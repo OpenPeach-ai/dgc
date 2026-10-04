@@ -196,7 +196,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
     if enable:
         config.set("pips_enabled", True)
     if config.get("pips_enabled", False) is not True:
-        raise RegistryError("disabled", "Pips are disabled. Start with dgc pips serve --enable to opt in locally.")
+        raise RegistryError("disabled", "Pips are disabled in this profile. Run dgc pips serve --enable to turn them on.")
     directory = state_directory()
     lease = named_process_lock("pips-supervisor", str(directory))
     if not lease.acquire(blocking=False):

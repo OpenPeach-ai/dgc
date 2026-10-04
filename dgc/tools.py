@@ -3887,7 +3887,8 @@ def _validate_public_url(url: str) -> str:
     return parsed.geturl()
 
 
-def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES) -> tuple[str, str]:
+def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES,
+                       https_only: bool = False) -> tuple[str, str]:
     """Fetch bounded public text, revalidating every redirect and ignoring proxy env state."""
     session = requests.Session()
     session.trust_env = False
@@ -3895,6 +3896,8 @@ def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES) -> tuple[s
     try:
         for redirect_n in range(MAX_FETCH_REDIRECTS + 1):
             current = _validate_public_url(current)
+            if https_only and urlsplit(current).scheme.lower() != "https":
+                raise ValueError("the page redirected away from https")
             response = session.get(current, timeout=(10, 20), headers={"User-Agent": "dgc/0.20"},
                                    allow_redirects=False, stream=True)
             try:

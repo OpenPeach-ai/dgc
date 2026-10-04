@@ -275,7 +275,7 @@ def _last_report(store, pip_id):
 
 def prepare(store, pip, req, *, context_size=32768, secrets=()):
     if store.db.execute("SELECT count(*) FROM pip_chat_messages").fetchone()[0] >= MAX_ARCHIVE_MESSAGES - 1:
-        raise RegistryError("limit", "The local conversation archive has reached its 20,000-message limit. No reply was queued. Archive management is not implemented in this lab build.")
+        raise RegistryError("limit", "The local conversation archive has reached its 20,000-message limit. No reply was queued; removing old conversations is not available yet.")
     if store.db.execute("SELECT 1 FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
                         "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
                         (pip["id"],)).fetchone():

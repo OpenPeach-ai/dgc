@@ -10,7 +10,7 @@ from .workspace_registry import RegistryError, WorkspaceRegistry, canonical_dire
 
 def adapt(args, ctx):
     if ctx.config.get("pips_enabled", False) is not True:
-        raise RegistryError("disabled", "Pips is disabled in this session.")
+        raise RegistryError("disabled", "Pips are disabled in this session.")
     from .pip_access import require_unrestricted
     require_unrestricted(ctx.config)
     if not isinstance(args, dict) or not isinstance(args.get("changes"), dict) or set(args["changes"]) - SAFE_FIELDS:

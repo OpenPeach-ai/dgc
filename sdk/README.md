@@ -77,12 +77,12 @@ same rules for state, policy, sandbox, timeouts, usage and errors; its times are
    wheel, publishes to PyPI with Trusted Publishing, and attaches the same bytes to the GitHub
    release without taking the Latest badge from the CLI.
 
-## Local Pips controls (lab)
+## Pips
 
-See [PIPS.md](PIPS.md) for the explicit inherited-controller API, per-request approval, independent-runner policy limits and API 8/9 capability gates.
-
-API 24 adds optional per-message `chat_options` to `send_pip_message`, with an
-integer `context_size` from 2048 to 32768 and `thinking` set to `off`, `low`,
-`medium`, `high` or `xhigh`. Both fields are required when the object is present.
-Messages without it retain their API 8 compatibility. These choices affect one
-read-only reply; they do not change a job's permissions or scheduled runs.
+SDK 0.7.0 adds `session.pips` in Python (sync and async) and TypeScript, for managing
+the Pips of an existing DGC profile from trusted host code. It pairs with CLI 0.48.0
+(Pips API 40), needs a client opened with `inherit_user_state=True`
+(`inheritUserState: true`), and refuses isolated, policy-bound and sandboxed
+sessions. Every mutation needs the host's explicit `approved=True`
+(`{ approved: true }`) on that call. See [PIPS.md](PIPS.md) for the commands,
+capability gates and payloads.

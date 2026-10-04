@@ -78,7 +78,7 @@ def validate(plan):
 
 def _fetch_page(url: str) -> tuple[str, str]:
     from .tools import _fetch_public_text, page_text
-    final_url, raw = _fetch_public_text(url)
+    final_url, raw = _fetch_public_text(url, https_only=True)   # a reviewed https page stays https
     return final_url, page_text(raw)
 
 

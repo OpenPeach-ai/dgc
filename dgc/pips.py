@@ -152,7 +152,8 @@ READ_TOOLS = frozenset({"read_file", "glob", "grep", "repo_map", "todo"})
 MAX_FILES = 10000
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
-MAX_RUNS = 1000
+MAX_RUNS = 1000                # project runs: each keeps a private copy of the source it read
+MAX_PERSONAL_RUNS = 20000      # Personal tasks and replies keep no source copy, only bounded results
 MAX_QUEUE = 20
 MAX_WALL_SECONDS = 300
 MAX_WORKER_INPUT_BYTES = 128 * 1024
@@ -1014,8 +1015,13 @@ class PipStore:
                     manifest['pulse_verification'] = pin_pulse(self, latest, manifest,
                         manual_request=pulse_request, schedule_occurrence=schedule_occurrence,
                         anchor_at=state['anchor_at'] if schedule_occurrence is not None else None)
-                if self.db.execute("SELECT count(*) FROM pip_runs").fetchone()[0] >= MAX_RUNS:
-                    raise RegistryError("limit", "The local archive has reached 1,000 audit/reply runs. No new work was queued. Archive management is not implemented in this lab build.")
+                kept = self.db.execute(
+                    "SELECT count(*) FROM pip_runs r JOIN workspaces w ON w.id=r.workspace_id WHERE "
+                    + ("w.kind='personal'" if personal else "w.kind!='personal'")).fetchone()[0]
+                if personal and kept >= MAX_PERSONAL_RUNS:
+                    raise RegistryError("limit", f"This profile keeps at most {MAX_PERSONAL_RUNS:,} Personal Pip runs and replies, and has reached it. No new work was queued.")
+                if not personal and kept >= MAX_RUNS:
+                    raise RegistryError("limit", f"This profile keeps at most {MAX_RUNS:,} project Pip runs, each with a copy of the source it read, and has reached it. No new work was queued; removing old runs is not available yet.")
                 if self.db.execute("SELECT count(*) FROM pip_runs WHERE status IN ('queued','running','cancelling')").fetchone()[0] >= MAX_QUEUE:
                     raise RegistryError("limit", "The local run queue is full.")
                 from .workspace_context import ContextStore
@@ -2670,7 +2676,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "command": safe_command, "ok": False}
     try:
         if config.get("pips_enabled", False) is not True:
-            raise RegistryError("disabled", "Pips are disabled on this runner. Enable them locally first.")
+            raise RegistryError("disabled", "Pips are disabled in this profile. Run dgc pips enable to turn them on.")
         from .pip_access import require_unrestricted
         require_unrestricted(config)
         request_limit = 32768 if command in ("prepare_pip_connector_draft", "propose_pip_connector_action", "propose_pip_handoff", "propose_pip_artifact_handoff", "propose_pip_personal_handoff", "propose_pip_app_action", "propose_pip_calendar_action", "prepare_pip_message_draft", "prepare_pip_calendar_draft") else 16384

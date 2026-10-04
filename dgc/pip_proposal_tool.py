@@ -51,7 +51,7 @@ def _request(args):
 
 def propose(args, ctx) -> str:
     if ctx.config.get("pips_enabled", False) is not True:
-        raise RegistryError("disabled", "Pips is disabled in this session.")
+        raise RegistryError("disabled", "Pips are disabled in this session.")
     from .pip_access import require_unrestricted
     require_unrestricted(ctx.config)
     request = _request(args)

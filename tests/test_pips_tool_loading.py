@@ -106,6 +106,18 @@ class PipsToolLoadingTests(unittest.TestCase):
         self.assertTrue(_PIPS_TOOL_NAMES <= seen[-1])
 
 
+    def test_deny_use_pips_also_keeps_a_turn_about_a_pip_without_the_tools(self):
+        self.config.permissions = {"allow": [], "ask": [], "deny": ["UsePips"]}
+        seen = []
+
+        def answer(messages, tools=None, **kwargs):
+            seen.append({tool["function"]["name"] for tool in tools or []})
+            return ChatResult(content="Done.", finish_reason="stop")
+        with patch.object(self.agent.client, "chat", side_effect=answer):
+            self.assertTrue(self.agent.run_turn(
+                _PIPS_REFERENCE_FRAME + '\n[{"id": "pip_1", "name": "Rook"}]\n</pip-references-json>\n\nWhat did Rook find?'))
+        self.assertFalse(seen[-1] & _PIPS_TOOL_NAMES)
+
     def private_profile(self):
         from dgc import sessions
         from dgc.workspace_registry import state_directory

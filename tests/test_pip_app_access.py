@@ -1,4 +1,5 @@
 import copy
+import json
 import threading
 import unittest
 from unittest.mock import patch
@@ -141,3 +142,29 @@ class MetaAppTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class SavedServersTests(unittest.TestCase):
+    """The controller rereads the user config before each app read or send."""
+
+    def write(self, value):
+        import tempfile
+        from pathlib import Path
+        directory = tempfile.TemporaryDirectory(prefix="dgc-saved-servers-")
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "config.json"
+        path.write_text(json.dumps(value))
+        patcher = patch("dgc.config.USER_CONFIG", path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_config_from_before_pips_existed_is_on_by_default(self):
+        servers = {"composio": {"transport": "remote", "url": "https://connect.composio.dev/x"}}
+        self.write({"model": "fixture", "mcp_servers": servers})
+        self.assertEqual(apps.saved_servers(None), servers)
+
+    def test_an_explicit_off_still_refuses(self):
+        self.write({"pips_enabled": False, "mcp_servers": {}})
+        with self.assertRaises(RegistryError) as raised:
+            apps.saved_servers(None)
+        self.assertEqual(raised.exception.code, "connection_unavailable")

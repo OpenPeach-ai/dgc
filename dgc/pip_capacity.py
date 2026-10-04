@@ -157,10 +157,19 @@ def _count(db, kind, ceiling, workspace_id, budget):
     parameters = []
     terms = []
     for table in tables:
-        term = 'SELECT 1 FROM ' + table
-        if workspace_id is not None:
-            term += ' WHERE workspace_id=?'
-            parameters.append(workspace_id)
+        if kind == 'runs':
+            # The run ceiling bounds project runs, which keep a source copy; Personal runs
+            # have their own, larger ceiling (pips.MAX_PERSONAL_RUNS).
+            term = ("SELECT 1 FROM pip_runs r JOIN workspaces w ON w.id=r.workspace_id "
+                    "WHERE w.kind!='personal'")
+            if workspace_id is not None:
+                term += ' AND r.workspace_id=?'
+                parameters.append(workspace_id)
+        else:
+            term = 'SELECT 1 FROM ' + table
+            if workspace_id is not None:
+                term += ' WHERE workspace_id=?'
+                parameters.append(workspace_id)
         terms.append(term)
     sql = 'SELECT count(*) FROM (' + ' UNION ALL '.join(terms) + ' LIMIT ?)'
     parameters.append(ceiling + 1)

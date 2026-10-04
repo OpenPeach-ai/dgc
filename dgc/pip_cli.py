@@ -1034,7 +1034,7 @@ def _format(value):
 def _workspace_command(config, args):
     """Local-console path handling, deliberately absent from Remote's command allowlist."""
     if config.get("pips_enabled", False) is not True:
-        raise RegistryError("disabled", "Pips are disabled. Run dgc pips enable locally first.")
+        raise RegistryError("disabled", "Pips are disabled in this profile. Run dgc pips enable to turn them on.")
     if args.workspace_action == "migrate-session":
         from .sessions import migrate_workspace_session
         return {"migration": migrate_workspace_session(
@@ -1118,7 +1118,7 @@ def handle_command(config, argv, *, in_chat=False):
         else:
             request = _request(args)
             if config.get("pips_enabled", False) is not True:
-                raise RegistryError("disabled", "Pips are disabled. Run dgc pips enable locally first.")
+                raise RegistryError("disabled", "Pips are disabled in this profile. Run dgc pips enable to turn them on.")
             if args.command in ("run", "send") or (args.command == "handoff" and args.handoff_action == "accept"):
                 _require_supervisor()
             if args.command == 'email-draft' and args.email_action == 'prepare' and 'message' not in request:

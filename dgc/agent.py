@@ -3198,6 +3198,14 @@ class Agent(GoalLifecycle):
     def _pips_loaded(self) -> bool:
         return bool(getattr(self, "_pips_tools_loaded", False))
 
+    def _pips_denied(self) -> bool:
+        """`deny: UsePips` keeps the Pips tools out of this chat, including a turn about a Pip."""
+        from .permissions import PermissionEngine
+        rules = {action: [*(self.config.permissions.get(action, []) or []),
+                          *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
+                 for action in ("allow", "ask", "deny")}
+        return bool(PermissionEngine(self.mode, rules, self.config.project_root).deny_reason("use_pips", {}))
+
     def _load_pips_tools(self) -> str:
         """`use_pips`: offer the Pips tools and their guidance from the next request on."""
         from .pip_access import tools_available
@@ -4718,7 +4726,8 @@ class Agent(GoalLifecycle):
                 self._mcp_query_text = _trusted_intent_text(safe_user_text)
                 self._active_mcp_tools.clear()
                 self._activate_tool_intents(safe_user_text, replace=True)
-                if pip_setup_notice is not None or _PIPS_REFERENCE_FRAME in safe_user_text:
+                if ((pip_setup_notice is not None or _PIPS_REFERENCE_FRAME in safe_user_text)
+                        and not self._pips_denied()):
                     self._pips_tools_loaded = True  # a turn about a Pip brings its tools along
                 try:
                     self._activate_skill_intents(safe_user_text, replace=True)
@@ -8047,7 +8056,7 @@ class Agent(GoalLifecycle):
         display_args = redact_value(self._with_task_agent(name, args), secrets)
         if name in ("pips_setup", "pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session") and (self.config.get("pips_enabled", False) is not True
                                        or self.depth > 0 or getattr(self, "_monitor_turn", False)):
-            reason = ("Pips is disabled in this session" if self.config.get("pips_enabled", False) is not True
+            reason = ("Pips are disabled in this session" if self.config.get("pips_enabled", False) is not True
                       else "Only the main user chat can request Pip changes or background work")
             self.ui.tool_denied(name, display_args, reason, call_id)
             return f"error: {reason}."

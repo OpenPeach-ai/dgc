@@ -90,13 +90,15 @@ def validate_arguments(tool, arguments):
 
 def saved_servers(config):
     """Reread connection revocations without loading secrets or saving Config."""
-    from .config import USER_CONFIG
+    from .config import DEFAULTS, USER_CONFIG
     try:
         with USER_CONFIG.open('rb') as stream:
             data = stream.read(2 * 1024 * 1024 + 1)
         if len(data) > 2 * 1024 * 1024: raise ValueError()
         raw = json.loads(data)
-        if not isinstance(raw, dict) or raw.get('pips_enabled') is not True: raise ValueError()
+        # A config written before Pips existed has no pips_enabled key: that is the default (on),
+        # not a refusal. Only an explicit false turns Pips off here.
+        if not isinstance(raw, dict) or raw.get('pips_enabled', DEFAULTS['pips_enabled']) is not True: raise ValueError()
         servers = raw.get('mcp_servers', {})
         if not isinstance(servers, dict): raise ValueError()
         return servers

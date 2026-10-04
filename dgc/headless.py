@@ -84,7 +84,7 @@ def _bounded_pips_command(cmd):
         if isinstance(value, str):
             chars += len(value)
             if chars > _MAX_PIPS_REQUEST_BYTES:
-                raise RegistryError("invalid_request", "Pips requests must fit within 16 KiB.")
+                raise RegistryError("invalid_request", "Pips requests must fit within 32 KiB.")
         elif isinstance(value, dict):
             if len(value) > 64 or any(not isinstance(key, str) for key in value):
                 raise RegistryError("invalid_request", "Pips request objects contain unsupported fields.")
@@ -103,7 +103,7 @@ def _bounded_pips_command(cmd):
         for chunk in json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False).iterencode(request):
             length += len(chunk.encode("utf-8"))
             if length > _MAX_PIPS_REQUEST_BYTES:
-                raise RegistryError("invalid_request", "Pips requests must fit within 16 KiB.")
+                raise RegistryError("invalid_request", "Pips requests must fit within 32 KiB.")
             chunks.append(chunk)
         detached = json.loads("".join(chunks))
     except (ValueError, TypeError, UnicodeError, RecursionError) as exc:

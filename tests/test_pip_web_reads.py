@@ -96,6 +96,19 @@ class ExecutionTests(unittest.TestCase):
         self.assertLessEqual(len(rows[0]["text"]), web.MAX_PAGE_CHARS + 20)
 
 
+class RedirectTests(unittest.TestCase):
+    def test_a_reviewed_https_page_cannot_redirect_to_plain_http(self):
+        class Response:
+            is_redirect, is_permanent_redirect = True, False
+            headers = {"Location": "http://plain.example.com/"}
+            def close(self):
+                pass
+        with patch("dgc.tools._validate_public_url", side_effect=lambda url: url), \
+                patch("requests.Session.get", return_value=Response()):
+            with self.assertRaisesRegex(ValueError, "away from https"):
+                web._fetch_page("https://status.example.com/")
+
+
 class PersonalJobTests(unittest.TestCase):
     setUp = fixtures.LocalPipsTests.setUp
 

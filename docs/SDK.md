@@ -25,28 +25,24 @@ application attribute the model-token spend your provider bills you.
 
 ## Install
 
-### Local Pips controls (unreleased lab build)
+### Pips (SDK 0.7.0)
 
-The lab SDK adds `Pips` (`session.pips`) and `AsyncPips` (`async_session.pips`).
-These controls require an already enabled, explicitly authorized local Pips profile;
-they do not turn Pips on or bypass its review flow. They are not present in the
-published SDK version listed above. See [the lab Pips contract](../sdk/PIPS.md)
-for capability versions, limits and complete command fields.
+SDK 0.7.0 adds `session.pips` (`Pips`, and `AsyncPips` on `AsyncDGC` sessions) for
+managing the Pips of an existing DGC profile: standing agents that review, test and
+draft beside the main chat. It pairs with DGC CLI 0.48.0, which advertises Pips API
+40; each control checks the minimum Pips API it needs before sending anything. See
+[sdk/PIPS.md](../sdk/PIPS.md) for the full command list and capability gates.
 
-| Public API | Purpose |
+| API | Purpose |
 | --- | --- |
-| `PipReadCommand` | Closed type of supported read commands. |
-| `PipMutationCommand` | Closed type of supported mutation commands. |
-| `Pips.read(command, params=None)` / `AsyncPips.read(command, params=None)` | Return a bounded control result after checking backend capabilities. |
-| `Pips.mutate(command, params, *, approved=False)` / `AsyncPips.mutate(command, params, *, approved=False)` | Require the host's explicit `approved=True` decision for each call and retry; all backend scope, revision and approval checks still apply. |
-| `Pips.list(workspace_id)` / `AsyncPips.list(workspace_id)` | List the selected workspace's Pip definitions. |
-| `Pips.get_run(run_id)` / `AsyncPips.get_run(run_id)` | Read a stored run result. |
+| `read(command, params)` | Run one read control, after checking the backend's Pips capabilities. |
+| `mutate(command, params, *, approved=False)` | Run one mutation. Refused unless the host passes `approved=True` (TypeScript: `{ approved: true }`) for that call; retries need it again. |
+| `list(workspace_id)`, `get(pip_id)`, `runs(pip_id)`, `get_run(run_id)` | Shortcuts for common reads (`getRun` in TypeScript). |
 
-Async methods are awaited. Isolated SDK profiles, active runtime policies and
-sandboxed sessions refuse these independent-runner controls; plan mode also refuses
-mutations. Never expose `mutate` directly as an unattended model tool. In API16,
-archive/restore require a job version, lifecycle revision, request key and reason;
-restoring leaves the Pip paused and preserves its evidence.
+Pips controls need a client opened with `inherit_user_state=True` (TypeScript:
+`inheritUserState: true`). Isolated profiles, sessions with a `RuntimePolicy` and
+sandboxed sessions refuse them, and plan mode refuses mutations. The SDK never turns
+Pips on or starts the runner. Never expose `mutate` to a model as an unattended tool.
 
 ### Published packages
 

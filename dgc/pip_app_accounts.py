@@ -3,7 +3,7 @@
 The documented MCP search envelope may expose accounts[]; older endpoints do
 not. Never infer identity from aliases, current_user_info, or default accounts.
 No search result plan, tool description, or account-management instruction is
-executed. Public contract evidence: docs/PIPS_PERSONAL_APPS.md.
+executed. The user guide is docs/PIPS.md.
 """
 from __future__ import annotations
 

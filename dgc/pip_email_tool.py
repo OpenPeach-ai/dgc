@@ -10,7 +10,7 @@ def propose(args,ctx,*,kind='email'):
     _,_,content,_=drafts._spec(kind)
     from .pip_access import require_unrestricted
     require_unrestricted(ctx.config)
-    if ctx.config.get('pips_enabled',False) is not True:raise RegistryError('disabled','Pips is disabled.')
+    if ctx.config.get('pips_enabled',False) is not True:raise RegistryError('disabled','Pips are disabled in this profile.')
     if not isinstance(args,dict) or set(args)!={'scope','source_run_id',content,'request_key'} or args['scope']!='personal':
         raise RegistryError('invalid_request','Use explicit Personal scope, a completed source run, draft content and retry key. No account or permission fields.')
     from .pip_app_actions import _id

@@ -34,51 +34,23 @@ python3 -m pip install dgc-sdk==0.6.8
 npm install @vibedgc/sdk
 ```
 
-## Local Pips-lab goal-pause outcome
+## Paused runs
 
-This unshipped branch adds `paused` to `turn_end.reason` and both SDK `RunStatus`
-types. A run that stops at its goal token budget is neither completed nor failed.
-It returns `status: paused`, `reason: paused`, retains generated text, and does
-not attempt output-schema repair. Resume is a separate user/host decision.
-Older backends continue emitting their original reasons; older SDKs may not
-recognize the new enum value. Integrators must migrate the backend, generated
-protocol and clients together. The SDK source manifest still needs the release
-agent's existing signing key; this note does not assert release readiness.
+`turn_end.reason` and both SDKs' `RunStatus` include `paused`. A run that stops at its
+goal's token budget is neither completed nor failed: it returns `status: paused`,
+`reason: paused`, keeps the generated text, and does not attempt output-schema repair.
+Resuming is a separate user or host decision. Older backends never send this reason,
+and older SDKs may not recognize it, so update the CLI and the SDK together.
 
+## Pips (SDK 0.7.0)
 
-## Local Pips API 34 and registry schema 28
-
-Calendar metadata inspection and proposal creation require Pips API 34. Python
-(sync/async) and TypeScript reject those commands on older runtimes before
-transport. Existing API 31 action reads/accept/reject now understand both Gmail
-and version-2 calendar payloads. Shared registry schema 28 intentionally prevents
-older processes from reading new action kinds; restart all controllers and
-supervisors using that profile together. Migration preserves earlier Gmail rows.
-These are local lab changes, not a new published SDK version. Offline contract
-and migration tests plus real metadata discovery do not establish live calendar
-creation compatibility. Live account testing and release signing are pending.
-
-
-API35 adds conversational calendar draft reads/preparation/dismissal. Both SDKs
-gate them before transport and require separate approval for preparation and
-creation. Registry29 adds a calendar-draft ledger without changing prior email
-or external-action rows. Restart profile-sharing controllers/supervisors together;
-older readers refuse the new schema. These remain unshipped lab changes.
-
-Pips API 36 adds `inspect_pip_connector_actions` and
-`propose_pip_connector_action` for exact, separately reviewed calls on saved
-Zapier, Arcade, Make and n8n connections. Python and TypeScript gate both commands
-at 36; mutations still require explicit host approval. Registry schema 30 excludes
-older readers of the new connector-call review semantics. Runtime connector
-responses do not prove downstream workflow completion. Final SDK source manifest
-signing remains the release agent's task.
-
-Pips API 37 adds retained conversational connector drafts and four closed local
-controller commands (get/list/prepare/dismiss). It requires registry schema 31;
-older registry readers refuse this schema. API 36 action preparation/execution
-semantics are unchanged. Connector metadata remains in the controller's bounded
-conversation snapshot; workers receive no credentials or MCP process. See PIPS.md.
-
+SDK 0.7.0 adds `session.pips` (Python sync and async, and TypeScript). It pairs with
+CLI 0.48.0, which advertises **Pips API 40** inside `ready.capabilities` on editor
+protocol v14. Each Pips control has a minimum Pips API (8 for the original controls,
+up to 40 for reviewed web reads), and the SDK refuses a control before sending it when
+the backend's `pips_api_version` is lower. The backend's Pips registry is schema 33;
+an older CLI refuses to open a newer registry, so update every DGC process that shares
+a profile together. See [PIPS.md](PIPS.md) for the per-command gates.
 
 ### Optional native goal replacement capability
 
@@ -89,8 +61,7 @@ already-running native goal. Send the current `expected_goal_id` and a unique
 committed, and the caller must retain the draft. It must not resubmit it as an
 ordinary prompt. The existing start_goal wire schema is unchanged. This does not
 permit arbitrary set_goal state changes during a turn, first-goal creation during
-an ordinary active turn without live_goal_start, or delegated subscription goal steering. Final source
-manifest signing is still release-agent work.
+an ordinary active turn without live_goal_start, or delegated subscription goal steering.
 
 
 ### Optional native goal editing capability
@@ -106,8 +77,7 @@ arrives or the transport closes; a short timeout is not evidence of refusal.
 Unlike replacement, editing keeps identity, accumulated usage, current-cycle token
 baseline, attachments and history. This capability does not authorize arbitrary
 live state mutation or a second foreground turn. Pause/clear use existing controls.
-The optional expected_goal_id field is also checked on idle set_goal calls. The
-Python SDK's vendored protocol and generated extension/schema copies are in sync.
+The optional expected_goal_id field is also checked on idle set_goal calls.
 
 
 ### Optional first-goal adoption capability
@@ -126,15 +96,3 @@ This does not grant monitor wakes, child agents or delegated subscription turns
 permission to adopt a new goal. Missing/closed admission windows refuse and retain
 the draft. Cancellation before adoption never queues an ordinary replacement prompt.
 The existing start_goal schema and SDK transport remain unchanged.
-
-### Pips API 38: explicit calendar invitations and finite series
-
-`propose_pip_calendar_action` and `prepare_pip_calendar_draft` accept the original
-five-field event, or those fields plus all of `attendees`, `repeat`, and
-`send_invitations`. Extended preparation requires API 38; SDKs reject older
-runtimes before sending. TypeScript exports `PipCalendarEvent`. Repeat is null
-or `{frequency: "daily" | "weekly" | "monthly", interval: 1..12, count: 2..52}`.
-Guests are up to ten exact distinct emails. Invitation boolean must match whether
-there are guests. This prepares a review; the separate approved accept call and
-exact digest remain mandatory. A successful event receipt never proves invitation
-delivery or acceptance. Registry schema 32 prevents partial reviews by old clients.

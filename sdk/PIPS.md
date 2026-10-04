@@ -1,14 +1,38 @@
-# Local Pips controls in the SDK
+# Pips in the SDK
 
-This lab adds `session.pips` to the Python, async Python and TypeScript SDKs. It accesses the existing local Pips registry through `dgc serve`. It does not enable Pips, start or resume the supervisor, install a service, or change a model connection. Work requests still require an already-running local supervisor and the normal backend review and permission checks.
+SDK 0.7.0 adds `session.pips` to the Python (sync and async) and TypeScript SDKs. It
+lets trusted host code read and manage the Pips of an existing DGC profile through
+`dgc serve`: list workspaces and Pips, read runs and reports, review proposals,
+setups and handoffs, queue runs, chat with a Pip, and review Personal app actions.
 
-## Choose a controller explicitly
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 40** over editor protocol
+v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
+the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
-The supported controller uses an existing profile: `inherit_user_state=True` in Python or `inheritUserState: true` in TypeScript, with no `RuntimePolicy` and sandbox `off`. Pips must already be enabled locally. Default isolated SDK sessions are deliberately unsupported: they carry a session trust policy which cannot govern an independent background runner.
+`session.pips` never turns Pips on, starts or resumes the runner, installs a service,
+or changes a model connection. Runs and Pip chat messages still need a running local
+runner, and every backend review and permission check still applies.
 
-A foreground policy or sandbox is never silently removed or weakened. Any requested or active sandbox, or any `RuntimePolicy`, refuses both read and mutation access. The backend also refuses raw Pips controls while a session policy or configured sandbox is active. This includes a malformed policy. A plan-mode SDK controller may read, but cannot mutate.
+## Requirements
 
-An inherited controller has access to the chosen local profile's workspaces, not just its foreground working directory. Give this controller to trusted host application code. Do not expose `mutate` to a model as an unattended tool, and do not use inheritance merely to bypass an application's required policy. A future restricted Pips API needs an explicit policy that the independent runner itself enforces.
+- **An inherited profile.** Open the client with `inherit_user_state=True` (Python)
+  or `inheritUserState: true` (TypeScript). Default isolated SDK sessions refuse
+  Pips controls: they carry a session trust policy that cannot govern an
+  independent background runner.
+- **No policy or sandbox.** A session with a `RuntimePolicy`, a requested sandbox
+  other than `"off"`, or an active sandbox refuses every Pips control, read or
+  mutation. The backend refuses them too. Nothing is silently weakened.
+- **Pips enabled.** The handshake must advertise `pips_supported: true`,
+  `pips_enabled: true` and an integer `pips_api_version`. Pips are on by default.
+  The handshake is not a live subscription: open a new session after the enable
+  flag changes.
+- **Plan mode** allows reads and refuses mutations.
+
+An inherited controller can reach every workspace of the chosen profile, not just
+its own working directory, and the profile's Personal workspace. Give it only to
+trusted host code. Do not expose `mutate` to a model as an unattended tool.
+
+## Quick start
 
 ```python
 from dgc_sdk import DGC
@@ -17,7 +41,7 @@ with DGC(inherit_user_state=True, sandbox="off") as dgc:
     with dgc.session(cwd="/path/to/project") as session:
         workspaces = session.pips.read("list_workspaces")
         jobs = session.pips.list(workspaces["current_workspace_id"])
-        # After the host application obtains a decision for this exact action:
+        # Only after the host application has a user decision for this exact action:
         session.pips.mutate("pause_pip", {"pip_id": "pip_..."}, approved=True)
 ```
 
@@ -29,7 +53,7 @@ try {
   const session = await dgc.session({ cwd: "/path/to/project" });
   const workspaces = await session.pips.read("list_workspaces", {});
   const jobs = await session.pips.list(String(workspaces.current_workspace_id));
-  // After the host application obtains a decision for this exact action:
+  // Only after the host application has a user decision for this exact action:
   await session.pips.mutate("pause_pip", { pip_id: "pip_..." }, { approved: true });
   await session.close();
 } finally {
@@ -37,580 +61,388 @@ try {
 }
 ```
 
-`AsyncDGC` exposes the same `session.pips` methods; await `read`, `mutate`, `list`, `get`, `runs` and `get_run`. Waits use the same worker-thread mechanism as the other async session controls.
-
-## Public API
-
-Python exports `Pips`, `AsyncPips`, `PipReadCommand` and `PipMutationCommand`. `read(command, params=None)` and `mutate(command, params, *, approved=False)` return the backend's result object. The read conveniences are `list(workspace_id)`, `get(pip_id)`, `runs(pip_id)` and `get_run(run_id)`.
-
-TypeScript exports `Pips`, the two command-name types, `PipReadParams`, `PipMutationParams`, `PipResult` and `PipJson`. `read(command, params)` has a command-specific parameter type. `mutate(command, params, options={approved:false})` requires `options.approved === true`. Its conveniences are `list`, `get`, `runs` and `getRun`. Results retain their wire field names. The SDK checks the response envelope and returns JSON; it does not claim that a model report establishes correctness or that an accepted report means every test passed.
-
-Read controls cover workspace/job/type/model lists, chats, runs, activity, version/proposal/checkpoint/handoff history, runner/execution capability and workspace context. A model-list read may contact the already configured model endpoint; execution-capability inspection may probe local confinement support. Read access means no requested job mutation, not that every read performs no I/O.
-
-Mutations use a closed allowlist: create/update/review jobs, pause/resume/stop, request/cancel runs, send a Pip chat message, record/archive reviewed context, review findings and execution outcomes, and propose/accept/reject finding or artifact handoffs. There is no generic passthrough for future controls. `pips_enable` and `pips_runtime` are not exposed. An exact boolean `approved=True` / `approved:true` authorizes one host request only; missing, false, numeric or string values refuse before transport. It never changes the job's own reviewed permissions.
-
-Every operation requires handshake capabilities `pips_supported: true`, `pips_enabled: true`, and an integer `pips_api_version >= 8`. `accept_pip_execution_context` additionally requires API 9 and both `expected_revision` and `expected_review_revision`. Open a fresh controller after changing the local enable flag; the initial handshake is not a live status subscription.
-
-Parameters are plain JSON with a closed top-level field set, at most 32 KiB, 2,048 visited values and 12 nested levels. Unknown fields, caller request IDs, endpoint/credential overrides, cycles, invalid Unicode, non-finite numbers and integers outside JSON's safe range are refused before transport. Backend-specific validation remains authoritative. SDK clients intentionally cannot represent SQLite cursors above JavaScript's safe-integer range, although Python itself has wider integers.
-
-## Correlation and failures
-
-The wire shape is exactly `{type: "pips_control", request: {type, request_id, ...params}}`. Correlation is passed separately to the transport. No outer `request_id` is added to this strict command. Concurrent requests for the same operation can complete in any order without sharing a reply. Existing non-Pips request correlation is unchanged.
-
-A negative `pips_result` raises `DGCCommandRejectedError`, with `reason` set to the backend code and `command` to the requested control. Bad parameters raise `DGCConfigError`; unsupported capabilities/policies raise `DGCUnsupportedError`; mismatched/malformed envelopes raise `DGCProtocolError`. Existing transport timeout and failure types remain unchanged.
-
-A timeout or cancelled async waiter is not proof that a mutation did not commit. There are no automatic retries. Preserve the original idempotency key where that operation supports one and inspect the saved run/proposal/handoff before deciding what to retry. Review revisions remain backend compare-and-swap guards; the SDK does not manufacture or advance them.
-
-## Validation and release status
-
-Offline tests cover Python sync/async access, TypeScript access, authority/capability gates, hostile JSON, strict nested correlation, reverse-order concurrent replies and both structured and transport failures. Both languages also read through the actual local backend using a fresh private profile with all network connection attempts trapped. Those checks confirm unchanged config bytes and an offline runner with no run directory; they do not test live provider execution.
-
-The TypeScript package builds with the existing locked dev dependencies. Existing Python SDK policy/protocol regression tests and new Pips tests are recorded in the lab's `output/pips-sdk-*.log` files. The broader suite may contain historical network fixtures or waits; the new Pips tests have no network calls or sleep-based synchronization.
-
-This is an additive lab source change, not a published SDK release. Checkout checksums and SBOM can be regenerated without authenticating them. A matching maintainer signature must be produced by the release owner before the signed checkout verification and publishing gate can pass. No replacement key or fabricated signature is appropriate.
-
-Current validation: 15 new Python Pips tests and 11 new TypeScript Pips tests pass; the combined Python Pips/protocol/controller gate passes 24 tests. The broader Python policy/protocol check passes 72 tests, and all 61 existing TypeScript SDK regression tests pass. TypeScript build and Python bytecode compilation pass. The TS harness now honors `DGC_TEST_PYTHON`; its unknown-event fixture uses `fixture_future_status` because `remote_status` is a supported event.
-
-Unsigned `sdk/sbom/SHA256SUMS` and `cyclonedx.json` were regenerated through the existing generator. Verification now reports only `SHA256SUMS.sig does not verify`. The existing signature and public key were left byte-for-byte unchanged; the matching maintainer private key is absent from this checkout. The release owner must regenerate/sign after reviewing the final source. This is a remaining release gate, not a passed signature check.
-
-## API 10 summary reads
-
-An API 10 runtime adds `list_workspace_overviews`, `list_pending_pip_reviews`,
-`list_recent_workspace_activity` and `list_pip_adaptations`. Both SDKs expose
-these through `pips.read`; API 8/9 runtimes refuse them locally before transport.
-Existing controls retain their earlier capability minimums.
-
-Workspace summaries use `after_id` and a maximum page size of 20. Pending reviews
-use `before_id` and a maximum of 20; omitting `workspace_id` requests this runner's
-reviews across workspaces. Recent activity uses `before_seq`, newest first, with
-a maximum of 50 whole events and an explicit retention disclaimer. Never use the
-older forward activity call with `after: 0` as a newest-activity query. Review
-rows contain routing references: fetch the original detailed Pip/handoff before
-asking the host to authorize a mutation. No aggregate read enables Pips or starts
-the background runner. See `docs/PIPS_OVERVIEWS.md` for exact result shapes.
-
-API 10 also adds `get_pip_proposal` with `pip_id` and `proposal_id`. It reads an
-exact immutable proposal and nested durable approval metadata for a review link,
-without expiring it or changing state. Check `approval.effective_status` and use
-the existing explicit mutation flow only after showing the full saved definition.
-
-## API 11 reviewed source policies
-
-`propose_pip_update` containing `changes.source_policy` requires API 11. Both SDKs
-refuse it before transport on older runtimes, while ordinary metadata proposals
-retain their previous minimum. The host still explicitly approves the proposal
-mutation; a separate saved-definition acceptance changes the job. No create-time
-shortcut or model-origin source-policy change is added.
-
-Canonical policies are `{mode: "committed_only"}` and
-`{mode: "current_tree", exclusions: "safe_source_v1"}`. Current-tree source is
-manual-only for read-only auditors and Quill. Its proposal must also remove any
-schedule or event trigger; it cannot enable Patch/Pulse or bypass handoff review.
-Results distinguish `source_revision` (Git commit or null) from `source_snapshot`
-(the exact bounded copy receipt or null). New checkpoint metadata carries explicit
-unavailable comparison reasons and null occurrence-comparison counts when source
-policies differ. Keep these distinctions in host UI; never coerce a snapshot hash
-into a Git revision or null counts into zero. Existing version 1 history remains
-valid. See `docs/PIPS_CHECKPOINT_SOURCES.md` and
-`docs/PIPS_CURRENT_TREE_SNAPSHOTS.md` for guarantees and limits.
-
-Permission rule maps also include `PipsRun` and `PipsHandoff` for the main chat's
-native tools. These labels do not make an isolated SDK controller inherit Pips
-state. Raw SDK controls retain explicit host approval, inherited-profile and
-independent-supervisor requirements.
-
-## API 12 reviewed session statements
-
-The session-outcome controls require API 12 in both SDKs. Read an exact proposal
-with `get_workspace_session_outcome`, or page `list_workspace_session_outcomes`
-with `workspace_id`, optional numeric `before_id`, and `limit` (maximum 20).
-Use the original proposal's digest for a subsequent review, not a digest computed
-from shortened display text.
-
-First call `inspect_workspace_session_outcome` with `workspace_id` and `session_id`
-to discover the bounded private transcript's generation and hash. This returns
-metadata only, never its contents. The matching CLI is
-`dgc pips session-outcome inspect SESSION_ID`.
-
-To populate a session selector, API 12 also offers `list_workspace_sessions` with
-`workspace_id`, optional `after` (session ID), and `limit` (maximum 20). It pages
-registry association metadata only, never transcript text or filesystem paths.
-Use its `next_cursor` only when `has_more` is true. Inspect the selected session
-before proposing; an association alone does not prove the transcript still exists.
-
-`propose_workspace_session_outcome` accepts `workspace_id`, `session_id`, `title`,
-`statement`, `source`, `expected_session_revision` and `request_key`. A source is
-either `{kind: "commit", revision: "exact commit ID"}` or
-`{kind: "pip_run", run_id: "completed run ID"}`. The controller resolves these
-identities; callers cannot supply a transcript path, arbitrary source receipt or
-verification classification. Creating a proposal does not add shared context.
-
-After displaying the saved statement, source reference and verification limits,
-the host can approve `accept_workspace_session_outcome` with `workspace_id`,
-`proposal_id`, `expected_digest`, and `expected_context_revision`. Reject through
-`reject_workspace_session_outcome` with the same identities and digest. All three
-mutations still require `approved=True` in Python or `{approved: true}` in
-TypeScript, including an exact retry. Host approval of a proposal request does
-not also approve its acceptance.
-
-The accepted record is a **user-reviewed statement**, with
-`verification: "not_execution_verified"`. Its source was selected for the
-statement; it does not establish where a command ran or that a test passed.
-The private transcript's bounded identity/revision/hash is pinned, but transcript
-text is never included in shared context or these control replies. This path is
-separate from the existing controller-recorded Patch/Pulse execution receipts.
-
-Native main-chat permission labels now also include `PipsPause`, `PipsResume`
-and `PipsAttach`. Attachments are references, never consent to share transcripts.
-Pause does not cancel an in-flight turn; resume allows already approved queued
-or scheduled work on the existing independent supervisor. Exact lifecycle retries
-return historical receipts and separately labelled current state without
-reapplying the original mutation.
-
-## API 13 local notifications
-
-`list_pip_notifications` is a read control with optional `workspace_id`,
-`before_seq` and `limit` (1–20). Omit the workspace to see this runner's retained
-notifications across its bindings. It scans at most 100 local events per call;
-`sync_pending` means a later explicit refresh can continue. The read materializes
-a local cache but never changes the source proposal, approval or run.
-
-`mark_pip_notification_read` is a mutation with `notification_id`,
-`expected_revision` (0 or 1), and optional `workspace_id`. It requires explicit
-per-call SDK approval, including retries. An already-read notification returns
-its original reader/time with `replayed: true`. This is an acknowledgement, not
-a review acceptance or permission grant. Read state is shared by controllers
-of this local runner, not an account-level cloud inbox.
-
-Both controls require API 13 before transport. Pages contain fixed titles and
-record references, never transcript text, provider secrets, error bodies or
-model prose. Fetch the referenced source through its existing detail control
-for any separately reviewed action. Retained notifications are capped at 500;
-`history_may_be_incomplete`, `evicted_total` and `unavailable_sources_total`
-expose omissions. There is no email, push or OS notification delivery.
-
-## API 14 explicit Pip memory
-
-`get_pip_exception_source` reads a checked source candidate for `pip_id`, `run_id`
-and `finding_index`. Present its full source and digest before offering a separate
-`record_pip_exception` mutation with the same IDs, `expected_source_digest`,
-`reason`, optional `expires_at` (timezone required, or null) and `request_key`.
-The source is rechecked atomically; a changed finding review requires fresh review.
-No caller-supplied finding body, path, workspace or authority is accepted.
-
-`list_pip_memories` pages by `pip_id`, optional integer `before_id`, and `limit`
-(1–20). `revoke_pip_exception` requires `pip_id`, `memory_id`,
-`expected_revision` and `reason`. Both mutations require explicit SDK approval
-for each request. All four controls require an API 14 runtime before transport.
-
-An exception is a user-recorded reference, not verified execution or permission.
-It never suppresses findings, marks them fixed, changes their review status or
-promotes itself to workspace context. Exact applicability requires the same source
-and job; the original context revision is provenance, not proof the current
-context agrees. Future audit and Pip-chat queues pin at most 16 whole records / 8 KiB with omission
-counts. Revocation/expiry affects later queues, not historical queued pins.
-The existing private ledger retains immutable creation and revocation receipts.
-See `docs/PIPS_LOCAL_MEMORY.md` for bounds, historical states and migration limits.
-
-## API 15 reviewed Patch specialists
-
-A Patch handoff action may optionally include
-`specialists: {roles: ["explorer", "critic", "worker"], max_calls: 3}`.
-Choose only needed roles and a call cap from 1 through 3. Omission retains the
-previous action and keeps delegation denied. Both SDKs refuse a handoff proposal
-containing this field unless the runtime advertises API 15; the ordinary handoff
-minimum stays unchanged. Every proposal and acceptance remains a separately
-approved mutation. This is not permission to invoke arbitrary personal agents.
-
-Explorer and Critic inspect only; Worker has exactly the parent's reviewed write
-paths in the private copy. Calls are synchronous with no background or nested
-delegation. The parent and children share one deadline and request/tool budgets.
-Their model prose and specialist receipts remain assessments. Reviewed test
-execution still belongs to the controller; delegation cannot add test commands,
-provider routes, writes, network, merge, publication or deployment authority.
-
-Show the full canonical action, selected roles and call cap and limits before acceptance.
-Do not auto-upgrade existing actions to include specialists. Consult the runtime
-receipt for actual calls, stop states and separately labeled token reservations
-versus reported usage; the optional grant does not promise that a model uses it.
-
-### Archive and restore (API 16)
-
-`archive_pip` and `restore_pip` are human-controller mutations. Both require
-`pip_id`, `expected_version`, `expected_lifecycle_revision`, `request_key` and
-`reason`, plus the SDK's explicit per-request approval. Read the exact current
-job and lifecycle revisions from `get_pip` before reviewing either action.
-
-Archival retains history and refuses unfinished runs or pending work reviews;
-it does not cancel them. An archived Pip cannot run, chat, resume or receive
-job/handoff changes. Evidence remains readable and reviewable. Restore returns
-the Pip to **paused**, requiring a separate explicit resume before automated work.
-
-The response contains the current `pip`, the immutable transition `receipt` and
-`replayed`. Reusing the exact actor-scoped request key returns the original receipt
-without applying its transition again, even if the Pip has since been restored.
-Do not mistake the receipt's historical status for the current Pip status.
-No deletion, archive export, cross-machine migration or model lifecycle tool is
-introduced by these commands. API 15 and earlier refuse them before transport.
-
-API16 also accepts `expected_lifecycle_revision` on `pause_pip` / `resume_pip`.
-Supplying it requires API16; it is never silently discarded on older runtimes.
-Legacy unpinned controls continue for never-archived Pips. After archival, resume
-requires an exact current lifecycle pin, including after restoration to paused.
-This prevents a delayed pre-archive resume request from reactivating the Pip.
-## Saved foreground turn triggers (API18)
-
-`propose_pip_update` with `changes.event_trigger.events` containing
-`session_turn_completed` requires a runtime advertising API18. Older event choices
-keep their existing compatibility gates. Mutation calls still require explicit
-host approval, and the saved proposal needs ordinary human review before its
-trigger is active. The SDK cannot manufacture completion events.
-
-This event means one native foreground turn completed and its final session save
-succeeded. It contains no transcript and makes no test, project-completion or
-source claim. Any resulting audit uses its approved committed source at enqueue.
-Cancelled/failed turns, automatic goal resumes, monitor/child/Pip work and delegated
-vendor turns do not qualify. Session-file save and the event transaction are
-separate; a crash between them leaves an unobserved completion, not reconstructed
-or replayed work.
-
-## Reviewed Pip-local statements (API19)
-
-These four commands require an enabled runtime advertising **Pips API19**. Python
-`Session.pips`, `AsyncSession.pips`, and TypeScript `Session.pips` use the same
-read/mutation distinction. API18 refuses them before transport. Existing inherited
-profile, RuntimePolicy, sandbox and plan-mode restrictions still apply.
-
-- Read `get_pip_statement_anchor` with `pip_id` and optional `source_run_id`.
-  It returns `{anchor, digest}` for the exact job/lifecycle/binding/context metadata.
-  Omit the source to state explicitly that no source was observed; a selected run
-  must be a completed checked audit of the same Pip. The audit does not verify the
-  authored statement. No transcript or source files are read by this operation.
-- After presenting that anchor and the full authored text for human review, mutate
-  `record_pip_statement` with `pip_id`, `kind` (`fact` or `preference`), `title`,
-  `statement`, `reason`, **required** `expires_at` (null or a timezone-aware date),
-  `expected_anchor_digest`, `request_key`, and the same optional `source_run_id`.
-  Display `fact` as **Recorded claim**, not verified fact. Preferences are advisory.
-- Read `list_pip_statements` with `pip_id`, optional safe-integer `before_id`, and
-  `limit` from 1 to 20. Whole records, effective expired/revoked state and omission
-  metadata are returned; the page is bounded to 64 KiB.
-- Mutate `revoke_pip_statement` with `pip_id`, `memory_id`, `expected_revision:0`
-  and `reason`. Revocation has no restore/edit operation. Exact same-actor/reason
-  retries preserve the original receipt.
-
-Both mutations require explicit `approved=True` / `{approved: true}` on **every**
-call, including retries. The actor comes from the controller, not SDK parameters.
-The backend validates field bounds, selected source, exact anchor and review CAS;
-SDK approval does not override a stale anchor, archive, quota or policy refusal.
-
-```python
-candidate = session.pips.read("get_pip_statement_anchor", {"pip_id": pip_id})
-# Present candidate and these authored fields for human review before this call.
-saved = session.pips.mutate("record_pip_statement", {
-    "pip_id": pip_id, "kind": "preference", "title": "Review style",
-    "statement": "Prefer concise explanations with source references.",
-    "reason": "Explicit maintainer preference", "expires_at": None,
-    "expected_anchor_digest": candidate["digest"], "request_key": review_request_key,
-}, approved=True)
-```
-
-Async Python uses `await` on the same `read` and `mutate` calls. In TypeScript the
-record parameter type requires `expires_at`; optional source/cursor fields are
-omitted rather than sent as null. Responses retain the generic `PipResult` shape;
-applications should validate the runtime's closed record contract before rendering.
-
-Claims/preferences remain private reference data for that Pip's future audit/chat
-pins. They do not change jobs, permissions, findings or Workspace Context and never
-verify execution or tests. Exact create retries return the original immutable
-record after expiry, revocation or archival without reactivating it. Future queues
-use at most 16 whole records / 8 KiB with explicit omissions; queued pins stay historical.
-Statement-free Pips retain the original v1 exception envelope. The combined ledgers
-retain at most 1,000 records per runner and 32 active/unexpired records per Pip.
-
-## Reviewed Quill automation (API20)
-
-An API20 runtime adds reviewed schedules and event triggers for committed-source
-Quill documentation drafts. These use the existing `propose_pip_update`,
-`get_pip_proposal`, and `accept_pip_update` controls and parameter fields. There is
-no new SDK method, wire field, capability flag, implicit job lookup or role cache.
-Current-tree Quill remains manual-only; a recurring draft never gains project
-write, command, publication, or connector authority.
-
-Before offering this feature, a host must read `get_pip` for the exact selected
-Pip and validate the returned ID, `pip_type`, `current_version`, and source policy.
-For Quill, require an integer `session.capabilities["pips_api_version"] >= 20`
-(TypeScript: `Number.isSafeInteger(session.capabilities.pips_api_version)` and the
-same comparison), alongside the existing supported/enabled checks. Do not offer
-Quill automation when the type, source policy or capability is unknown. The SDK's
-generic proposal call cannot infer a role from `pip_id` alone.
-
-The host then presents the exact proposed schedule or event trigger for review,
-passes the fetched version as `expected_version`, and explicitly approves that
-single proposal mutation. Fetch and present the saved proposal before a separate,
-explicitly approved acceptance using its expected version. A proposal is not
-activation. The backend validates role, source, policy and version again; if the
-job changed, show the conflict and start a fresh review. Do not advance the
-version, clear a trigger, substitute a role or downgrade a request automatically.
-
-Audit schedule updates keep their existing API requirements. In particular,
-ordinary schedule updates remain usable on API19; `session_turn_completed`
-retains its API18 event gate. Because the schedule syntax is shared and the
-generic SDK does not fetch a job implicitly, a direct Quill automation request
-to an older runtime reaches that runtime's authoritative rejection. It surfaces
-as `DGCCommandRejectedError` with the original `reason` (for example,
-`manual_only` or `invalid_event_trigger`) and command. There is no hidden query,
-retry, fallback or automatic acceptance. Explicit `approved=True` /
-`approved:true` remains required for every mutation on every API version and
-does not bypass inherited-state, policy, sandbox, plan-mode or disabled guards.
-
-The API20 SDK compatibility tests use deterministic transport fixtures to check
-unchanged API19 audit forwarding, structured older-Quill refusal, exact stale
-version forwarding, no extra requests, and separate proposal/acceptance approval.
-They are not a claim that an actual scheduled draft or event worker executed;
-that is covered separately by core and native acceptance.
-
-## Reviewed standalone Pulse verification (API21)
-
-API21 adds a separately reviewed standing command plan for committed-source Pulse
-jobs. This is independent of existing finding/artifact handoffs. The SDK requires
-API21 before sending `changes.verification_plan`, including removal with null, or
-any new `run_pip` pin. It performs no hidden job lookup, role inference, rebase,
-retry or acceptance. Generic legacy auditor/Quill schedule requests keep their
-existing capability gates.
-
-Use the existing proposal → saved-proposal read → separate acceptance flow. A plan
-has exactly `schema_version:1` and `action`, where the action contains `kind:test`,
-one to four ordered `{argv:[...],cwd:"."}` commands, `network:false` and the fixed
-runner limits. Present every literal argument and directory, the committed source
-choice, calendar (if any), and confinement limits for human review. Do not infer
-commands from a goal or a model response. Plan creation/removal belongs to the
-human-control surface, not an unattended model proposal tool. A schedule requires
-a plan; removing both can be reviewed in one proposal. Current-tree/event-triggered
-standalone verification is refused in this increment.
-
-For a new manual run, read `get_pip` and validate the returned exact job identity,
-Pulse type, version, lifecycle revision, canonical `verification_plan`, and
-controller-computed `verification_plan_digest`. After human confirmation, pass
-all three pins together without refreshing them silently:
-
-```python
-session.pips.mutate("run_pip", {
-    "pip_id": pip_id,
-    "idempotency_key": reviewed_run_request_key,
-    "expected_version": reviewed_job["current_version"],
-    "expected_lifecycle_revision": reviewed_job["lifecycle_revision"],
-    "expected_plan_digest": reviewed_job["verification_plan_digest"],
-}, approved=True)
-```
-
-Async Python awaits the same call; TypeScript forwards the same snake-case fields
-with `{approved:true}`. They are optional in the generic SDK type because ordinary
-auditors/drafts retain the old request, but the backend requires all three for a
-new standalone Pulse run. Mixing them with another authorization path is refused.
-Separate explicit approval is required for proposal, acceptance and manual run.
-Existing inherited-profile, RuntimePolicy, sandbox, disabled and plan-mode guards
-remain in force. A conflict is returned as a structured `DGCCommandRejectedError`;
-the host must start a new review rather than substituting current values.
-
-This branch invokes no model: the manifest has null model/provider fields and the
-grant records the unused configured model choice. The controller runs only the
-approved arguments through Linux/bubblewrap with read-only source, private scratch,
-no network and the existing process/output/time limits. Missing capability means
-refusal, not an unrestricted fallback or automatic dependency installation.
-
-Treat the new versioned progress/result as recorded command outcomes. A run can
-complete while an invocation exits nonzero. Exit0 alone does not prove that a test
-framework ran or that the project is correct. Finished outcomes survive cancellation
-and interruption; a reserved launch without a durable final outcome is **unknown**.
-Never turn a partial receipt into an all-passed badge or automatically replay it.
-This increment does not accept these receipts as findings, handoffs or Workspace
-Context promotion. Raw artifact access and project apply/merge/deploy authority do
-not expand. See [the implementation contract](../docs/PIPS_PULSE_PLANS.md)
-in the isolated handoff for the bounded receipt schema and acceptance status.
-
-## Reviewed committed-path triggers (API22)
-
-API22 adds `committed_paths_changed` to the existing reviewed event policy. Both
-SDKs require API22 before forwarding that event or the presence of `commit_paths`
-(including null). They do not query the job, guess its role, strip the filter,
-retry a stale version or substitute broad `commit_changed`. Existing event and
-calendar requests retain their previous capability requirements.
+`AsyncDGC` sessions expose `AsyncPips` with the same methods; await each call.
+
+## API
+
+| Python (`Pips` / `AsyncPips`) | TypeScript (`Pips`) | Sends |
+| --- | --- | --- |
+| `read(command, params=None)` | `read(command, params)` | Any read command |
+| `mutate(command, params, *, approved=False)` | `mutate(command, params, { approved })` | Any mutation command |
+| `list(workspace_id)` | `list(workspaceId)` | `list_pips` |
+| `get(pip_id)` | `get(pipId)` | `get_pip` |
+| `runs(pip_id)` | `runs(pipId)` | `list_pip_runs` |
+| `get_run(run_id)` | `getRun(runId)` | `get_pip_run` |
+
+Python exports `Pips`, `AsyncPips`, `PipReadCommand` and `PipMutationCommand`.
+TypeScript exports `Pips`, `PipReadCommand`, `PipMutationCommand`, `PipReadParams`,
+`PipMutationParams`, `PipResult`, `PipJson`, `PipChatOptions` and
+`PipCalendarEvent`. In TypeScript, `read` always takes a params object (use `{}`
+when there are none).
+
+Both methods return the backend's result object with its wire field names. A
+model report, draft or command outcome in that result is evidence to show a
+person, not proof that the code is correct or that tests passed.
+
+### Approval
+
+`mutate` requires the exact boolean `approved=True` (Python) or `{ approved: true }`
+(TypeScript) on every call, including retries. Anything else is refused before the
+request leaves the process. It authorizes that one request only and never changes
+a Pip's own reviewed permissions.
+
+Several flows have two separate decisions, and approval of one never carries over
+to the other:
+
+- saving a proposal, and accepting it;
+- proposing a handoff, and accepting it;
+- preparing an external action from a draft, and accepting that action.
+
+Show the saved record to the user before asking for the second decision.
+
+### Commands and parameters
+
+Commands form two closed sets: 50 reads and 46 mutations, with a closed field set
+for each. There is no generic passthrough. `pips_enable` and `pips_runtime` are not
+exposed. Parameters are plain JSON:
+
+- at most 32 KiB in total, 2,048 values and 12 nested levels;
+- at most 128 fields per object, field names up to 128 characters, lists up to
+  2,048 items;
+- integers within JavaScript's safe range; no non-finite numbers, invalid Unicode
+  or cycles;
+- no unknown fields, no caller `request_id`, and no endpoint or credential fields.
+
+The backend's own validation is authoritative; it also checks required fields.
+
+### Capability gates
+
+Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
+needs a newer API, before sending it. The current backend is API 40.
+
+| API | Commands or parameters |
+| --- | --- |
+| 8 | Workspaces, Pips, runs, chat, versions, approvals, checkpoints, handoffs, run activity, models, types, runner and execution status, workspace context, findings, execution reviews, `stop_pips` |
+| 9 | `accept_pip_execution_context` |
+| 10 | `get_pip_proposal`, `list_workspace_overviews`, `list_pending_pip_reviews`, `list_recent_workspace_activity`, `list_pip_adaptations` |
+| 11 | `changes.source_policy` |
+| 12 | Session statements: `list_workspace_sessions` and `*_workspace_session_outcome` |
+| 13 | `list_pip_notifications`, `mark_pip_notification_read` |
+| 14 | Exceptions: `get_pip_exception_source`, `list_pip_memories`, `record_pip_exception`, `revoke_pip_exception` |
+| 15 | `action.specialists` on a handoff |
+| 16 | `archive_pip`, `restore_pip`; `expected_lifecycle_revision` on `pause_pip` and `resume_pip` |
+| 17 | Command receipts: `list_workspace_execution_receipts`, `get_workspace_execution_receipt`, `record_workspace_execution_context` |
+| 18 | The `session_turn_completed` event |
+| 19 | Claims and preferences: `get_pip_statement_anchor`, `list_pip_statements`, `record_pip_statement`, `revoke_pip_statement` |
+| 21 | `changes.verification_plan`; the three Pulse pins on `run_pip` |
+| 22 | The `committed_paths_changed` event and `commit_paths` |
+| 23 | Setups: `list_pip_setups`, `get_pip_setup`, `accept_pip_setup`, `reject_pip_setup` |
+| 24 | `chat_options` on `send_pip_message` |
+| 25 | `revise_pip_setup`; `chat_options.context_size` above 32,768 |
+| 28 | `list_pip_connections`, `inspect_pip_connection`; `changes.app_plan` |
+| 29 | `list_pip_accounts` |
+| 30 | `propose_pip_personal_handoff` |
+| 31 | `inspect_pip_send_connection`, `get_pip_app_action`, `list_pip_app_actions`, `propose_pip_app_action`, `accept_pip_app_action`, `reject_pip_app_action` |
+| 32 | Email drafts: `get_`/`list_pip_message_draft(s)`, `prepare_`/`dismiss_pip_message_draft` |
+| 33 | `app_plan` version 2 (calendar-day windows) |
+| 34 | `inspect_pip_calendar_connection`, `propose_pip_calendar_action` |
+| 35 | Calendar drafts: `get_`/`list_pip_calendar_draft(s)`, `prepare_`/`dismiss_pip_calendar_draft` |
+| 36 | `inspect_pip_connector_actions`, `propose_pip_connector_action` |
+| 37 | Connector drafts: `get_`/`list_pip_connector_draft(s)`, `prepare_`/`dismiss_pip_connector_draft` |
+| 38 | `attendees`, `repeat` and `send_invitations` in a calendar `event` |
+| 39 | `app_plan` version 3 (Drive, Notion and Contacts searches) |
+| 40 | `changes.web_plan` |
+
+API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
+conversational Pulse setup) add no SDK command. A request to an older backend
+reaches that backend and is refused there.
+
+## Errors
+
+| Error | When |
+| --- | --- |
+| `DGCConfigError` | Unknown command, a read sent as a mutation (or the reverse), missing `approved`, unknown or oversized parameters |
+| `DGCUnsupportedError` | Isolated session, policy or sandbox, mutation in plan mode, Pips not supported or not enabled, API too old. It is a subclass of `DGCConfigError`. |
+| `DGCCommandRejectedError` | The backend refused the request. `reason` is the backend error code and `command` the control name. |
+| `DGCProtocolError` | A malformed or mismatched reply |
+| `DGCTimeoutError` | The transport timed out |
+
+The wire shape is `{type: "pips_control", request: {type, request_id, ...params}}`,
+answered by `pips_result`. The SDK generates the nested `request_id`; concurrent
+requests can complete in any order without sharing a reply.
+
+A timeout or a cancelled async wait does not prove that a mutation did not commit.
+The SDK never retries. Keep the original idempotency or request key, read the saved
+run, proposal, handoff or action, and only then decide whether to retry the exact
+same request. Expected versions, revisions and digests are compare-and-swap guards
+you pass through; the SDK never computes or advances them.
+
+## Commands by area
+
+R = read, M = mutation. Optional fields are marked `?`.
+
+### Workspaces and Pips
+
+| Command | | Fields |
+| --- | --- | --- |
+| `list_workspaces` | R | none. Returns `workspaces`, `current_workspace_id`, `runner_id`. The Personal workspace has `kind: "personal"`. |
+| `list_workspace_overviews` | R | `after_id?`, `limit?` (1–20) |
+| `list_pips` | R | `workspace_id` |
+| `get_pip` | R | `pip_id` |
+| `list_pip_types` | R | none |
+| `list_pip_models` | R | none. May contact the configured model endpoint. |
+| `get_pip_runner`, `get_pip_execution` | R | none. Execution inspection may probe local confinement support. |
+| `create_pip` | M | `workspace_id`, `name`, `goal`, `pip_type`, `source_ref`, `model_choice?` |
+| `pause_pip`, `resume_pip` | M | `pip_id`, `expected_lifecycle_revision?` (required to resume a Pip that was ever archived) |
+| `archive_pip`, `restore_pip` | M | `pip_id`, `expected_version`, `expected_lifecycle_revision`, `request_key`, `reason` |
+| `stop_pips` | M | none. Emergency stop: pauses every Pip and cancels queued and running work. |
+
+`model_choice` is `{"mode": "default"}` or `{"mode": "model", "model": "<id from list_pip_models>"}`.
+Archiving keeps all history and refuses while a run or review is unfinished;
+restoring leaves the Pip paused. An exact retry with the same `request_key`
+returns the original receipt without applying it again.
+
+### Changing a Pip
+
+| Command | | Fields |
+| --- | --- | --- |
+| `propose_pip_update` | M | `pip_id`, `expected_version`, `changes`, `reason?` |
+| `get_pip_proposal` | R | `pip_id`, `proposal_id` |
+| `accept_pip_update`, `reject_pip_update` | M | `pip_id`, `proposal_id`, `expected_version` |
+| `list_pip_versions` | R | `pip_id`, `before_version?`, `limit?` |
+| `list_pip_approvals` | R | `pip_id`, `before_id?`, `limit?` |
+| `list_pending_pip_reviews` | R | `workspace_id?`, `before_id?`, `limit?` (1–20) |
+| `list_pip_adaptations` | R | `pip_id`, `before_id?`, `limit?` |
+
+`changes` may contain `name`, `goal`, `source_ref`, `model_choice`, `schedule`,
+`event_trigger`, `adaptation_policy`, `source_policy`, `verification_plan`,
+`app_plan` and `web_plan`. A proposal changes nothing until it is accepted, and
+accepting checks the expected version again. The shapes of each field are in
+[PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md#schedules-and-event-triggers).
 
 ```python
 saved = session.pips.mutate("propose_pip_update", {
     "pip_id": pip_id,
-    "expected_version": reviewed_version,
-    "reason": "Review committed changes in source and the package definition",
+    "expected_version": job["current_version"],
+    "reason": "Review committed changes to the parser",
     "changes": {"event_trigger": {
         "events": ["committed_paths_changed"],
         "minimum_minutes": 5,
-        "missed_policy": "coalesce_latest",
-        "commit_paths": [
-            {"kind": "directory", "path": "src"},
-            {"kind": "exact", "path": "pyproject.toml"}
-        ]
-    }}
+        "commit_paths": [{"kind": "directory", "path": "src"},
+                         {"kind": "exact", "path": "pyproject.toml"}],
+    }},
 }, approved=True)
-# Present the exact saved proposal to the human. Acceptance is a separate
-# approved mutation naming the saved proposal and unchanged expected version.
+# Show the saved proposal to the user. Accepting it is a separate, approved call.
 ```
 
-The backend canonicalizes 1–32 literal, case-sensitive relative rules within a
-2KiB total budget. Each path has a256 UTF-8-byte bound. A directory rule matches
-descendants separated by `/`; `src` does not match `src2` or an entry named exactly
-`src`. No globs, regex, pathspec expansion, symlink traversal or file-body reads
-are implied. The new event cannot be combined with broad `commit_changed`.
-Other selected events are independent OR conditions, shown in the saved review.
+### Setups
 
-This applies to committed-source Scout, Lens, Rook, Lock and Quill. It grants no
-execution authority to Patch/Pulse and does not observe dirty or untracked files.
-The initial observation and lifecycle/ref/filter/binding resets are silent.
-Incomplete or unavailable comparisons never wake the job. Source is selected
-separately when a retained matching event is enqueued: the observed commit pair
-can differ from the actual run source revision.
+Setups are review cards that the main chat prepares with its `pips_setup` tool.
 
-The selected match is bounded metadata in `manifest.event_trigger.commit_path_match`.
-It identifies the original reviewed rules by indices and records the observed
-commit pair; it contains no discovered path list or file contents. Other event
-selections, including other events on a filtered job, omit this field. Digests
-bind saved representations; they do not independently attest that Git work occurred
-or defend against arbitrary local database writes. No Remote trust or SDK
-permission boundary changes accompany this policy.
+| Command | | Fields |
+| --- | --- | --- |
+| `list_pip_setups` | R | `workspace_id?` |
+| `get_pip_setup` | R | `setup_id` |
+| `accept_pip_setup`, `reject_pip_setup` | M | `setup_id`, `expected_digest` |
+| `revise_pip_setup` | M | `setup_id`, `expected_digest`, `model_choice` |
 
-## Per-message reply controls (API24)
+Accepting saves the Pip exactly as shown and, if the card says so, queues one run.
+Revising replaces the card with a new pending card that uses another model.
 
-`send_pip_message` accepts optional `chat_options` with exactly two fields:
-`context_size` (integer 2048–32768) and `thinking` (`off`, `low`, `medium`, `high`
-or `xhigh`). Both SDKs require API24 before forwarding a request that includes
-the field, including null or an empty object. At API24 those malformed values,
-partial objects, extra keys and invalid choices are refused before transport.
-Omitting the field retains the original API8 send behavior and retry identity.
+### Runs and conversations
+
+| Command | | Fields |
+| --- | --- | --- |
+| `run_pip` | M | `pip_id`, `idempotency_key`, and for a standing Pulse plan all of `expected_version`, `expected_lifecycle_revision`, `expected_plan_digest` |
+| `cancel_pip_run` | M | `run_id` |
+| `list_pip_runs` | R | `pip_id` |
+| `get_pip_run` | R | `run_id` |
+| `list_pip_run_activity` | R | `run_id`, `after?` |
+| `list_pip_checkpoints` | R | `pip_id`, `before_id?`, `limit?` |
+| `list_pip_messages` | R | `pip_id`, `before_id?`, `limit?` |
+| `send_pip_message` | M | `pip_id`, `text`, `idempotency_key`, `chat_options?` |
+
+`run_pip` and `send_pip_message` need a running local runner. Queueing is not
+completion: read the run until it reaches a terminal status. Reusing an
+`idempotency_key` with the same content returns the original run.
+
+`chat_options` sets one reply's context budget and reasoning effort:
+`{"context_size": 2048–1048576, "thinking": "off" | "low" | "medium" | "high" | "xhigh"}`.
+Both fields are required when the object is present. It cannot change a mode,
+permission, model or endpoint, and it does not change the Pip's job.
+
+A standing Pulse plan runs only with the exact reviewed pins:
 
 ```python
-reply = session.pips.mutate("send_pip_message", {
+session.pips.mutate("run_pip", {
     "pip_id": pip_id,
-    "text": "Explain the source references in the latest report.",
-    "idempotency_key": "review-reply-1",
-    "chat_options": {"context_size": 8192, "thinking": "medium"},
+    "idempotency_key": run_key,
+    "expected_version": job["current_version"],
+    "expected_lifecycle_revision": job["lifecycle_revision"],
+    "expected_plan_digest": job["verification_plan_digest"],
 }, approved=True)
 ```
 
-TypeScript exports `PipChatOptions` and includes it on
-`PipMutationParams["send_pip_message"]`. The equivalent call still requires
-`{approved: true}`. Both languages detach the supplied options before transport;
-SDK isolation, policy, sandbox and plan-mode guards remain unchanged. Options
-cannot carry a mode, permission, model, endpoint, credential or output-limit
-override. They apply to one immutable read-only conversation run, not a standing
-job or schedule. An explicit `off` choice is not raised by prompt keywords.
+### Findings, execution results and workspace context
 
-`list_pip_messages` retains its original capability minimum and returns additive
-`chat_controls` metadata on API24 runtimes. It includes the available choices,
-the selected context budget, the inherited main context size, last-message
-defaults and the provider's reasoning limitation. Hosts must handle its absence
-on older runtimes. Provider effort mappings vary; instruction guidance does not
-promise native reasoning support. The existing worker time, output and tool
-budgets still apply. A connection that rejects the reply's output-token cap is
-refused; the worker does not retry that request without its cap.
+| Command | | Fields |
+| --- | --- | --- |
+| `review_pip_finding` | M | `run_id`, `finding_index`, `status` (`accepted`, `dismissed`, `open`), `expected_revision`, `reason` |
+| `review_pip_execution` | M | `run_id`, `status`, `expected_revision`, `reason` |
+| `get_workspace_context` | R | `workspace_id` |
+| `record_workspace_context` | M | `workspace_id`, `kind`, `title`, `content`, `expected_revision` |
+| `archive_workspace_context` | M | `workspace_id`, `entry_id`, `expected_revision` |
+| `accept_pip_finding` | M | `workspace_id`, `run_id`, `finding_index`, `expected_revision` |
+| `accept_pip_execution_context` | M | `workspace_id`, `run_id`, `expected_revision`, `expected_review_revision` |
+| `list_workspace_activity` | R | `workspace_id`, `after?` |
+| `list_recent_workspace_activity` | R | `workspace_id?`, `before_seq?`, `limit?` (up to 50) |
 
-The backend binds the selected options into the message's idempotency digest.
-Changing options under an existing key is a conflict. The SDK never removes the
-options, changes the key, retries automatically or converts a refusal into a
-legacy send. Inspect the saved run after an ambiguous timeout before retrying
-the exact original request.
+Context `kind` is one of `decision`, `milestone`, `command`, `risk`, `exception`.
+Accepting a finding records a person's choice to keep a model assessment for
+reference; it does not make the finding true. `list_workspace_activity` reads
+forward from a cursor; use `list_recent_workspace_activity` for the newest events.
 
+### Handoffs
 
-## API 28: Personal Pips and existing app connections (local lab)
+| Command | | Fields |
+| --- | --- | --- |
+| `propose_pip_handoff` | M | `source_run_id`, `finding_index`, `target_pip_id`, `task`, `action`, `idempotency_key` |
+| `propose_pip_artifact_handoff` | M | `source_run_id`, `target_pip_id`, `task`, `action`, `idempotency_key` |
+| `propose_pip_personal_handoff` | M | `source_run_id`, `target_pip_id`, `shared_text`, `task`, `idempotency_key` |
+| `get_pip_handoff` | R | `handoff_id` |
+| `list_pip_handoffs` | R | `pip_id`, `before_id?`, `limit?` |
+| `accept_pip_handoff` | M | `handoff_id`, `expected_revision` |
+| `reject_pip_handoff` | M | `handoff_id`, `expected_revision`, `reason` |
 
-A Personal Pip belongs to the local DGC profile, not to the editor directory.
-An explicitly authorized inherited controller can locate it using:
+`action` is an exact JSON action, never a shell command: `{"kind": "read_only"}`,
+a Patch action with `write_paths` and up to four `tests`, or a Pulse action with
+one to four `tests`, each `{"argv": [...], "cwd": "."}`. A Patch action may also
+carry `specialists: {"roles": [...], "max_calls": 1–3}`. Accepting a handoff
+queues one run and needs a running runner. `shared_text` must be an exact excerpt
+(up to 12,000 bytes) of a completed Personal result.
 
-```python
-workspaces = session.pips.read("list_workspaces")["workspaces"]
-personal = next(w for w in workspaces if w["kind"] == "personal")
-jobs = session.pips.list(personal["id"])
-connections = session.pips.read("list_pip_connections")
-# Only after choosing a saved connection; public tool-schema metadata, no email:
-metadata = session.pips.read("inspect_pip_connection", {"server": "composio"})
+### Pip memory
+
+| Command | | Fields |
+| --- | --- | --- |
+| `get_pip_exception_source` | R | `pip_id`, `run_id`, `finding_index` |
+| `record_pip_exception` | M | `pip_id`, `run_id`, `finding_index`, `expected_source_digest`, `reason`, `request_key`, `expires_at?` |
+| `revoke_pip_exception` | M | `pip_id`, `memory_id`, `expected_revision`, `reason` |
+| `list_pip_memories` | R | `pip_id`, `before_id?`, `limit?` (1–20) |
+| `get_pip_statement_anchor` | R | `pip_id`, `source_run_id?` |
+| `record_pip_statement` | M | `pip_id`, `kind` (`fact` or `preference`), `title`, `statement`, `reason`, `expires_at`, `expected_anchor_digest`, `request_key`, `source_run_id?` |
+| `revoke_pip_statement` | M | `pip_id`, `memory_id`, `expected_revision`, `reason` |
+| `list_pip_statements` | R | `pip_id`, `before_id?`, `limit?` (1–20) |
+
+`record_pip_statement` requires `expires_at`: `null` or a timestamp with a time zone
+(for `record_pip_exception` it is optional). Show a `fact` as
+a **recorded claim**, never as a verified fact; preferences are advisory. Neither
+hides findings, changes a job or grants permissions.
+
+### Sessions and command receipts
+
+| Command | | Fields |
+| --- | --- | --- |
+| `list_workspace_sessions` | R | `workspace_id`, `after?`, `limit?` |
+| `inspect_workspace_session_outcome` | R | `workspace_id`, `session_id` |
+| `propose_workspace_session_outcome` | M | `workspace_id`, `session_id`, `title`, `statement`, `source`, `expected_session_revision`, `request_key` |
+| `get_workspace_session_outcome` | R | `workspace_id`, `proposal_id` |
+| `list_workspace_session_outcomes` | R | `workspace_id`, `before_id?`, `limit?` |
+| `accept_workspace_session_outcome` | M | `workspace_id`, `proposal_id`, `expected_digest`, `expected_context_revision` |
+| `reject_workspace_session_outcome` | M | `workspace_id`, `proposal_id`, `expected_digest` |
+| `list_workspace_execution_receipts` | R | `workspace_id`, `session_id?`, `before_id?`, `limit?` |
+| `get_workspace_execution_receipt` | R | `workspace_id`, `attempt_id` |
+| `record_workspace_execution_context` | M | `workspace_id`, `attempt_id`, `expected_attempt_digest`, `expected_final_digest`, `expected_view_digest`, `expected_context_revision` |
+
+`source` is `{"kind": "commit", "revision": "<full commit>"}` or
+`{"kind": "pip_run", "run_id": "<completed run>"}`. A session statement is the
+user's own statement and is stored as not execution-verified. A recorded command
+receipt is a process outcome, not proof that tests ran or passed.
+
+### Notifications
+
+| Command | | Fields |
+| --- | --- | --- |
+| `list_pip_notifications` | R | `workspace_id?`, `before_seq?`, `limit?` (1–20) |
+| `mark_pip_notification_read` | M | `notification_id`, `expected_revision` (0 or 1), `workspace_id?` |
+
+Notifications are references to a review or a failed run. Marking one read
+approves, rejects or starts nothing. Open the referenced record before acting.
+
+### Personal Pips: connections, reads and external actions
+
+Find the Personal workspace in `list_workspaces` (`kind: "personal"`) and use its
+ID with `list_pips` and `create_pip`.
+
+| Command | | Fields |
+| --- | --- | --- |
+| `list_pip_connections` | R | none |
+| `inspect_pip_connection` | R | `server`. Reads tool schemas only, never mail or events. |
+| `list_pip_accounts` | R | `server`. Lists connected account identities only. |
+| `inspect_pip_send_connection` | R | `server` |
+| `inspect_pip_calendar_connection` | R | `server` |
+| `inspect_pip_connector_actions` | R | `server` |
+| `propose_pip_app_action` | M | `source_run_id`, `server`, `connection_digest`, `account`, `schema_digest`, `message`, `request_key` |
+| `propose_pip_calendar_action` | M | `source_run_id`, `server`, `connection_digest`, `account`, `schema_digest`, `event`, `request_key` |
+| `propose_pip_connector_action` | M | `source_run_id`, `server`, `connection_digest`, `schema_digest`, `call`, `request_key` |
+| `get_pip_app_action` | R | `action_id` |
+| `list_pip_app_actions` | R | `pip_id`, `before_id?`, `limit?` (1–20) |
+| `accept_pip_app_action`, `reject_pip_app_action` | M | `action_id`, `expected_digest` |
+| `get_pip_message_draft`, `get_pip_calendar_draft`, `get_pip_connector_draft` | R | `draft_id` |
+| `list_pip_message_drafts`, `list_pip_calendar_drafts`, `list_pip_connector_drafts` | R | `pip_id`, `before_id?`, `limit?` (1–20) |
+| `prepare_pip_message_draft` | M | `draft_id`, `expected_digest`, `server`, `connection_digest`, `account`, `schema_digest`, `message` |
+| `prepare_pip_calendar_draft` | M | `draft_id`, `expected_digest`, `server`, `connection_digest`, `account`, `schema_digest`, `event` |
+| `prepare_pip_connector_draft` | M | `draft_id`, `expected_digest`, `call?` |
+| `dismiss_pip_message_draft`, `dismiss_pip_calendar_draft`, `dismiss_pip_connector_draft` | M | `draft_id`, `expected_digest` |
+
+Never invent an account ID or a digest: take them from the inspection and account
+reads of the same connection, and let the user choose the account. Nothing is
+selected for them, not even a default account.
+
+Payload shapes:
+
+- `message`: exactly `recipient_email`, `subject` (up to 200 bytes) and `body`
+  (plain text, up to 12,000 bytes). One recipient, no CC, BCC, HTML or attachments.
+- `event`: `summary`, `description`, `start_datetime`, `end_datetime` (with seconds
+  and an explicit UTC offset that matches the zone) and `timezone` (IANA). To add
+  guests or a series, include all three of `attendees` (up to ten exact emails),
+  `repeat` (`null` or `{"frequency": "daily" | "weekly" | "monthly", "interval": 1–12, "count": 2–52}`)
+  and `send_invitations` (true exactly when there are guests). The start must
+  still be in the future when the action runs; the duration is at most seven days.
+- `call`: `{"tool": "<tool name from inspect_pip_connector_actions>", "arguments": {...}}`
+  on a saved `zapier`, `arcade`, `make` or `n8n` connection. There is no `account`
+  field: the connector manages its own accounts.
+
+Proposing or preparing only saves a pending review, which expires after 24 hours.
+`accept_pip_app_action` with the saved digest makes exactly one attempt. Repeating
+it observes that attempt and never retries it. Read the receipt carefully:
+
+- A Gmail `succeeded` means the provider accepted the message, not that it was
+  delivered.
+- A calendar `succeeded` means the provider confirmed creation; invitation
+  delivery and acceptance are not confirmed.
+- A connector `succeeded` means the connector returned a response, not that the
+  downstream work completed.
+- `dispatching` or `unknown` means the outcome is unconfirmed. Check the provider
+  before preparing another action.
+
+App and web reads are granted through `propose_pip_update` with `changes.app_plan`
+or `changes.web_plan`, and only take effect after acceptance:
+
+```json
+{"web_plan": {"schema_version": 1, "reads": [
+  {"kind": "page", "url": "https://example.com/timetable"},
+  {"kind": "search", "query": "library opening hours"}
+]}}
 ```
 
-```typescript
-const workspaces = await session.pips.read("list_workspaces", {});
-const connections = await session.pips.read("list_pip_connections", {});
-const metadata = await session.pips.read("inspect_pip_connection", {server: "composio"});
-```
+An `app_plan` names one connection and one to four exact read calls:
+`{"schema_version": 1 | 2 | 3, "server", "connection_digest", "calls": [{"tool", "schema_digest", "arguments", "account"?, "window"?}]}`.
+See [PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md#personal-pips) for the supported
+tools, their fixed arguments and the calendar-day window.
 
-Use the returned Personal workspace ID with existing create/list controls; use
-Pip/run IDs with existing conversation, lifecycle, results and review controls.
-Mutations still require `approved=True` / `{approved: true}` for that exact request.
-A proposal mutation never implies approval of its contents. There is no separate
-SDK login or credential store. Both clients reject app-plan mutations and the two
-new metadata reads on runtimes older than API 28.
-
-An app plan pins the saved connection, read schemas, exact arguments and connected
-account ID. Never invent IDs or digests. Granting access requires a separate saved
-job review. Revocation is checked before provider reads and before their contents
-reach the worker. Current supported reads are bounded Gmail and Calendar reads;
-external actions and other adapters remain under construction. Live Google-account
-verification is pending, not implied by SDK unit tests.
-
-Saved personal documents are `get_pip_run` results with `run_kind: personal_task`
-and `result.text`. Hosts choose where to display/save them; the SDK does not write
-files or publish localhost pages. The local CLI offers private exclusive Markdown
-export, and the extension offers Open Markdown and native Save As.
-
-These changes are additive local source work. The release agent must regenerate
-and sign the final SDK manifest after reviewing all changes. No SDK version or
-signature has been published from this lab.
-
-### Personal conversation drafts
-
-`send_pip_message` can now produce a proposed change to that personal Pip's
-name, goal, schedule or model choice. A returned chat reply is never approval.
-Poll `get_pip` for its pending proposals and use the existing explicit
-`accept_pip_update` / `reject_pip_update` human-control flow with the exact saved
-proposal ID and expected job version. The proposal actor records `pip_chat:`
-followed by the producing run ID. No additional SDK credentials or mutation
-API is introduced. Locked Pips cannot produce these drafts. App permissions,
-source policy, tools, account selection and endpoints are not draftable here.
-
-Personal manual/scheduled runs also carry a bounded reference snapshot of that
-Pip's successful chat and rolling brief. This does not share another Pip's
-history or authorize actions mentioned in old messages.
-
-## API 29: discover connected accounts for human review (local lab)
-
-```python
-identities = session.pips.read("list_pip_accounts", {"server": "composio"})
-```
-
-```typescript
-const identities = await session.pips.read("list_pip_accounts", {server: "composio"});
-```
-
-The result contains `server`, `connection_digest`, bounded `accounts` entries
-(`toolkit`, stable `id`, display `label`), per-toolkit availability and a notice.
-The exact request field is `server`; this read accepts no account, arbitrary tool
-or authentication parameters. Both SDKs refuse it below Pips API 29. It is a local
-controller read, not a model-worker grant or Remote authorization.
-
-Present all available accounts and require a human choice. Do not infer a choice
-from the first result, a label, an email address or a provider's default. Older
-Composio endpoints may not expose stable account identities. An empty/unsupported
-result is not permission to use an unpinned default account. Combine the chosen ID
-with `inspect_pip_connection` metadata from the same connection digest, prepare an
-exact `app_plan` proposal and obtain human acceptance through the existing durable
-review path. Listing identities reads no email/events and approves nothing.
-
-The current picker supports bounded Gmail and Google Calendar reads only. A
-calendar window is absolute on API 29; API 33 adds reviewed recurring windows. Public-contract and
-offline validation are distinct from live-provider verification, which is pending.
-
-## API 30: Personal result handoffs (local lab)
-
-Python and TypeScript expose `propose_pip_personal_handoff` as an explicitly
-approved mutation. Its exact fields are `source_run_id`, `target_pip_id`,
-`shared_text`, `task` and `idempotency_key`. The backend derives all permission,
-source-result, model and job pins; the caller cannot supply an action contract.
+`propose_pip_personal_handoff` shares an exact excerpt of one completed Personal
+result with another Personal Pip. Saving the proposal is not accepting it.
 
 ```python
 proposal = session.pips.mutate("propose_pip_personal_handoff", {
@@ -622,258 +454,34 @@ proposal = session.pips.mutate("propose_pip_personal_handoff", {
 }, approved=True)
 ```
 
-```typescript
-const proposal = await session.pips.mutate("propose_pip_personal_handoff", {
-  source_run_id: sourceRunId, target_pip_id: targetPipId,
-  shared_text: reviewedExcerpt, task: "Turn this plan into a checklist.",
-  idempotency_key: "checklist-1",
-}, {approved: true});
-```
+Personal results are `get_pip_run` results with `run_kind: "personal_task"` and the
+document in `result.text`. The SDK writes no files; the host decides where to show
+or save them.
 
-Proposal approval here means permission to save that proposal, **not** acceptance
-of the handoff. Show its saved `personal_result.v1` payload to the user and call
-the existing `accept_pip_handoff` only after separate approval, with the exact
-`handoff_id` and `expected_revision`. `get_pip_handoff`, `list_pip_handoffs`,
-`reject_pip_handoff` and the existing run/result controls retain their contracts.
-The backend pins the verbatim excerpt, source result digest, job/lifecycle
-revisions, recipient model connection and recipient's existing app plan. It does
-not copy source permissions. Changed pins fail closed rather than silently
-rebasing. SDKs require API 30 before sending the new proposal command.
+## Parameters that pin a review
 
-## API 31: reviewed external messages
+The SDK passes these through unchanged. Read them from the record the user saw.
 
-Python (sync/async) and TypeScript expose three additional reads:
-`inspect_pip_send_connection {server}`, `get_pip_app_action {action_id}` and
-`list_pip_app_actions {pip_id, before_id?, limit?}` (1–20 rows).
-Three mutations require explicit host approval:
+| Field | Used by |
+| --- | --- |
+| `idempotency_key` | `run_pip`, `send_pip_message`, `propose_pip_handoff`, `propose_pip_artifact_handoff`, `propose_pip_personal_handoff` |
+| `request_key` | `propose_pip_app_action`, `propose_pip_calendar_action`, `propose_pip_connector_action`, `record_pip_exception`, `record_pip_statement`, `archive_pip`, `restore_pip`, `propose_workspace_session_outcome` |
+| `expected_version` | `propose_pip_update`, `accept_pip_update`, `reject_pip_update`, `archive_pip`, `restore_pip`, `run_pip` |
+| `expected_lifecycle_revision` | `archive_pip`, `restore_pip`, `pause_pip`, `resume_pip`, `run_pip` |
+| `expected_revision` | Finding and execution reviews, context records, handoff accept/reject, memory revocation, notification read |
+| `expected_digest` | Setup accept/reject/revise, draft prepare/dismiss, action accept/reject, session statement accept/reject |
+| `expected_plan_digest` | `run_pip` for a standing Pulse plan |
+| `expected_anchor_digest`, `expected_source_digest` | `record_pip_statement`, `record_pip_exception` |
+| `expected_session_revision`, `expected_context_revision` | Session statements and command receipts |
+| `connection_digest`, `schema_digest` | External actions and draft preparation |
 
-- `propose_pip_app_action {source_run_id, server, connection_digest, account,
-  schema_digest, message: {recipient_email, subject, body}, request_key}`.
-- `accept_pip_app_action {action_id, expected_digest}`.
-- `reject_pip_app_action {action_id, expected_digest}`.
+A conflict comes back as `DGCCommandRejectedError`. Start a fresh review rather
+than substituting current values.
 
-Proposal approval is permission to save a review only. Fetch the saved action and
-show its exact account, recipient, subject and body before separately authorizing
-acceptance. Use `approved=True` / `{approved: true}` only for that human decision.
-An accepted action is one local attempt. `succeeded` means Gmail accepted it, not
-that the recipient received it. `dispatching` or `unknown` means delivery is
-unconfirmed; repeating accept observes the saved attempt without retrying it.
-Pending reviews expire after 24 hours. Job/source/connection changes can invalidate
-approval. These commands use the local controller, not an isolated model worker
-or Remote; they do not require or start the background supervisor.
+## Permission names
 
-API 31 supports exact, account-specific Composio Gmail plain-text sends. API 34
-adds separately reviewed single Google Calendar events, described below.
-This is source code in the isolated lab; live provider verification and release
-signing are still pending. See `docs/PIPS_PERSONAL_APPS.md` for guarantees and limits.
-
-
-## API 32: conversational email drafts
-
-Reads (Python sync/async and TypeScript):
-
-- `get_pip_message_draft {draft_id}` returns the authoritative saved draft.
-- `list_pip_message_drafts {pip_id, before_id?, limit?}` returns up to 20 summaries.
-
-Mutations require explicit host approval:
-
-- `prepare_pip_message_draft {draft_id, expected_digest, server,
-  connection_digest, account, schema_digest, message: {recipient_email, subject, body}}`
-  saves a separate immutable API 31 send review. It does not send.
-- `dismiss_pip_message_draft {draft_id, expected_digest}` dismisses an inert draft.
-
-The model's `draft_email` / `draft_pip_email` tools produce drafts; SDK clients
-review existing drafts through these closed commands. Show the exact message and
-require an explicit account choice before preparing. Fetch the returned action
-and obtain separate human approval before `accept_pip_app_action`. Approval of
-preparation must never be reused as approval to send. Remote and worker actors
-cannot use these controls. API 31 runtimes refuse API 32 calls before transport.
-Drafts expire after 24 hours; already prepared drafts refer to their retained send
-review and cannot create a second action. The local controller validates current
-source/job/connection pins before any send attempt.
-
-
-## API 33: recurring calendar-day read plans
-
-Use the existing `propose_pip_update` mutation with human host approval and
-`changes.app_plan.schema_version: 2`. Review and separately accept the saved
-proposal; proposal permission does not authorize access by itself. Python and
-TypeScript refuse version 2 plan updates against a backend older than API 33.
-
-A `GOOGLECALENDAR_FIND_EVENT` call can carry:
-
-```json
-{
-  "window": {
-    "kind": "calendar_days",
-    "timezone": "Asia/Kolkata",
-    "start_day": 0,
-    "days": 7
-  }
-}
-```
-
-Keep the existing exact `account`, `schema_digest`, `tool` and bounded `arguments`.
-The arguments must omit `time_min` and `time_max`; the controller resolves these
-once per run at the start of app reads. Midnight boundaries use the reviewed
-IANA timezone, including DST. Start day is 0–30, length 1–31; missing timezone data
-or a nonexistent midnight is an actionable refusal before connecting. The worker
-receives exact resolved UTC bounds with its references. Version 1 fixed-date
-plans retain their behavior. No new SDK command, database migration or dependency
-is needed. This is a read permission, not approval for calendar writes or sending.
-
-
-## API 34: reviewed single calendar events (local lab)
-
-Python sync/async and TypeScript expose:
-
-- Read: `inspect_pip_calendar_connection {server}`. This fetches tool metadata,
-  not account contents, and returns connection/schema digests.
-- Mutation: `propose_pip_calendar_action {source_run_id, server,
-  connection_digest, account, schema_digest, event, request_key}`. Requires
-  explicit host approval (`approved=True` / `{approved: true}`) to save a review.
-
-Both SDKs refuse these two commands below Pips API 34 before transport. `event`
-has exactly five fields, all strings:
-
-```json
-{
-  "summary": "Read one chapter",
-  "description": "A quiet half hour.",
-  "start_datetime": "2026-12-01T11:00:00+05:30",
-  "end_datetime": "2026-12-01T11:30:00+05:30",
-  "timezone": "Asia/Kolkata"
-}
-```
-
-Example dates are illustrative: the chosen start must still be future when
-accepted. Inspect the saved version-2 `calendar_create` payload via
-`get_pip_app_action`, display the account, primary calendar, full event text and
-exact times, then obtain a separate human decision before
-`accept_pip_app_action {action_id, expected_digest}`. Proposal approval must never
-be reused as creation approval. Existing list/get/reject controls support both
-Gmail and calendar actions; list summaries include `kind`. No model or Remote
-actor may use these mutation controls.
-
-The event is private/busy with no guests, recurrence, notification emails or Meet
-link. Calendar reminders and sharing policies can still apply. Explicit offsets
-must agree with the IANA zone; duration is at most seven days. A passed start,
-stale job or changed connector refuses before dispatch. Success carries exactly
-`{provider: "Google Calendar", event_id, meaning: "Provider confirmed creation of
-this calendar event."}`. Unknown or dispatching means creation is unconfirmed;
-repeating acceptance observes the same attempt without retrying. Investigate the
-provider before preparing a new action. Reviews expire after 24 hours.
-
-Registry schema 28 retains earlier Gmail actions and refuses older readers. Stop
-and restart older processes sharing the profile for migration. This is an
-unreleased local implementation. Provider metadata was checked; actual account
-creation remains untested by user choice. Final SDK source signing belongs to
-the release agent.
-
-
-## API 35: conversational calendar drafts (local lab)
-
-Python sync/async and TypeScript require API 35 before transport for:
-
-- `get_pip_calendar_draft {draft_id}` and
-  `list_pip_calendar_drafts {pip_id, before_id?, limit?}` (1–20 summaries).
-- `prepare_pip_calendar_draft {draft_id, expected_digest, server,
-  connection_digest, account, schema_digest, event}`.
-- `dismiss_pip_calendar_draft {draft_id, expected_digest}`.
-
-The two mutations require explicit host approval. `event` has the same five exact
-string fields as API34. Fetch the saved draft, let the human edit its contents
-and choose an account, then prepare the review. Preparation is not acceptance:
-fetch the returned action and obtain a separate decision before calling
-`accept_pip_app_action`. Never transfer approval between those two decisions.
-
-Calendar drafts use `caldraft_` IDs and a version1 payload with exactly
-`schema_version`, `source` and `event`. Email drafts keep their existing payloads
-and commands. Repeated preparation returns the same action only when account,
-connection/schema pins and event still match; a changed request is refused.
-Concurrent controllers link one action atomically. Cancelled or stale replies
-cannot commit a draft. Dismissal, expiry and old-runtime refusal are explicit.
-The additive registry29 migration preserves previous email/action records.
-Live calendar-account creation remains pending; an inert real-model draft is not
-proof of provider execution. SDK publication/signing remains release-agent work.
-
-### Reviewed connector calls (API 36)
-
-`inspect_pip_connector_actions {server}` returns the existing connector's tools,
-input schemas and descriptor digests without calling a tool. The supported saved
-connector names are `zapier`, `arcade`, `make`, `n8n`.
-
-`propose_pip_connector_action {source_run_id, server, connection_digest,
-schema_digest, call: {tool, arguments}, request_key}` prepares one action from a
-completed Personal result. It requires explicit host approval, even though it is
-inert. There is no `account` parameter: these connectors manage account/default
-selection themselves. Review any account/workflow fields present in the tool's
-inputs and its provider dashboard. A metadata fingerprint is not an immutable
-remote workflow version.
-
-Then use the existing `get_pip_app_action`, and separately human-approved
-`accept_pip_app_action {action_id, expected_digest}` or `reject_pip_app_action`.
-Do not automatically accept after preparation. Success means a connector response
-was received, not downstream workflow completion. The receipt provides `provider`,
-`tool`, `response_digest`, a bounded `response_preview`, and an explicit `meaning`.
-Unknown or interrupted attempts never retry. Older runtimes refuse the new
-controls. Registry schema 30 prevents older implementations reading new payloads.
-
-CLI equivalent:
-
-```sh
-dgc pips app-action inspect make --kind connector_call
-dgc pips app-action propose RUN_ID --kind connector_call --server make \
-  --connection-digest CONNECTION_DIGEST --schema-digest TOOL_DIGEST \
-  --request-key MY_REVIEW_KEY --call-file /absolute/path/reviewed-call.json
-dgc pips app-action show ACTION_ID
-# Only after a human has reviewed the saved action:
-dgc pips app-action accept ACTION_ID --expected-digest REVIEW_DIGEST
-```
-
-`reviewed-call.json` contains `{"tool":"actual_tool_name","arguments":{...}}`.
-Tool names and inputs come from the saved connector, not a hardcoded example.
-No network/service execution was used in the deterministic contract tests. Live
-provider verification remains pending; do not interpret a green SDK test as
-verified account authorization or successful external work.
-
-## API 37: conversational connector drafts
-
-Personal Pip conversations can use `list_connector_tools` to inspect metadata
-pinned by the local controller, then `draft_connector_action` to propose exact
-inputs. The worker receives no connector credentials or MCP process and cannot
-execute the proposed action. A successful reply saves one inert draft; cancelled,
-failed or stale replies do not publish it. The main chat offers
-`draft_pip_connector_action` with explicit `scope: personal` and a completed
-Personal source. `pips_context` action `connector_tools` discovers real tool names,
-input schemas and fingerprints; guessed or changed descriptors are refused.
-
-Local Python sync/async and TypeScript clients expose:
-
-- `get_pip_connector_draft {draft_id}`.
-- `list_pip_connector_drafts {pip_id, before_id?, limit?}` (1–20 summaries).
-- `prepare_pip_connector_draft {draft_id, expected_digest, call?}`. Omit `call`
-  to keep the draft inputs. An override can edit arguments for the same tool;
-  the saved connection and descriptor fingerprints cannot be replaced.
-- `dismiss_pip_connector_draft {draft_id, expected_digest}`.
-
-Preparation and dismissal require the SDK's explicit host approval. Preparation
-returns a pending API 36 external-action review. It does not run anything;
-`accept_pip_app_action` is a separate human decision. Requests need an existing,
-local, unrestricted controller; Remote and restricted sessions are refused.
-
-CLI equivalents:
-
-```sh
-dgc pips connector-draft list <pip-id>
-dgc pips connector-draft show <draft-id>
-dgc pips connector-draft prepare <draft-id> --expected-digest <digest>
-dgc pips app-action show <action-id>
-# Review the exact action before this separate, interactive approval:
-dgc pips app-action accept <action-id> --expected-digest <action-digest>
-```
-
-Drafts expire after 24 hours and use the retained schema-31 ledger. Retrying the
-same prepared draft cannot produce another action. Connector accounts and workflow
-contents remain provider-managed; a returned response does not prove downstream
-completion. Final source-manifest signing remains the release agent's step.
+The SDK's permission tables include the main chat's Pips tools: `UsePips`,
+`PipsContext`, `PipsSetup`, `PipsPropose`, `PipsAdapt`, `PipsRun`, `PipsHandoff`,
+`PipsEmailDraft`, `PipsCalendarDraft`, `PipsConnectorDraft`, `PipsPause`,
+`PipsResume` and `PipsAttach`. These govern the agent's tools inside a session.
+They do not make a policy-bound SDK session eligible to use `session.pips`.
