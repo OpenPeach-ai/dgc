@@ -1,9 +1,12 @@
 """Reviewed Patch/Pulse actions in a private copy, never the user's working tree.
 
 Only the controller grants an immutable action. Models have no command executor:
-reviewed shell argv uses mandatory Linux confinement. The standalone fixed HTTP
-probe uses a separately reviewed loopback profile, never project code. Hard
-AS/CPU limits are per process; aggregate RSS is a sampled guard, not a hard ceiling.
+reviewed shell argv uses mandatory OS confinement, bubblewrap on Linux and Seatbelt
+(``sandbox-exec``) on macOS. The standalone fixed HTTP probe uses a separately
+reviewed loopback profile, never project code. Hard CPU limits are per process; on
+Linux AS is too, while aggregate RSS is a sampled guard, not a hard ceiling. macOS
+has no PID namespace and rejects finite AS limits, so there memory, process count
+and scratch size are all sampled guards.
 """
 from __future__ import annotations
 
@@ -190,18 +193,68 @@ def authorize_write(worktree, path, action):
     return _inside(root, relative, missing=True)
 
 
-def _runtime():
-    if not sys.platform.startswith("linux"):
-        raise _error("Patch and Pulse execution currently require Linux with working bubblewrap confinement.", "execution_unavailable")
-    bwrap, python = Path("/usr/bin/bwrap"), Path("/usr/bin/python3")
-    for path in (bwrap, python, Path("/usr/bin/git")):
+def _backend():
+    if sys.platform.startswith("linux"):
+        return "bwrap"
+    if sys.platform == "darwin":
+        return "seatbelt"
+    return None
+
+
+def _helpers(paths, message):
+    for path in paths:
         try:
             info = path.resolve(strict=True).stat()
         except OSError:
-            raise _error("This runner needs system bubblewrap, Python 3 and Git for isolated execution.", "execution_unavailable") from None
+            raise _error(message, "execution_unavailable") from None
         if not stat.S_ISREG(info.st_mode) or not os.access(path, os.X_OK):
             raise _error("A required execution helper is unavailable.", "execution_unavailable")
-    return str(bwrap), str(python)
+
+
+_SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
+_XCODE_SELECT = Path("/usr/bin/xcode-select")
+
+
+def _developer_directory():
+    """The active Xcode or Command Line Tools folder, found without running an xcrun shim.
+
+    `/usr/bin/python3` and `/usr/bin/git` are shims. With no developer tools installed they
+    open the "install command line developer tools" dialog, and inside Seatbelt every call
+    fails to write xcrun's cache in the per-user temporary folder (an error line in the test
+    output and about a second of delay). `xcode-select -p` only reports the selection, so
+    the runner asks it whenever it resolves the runtime and runs that folder's real binaries.
+    """
+    result = _capture([str(_XCODE_SELECT), "-p"], maximum=4096, timeout=5, env={"PATH": "/usr/bin:/bin"})
+    try:
+        text = result["data"].decode("utf-8").strip()
+    except UnicodeError:
+        text = ""
+    path = Path(text) if result["status"] == "passed" and text and "\n" not in text else None
+    if path is None or not path.is_absolute():
+        raise _error("No Xcode or Command Line Tools folder is selected; install them with "
+                     "`xcode-select --install`.", "execution_unavailable")
+    try:
+        return path.resolve(strict=True)
+    except OSError:
+        raise _error("The selected developer tools folder is missing.", "execution_unavailable") from None
+
+
+def _runtime():
+    backend = _backend()
+    if backend == "bwrap":
+        bwrap, python = Path("/usr/bin/bwrap"), Path("/usr/bin/python3")
+        _helpers((bwrap, python, Path("/usr/bin/git")),
+                 "This runner needs system bubblewrap, Python 3 and Git for isolated execution.")
+        return str(bwrap), str(python)
+    if backend == "seatbelt":
+        message = "This runner needs sandbox-exec and the Xcode or Command Line Tools Python 3 and Git."
+        _helpers((_SANDBOX_EXEC, _XCODE_SELECT, Path("/usr/bin/git")), message)
+        developer = _developer_directory()
+        python = developer / "usr" / "bin" / "python3"
+        _helpers((python, developer / "usr" / "bin" / "git"), message)
+        return str(_SANDBOX_EXEC), str(python)
+    raise _error("Patch and Pulse execution require Linux with working bubblewrap or macOS with "
+                 "Seatbelt (sandbox-exec) confinement.", "execution_unavailable")
 
 
 def _sandbox_argv(worktree, cwd, command):
@@ -223,49 +276,272 @@ def _sandbox_argv(worktree, cwd, command):
     return argv
 
 
-# Executed inside the namespace before the exact reviewed argv. No preexec_fn in
+_RLIMITS = (("RLIMIT_AS", 536870912), ("RLIMIT_CPU", 30), ("RLIMIT_FSIZE", 67108864),
+            ("RLIMIT_NOFILE", 64), ("RLIMIT_NPROC", 32), ("RLIMIT_CORE", 0))
+# macOS counts RLIMIT_NPROC per user across the whole system (a cap of 32 would refuse the
+# first fork of a logged-in user) and rejects finite RLIMIT_AS/RLIMIT_DATA. Memory and
+# process count are enforced there by the parent's sampler instead.
+_DARWIN_RLIMITS = tuple(item for item in _RLIMITS if item[0] not in ("RLIMIT_AS", "RLIMIT_NPROC"))
+
+
+def _limit_exec(limits):
+    pairs = ",".join(f"(resource.{name},{value})" for name, value in limits)
+    return ("import os,resource,sys\n"
+            f"for key,value in ({pairs}):\n"
+            " resource.setrlimit(key,(value,value))\n"
+            "os.execvpe(sys.argv[1],sys.argv[1:],os.environ)\n")
+
+
+# Executed inside the sandbox before the exact reviewed argv. No preexec_fn in
 # a multithreaded controller, no eval, no shell interpolation and no inherited key.
-_LIMIT_EXEC = """import os,resource,sys
-for key,value in ((resource.RLIMIT_AS,536870912),(resource.RLIMIT_CPU,30),(resource.RLIMIT_FSIZE,67108864),(resource.RLIMIT_NOFILE,64),(resource.RLIMIT_NPROC,32),(resource.RLIMIT_CORE,0)):
- resource.setrlimit(key,(value,value))
-os.execvpe(sys.argv[1],sys.argv[1:],os.environ)
-"""
+_LIMIT_EXEC = _limit_exec(_RLIMITS)
+_LIMIT_EXEC_DARWIN = _limit_exec(_DARWIN_RLIMITS)
+
+# Seatbelt rules beyond the file and network policy. With no PID namespace, the user's other
+# processes are visible to a test, so it may signal or inspect only processes in its own
+# sandbox (KERN_PROCARGS2, which exposes another process's arguments and environment, needs
+# both the process-info and the sysctl rule). Keychain, clipboard and Apple Events are user
+# data that Mach IPC would otherwise reach. A test cannot set ACLs, so its scratch can always
+# be removed.
+_SEATBELT_RULES = (
+    "(deny signal)", "(allow signal (target same-sandbox))",
+    "(deny process-info*)", "(allow process-info* (target self))",
+    "(allow process-info* (target same-sandbox))",
+    '(deny sysctl-read (sysctl-name-prefix "kern.procargs"))',
+    '(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd.xpc") '
+    '(global-name "com.apple.pasteboard.1") (global-name "com.apple.coreservices.appleevents"))',
+    "(deny file-write-acl)",
+)
+
+LIMITATIONS = {
+    "seatbelt": [
+        "Shared host process namespace: there is no PID namespace. A test can signal and inspect "
+        "only processes in its own sandbox, but its process tree is found by sampling, so a "
+        "process that detaches between samples can outlive its command (still inside the "
+        "Seatbelt policy and its rlimits).",
+        "No private loopback: all network access is denied, including 127.0.0.1, so tests that "
+        "start or contact a local server fail.",
+        "System paths outside home folders (such as /usr, /Library, /Applications and /opt) stay "
+        "readable. Home folders, DGC state, other runs and shared temporary folders do not.",
+        "Memory (512 MiB aggregate footprint), process count (32) and scratch size (64 MiB) are "
+        "sampled by the runner about every 50 ms, not kernel limits; a spike can exceed them "
+        "between samples. CPU, file size, open files and core dumps are hard per-process rlimits.",
+        "Apple marks sandbox-exec as deprecated; a future macOS release may change or remove it.",
+    ],
+}
+
+
+def _hidden_paths(run):
+    """Trees a Seatbelt test may not read: homes, DGC state, other runs, shared temp folders."""
+    from .config import _user_home_root
+    from .sandbox import _account_home, _isolated_state_dir
+    candidates = [Path.home(), _account_home(), Path("/Users"), _user_home_root() / ".dgc", _isolated_state_dir()]
+    if run.parent.name == "runs":
+        candidates += [run.parent.parent, run.parent]
+    candidates += [run, Path("/private/tmp"), Path("/private/var/tmp"), Path("/private/var/folders")]
+    hidden = []
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            resolved = Path(candidate).resolve(strict=False)
+        except (OSError, RuntimeError):
+            continue
+        if resolved != Path("/") and resolved not in hidden:
+            hidden.append(resolved)
+    return hidden
+
+
+def _seatbelt_argv(helper, run, worktree, scratch, command):
+    """Exact argv for one Seatbelt command: no shell, every helper an absolute path.
+
+    The project copy is readable, never writable; the per-command scratch is the only
+    writable tree. Seatbelt applies the last matching rule, so the copy and the scratch are
+    re-allowed after the trees that contain them are hidden.
+    """
+    from . import seatbelt
+    profile = seatbelt.profile(writable=[scratch], hidden=_hidden_paths(run), readable=[worktree, scratch],
+                               reachable=[worktree, scratch], network=False, rules=_SEATBELT_RULES)
+    return [helper, "-p", profile, *command]
+
+
+def _seatbelt_env(scratch, python):
+    # The selected developer folder's bin precedes /usr/bin, so `python3` and `git` in a
+    # reviewed argv run the real tools rather than the xcrun shims.
+    developer = str(Path(python).parent)
+    return {"PATH": f"/usr/local/bin:/opt/homebrew/bin:{developer}:/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": str(scratch / "home"), "TMPDIR": str(scratch / "tmp"), "LANG": "C.UTF-8",
+            "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"}
+
+
+def _make_scratch(run):
+    """A fresh private scratch tree for one command, inside the run's private folder."""
+    path = run / "scratch"
+    if os.path.lexists(path):
+        _remove_scratch(path)  # left by an interrupted earlier command of this run
+    path.mkdir(mode=0o700)
+    (path / "home").mkdir(mode=0o700)
+    (path / "tmp").mkdir(mode=0o700)
+    return path
+
+
+def _unlock(path):
+    """Undo modes and user flags a test set on its own scratch, so the tree can be removed."""
+    for root, dirs, files in os.walk(path, topdown=True, followlinks=False):
+        for target in (root, *(os.path.join(root, name) for name in dirs + files)):
+            try:
+                info = os.lstat(target)
+                if hasattr(os, "lchflags") and info.st_flags:
+                    os.lchflags(target, 0)
+                if stat.S_ISDIR(info.st_mode):
+                    os.chmod(target, 0o700)
+            except OSError:
+                continue
+
+
+def _remove_scratch(path):
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(info.st_mode):
+        os.unlink(path)
+        return
+    for attempt in range(2):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if attempt:
+                raise _error("A reviewed test left private scratch that could not be removed.",
+                             "execution_cleanup_failed") from None
+            _unlock(path)
+
+
+def _scratch_bytes(path, maximum):
+    """Allocated bytes under scratch, or maximum + 1 past the entry budget. Never follows links."""
+    total, entries, pending = 0, 0, [path]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as listing:
+                for entry in listing:
+                    entries += 1
+                    if entries > MAX_FILES:
+                        return maximum + 1
+                    try:
+                        info = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        continue  # removed between the listing and the stat
+                    total += getattr(info, "st_blocks", 0) * 512
+                    if stat.S_ISDIR(info.st_mode):
+                        pending.append(entry.path)
+        except OSError:
+            continue  # a directory the test made unreadable or already removed
+        if total > maximum:
+            return total
+    return total
+
+
+def _darwin_probe_code(scratch, hidden):
+    """Real guarantees, checked from inside the profile; any other exception fails the probe."""
+    return "\n".join([
+        "import os,resource,socket",
+        "def refused(action):",
+        " try: action()",
+        " except PermissionError: return True",
+        " return False",
+        "assert refused(lambda: open('probe.txt','a'))",
+        "assert refused(lambda: open('created.txt','x'))",
+        *(f"assert refused(lambda: os.listdir({str(path)!r}))" for path in hidden),
+        "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)",
+        "assert refused(lambda: s.connect(('127.0.0.1',9)))",
+        "s.close()",
+        f"assert refused(lambda: os.kill({os.getpid()},0))",
+        "p=os.path.join(os.environ['TMPDIR'],'probe')",
+        "open(p,'w').write('ok')",
+        "assert open(p).read()=='ok'",
+        f"assert os.environ['HOME'].startswith({str(scratch) + '/'!r})",
+        *(f"assert resource.getrlimit(resource.{name})==({value},{value})" for name, value in _DARWIN_RLIMITS),
+        "print('dgc-confined')",
+    ])
+
+
+def _probe_darwin(helper, python):
+    from .sandbox import _account_home
+    with tempfile.TemporaryDirectory(prefix="dgc-pip-confinement-") as directory:
+        run = Path(directory).resolve()
+        worktree = run / "worktree"
+        worktree.mkdir(mode=0o700)
+        (worktree / "probe.txt").write_text("probe\n")
+        scratch = _make_scratch(run)
+        try:
+            # HOME, the account's home and this probe's own run folder must all be unreadable.
+            hidden = [path.resolve() for path in (Path.home(), _account_home(), run)
+                      if path is not None and path.is_dir()]
+            argv = _seatbelt_argv(helper, run, worktree, scratch, [
+                python, "-I", "-c", _LIMIT_EXEC_DARWIN, python, "-I", "-c", _darwin_probe_code(scratch, hidden)])
+            checked = _capture(argv, maximum=4096, timeout=10, env=_seatbelt_env(scratch, python),
+                               cwd=str(worktree), monitor=True, scratch=scratch)
+        finally:
+            _remove_scratch(scratch)
+        return checked["status"] == "passed" and checked["data"].strip() == b"dgc-confined"
+
+
+def _probe_bwrap(helper, python):
+    with tempfile.TemporaryDirectory(prefix="dgc-pip-confinement-") as directory:
+        probe = ("import os,resource; "
+                 "assert os.statvfs('/workspace').f_flag & os.ST_RDONLY; "
+                 "assert os.statvfs('/usr').f_flag & os.ST_RDONLY; "
+                 "assert os.statvfs('/').f_flag & os.ST_RDONLY; "
+                 "assert os.statvfs('/dev/shm').f_flag & os.ST_RDONLY; "
+                 "assert not os.path.exists('/home'); "
+                 "assert resource.getrlimit(resource.RLIMIT_AS)==(536870912,536870912); "
+                 "assert resource.getrlimit(resource.RLIMIT_NPROC)==(32,32); "
+                 "assert len(os.listdir('/proc/self/fd'))<10; print('dgc-confined')")
+        argv = _sandbox_argv(Path(directory), ".", [python, "-I", "-c", _LIMIT_EXEC,
+                             python, "-I", "-c", probe])
+        checked = _capture(argv, maximum=1024, timeout=10, env={"PATH": "/usr/bin:/bin"})
+        return checked["status"] == "passed" and checked["data"].strip() == b"dgc-confined"
 
 
 def capability():
+    backend = _backend()
+    seatbelt = backend == "seatbelt"
     result = {"available": False, "platform": sys.platform, "backend": None, "reason": None,
               "network": False, "test_workspace": "read_only", "limits": dict(LIMITS),
-              "memory_scope": "per_process_with_sampled_aggregate_rss", "cpu_scope": "per_process",
-              "scratch_bytes": SCRATCH_BYTES}
+              "memory_scope": ("sampled_aggregate_footprint" if seatbelt
+                               else "per_process_with_sampled_aggregate_rss"),
+              "cpu_scope": "per_process",
+              "process_scope": "sampled_process_tree" if seatbelt else "per_namespace",
+              "scratch_bytes": SCRATCH_BYTES,
+              "limitations": list(LIMITATIONS.get(backend, []))}
     try:
-        bwrap, python = _runtime()
-        info = Path(bwrap).stat()
-        key = (bwrap, info.st_size, info.st_mtime_ns, os.getuid())
+        helper, python = _runtime()
+        info, interpreter = Path(helper).stat(), Path(python).stat()
+        key = (backend, helper, info.st_size, info.st_mtime_ns, python, interpreter.st_size,
+               interpreter.st_mtime_ns, os.getuid(), str(Path.home()))
         with _PROBE_LOCK:
             cached = _PROBE_CACHE.get(key)
             if cached is None:
-                with tempfile.TemporaryDirectory(prefix="dgc-pip-confinement-") as directory:
-                    probe = ("import os,resource; "
-                             "assert os.statvfs('/workspace').f_flag & os.ST_RDONLY; "
-                             "assert os.statvfs('/usr').f_flag & os.ST_RDONLY; "
-                             "assert os.statvfs('/').f_flag & os.ST_RDONLY; "
-                             "assert os.statvfs('/dev/shm').f_flag & os.ST_RDONLY; "
-                             "assert not os.path.exists('/home'); "
-                             "assert resource.getrlimit(resource.RLIMIT_AS)==(536870912,536870912); "
-                             "assert resource.getrlimit(resource.RLIMIT_NPROC)==(32,32); "
-                             "assert len(os.listdir('/proc/self/fd'))<10; print('dgc-confined')")
-                    argv = _sandbox_argv(Path(directory), ".", [python, "-I", "-c", _LIMIT_EXEC,
-                                         python, "-I", "-c", probe])
-                    checked = _capture(argv, maximum=1024, timeout=10, env={"PATH": "/usr/bin:/bin"})
-                    cached = checked["status"] == "passed" and checked["data"].strip() == b"dgc-confined"
+                cached = (_probe_darwin if seatbelt else _probe_bwrap)(helper, python)
                 if len(_PROBE_CACHE) >= 8:
                     _PROBE_CACHE.clear()
                 _PROBE_CACHE[key] = cached
         if not cached:
-            raise _error("Bubblewrap is installed but its required namespace, read-only mounts or resource-limit probe failed. Execution is unavailable.", "execution_unavailable")
-        result.update(available=True, backend="bwrap")
+            raise _error("The sandbox helper is installed but its confinement probe failed. Execution is unavailable.", "execution_unavailable")
+        result.update(available=True, backend=backend)
     except (RegistryError, OSError, ValueError):
-        result["reason"] = "Patch and Pulse require working Linux bubblewrap namespaces, isolated mounts and resource limits; this runner did not pass that probe."
+        result["reason"] = (
+            "Patch and Pulse on macOS require sandbox-exec Seatbelt confinement, the selected Xcode or "
+            "Command Line Tools Python 3 and Git, and the runner's process sampler; this runner did not "
+            "pass that probe." if seatbelt else
+            "Patch and Pulse require working Linux bubblewrap namespaces, isolated mounts and resource "
+            "limits; this runner did not pass that probe." if backend == "bwrap" else
+            "Patch and Pulse require Linux with bubblewrap or macOS with Seatbelt confinement; this "
+            "platform has neither.")
     return result
 
 
@@ -283,6 +559,11 @@ def _kill(proc):
         os.killpg(proc.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # macOS answers EPERM, not ESRCH, when the group holds only an unreaped zombie. The
+        # child is not yet reaped, so its group cannot belong to anyone else.
+        if sys.platform != "darwin":
+            raise
 
 
 def _descendant_usage(pid):
@@ -329,16 +610,176 @@ def _descendant_usage(pid):
     return len(seen), rss
 
 
-def _capture(argv, *, maximum, timeout, env, cancelled=None, monitor=False):
+class _LinuxProcesses:
+    """bwrap's PID namespace is the process boundary; the sample is a secondary guard."""
+    interval = 0.1
+
+    def __init__(self, scratch=None):
+        self._root = None
+
+    def attach(self, pid):
+        self._root = pid
+
+    def exceeded(self):
+        count, rss = _descendant_usage(self._root)
+        # +2: bwrap and the namespace's init sit above the reviewed command.
+        return count > LIMITS["processes"] + 2 or rss > LIMITS["memory_bytes"]
+
+    def stop(self):
+        pass  # The namespace ends with its init, and --die-with-parent ties it to the run.
+
+
+class _DarwinProcesses:
+    """Sampled accounting for Seatbelt, which shares the host's process namespace.
+
+    There is no namespace to count or tear down, so the parent walks the tree through libproc:
+    the children of every live member, plus every member of each process group that a member
+    led (a process that daemonizes keeps the group it created, even once its parent exits).
+    A pid counts as ours when it was seen before with the same start time, or when it is newly
+    found from one of ours and started after this run began, so a recycled pid is never
+    counted or signalled. When the reviewed command exits, whatever it left running is
+    killed, as the end of a PID namespace would.
+    """
+    interval = 0.05
+    _SCRATCH_EVERY = 4   # samples between scratch-size walks (about 0.2 s)
+
+    def __init__(self, scratch=None):
+        from .darwin_libproc import Libproc
+        self._proc = Libproc()   # loaded before any spawn: a missing monitor never runs a test
+        self._uid = os.getuid()
+        self._since = time.time() - 1.0
+        self._known = {}         # pid -> start time of every process of this run still relevant
+        self._groups = set()     # process groups that held a live member at the last sample
+        self._root = None
+        self._scratch = scratch
+        self._samples = 0
+
+    def attach(self, pid):
+        # The controller has not reaped its child yet, so the pid is still this process. A
+        # child that already exited is a zombie with no identity: record a start no process
+        # can have, so the pid is never accepted again once it is reaped and recycled.
+        info = self._identity(pid)
+        self._root = pid
+        self._known[pid] = info.start if info is not None and info.uid == self._uid else -1.0
+
+    def _identity(self, pid):
+        try:
+            return self._proc.identity(pid)
+        except PermissionError:
+            return None  # another user's process is never one of ours
+        except OSError as exc:
+            raise _error("The test resource monitor could not read process identity.", "execution_monitor_failed") from exc
+
+    def _ours(self, pid, info):
+        if info is None or info.uid != self._uid:
+            return False
+        start = self._known.get(pid)
+        return info.start >= self._since if start is None else start == info.start
+
+    def _members(self, limit):
+        """Live processes of this run; more than `limit` entries means over the cap."""
+        live, pending, listed = {}, [], set()
+
+        def list_group(pgid):
+            if pgid in listed:
+                return
+            listed.add(pgid)
+            start = self._known.get(pgid)
+            if start is not None:
+                leader = self._identity(pgid)
+                if leader is not None and leader.start != start:
+                    return  # a recycled pid: a group it leads now is not ours
+            pending.extend(self._proc.group(pgid, limit + 2))
+
+        try:
+            if self._root is not None:
+                pending.append(self._root)
+            # Every pid of ours may have become a group leader (setsid) before it exited.
+            for pgid in (*self._known, *self._groups):
+                list_group(pgid)
+            while pending and len(live) <= limit:
+                pid = pending.pop()
+                if pid in live:
+                    continue
+                info = self._identity(pid)
+                if not self._ours(pid, info):
+                    continue
+                self._known[pid] = info.start
+                live[pid] = info
+                pending.extend(self._proc.children(pid, limit + 2))
+                list_group(info.pgid)
+        except RegistryError:
+            raise
+        except OSError as exc:
+            raise _error("The test resource monitor could not list test processes.", "execution_monitor_failed") from exc
+        # A group lives while it has members (and its id cannot be recycled meanwhile). Forget
+        # a pid once it has exited and leads no live member's group: such a group can never
+        # gain members again, and a recycled pid must not inherit it.
+        self._groups = {info.pgid for info in live.values()}
+        self._known = {pid: start for pid, start in self._known.items() if pid in live or pid in self._groups}
+        return live
+
+    def exceeded(self):
+        live = self._members(LIMITS["processes"])
+        # First: a walk stopped at the cap is incomplete, so it says nothing about the root.
+        if len(live) > LIMITS["processes"]:
+            return True
+        if self._root not in live:
+            # The reviewed command has exited; nothing it started may outlive it.
+            self.stop()
+            return False
+        total = 0
+        for pid in live:
+            try:
+                total += self._proc.memory(pid) or 0
+            except OSError as exc:
+                raise _error("The test resource monitor could not read process memory.", "execution_monitor_failed") from exc
+        if total > LIMITS["memory_bytes"]:
+            return True
+        self._samples += 1
+        if self._scratch is not None and self._samples % self._SCRATCH_EVERY == 1:
+            return _scratch_bytes(self._scratch, SCRATCH_BYTES) > SCRATCH_BYTES
+        return False
+
+    def stop(self):
+        """Kill every remaining member of this run, including detached process groups."""
+        for _ in range(200):
+            live = self._members(4096)
+            if not live:
+                return
+            # A member's group belongs to the session the root started or to one a member
+            # created, never the controller's; while it has a member its id cannot be recycled.
+            for group in {info.pgid for info in live.values()}:
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            for pid in live:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            time.sleep(0.005)
+        raise _error("Processes started by a reviewed test could not all be stopped.", "execution_monitor_failed")
+
+
+def _process_monitor(scratch=None):
+    return (_DarwinProcesses if sys.platform == "darwin" else _LinuxProcesses)(scratch)
+
+
+def _capture(argv, *, maximum, timeout, env, cancelled=None, monitor=False, cwd=None, scratch=None):
     """Bound output while reading, and kill the owned process group on every stop."""
     if cancelled is not None and cancelled.is_set():
         return {"status": "cancelled", "exit_code": None, "data": b"", "truncated": False}
+    watch = _process_monitor(scratch) if monitor else None
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            env=env, start_new_session=True, close_fds=True)
+                            env=env, cwd=cwd, start_new_session=True, close_fds=True)
     selector = selectors.DefaultSelector()
     data, status, truncated, eof = bytearray(), None, False, False
     deadline = time.monotonic() + timeout
     try:
+        if watch is not None:
+            watch.attach(proc.pid)
         os.set_blocking(proc.stdout.fileno(), False)
         selector.register(proc.stdout, selectors.EVENT_READ)
         while True:
@@ -348,12 +789,10 @@ def _capture(argv, *, maximum, timeout, env, cancelled=None, monitor=False):
             if time.monotonic() >= deadline:
                 status = "timed_out"
                 break
-            if monitor:
-                count, rss = _descendant_usage(proc.pid)
-                if count > LIMITS["processes"] + 2 or rss > LIMITS["memory_bytes"]:
-                    status = "resource_limit"
-                    break
-            ready = selector.select(0.1)
+            if watch is not None and watch.exceeded():
+                status = "resource_limit"
+                break
+            ready = selector.select(watch.interval if watch is not None else 0.1)
             if ready:
                 chunk = os.read(proc.stdout.fileno(), min(4096, maximum - len(data) + 1))
                 if not chunk:
@@ -377,8 +816,12 @@ def _capture(argv, *, maximum, timeout, env, cancelled=None, monitor=False):
     finally:
         _kill(proc)
         proc.wait(timeout=5)
-        selector.close()
-        proc.stdout.close()
+        try:
+            if watch is not None:
+                watch.stop()
+        finally:
+            selector.close()
+            proc.stdout.close()
 
 
 def _git(prepared, *args, maximum=4096):
@@ -533,27 +976,50 @@ def verify_unmodified(prepared, action):
         raise _error('The isolated Pulse copy changed during verification.', 'execution_denied')
 
 
+def _run_command(runtime, run, root, directory, test, local_http, cancelled):
+    """Launch one reviewed command under the platform's confinement."""
+    helper, python = runtime
+    if local_http:
+        from .pip_http_checks import WORKER, WALL_SECONDS
+        return _capture([python, '-I', '-c', WORKER, *test['argv'][1:]], maximum=LIMITS["output_bytes"],
+                        timeout=WALL_SECONDS, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+                        cancelled=cancelled, monitor=True)
+    if _backend() == "seatbelt":
+        # No mount namespace: the command runs in the copy's real path, not /workspace.
+        command = [python, "-I", "-c", _LIMIT_EXEC_DARWIN, *test["argv"]]
+        scratch = _make_scratch(run)
+        try:
+            return _capture(_seatbelt_argv(helper, run, root, scratch, command), maximum=LIMITS["output_bytes"],
+                            timeout=LIMITS['wall_seconds'], env=_seatbelt_env(scratch, python), cancelled=cancelled,
+                            monitor=True, cwd=str(directory), scratch=scratch)
+        finally:
+            _remove_scratch(scratch)
+    command = [python, "-I", "-c", _LIMIT_EXEC, *test["argv"]]
+    return _capture(_sandbox_argv(root, test["cwd"], command), maximum=LIMITS["output_bytes"],
+                    timeout=LIMITS['wall_seconds'], env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+                    cancelled=cancelled, monitor=True)
+
+
 def run_reviewed_tests(prepared, action, *, cancelled=None, before_command=None, after_command=None):
     action = _canonical_action(action)
     require_capability()
     run, root = _prepared(prepared)
-    _, python = _runtime()
-    results = []
+    runtime, results = None, []
     for index, test in enumerate(action["tests"]):
-        _inside(root, test["cwd"], directory=True)
-        if action['network'] == 'loopback_http_v1':
-            from .pip_http_checks import validate_test, WORKER, WALL_SECONDS
+        directory = _inside(root, test["cwd"], directory=True)
+        local_http = action['network'] == 'loopback_http_v1'
+        if local_http:
+            from .pip_http_checks import validate_test
             validate_test(test)
-            argv = [python, '-I', '-c', WORKER, *test['argv'][1:]]
-            timeout = WALL_SECONDS
-        else:
-            command = [python, "-I", "-c", _LIMIT_EXEC, *test["argv"]]
-            argv = _sandbox_argv(root, test["cwd"], command)
-            timeout = LIMITS['wall_seconds']
         if before_command is not None:
             before_command(index, {"argv": list(test["argv"]), "cwd": test["cwd"]})
-        result = _capture(argv, maximum=LIMITS["output_bytes"], timeout=timeout,
-                          env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}, cancelled=cancelled, monitor=True)
+        if cancelled is not None and cancelled.is_set():
+            # Once cancelled, nothing more is resolved or launched (macOS resolves its
+            # developer tools with a process).
+            result = {"status": "cancelled", "exit_code": None, "data": b"", "truncated": False}
+        else:
+            runtime = runtime or _runtime()
+            result = _run_command(runtime, run, root, directory, test, local_http, cancelled)
         artifact = _artifact(run, f"test-{index + 1}.txt", result["data"])
         output, truncated = _preview(result["data"], 4096)
         results.append({"index": index, "argv": list(test["argv"]), "cwd": test["cwd"], "status": result["status"],

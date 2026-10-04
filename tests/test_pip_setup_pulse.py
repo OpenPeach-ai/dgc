@@ -96,7 +96,8 @@ class PulseSetupTests(unittest.TestCase):
         from pathlib import Path
         prepared={'unused': True}
         output={'data':b'PASS','status':'passed','exit_code':0,'truncated':False}
-        with patch.object(pip_execution,'require_capability'),patch.object(pip_execution,'_prepared',return_value=(self.base,self.root)),patch.object(pip_execution,'_capture',return_value=output) as capture,patch.object(pip_execution,'_artifact',return_value={}):
+        with patch.object(pip_execution,'require_capability'),patch.object(pip_execution,'_prepared',return_value=(self.base,self.root)),patch.object(pip_execution,'_capture',return_value=output) as capture,patch.object(pip_execution,'_artifact',return_value={}), \
+             patch.object(pip_execution,'_runtime',return_value=('/usr/bin/sandbox-helper','/usr/bin/python3')):
             pip_execution.run_reviewed_tests(prepared,plans.validate_plan(plan(True))['action'])
         argv=capture.call_args.args[0]
         self.assertEqual(argv[:3],['/usr/bin/python3','-I','-c'])
@@ -122,6 +123,22 @@ class HTTPPlanBoundaryTests(unittest.TestCase):
         with self.assertRaises(RegistryError):_action('pulse',plan(True)['action'])
         p=plan(True)['action'];p.update(kind='patch',write_paths=['file.txt'])
         with self.assertRaises(RegistryError):pip_execution.validate_action('patch',p)
+
+    def test_fixed_helper_limits_follow_the_platform(self):
+        # macOS rejects a finite RLIMIT_AS; the runner's sampled footprint guard covers memory there.
+        from dgc.pip_http_checks import WORKER
+        import resource,sys
+        from contextlib import redirect_stdout
+        from io import StringIO
+        for platform,address_space in (('linux',True),('darwin',False)):
+            factory=unittest.mock.Mock(side_effect=OSError('refused'))
+            with self.subTest(platform=platform),patch.object(sys,'platform',platform),patch('resource.setrlimit') as limits, \
+                 patch('http.client.HTTPConnection',factory),patch.object(sys,'argv',['probe','http://127.0.0.1:3090/','200']), \
+                 redirect_stdout(StringIO()),self.assertRaises((SystemExit,OSError)):
+                exec(compile(WORKER,'pulse-http-worker','exec'),{})
+            keys=[call.args[0] for call in limits.call_args_list]
+            self.assertEqual(resource.RLIMIT_AS in keys,address_space)
+            for key in (resource.RLIMIT_CPU,resource.RLIMIT_CORE,resource.RLIMIT_FSIZE):self.assertIn(key,keys)
 
     def test_fixed_helper_never_uses_proxy_redirect_cookie_or_body_output(self):
         from dgc.pip_http_checks import WORKER

@@ -11,7 +11,7 @@ from tests import test_pips_local as fixtures
 
 def snapshot(run: Path) -> None:
     """A run folder as a finished run leaves it: read-only copies plus kept artifacts."""
-    for part in ("source/pkg", "worktree", "private-git/objects", "worker-home/.dgc", "artifacts"):
+    for part in ("source/pkg", "worktree", "private-git/objects", "worker-home/.dgc", "artifacts", "scratch/tmp"):
         (run / part).mkdir(parents=True, exist_ok=True)
     (run / "source" / "pkg" / "module.py").write_text("x = 1\n" * 1000)
     (run / "worktree" / "module.py").write_text("x = 1\n")
@@ -40,7 +40,7 @@ class RunCleanupTests(unittest.TestCase):
         with patch.object(cleanup, "_usage_recorded", return_value=True):
             freed = cleanup.prune_run(self.registry.directory, run_id)
         self.assertGreater(freed, 6000)
-        for gone in ("source", "worktree", "private-git", "worker-home"):
+        for gone in ("source", "worktree", "private-git", "worker-home", "scratch"):
             self.assertFalse((folder / gone).exists(), gone)
         self.assertEqual((folder / "artifacts" / "changes.patch").read_text(), "--- a\n+++ b\n")
         self.assertEqual(self.store.run(run_id)["status"], "cancelled")

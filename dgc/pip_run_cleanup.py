@@ -17,8 +17,10 @@ from pathlib import Path
 
 RUN_ID = re.compile(r"run_[a-f0-9]{32}\Z")
 TERMINAL = ("succeeded", "failed", "cancelled")
-# The parts no review reads after the run. `artifacts/` and everything else stay.
-COPIES = ("source", "worktree", "private-git")
+# The parts no review reads after the run. `artifacts/` and everything else stay. A macOS
+# command's `scratch` is removed when the command ends; one is left only if the runner stopped
+# mid-command.
+COPIES = ("source", "worktree", "private-git", "scratch")
 WORKER_HOME = "worker-home"
 SWEEP_LIMIT = 200          # runs examined per sweep, so a large backlog never stalls the runner
 

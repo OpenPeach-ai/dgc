@@ -241,6 +241,13 @@ class PulseIntegrationTests(unittest.TestCase):
         from dgc.pip_export import export_run
         run=self.execute(self.planned());before='\n'.join(self.registry.db.iterdump())
         destination=self.base/'pulse.jsonl'
+        if not os.path.isdir('/proc/self/fd'):
+            # Documented: the pinned read-only export needs Linux procfs. It must refuse, not degrade.
+            with self.assertRaises(RegistryError) as refused:
+                export_run(self.cfg,run['id'],destination,directory=self.registry.directory)
+            self.assertEqual(refused.exception.code,'unsupported_platform')
+            self.assertFalse(destination.exists());self.assertEqual('\n'.join(self.registry.db.iterdump()),before)
+            return
         export_run(self.cfg,run['id'],destination,directory=self.registry.directory)
         self.assertEqual('\n'.join(self.registry.db.iterdump()),before)
         lines=destination.read_bytes().splitlines(keepends=True);rows=[json.loads(line) for line in lines]

@@ -17,6 +17,8 @@ class PulseExecutionTests(unittest.TestCase):
         self.run=Path(self.temp.name); self.source=self.run/'source'; self.source.mkdir()
         (self.source/'source.py').write_text('answer = 42\n')
         self.gate=patch.object(execution,'require_capability',return_value={'available':True}); self.gate.start();self.addCleanup(self.gate.stop)
+        # These cases mock _capture; pin the runtime so no platform helper lookup runs through it.
+        runtime=patch.object(execution,'_runtime',return_value=('/usr/bin/sandbox-helper','/usr/bin/python3')); runtime.start();self.addCleanup(runtime.stop)
         self.prepared=execution.prepare_isolated_repo(self.source,self.run)
         self.action=plan()['action']
 

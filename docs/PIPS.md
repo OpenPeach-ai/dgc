@@ -148,10 +148,23 @@ Start it in one of three ways:
 The runner does one run at a time.
 
 **Platforms.** Linux and macOS can run audits, Quill drafts, Pip conversations and
-Personal tasks. Patch fixes and Pulse commands need Linux with working bubblewrap
-(`/usr/bin/bwrap`, `/usr/bin/python3` and `/usr/bin/git`). The background service is
-Linux only; on macOS use **Start runner** or `dgc pips serve`. Windows can't run Pips
-work yet.
+Personal tasks. Patch fixes and Pulse commands need either Linux with working
+bubblewrap (`/usr/bin/bwrap`, `/usr/bin/python3` and `/usr/bin/git`) or macOS with
+`sandbox-exec` and Xcode or the Command Line Tools (`xcode-select --install`).
+`dgc pips execution` shows whether this runner passed its confinement check. The
+background service is Linux only; on macOS use **Start runner** or `dgc pips serve`.
+Windows can't run Pips work yet.
+
+**macOS is weaker than Linux, and says so.** On macOS commands run under Seatbelt
+rather than in a private namespace. The project copy is still read-only, the network
+is still off (loopback included, so a test that starts a local server fails), and
+home folders, DGC state and other runs stay unreadable. But there is no process
+namespace: memory, the number of processes and the scratch folder are checked by
+sampling about every 50 ms rather than enforced by the kernel, and a process that
+detaches faster than one sample can outlive its command (still inside the sandbox).
+System folders such as `/usr` and `/Library` stay readable, and Apple marks
+`sandbox-exec` as deprecated. The editor and `dgc pips execution` list these
+limitations. See [PIPS_REFERENCE.md](PIPS_REFERENCE.md) for the exact policy.
 
 ## Schedules and event triggers
 
@@ -517,7 +530,8 @@ than run unconfined.
 - Pulse and Patch commands: up to four per run, each with 60 seconds, 30 CPU
   seconds, 512 MiB of memory per process, 32 processes and 64 KiB of output. The
   project copy is read-only to the commands; only a 64 MiB temporary folder is
-  writable.
+  writable. On macOS, memory (512 MiB across all of a command's processes), the
+  process count and the temporary folder's size are sampled, not hard limits.
 - Up to 100 Pips per project and 256 projects.
 - **Finished runs clean up after themselves.** Once a run finishes, DGC removes its
   private copy of the source, its private worktree and, after its token usage is

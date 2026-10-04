@@ -373,7 +373,7 @@ class PipCliTests(unittest.TestCase):
                     pip_cli._read_action_json(args)
 
     def test_execution_capability_and_report_do_not_invent_audit_or_test_success(self):
-        capability = {"available": False, "platform": "Darwin", "backend": None,
+        capability = {"available": False, "platform": "sunos5", "backend": None,
                       "reason": "Required sandbox unavailable", "network": False, "test_workspace": "read_only",
                       "limits": {"wall_seconds": 60, "cpu_seconds": 30, "memory_bytes": 536870912, "output_bytes": 65536, "processes": 32}}
         with patch.object(pips, "handle_control", return_value={"ok": True, "result": capability}) as control:

@@ -32,10 +32,12 @@ def validate_test(test):
 
 # Executed with isolated system Python and an empty, explicitly supplied env.
 # All authority is in this fixed program, never source copied from the project.
+# macOS rejects a finite RLIMIT_AS; there the runner's sampled footprint guard bounds memory.
 WORKER = r'''
 import http.client, resource, socket, sys
 from urllib.parse import urlsplit
-resource.setrlimit(resource.RLIMIT_AS, (536870912, 536870912))
+if sys.platform.startswith('linux'):
+    resource.setrlimit(resource.RLIMIT_AS, (536870912, 536870912))
 resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))

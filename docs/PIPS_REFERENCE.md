@@ -65,8 +65,9 @@ Each run executes in a fresh worker subprocess:
 
 The model worker has no operating-system sandbox; its boundary is DGC's tool
 allowlist and deny policy. Commands that Patch and Pulse run are the exception:
-they always run inside bubblewrap (below). None of this defends against a
-malicious process already running as your user.
+they always run under OS confinement, bubblewrap on Linux and Seatbelt on macOS
+(below). None of this defends against a malicious process already running as your
+user.
 
 Model routes: a Pip uses DGC's configured native model connection, with API mode
 `auto`, `ollama`, `anthropic`, `chat_completions` or `responses`. Delegated subscription engines are
@@ -115,9 +116,12 @@ to 64 paths). This is reference data, not a claim that anything was fixed.
 
 ### Patch and Pulse commands
 
-Patch and Pulse execute only an exact, reviewed action. Execution needs Linux and
-working bubblewrap, with `/usr/bin/bwrap`, `/usr/bin/python3` and `/usr/bin/git`. A
-real confinement probe must pass; there is no unconfined fallback.
+Patch and Pulse execute only an exact, reviewed action. Execution needs either Linux
+with working bubblewrap (`/usr/bin/bwrap`, `/usr/bin/python3` and `/usr/bin/git`), or
+macOS with `/usr/bin/sandbox-exec` and Xcode or the Command Line Tools (see **macOS**
+below). A real confinement probe must pass; there is no unconfined fallback.
+`dgc pips execution` shows the result, including the backend (`bwrap` or `seatbelt`)
+and, on macOS, the runner's `limitations`.
 
 - **Private copy.** The committed source is copied into the run's `worktree`, with
   its own private Git store outside the edit root. Your repository's refs, index,
@@ -127,7 +131,7 @@ real confinement probe must pass; there is no unconfined fallback.
   After the model finishes, DGC diffs the whole copy and fails the run if any other
   path changed. The diff is saved as `artifacts/changes.patch` (at most 256 KiB). It
   is never applied, committed, merged or deployed.
-- **Commands.** Each reviewed `argv` runs in bubblewrap with every namespace
+- **Commands (Linux).** Each reviewed `argv` runs in bubblewrap with every namespace
   unshared (so no network), capabilities dropped, standard system folders mounted
   read-only, the project copy mounted read-only at `/workspace`, a 64 MiB writable
   `/tmp`, and a fixed small environment. Inside, rlimits cap address space at
@@ -142,15 +146,62 @@ real confinement probe must pass; there is no unconfined fallback.
 Commands see only system-installed runtimes. Nothing is installed, and a suite that
 writes into the project folder fails because the copy is read-only.
 
+**macOS.** Each reviewed `argv` runs as `sandbox-exec -p <profile> python3 -I -c
+<limits> <argv>`: no shell, absolute helper paths, and the real `python3` of the
+selected Xcode or Command Line Tools folder (found with `xcode-select -p`). The
+`/usr/bin` shims are never run, so a Mac without developer tools reports execution
+unavailable instead of opening an install prompt. The environment is fixed: `PATH`,
+`LANG`, `PYTHONDONTWRITEBYTECODE`, `PYTHONNOUSERSITE`, and `HOME` and `TMPDIR` inside a
+private scratch folder in the run folder, created for each command and removed after
+it. The generated profile:
+
+- denies every write except that scratch folder and the standard output devices, so
+  writing the project copy fails with `EPERM`;
+- hides home folders (`HOME`, the account's home, `/Users`), DGC state, the run folder
+  (its private Git, source snapshot and the other runs) and the shared temporary
+  folders (`/private/tmp`, `/private/var/tmp`, `/private/var/folders`); only the copy
+  and the scratch folder are readable inside them;
+- denies all network access, including loopback;
+- lets a command signal or inspect only processes in its own sandbox, so it can't read
+  another process's arguments or environment, and blocks the keychain, clipboard and
+  Apple Events services;
+- denies setting ACLs, so the scratch folder can always be removed.
+
+Kernel rlimits on macOS are CPU 30 seconds, file size 64 MiB, open files 64 and no
+core dumps. DGC never sets `RLIMIT_NPROC` there (macOS counts it per user across the
+whole system) or `RLIMIT_AS`/`RLIMIT_DATA` (macOS rejects finite values). Commands run
+in the copy's real path, not `/workspace`, so use relative paths. `PATH` is
+`/usr/local/bin`, `/opt/homebrew/bin`, the developer tools' `usr/bin`, then the system
+folders, so `python3` and `git` are the real tools rather than the `/usr/bin` shims.
+
+The macOS guarantees are weaker than Linux, and the runner reports each of these as a
+limitation:
+
+- **No PID namespace.** The runner samples the command's process tree about every
+  50 ms through libproc (children, plus the process groups its processes created) and
+  kills whatever the command left running when it exits. A process that detaches into
+  a new session faster than one sample can outlive the command. It stays inside the
+  profile and its rlimits.
+- **Sampled caps.** Memory (512 MiB, the summed footprint of the whole tree), the
+  process count (32) and the scratch folder (64 MiB) are checked by sampling, not
+  enforced by the kernel. A spike can exceed them between samples; the command then
+  stops with `resource_limit`.
+- **No private loopback.** All network is denied, so a test that starts or contacts a
+  local server fails.
+- **System paths stay readable.** Folders outside home folders, such as `/usr`,
+  `/Library`, `/Applications` and `/opt`, are readable.
+- **Deprecated helper.** Apple marks `sandbox-exec` as deprecated; a future macOS
+  release may change or remove it, and the probe then reports execution unavailable.
+
 **Local HTTP checks** (`network: "loopback_http_v1"`, standalone Pulse plans only).
 Each check is exactly `["dgc-http-check", "http://127.0.0.1:PORT/path", "STATUS"]` with
 `cwd: "."`, a port from 1024 to 65535 and one expected status. A fixed, isolated
 Python helper sends one GET with no redirects, cookies, credentials, proxy, query or
 body; it reads at most 64 KiB and discards it. Limits: 10 seconds, 5 CPU seconds,
-512 MiB, 3-second socket timeout. The helper runs outside bubblewrap because it must
-reach your loopback interface; the URL rules are an application-level allowlist, not
-a firewall. Pulse doesn't start your app, and the app may not be running the
-committed source recorded with the run.
+512 MiB (address space on Linux; sampled on macOS), 3-second socket timeout. The
+helper runs outside the sandbox because it must reach your loopback interface; the
+URL rules are an application-level allowlist, not a firewall. Pulse doesn't start your
+app, and the app may not be running the committed source recorded with the run.
 
 **Specialists.** A Patch action may add
 `"specialists": {"roles": ["explorer", "critic", "worker"], "max_calls": 1–3}`.
@@ -403,9 +454,11 @@ default `.config/systemd/user`).
 
 **Platforms.** Queueing and running work needs a POSIX system, so Windows can't run
 Pips work. Audits, Quill drafts, conversations and Personal tasks run on Linux and
-macOS. Patch, Pulse and local HTTP checks need Linux with bubblewrap. Current-tree
-source needs POSIX directory handles. `export-run` and `capacity` need Linux
-`/proc`. The service needs Linux with user systemd.
+macOS. Patch, Pulse and local HTTP checks need Linux with bubblewrap, or macOS with
+Seatbelt and Xcode or the Command Line Tools, with weaker guarantees (see **macOS**
+under Patch and Pulse commands). Current-tree source needs POSIX directory handles.
+`export-run` and `capacity` need Linux `/proc`. The service needs Linux with user
+systemd.
 
 ## Run kinds
 
@@ -625,8 +678,8 @@ passed on. Personal Pips can't hand off to project Pips.
 | Commands per action | 4 (Pulse 1–4, Patch 0–4) |
 | Write paths per Patch action | 32 |
 | Action JSON | 16 KiB |
-| Per command | 60 s wall, 30 s CPU, 512 MiB address space, 32 processes, 64 KiB output |
-| Command scratch space | 64 MiB |
+| Per command | 60 s wall, 30 s CPU, 512 MiB address space, 32 processes, 64 KiB output (macOS: memory across all processes and the process count are sampled) |
+| Command scratch space | 64 MiB (sampled on macOS) |
 | Patch diff | 256 KiB |
 | Execution result | 64 KiB |
 | Audit report | 32,000 bytes, 16 findings, 12 limitations |
