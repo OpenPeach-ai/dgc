@@ -722,7 +722,7 @@ def _request(args):
 
 
 def _format(value):
-    if "digest" in value:
+    if set(value) == {"digest"}:          # dgc pips digest; other results carry a hash named digest
         return format_digest(value["digest"])
     if "settings" in value and "min_severity" in value["settings"]:
         item = value["settings"]

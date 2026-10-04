@@ -20,10 +20,10 @@ class QuillSemanticMigrationTests(unittest.TestCase):
 
     @staticmethod
     def snapshot(db):
-        tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts') ORDER BY name")]
+        tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts','pip_notify_settings','pip_digest_state') ORDER BY name")]
         rows = {name: [tuple(row) for row in db.execute('SELECT * FROM "' + name.replace('"', '""') + '" ORDER BY rowid')]
                 for name in tables}
-        definitions = [tuple(row) for row in db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts') ORDER BY type,name")]
+        definitions = [tuple(row) for row in db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts','pip_notify_settings','pip_digest_state') ORDER BY type,name")]
         return rows, definitions
 
     def legacy(self):
@@ -46,11 +46,12 @@ class QuillSemanticMigrationTests(unittest.TestCase):
         from dgc.pip_chat_continuity import SCHEMA as CONTINUITY_SCHEMA
         from dgc.pip_app_actions import SCHEMA as APP_ACTION_SCHEMA
         from dgc.pip_message_drafts import SCHEMA as MESSAGE_DRAFT_SCHEMA, CALENDAR_SCHEMA, CONNECTOR_SCHEMA
+        from dgc.pip_digest import SCHEMA as DIGEST_SCHEMA
         with patch.object(schema, '_execute_schema', wraps=schema._execute_schema) as ddl:
             with WorkspaceRegistry(self.registry.directory, clock=self.registry.clock) as upgraded:
                 self.assertEqual([call.args for call in ddl.call_args_list],
                                  [(upgraded.db, SCHEMA_V22), (upgraded.db, SETUP_SCHEMA),
-                                  (upgraded.db, CONTINUITY_SCHEMA), (upgraded.db, APP_ACTION_SCHEMA), (upgraded.db, MESSAGE_DRAFT_SCHEMA), (upgraded.db, CALENDAR_SCHEMA), (upgraded.db, CONNECTOR_SCHEMA)])
+                                  (upgraded.db, CONTINUITY_SCHEMA), (upgraded.db, APP_ACTION_SCHEMA), (upgraded.db, MESSAGE_DRAFT_SCHEMA), (upgraded.db, CALENDAR_SCHEMA), (upgraded.db, CONNECTOR_SCHEMA), (upgraded.db, DIGEST_SCHEMA)])
                 self.assertEqual(upgraded.db.execute('SELECT count(*) FROM pip_commit_path_observations').fetchone()[0], 0)
                 self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0], schema.SCHEMA_VERSION)
                 self.assertEqual(self.snapshot(upgraded.db), before)

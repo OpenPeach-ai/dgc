@@ -45,11 +45,12 @@ class PulseSemanticMigrationTests(unittest.TestCase):
         from dgc.pip_chat_continuity import SCHEMA as CONTINUITY_SCHEMA
         from dgc.pip_app_actions import SCHEMA as APP_ACTION_SCHEMA
         from dgc.pip_message_drafts import SCHEMA as MESSAGE_DRAFT_SCHEMA, CALENDAR_SCHEMA, CONNECTOR_SCHEMA
+        from dgc.pip_digest import SCHEMA as DIGEST_SCHEMA
         with patch.object(schema, '_execute_schema', wraps=schema._execute_schema) as ddl:
             with WorkspaceRegistry(self.registry.directory, clock=self.registry.clock) as upgraded:
                 self.assertEqual([call.args for call in ddl.call_args_list],
                                  [(upgraded.db, SCHEMA_V22), (upgraded.db, SETUP_SCHEMA),
-                                  (upgraded.db, CONTINUITY_SCHEMA), (upgraded.db, APP_ACTION_SCHEMA), (upgraded.db, MESSAGE_DRAFT_SCHEMA), (upgraded.db, CALENDAR_SCHEMA), (upgraded.db, CONNECTOR_SCHEMA)])
+                                  (upgraded.db, CONTINUITY_SCHEMA), (upgraded.db, APP_ACTION_SCHEMA), (upgraded.db, MESSAGE_DRAFT_SCHEMA), (upgraded.db, CALENDAR_SCHEMA), (upgraded.db, CONNECTOR_SCHEMA), (upgraded.db, DIGEST_SCHEMA)])
                 self.assertEqual(upgraded.db.execute('SELECT count(*) FROM pip_commit_path_observations').fetchone()[0], 0)
                 self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0], schema.SCHEMA_VERSION)
                 self.assertEqual(self.snapshot(upgraded.db), before)
