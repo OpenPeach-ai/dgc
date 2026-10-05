@@ -19,6 +19,12 @@ export type PipReadParams = {
   list_pip_computer_actions: { pip_id: string; limit?: number };
   get_pip_computer_frame: { run_id: string; frame: string };
   list_pip_computer_frames: { run_id: string };
+  list_pip_action_grants: { pip_id: string };
+  list_pip_feedback: { pip_id: string };
+  export_pip: { pip_id: string };
+  get_pip_usage: { pip_id: string };
+  get_pips_desktop_notifications: Record<string, never>;
+  get_pips_keep_running: Record<string, never>;
   get_pip_digest: Record<string, never>;
   get_pip_notify_settings: { pip_id: string };
   get_pip_outcomes: { pip_id: string };
@@ -78,6 +84,12 @@ export type PipMutationParams = {
   stop_pip_computer: { pip_id: string };
   open_pip_computer: { pip_id: string };
   use_pip_computer_view: { pip_id: string; op: string; x?: number; y?: number; text?: string; key?: string; dy?: number; url?: string };
+  always_allow_pip_app_action: { action_id: string; expected_digest: string };
+  revoke_pip_action_grant: { pip_id: string; grant_id: string };
+  set_pip_feedback: { run_id: string; rating: "up" | "down" | null; note: string };
+  set_pip_daily_cap: { pip_id: string; daily_tokens: number | null };
+  set_pips_desktop_notifications: { enabled: boolean };
+  set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   set_pip_notify_settings: { pip_id: string; min_severity: PipSeverity; alert_severity: PipSeverity | null; expected_revision: number };
   prepare_pip_calendar_draft: { draft_id: string; expected_digest: string; server: string; connection_digest: string; account: string; schema_digest: string; event: PipCalendarEvent };
@@ -138,6 +150,18 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   stop_pip_computer: ["pip_id"],
   open_pip_computer: ["pip_id"],
   use_pip_computer_view: ["pip_id", "op", "x", "y", "text", "key", "dy", "url"],
+  list_pip_action_grants: ["pip_id"],
+  always_allow_pip_app_action: ["action_id", "expected_digest"],
+  revoke_pip_action_grant: ["pip_id", "grant_id"],
+  list_pip_feedback: ["pip_id"],
+  set_pip_feedback: ["run_id", "rating", "note"],
+  export_pip: ["pip_id"],
+  get_pip_usage: ["pip_id"],
+  set_pip_daily_cap: ["pip_id", "daily_tokens"],
+  get_pips_desktop_notifications: [],
+  set_pips_desktop_notifications: ["enabled"],
+  get_pips_keep_running: [],
+  set_pips_keep_running: ["enabled"],
   get_pip_digest: [],
   mark_pip_digest_seen: ["until"],
   get_pip_notify_settings: ["pip_id"],
@@ -405,8 +429,8 @@ const API37_MUTATIONS = new Set(["prepare_pip_connector_draft","dismiss_pip_conn
 for (const command of API37_READS) READS.add(command);
 for (const command of API37_MUTATIONS) MUTATIONS.add(command);
 // API 41: the daily digest, per-Pip notification settings and finding outcomes (display state only).
-const API41_READS = new Set(["get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes"]);
-const API41_MUTATIONS = new Set(["mark_pip_digest_seen", "set_pip_notify_settings"]);
+const API41_READS = new Set(["list_pip_action_grants", "list_pip_feedback", "export_pip", "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes"]);
+const API41_MUTATIONS = new Set(["always_allow_pip_app_action", "revoke_pip_action_grant", "set_pip_feedback", "set_pip_daily_cap", "set_pips_desktop_notifications", "set_pips_keep_running", "mark_pip_digest_seen", "set_pip_notify_settings"]);
 for (const command of API41_READS) READS.add(command);
 for (const command of API41_MUTATIONS) MUTATIONS.add(command);
 // API 42: Pip computers; a decision releases or drops one held browser write (local only).

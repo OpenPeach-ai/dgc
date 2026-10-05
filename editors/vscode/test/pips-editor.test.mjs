@@ -1417,3 +1417,34 @@ test('additional read picker labels scope, combines approved reads, and only pro
 test('additional app plans are refused on old backend before dispatch',()=>{
  const x=bridge();x.editor.ready({...x.caps,pips_api_version:38},{});x.receive({type:'pipsRequest',id:'extra-read',request:{type:'propose_pip_update',pip_id:'a',expected_version:1,changes:{app_plan:{schema_version:3}},reason:'Review search'}});assert.equal(x.sent.length,0);assert.match(x.posted.at(-1).error.message,/API 39/);
 });
+
+const grantFixture={id:'grant_'+'3'.repeat(32),kind:'gmail_send',server:'composio',connection_digest:'a'.repeat(64),account:'ca_home',schema_digest:'b'.repeat(64),tool:'GMAIL_SEND_EMAIL',label:'Send email with composio',created_at:'2099-10-05T05:00:00Z',created_by:'editor-user'};
+test('Always allow sends this email once and lets the Pip send like it without asking',async()=>{
+ const x=await emailFixture(41);await emailForm(x);fillEmail(x);x.click('#review-confirm');
+ x.answer(x.requests('propose_pip_app_action').at(-1),{action:emailReview()});await x.drain();
+ assert.ok(x.d.querySelector('#review-always'),'Always allow sits beside Send once');
+ x.click('#review-always');x.click('#review-always');
+ const asked=x.requests('always_allow_pip_app_action');
+ assert.equal(asked.length,1,'one request however many clicks');
+ assert.equal(asked[0].request.action_id,emailActionId);assert.equal(asked[0].request.expected_digest,'d'.repeat(64));
+ assert.equal(x.requests('accept_pip_app_action').length,0,'Always allow is its own decision, not a second Send once');
+ x.answer(asked[0],{action:emailReview('succeeded'),grant:grantFixture});await x.drain({list_pip_action_grants:()=>({pip_id:'a',grants:[grantFixture]})});
+ assert.match(x.d.body.textContent,/Always allowed: Send email with composio\. This Pip will do this again without asking and tell you after\./);
+});
+test('an older CLI is not offered Always allow',async()=>{
+ const x=await emailFixture(40);await emailForm(x);fillEmail(x);x.click('#review-confirm');
+ x.answer(x.requests('propose_pip_app_action').at(-1),{action:emailReview()});await x.drain();
+ assert.equal(x.d.querySelector('#review-always'),null);assert.ok(x.d.querySelector('#review-confirm'));
+});
+test("a Personal Pip's Job tab lists what it may do without asking, and Stop allowing takes one back",async()=>{
+ const x=await emailFixture(41);
+ x.click('[data-tab=job]');await x.drain({list_pip_action_grants:()=>({pip_id:'a',grants:[grantFixture]})});
+ const section=x.d.querySelector('[aria-label="Allowed without asking"]');
+ assert.ok(section,'shown for a Personal Pip');assert.match(section.textContent,/Send email with composio · account ca_home/);
+ x.click(`[data-revoke-grant="${grantFixture.id}"]`);
+ const revoke=x.requests('revoke_pip_action_grant').at(-1);
+ assert.equal(revoke.request.pip_id,'a');assert.equal(revoke.request.grant_id,grantFixture.id);
+ x.answer(revoke,{pip_id:'a',grants:[]});await x.drain({list_pip_action_grants:()=>({pip_id:'a',grants:[]})});
+ assert.match(x.d.body.textContent,/This Pip will ask you again before: Send email with composio\./);
+ assert.match(x.d.querySelector('[aria-label="Allowed without asking"]').textContent,/Nothing\. Every email, event or app action this Pip drafts waits for you\./);
+});

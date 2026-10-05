@@ -28,6 +28,28 @@ _BRIEF_GOAL = (
     "my attention today and anything unusual. Keep it under 150 words, lead with what matters most, "
     "and say plainly when a read failed or nothing notable happened.")
 
+_WATCH_GOAL = (
+    "Read the reviewed page and tell me what changed since your previous result: items added or removed, "
+    "prices, dates, availability or wording that matters. Quote the changed lines. If nothing changed, "
+    "say so in one sentence. If the page could not be read, say that plainly instead of guessing.")
+_MARKET_GOAL = (
+    "Before the market opens on weekdays, brief me on the companies and markets in the reviewed reads: "
+    "notable news, results, guidance and anything scheduled for today, each with its source. Facts from the "
+    "reads only: no predictions, no price targets and no advice to buy, sell or hold. Leave out what your "
+    "previous result already said. Under 200 words, most important first.")
+_RESEARCH_GOAL = (
+    "Once a week, from the reviewed searches, tell me what is new on these topics: the three to five most "
+    "significant items, each with one line on why it matters and its source. Skip anything older than a "
+    "week or already in your previous result. Say plainly when the searches found nothing new.")
+_RELEASE_GOAL = (
+    "Check the reviewed release or changelog pages and tell me about any release since your previous "
+    "result: the version, its date and the changes that would affect me, breaking changes, security fixes "
+    "and deprecations first. If there is no new release, say so in one sentence.")
+_NEWS_GOAL = (
+    "From the reviewed searches, give me today's most important news on these topics in at most five "
+    "bullets, each with its source and one line on why it matters. Leave out anything already in your "
+    "previous result. If nothing new happened, say so in one sentence.")
+
 STARTERS = {
     "commit_review": {
         "title": "Review each commit",
@@ -49,6 +71,47 @@ STARTERS = {
         "pip_type": "lens", "scope": "personal", "work_kind": "personal_task",
         "name": "Morning brief", "goal": _BRIEF_GOAL, "when": "weekdays",
         "default_time": "07:30", "params": ("time", "timezone", "web_reads"),
+        "web_example": "https://example.com/status\nsearch: weather in your city today",
+    },
+    "page_watch": {
+        "title": "Watch a page for changes",
+        "summary": "A Personal Pip reads a page each day and tells you what changed since last time.",
+        "pip_type": "scout", "scope": "personal", "work_kind": "personal_task",
+        "name": "Page watch", "goal": _WATCH_GOAL, "when": "daily",
+        "default_time": "09:00", "params": ("time", "timezone", "web_reads"), "requires_web_reads": True,
+        "web_example": "https://example.com/pricing",
+    },
+    "market_brief": {
+        "title": "Market brief",
+        "summary": "Before the market opens on weekdays, the news on companies you name, with sources. It never trades or advises.",
+        "pip_type": "lens", "scope": "personal", "work_kind": "personal_task",
+        "name": "Market brief", "goal": _MARKET_GOAL, "when": "weekdays",
+        "default_time": "08:30", "params": ("time", "timezone", "web_reads"), "requires_web_reads": True,
+        "web_example": "search: Reliance Industries news today\nsearch: Infosys results",
+    },
+    "research_digest": {
+        "title": "Weekly research digest",
+        "summary": "Every Monday, what is new on the topics you follow, with sources and no repeats.",
+        "pip_type": "lens", "scope": "personal", "work_kind": "personal_task",
+        "name": "Research digest", "goal": _RESEARCH_GOAL, "when": "weekly",
+        "default_time": "09:00", "params": ("time", "timezone", "web_reads"), "requires_web_reads": True,
+        "web_example": "search: new open-weight language models\nsearch: local inference hardware",
+    },
+    "release_watch": {
+        "title": "Release watch",
+        "summary": "Each day, new releases of the tools you depend on, breaking changes first.",
+        "pip_type": "scout", "scope": "personal", "work_kind": "personal_task",
+        "name": "Release watch", "goal": _RELEASE_GOAL, "when": "daily",
+        "default_time": "10:00", "params": ("time", "timezone", "web_reads"), "requires_web_reads": True,
+        "web_example": "https://github.com/ollama/ollama/releases",
+    },
+    "daily_news": {
+        "title": "News on a topic",
+        "summary": "Each morning, the most important news on topics you choose, in five bullets at most.",
+        "pip_type": "lens", "scope": "personal", "work_kind": "personal_task",
+        "name": "Daily news", "goal": _NEWS_GOAL, "when": "daily",
+        "default_time": "08:00", "params": ("time", "timezone", "web_reads"), "requires_web_reads": True,
+        "web_example": "search: India monsoon forecast\nsearch: EV charging policy",
     },
 }
 
@@ -56,7 +119,8 @@ STARTERS = {
 def catalog() -> list[dict]:
     """What the Pips view and the CLI offer, in a fixed order."""
     return [{"id": key, **{k: spec[k] for k in ("title", "summary", "pip_type", "scope", "name", "when")},
-             "default_time": spec.get("default_time"), "params": list(spec["params"])}
+             "default_time": spec.get("default_time"), "params": list(spec["params"]),
+             "web_example": spec.get("web_example")}
             for key, spec in STARTERS.items()]
 
 
@@ -134,6 +198,9 @@ def build(starter_id, params, *, project_root, request_key) -> dict:
         zone = _timezone(params.get("timezone"))
         if when == "daily":
             request["schedule"] = {"type": "daily", "time": time, "timezone": zone}
+        elif when == "weekly":
+            hour, minute = (int(part) for part in time.split(":"))
+            request["schedule"] = {"type": "cron", "cron": f"{minute} {hour} * * 1", "timezone": zone}
         else:
             hour, minute = (int(part) for part in time.split(":"))
             request["schedule"] = {"type": "cron", "cron": f"{minute} {hour} * * 1-5", "timezone": zone}
@@ -142,4 +209,6 @@ def build(starter_id, params, *, project_root, request_key) -> dict:
         if not isinstance(reads, list):
             _fail("List the pages and searches to read.")
         request["web_plan"] = {"schema_version": 1, "reads": reads}
+    elif spec.get("requires_web_reads"):
+        _fail("Add at least one page or search for this starter: it has nothing to read otherwise.")
     return request

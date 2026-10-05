@@ -180,7 +180,8 @@ TOOL_SCHEMAS = [
     _fn("use_pips", "Load the Pips tools for this chat. Pips are standing agents that review, test and draft "
         "for this project or the user's personal tasks. Call this before you read Pip status or findings, set up "
         "or change a Pip, run, pause or hand work to one, or draft an email, calendar event or app action "
-        "from a Personal Pip result.", {}, []),
+        "from a Personal Pip result. When the user wants something done again and again, offer once to make it a Pip.",
+        {}, []),
     _fn("pips_context", "Read bounded Pips reference data for this session workspace, or inspect shared app-connection metadata. "
         "List jobs and latest run IDs, inspect a job definition, page audit findings, Patch/Pulse execution evidence or Quill drafts, read approved context, explicit Pip memory exceptions, human-recorded statements/preferences, this chat's attachments, or page activity. "
         "Send only the chosen action's keys (action is always required; ? means optional): "
@@ -211,8 +212,9 @@ TOOL_SCHEMAS = [
          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["pip_id", "expected_version", "changes", "reason", "request_key"]),
-    _fn("pips_setup", "Prepare one saved setup card for a NEW or EXISTING Pip, including a schedule and optional first run. "
-        "This only saves a draft: the human must review it in Pips or the CLI. It never creates, resumes or runs a job. "
+    _fn("pips_setup", "Set up a NEW or EXISTING Pip, including a schedule and optional first run. Calling it asks the user "
+        "like any tool call (auto mode allows it); once allowed, the Pip is created and on. A Pip that reads connected "
+        "accounts (app_plan) or a Pulse with commands is saved as a card the user reviews instead. "
         "First establish project or personal scope. Personal tasks use scope=personal and work_kind=personal_task; they persist across projects and receive no project files or command tools. Use pips_context connections/connection to inspect existing shared app metadata; app_plan requires exact inspected digests and a user-selected connected account ID, never guesses. "
         "For project work establish whether the user wants source review or actual app tests. "
         "target_root must be this chat's project root; ask the user to open the correct project on a mismatch, "
@@ -223,7 +225,7 @@ TOOL_SCHEMAS = [
         "Confirm the actual local URLs. This only checks status, not browser rendering or authenticated journeys. "
         "For an existing Pip read its definition first and provide all three identity/version fields. "
         "Daily schedules require an explicit IANA timezone. With run_now=true the immediate run counts for today "
-        "and the next daily occurrence is tomorrow. Show the saved plan for review; never claim activation. "
+        "and the next daily occurrence is tomorrow. Report what the result says: created, or a card waiting for review. "
         "Retry the same draft with the same request_key; changed content needs a new key.",
         {"target_root": {"type": "string", "maxLength": 4096},
          "name": {"type": "string", "minLength": 1, "maxLength": 120},
@@ -269,9 +271,9 @@ TOOL_SCHEMAS = [
          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["target_root", "name", "goal", "pip_type", "work_kind", "schedule", "run_now", "reason", "request_key"]),
-    _fn("pips_propose", "Draft an update to an EXISTING Pip in this chat's workspace for the user to review. "
-        "Only name, goal and source_ref can change. This records a pending proposal; it cannot apply changes, "
-        "approve proposals, run work, schedule work, or change permissions. Read pips_context definition first. "
+    _fn("pips_propose", "Change an EXISTING Pip in this chat's workspace. Calling it asks the user like any tool call "
+        "(auto mode allows it); once allowed, the change is applied. Only name, goal and source_ref can change; it cannot "
+        "run work, schedule work or change permissions. Read pips_context definition first. "
         "Use the same request_key for a retry of the identical draft; a changed draft needs a new key.",
         {"pip_id": {"type": "string"},
          "expected_version": {"type": "integer", "minimum": 1, "maximum": 999999},
@@ -1946,7 +1948,8 @@ def bash(args: dict, ctx) -> str:
     popen_kw = dict(cwd=str(ctx.project_root), stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace", start_new_session=True,
-                    env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
+                    env=(sandbox.process_env(ctx.config, agent=not _USER_TYPED.get()) if sandbox_requested
+                         else sandbox.tool_env(agent=not _USER_TYPED.get())))
     observer = None
     receipt = getattr(ctx, 'configured_verifier_receipt', None)
     if receipt is not None:
@@ -2132,9 +2135,11 @@ def direct_bash(command: str, ctx) -> str:
     if not acquire_cancellable(lease, cancelled):
         return (f"error: {lease.last_error}" if lease.last_error else
                 "error: command cancelled while waiting for the workspace write lease")
+    typed = _USER_TYPED.set(True)
     try:
         return bash({"command": command}, ctx)
     finally:
+        _USER_TYPED.reset(typed)
         lease.release()
 
 
@@ -2167,7 +2172,8 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                         encoding="utf-8", errors="replace",
                         cwd=str(ctx.project_root), start_new_session=True,
-                        env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
+                        env=(sandbox.process_env(ctx.config, agent=not _USER_TYPED.get()) if sandbox_requested
+                         else sandbox.tool_env(agent=not _USER_TYPED.get())))
         if argv:
             proc = subprocess.Popen(argv, **popen_kw)
         else:
@@ -2581,6 +2587,9 @@ _BROWSERS_LOCK = _threading.Lock()
 # each call (in the thread that runs it), so an executor never has to be told its call id.
 _PENDING_IMAGES: dict = {}
 _IMAGE_CALL: contextvars.ContextVar = contextvars.ContextVar("dgc_tool_call", default="")
+# True only while direct_bash runs a command the user typed (`!cmd`). A context variable, so nothing
+# in a tool call's arguments can set it: the model's own shells always carry sandbox.AGENT_SHELL.
+_USER_TYPED: contextvars.ContextVar = contextvars.ContextVar("dgc_user_typed_shell", default=False)
 MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
 
 

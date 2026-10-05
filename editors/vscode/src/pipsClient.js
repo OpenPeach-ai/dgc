@@ -6,7 +6,7 @@ import './pipsTranscript.css';
 import {messageMarkup,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipComputer,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames} from './pipsModel.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -58,7 +58,7 @@ let memories=[],memoryCursor=null,memoryLoaded=false,memoryLoading=false,memoryE
 let statementRows=[],statementPage=null,statementLoaded=false,statementLoading=false,statementError='',statementSeq=0,statementAnchorSeq=0,statementInspecting=false,statementRetry=null;
 let commandReceipts=[],commandCursor=null,commandMore=false,commandTotal=0,commandLoaded=false,commandLoading=false,commandError='',commandSession='',commandSeq=0,commandDetailSeq=0;
 let pulseCommands=[{argv:[''],cwd:'.'}],commitRules=[{kind:'exact',path:''}];
-const draft = {webReads:'',chatModelSearch:'',setupTask:'',verificationEnabled:false,statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
+const draft = {feedbackNote:'',webReads:'',chatModelSearch:'',setupTask:'',verificationEnabled:false,statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
 let adaptationSeq=0,handoffSeq=0,handoffDetailSeq=0,checkpointSeq=0,refreshSeq=0,selectionSeq=0,detailSeq=0,historySeq=0,activitySeq=0,approvalSeq=0,polling=false,dialogReturn=null,lastMarkup='';
 const send = (type,args={}) => broker.request({type,...args});
 const usable = () => S.connected && S.supported && S.enabled;
@@ -87,19 +87,71 @@ function contextEntries(entries,archivable=false) {
   if(entries.some(e=>e.provenance?.source==='session_execution'))return entries.map(e=>e.provenance?.source==='session_execution'?`<article class="entry"><span class="badge">Recorded command outcome</span><h3>${esc(e.title)}</h3>${commandContextSummary(e)}${commandContextDetails(e)}${archivable?`<div class="actions"><button type="button" data-archive="${esc(e.id)}"${S.busy||!usable()?' disabled':''}>Archive record</button></div>`:''}</article>`:contextEntries([e],archivable)).join('');
   return entries.length ? entries.map(e=>`<article class="entry"><span class="badge">${e.kind==='session_outcome'?'Reviewed session statement':e.kind==='execution'?'Reviewed execution receipt':e.kind==='finding'?'Model assessment':esc(e.kind)}</span><h3>${esc(e.title)}</h3><div class="goal">${esc(e.kind==='session_outcome'?e.provenance.proposal.statement:e.content)}</div><p class="muted">${e.kind==='session_outcome'?SESSION_STATEMENT_NOTICE.trim():e.kind==='execution'?`Historical runner receipt · accepted review v${e.provenance.review_revision}. Later reviews may differ; this does not describe current source health or prove correctness.`:e.kind==='finding'?'Source excerpt checked; the conclusion is not independently verified.':'Recorded by a user.'} ${e.kind==='command'?'Reference only; this grants no permission to execute.':''}</p>${e.kind==='finding'&&e.provenance.schema_version===2?`<dl class="meta">${pinnedSourceMarkup(e.provenance)}</dl>${pinnedSourceNotice(e.provenance)}`:''}${e.kind==='session_outcome'?sessionStatementDetails(e.provenance.proposal,e.provenance.proposal_digest):''}${e.provenance?.run_id?`<small>Run ${esc(e.provenance.run_id)} · job v${esc(e.provenance.job_version)} · ${esc(e.provenance.model)}</small>`:''}${archivable?`<div class="actions"><button type="button" data-archive="${esc(e.id)}"${S.busy||!usable()?' disabled':''}>Archive record</button></div>`:''}</article>`).join('') : '<p class="muted">No active context records.</p>';
 }
+// Keep Pips running (API 41): one switch that starts the runner at login and after a restart.
+let keepState={value:null,loading:false,error:'',asked:false};
+async function loadKeepRunning(){
+ if(remoteHost||S.apiVersion<41||!usable()||keepState.loading)return;
+ const token=S.epoch;keepState={...keepState,loading:true,asked:true};   // runner-wide: not tied to a selected Pip
+ try{const value=pipsKeepRunning((await send('get_pips_keep_running')).keep_running);if(token===S.epoch){keepState.value=value;keepState.error='';}}
+ catch(error){if(token===S.epoch)keepState.error=errorText(error);}
+ finally{keepState.loading=false;if(token!==S.epoch)keepState.asked=false;render();}
+}
+async function setKeepRunning(enabled){
+ if(S.busy||!usable())return;const token=scope();S.busy=true;render();
+ try{const value=pipsKeepRunning((await send('set_pips_keep_running',{enabled})).keep_running);if(token!==scope())return;keepState.value=value;keepState.error='';
+  S.notice=value.on?(value.while_logged_out?'Pips keep running: the runner starts when you log in, restarts if it fails, and runs while you are logged out.':'Pips keep running: the runner starts when you log in and restarts if it fails.'):'Pips no longer start on their own. The runner running now keeps going until you stop it.';}
+ catch(error){if(token===scope()){keepState.error=errorText(error);setError(error);}}
+ finally{if(token===scope()){S.busy=false;render();}}
+}
+let desktopState={value:null,loading:false,error:'',asked:false};
+async function loadDesktopNotifications(){
+ if(remoteHost||S.apiVersion<41||!usable()||desktopState.loading)return;
+ const token=S.epoch;desktopState={...desktopState,loading:true,asked:true};   // runner-wide: not tied to a selected Pip
+ try{const value=pipsDesktopNotifications((await send('get_pips_desktop_notifications')).desktop_notifications);if(token===S.epoch){desktopState.value=value;desktopState.error='';}}
+ catch(error){if(token===S.epoch)desktopState.error=errorText(error);}
+ finally{desktopState.loading=false;if(token!==S.epoch)desktopState.asked=false;render();}
+}
+async function setDesktopNotifications(enabled){
+ if(S.busy||!usable())return;const token=scope();S.busy=true;render();
+ try{const value=pipsDesktopNotifications((await send('set_pips_desktop_notifications',{enabled})).desktop_notifications);if(token!==scope())return;desktopState.value=value;desktopState.error='';
+  S.notice=value.on?'Desktop notifications on: the runner tells you about a new alert or review, even with the editor closed.':'Desktop notifications off. The editor still tells you while it is open (dgc.notifyPips).';}
+ catch(error){if(token===scope()){desktopState.error=errorText(error);setError(error);}}
+ finally{if(token===scope()){S.busy=false;render();}}
+}
+function desktopNotificationsMarkup(){
+ if(remoteHost||S.apiVersion<41||!S.connected||!S.enabled)return '';
+ if(!desktopState.asked&&usable())void loadDesktopNotifications();
+ const d=desktopState.value;
+ if(!d)return desktopState.error?`<p class="muted keep-running-note">${esc(desktopState.error)}</p>`:'';
+ const note=!d.available?'This computer has no notification tool the runner can use. The editor still tells you while it is open.'
+  :d.last&&!d.last.shown?'The last one did not show: this computer has no notification service running (a server you reach remotely, for example). The editor still tells you while it is open.'
+  :'A new alert or review shows as a desktop notification, even with the editor closed.';
+ return `<label class="keep-running"><input type="checkbox" id="desktop-notifications"${d.on?' checked':''}${S.busy||!usable()?' disabled':''}> Desktop notifications</label><p class="muted keep-running-note">${esc(note)}</p>`;
+}
+function keepRunningMarkup(){
+ if(remoteHost||S.apiVersion<41||!S.connected||!S.enabled)return '';
+ if(!keepState.asked&&usable())void loadKeepRunning();
+ const k=keepState.value;
+ if(!k)return keepState.error?`<p class="muted keep-running-note">${esc(keepState.error)}</p>`:'';
+ if(!k.supported)return `<p class="muted keep-running-note">${esc(k.reason)}</p>`;
+ const note=k.on?(k.while_logged_out?'Starts when you log in and after a restart, restarts if it fails, and runs while you are logged out.':'Starts when you log in and after a restart, and restarts if it fails.'):'Off: Pips run only while a runner you started is running. Turn this on so a schedule still runs after a restart.';
+ return `<label class="keep-running"><input type="checkbox" id="keep-running"${k.on?' checked':''}${S.busy||!usable()?' disabled':''}> Keep Pips running</label><p class="muted keep-running-note">${esc(note)}</p>`;
+}
 function runnerMarkup() {
   const r=S.runner,paused=r?.paused;
   const state=`<span class="runner-status"><i class="status-dot${r?.online?' online':''}" aria-hidden="true"></i>${!S.connected?'Local DGC disconnected':!S.enabled?'Pips disabled':r?`Runner ${esc(r.status)}${paused?' · globally stopped':''}`:'Runner status unavailable'}</span>`;
   const start=remoteHost?'':`${r&&!r.online&&!paused?button('start-runner','Start runner',S.busy||!usable()):''}${paused?button('resume-runner','Resume runner…',S.busy||!usable()):''}`;
   const counts=r?`<span class="muted">${r.counts.queued} queued · ${r.counts.running} running</span>`:'';
   const controls=`${button('refresh','Refresh',!usable())}${button('stop-all','Stop all Pips…',!usable()||S.busy,'danger')}`;
-  if(embedded)return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls"><summary id="runner-controls-toggle">Controls</summary><div class="runner-menu">${counts}<div class="actions">${controls}</div><p class="muted">Stop pauses all Pips across local workspaces and cancels active runs. Resume the runner, then resume individual Pips.</p>${remoteHost?'<p class="muted">Start or resume the supervisor on the computer with <code>dgc pips resume</code> and <code>dgc pips serve</code>. Remote cannot enable Pips or change its runner configuration.</p>':button('disable','Disable local Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
-  return `<div class="runner">${state}${counts}<div class="actions">${start}${controls}</div></div>${r?.error?errorMarkup(r.error.message):''}`;
+  if(embedded)return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls"><summary id="runner-controls-toggle">Controls</summary><div class="runner-menu">${counts}${keepRunningMarkup()}${desktopNotificationsMarkup()}<div class="actions">${controls}</div><p class="muted">Stop pauses all Pips across local workspaces and cancels active runs. Resume the runner, then resume individual Pips.</p>${remoteHost?'<p class="muted">Start or resume the supervisor on the computer with <code>dgc pips resume</code> and <code>dgc pips serve</code>. Remote cannot enable Pips or change its runner configuration.</p>':button('disable','Disable local Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
+  return `<div class="runner">${state}${counts}<div class="actions">${start}${controls}</div></div>${keepRunningMarkup()}${desktopNotificationsMarkup()}${r?.error?errorMarkup(r.error.message):''}`;
 }
 function welcome() {
   if(remoteHost&&!S.connected)return `<div class="empty">${avatar('offline')}<h2>Computer disconnected</h2><p class="muted">Reconnect the approved computer to read current Pips and send commands over the encrypted connection.</p>${button('reconnect','Check connection')}</div>`;
   if(remoteHost&&!S.enabled)return '<div class="empty"><h2>Enable Pips on the computer</h2><p class="muted">Remote cannot enable this feature, choose a local path, or start its supervisor.</p><code>dgc remote connect --pips</code></div>';
   if (!S.connected) return `<div class="empty">${avatar('offline')}<h2>Connect to local DGC</h2><p class="muted">Pips uses the DGC process in this editor. No web account is needed.</p>${button('reconnect','Reconnect')}</div>`;
+  // An API new enough for Pips that still says unsupported is the platform, not the version.
+  if (!S.supported && S.apiVersion >= 41) return `<div class="empty"><h2>Pips run on Linux and macOS</h2><p class="muted">Pips are not available on Windows yet. A DGC installed inside WSL is a Linux install. Everything else in DGC works here.</p></div>`;
   if (!S.supported) return `<div class="empty"><h2>Update the DGC CLI to use Pips</h2><p class="muted">This editor requires Pips API v${PIPS_API_VERSION}, including reviewed execution context and Patch artifact handoffs. Update the DGC CLI, then reconnect.</p>${button('reconnect','Reconnect')}</div>`;
   if (!S.enabled) return `<div class="empty">${avatar()}<h2>A small team for your committed code</h2><p>Choose a Pip to explore, research, review, or inspect security in a source snapshot.</p><p class="muted">Source presets inspect committed code. Patch and Pulse require a separate approved handoff for each isolated edit or test run. All chats stay read-only. Uses your configured DGC model.</p>${button('enable','Enable local Pips',S.busy,'primary')}</div>`;
   if (S.loading) return '<p role="status">Loading the current workspace…</p>';
@@ -109,8 +161,8 @@ function welcome() {
 function createMarkup() {
   if(S.workspace?.kind==='personal'&&S.createStep!=='describe')return `<section class="setup-compose"><h2>Your personal Pip</h2><p class="muted">Available across your projects on this computer. No project files or app access are inherited.</p><form id="create-form" class="form"><label for="personal-character">Character</label><select id="personal-character">${S.types.filter(t=>t.available).map(t=>`<option value="${esc(t.id)}"${t.id===S.createType?' selected':''}>${esc(t.name)}</option>`).join('')}</select>${field('name','Name')}${field('goal','What would you like help with?',true)}${modelPicker('createModel','Model',draft.createModel)}<p class="muted">Start a private conversation. App access must be separately supported and reviewed before email or calendar jobs can run.</p><button type="submit" class="primary">Create personal Pip</button>${button('cancel-create','Cancel',S.busy)}</form></section>`;
 
-  if(S.workspace?.kind==='personal'&&S.createStep==='describe')return `<section class="setup-compose"><p class="step">Personal · across your projects</p><h2>What would you like a hand with?</h2>${startersMarkup('personal')}<p class="muted">Describe the task in your own words. DGC will prepare a setup card for your review.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Help me plan my week every Sunday at 6 pm. Ask me what to include.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary">Describe to DGC</button>':'<p>Describe the task in the main DGC chat.</p>'}</form><p class="muted">Private to this DGC profile. No project files or connected apps are included automatically.</p><div class="actions">${button('advanced-create','Choose a Pip myself',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
-  if(S.createStep==='describe')return `<section class="setup-compose" aria-labelledby="setup-compose-title"><p class="step">Start with the job</p><h2 id="setup-compose-title">What should your Pip look after?</h2>${startersMarkup('project')}<p class="muted">Tell DGC the project, the task, and when to do it. It will prepare one setup card for you to review before anything starts.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Review committed changes in this project daily at 11:00 in Asia/Kolkata. Also run once today.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary"'+(S.busy||!usable()?' disabled':'')+'>Describe to DGC</button>':'<p class="notice">Describe this setup in the main DGC chat on your computer. This view cannot send a setup prompt to that chat.</p>'}</form><p class="muted">Project: ${esc(S.workspace.name)}. DGC must resolve and confirm the project folder. Application smoke tests need separately reviewed test commands.</p><div class="actions">${button('advanced-create','Advanced: choose a Pip',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
+  if(S.workspace?.kind==='personal'&&S.createStep==='describe')return `<section class="setup-compose"><p class="step">Personal · across your projects</p><h2>What would you like a hand with?</h2>${startersMarkup('personal')}${importMarkup()}<p class="muted">Describe the task in your own words. DGC will prepare a setup card for your review.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Help me plan my week every Sunday at 6 pm. Ask me what to include.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary">Describe to DGC</button>':'<p>Describe the task in the main DGC chat.</p>'}</form><p class="muted">Private to this DGC profile. No project files or connected apps are included automatically.</p><div class="actions">${button('advanced-create','Choose a Pip myself',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
+  if(S.createStep==='describe')return `<section class="setup-compose" aria-labelledby="setup-compose-title"><p class="step">Start with the job</p><h2 id="setup-compose-title">What should your Pip look after?</h2>${startersMarkup('project')}${importMarkup()}<p class="muted">Tell DGC the project, the task, and when to do it. It will prepare one setup card for you to review before anything starts.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Review committed changes in this project daily at 11:00 in Asia/Kolkata. Also run once today.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary"'+(S.busy||!usable()?' disabled':'')+'>Describe to DGC</button>':'<p class="notice">Describe this setup in the main DGC chat on your computer. This view cannot send a setup prompt to that chat.</p>'}</form><p class="muted">Project: ${esc(S.workspace.name)}. DGC must resolve and confirm the project folder. Application smoke tests need separately reviewed test commands.</p><div class="actions">${button('advanced-create','Advanced: choose a Pip',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
 
   if(S.createStep==='type')return `<section class="type-picker" aria-labelledby="type-picker-title"><p class="step">Step 1 of 2 · Choose your Pip</p><h2 id="type-picker-title">Who’s right for this job?</h2><p class="muted">Scout, Lens, Rook and Lock inspect committed source. Patch and Pulse execute explicitly reviewed commands in an isolated copy. Pulse also supports reviewed standing command plans on API 21. Quill prepares private documentation drafts. Every Pip’s conversation stays read-only.</p>${S.types.length?`<div class="type-grid">${S.types.map(t=>`<article class="type-card${t.available?'':' planned'}" data-type-card="${esc(t.id)}">${avatar(t.available?'idle':'offline',t,`choose-${t.id}`)}<div class="type-copy"><h3>${esc(t.name)}<span class="badge">${t.available?(executionPip(t)?'Review required':documentationPip(t)?'Draft only':'Read-only preset'):'Planned'}</span></h3><p class="type-role">${esc(t.role)}</p><p class="muted">${esc(t.description)}</p>${!t.available?`<p class="type-reason">${esc(t.unavailable_reason)}</p>`:''}</div><button type="button" data-pip-type="${esc(t.id)}"${!t.available||S.busy||!usable()?' disabled':''}>${t.available?`Choose ${esc(t.name)}`:'Not available yet'}</button></article>`).join('')}</div>`:'<p class="notice error">Pip types are unavailable. Reconnect to retry.</p>'}<div class="actions">${button('cancel-create','Cancel',S.busy)}</div></section>`;
   const type=S.types.find(t=>t.id===S.createType);
@@ -277,6 +329,102 @@ function githubProposalMarkup(proposal){
  const list=v=>v?`${esc(v.repository)}<ul class="web-reads">${v.reads.map(r=>`<li>${esc(githubReadLabel(r))}</li>`).join('')}</ul>`:'None';
  return `<h3>GitHub reads</h3><dl class="meta"><dt>Current</dt><dd>${list(current)}</dd><dt>Proposed</dt><dd>${list(proposed)}</dd></dl><p class="muted">Read-only, with your own GitHub login. DGC makes these reads before each run; the model never chooses what to read.</p>`;
 }
+// Usage and the daily limit (API 41): what this Pip's runs cost, and a limit on automatic runs.
+let usageState={pip:'',value:null,loading:false,error:''};
+async function loadUsage(){
+ const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||usageState.loading&&usageState.pip===pip)return;
+ const token=scope();usageState={pip,value:null,loading:true,error:'',token};
+ try{const value=pipUsage((await send('get_pip_usage',{pip_id:pip})).usage,pip);if(token!==scope()||S.selected!==pip)return;usageState.value=value;draft.usageLimit=value.daily_cap===null?'':String(value.daily_cap);}
+ catch(error){if(token===scope()&&S.selected===pip)usageState.error=errorText(error);}
+ finally{if(usageState.token===token){usageState.loading=false;if(token!==scope()||S.selected!==pip)usageState.pip='';render();}}
+}
+// Thumbs up or down on a finished result; the Pip's later runs read it (API 41).
+const RATED_RUNS=['personal_task','audit','draft'];
+let feedbackState={pip:'',value:null,loading:false,error:'',run:''};
+async function loadFeedback(){
+ const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||feedbackState.loading&&feedbackState.pip===pip)return;
+ const token=scope();feedbackState={pip,value:null,loading:true,error:'',run:'',token};
+ try{const value=pipFeedback(await send('list_pip_feedback',{pip_id:pip}),pip);if(token!==scope()||S.selected!==pip)return;feedbackState.value=value;}
+ catch(error){if(token===scope()&&S.selected===pip)feedbackState.error=errorText(error);}
+ finally{if(feedbackState.token===token){feedbackState.loading=false;if(token!==scope()||S.selected!==pip)feedbackState.pip='';render();}}
+}
+function feedbackMarkup(run){
+ if(S.apiVersion<41||!run||run.id!==S.runId||run.status!=='succeeded'||!RATED_RUNS.includes(run.manifest?.run_kind??'audit'))return '';
+ if(feedbackState.pip!==S.selected){void loadFeedback();return '';}
+ const f=feedbackState.value;
+ if(!f)return feedbackState.error?`<section class="section feedback" aria-label="Your rating">${errorMarkup(feedbackState.error)}</section>`:'';
+ const mine=f.feedback.find(r=>r.run_id===run.id),off=S.busy||!usable();
+ if(feedbackState.run!==run.id){feedbackState.run=run.id;draft.feedbackNote=mine?.note||'';}
+ const thumb=(rating,label,glyph)=>`<button type="button" id="rate-${rating}" class="thumb${mine?.rating===rating?' is-on':''}" aria-pressed="${mine?.rating===rating}"${off?' disabled':''}><span aria-hidden="true">${glyph}</span> ${label}</button>`;
+ return `<section class="section feedback" aria-label="Your rating"><h3>Was this result useful?</h3><div class="actions">${thumb('up','Useful','👍')}${thumb('down','Not useful','👎')}${mine?button('rate-clear','Clear rating',off):''}</div><label for="feedbackNote">What should it keep doing, or do differently? <span class="muted">Optional</span></label><textarea id="feedbackNote" data-draft="feedbackNote" maxlength="500" rows="2"${off?' disabled':''}>${esc(draft.feedbackNote)}</textarea><p class="muted">Its next runs read your rating and note. The job itself does not change.</p>${errorMarkup(feedbackState.error)}</section>`;
+}
+function saveFeedback(rating){
+ const run=S.run,pip=S.selected;if(S.apiVersion<41||!run||run.id!==S.runId||!feedbackState.value||feedbackState.pip!==pip)return;
+ const note=rating===null?'':String(draft.feedbackNote||'').trim();
+ if(note.length>500){feedbackState.error='Keep the note to 500 characters.';render();return;}
+ feedbackState.error='';
+ void mutate({type:'set_pip_feedback',run_id:run.id,rating,note},result=>{const value=pipFeedback(result,pip);const mine=value.feedback.find(r=>r.run_id===run.id);
+  if(rating===null?mine:mine?.rating!==rating)throw Error('The saved rating differs from your choice. Refresh this Pip.');
+  feedbackState.value=value;draft.feedbackNote=mine?.note??'';
+  S.notice=rating===null?'Rating cleared.':`Saved. Its next runs will read your ${rating==='up'?'thumbs up':'thumbs down'}${note?' and note':''}.`;});
+}
+// Allowed without asking (API 41): a Personal Pip's Always-allow grants, each with Stop allowing.
+let grantsState={pip:'',value:null,loading:false,error:'',token:''};
+async function loadGrants(){
+ const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||grantsState.loading&&grantsState.pip===pip)return;
+ const token=scope();grantsState={pip,value:null,loading:true,error:'',token};
+ try{const value=actionGrants(await send('list_pip_action_grants',{pip_id:pip}),pip);if(token!==scope()||S.selected!==pip)return;grantsState.value=value;}
+ catch(error){if(token===scope()&&S.selected===pip)grantsState.error=errorText(error);}
+ finally{if(grantsState.token===token){grantsState.loading=false;if(token!==scope()||S.selected!==pip)grantsState.pip='';render();}}
+}
+function grantsMarkup(){
+ if(S.apiVersion<41||!S.pip||S.pip.source_policy?.mode!=='personal')return '';
+ if(grantsState.pip!==S.selected){void loadGrants();return '';}
+ const g=grantsState.value;
+ if(!g)return grantsState.error?`<section class="section" aria-label="Allowed without asking"><h2>Allowed without asking</h2>${errorMarkup(grantsState.error)}</section>`:'';
+ const off=S.busy||!usable();
+ return `<section class="section" aria-label="Allowed without asking"><h2>Allowed without asking</h2>${g.grants.length
+   ?`<p class="muted">When this Pip drafts one of these, it runs after the run and you are told after. Anything else waits for you.</p>${g.grants.map(x=>`<div class="grant-row"><span>${esc(x.label)} <span class="muted">· ${x.account==='connection_managed'?'the account its connection uses':'account '+esc(x.account)}</span></span><button type="button" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></div>`).join('')}`
+   :'<p class="muted">Nothing. Every email, event or app action this Pip drafts waits for you. Choose <b>Always allow</b> when you approve one to let it do that kind of action on its own.</p>'}</section>`;
+}
+function revokeGrant(grantId){
+ const pip=S.selected;if(S.apiVersion<41||!grantsState.value||grantsState.pip!==pip)return;
+ const label=grantsState.value.grants.find(x=>x.id===grantId)?.label||'that action';
+ void mutate({type:'revoke_pip_action_grant',pip_id:pip,grant_id:grantId},result=>{grantsState.value=actionGrants(result,pip);S.notice=`This Pip will ask you again before: ${label}.`;});
+}
+// "200k", "1.5m", "250,000" or empty (no limit). Null for empty; undefined when it is not a number.
+function parseTokens(text){
+ const raw=String(text||'').trim().toLowerCase().replace(/[,_\s]/g,'');
+ if(!raw)return null;
+ const m=/^(\d+(?:\.\d+)?)([km]?)$/.exec(raw);if(!m)return undefined;
+ return Math.round(Number(m[1])*(m[2]==='k'?1000:m[2]==='m'?1000000:1));
+}
+function usageChart(u){
+ const days=[],[y,mo,d]=u.today.day.split('-').map(Number),byDay=new Map(u.days.map(e=>[e.day,e.tokens]));
+ for(let i=13;i>=0;i--){const t=new Date(Date.UTC(y,mo-1,d-i));days.push({day:t.toISOString().slice(0,10),tokens:byDay.get(t.toISOString().slice(0,10))||0});}
+ // Scaled to the days themselves: a limit far above them would flatten every bar, so its line is
+ // drawn only when it is near enough to read (the form above says the limit in words).
+ const busiest=Math.max(1,...days.map(e=>e.tokens)),cap=u.daily_cap&&u.daily_cap<=busiest*1.5?u.daily_cap:0;
+ const max=Math.max(busiest,cap),w=14,gap=4,h=40;
+ const bars=days.map((e,i)=>{const bh=e.tokens?Math.max(2,Math.round(e.tokens/max*h)):1;return `<rect x="${i*(w+gap)}" y="${h-bh}" width="${w}" height="${bh}" rx="2" class="${e.tokens?'usage-bar':'usage-bar empty'}"><title>${e.day}: ${e.tokens.toLocaleString('en-US')} tokens</title></rect>`;}).join('');
+ const capLine=cap?`<line x1="0" x2="${14*(w+gap)-gap}" y1="${h-Math.round(cap/max*h)}" y2="${h-Math.round(cap/max*h)}" class="usage-cap"/>`:'';
+ return `<svg class="usage-chart" viewBox="0 0 ${14*(w+gap)-gap} ${h}" preserveAspectRatio="none" role="img" aria-label="Tokens per day for the last 14 days">${bars}${capLine}</svg>`;
+}
+function usageMarkup(){
+ if(S.apiVersion<41||!S.pip)return '';
+ if(usageState.pip!==S.selected){void loadUsage();return '<section class="section"><h2>Usage</h2><p class="muted">Loading…</p></section>';}
+ const u=usageState.value,off=S.busy||!usable()||!u;
+ if(!u)return `<section class="section"><h2>Usage</h2>${errorMarkup(usageState.error)||'<p class="muted">Loading…</p>'}</section>`;
+ const n=v=>v.toLocaleString('en-US'),runs=v=>`${v} run${v===1?'':'s'}`;
+ return `<form id="usage-form" class="section form"><h2>Usage</h2><dl class="meta usage-counts"><dt>Today</dt><dd>${n(u.today.tokens)} tokens · ${runs(u.today.runs)}</dd><dt>Last 30 days</dt><dd>${n(u.last_30_days.tokens)} tokens · ${runs(u.last_30_days.runs)}</dd></dl>${usageChart(u)}${u.capped_today?'<p class="notice">It reached its daily limit: its schedules and triggers are skipped for the rest of the day. Runs you start still run.</p>':''}${errorMarkup(usageState.error)}<label for="usageLimit">Daily limit for automatic runs, in tokens</label><input id="usageLimit" data-draft="usageLimit" inputmode="numeric" autocomplete="off" placeholder="No limit (for example 200k)" value="${esc(draft.usageLimit||'')}"${off?' disabled':''}><p class="muted">Once its runs today reach the limit, its schedules and triggers are skipped until tomorrow. Runs you start, chat replies and handoffs you approve still run. This is your setting, not part of the job, so it needs no review.</p><div class="actions"><button type="submit"${off?' disabled':''}>Save limit</button>${u.daily_cap!==null?button('remove-usage-limit','Remove limit',off):''}</div></form>`;
+}
+function saveUsageLimit(limit){
+ const u=usageState.value,pip=S.selected;if(S.apiVersion<41||!u||u.pip_id!==pip)return;
+ if(limit===undefined||limit!==null&&(limit<1000||limit>1000000000)){usageState.error='Give a daily limit from 1,000 to 1,000,000,000 tokens, for example 200k, or leave it empty for no limit.';render();return;}
+ usageState.error='';
+ void mutate({type:'set_pip_daily_cap',pip_id:pip,daily_tokens:limit},result=>{const value=pipUsage(result.usage,pip);if(value.daily_cap!==limit)throw Error('The saved limit differs from your choice. Refresh this Pip.');usageState.value=value;draft.usageLimit=limit===null?'':String(limit);S.notice=limit===null?'Daily limit removed.':`Daily limit saved: ${limit.toLocaleString('en-US')} tokens for automatic runs. The job itself did not change.`;});
+}
+document.addEventListener('submit',event=>{if(event.target.id!=='usage-form')return;event.preventDefault();if(S.busy||!usable())return;saveUsageLimit(parseTokens(draft.usageLimit));});
 function notifyMarkup(){
  if(S.apiVersion<41||!auditPip())return '';
  if(notifyState.pip!==S.selected){void loadNotify();return '<section class="section"><h2>Notifications</h2><p class="muted">Loading…</p></section>';}
@@ -454,7 +602,7 @@ function reviewLifecycle(restore){
 }
 function jobSettingsMarkup(){
   if(archived())return `<section class="section"><h2>Archived job</h2><p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} · ${esc(modelLabel(S.pip.model_choice))}</p>${lifecycleMarkup()}</section>`;
-  return `<section class="section"><h2>Job and source</h2>${S.apiVersion>=23?button('setup-in-chat','Change setup in chat',S.busy||!usable()):''}<p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} ${personalPip()?(S.pip.computer_plan?'Conversations use the details you provide; its tasks can also use its own computer. No project files, and nothing is submitted without your approval.':'Conversations and scheduled tasks use the details you provide and any separately reviewed app reads. No files or external actions.'):pulsePip(S.pip)?'Conversations use read-only tools. A reviewed command plan enables model-free manual and calendar runs on API 21. Separately approved handoffs remain independent.':executionPip(S.pip)?'Conversations use read-only tools. Every edit or test run requires its own reviewed handoff.':documentationPip(S.pip)?'Quill prepares private drafts. Drafts and messages use read-only tools; no project files are changed. Committed-source automation requires a reviewed schedule or trigger on Pips API 20.':'Scheduled audits and messages use the same read-only tool policy.'}</p>${button('toggle-pip',S.pip.status==='paused'?'Resume job':'Pause job',S.busy||!usable()||S.apiVersion>=16&&!canLifecycle())}${lifecycleMarkup()}</section>${sourceSettingsMarkup()}<form id="model-form" class="section form"><h2>Model for this Pip</h2><p class="muted">Current choice: ${esc(modelLabel(S.pip.model_choice))}. Model changes are saved for your review. Running work keeps its pinned model.${pulsePip(S.pip)?' Standalone command plans do not invoke this model; the choice applies to chat and model-based handoffs.':''}</p>${modelPicker('pipModel','Model',draft.pipModel)}${field('modelReason','Reason for changing model')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review model change…</button></form>${adaptationMarkup()}${githubReadsMarkup()}${notifyMarkup()}`;
+  return `<section class="section"><h2>Job and source</h2>${S.apiVersion>=23?button('setup-in-chat','Change setup in chat',S.busy||!usable()):''}<p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} ${personalPip()?(S.pip.computer_plan?'Conversations use the details you provide; its tasks can also use its own computer. No project files, and nothing is submitted without your approval.':'Conversations and scheduled tasks use the details you provide and any separately reviewed app reads. No files; an email, event or app action it drafts runs only when you approve it or always allow it.'):pulsePip(S.pip)?'Conversations use read-only tools. A reviewed command plan enables model-free manual and calendar runs on API 21. Separately approved handoffs remain independent.':executionPip(S.pip)?'Conversations use read-only tools. Every edit or test run requires its own reviewed handoff.':documentationPip(S.pip)?'Quill prepares private drafts. Drafts and messages use read-only tools; no project files are changed. Committed-source automation requires a reviewed schedule or trigger on Pips API 20.':'Scheduled audits and messages use the same read-only tool policy.'}</p>${button('toggle-pip',S.pip.status==='paused'?'Resume job':'Pause job',S.busy||!usable()||S.apiVersion>=16&&!canLifecycle())}${lifecycleMarkup()}</section>${sourceSettingsMarkup()}<form id="model-form" class="section form"><h2>Model for this Pip</h2><p class="muted">Current choice: ${esc(modelLabel(S.pip.model_choice))}. Model changes are saved for your review. Running work keeps its pinned model.${pulsePip(S.pip)?' Standalone command plans do not invoke this model; the choice applies to chat and model-based handoffs.':''}</p>${modelPicker('pipModel','Model',draft.pipModel)}${field('modelReason','Reason for changing model')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review model change…</button></form>${adaptationMarkup()}${githubReadsMarkup()}${grantsMarkup()}${usageMarkup()}${notifyMarkup()}${shareMarkup()}`;
 }
 function chooseType(id){const type=S.types.find(t=>t.id===id);if(!S.create||!type?.available||S.busy||!usable())return;rememberCreationDraft();S.createType=id;Object.assign(draft,creationDrafts.get(id)||{name:type.default_name,goal:type.default_goal,source_ref:'HEAD',createModel:'default'});S.createStep='configure';S.error='';render();$('name')?.focus();}
 function jobMarkup(p) {
@@ -544,7 +692,8 @@ function draftAutomationMarkup(manifest){
 function eventReceiptMarkup(manifest){
  if(manifest?.trigger!=='event')return '';try{const pin=eventRunPin(manifest);return `<section class="section" aria-label="Event-trigger receipt"><h3>Event-triggered ${manifest.pip_type==='quill'?'draft':'audit'}</h3><p>${esc(eventTriggerLabel(pin.policy))}</p><dl class="meta"><dt>Event</dt><dd>${esc(['workspace_session_turn_completed','workspace_committed_paths_changed'].includes(pin.event.event_type)?activityLabel(pin.event):pin.event.event_type.replaceAll('_',' '))}</dd><dt>Occurred</dt><dd>${esc(date(pin.event.created_at))}</dd><dt>${pin.commit_path_match?'Checked for enqueue':'Observed'}</dt><dd>${esc(date(pin.checked_at))}</dd><dt>Event identity</dt><dd class="mono">${esc(pin.event.event_id)} · ${pin.event.seq}</dd></dl>${pin.event.event_type==='workspace_session_turn_completed'?`<p class="muted">${esc(sessionTurnNotice)}</p>`:''}<p class="muted">${esc(pin.source_semantics)} This event grants no tool permission; its payload was not copied into the model input.</p>${commitMatchMarkup(pin,manifest)}${pin.history_may_be_incomplete?'<p class="notice">Earlier event history may be incomplete. This is not a replay of every change.</p>':''}</section>`;}catch(error){return errorMarkup(errorText(error));}
 }
-function reportMarkup() {
+function reportMarkup(){return runReportMarkup()+feedbackMarkup(S.run);}
+function runReportMarkup() {
   const run=S.run;
   if(!S.runId) return '<p class="muted">Choose a run to inspect its pinned inputs and report.</p>';
   if(!run || run.id!==S.runId) return '<p role="status">Loading run…</p>';
@@ -871,6 +1020,35 @@ async function loadStarters(){
  catch{starterCatalog=[];}
  finally{starterLoading=false;render();}
 }
+// Sharing (API 41): export a Pip's job to a file, or import one as a setup card to review.
+function importMarkup(){
+ if(S.apiVersion<41||remoteHost)return '';
+ return `<p class="muted import-pip">${button('import-pip-file','Import a shared Pip…',S.busy||!usable())} A file someone exported from DGC. It opens as a setup card for you to review.</p>`;
+}
+async function importPipFile(){
+ if(S.apiVersion<41||!usable()||S.busy)return;
+ const token=scope();S.busy=true;render();let card=null;
+ try{const result=await send('import_pip_file',{});if(token!==scope()||result?.cancelled)return;
+  card=pipSetup(result.setup,S.workspace.id);setupRows=[...setupRows.filter(row=>row.id!==card.id),card];S.create=false;S.overview=true;
+  const left=Array.isArray(result.left_out)?result.left_out.filter(x=>typeof x==='string'):[];
+  S.notice='Imported as a setup card. Review it before anything is created.'+(left.length?' Not included: '+left.join(' '):'');}
+ catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){S.busy=false;render();}}
+ if(card&&token===scope())await openSetup(card.id);
+}
+function shareMarkup(){
+ if(S.apiVersion<41||remoteHost||!S.pip||S.pip.pip_type==='patch')return '';
+ return `<section class="section"><h2>Share this Pip</h2><p class="muted">Save its job as a file someone else can import into their DGC: name, goal, type, schedule and the pages it reads. Your connected accounts, memory, history and findings stay here.</p><div class="actions">${button('export-pip-file','Export…',S.busy||!usable())}</div></section>`;
+}
+async function exportPipFile(){
+ if(S.apiVersion<41||!usable()||S.busy||!S.pip)return;
+ const token=scope();S.busy=true;render();
+ try{const result=await send('export_pip_file',{pip_id:S.pip.id});if(token!==scope())return;
+  const left=Array.isArray(result?.left_out)?result.left_out.filter(x=>typeof x==='string'):[];
+  S.notice='The shared Pip file is open. Save it where you like.'+(left.length?' Not included: '+left.join(' '):'');}
+ catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){S.busy=false;render();}}
+}
 function startersMarkup(scope){
  if(S.apiVersion<41||remoteHost)return '';
  if(!starterCatalog){void loadStarters();return '';}
@@ -881,7 +1059,7 @@ function openStarter(id){
  const v=(starterCatalog||[]).find(item=>item.id===id);if(!v||S.apiVersion<41||!usable())return;
  let zone='';try{zone=Intl.DateTimeFormat().resolvedOptions().timeZone||'';}catch{}
  const has=key=>v.params.includes(key);
- const body=`<div class="form">${has('branch')?`<label for="starter-branch">Branch to review</label><input id="starter-branch" placeholder="the checked-out branch" autocomplete="off">`:''}${has('time')?`<label for="starter-time">Time</label><input id="starter-time" type="time" value="${esc(v.default_time||'09:00')}">`:''}${has('timezone')?`<label for="starter-timezone">Time zone</label><input id="starter-timezone" value="${esc(zone)}" autocomplete="off">`:''}${has('web_reads')?`<label for="starter-web">Pages and searches to read, one per line: an https page, or <code>search: your query</code>. Up to four; you can add apps later.</label><textarea id="starter-web" rows="3" placeholder="https://example.com/status&#10;search: weather in your city today"></textarea>`:''}</div>`;
+ const body=`<div class="form">${has('branch')?`<label for="starter-branch">Branch to review</label><input id="starter-branch" placeholder="the checked-out branch" autocomplete="off">`:''}${has('time')?`<label for="starter-time">Time</label><input id="starter-time" type="time" value="${esc(v.default_time||'09:00')}">`:''}${has('timezone')?`<label for="starter-timezone">Time zone</label><input id="starter-timezone" value="${esc(zone)}" autocomplete="off">`:''}${has('web_reads')?`<label for="starter-web">Pages and searches to read, one per line: an https page, or <code>search: your query</code>. Up to four; you can add apps later.</label><textarea id="starter-web" rows="3" placeholder="${esc(typeof v.web_example==='string'&&v.web_example?v.web_example:'https://example.com/status\nsearch: weather in your city today').replace(/\n/g,'&#10;')}"></textarea>`:''}</div>`;
  openReview({starterForm:{id:v.id,params:v.params},title:v.title,description:v.summary+' DGC prepares a setup card from these choices; nothing is created until you approve the card.',body,confirm:'Prepare setup card',request:{type:'propose_starter_pip'}});
 }
 function prepareStarter(review){
@@ -959,7 +1137,7 @@ function render() {
   shell.classList.toggle('chat-open',!intro&&!S.create&&!S.overview&&!!S.pip&&S.tab==='chat');
   const scopePicker=!remoteHost&&S.workspaces.some(w=>w.kind==='personal')?`<label class="pip-scope-picker">Pips in <select id="pip-workspace" aria-label="Pip workspace"${S.busy?' disabled':''}>${S.workspaces.map(w=>`<option value="${esc(w.id)}"${w.id===S.workspace?.id?' selected':''}>${esc(w.kind==='personal'?'Personal · this computer':w.name)}</option>`).join('')}</select></label>`:'';
   const header=scopePicker+(embedded?`<header class="embedded-header"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.name||'Current workspace')} · local Pip team</p></div><span class="badge">Reviewed permissions</span></div>${runnerMarkup()}</header>`);
-  const markup=`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${!intro&&S.overview&&!S.create?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop pauses all Pips across local workspaces and cancels active runs. Resume the runner here, then resume individual Pips.</p>${button('disable','Disable local Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${[['chat','Chat'],['job','Job'],['runs',personalPip()?'Results':'Runs'],['schedule','Schedule'],['handoffs','Handoffs'],['revisions','Reviews'],...(S.apiVersion>=14?[['memory','Memory']]:[]),['context','Context'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])].filter(([key])=>personalPip()&&key==='handoffs'?S.apiVersion>=30&&!remoteHost:key==='schedule'?(!executionPip(S.pip)||pulsePip(S.pip)):key!=='handoffs'||personalPip()||!documentationPip(S.pip)).map(([key,text])=>`<button type="button" data-tab="${key}" aria-pressed="${S.tab===key}"${['revisions','schedule'].includes(key)&&!S.pip?' disabled':''}>${key==='schedule'&&pulsePip(S.pip)?'Plan & schedule':text}</button>`).join('')}</nav>${detailMarkup()}</div></div>`}`;
+  const markup=`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${!intro&&S.overview&&!S.create?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop pauses all Pips across local workspaces and cancels active runs. Resume the runner here, then resume individual Pips.</p>${button('disable','Disable local Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${[['chat','Chat'],['job','Job'],['runs',personalPip()?'Results':'Runs'],['schedule','Schedule'],['handoffs','Handoffs'],['revisions','Reviews'],...(S.apiVersion>=14?[['memory','Memory']]:[]),['context','Context'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])].filter(([key])=>personalPip()&&key==='handoffs'?S.apiVersion>=30&&!remoteHost:key==='schedule'?(!executionPip(S.pip)||pulsePip(S.pip)):key!=='handoffs'||personalPip()||!documentationPip(S.pip)).map(([key,text])=>`<button type="button" data-tab="${key}" aria-pressed="${S.tab===key}"${['revisions','schedule'].includes(key)&&!S.pip?' disabled':''}>${key==='schedule'&&pulsePip(S.pip)?'Plan & schedule':text}</button>`).join('')}</nav>${detailMarkup()}</div></div>`}`;
   if(markup===lastMarkup) return;
   lastMarkup=markup;
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
@@ -1052,7 +1230,7 @@ function readCalendarExtras(){
 function showCalendarReview(a){
  const p=a.payload,e=p.event,pending=a.status==='pending';if(extendedCalendar(e)&&S.apiVersion<38)throw Error('Calendar invitations and series need Pips API 38. Reload with the updated backend.');
  openReview({title:pending?'Review calendar event':a.status==='succeeded'?'Calendar event created':messageStates[a.status],description:pending?'Approval creates this exact event or finite series, with the listed invitations. It grants no permission to create further events.':a.status==='succeeded'?'Google Calendar confirmed the reviewed event or series. Invitation delivery and acceptance are not confirmed.':['unknown','dispatching'].includes(a.status)?'Creation is unconfirmed. Check the calendar or Composio log before preparing another event. DGC will not retry this action.':'This review cannot create an event.',readOnly:!pending,blocked:archived(),confirm:calendarDetails(e).confirm,expiresAt:a.expires_at,messageAction:a.id,messageDigest:a.digest,
- body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>Calendar</dt><dd>Primary</dd><dt>Title</dt><dd>${esc(e.summary)}</dd><dt>Start</dt><dd>${esc(e.start_datetime)}</dd><dt>End</dt><dd>${esc(e.end_datetime)}</dd><dt>Time zone</dt><dd>${esc(e.timezone)}</dd>${calendarExtras(e)}</dl><pre class="message-review-body">${esc(e.description)}</pre><p class="muted">Private and busy; invitees can see event details. No meeting link. The provider expands repeats in the named time zone; invalid dates or local times may be skipped. Calendar reminders, sharing and administrator access still apply. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject event</button>':''}`,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
+ body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>Calendar</dt><dd>Primary</dd><dt>Title</dt><dd>${esc(e.summary)}</dd><dt>Start</dt><dd>${esc(e.start_datetime)}</dd><dt>End</dt><dd>${esc(e.end_datetime)}</dd><dt>Time zone</dt><dd>${esc(e.timezone)}</dd>${calendarExtras(e)}</dl><pre class="message-review-body">${esc(e.description)}</pre><p class="muted">Private and busy; invitees can see event details. No meeting link. The provider expands repeats in the named time zone; invalid dates or local times may be skipped. Calendar reminders, sharing and administrator access still apply. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject event</button>':''}`,always:pending,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
 }
 async function loadConnectorDrafts(){
  if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;const token=scope(),seq=++connectorDraftSeq;
@@ -1108,7 +1286,7 @@ function prepareConnector(review){
 function showConnectorReview(a){
  const p=a.payload,pending=a.status==='pending';
  openReview({title:pending?'Review connector action':actionStatus(a),description:pending?'Run once authorizes this exact call. The connector controls the account and workflow contents. Check those in its dashboard before approving.':a.status==='succeeded'?a.receipt.meaning:['unknown','dispatching'].includes(a.status)?'The action may still be running at the provider. DGC will not retry an uncertain attempt.':'This review is closed. No further attempt can be approved.',readOnly:!pending,blocked:archived(),confirm:'Run once',expiresAt:a.expires_at,messageAction:a.id,messageDigest:a.digest,connectorSummary:p.call.arguments,
- body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Tool</dt><dd>${esc(p.call.tool)}</dd><dt>Account</dt><dd>Managed by this connection</dd></dl><div id="connector-review-values"></div><details><summary>Exact inputs (JSON)</summary><pre class="message-review-body">${esc(JSON.stringify(p.call.arguments,null,2))}</pre></details><p class="muted">One call only. A workflow can keep running after DGC times out. No automatic retry.</p>${a.receipt?.response_preview?`<h3>Connector response</h3><pre>${esc(a.receipt.response_preview)}</pre>`:''}${pending?'<button type="button" id="reject-message-review">Reject action</button>':''}`,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
+ body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Tool</dt><dd>${esc(p.call.tool)}</dd><dt>Account</dt><dd>Managed by this connection</dd></dl><div id="connector-review-values"></div><details><summary>Exact inputs (JSON)</summary><pre class="message-review-body">${esc(JSON.stringify(p.call.arguments,null,2))}</pre></details><p class="muted">One call only. A workflow can keep running after DGC times out. No automatic retry.</p>${a.receipt?.response_preview?`<h3>Connector response</h3><pre>${esc(a.receipt.response_preview)}</pre>`:''}${pending?'<button type="button" id="reject-message-review">Reject action</button>':''}`,always:pending,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
 }
 async function chooseMessageConnection(savedDraft=null,calendar=false){
  if(calendar&&S.apiVersion<34)return;
@@ -1151,7 +1329,7 @@ function showMessageReview(value){
  if(p.kind==='connector_call'){showConnectorReview(a);return;}
  if(p.kind==='calendar_create'){showCalendarReview(a);return;}
  openReview({title:pending?'Review email':messageStates[a.status],description:pending?'Send once authorizes one attempt with this exact account, recipient and message. It does not grant future sending permission.':a.status==='succeeded'?'Gmail accepted the message. Delivery to the recipient is not confirmed.':['unknown','dispatching'].includes(a.status)?'Delivery is unconfirmed. DGC will not retry this action. Check Gmail Sent or the Composio log before preparing another message.':'This review cannot send a message.',readOnly:!pending,blocked:archived(),confirm:'Send once',expiresAt:a.expires_at,messageAction:a.id,messageDigest:a.digest,
- body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>To</dt><dd>${esc(p.message.recipient_email)}</dd><dt>Subject</dt><dd>${esc(p.message.subject)}</dd></dl><pre class="message-review-body">${esc(p.message.body)}</pre><p class="muted">No CC, BCC, attachments or HTML. Source job v${p.source.job_version}. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject message</button>':''}<details><summary>Saved review details</summary><p class="mono">${esc(a.id)}</p><p class="mono">${esc(a.digest)}</p></details>`,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
+ body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>To</dt><dd>${esc(p.message.recipient_email)}</dd><dt>Subject</dt><dd>${esc(p.message.subject)}</dd></dl><pre class="message-review-body">${esc(p.message.body)}</pre><p class="muted">No CC, BCC, attachments or HTML. Source job v${p.source.job_version}. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject message</button>':''}<details><summary>Saved review details</summary><p class="mono">${esc(a.id)}</p><p class="mono">${esc(a.digest)}</p></details>`,always:pending,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
 }
 async function openMessageReview(id){
  if(!canReviewMessages())return;
@@ -1173,7 +1351,7 @@ const reviewBlocked=r=>!!r.blocked || (r.setup&&(S.apiVersion<23||r.setup.pip_ty
 function renderReview() {
   const r=S.review;if(!r)return;
   $('app').inert=true;
-  $('review-root').innerHTML=`<div class="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.reasonRequired?`<label>Reason for this decision<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label><p class="muted">Required. Up to 1,000 UTF-8 bytes.</p>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${r.secondary?button(r.secondary.id,r.secondary.label,S.busy||!usable(),'secondary-action'):''}${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.readOnly?'':button('review-confirm',S.busy?'Applying…':r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
+  $('review-root').innerHTML=`<div class="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.reasonRequired?`<label>Reason for this decision<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label><p class="muted">Required. Up to 1,000 UTF-8 bytes.</p>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${r.secondary?button(r.secondary.id,r.secondary.label,S.busy||!usable(),'secondary-action'):''}${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.always&&!r.readOnly&&S.apiVersion>=41?button('review-always','Always allow',S.busy||!usable()||reviewBlocked(r)):''}${r.readOnly?'':button('review-confirm',S.busy?'Applying…':r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
   if(r.connectorSummary)mountConnectorSummary($('connector-review-values'),r.connectorSummary);
   if(r.connectorForm){
     const form=r.connectorForm,select=$('connector-tool');select.value=String(form.selected);select.disabled=S.busy;
@@ -1307,7 +1485,7 @@ function updateDraft(event) {
   if((key==='scheduleType'||key==='handoffTarget'||key==='adaptationMode'||key==='sourceMode'||key==='outcomeSession'||key==='outcomeSourceKind')&&event.type==='change'){render();if(key==='handoffTarget'&&executionPip(S.jobs.find(p=>p.id===draft.handoffTarget)))void loadExecution();}
 }
 document.addEventListener('input',updateDraft);
-document.addEventListener('change',event=>{if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='computer-go'){event.preventDefault();const url=$('computer-url').value.trim();if(url)void computerView('go',{url:/^https?:\/\//i.test(url)?url:'https://'+url});return;}
   if(event.target.id==='computer-type'){event.preventDefault();const input=$('computer-text'),text=input.value;if(text){input.value='';void computerView('type',{text});}return;}
@@ -1443,6 +1621,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipType){chooseType(target.dataset.pipType);return;}
   if(target.dataset.starter){openStarter(target.dataset.starter);return;}
   if(target.dataset.computerAction){void openComputerAction(target.dataset.computerAction);return;}
+  if(target.dataset.revokeGrant){revokeGrant(target.dataset.revokeGrant);return;}
   if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
   if(target.dataset.chatRun){S.tab='runs';S.overview=false;render();void loadRun(target.dataset.chatRun);return;}
   if(target.dataset.run){void loadRun(target.dataset.run);return;}
@@ -1546,6 +1725,12 @@ document.addEventListener('click',event=>{
     case 'computer-backspace':void computerView('key',{key:'Backspace'});break;
     case 'computer-scroll-down':void computerView('scroll',{dy:500});break;
     case 'computer-scroll-up':void computerView('scroll',{dy:-500});break;
+    case 'remove-usage-limit':saveUsageLimit(null);break;
+    case 'rate-up':saveFeedback('up');break;
+    case 'rate-down':saveFeedback('down');break;
+    case 'rate-clear':saveFeedback(null);break;
+    case 'import-pip-file':void importPipFile();break;
+    case 'export-pip-file':void exportPipFile();break;
     case 'refresh-findings':outcomeState.pip='';void loadFindingOutcomes();break;
     case 'back-types':rememberCreationDraft();S.createStep='type';render();[...document.querySelectorAll('[data-pip-type]')].find(b=>b.dataset.pipType===S.createType)?.focus();break;
     case 'cancel-create':rememberCreationDraft();S.create=false;S.overview=!S.selected;render();break;
@@ -1605,6 +1790,19 @@ document.addEventListener('click',event=>{
     case 'reset-schedule':S.scheduleDirty=false;draft.scheduleReason='';hydrateSchedule(S.pip);S.error='';render();break;
     case 'more-history':void history(true);break;
     case 'review-cancel':if(!S.busy)closeReview();break;
+    case 'review-always':{
+      // This one now, and the same kind of action with this connection, account and tool from now on.
+      const review=S.review;if(!review||review.scope!==scope()||!usable()||!review.always||reviewBlocked(review))return;
+      const pip=S.selected;
+      void mutate({type:'always_allow_pip_app_action',action_id:review.request.action_id,expected_digest:review.request.expected_digest},result=>{
+        const a=messageReview(result.action,pip,S.workspace.id),g=actionGrant(result.grant);
+        if(a.id!==review.messageAction||a.digest!==review.messageDigest)throw Error('The receipt does not match this saved review.');
+        grantsState.pip='';
+        S.notice=`Always allowed: ${g.label}. This Pip will do this again without asking and tell you after. Take it back under Allowed without asking in its Job tab.`;
+        showMessageReview(a);
+      });
+      break;
+    }
     case 'review-confirm':{
       const review=S.review;if(!review||review.scope!==scope()||!usable())return;
       if(review.emailDraft){void chooseMessageConnection(review.emailDraft,review.calendarAction===true);return;}

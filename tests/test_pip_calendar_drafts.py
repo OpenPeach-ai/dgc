@@ -85,7 +85,8 @@ class CalendarDraftTests(unittest.TestCase):
         self.store.set_paused(self.source['id'],True,'local-console');self.store.finish(run['id'],result={'text':'Draft','calendar_draft':EVENT})
         self.assertEqual(drafts.history(self.store,self.source['id'],kind='calendar')['drafts'],[])
         self.assertFalse(drafts.validate_pin({'run_kind':'conversation'},kind='calendar'))
-        with self.assertRaises(RegistryError):drafts.validate_pin({'run_kind':'personal_task','source_policy':{'mode':'personal'},'calendar_draft':{'schema_version':1}},kind='calendar')
+        # A Personal task may draft now (an Always-allow grant can run it); an audit still may not.
+        with self.assertRaises(RegistryError):drafts.validate_pin({'run_kind':'audit','source_policy':{'mode':'personal'},'calendar_draft':{'schema_version':1}},kind='calendar')
     def test_hidden_fields_secret_and_timezone_errors_refused(self):
         for update in ({'account':'ca_other'},{'attendees':['x@example.invalid']},{'timezone':'Europe/London'},{'start_datetime':'tomorrow'},{'summary':'x\u202ey'}):
             with self.assertRaises(RegistryError):self.save(message={**EVENT,**update})

@@ -109,6 +109,16 @@ def _integer(value, label, lower, upper):
     return value
 
 
+def needs_card(request) -> bool:
+    """A setup that keeps its own card whatever the permission mode: one that reads the user's
+    connected accounts (their mail, calendar, files) or runs commands on a schedule (Pulse).
+    Everything else is approved by the tool call's ordinary permission, like any other tool."""
+    if not isinstance(request, dict):
+        return True
+    return (request.get("app_plan") is not None
+            or (request.get("pip_type") == "pulse" and request.get("scope") != "personal"))
+
+
 def validate_request(value):
     _encode(value)
     if (type(value) is not dict or not _REQUIRED <= set(value)

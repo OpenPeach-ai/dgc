@@ -82,12 +82,43 @@ The reply is a `pips_result` event that carries the nested request ID:
 `list_pip_starters {request_id}` and `propose_starter_pip {request_id, starter, params}`
 (API 41) are nested controls handled by the chat backend, because a setup card belongs
 to a chat. The first returns `{starters: [...]}`: each has `id`, `title`, `summary`,
-`pip_type`, `scope`, `name`, `when`, `default_time` and the `params` it takes (`branch`,
-`time`, `timezone`, `web_reads`). The second saves one pending setup card for this chat
+`pip_type`, `scope`, `name`, `when` (`commit`, `daily`, `weekdays` or `weekly`),
+`default_time`, the `params` it takes (`branch`, `time`, `timezone`, `web_reads`) and
+`web_example`, an example of what to read (text, or null). The second saves one pending setup card for this chat
 from the starter's fixed job and the checked choices, and returns `{setup}`; it creates
 no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
 the approved Pip reviews after each new commit to `source_ref`.
+
+`always_allow_pip_app_action {action_id, expected_digest}` (API 41, local only) runs one pending
+action and returns `{action, grant}`; `list_pip_action_grants {pip_id}` and
+`revoke_pip_action_grant {pip_id, grant_id}` return `{pip_id, grants}`. The digest may carry
+`pending_actions` (drafts and prepared actions waiting).
+
+`set_pip_feedback {run_id, rating, note}` and `list_pip_feedback {pip_id}` (API 41, local
+only) rate a succeeded Personal task, audit or Quill draft and list the newest 20 ratings
+`{pip_id, feedback: [{run_id, rating, note, at}]}`. `rating` is `"up"`, `"down"` or null.
+
+`export_pip {pip_id}` (API 41, local only) returns `{document, text}`, a shareable `dgc-pip`
+file. `import_pip_document {request_id, document}` is a nested control handled by the chat
+backend, like `propose_starter_pip`: it saves the file as a pending setup card for this chat
+and returns `{setup, left_out}`. The extension host reads and writes the files itself
+(`export_pip_file`, `import_pip_file` from the Pips view).
+
+`get_pip_usage {pip_id}` and `set_pip_daily_cap {pip_id, daily_tokens}` (API 41, local
+only) return `{usage: {pip_id, today, last_30_days, days, daily_cap, capped_today}}`; the
+Job tab draws it as Usage with the limit field.
+
+`get_pips_desktop_notifications {}` and `set_pips_desktop_notifications {enabled}` (API 41,
+local only) return `{desktop_notifications: {on, available, platform, last}}`; `last` is
+`null` or `{shown, at}`, whether the runner's last desktop notification actually showed.
+The extension host itself sends `get_pip_digest` (request ids `pips-host-…`) once a minute
+for its own notification; those replies never reach a webview.
+
+`get_pips_keep_running {}` and `set_pips_keep_running {enabled}` (API 41, local only)
+return `{keep_running: {platform, supported, reason, on, starts_at_login,
+restarts_after_failure, while_logged_out}}`. The Pips view shows them as one switch beside
+the runner, and only the reason when `supported` is false.
 
 The digest controls (API 41) are local only (`editor-user`):
 `get_pip_digest {}` returns `{digest}`, or `{digest: null}` when the profile has never

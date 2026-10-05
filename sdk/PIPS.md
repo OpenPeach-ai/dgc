@@ -154,7 +154,7 @@ job with `create_pip` and a reviewed update.
 | 38 | `attendees`, `repeat` and `send_invitations` in a calendar `event` |
 | 39 | `app_plan` version 3 (Drive, Notion and Contacts searches) |
 | 40 | `changes.web_plan` |
-| 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`; `changes.github_plan` |
+| 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`, `get_pips_keep_running`, `set_pips_keep_running`, `get_pips_desktop_notifications`, `set_pips_desktop_notifications`, `get_pip_usage`, `set_pip_daily_cap`, `export_pip`, `list_pip_feedback`, `set_pip_feedback`, `always_allow_pip_app_action`, `list_pip_action_grants`, `revoke_pip_action_grant`; `changes.github_plan` |
 | 42 | Pip computers: `get_pip_computer`, `list_pip_computer_actions`, `get_pip_computer_frame`, `list_pip_computer_frames`, `decide_pip_computer_action`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view`; `changes.computer_plan` |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
@@ -383,6 +383,18 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `get_pip_notify_settings` | R | `pip_id` |
 | `set_pip_notify_settings` | M | `pip_id`, `min_severity`, `alert_severity` (or null), `expected_revision` |
 | `get_pip_outcomes` | R | `pip_id` |
+| `get_pips_keep_running` | R | none |
+| `set_pips_keep_running` | M | `enabled` (bool) |
+| `get_pips_desktop_notifications` | R | none |
+| `set_pips_desktop_notifications` | M | `enabled` (bool) |
+| `get_pip_usage` | R | `pip_id` |
+| `export_pip` | R | `pip_id`; returns a shareable `dgc-pip` file (no accounts, IDs, memory or history) |
+| `set_pip_daily_cap` | M | `pip_id`, `daily_tokens` (1,000 to 1,000,000,000, or null) |
+| `list_pip_feedback` | R | `pip_id`; the newest 20 ratings |
+| `always_allow_pip_app_action` | M | `action_id`, `expected_digest`; runs it and lets its Pip run the same kind without asking |
+| `list_pip_action_grants` | R | `pip_id`; what the Pip runs without asking |
+| `revoke_pip_action_grant` | M | `pip_id`, `grant_id` |
+| `set_pip_feedback` | M | `run_id`, `rating` (`"up"`, `"down"` or null), `note` (500 characters at most) |
 
 The digest is what the Pips bar and `dgc pips digest` show: what the profile's Pips did
 since the user last looked, and whether it is due. Marking it seen hides it for the user

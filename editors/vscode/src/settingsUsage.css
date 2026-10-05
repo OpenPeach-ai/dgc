@@ -75,3 +75,8 @@
 .usage-axis { display: flex; justify-content: space-between; gap: var(--sp-2); margin-top: 7px; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
 .usage-readout { min-height: 1.45em; margin: var(--sp-1) 0 0; color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
 .usage-privacy { margin-top: var(--sp-4); padding-top: var(--sp-2); border-top: 1px solid var(--border); }
+
+/* Everything / Pips: which usage the page shows. The range below is shared. */
+.usage-views { margin: 0 0 var(--sp-3, 12px); }
+/* A Pip's name is words, not a model id: the page's own font, not the id's monospace. */
+.pip-usage-section .usage-name { font-family: inherit; }

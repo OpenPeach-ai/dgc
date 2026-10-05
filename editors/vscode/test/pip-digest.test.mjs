@@ -78,3 +78,8 @@ test('validators accept the backend shapes and refuse anything else',()=>{
  assert.equal(Model.pipOutcomes(outcomes,pip),outcomes);
  assert.throws(()=>Model.pipOutcomes({...outcomes,still_reported:2},pip),/invalid/,'the outcomes must add up');
 });
+test('a digest may count actions waiting for you, and the bar adds them to its reviews',()=>{
+ assert.equal(Model.pipDigest(digest({pending_actions:2})).pending_actions,2);
+ assert.equal(Model.pipDigest(digest()).pending_actions,undefined,'a digest from before the count is still valid');
+ for(const bad of [-1,1.5,'2',null])assert.throws(()=>Model.pipDigest(digest({pending_actions:bad})),/invalid/);
+});

@@ -17,6 +17,14 @@ and save proposals, setups and handoffs for review. Every mutation needs the hos
 old for it. The CLI advertises Pips API 41, which adds the daily digest, notification
 settings, finding outcomes and reviewed GitHub reads (`changes.github_plan`). See [PIPS.md](PIPS.md).
 
+`get_pip_usage` and `set_pip_daily_cap` read a Pip's token usage and set its daily limit. `export_pip` returns a Pip's
+job as a shareable file. `set_pip_feedback` rates a finished result up or down with a note that the Pip's later runs
+read; `list_pip_feedback` lists the ratings. `always_allow_pip_app_action`, `list_pip_action_grants` and
+`revoke_pip_action_grant` let a Personal Pip run one kind of action without asking, and take it back.
+`get_pips_desktop_notifications` and `set_pips_desktop_notifications` read and set the
+runner's desktop notifications. `get_pips_keep_running` and `set_pips_keep_running` read and set the "keep Pips running"
+switch (local mutation; it never enables Pips or clears an emergency stop).
+
 `turn_end.reason` and both `RunStatus` types gain `paused`: a run that stops at its goal's token
 budget is neither completed nor failed. The vendored editor protocol gains the Pips control,
 result and status messages and `pip_references` on a prompt.

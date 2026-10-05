@@ -73,7 +73,12 @@ export function scheduleLabel(value) {
   if (record(value) && value.type === 'interval' && Number.isInteger(value.minutes) && value.minutes >= 5 && value.minutes <= 10080) return `Every ${value.minutes} minutes`;
   if (record(value) && value.type === 'daily' && typeof value.time === 'string' && typeof value.timezone === 'string') return `Daily at ${value.time} · ${value.timezone}`;
   if(record(value)&&value.type==='once'&&typeof value.at==='string')return `Once at ${value.at}`;
-  if(record(value)&&value.type==='cron'&&typeof value.cron==='string'&&typeof value.timezone==='string')return `Cron ${value.cron} · ${value.timezone}`;
+  if(record(value)&&value.type==='cron'&&typeof value.cron==='string'&&typeof value.timezone==='string'){
+    // The two shapes starters write, in words; anything else stays the exact expression.
+    const m=/^(\d{1,2}) (\d{1,2}) \* \* (1-5|1)$/.exec(value.cron);
+    if(m&&Number(m[1])<60&&Number(m[2])<24)return `${m[3]==='1-5'?'Weekdays':'Mondays'} at ${m[2].padStart(2,'0')}:${m[1].padStart(2,'0')} · ${value.timezone}`;
+    return `Cron ${value.cron} · ${value.timezone}`;
+  }
   return 'Schedule unavailable';
 }
 export function cronExpression(value) {
@@ -964,6 +969,73 @@ export function pipNotifySettings(value, pip) {
     throw Error('Notification settings are invalid or belong to another Pip.');
   return value;
 }
+// Keep Pips running (API 41): the switch's state. Exact keys, since the panel words it.
+export function pipsKeepRunning(value) {
+  const keys = ['on', 'platform', 'reason', 'restarts_after_failure', 'starts_at_login', 'supported', 'while_logged_out'];
+  if (!record(value) || Object.keys(value).sort().join() !== keys.join() || typeof value.platform !== 'string'
+    || typeof value.reason !== 'string' || value.reason.length > 400
+    || !['on', 'restarts_after_failure', 'starts_at_login', 'supported', 'while_logged_out'].every((key) => typeof value[key] === 'boolean')
+    || (!value.supported && (value.on || !value.reason)))
+    throw Error('The keep-running status is invalid. Refresh the Pips view.');
+  return value;
+}
+
+// A Pip's token usage and daily limit (API 41): exact shapes, since the Job tab draws them.
+export function pipUsage(value, pip) {
+  const fail = () => { throw Error("This Pip's usage is invalid. Refresh this Pip."); };
+  const count = (n) => Number.isSafeInteger(n) && n >= 0;
+  const day = (d) => typeof d === 'string' && /^\d{4}-\d\d-\d\d$/.test(d);
+  const entry = (e) => record(e) && Object.keys(e).sort().join() === 'day,runs,tokens' && day(e.day) && count(e.runs) && count(e.tokens);
+  if (!record(value) || Object.keys(value).sort().join() !== 'capped_today,daily_cap,days,last_30_days,pip_id,today' || value.pip_id !== pip
+    || !entry(value.today) || !record(value.last_30_days) || Object.keys(value.last_30_days).sort().join() !== 'runs,tokens'
+    || !count(value.last_30_days.runs) || !count(value.last_30_days.tokens) || !Array.isArray(value.days) || value.days.length > 31
+    || !value.days.every(entry) || !(value.daily_cap === null || (Number.isSafeInteger(value.daily_cap) && value.daily_cap >= 1000))
+    || typeof value.capped_today !== 'boolean' || (value.daily_cap === null && value.capped_today)) fail();
+  return value;
+}
+
+// Always allow (API 41): what a Personal Pip may run without asking, each pinned to one action's
+// kind, connection, account, tool and schema. Only the user creates or removes one.
+function actionGrantRow(g) {
+  const hash = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+  const text = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+  return record(g) && Object.keys(g).sort().join() === 'account,connection_digest,created_at,created_by,id,kind,label,schema_digest,server,tool'
+    && /^grant_[a-f0-9]{32}$/.test(g.id) && ['gmail_send', 'calendar_create', 'connector_call'].includes(g.kind)
+    && text(g.server, 80) && text(g.account, 160) && text(g.tool, 160) && text(g.label, 200) && text(g.created_at, 40)
+    && ['editor-user', 'local-console'].includes(g.created_by) && hash(g.connection_digest) && hash(g.schema_digest);
+}
+export function actionGrants(value, pip) {
+  if (!record(value) || Object.keys(value).sort().join() !== 'grants,pip_id' || value.pip_id !== pip
+    || !Array.isArray(value.grants) || value.grants.length > 20 || !value.grants.every(actionGrantRow))
+    throw Error("This Pip's allowed actions are invalid. Refresh this Pip.");
+  return value;
+}
+export function actionGrant(value) {
+  if (!actionGrantRow(value)) throw Error('The allowed action DGC returned is invalid. Refresh this Pip.');
+  return value;
+}
+
+// The user's ratings of a Pip's results (API 41), newest first. Its later runs read the newest five.
+export function pipFeedback(value, pip) {
+  const fail = () => { throw Error("This Pip's ratings are invalid. Refresh this Pip."); };
+  const row = (r) => record(r) && Object.keys(r).sort().join() === 'at,note,rating,run_id'
+    && typeof r.run_id === 'string' && r.run_id.length > 0 && r.run_id.length <= 128 && (r.rating === 'up' || r.rating === 'down')
+    && typeof r.note === 'string' && [...r.note].length <= 500 && typeof r.at === 'string' && r.at.length <= 40;
+  if (!record(value) || Object.keys(value).sort().join() !== 'feedback,pip_id' || value.pip_id !== pip
+    || !Array.isArray(value.feedback) || value.feedback.length > 20 || !value.feedback.every(row)) fail();
+  return value;
+}
+
+// The runner's desktop notifications (API 41). `last` is evidence: whether the last one showed.
+export function pipsDesktopNotifications(value) {
+  const fail = () => { throw Error('The desktop notification status is invalid. Refresh the Pips view.'); };
+  if (!record(value) || Object.keys(value).sort().join() !== 'available,last,on,platform' || typeof value.on !== 'boolean'
+    || typeof value.available !== 'boolean' || typeof value.platform !== 'string') fail();
+  if (value.last !== null && (!record(value.last) || Object.keys(value.last).sort().join() !== 'at,shown'
+    || typeof value.last.shown !== 'boolean' || typeof value.last.at !== 'string')) fail();
+  return value;
+}
+
 export function pipOutcomes(value, pip) {
   const counts = ['reported','accepted','dismissed','still_reported','gone_after_change','gone_without_change','checkpoints_examined'];
   if (!digestKeys(value, ['pip_id','name','pip_type','history_truncated',...counts]) || value.pip_id !== pip || typeof value.name !== 'string'
@@ -975,7 +1047,10 @@ export function pipOutcomes(value, pip) {
 export function pipDigest(value) {
   if (value === null) return null;
   const fail = () => { throw Error('The Pips digest is invalid. Update DGC or open the Pips view.'); };
-  if (!digestKeys(value, ['schema_version','since','until','first','due','reason','headline','pips','omitted_pips','failed_runs','pending_reviews','pending_setups','truncated'])
+  // pending_actions (drafts and prepared actions waiting for you) came later in API 41; a digest may lack it.
+  const base = ['schema_version','since','until','first','due','reason','headline','pips','omitted_pips','failed_runs','pending_reviews','pending_setups','truncated'];
+  if (!(digestKeys(value, base) || digestKeys(value, [...base, 'pending_actions']))
+    || (Object.hasOwn(value, 'pending_actions') && !digestCount(value.pending_actions))
     || value.schema_version !== 1 || !digestTime(value.since) || !digestTime(value.until) || value.since > value.until
     || typeof value.first !== 'boolean' || typeof value.due !== 'boolean' || ![null,'alert','daily'].includes(value.reason) || (value.reason !== null) !== value.due
     || typeof value.headline !== 'string' || !value.headline || value.headline.length > 400 || !Array.isArray(value.pips) || value.pips.length > 20

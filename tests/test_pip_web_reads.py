@@ -170,7 +170,7 @@ from dgc.pips import _worker_main
 import json
 
 def chat(self, messages, tools=None, **kwargs):
-    assert not tools, 'Personal workers must have no tool catalog'
+    assert {t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event'}, 'A Personal task may only draft: no tool reads or runs anything'
     reference = json.dumps(messages)
     assert 'Untrusted web reference data' in reference, 'Web reference envelope missing'
     assert 'PAGE_TEXT_SENTINEL' in reference and 'SEARCH_TEXT_SENTINEL' in reference, 'Read text missing'

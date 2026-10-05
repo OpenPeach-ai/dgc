@@ -492,7 +492,7 @@ def tick(registry, config, *, now=None, limit=MAX_TICK_ITEMS, stop_event=None):
                 store.enqueue(state["pip_id"], occurrence_key(state["job_version"], plan["scheduled_at"]),
                               "local-scheduler", config, schedule_occurrence=occurrence)
             except RegistryError as exc:
-                if exc.code in ("paused", "schedule_busy", "source_unchanged"):
+                if exc.code in ("paused", "schedule_busy", "source_unchanged", "daily_cap_reached"):
                     reason = {"paused": "job_paused", "schedule_busy": "job_busy"}.get(exc.code, exc.code)
                     result["skipped"] += int(_advance_skipped(registry, state, plan, reason))
                     continue

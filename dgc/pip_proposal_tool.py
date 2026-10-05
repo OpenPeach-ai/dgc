@@ -1,7 +1,8 @@
-"""Main-chat proposal drafting. Applying a draft belongs to the user's Pips controls.
+"""The chat's change to an existing Pip's name, goal or branch.
 
-The ordinary tool permission engine gates this stored-data mutation. This executor
-adds scope and provenance checks; it never dispatches Pips control commands.
+The ordinary tool permission engine approves it (auto mode, an allow rule, or the user's Allow), and
+this executor then applies it; one that cannot be applied now stays a pending proposal for the user.
+This executor adds scope and provenance checks; it never dispatches Pips control commands.
 """
 from __future__ import annotations
 
@@ -83,15 +84,27 @@ def propose(args, ctx) -> str:
             if identity is None or identity["workspace_id"] != workspace["id"]:
                 raise RegistryError("session_required", "The owning chat has no authoritative association with this workspace.")
             from .pips import PipStore
-            proposal = PipStore(registry).propose(
+            store = PipStore(registry)
+            proposal = store.propose(
                 request["pip_id"], request["expected_version"], request["changes"], "core_proposal",
                 request["reason"], origin_session_id=origin["session_id"],
                 request_key=request["request_key"], expected_workspace_id=workspace["id"])
+            applied, note = False, ""
+            if proposal["status"] == "proposed" and proposal.get("approval_status", "pending") == "pending":
+                try:
+                    store.accept(request["pip_id"], proposal["id"], proposal["expected_version"],
+                                 "chat-permission:" + str(ctx.config.get("mode", "default") or "default"))
+                    proposal = {**proposal, "status": "accepted", "approval_status": "approved"}
+                    applied = True
+                except RegistryError as exc:
+                    note = str(exc)
             receipt = {"pip_id": request["pip_id"], "proposal_id": proposal["id"],
                        "expected_version": proposal["expected_version"], "status": proposal["status"],
                        "review_required": proposal["status"] == "proposed",
-                       "job_changed_by_this_call": False, "execution_started": False,
-                       "message": "The user reviews proposals in the Pips editor page or CLI. This tool cannot accept or apply them."}
+                       "job_changed_by_this_call": applied, "execution_started": False,
+                       "message": ("Applied. Tell the user what changed." if applied else
+                                   "Already applied by an earlier identical call." if proposal["status"] == "accepted" else
+                                   "Saved as a proposal for the user to review in Pips or the CLI" + (": " + note if note else "."))}
             if proposal.get("approval_id"):
                 receipt["approval_id"] = proposal["approval_id"]
             if proposal.get("approval_status"):

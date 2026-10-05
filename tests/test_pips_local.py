@@ -244,9 +244,9 @@ class LocalPipsTests(unittest.TestCase):
         pip = self.create()
         with patch.object(pips.os, "name", "nt"), \
              patch.object(pips.subprocess, "Popen", side_effect=AssertionError("must not launch")):
-            with self.assertRaisesRegex(RegistryError, "Windows execution is not enabled"):
+            with self.assertRaisesRegex(RegistryError, "not on Windows yet"):
                 self.store.enqueue(pip["id"], "unsupported", "device_1", self.cfg)
-            with self.assertRaisesRegex(RegistryError, "Windows execution is not enabled"):
+            with self.assertRaisesRegex(RegistryError, "not on Windows yet"):
                 pips._execute_run(self.registry, {}, self.cfg)
         self.assertEqual(self.store.runs(pip["id"]), [])
 

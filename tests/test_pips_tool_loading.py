@@ -151,3 +151,38 @@ class PipsToolLoadingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PipsRepeatHintTests(PipsToolLoadingTests):
+    """A chat that begins with familiar work carries one line offering a Pip; plan mode does not."""
+
+    def test_the_repeat_line_is_in_the_real_system_prompt_only_when_pips_can_be_offered(self):
+        with patch("dgc.pip_repeat.hint", return_value="- REPEAT_HINT_LINE"):
+            self.agent._check_pips_repeat("Summarise the overnight sales numbers and email the team")
+        self.assertIn("REPEAT_HINT_LINE", self.agent.system_prompt())
+        self.config.data["mode"] = "plan"
+        self.assertNotIn("REPEAT_HINT_LINE", self.agent.system_prompt())
+        self.config.data["mode"] = "default"
+        self.config.data["pips_enabled"] = False
+        self.assertNotIn("REPEAT_HINT_LINE", self.agent.system_prompt(), "Pips off: nothing to offer")
+
+    def test_a_new_chat_is_checked_for_repeated_work_afresh(self):
+        with patch("dgc.pip_repeat.hint", return_value="- REPEAT_HINT_LINE"):
+            self.agent._check_pips_repeat("Summarise the overnight sales numbers and email the team")
+        self.assertIn("REPEAT_HINT_LINE", self.agent.system_prompt())
+        self.agent.reset()
+        self.assertNotIn("REPEAT_HINT_LINE", self.agent.system_prompt(), "the last chat's hint does not follow")
+        with patch("dgc.pip_repeat.hint", return_value="") as hint:
+            self.agent._check_pips_repeat("A first prompt for the new chat about something else")
+        hint.assert_called_once()
+
+    def test_the_loader_tells_the_model_when_to_offer_a_pip_and_what_pips_cannot_do(self):
+        loader = next(t for t in self.agent._tool_schemas() if t["function"]["name"] == "use_pips")
+        text = loader["function"]["description"]
+        self.assertIn("offer once to make it a Pip", text)
+        # What Pips can and cannot do travels with their tools, off the always-on surface.
+        self.assertNotIn("actions in any connected app or service", self.agent.system_prompt())
+        self.agent._load_pips_tools()
+        for line in ("actions in any connected app or service", "run when the user approves them",
+                     "refuses changes from your shell", "read web pages and searches the user approves"):
+            self.assertIn(line, self.agent.system_prompt())

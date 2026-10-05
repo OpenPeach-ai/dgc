@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -40,6 +41,13 @@ ANNOUNCE_EVERY = 30                  # 2.0s x 30 = a 60s note refresh
 
 def peers_dir() -> Path:
     return Path.home() / ".dgc" / "peers"
+
+
+def _staging(directory: Path, name: str) -> Path:
+    """A temp file no other writer shares. The heartbeat and a status change write the same note
+    from two threads, and two DGCs can ask one holder at once: with one shared temp name a shorter
+    record written over a longer one left its tail behind, and the note stopped being JSON."""
+    return directory / f".{name}.{os.getpid()}.{threading.get_ident()}.tmp"
 
 
 def _procfs() -> bool:
@@ -185,7 +193,7 @@ def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str =
                  "status": str(item.get("status") or "idle")[:32]}
                 for item in sessions[:MAX_NOTE_SESSIONS] if isinstance(item, dict)]
         path = directory / f"{pid}.json"
-        tmp = directory / f".{pid}.json.tmp"
+        tmp = _staging(directory, f"{pid}.json")
         tmp.write_text(json.dumps(record, ensure_ascii=True), encoding="utf-8")
         try:
             tmp.chmod(0o600)
@@ -408,7 +416,7 @@ def request_release(record: dict, session: str) -> bool:
         payload = {"session": str(session)[:4096], "asker": os.getpid(),
                    "holder": pid, "at": time.time()}
         path = _release_path(pid, "ask")
-        tmp = directory / f".{pid}.ask.tmp"
+        tmp = _staging(directory, f"{pid}.ask")
         tmp.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
         try:
             tmp.chmod(0o600)
@@ -452,7 +460,7 @@ def answer_release(*, granted: bool, reason: str = "") -> None:
                    "reason": str(reason)[:400], "at": time.time()}
         directory = takeover_dir()
         directory.mkdir(parents=True, exist_ok=True)
-        tmp = directory / f".{pid}.ans.tmp"
+        tmp = _staging(directory, f"{pid}.ans")
         tmp.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
         try:
             tmp.chmod(0o600)

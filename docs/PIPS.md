@@ -78,22 +78,49 @@ Personal Pip).
 | Review each commit | Rook, this project | After each new commit to the branch, at most every 5 minutes |
 | Nightly security review | Lock, this project | Daily at 02:00 in your time zone |
 | Morning brief | Personal | Weekdays at 07:30, from up to four pages and searches you name |
+| Watch a page for changes | Personal | Daily at 09:00: what changed on the page since last time |
+| Market brief | Personal | Weekdays at 08:30: news on the companies you name, with sources; never trades or advises |
+| Weekly research digest | Personal | Mondays at 09:00: what is new on your topics, no repeats |
+| Release watch | Personal | Daily at 10:00: new releases of tools you depend on, breaking changes first |
+| News on a topic | Personal | Daily at 08:00: at most five items, each with its source |
+
+The Personal starters read only the pages and searches you name, so they need no
+connected account; all but the morning brief need at least one. Each run sees its own
+previous result, so a watch says what changed and a digest doesn't repeat itself.
 
 Choose one, adjust the branch, time or reads, and choose **Prepare setup card**. The
 card opens in its review straight away; approving it is still your decision. From the
 CLI, `dgc pips starters` lists them and `dgc pips starter commit-review` (or
-`nightly-security`, `morning-brief`) shows the exact job and asks before creating it.
+`nightly-security`, `morning-brief`, `page-watch`, `market-brief`, `research-digest`,
+`release-watch`, `daily-news`) shows the exact job and asks before creating it.
 `--branch`, `--time`, `--timezone`, `--web-page` and `--web-search` change the
 choices; `--yes` approves the job shown without the question.
 
+**From an answer.** Each answer in the chat has **Make this a Pip** (the calendar
+button). It drafts the ask in your composer, "make this a Pip that does it on a
+schedule", with your original request; adjust it and send. Nothing is created until
+you allow it. And when you start a chat with work you have started
+chats with before, the chat may offer once to make it a Pip; say no and it won't ask
+again in that chat.
+
 **From the main chat.** Just ask, for example: "Review committed changes in this
 project every weekday at 9:00 Europe/London, and run once now." The main chat loads
-its Pips tools and prepares a **setup card**. The card shows the project folder,
-the job, the character, the source, the schedule with its next run time, whether
-it will run once on approval, the model, and exactly what the Pip may do. Choose
-**Approve** (or **Approve & run**), **Reject** or **Review**. Nothing is saved or run
-until you approve the exact card. A card expires after seven days, or sooner if the
-next run time it shows has already passed.
+its Pips tools and sets the Pip up with a tool call, which follows your permission
+mode like any other: in the default mode it asks first, showing the Pip, its job,
+what it reads, when it runs and whether it runs now (**Allow once**, **Always allow**
+or **Deny**); in auto mode it is allowed; plan mode denies it. Once allowed, the Pip
+is created and on. A Pip the chat creates this way starts with a daily limit of
+200,000 tokens, which you can change in its **Job** tab. Pause, change or delete it
+any time in the Pips view.
+
+Two kinds of Pip still wait for your own review on a **setup card**, in every mode:
+one that reads your connected accounts (mail, calendar, files), and a Pulse that runs
+commands. Those run with nobody watching, long after the chat ends, so you approve
+the exact card: it shows the project folder, the job, the character, the source, the
+schedule with its next run time, whether it will run once on approval, the model,
+and exactly what the Pip may do. Choose **Approve** (or **Approve & run**), **Reject**
+or **Review**. A card expires after seven days, or sooner if the next run time it
+shows has already passed.
 
 The main chat can set up Scout, Lens, Rook and Lock reviews, Quill drafts, Pulse
 command plans and Personal Pips. A new Scout, Lens, Rook, Lock or Quill can run after
@@ -124,13 +151,22 @@ dgc pips setup accept SETUP_ID --expected-digest DIGEST
 
 A Pip's work runs in the **runner**, a local process separate from your chats.
 Without it, runs and Pip replies wait in the queue and schedules don't fire.
-Start it in one of three ways:
+
+**Keep Pips running** (in the Pips view's runner controls, or `dgc pips keep-running on`)
+is the one switch most people want. The runner then starts when you log in and after a
+restart, and is restarted if it fails, so a morning schedule still runs after a reboot.
+On Linux it also keeps running while you are logged out, where the system allows it
+(systemd "lingering"); `dgc pips keep-running` says whether yours does. Turning it off
+stops the runner starting on its own; the runner running now keeps going until you stop
+it. It never turns Pips on and never clears an emergency stop.
+
+Otherwise:
 
 - **Start runner** in the Pips view. The runner keeps going when the editor
   closes, until you log out, restart or stop all Pips.
 - `dgc pips serve` in a terminal you leave open. Ctrl+C stops it; queued work
   stays queued.
-- On Linux, as a systemd user service:
+- On Linux, the systemd user service behind the switch, step by step:
 
   ```sh
   dgc pips service preview    # show the exact unit first
@@ -147,13 +183,19 @@ Start it in one of three ways:
 `dgc pips status` shows whether the runner is online and how much work is queued.
 The runner does one run at a time.
 
-**Platforms.** Linux and macOS can run audits, Quill drafts, Pip conversations and
-Personal tasks. Patch fixes and Pulse commands need either Linux with working
-bubblewrap (`/usr/bin/bwrap`, `/usr/bin/python3` and `/usr/bin/git`) or macOS with
-`sandbox-exec` and Xcode or the Command Line Tools (`xcode-select --install`).
-`dgc pips execution` shows whether this runner passed its confinement check. The
-background service is Linux only; on macOS use **Start runner** or `dgc pips serve`.
-Windows can't run Pips work yet.
+**Platforms.**
+
+| | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| Pips view, Pip chats, audits, Quill drafts, Personal tasks | Yes | Yes | Not yet |
+| Patch fixes and Pulse commands | With bubblewrap (`/usr/bin/bwrap`, `python3`, `git`) | Under Seatbelt, with Xcode or the Command Line Tools; weaker, see below | Not yet |
+| Keep Pips running | systemd user service; also while logged out, where the system allows lingering | LaunchAgent, while you are logged in | Not yet |
+| Desktop notifications | `notify-send`, when a notification service is running | Notification Center | Not yet |
+
+`dgc pips execution` shows whether this runner passed its confinement check. On Windows
+the Pips view says Pips are not available, the main chat has no Pips tools and
+`dgc pips` explains the same, so nothing can be created that would never run. A DGC
+installed inside WSL is a Linux install.
 
 **macOS is weaker than Linux, and says so.** On macOS commands run under Seatbelt
 rather than in a private namespace. The project copy is still read-only, the network
@@ -252,11 +294,82 @@ dgc pips notify PIP_ID --min-severity high --alerts critical
 dgc pips outcomes PIP_ID                             # what became of its findings
 ```
 
+**When you are not looking.** Two notices make sure a new alert or a waiting review
+reaches you once:
+
+- **In the editor.** While VS Code (or Cursor) is open, DGC checks every minute and shows
+  one notification, with **Open Pips**, whether or not the DGC panel is on screen. This is
+  the one to rely on when you work on a remote machine. `dgc.notifyPips` turns it off.
+- **On the desktop.** The runner shows a desktop notification (Notification Center on
+  macOS, `notify-send` on Linux) even with the editor closed. Each alert and review is
+  announced once, at most one a minute, and never as a backlog when you turn it back on.
+  Turn it off in the Pips view's runner controls or with
+  `dgc pips desktop-notifications off`. A computer with no notification service (a
+  server you reach remotely) cannot show them; the switch says so after the first one
+  fails.
+
 **What became of its findings.** A project reviewer's **Job** tab (or
 `dgc pips outcomes`) counts what it reported, what you accepted or dismissed, what
 it still reports, and what went away: after its file changed, or without a change.
 "Gone after its file changed" suggests a fix; it doesn't prove one, because the
 run simply stopped reporting it.
+
+## Sharing a Pip
+
+A Pip's **Job** tab has **Share this Pip → Export…**, which saves its job as a small file
+someone else can import: name, goal, type, schedule or trigger, the pages and searches it
+reads, a Pulse's reviewed commands, and its model if you chose one. The file never carries
+your connected accounts, memory, history, findings or results, and it says what it left out.
+
+To use one, choose **Import a shared Pip…** under **New**. It becomes an ordinary setup
+card that opens for your review; nothing runs until you approve it. In the terminal:
+
+```sh
+dgc pips export PIP --output brief.pip.json
+dgc pips import brief.pip.json        # shows the job, asks, then creates it
+```
+
+Patch Pips can't be shared yet, and a Pulse Pip is imported in the Pips view, where its
+commands are reviewed on the card.
+
+## Rating results
+
+Under a finished result, report or Quill draft, **Was this result useful?** takes a thumbs
+up or down and an optional note: "Too long, lead with the three biggest movers", "Perfect,
+keep this format". The Pip's later runs read your five newest ratings and notes as
+guidance that fits its approved job. A rating never changes the job, and a note is not a
+new task: to change what a Pip does, edit its job. In the terminal:
+
+```sh
+dgc pips feedback RUN_ID down --note "Lead with the three biggest movers"
+dgc pips feedback RUN_ID clear
+```
+
+Only you can rate, on this computer; a Pip and the main chat cannot.
+
+## Usage and daily limits
+
+Every Pip's **Job** tab shows what its runs cost in tokens, today and over the last 30
+days, with a chart of the last two weeks. `dgc pips usage PIP` says the same in the
+terminal. It counts every model request a run made, including a run that failed or ran
+out of time.
+
+For every Pip at once, open **Settings → Token usage** and choose **Pips**: each Pip's
+input and output tokens and runs for the range you pick, its share of the Pips' total,
+and what all of the Pips used out of everything DGC counted. It is a breakdown of the
+**Everything** totals, not an addition to them, and includes replies in each Pip's chat.
+
+To keep a scheduled Pip from running up a bill, give it a **daily limit**:
+
+```sh
+dgc pips usage PIP --daily-limit 200k     # or 1.5m, 250000; off removes it
+```
+
+Once its runs today reach the limit, its schedules and event triggers are skipped for the
+rest of the day, and the skip says why; a skipped run does not run later. A run you start
+yourself, a chat reply and a handoff you approve still run, and a Pulse running its
+reviewed commands uses no model, so its schedule is never skipped. The limit is your setting, not part of the job: it needs no review
+and no model can change it.
 
 ## Reviewing what Pips propose
 
@@ -352,9 +465,12 @@ emails, events and connector actions from a Personal result. In the editor, type
 Each of these tools has a permission name, so you can control it with the usual
 rules: `PipsContext`, `PipsSetup`, `PipsPropose`, `PipsAdapt`, `PipsRun`,
 `PipsHandoff`, `PipsEmailDraft`, `PipsCalendarDraft`, `PipsConnectorDraft`,
-`PipsPause`, `PipsResume` and `PipsAttach`. Reading and preparing setup cards or
-proposals don't ask, because nothing happens until you approve the card or
-proposal. The others ask in the default mode, and plan mode denies them.
+`PipsPause`, `PipsResume` and `PipsAttach`. Setting a Pip up (`PipsSetup`) and
+changing one (`PipsPropose`) ask in the default mode, like the rest, and allowing
+them is the approval; **Always allow** saves an ordinary allow rule. A setup that
+reads connected accounts or runs Pulse commands doesn't ask twice: it saves a card
+you approve instead. Reading never asks, auto mode allows everything, and plan mode
+denies every change.
 
 **Memory and context.** You can record facts for future runs:
 
@@ -474,8 +590,9 @@ macOS and Windows are planned.
 ### Drafts and reviewed sends
 
 Ask a Personal Pip, in its own chat, to draft an email, a calendar event or a
-connector action. The main chat can also draft them from a completed Personal
-result or reply. A draft is only text: it can't choose an account or send anything.
+connector action, or give it a job that calls for one: its scheduled runs can draft
+them too. The main chat can also draft them from a completed Personal result or
+reply. A draft is only text: it can't choose an account or send anything.
 
 Sending takes two separate decisions:
 
@@ -498,6 +615,30 @@ The CLI has the same steps: `dgc pips email-draft`, `calendar-draft` and
 `connector-draft` (`list`, `show`, `prepare`, `dismiss`), then `dgc pips app-action
 show` and `dgc pips app-action accept ACTION_ID --expected-digest DIGEST`.
 
+### Always allow
+
+Beside **Send once**, **Create once** and **Run once** is **Always allow**: it runs
+this action and lets the Pip do the same kind of action again without asking, with
+the same connection, account and tool. After a later run, the Pip drafts it and DGC
+runs it straight away, then tells you: a desktop notification says what the Pip did,
+and the action is in its reviews like any other. Anything the Pip drafts that no
+Always allow covers still waits for you.
+
+Always allow is pinned to what you approved. If the connection, account, tool or the
+tool's inputs change, it no longer matches, and the action waits for you again.
+Nothing else grants it: not the chat, not auto mode, not a Pip. Money is not special:
+a trade or a payment through a connected app is an action like any other, so allow
+it only for a tool you trust to act on its own.
+
+See and take back what a Pip may do in its **Job** tab, under **Allowed without
+asking** (**Stop allowing**), or in the terminal:
+
+```sh
+dgc pips app-action accept ACTION_ID --expected-digest DIGEST --always
+dgc pips allowed PIP                      # what runs without asking
+dgc pips allowed PIP --revoke GRANT_ID
+```
+
 ## What Pips never do
 
 - **Change your project.** No Pip edits your working files, commits, merges,
@@ -507,18 +648,22 @@ show` and `dgc pips app-action accept ACTION_ID --expected-digest DIGEST`.
   lists you reviewed, in a confined copy with the network off, apart from fixed checks of
   local `http://127.0.0.1` addresses you approved. No Pip has a shell, installs
   dependencies or picks its own commands.
-- **Approve themselves.** No Pip, and not the main chat, can accept a setup,
-  proposal, handoff or external action. Only you can, in the Pips view or the CLI.
+- **Approve themselves.** No Pip can accept a setup, proposal, handoff or external
+  action. The main chat sets up and changes Pips only through tool calls your
+  permission mode decides; a Pip that reads connected accounts or runs commands, a
+  handoff and an external action still wait for you in the Pips view or the CLI.
+  When the chat runs `dgc pips` in its own shell, the CLI only reads (and can make
+  the emergency stop); anything that changes a Pip is refused there.
 - **Act outside their reviewed reads.** Project Pips read only their approved
   source. Personal Pips see only the app and web reads you approved, and the public
   websites their own computer opens if you gave them one.
 - **Send, create or call without you.** Every email, event and connector call is a
-  single attempt you approved on its exact content. So is every form a Pip's computer
+  single attempt you approved on its exact content, or one you chose to **Always
+  allow** for that Pip, connection, account and tool. So is every form a Pip's computer
   would submit.
-- **Buy, pay or book on their own.** A Pip has no tool that can do this, and a Pip's
-  computer refuses any request carrying a payment card number. A connector
-  action you approve runs the exact tool call you reviewed, so check what that
-  tool does before you approve it.
+- **Buy, pay or book on their own,** unless you allowed it. A Pip has no tool of its
+  own for this, and a Pip's computer refuses any request carrying a payment card number; a connector action runs the exact tool call you reviewed, or one you
+  always allow, so check what that tool does before you allow it.
 - **Use a cloud service of DGC's.** There is no Pips account or hosted runner.
 
 ## Privacy and where state lives

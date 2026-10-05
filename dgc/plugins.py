@@ -92,16 +92,47 @@ def _license_ok(entry: dict, accept_license: str) -> None:
             f"accept the upstream terms with --accept-license {entry.get('license')}")
 
 
+def _state() -> dict:
+    """The installed-plugins record, salvaged if part of it is unreadable.
+
+    Seen in a real profile: something else wrote a sentence of text over `installed`, and every
+    catalog read then crashed, leaving Plugins and Apps empty with no way back from the editor.
+    Valid plugin records and removed defaults are kept; the original file is set aside as
+    installed.json.invalid-<time> for inspection, and a repaired one written in its place.
+    """
+    if not STATE_PATH.exists():
+        return {}
+    try:
+        data = sources.read_json(STATE_PATH)
+    except (OSError, sources.SourceError):
+        data = None
+    rows = data.get('installed', []) if isinstance(data, dict) else None
+    removed = data.get('removed_defaults', []) if isinstance(data, dict) else None
+    valid = (isinstance(rows, list) and isinstance(removed, list)
+             and all(isinstance(r, dict) and isinstance(r.get('name'), str) for r in rows)
+             and all(isinstance(n, str) for n in removed))
+    if valid:
+        return data
+    import sys
+    import time
+    salvaged = {**(data if isinstance(data, dict) else {}),
+                'installed': [r for r in rows if isinstance(r, dict) and isinstance(r.get('name'), str)]
+                if isinstance(rows, list) else [],
+                'removed_defaults': [n for n in removed if isinstance(n, str)] if isinstance(removed, list) else []}
+    aside = STATE_PATH.with_name(f'{STATE_PATH.name}.invalid-{time.strftime("%Y%m%d-%H%M%S")}')
+    os.replace(STATE_PATH, aside)
+    sources.write_json(STATE_PATH, salvaged)
+    print(f'[plugins] {STATE_PATH} was unreadable; kept it as {aside.name} and repaired the list',
+          file=sys.stderr, flush=True)
+    return salvaged
+
+
 def _installed() -> list[dict]:
-    if not STATE_PATH.exists(): return []
-    data = sources.read_json(STATE_PATH)
-    if not isinstance(data, dict) or not isinstance(data.get('installed', []), list):
-        raise PluginError('Installed plugin state is invalid')
-    return data.get('installed', [])
+    return _state().get('installed', [])
 
 
 def _save(rows: list[dict]) -> None:
-    state = sources.read_json(STATE_PATH) if STATE_PATH.exists() else {}
+    state = _state()
     state['installed'] = rows
     sources.write_json(STATE_PATH, state)
 
@@ -533,7 +564,7 @@ def catalog_for_editor(opening: str = "", connected: set | None = None,
 
 def ensure_first_party() -> None:
     # A removed default stays removed. This records a user's choice, not just presence.
-    state = sources.read_json(STATE_PATH) if STATE_PATH.exists() else {}
+    state = _state()
     have = {row.get('name') for row in state.get('installed', [])}
     removed = set(state.get('removed_defaults', []))
     for entry in load_catalog()['plugins']:
@@ -833,7 +864,7 @@ def uninstall(name: str, *, config, manager=None) -> dict:
         logo = sources.contained(LOGO_ROOT, name + '.png')
         logo.unlink(missing_ok=True)
         _save([r for r in rows if r['name'] != name])
-        state = sources.read_json(STATE_PATH)
+        state = _state()
         state['removed_defaults'] = sorted(set(state.get('removed_defaults', [])) | {name})
         sources.write_json(STATE_PATH,state)
         return {'name':name, 'retained_servers':retained, 'removed_servers':removed}

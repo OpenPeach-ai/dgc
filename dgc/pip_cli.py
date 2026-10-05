@@ -69,8 +69,8 @@ def parser():
     starter.add_argument("--branch", help="project starters: the branch to review (default: the checked-out branch)")
     starter.add_argument("--time", help="scheduled starters: HH:MM, 24-hour clock")
     starter.add_argument("--timezone", help="scheduled starters: IANA zone such as Asia/Kolkata (default: this computer's)")
-    starter.add_argument("--web-page", action="append", metavar="URL", help="morning brief: an exact https page to read (repeat)")
-    starter.add_argument("--web-search", action="append", metavar="QUERY", help="morning brief: a fixed search (repeat)")
+    starter.add_argument("--web-page", action="append", metavar="URL", help="Personal starters: an exact https page to read (repeat)")
+    starter.add_argument("--web-search", action="append", metavar="QUERY", help="Personal starters: a fixed search (repeat)")
     starter.add_argument("--yes", action="store_true", help="approve the displayed job without the question")
     command("execution", "inspect this runner’s bounded execution support and limits")
     command("models", "list models on the configured native connection")
@@ -138,7 +138,10 @@ def parser():
         else:
             item.add_argument('action_id')
             if action in ('accept','reject'):item.add_argument('--expected-digest',required=True)
+            if action=='accept':item.add_argument('--always',action='store_true',help="also let this Pip run the same kind of action, with this connection, account and tool, without asking")
             if action=='accept':item.add_argument('--yes',action='store_true',help='confirm one attempt for the exact displayed external action')
+    allowed=command('allowed',"what a Pip may do without asking (Always allow); --revoke takes one back")
+    job(allowed);allowed.add_argument('--revoke',metavar='GRANT_ID',help='stop allowing this action without asking')
     command("types", "list Pip characters and the source-only roles available on this runner")
     command("workspaces", "list registered local workspaces")
     identity = command("workspace", "inspect session identity, backfill history, or repair a moved directory")
@@ -453,7 +456,27 @@ def parser():
         item.add_argument("--unit-directory", help="explicit owner-private service directory; use preview to review the exact unit first")
     serve = command("serve", "run the foreground supervisor; keep this terminal open")
     serve.add_argument("--enable", action="store_true")
+    # Started by the user service or LaunchAgent: Pips off, stopped or already running is a clean
+    # exit (status 0), so the service manager does not restart it every few seconds.
+    serve.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
     command("status", "show runner status as JSON")
+    keep = command("keep-running", "start the runner when you log in and after a restart: show, or turn on or off")
+    keep.add_argument("state", nargs="?", choices=("on", "off"))
+    rate = command("feedback", "rate a Pip's result up or down, with an optional note its later runs read")
+    rate.add_argument("run_id")
+    rate.add_argument("rating", choices=("up", "down", "clear"))
+    rate.add_argument("--note", help="what it should keep doing or do differently (500 characters at most)")
+    share = command("export", "save a Pip's job as a shareable file (no accounts, memory, history or findings)")
+    share.add_argument("pip_id")
+    share.add_argument("--output", metavar="FILE", help="write the file here (default: print it)")
+    take = command("import", "show a shared Pip file's job, then create it once you confirm")
+    take.add_argument("file")
+    take.add_argument("--yes", action="store_true", help="create the displayed job without the question")
+    spend = command("usage", "what a Pip's runs cost in tokens, today and over 30 days; set or remove its daily limit")
+    spend.add_argument("pip_id")
+    spend.add_argument("--daily-limit", metavar="TOKENS|off", help="stop its schedules and triggers for the day once its runs reach this many tokens")
+    desktop = command("desktop-notifications", "the runner's desktop notifications for new alerts and reviews: show, or turn on or off")
+    desktop.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
     stop.add_argument("--yes", action="store_true", help="confirm the global emergency stop without a prompt")
     command("resume", "locally clear emergency stop; jobs stay paused")
@@ -564,7 +587,7 @@ def _request(args):
         return request
     if name == 'app-action':
         request['type']={'inspect':'inspect_pip_send_connection','propose':'propose_pip_app_action','show':'get_pip_app_action',
-                         'list':'list_pip_app_actions','accept':'accept_pip_app_action','reject':'reject_pip_app_action'}[args.app_action]
+                         'list':'list_pip_app_actions','accept':'always_allow_pip_app_action' if getattr(args,'always',False) else 'accept_pip_app_action','reject':'reject_pip_app_action'}[args.app_action]
         if getattr(args,'kind',None)=='calendar_create':request['type']={'inspect':'inspect_pip_calendar_connection','propose':'propose_pip_calendar_action'}[args.app_action]
         keys=('server','source_run_id','connection_digest','account','schema_digest','request_key','action_id','expected_digest','pip_id','before_id','limit')
         if getattr(args,'kind',None)=='connector_call':
@@ -573,6 +596,12 @@ def _request(args):
         if args.app_action=='propose':
             if args.kind!='connector_call' and not args.account:raise ValueError('--account is required for email and calendar actions.')
             request[{'gmail_send':'message','calendar_create':'event','connector_call':'call'}[args.kind]]=_read_action_json(args)
+    elif name == "allowed":
+        request["type"] = "revoke_pip_action_grant" if args.revoke else "list_pip_action_grants"
+        request["pip_id"] = args.pip_id
+        if args.revoke:
+            request["grant_id"] = args.revoke
+        return request
     elif name == "setup":
         request["type"] = {"list": "list_pip_setups", "show": "get_pip_setup",
                            "accept": "accept_pip_setup", "reject": "reject_pip_setup"}[args.setup_action]
@@ -741,6 +770,31 @@ def _request(args):
     return request
 
 
+def keep_running_text(item) -> str:
+    """One plain sentence for the keep-running switch, shared by the CLI and its tests."""
+    if not item["supported"]:
+        return item["reason"]
+    if not item["on"]:
+        return "Keep Pips running: off. Start the runner when you need it (Pips view, or dgc pips serve)."
+    where = (" It also keeps running while you are logged out." if item["while_logged_out"]
+             else " It runs while you are logged in." if item["platform"] == "linux" else "")
+    return "Keep Pips running: on. The runner starts when you log in and restarts if it fails." + where
+
+
+def usage_text(item) -> str:
+    """A Pip's token spend in plain words, shared by the CLI and its tests."""
+    today, month = item["today"], item["last_30_days"]
+    runs = lambda n: f"{n} run{'' if n == 1 else 's'}"
+    text = (f"Today: {today['tokens']:,} tokens ({runs(today['runs'])}). "
+            f"Last 30 days: {month['tokens']:,} tokens ({runs(month['runs'])}).")
+    if item["daily_cap"] is None:
+        return text + " No daily limit."
+    text += f" Daily limit for automatic runs: {item['daily_cap']:,} tokens."
+    if item["capped_today"]:
+        text += " Reached today: its schedules and triggers are skipped for the rest of the day; runs you start still run."
+    return text
+
+
 def _format(value):
     if "computer" in value and isinstance(value["computer"], dict) and "granted" in value["computer"]:
         item = value["computer"]
@@ -768,6 +822,34 @@ def _format(value):
         return "\n".join(f'{f["frame"]}  {f["label"]}  {f["url"]}' for f in value["frames"]) or "No screenshots for this run."
     if set(value) == {"pip_id", "stopping"}:
         return "Stopping. The browser closes within a few seconds; anything waiting was dropped."
+    if set(value) == {"pip_id", "grants"}:
+        if not value["grants"]:
+            return "Nothing runs without asking: every action this Pip drafts waits for you."
+        account = lambda g: "the account its connection uses" if g["account"] == "connection_managed" else f"account {g['account']}"
+        return "Runs without asking:\n" + "\n".join(f"- {g['label']} ({account(g)}) · {g['id']}" for g in value["grants"])
+    if set(value) == {"pip_id", "feedback"}:
+        rows = value["feedback"]
+        if not rows:
+            return "No ratings yet."
+        return "\n".join(("Up" if r["rating"] == "up" else "Down") + f" · {r['at'][:10]} · run {r['run_id']}"
+                         + (f" · {r['note']}" if r["note"] else "") for r in rows[:5])
+    if set(value) == {"exported", "left_out"}:
+        return "Saved " + value["exported"] + ". Not included: " + " ".join(value["left_out"])
+    if set(value) == {"shared_pip"}:
+        from .pip_share import dumps
+        return dumps(value["shared_pip"]).rstrip()
+    if set(value) == {"usage"} and isinstance(value["usage"], dict) and "last_30_days" in value["usage"]:
+        return usage_text(value["usage"])
+    if set(value) == {"desktop_notifications"}:
+        item = value["desktop_notifications"]
+        return (f"Desktop notifications: {'on' if item['on'] else 'off'}."
+                + ("" if item["available"] else " This computer has no notification tool the runner can use"
+                   " (on Linux, install libnotify's notify-send); the digest and the Pips view still have everything.")
+                + (" The last one did not show: this computer has no notification service running (a server you"
+                   " reach remotely, for example). The editor still tells you while it is open."
+                   if item["last"] and not item["last"]["shown"] else ""))
+    if set(value) == {"keep_running"}:
+        return keep_running_text(value["keep_running"])
     if set(value) == {"digest"}:          # dgc pips digest; other results carry a hash named digest
         return format_digest(value["digest"])
     if "settings" in value and "min_severity" in value["settings"]:
@@ -1216,6 +1298,40 @@ def _digest_command(config, args):
         if not response["ok"]:
             raise RegistryError(response["error"]["code"], response["error"]["message"])
         return response["result"]
+    if args.command == "feedback":
+        return control({"type": "set_pip_feedback", "run_id": args.run_id,
+                        "rating": None if args.rating == "clear" else args.rating, "note": args.note or ""})
+    if args.command == "export":
+        value = control({"type": "export_pip", "pip_id": args.pip_id})
+        if args.output:
+            path = Path(args.output).expanduser()
+            if path.exists() and (path.is_dir() or path.is_symlink()):
+                raise RegistryError("invalid_request", "Choose a new file to write, not a folder or a link.")
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(value["text"])
+            return {"exported": str(path), "left_out": value["document"]["left_out"]}
+        return {"shared_pip": value["document"]}
+    if args.command == "usage":
+        if args.daily_limit is None:
+            return control({"type": "get_pip_usage", "pip_id": args.pip_id})
+        raw = args.daily_limit.strip().lower().replace(",", "").replace("_", "")
+        if raw in ("off", "none"):
+            limit = None
+        else:
+            try:
+                limit = int(float(raw[:-1]) * 1000) if raw.endswith("k") else int(float(raw[:-1]) * 1_000_000) if raw.endswith("m") else int(raw)
+            except (ValueError, OverflowError):
+                raise RegistryError("invalid_request", "Give the daily limit in tokens, for example 200000, 200k or 1.5m, or off.") from None
+        return control({"type": "set_pip_daily_cap", "pip_id": args.pip_id, "daily_tokens": limit})
+    if args.command == "desktop-notifications":
+        if args.state is None:
+            return control({"type": "get_pips_desktop_notifications"})
+        return control({"type": "set_pips_desktop_notifications", "enabled": args.state == "on"})
+    if args.command == "keep-running":
+        if args.state is None:
+            return control({"type": "get_pips_keep_running"})
+        return control({"type": "set_pips_keep_running", "enabled": args.state == "on"})
     if args.command == "outcomes":
         return control({"type": "get_pip_outcomes", "pip_id": args.pip_id})
     if args.command == "notify":
@@ -1340,6 +1456,77 @@ def format_digest(digest) -> str:
     return "\n".join(lines)
 
 
+def _import_command(config, args):
+    """Create a Pip from a shared file: show its exact job and what it left out, ask, then create."""
+    from . import pip_share
+    from .pip_setup import validate_request  # noqa: F401  (pip_share checks through it)
+    from .style import terminal_safe_text
+    path = Path(args.file).expanduser()
+    try:
+        if path.stat().st_size > pip_share.MAX_BYTES:
+            raise RegistryError("invalid_pip_file", f"A shared Pip file is at most {pip_share.MAX_BYTES // 1024} KiB.")
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RegistryError("invalid_request", f"Could not read {path}: {exc.strerror or exc}") from None
+    document = pip_share.parse(text)
+    checked = pip_share.setup_request(document, project_root=config.project_root, request_key="cli-import")
+    from .redaction import contains_secret, secret_values
+    if contains_secret(checked, secret_values(config)):
+        raise RegistryError("secret_detected", "The shared Pip contains one of your configured credentials; it was not imported.")
+    if checked["pip_type"] == "pulse":
+        raise RegistryError("unsupported_share", "Import a Pulse Pip in the Pips view, where its commands are reviewed on a setup card.")
+    personal = checked.get("scope") == "personal"
+    lines = [f"{checked['name']} ({checked['pip_type']}, {'Personal' if personal else 'this project'})",
+             f"Job: {checked['goal']}"]
+    for read in (checked.get("web_plan") or {}).get("reads", []):
+        lines.append("Web read: " + (read["url"] if read["kind"] == "page" else "search: " + read["query"]))
+    for note in document.get("left_out", []):
+        lines.append("Not included: " + note)
+    print(terminal_safe_text("\n".join(lines)), file=sys.stderr, flush=True)
+    return _create_checked(config, args, checked, personal)
+
+
+def _create_checked(config, args, checked, personal):
+    """Ask (unless --yes), then create the checked job and apply its schedule, trigger and reads."""
+    from . import pips
+    if not args.yes:
+        if not sys.stdin.isatty():
+            raise RegistryError("confirmation_required", "Review the displayed job, then repeat with --yes to create this Pip.")
+        try:
+            answer = input("Create this Pip" + (" and turn on its trigger" if checked.get("event_trigger")
+                           else " and turn on its schedule" if checked.get("schedule") else "") + "? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Cancelled. No Pip was created.")
+            return None
+
+    def control(request):
+        response = pips.handle_control(config, {**request, "request_id": identifier("cli")}, "local-console", start_worker=False)
+        if not response["ok"]:
+            raise RegistryError(response["error"]["code"], response["error"]["message"])
+        return response["result"]
+    with WorkspaceRegistry() as registry:
+        workspace_id = registry.personal()["id"] if personal else registry.resolve(config.project_root)["id"]
+    pip = control({"type": "create_pip", "workspace_id": workspace_id, "name": checked["name"], "goal": checked["goal"],
+                   "pip_type": checked["pip_type"], **({} if personal else {"source_ref": checked["source_ref"]})})["pip"]
+    changes = {}
+    if checked.get("event_trigger"):
+        changes["event_trigger"] = checked["event_trigger"]
+    elif checked.get("schedule"):
+        changes["schedule"] = checked["schedule"]
+    for key in ("web_plan", "model_choice"):
+        if checked.get(key):
+            changes[key] = checked[key]
+    if changes:
+        proposal = control({"type": "propose_pip_update", "pip_id": pip["id"], "expected_version": pip["current_version"],
+                            "changes": changes, "reason": checked["reason"]})["proposal"]
+        control({"type": "accept_pip_update", "pip_id": pip["id"], "proposal_id": proposal["id"],
+                 "expected_version": pip["current_version"]})
+    return {"pip": control({"type": "get_pip", "pip_id": pip["id"]})["pip"],
+            "next": "Schedules and triggers run while the local runner is running: dgc pips serve, or dgc pips keep-running on."}
+
+
 def _starter_command(config, args):
     """Create a starter Pip from the terminal: show its exact job, ask, then create and apply it.
 
@@ -1373,7 +1560,8 @@ def _starter_command(config, args):
     personal = checked.get("scope") == "personal"
     when = (f"after each new commit to {checked['source_ref']} (at most every 5 minutes)" if checked.get("event_trigger")
             else (f"daily at {checked['schedule']['time']} {checked['schedule']['timezone']}" if checked["schedule"]["type"] == "daily"
-                  else f"weekdays at {checked['schedule']['cron'].split()[1].zfill(2)}:{checked['schedule']['cron'].split()[0].zfill(2)} {checked['schedule']['timezone']}"))
+                  else ("Mondays" if checked["schedule"]["cron"].split()[4] == "1" else "weekdays")
+                  + f" at {checked['schedule']['cron'].split()[1].zfill(2)}:{checked['schedule']['cron'].split()[0].zfill(2)} {checked['schedule']['timezone']}"))
     heading = checked["name"] if checked["name"] == spec["title"] else f"{spec['title']}: {checked['name']}"
     lines = [f"{heading} ({checked['pip_type']}, {'Personal' if personal else 'this project'})",
              f"Runs: {when}", f"Job: {checked['goal']}"]
@@ -1382,35 +1570,47 @@ def _starter_command(config, args):
     for read in (checked.get("web_plan") or {}).get("reads", []):
         lines.append("Web read: " + (read["url"] if read["kind"] == "page" else "search: " + read["query"]))
     print(terminal_safe_text("\n".join(lines)), file=sys.stderr, flush=True)
-    if not args.yes:
-        if not sys.stdin.isatty():
-            raise RegistryError("confirmation_required", "Review the displayed job, then repeat with --yes to create this Pip.")
-        try:
-            answer = input("Create this Pip and turn on its " + ("trigger" if checked.get("event_trigger") else "schedule") + "? [y/N] ").strip().lower()
-        except EOFError:
-            answer = ""
-        if answer not in ("y", "yes"):
-            print("Cancelled. No Pip was created.")
-            return None
+    return _create_checked(config, args, checked, personal)
 
-    def control(request):
-        response = pips.handle_control(config, {**request, "request_id": identifier("cli")}, "local-console", start_worker=False)
-        if not response["ok"]:
-            raise RegistryError(response["error"]["code"], response["error"]["message"])
-        return response["result"]
-    with WorkspaceRegistry() as registry:
-        workspace_id = registry.personal()["id"] if personal else registry.resolve(config.project_root)["id"]
-    pip = control({"type": "create_pip", "workspace_id": workspace_id, "name": checked["name"], "goal": checked["goal"],
-                   "pip_type": checked["pip_type"], **({} if personal else {"source_ref": checked["source_ref"]})})["pip"]
-    changes = {"event_trigger": checked["event_trigger"]} if checked.get("event_trigger") else {"schedule": checked["schedule"]}
-    if checked.get("web_plan"):
-        changes["web_plan"] = checked["web_plan"]
-    proposal = control({"type": "propose_pip_update", "pip_id": pip["id"], "expected_version": pip["current_version"],
-                        "changes": changes, "reason": checked["reason"]})["proposal"]
-    control({"type": "accept_pip_update", "pip_id": pip["id"], "proposal_id": proposal["id"],
-             "expected_version": pip["current_version"]})
-    return {"pip": control({"type": "get_pip", "pip_id": pip["id"]})["pip"],
-            "next": "Schedules and triggers run while the local runner is running: dgc pips serve."}
+
+# What a DGC chat's own shell may run (sandbox.AGENT_SHELL): reading, and the emergency stop.
+# Everything else changes Pips, which is the user's decision; the chat prepares it as a setup card
+# or proposal (pips_setup, pips_propose) for the user to approve.
+_AGENT_SHELL_READS = {"export", "starters", "digest", "outcomes", "execution", "models", "connections", "accounts",
+                      "inspect-connection", "types", "workspaces", "list", "show", "messages", "runs",
+                      "report", "capacity", "export-run", "checkpoints", "adaptations", "approvals",
+                      "versions", "activity", "status", "stop"}
+_AGENT_SHELL_READ_ACTIONS = {
+    "email-draft": ("email_action", {"list", "show"}), "calendar-draft": ("calendar_action", {"list", "show"}),
+    "connector-draft": ("connector_draft_action", {"list", "show"}),
+    "app-action": ("app_action", {"inspect", "show", "list"}), "workspace": ("workspace_action", {"show", "sessions"}),
+    "setup": ("setup_action", {"list", "show"}), "handoff": ("handoff_action", {"review", "list"}),
+    "context": ("context_action", {"list"}), "session-execution": ("execution_action", {"list", "show"}),
+    "memory": ("memory_action", {"source", "list", "statements"}), "notifications": ("notification_action", {"list"}),
+    "session-outcome": ("outcome_action", {"inspect", "review", "list"}), "service": ("service_action", {"preview", "status"}),
+}
+AGENT_SHELL_REFUSAL = ("This ran in a DGC chat's own shell, and changing Pips is your decision, so it was refused. "
+                       "The chat can prepare it as a setup card or proposal for you to approve (pips_setup, "
+                       "pips_propose), or you can run this command in your own terminal. Reading Pips and the "
+                       "emergency stop still work here.")
+
+
+def agent_shell_allows(args) -> bool:
+    """True when a parsed `dgc pips` command only reads (or is the emergency stop)."""
+    if args.command in _AGENT_SHELL_READS:
+        return True
+    if args.command == "notify":
+        return args.min_severity is None and args.alerts is None
+    if args.command in ("keep-running", "desktop-notifications"):
+        return args.state is None
+    if args.command == "usage":
+        return args.daily_limit is None
+    if args.command == "allowed":
+        return args.revoke is None
+    if args.command == "memory" and args.memory_action == "statements":
+        return args.statement_action in ("anchor", "list")   # record and revoke are the user's
+    spec = _AGENT_SHELL_READ_ACTIONS.get(args.command)
+    return bool(spec) and getattr(args, spec[0], None) in spec[1]
 
 
 def handle_command(config, argv, *, in_chat=False):
@@ -1420,7 +1620,20 @@ def handle_command(config, argv, *, in_chat=False):
         return int(exc.code or 0)
     from . import pip_daemon, pips
     from .redaction import redact_value, secret_values
+    from .sandbox import AGENT_SHELL
     from .style import terminal_safe_text
+    from .pip_access import PLATFORM_SUPPORTED, UNSUPPORTED_PLATFORM
+    if not PLATFORM_SUPPORTED:
+        print("dgc pips: " + UNSUPPORTED_PLATFORM, file=sys.stderr)
+        return 2
+    # The model's shell carries the marker, and so does any DGC started from it: its `/pips` is no
+    # more the user's than `dgc pips` is. The DGC the user starts never has it.
+    if os.environ.get(AGENT_SHELL) == "1":
+        if not agent_shell_allows(args):
+            print("dgc pips: " + AGENT_SHELL_REFUSAL, file=sys.stderr)
+            return 2
+        if args.command == "digest":
+            args.keep = True                 # the chat reading the digest never marks it seen for you
     try:
         if args.command == "enable":
             config.set("pips_enabled", True)
@@ -1428,8 +1641,15 @@ def handle_command(config, argv, *, in_chat=False):
         elif args.command == "serve":
             if in_chat:
                 raise RegistryError("separate_terminal", "Keep the supervisor separate from chat: run dgc pips serve in another terminal.")
-            print("Starting the foreground Pips supervisor. Keep this terminal open; Ctrl+C stops its work.", file=sys.stderr, flush=True)
-            result = pip_daemon.serve(config, enable=args.enable)
+            if not args.service:
+                print("Starting the foreground Pips supervisor. Keep this terminal open; Ctrl+C stops its work.", file=sys.stderr, flush=True)
+            try:
+                result = pip_daemon.serve(config, enable=args.enable)
+            except RegistryError as exc:
+                if not args.service or exc.code not in ("runner_running", "disabled", "runtime_paused"):
+                    raise
+                print(f"dgc pips serve: not started: {exc}", file=sys.stderr)
+                return 0
         elif args.command == "stop":
             if not args.yes:
                 if not sys.stdin.isatty():
@@ -1452,7 +1672,11 @@ def handle_command(config, argv, *, in_chat=False):
             result = _starter_command(config, args)
             if result is None:
                 return 0
-        elif args.command in ("digest", "notify", "outcomes"):
+        elif args.command == "import":
+            result = _import_command(config, args)
+            if result is None:
+                return 0
+        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications", "usage", "export", "feedback"):
             result = _digest_command(config, args)
         elif args.command == "computer":
             result = _computer_command(config, args)
@@ -1500,6 +1724,7 @@ def handle_command(config, argv, *, in_chat=False):
                 print(terminal_safe_text(_format(review['result'])),file=sys.stderr,flush=True)
                 if not args.yes:
                     if not sys.stdin.isatty():raise RegistryError('confirmation_required','Review the displayed account and exact action, then repeat with --yes to authorize one attempt.')
+                    if getattr(args,'always',False):print('Always allow: this Pip will also run this kind of action, with this connection, account and tool, without asking. Take it back with dgc pips allowed PIP --revoke.',file=sys.stderr)
                     try:answer=input('Run this exact connector action once? [y/N] ' if saved['payload']['kind']=='connector_call' else ('Create this exact event/series and send the listed invitations once? [y/N] ' if saved['payload']['event'].get('send_invitations') else 'Create this exact calendar event/series once? [y/N] ') if saved['payload']['kind']=='calendar_create' else 'Send this exact message once? [y/N] ').strip().lower()
                     except EOFError:answer=''
                     if answer not in ('y','yes'):

@@ -178,7 +178,8 @@ def _run_one(command: str, payload: bytes, config, cwd, timeout: float,
         "stdin": subprocess.PIPE,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
-        "env": sandbox.process_env(config) if sandbox_requested else sandbox.tool_env(),
+        # A hook is the user's own command (an inherited marker, from a DGC the model started, stays).
+        "env": sandbox.process_env(config, agent=False) if sandbox_requested else sandbox.tool_env(agent=False),
     }
     if os.name == "posix":
         popen_kwargs["start_new_session"] = True

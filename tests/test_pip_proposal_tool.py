@@ -67,43 +67,49 @@ class PipProposalToolTests(unittest.TestCase):
         agent.session_file = sessions.new_path(self.root)
         return agent, approvals
 
-    def test_proposal_is_pending_and_cannot_change_job_or_start_work(self):
+    def test_an_allowed_change_is_applied_and_starts_no_work(self):
+        # The tool call's permission (auto mode, an allow rule or the user's Allow) is the approval.
         pip = self.create()
         receipt = self.propose(self.request(pip))
+        self.assertEqual(receipt["status"], "accepted")
+        self.assertFalse(receipt["review_required"])
+        self.assertTrue(receipt["job_changed_by_this_call"])
+        self.assertFalse(receipt["execution_started"])
+        self.assertEqual(self.store.get(pip["id"])["goal"], "Inspect authorization checks.")
+        self.assertEqual(self.store.get(pip["id"])["current_version"], 2)
+        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_runs").fetchone()[0], 0)
+        author = self.registry.db.execute("SELECT actor FROM pip_proposals WHERE id=?", (receipt["proposal_id"],)).fetchone()[0]
+        self.assertEqual(author, "core_proposal", "the chat drafted it")
+        approval = self.registry.db.execute("SELECT status, resolved_by FROM pip_approvals WHERE proposal_id=?",
+                                            (receipt["proposal_id"],)).fetchone()
+        self.assertEqual(tuple(approval), ("approved", "chat-permission:default"), "the record says how it was approved")
+
+    def test_a_change_that_cannot_be_applied_now_stays_a_proposal(self):
+        pip = self.create()
+        with patch.object(pips.PipStore, "accept", side_effect=RegistryError("pending_review", "Resolve the earlier review first.")):
+            receipt = self.propose(self.request(pip))
         self.assertEqual(receipt["status"], "proposed")
         self.assertTrue(receipt["review_required"])
         self.assertFalse(receipt["job_changed_by_this_call"])
-        self.assertFalse(receipt["execution_started"])
-        self.assertEqual(self.store.get(pip["id"])["goal"], pip["goal"])
+        self.assertIn("Resolve the earlier review first.", receipt["message"])
         self.assertEqual(self.store.get(pip["id"])["current_version"], 1)
-        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_runs").fetchone()[0], 0)
-        proposal = self.store.get(pip["id"])["proposals"][0]
-        self.assertEqual(proposal["actor"], "core_proposal")
-        self.assertIn("approval_id", receipt)
 
     def test_request_replay_is_idempotent_and_changed_payload_conflicts(self):
         request = self.request()
         first, second = self.propose(request), self.propose(request)
-        self.assertEqual(first, second)
+        self.assertEqual((first["proposal_id"], first["status"]), (second["proposal_id"], second["status"]))
+        self.assertFalse(second["job_changed_by_this_call"], "a replay changes nothing twice")
+        self.assertIn("Already applied", second["message"])
         self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_proposals").fetchone()[0], 1)
+        self.assertEqual(self.store.get(request["pip_id"])["current_version"], 2)
         with self.assertRaises(RegistryError):
             self.propose({**request, "reason": "A different reason"})
-
-    def test_retry_after_human_acceptance_does_not_create_a_new_proposal(self):
-        request = self.request()
-        receipt = self.propose(request)
-        self.store.accept(request["pip_id"], receipt["proposal_id"], 1, "user")
-        replay = self.propose(request)
-        self.assertEqual(replay["proposal_id"], receipt["proposal_id"])
-        self.assertEqual(replay["status"], "accepted")
-        self.assertFalse(replay["review_required"])
-        self.assertFalse(replay["job_changed_by_this_call"])
-        self.assertEqual(self.store.get(request["pip_id"])["current_version"], 2)
 
     def test_retry_keys_are_scoped_to_the_owning_session(self):
         request = self.request()
         first = self.propose(request, self.context("chat-one"))
-        second = self.propose(request, self.context("chat-two"))
+        second = self.propose({**request, "expected_version": 2, "changes": {"goal": "Inspect session handling."}},
+                              self.context("chat-two"))
         self.assertNotEqual(first["proposal_id"], second["proposal_id"])
 
     def test_disabled_and_malformed_inputs_never_open_registry(self):
@@ -168,7 +174,7 @@ class PipProposalToolTests(unittest.TestCase):
 
     def test_draft_permission_preserves_plan_and_explicit_denials(self):
         self.assertNotIn("pips_propose", READ_ONLY_TOOLS)
-        for mode, expected in (("default", ALLOW), ("acceptEdits", ALLOW), ("plan", DENY), ("auto", ALLOW)):
+        for mode, expected in (("default", ASK), ("acceptEdits", ASK), ("plan", DENY), ("auto", ALLOW)):
             with self.subTest(mode=mode):
                 self.assertEqual(PermissionEngine(mode, {}, self.root).decide("pips_propose", {"pip_id": "x"})[0], expected)
                 self.assertEqual(PermissionEngine(mode, {"deny": ["PipsPropose"], "allow": ["PipsPropose"]}, self.root)
@@ -209,12 +215,13 @@ class PipProposalToolTests(unittest.TestCase):
             self.assertIn("DENIED", agent._handle_call(ToolCall("d2", "pips_propose", request)))
             self.assertEqual(approvals, ["pips_propose"])
 
-    def test_local_model_tool_roundtrip_creates_only_pending_proposal(self):
+    def test_local_model_tool_roundtrip_asks_once_and_applies(self):
         agent, approvals = self.agent()
+        agent.ui.verdict = "once"
         self.cfg.data.update(mode="default", api_mode="ollama")
         request = self.request()
         responses = iter([ChatResult(tool_calls=[ToolCall("draft", "pips_propose", request)]),
-                          ChatResult(content="The update is pending your review in Pips.")])
+                          ChatResult(content="Done: its goal now covers authorization checks.")])
         sent = []
         def chat(client, messages, **kwargs):
             sent.append((copy.deepcopy(messages), copy.deepcopy(kwargs.get("tools", []))))
@@ -225,9 +232,9 @@ class PipProposalToolTests(unittest.TestCase):
              patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
             self.assertTrue(agent.run_turn("Propose a narrower goal for the existing audit Pip."))
         self.assertIn("pips_propose", str(sent[0][1]))
-        self.assertEqual(approvals, [], "draft review replaces the preliminary tool permission prompt")
-        self.assertIn('"review_required":true', str(sent[-1][0]))
-        self.assertEqual(self.store.get(request["pip_id"])["current_version"], 1)
+        self.assertEqual(approvals, ["pips_propose"], "asked once, like any tool call")
+        self.assertIn('"job_changed_by_this_call":true', str(sent[-1][0]))
+        self.assertEqual(self.store.get(request["pip_id"])["current_version"], 2)
 
     def test_definition_read_is_scoped_paginated_and_bounded(self):
         pip = self.create()

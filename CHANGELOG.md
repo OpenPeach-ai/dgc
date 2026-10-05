@@ -10,9 +10,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 Pips are standing agents that work beside the main chat, and they are on for everyone. A Project
 Pip reviews, tests or drafts for one project, on a schedule or when commits land; a Personal Pip
-handles your own tasks across projects. Everything consequential is a proposal you review first:
-the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
+handles your own tasks across projects. You decide what they do: the chat sets Pips up through your
+permission mode, and anything that sends, books or runs on your behalf waits for your approval. See
+[docs/PIPS.md](docs/PIPS.md).
 
+- Setting up a Pip from the chat is a tool call like any other: the default mode asks, showing the
+  Pip, its job, what it reads and when it runs; auto mode allows it; Always allow saves a rule. Once
+  allowed it is created and on, with a 200,000-token daily limit you can change. A Pip that reads
+  your connected accounts or a Pulse that runs commands still waits for you on a setup card.
 - `dgc pips` creates, runs, reviews and stops Pips from the terminal; `dgc pips serve` runs the
   local runner that schedules need.
 - Starter Pips cover three common jobs: review each new commit, a nightly security review, and a
@@ -51,6 +56,49 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
   out of the main chat.
+- Share a Pip: `dgc pips export PIP --output FILE` saves its job (no accounts, memory, history or
+  findings; the file says what it left out) and `dgc pips import FILE` shows the job and creates it
+  after you confirm.
+- The main chat offers to make recurring work a Pip: when you ask for something that repeats, and
+  when you start a chat with work you have started chats with before (once per chat; it does not
+  ask again if you say no). It also knows that no Pip buys, sells, trades or pays, and that
+  Personal Pips can read pages, searches and connected apps you approve.
+- Windows says plainly that Pips are not available there yet: the editor shows that instead of
+  "update the CLI", the main chat offers no Pips tools and `dgc pips` explains, so no Pip is
+  created that could never run. The Pips guide has a platform table.
+- Five more Personal starters, each reading only the pages and searches you name: Watch a page for
+  changes, Market brief (news with sources before the market opens; it never trades or advises),
+  Weekly research digest, Release watch and News on a topic. A Personal task now sees its own
+  previous result, so a watch says what changed and a digest doesn't repeat itself.
+- Rate a Pip's result: `dgc pips feedback RUN_ID up|down --note "…"`. Its later runs read your
+  five newest ratings and notes as guidance; a rating never changes the job.
+- Always allow: approving a Pip's email, calendar event or connector action can also let that Pip
+  do the same kind of action again without asking, with the same connection, account and tool.
+  Its scheduled runs can now draft actions too; one you always allow runs after the run and you
+  are told after, anything else waits for you. `dgc pips app-action accept … --always`,
+  `dgc pips allowed PIP [--revoke GRANT_ID]`.
+- Token usage by Pip for the editor's Settings → Token usage (`get_pip_usage_report`): each
+  Pip's tokens and runs for a range, as a part of everything DGC counted.
+- `dgc pips usage PIP` shows what a Pip's runs cost in tokens, today and over 30 days, counting
+  failed and timed-out runs too. `--daily-limit 200k` skips its schedules and triggers for the rest of
+  the day once it reaches that many tokens; runs you start still run. The limit is your setting, not part
+  of the job.
+- The runner shows a desktop notification for a new alert or a review waiting for you, even with
+  the editor closed: once per item, at most one a minute, never a backlog. `dgc pips
+  desktop-notifications off` (or the switch in the Pips view) turns it off; a computer with no
+  notification service says so instead of failing.
+- **Keep Pips running**: `dgc pips keep-running on` (or the switch in the Pips view) starts the
+  runner when you log in and after a restart, and restarts it if it fails. Linux uses a systemd
+  user service and, where allowed, keeps running while you are logged out; macOS uses a
+  LaunchAgent. Off stops it starting on its own and never stops the runner running now. The
+  service unit now restarts on failure; `pips serve --service` exits cleanly when Pips are off,
+  stopped or already running, so it never loops. A group-writable `~/.config` whose group is only
+  you (Ubuntu's default) no longer blocks the service.
+- A chat can no longer approve its own Pips by running `dgc pips` in its shell (the CLI acts as you,
+  and auto mode approves every shell command). In a chat's shell the CLI only reads and can make
+  the emergency stop; changes are refused and the chat prepares a setup card for you instead. The
+  same holds for a DGC, or an SDK script, started from that shell, and for a chat run by Claude
+  Code or Codex through your subscription.
 - A profile that has never used Pips gets no Pips state: per-turn Pips bookkeeping starts the
   first time a chat or command uses them.
 - Personal Pips can use reviewed reads from connected apps (Gmail, Google Calendar, Google

@@ -455,6 +455,19 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "error": _S(False),
     },
     # ---- end v13 token usage -------------------------------------------------------------------
+    # The answer to get_pip_usage_report (capability pip_usage_report): the Pips tab of Token
+    # Usage. A breakdown of the same range's totals, never added to them: ``all_tokens`` is the
+    # whole range (input + output), ``totals`` {input_tokens, output_tokens, runs} the Pips' part.
+    #   by_pip [{pip_id, name, pip_type, scope "personal"|"project", project, status, input_tokens,
+    #            output_tokens, runs, daily_cap (int|null)}]  most tokens first, at most 200
+    # ``omitted`` counts Pips past that; ``error`` is set when the registry or ledger was unreadable.
+    "pip_usage_report": {
+        "request_id": _S(),
+        "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
+        "generated_at": _S(), "timezone": _S(False),
+        "all_tokens": _I(), "totals": _O(), "by_pip": _A(), "omitted": _I(),
+        "error": _S(False),
+    },
     # ---- v14: sub-agents (the agents indicator) -----------------------------------------------
     # Every task sub-agent started in this chat, at any depth. ``id`` is sub-<12 hex>, the same id
     # every ``agent`` field carries; ``parent_id`` is null for a child of the main agent;
@@ -707,6 +720,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # ---- v13 token usage (local ledger) -------------------------------------------------------
     # Read-only and allowed while a turn runs; answered by one usage_report with this request_id.
     "get_usage": {
+        "request_id": _S(),
+        "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
+    },
+    # Read-only and allowed while a turn runs; answered by one pip_usage_report.
+    "get_pip_usage_report": {
         "request_id": _S(),
         "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
     },

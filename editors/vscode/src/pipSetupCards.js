@@ -44,7 +44,7 @@ export function mountSetupCards(options) {
   const s=entry.setup, head=node('summary','pip-setup-summary'),face=node('span','pip-setup-avatar');
   if(s&&globalThis.PipConcepts?.plush){face.innerHTML=globalThis.PipConcepts.plush.markup({index:['core','scout','lens','patch','rook','pulse','lock','quill'].indexOf(s.pip_type),name:s.name},s.status==='pending'?'waiting_approval':'idle',view.uid,{paused:true});}
   const title=node('span','pip-setup-title');title.title=s?.name||'Pip proposal';title.append(node('strong','',s?.name||'Pip proposal'),node('span','',s?(s.verification_plan?`Pulse · ${s.verification_plan.action.tests.length} reviewed ${s.work_kind==='app_smoke_test'?'local HTTP checks':'commands'}`:s.pip_id?'Modify Pip':'Create Pip'):'Loading saved setup…'));
-  const status=node('span','pip-setup-state',s?.status==='pending'?(s.pip_id?'Modify':'Create'):s?.status==='accepted'?'Saved':s?.status||'');head.append(face,title,status);
+  const status=node('span','pip-setup-state',s?.status==='pending'?(s.pip_id?'Modify':'Create'):s?.status==='accepted'?(String(s.receipt?.actor||'').startsWith('chat-permission:')?(s.pip_id?'Updated':'Created'):'Saved'):s?.status||'');head.append(face,title,status);
   const quick=node('span','pip-setup-quick-actions');
   const local=(label,fn,cls)=>button(label,event=>{event.preventDefault();event.stopPropagation();fn();},cls);
   if(s?.status==='pending'&&!entry.loading){
@@ -85,8 +85,12 @@ export function mountSetupCards(options) {
      body.append(models);
     }
    }else if(s.status==='accepted'){
-    body.append(node('p','pip-setup-receipt',s.receipt.run_id?'Setup saved. One run was queued; this is not a completed review.':'Setup saved. No immediate run was requested.'));
-    if(!entry.continued)body.append(button('Retry chat notification',()=>continueChat(entry),'pip-setup-secondary'));
+    // Created on the chat's tool permission (auto mode, an allow rule or Allow), not on this card:
+    // the chat already knows, so there is no notification to retry.
+    const allowed=String(s.receipt.actor||'').startsWith('chat-permission:');
+    body.append(node('p','pip-setup-receipt',(allowed?(s.pip_id?'Updated and on, as allowed in the chat.':'Created and on, as allowed in the chat.')+' Pause, change or delete it in Pips. ':'Setup saved. ')
+      +(s.receipt.run_id?'One run was queued; this is not a completed review.':allowed?'':'No immediate run was requested.')));
+    if(!entry.continued&&!allowed)body.append(button('Retry chat notification',()=>continueChat(entry),'pip-setup-secondary'));
    }else if(s.status==='rejected')body.append(node('p','pip-setup-notice','Proposal rejected. This proposal did not change the Pip or start work.'));
    else if(s.status==='expired')body.append(node('p','pip-setup-notice','This proposal expired. Ask DGC for a fresh setup card.'));
   }

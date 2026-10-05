@@ -310,6 +310,15 @@ def empty_report(range_name: str = "7d", *, now: float | None = None, error: str
     return report
 
 
+def range_days(range_name: str, stamp: float) -> tuple[_dt.date, _dt.date | None]:
+    """(today, the range's first local day) -- None for all time. Shared with the Pips tab, so
+    both cut the same days."""
+    today = _dt.date.fromtimestamp(stamp)
+    return today, {"today": today, "7d": today - _dt.timedelta(days=6),
+                   "30d": today - _dt.timedelta(days=29),
+                   "month": today.replace(day=1), "all": None}[range_name]
+
+
 def report(range_name: str = "7d", *, now: float | None = None, path: Path | None = None) -> dict:
     """Aggregate one range: totals, by model (provider + host), and every local day in it.
 
@@ -323,10 +332,7 @@ def report(range_name: str = "7d", *, now: float | None = None, path: Path | Non
     range_name = normalize_range(range_name)
     stamp = time.time() if now is None else float(now)
     report = empty_report(range_name, now=stamp)
-    today = _dt.date.fromtimestamp(stamp)
-    first_day = {"today": today, "7d": today - _dt.timedelta(days=6),
-                 "30d": today - _dt.timedelta(days=29),
-                 "month": today.replace(day=1), "all": None}[range_name]
+    today, first_day = range_days(range_name, stamp)
     # A bounded range ends at the next local midnight, so a row stamped in the future (a clock
     # that was wrong for a while) is not counted as today.
     where, args = (("WHERE ts >= ? AND ts < ?",

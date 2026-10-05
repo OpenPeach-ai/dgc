@@ -41,14 +41,24 @@ def _is_provider_key_env(name: str) -> bool:
     return up.startswith("DGC_") and up.endswith("_API_KEY_FILE")
 
 
-def tool_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+# Set in every shell DGC runs for the model, so a tool that acts as the local user can tell the
+# chat's own shell from the user's terminal. `dgc pips` refuses Pip decisions there: approving a
+# Pip is the user's, and an auto-mode chat would otherwise approve its own by running the CLI.
+# A marker, not a boundary: an unsandboxed shell runs as the user (docs/PIPS_REFERENCE.md).
+AGENT_SHELL = "DGC_AGENT_SHELL"
+
+
+def tool_env(extra: dict[str, str] | None = None, *, agent: bool = True) -> dict[str, str]:
     """The environment for an UNSANDBOXED shell/python/monitor tool: the inherited environment
     with DGC's provider credentials removed. (A sandboxed tool uses :func:`process_env`, which is
-    far more restrictive.) ``extra`` is merged on top, its provider keys stripped too."""
+    far more restrictive.) ``extra`` is merged on top, its provider keys stripped too. ``agent``
+    marks it as the model's shell; a command the user typed (``!cmd``) passes False."""
     env = {k: v for k, v in os.environ.items() if not _is_provider_key_env(k)}
     for k, v in (extra or {}).items():
         if not _is_provider_key_env(k):
             env[k] = v
+    if agent:
+        env[AGENT_SHELL] = "1"
     return env
 
 
@@ -246,7 +256,7 @@ def active(config) -> bool:
     return requested(config) and available() is not None
 
 
-def process_env(config=None) -> dict[str, str]:
+def process_env(config=None, *, agent: bool = True) -> dict[str, str]:
     """Return the intentionally small environment visible inside a sandbox.
 
     Extra names must be opted into by *name* through ``sandbox_env_allow``. This
@@ -263,6 +273,8 @@ def process_env(config=None) -> dict[str, str]:
                 and key.upper() not in ENV_HIJACK_BLOCKLIST):
             env[key] = os.environ[key]
     env.update({"HOME": "/tmp/dgc-home", "TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp"})
+    if agent or os.environ.get(AGENT_SHELL) == "1":
+        env[AGENT_SHELL] = "1"
     return env
 
 

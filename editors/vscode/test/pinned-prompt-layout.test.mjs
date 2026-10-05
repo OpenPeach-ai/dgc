@@ -235,7 +235,7 @@ test("a long prompt pins folded; opened it scrolls away while Show less stays in
     }, head);
     assert.equal(folded.fold, "folded");
     assert.ok(folded.pinned && folded.position === "sticky", "pinned, folded");
-    assert.ok(Math.abs(folded.lines - 5) < 0.1, `showing its five lines (${folded.lines})`);
+    assert.ok(Math.abs(folded.lines - 3) < 0.1, `showing its three lines (${folded.lines})`);
 
     // Show more on the pinned prompt: it goes back to where it was sent, then opens there.
     await s.page.hover(`${head} > .bubble`);

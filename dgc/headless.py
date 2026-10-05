@@ -201,6 +201,12 @@ RETIRE_REQUEST_PREFIX = "retire-"
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # The Pips control contract this backend speaks: the ready handshake and every pips_status say it.
 PIPS_API_VERSION = 42
+
+
+def _pips_platform_supported() -> bool:
+    """Linux and macOS: the editor shows Windows a plain explanation instead (pip_access)."""
+    from .pip_access import PLATFORM_SUPPORTED
+    return PLATFORM_SUPPORTED
 _BUSY_MUTATIONS = {
     # `new_session` is deliberately absent: asking for a new chat while a turn runs is a decision
     # to abandon that turn, so its handler cancels and waits rather than refusing the request.
@@ -1795,6 +1801,22 @@ def _chat_field(name: str) -> property:
     return property(get, set_, delete, doc=f"Per-chat `{name}`, stored on this backend's Chat.")
 
 
+# A backend started from a model's shell (`dgc serve`, or a script using the SDK) carries
+# sandbox.AGENT_SHELL, like `dgc pips` there: it may read Pips and stop them, never decide for the user.
+AGENT_SHELL_PIPS_REFUSAL = ("This DGC was started from a chat's own shell, and changing Pips is your decision, so it was "
+                            "refused. Reading Pips and stopping them still work; make the change in your own editor or terminal.")
+
+
+def _agent_shell_pips_read(cmd) -> bool:
+    if cmd.get("type") == "pips_enable":
+        return cmd.get("enabled") is False
+    if cmd.get("type") != "pips_control":
+        return False                         # pips_runtime starts the runner or clears a stop
+    request = cmd.get("request") if isinstance(cmd.get("request"), dict) else {}
+    kind = request.get("type") if isinstance(request.get("type"), str) else ""
+    return kind.startswith(("get_", "list_", "inspect_")) or kind in ("stop_pips", "export_pip")
+
+
 class Backend:
     # Step 3: the first two per-chat names. Everything else stays a plain attribute until its own
     # step, so each move is verified alone.
@@ -1969,7 +1991,7 @@ class Backend:
                           # The client answers with set_workspace_roots.agent_faces when it draws
                           # the registry's face slots; only then do agent frames carry face_slot.
                           "agent_faces": True,
-                          "resume_turn": True, "monitors": True, "usage_ledger": True,
+                          "resume_turn": True, "monitors": True, "usage_ledger": True, "pip_usage_report": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           # This CLI accepts `agent_control`: the user may steer or stop ONE
                           # background sub-agent instead of ending the whole turn. Gated because
@@ -1985,7 +2007,7 @@ class Backend:
                           # decided by whether a process is alive. Gated: an older CLI would answer
                           # a heartbeat with command_rejected every 20s.
                           "editor_state": True,
-                          "pips_supported": True, "pips_api_version": PIPS_API_VERSION,
+                          "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
                           "pips_enabled": self.config.get("pips_enabled", False) is True,
@@ -3095,6 +3117,21 @@ class Backend:
             self.em.emit("usage_report", request_id=request_id, **report)
         threading.Thread(target=run, name="dgc-usage-report", daemon=True).start()
 
+    def _emit_pip_usage(self, request_id: str, range_name: str) -> None:
+        """Answer get_pip_usage_report: the Pips tab of Token Usage, on a short-lived thread like
+        get_usage. Reads the registry even with Pips off, so their past usage still shows."""
+        def run() -> None:
+            from . import pip_usage_report, usage_ledger
+            try:
+                report = pip_usage_report.report(range_name)
+            except Exception as exc:        # informational; say why and carry on
+                empty = usage_ledger.empty_report(range_name)
+                report = {"range": empty["range"], "generated_at": empty["generated_at"], "timezone": empty["timezone"],
+                          "all_tokens": 0, "totals": {"input_tokens": 0, "output_tokens": 0, "runs": 0},
+                          "by_pip": [], "omitted": 0, "error": f"{type(exc).__name__}: {exc}"[:300]}
+            self.em.emit("pip_usage_report", request_id=request_id, **report)
+        threading.Thread(target=run, name="dgc-pip-usage-report", daemon=True).start()
+
     def _emit_doc(self, request_id: str, identifier: str) -> None:
         from .docs import find_id, slug
         entry = find_id(identifier)
@@ -4005,6 +4042,26 @@ class Backend:
         with WorkspaceRegistry() as registry:
             return {"setup": pip_setup.propose(registry, setup_request, config.project_root, origin["session_id"])}
 
+    def _pip_import(self, config, request):
+        """An imported Pip file becomes a pending setup card owned by this chat, like a starter."""
+        import uuid
+        from . import pip_setup, pip_share
+        from .redaction import contains_secret, secret_values
+        from .workspace_registry import RegistryError, WorkspaceRegistry
+        if set(request) - {"type", "request_id", "document"}:
+            raise RegistryError("invalid_request", "Send the shared Pip file's contents.")
+        document = request.get("document")
+        if isinstance(document, str):
+            document = pip_share.parse(document)
+        setup_request = pip_share.setup_request(document, project_root=config.project_root,
+                                                request_key="import-" + uuid.uuid4().hex[:24])
+        if contains_secret(setup_request, secret_values(config)):
+            raise RegistryError("secret_detected", "The shared Pip file contains a configured secret. Nothing was saved.")
+        origin = self.agent._pip_proposal_origin()
+        with WorkspaceRegistry() as registry:
+            setup = pip_setup.propose(registry, setup_request, config.project_root, origin["session_id"])
+        return {"setup": setup, "left_out": [str(item)[:300] for item in pip_share.check(document).get("left_out", [])][:8]}
+
     def _pips_failure(self, cmd, code, message):
         from .redaction import redact_text
         message = redact_text(str(message), secret_values(self.config))[:1500]
@@ -4068,6 +4125,10 @@ class Backend:
         if getattr(self, "_pips_closing", False):
             self._pips_failure(cmd, "chat_closed", "This chat closed before its Pip control could run.")
             return True
+        from .sandbox import AGENT_SHELL
+        if os.environ.get(AGENT_SHELL) == "1" and not _agent_shell_pips_read(cmd):
+            self._pips_failure(cmd, "agent_shell", AGENT_SHELL_PIPS_REFUSAL)
+            return True
         from .pip_access import restricted, MESSAGE
         if restricted(self.config):
             self._pips_failure(cmd, "session_policy", MESSAGE)
@@ -4127,9 +4188,10 @@ class Backend:
                     self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
                                  command="get_pip_digest", ok=True, result={"digest": None})
                     return
-            if cmd["request"].get("type") in ("list_pip_starters", "propose_starter_pip"):
+            if cmd["request"].get("type") in ("list_pip_starters", "propose_starter_pip", "import_pip_document"):
                 kind = cmd["request"]["type"]
-                value = self._pip_starter(config, cmd["request"])
+                value = (self._pip_import(config, cmd["request"]) if kind == "import_pip_document"
+                         else self._pip_starter(config, cmd["request"]))
                 self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
                              command=kind, ok=True, result=value)
                 return
@@ -4794,6 +4856,14 @@ class Backend:
                              message="request_id must contain 1-128 characters")
             else:
                 self._emit_usage(usage_request, str(cmd["range"]))
+
+        elif t == "get_pip_usage_report":
+            usage_request = str(cmd.get("request_id") or "")
+            if not usage_request or len(usage_request) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+            else:
+                self._emit_pip_usage(usage_request, str(cmd["range"]))
 
         elif t == "list_mcp_servers":
             self._emit_mcp_servers(str(cmd.get("request_id") or ""))

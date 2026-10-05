@@ -31,7 +31,7 @@ const LONG = Array.from({ length: 12 }, (_, i) => `Step ${i + 1}: check the boun
 const LINKED = LONG.split("\n").map((row, i) => (i === 1 ? "See https://vibedgc.com/docs"
   : i === 10 ? "Then https://example.com/later" : row)).join("\n");
 const TALL = Array.from({ length: 48 }, (_, i) => `Line ${i + 1} of a long pasted spec`).join("\n");
-const WIDE = "The migration touches several tables, so the order of the steps matters a great deal. ".repeat(5).slice(0, 420);
+const WIDE = "The migration touches several tables, so the order of the steps matters a great deal. ".repeat(5).slice(0, 300);
 // A typed link wears its site's favicon from the icon service; it is answered here, offline.
 const FAVICON = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 
@@ -85,7 +85,7 @@ const focusedName = (page) => page.evaluate(() => {
 
 for (const theme of ["dark-modern", "light-modern", "hc"]) {
   for (const width of [300, 460]) {
-    test(`a long prompt shows five lines, and its pill answers hover and Tab (${theme}, ${width}px)`, async (t) => {
+    test(`a long prompt shows three lines, and its pill answers hover and Tab (${theme}, ${width}px)`, async (t) => {
       if (skipOrFail(t)) return;
       const s = await openPage({ width, theme });
       try {
@@ -99,7 +99,7 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) {
             scrollHeight: text.scrollHeight, maxHeight: style.maxHeight, mask: style.webkitMaskImage, maskStd: style.maskImage };
         });
         assert.equal(rest.fold, "folded");
-        assert.ok(Math.abs(rest.clientHeight - 5 * rest.line) <= 1, `five lines show: ${rest.clientHeight}px of ${rest.line}px lines`);
+        assert.ok(Math.abs(rest.clientHeight - 3 * rest.line) <= 1, `three lines show: ${rest.clientHeight}px of ${rest.line}px lines`);
         assert.ok(rest.scrollHeight > rest.clientHeight + rest.line, "and the rest is there, folded away");
         assert.notEqual(rest.maxHeight, "none", "the clamp wins the cascade");
         if (theme === "hc") {
@@ -215,12 +215,13 @@ test("open, Show less stays in reach down a long prompt, clear of the Latest pil
   const s = await openPage({ width: 460, height: 600 });
   try {
     for (let i = 0; i < 4; i += 1) await s.events(turn(`p${i}`, `Earlier question ${i}`, "Some answer prose. ".repeat(30)));
-    await s.events(turn("t1", TALL, `Answer.\n\n${"More prose. ".repeat(40)}`));
+    // A long answer, so a folded prompt can be scrolled to its resting place under the top edge.
+    await s.events(turn("t1", TALL, `Answer.\n\n${"More prose. ".repeat(160)}`));
     await s.settle();
     const bubbles = ".msg.user > .bubble";
 
     // A drag that starts on line 2 and runs off below the bubble selects into the folded tail; the
-    // clipped box must not scroll with it, or the five-line window would show a later slice.
+    // clipped box must not scroll with it, or the three-line window would show a later slice.
     const start = await s.page.evaluate((sel) => {
       const text = [...document.querySelectorAll(sel)].at(-1).querySelector(".prompt-text");
       text.scrollIntoView({ block: "center" });
@@ -327,7 +328,7 @@ test("a fold is decided again at a new width, without moving the reader", async 
   try {
     for (let i = 0; i < 10; i += 1) await s.events(turn(`p${i}`, `${i}. ${WIDE}`, `Answer ${i}. ${"The bounds hold across every page. ".repeat(8)}`));
     await s.settle(300);
-    assert.ok((await foldOf()).every((state) => state === "none"), "at 900px a 420-character line fits in four lines");
+    assert.ok((await foldOf()).every((state) => state === "none"), "at 900px a 300-character line fits in three lines");
     // Read from the middle: not following the end.
     await s.page.evaluate(() => { const log = document.getElementById("log"); log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = log.scrollHeight * 0.45; });
     await s.settle();

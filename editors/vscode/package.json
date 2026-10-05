@@ -535,6 +535,18 @@
           "scope": "window",
           "description": "Show a notification when a DGC turn longer than 20 seconds finishes while the DGC panel is not visible."
         },
+        "dgc.notifyPips": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Show a notification when a Pip finds something at its alert level or a new review is waiting for you, even when the DGC panel is not on screen. Open Pips goes straight to it."
+        },
+        "dgc.notifyWhenWaiting": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Show a notification when a DGC chat you are not looking at needs your answer: an approval, a question or a plan. Open chat goes straight to it."
+        },
         "dgc.linkFavicons": {
           "type": "boolean",
           "default": true,

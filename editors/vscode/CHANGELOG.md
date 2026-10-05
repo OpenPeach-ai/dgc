@@ -26,6 +26,30 @@
   appears under **Waiting for you**; **Review…** shows the screenshot and exactly what would be
   sent, then **Send once** or **Reject**. The Pips bar says when something is waiting.
   **Stop computer** closes it at once.
+- **Always allow** beside Send once, Create once and Run once: the Pip does that kind of action
+  again without asking, and you are told after. Its **Job** tab lists them under **Allowed without
+  asking**, with **Stop allowing**. Actions waiting for you count in the Pips bar.
+- **Settings → Token usage** has a **Pips** view: each Pip's tokens and runs for the range, its share,
+  and how much of everything the Pips used.
+- A Pip the chat sets up is approved on its permission card, which shows the Pip, its job, what it
+  reads and when it runs, instead of raw arguments; once allowed it is created and on.
+- **Share this Pip → Export…** in the Job tab and **Import a shared Pip…** under **New**: an
+  imported Pip opens as a setup card for you to review.
+- **Was this result useful?** under each finished Pip result, report and draft: a thumbs up or down
+  and an optional note, which the Pip's later runs read. The job itself does not change.
+- Each answer has **Make this a Pip**: it drafts the request in your composer to turn that task
+  into a Pip on a schedule. Nothing is sent or created until you do.
+- On Windows the Pips view says Pips run on Linux and macOS instead of asking you to update the CLI.
+- **New** offers five more Personal starters (page watch, market brief, weekly research digest,
+  release watch, news on a topic), each with an example of what to read. Starter schedules read
+  "Weekdays at 08:30" or "Mondays at 09:00" instead of a cron expression.
+- Each Pip's **Job** tab shows its token usage today and over 30 days, with a two-week chart, and
+  takes a daily limit for its automatic runs.
+- When a Pip finds something at its alert level or a new review is waiting, the editor says so
+  once with **Open Pips**, even when the DGC panel is not on screen (`dgc.notifyPips`). The
+  runner controls also switch the runner's desktop notifications on or off.
+- **Keep Pips running** in the runner controls: one switch so the runner starts when you log in
+  and after a restart, and restarts if it fails (Linux and macOS).
 - On macOS, Patch and Pulse run under Seatbelt; their reviews state how that confinement is
   weaker than Linux's (sampled memory and process limits, readable system folders).
 - Reference a Pip in the main chat with `@`. Setup cards, run rows and email, calendar and
@@ -45,6 +69,21 @@
   applies at the turn's next step without stopping the turn. With no goal, a running turn can
   adopt one.
 - Text follows the editor's font size.
+- A sent prompt shows its first three lines, then **Show more**, so a pinned prompt takes less of
+  the panel (it was five, from seven lines up).
+- Chat tabs, redone. Every tab has the same height and the new chat's tab no longer gets a white
+  border. Drag a tab to reorder your chats, or press Alt+Shift+Left/Right on it. With more chats
+  than fit, tabs shrink first, then the strip scrolls (the mouse wheel scrolls it sideways), the
+  chat on screen stays in view and a chevron lists every chat. The tabs are hidden on an agent's
+  page.
+- A tab's dot says what its chat is doing: purple and pulsing while it works, purple and still
+  when it finished and you have not read it yet, green and pulsing when it needs your answer, grey
+  when it is idle. Coming back to a chat that finished in the background no longer shows it
+  working, and a chat that still waits on you keeps its dot after you look in and leave.
+- When a chat you are not looking at needs your answer (an approval, a question or a plan), DGC
+  says so in a notification once; **Open chat** goes straight to it. `dgc.notifyWhenWaiting`
+  turns it off.
+- A working specialist's mark moves and glows less, and its glow is no longer cut off on the left.
 
 ## 0.32.1 — 2026-10-02
 

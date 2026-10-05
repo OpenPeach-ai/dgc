@@ -91,8 +91,16 @@ test("a running agent's mark glows, and a finished one does not", () => {
   // value. A glow alone is easy to miss at 16px beside a wall of tool output.
   const frames = /@keyframes agent-mark-breathe \{([\s\S]*?)\n\}/.exec(mainCss);
   assert.ok(frames, "the keyframes are declared");
-  assert.match(frames[1], /transform: rotate\(-10deg\) scale\(\.96\)/, "it rocks back");
-  assert.match(frames[1], /transform: rotate\(12deg\) scale\(1\.08\)/, "and forward, swelling");
+  // Quietly: the site's -10..+12 degrees and 1.08 swell were too much beside text being read.
+  const turns = [...frames[1].matchAll(/rotate\((-?[\d.]+)deg\) scale\(([\d.]+)\)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  assert.equal(turns.length, 2, "two poses");
+  assert.ok(turns.some(([deg]) => deg < 0) && turns.some(([deg]) => deg > 0), "it rocks both ways");
+  assert.ok(turns.every(([deg, scale]) => Math.abs(deg) <= 5 && scale >= .96 && scale <= 1.04), `within a quiet range: ${JSON.stringify(turns)}`);
+  const glows = [...frames[1].matchAll(/drop-shadow\(0 0 ([\d.]+)px/g)].map((m) => Number(m[1]));
+  assert.ok(glows.length === 2 && Math.max(...glows) <= 4, `a glow of at most 4px: ${glows}`);
+  // A settled block clips paint to its box and the mark sits on its left edge: while an agent works,
+  // the block paints in full, or the glow is sliced off in a straight line.
+  assert.match(mainCss, /\.msg\.settled:has\(\.agent-mark\.is-live\) \{ content-visibility: visible; \}/);
   // One animation, so the glow and the movement cannot drift into two beating periods.
   assert.equal((mainCss.match(/animation: agent-mark-breathe/g) || []).length, 1,
                "the mark runs exactly one animation");

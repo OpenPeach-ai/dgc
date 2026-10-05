@@ -23,14 +23,32 @@ made it, and the controller decides what that actor may do.
 | Actor | Who | May |
 | --- | --- | --- |
 | Local user | The Pips view (`editor-user`) and `dgc pips` (`local-console`) | Everything a person decides: create, accept and reject proposals, setups and handoffs, prepare and accept external actions, archive, stop |
-| Main chat | The main DGC chat's model, through its Pips tools | Read Pips data; save setup cards, proposals, handoffs and drafts for review; queue runs of read-only Pips; pause, resume and attach Pips. Each call passes DGC's permission engine. |
+| Main chat | The main DGC chat's model, through its Pips tools | Read Pips data; set up and change Pips when the permission engine allows the call (accepted as `chat-permission:<mode>`), except setups with app reads or Pulse commands, which stay cards; save handoffs and drafts for review; queue runs of read-only Pips; pause, resume and attach Pips. Each call passes DGC's permission engine. |
 | Automation | The runner's scheduler (`local-scheduler`) and event trigger (`local-event-trigger`) | Queue runs that a reviewed schedule or trigger already authorizes |
 | Pip worker | The model inside a run | Only its run kind's tools, listed under [Run kinds](#run-kinds) |
 
-Accepting any setup, proposal, handoff or external action is a local-user decision.
+Accepting a handoff or an external action, and a setup with app reads or Pulse
+commands, is a local-user decision. Another setup or a name, goal or source-ref
+proposal from the main chat is accepted by the call's own permission decision (auto
+mode, an allow rule or the user's Allow), recorded as `chat-permission:<mode>`; a new
+Pip created that way gets a 200,000-token daily limit (`pip_spend.DEFAULT_CHAT_CAP`).
 No main-chat tool, scheduler, trigger or Pip worker can accept one. Personal Pips,
 external actions, connections and setup reviews are available only to the local
 user's own controllers.
+
+The `dgc pips` CLI acts as the local user, so a chat that ran it in its shell (in auto
+mode, without asking) could approve its own Pips. Every shell DGC runs for the model
+(`bash`, `python`, monitors) carries `DGC_AGENT_SHELL=1`, and so does a subscription
+engine's CLI (Claude Code, Codex), whose own shell is the model's too. A command you type
+yourself (`!cmd`) and your own hooks and gate command do not. With the marker, `dgc pips`
+allows only reading commands and the emergency stop, never marks the digest seen, and
+refuses the rest with exit status 2. Memory statements can be listed (and anchored for
+reading), never recorded or revoked. A DGC started from a marked shell inherits the
+marker: its `/pips` is refused the same way, and its `dgc serve` (the backend an SDK
+script starts) serves `get_`, `list_` and `inspect_` controls, `export_pip`, `stop_pips`
+and turning Pips off, and refuses everything else with `agent_shell`. This is a guard against a chat taking the wrong path, not a
+security boundary: an unsandboxed shell runs as you and could edit the registry
+directly, like any other process of yours.
 
 ### An independent runner
 
@@ -577,6 +595,108 @@ reaches the worker. Each read gives the worker at most 8,000 characters of JSON,
 whole items rather than cutting text; a failed read is reported with its error. The run
 records `pip_run_github_reads` with each read's kind and item count or error, not the text.
 
+**Sharing** (API 41). `export_pip {pip_id}` (local only) returns `{document, text}`: a
+`dgc-pip` version 1 document `{format, version, pip: {name, goal, pip_type, scope,
+schedule, event_trigger?, model_choice?, web_plan?, source_ref?, verification_plan?},
+left_out}`. App plans, GitHub plans, IDs, memory, history, findings and results are never
+included; a default model choice is left to the importer. Patch cannot be exported. Files
+are at most 24 KiB. The editor's `import_pip_document {document}` (chat backend, like a
+starter) checks the document and saves it as a pending setup card for that chat; the CLI's
+`dgc pips import` shows the job and what was left out, asks, then creates it (not Pulse).
+
+**Offering a Pip** (API 41). On a chat's first prompt the main chat compares it with how
+the newest 40 chats of the last 30 days in this project began (word overlap of at least
+0.6, at least four significant words, files above 2 MB skipped). Two or more alike add one
+line to the system prompt: offer once to make it a Pip, prepare a setup card only if the
+user agrees. It is guidance, not a gate; no tool appears or disappears on it, and plan mode
+and sub-agents never get it. The `use_pips` description says the same for any recurring
+request, and that no Pip buys, sells, trades or pays. The editor's Make this a Pip only
+drafts the request in the composer.
+
+**Previous result** (API 41). A `personal_task` run pins `manifest.previous_result`
+`{run_id, finished_at, text}`: the Pip's latest succeeded Personal task result, redacted
+with the current secrets and cut to 6,000 characters. The worker shows it as reference
+"for comparison only", so a watch reports what changed and a digest leaves out what it
+already said. A conversation does not get it (its history is the chat).
+
+**Ratings** (API 41). `set_pip_feedback {run_id, rating, note}` (local only) rates a
+succeeded `personal_task`, `audit` or `draft` run: `rating` is `"up"`, `"down"` or null to
+clear, `note` at most 500 characters of plain text. It returns `{pip_id, feedback}`, the
+newest 20 `{run_id, rating, note, at}`; `list_pip_feedback {pip_id}` returns the same. The
+newest 50 per Pip are kept in registry metadata, outside the job, and each rating records
+`pip_feedback_recorded`. Those three run kinds pin `manifest.user_feedback`, the newest five
+ratings with notes redacted by the current secrets, and the worker shows them as reference
+"where it fits the approved goal", never as a new task, a job change or a permission.
+
+**Usage and daily limits** (API 41). `get_pip_usage {pip_id}` returns `{usage: {pip_id,
+today: {day, tokens, runs}, last_30_days: {tokens, runs}, days: [{day, tokens, runs}],
+daily_cap, capped_today}}` over local days. A run's tokens are the input plus output tokens
+the runner imported for it (`pip_usage_imports` in the usage ledger now keeps each run's
+totals, all of its requests); a run not imported yet counts its result's `usage`.
+`set_pip_daily_cap {pip_id, daily_tokens}` (local only; 1,000 to 1,000,000,000, or null)
+is kept in registry metadata, outside the job definition, and records
+`pip_daily_cap_changed`. While today's tokens are at or over the limit, `enqueue` refuses
+schedule and event occurrences with `daily_cap_reached`, which the scheduler and the
+trigger controller record as an ordinary skip (a skipped occurrence does not run later);
+manual, chat, handoff and main-chat runs are not limited, and neither is a standalone
+Pulse schedule, which runs its reviewed commands without a model.
+
+**Always allow** (API 41). `always_allow_pip_app_action {action_id, expected_digest}` (local
+only) accepts one pending action like `accept_pip_app_action` and then saves a grant for its Pip:
+`{id: grant_<32 hex>, kind, server, connection_digest, account, schema_digest, tool, label,
+created_at, created_by}`, returned as `{action, grant}`. `list_pip_action_grants {pip_id}` and
+`revoke_pip_action_grant {pip_id, grant_id}` (local only) return `{pip_id, grants}`. Grants live
+in registry metadata (`pip_action_grant:<pip_id>:<grant_id>`, at most 20 per Pip), outside the
+job, and record `pip_action_granted` / `pip_action_grant_revoked`.
+
+A Personal task now pins `email_draft`, `calendar_draft`, `action_grants` (a summary) and, only
+when the Pip has a connector grant, a `connector_draft` snapshot; a handoff run pins none. Its
+worker may return `message_draft`, `calendar_draft` and `connector_action_draft`, which `finish`
+saves as drafts (actor `pip-<kind>:<run_id>`). After each finished run the runner calls
+`pip_action_grants.dispatch_for_run`: a draft whose kind, connection, account, tool and schema a
+grant matches (for connectors, the draft's own pinned digests too) is prepared and accepted as
+`pip-grant:<grant_id>`; `pip_app_actions` checks that grant against the exact payload, and only
+the runner uses that actor. Anything else stays a draft, and a failed match records
+`pip_action_grant_skipped`. The digest counts waiting drafts and actions as `pending_actions`,
+and the desktop notifier names each action a grant ran.
+
+**Token usage by Pip** (editor protocol, capability `pip_usage_report`). `get_pip_usage_report
+{request_id, range}` is answered by one `pip_usage_report {request_id, range, generated_at,
+timezone, all_tokens, totals: {input_tokens, output_tokens, runs}, by_pip: [{pip_id, name,
+pip_type, scope, project, status, input_tokens, output_tokens, runs, daily_cap}], omitted,
+error?}` (`dgc/pip_usage_report.py`). Runs that finished in the range count on that local day,
+with the imported totals or the run's own reported usage; `all_tokens` is the same range's
+ledger total, so the Pips are shown as a part of it, never added to it. It reads the registry
+even with Pips off and creates none for a profile that never used them.
+
+**Desktop notifications** (API 41). The runner checks once a minute (`pip_desktop.Notifier`)
+for alert findings in the digest and for pending reviews and setup cards, and shows one
+notification for what is new: the digest headline, or "N reviews waiting". What it has
+announced is kept in registry metadata (`desktop_notifications_seen`, 400 ids per kind), so a
+restart does not repeat it; while the setting is off it still marks what arrives as seen.
+Delivery is `notify-send` (with the session bus at `/run/user/UID/bus` when the service has
+none) or `osascript` with the text as script arguments; failure is never an error and is
+recorded as `last.shown: false`. `get_pips_desktop_notifications` /
+`set_pips_desktop_notifications {enabled}` (local only) return `{on, available, platform,
+last}`. The editor's own notice reads `get_pip_digest` from the extension host every minute
+(`pipsAttention.ts`, remembered in the host's global state) and is turned off by
+`dgc.notifyPips`.
+
+**Keep Pips running** (API 41). `get_pips_keep_running` and `set_pips_keep_running
+{enabled}` (local user only) return `{platform, supported, reason, on, starts_at_login,
+restarts_after_failure, while_logged_out}`. On Linux, on installs the managed user unit
+(format 2: `Restart=on-failure`, `RestartSec=30`; an earlier DGC unit for the same home is
+replaced, any other differing unit is refused), enables it, starts it unless a runner is
+already online, and asks `loginctl enable-linger` when lingering is off. On macOS, on writes
+`~/Library/LaunchAgents/com.vibedgc.pips.<home hash>.plist` (`RunAtLoad`,
+`KeepAlive: {SuccessfulExit: false}`, `ThrottleInterval` 30), enables it and bootstraps it
+into the GUI domain; an unchanged loaded agent is never reloaded, so a running runner is
+not interrupted. Off disables (Linux) or disables and removes the agent (macOS) and never
+stops the runner. Both start `pips serve --service`, which exits 0 when Pips are off,
+emergency-stopped or already running, so neither manager restarts it in a loop. Writable
+parents of the unit directory are refused unless the group is the user's own with no other
+member (OpenSSH's rule, so Ubuntu's 775 `~/.config` is accepted).
+
 **Digest and notification settings** (API 41). `pip_notify_settings` holds one row
 per Pip that has left the defaults (`min_severity` medium, `alert_severity` high or
 null for no alerts, never below `min_severity`); only `editor-user` and
@@ -736,8 +856,8 @@ notice, loads them automatically. A new or resumed chat starts without them.
 | --- | --- | --- | --- |
 | `use_pips` | `UsePips` | Allowed | Loads the Pips tools |
 | `pips_context` | `PipsContext` | Allowed | Reads Pips data (below) |
-| `pips_setup` | `PipsSetup` | Allowed (draft only) | Saves a setup card for a new or existing Pip |
-| `pips_propose` | `PipsPropose` | Allowed (draft only) | Saves a proposal to change a project Pip's name, goal or source ref |
+| `pips_setup` | `PipsSetup` | Asks (allowed without asking when it saves a card) | Creates or updates a Pip; one with app reads or Pulse commands is saved as a setup card instead |
+| `pips_propose` | `PipsPropose` | Asks | Applies a change to a project Pip's name, goal or source ref |
 | `pips_adapt` | `PipsAdapt` | Asks | Applies a name or source-ref change that the Pip's adaptation policy allows |
 | `run_pip_now` | `PipsRun` | Asks | Queues one run of a Scout, Lens, Rook, Lock or Quill Pip, or a Personal Pip |
 | `handoff_to_pip` | `PipsHandoff` | Asks | Saves a handoff proposal |

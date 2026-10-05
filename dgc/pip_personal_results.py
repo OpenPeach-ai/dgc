@@ -12,7 +12,9 @@ def validate(result):
                 or not 0 <= computer['calls'] <= 10000 or not isinstance(computer['held'], list) or len(computer['held']) > 8
                 or not all(isinstance(a, str) and a.startswith('compact_') and len(a) <= 64 for a in computer['held'])):
             raise RegistryError('invalid_result', 'Invalid Pip computer usage in a personal result.')
-    if (not isinstance(result, dict) or set(result)-{'snapshot', 'computer'} != {'text', 'external_actions', 'tools_called', 'usage'}
+    # Drafts are inert: commit_reply validates and saves each; the runner runs one only on a grant.
+    drafts = {'message_draft', 'calendar_draft', 'connector_action_draft'}
+    if (not isinstance(result, dict) or set(result)-{'snapshot', 'computer'}-drafts != {'text', 'external_actions', 'tools_called', 'usage'}
             or result.get('external_actions') is not False or type(result.get('tools_called')) is not int
             or result['tools_called'] != 0):
         raise RegistryError('invalid_result', 'A personal result must be text with no executed tools or external actions.')

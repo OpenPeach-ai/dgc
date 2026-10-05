@@ -225,3 +225,37 @@ test('a GitHub plan this view cannot read blocks acceptance instead of hiding it
  assert.throws(()=>model.githubReadPlan({schema_version:1,repository:'a/b',reads:[{kind:'commit_checks'}],token:'x'}));
  assert.equal(model.githubReadPlan({schema_version:1,repository:'a/b',reads:[{kind:'failed_runs',limit:10}]}).repository,'a/b');
 });
+
+test('a starter shows its own example of what to read, and its schedule in words', async()=>{
+ const personal=[{id:'market_brief',title:'Market brief',summary:'Before the market opens.',pip_type:'lens',scope:'personal',name:'Market brief',when:'weekdays',default_time:'08:30',params:['time','timezone','web_reads'],web_example:'search: Infosys results\nsearch: <b>x</b>'}];
+ const x=setup({api:41,personal:true,proposal:null});await x.drain({list_pip_starters:()=>({starters:personal})});x.click('#new-pip');await x.drain({list_pip_starters:()=>({starters:personal})});
+ x.click('[data-starter=market_brief]');
+ const box=x.d.querySelector('#starter-web');assert.ok(box);
+ assert.equal(box.getAttribute('placeholder'),'search: Infosys results\nsearch: <b>x</b>','the example, as text');
+ assert.equal(model.scheduleLabel({type:'cron',cron:'30 8 * * 1-5',timezone:'Asia/Kolkata'}),'Weekdays at 08:30 · Asia/Kolkata');
+ assert.equal(model.scheduleLabel({type:'cron',cron:'0 9 * * 1',timezone:'UTC'}),'Mondays at 09:00 · UTC');
+ assert.equal(model.scheduleLabel({type:'cron',cron:'0 9 1 * *',timezone:'UTC'}),'Cron 0 9 1 * * · UTC','anything else stays exact');
+});
+
+test('import a shared Pip from New: it opens as a setup card to review and says what it left out', async()=>{
+ const card=fixture({name:'Imported reviewer'});
+ const x=setup({api:41,proposal:null});
+ await x.drain({list_pip_starters:()=>({starters:[]})});x.click('#new-pip');await x.drain({list_pip_starters:()=>({starters:[]})});
+ x.click('#import-pip-file');
+ const request=x.requests('import_pip_file')[0];assert.ok(request,'the host is asked to pick a file');
+ x.answer(request,{setup:card,left_out:['Reads from connected apps: they name your accounts.']});
+ await x.drain({get_pip_setup:()=>({setup:card}),list_pip_setups:()=>({setups:[card]})});
+ const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog,'the card opens straight into its review');
+ assert.match(dialog.textContent,/Imported reviewer/);
+ assert.equal(x.requests('accept_pip_setup').length,0,'nothing is approved by importing');
+ assert.match(x.d.body.textContent,/Not included: Reads from connected apps/);
+});
+
+test('a Pip exports from its Job tab and the editor says what stayed behind', async()=>{
+ const p=job(),reads={get_pip_notify_settings:()=>({settings:{pip_id:p.id,min_severity:'medium',alert_severity:'high',revision:0,is_default:true}}),get_pip_outcomes:()=>({outcomes:{pip_id:p.id,name:p.name,pip_type:'rook',history_truncated:false,reported:0,accepted:0,dismissed:0,still_reported:0,gone_after_change:0,gone_without_change:0,checkpoints_examined:0}})};
+ const x=setup({api:41,proposal:null,jobs:[p]});await x.drain(reads);x.click('[data-job]');await x.drain(reads);x.click('[data-tab=job]');await x.drain(reads);
+ x.click('#export-pip-file');
+ const request=x.requests('export_pip_file')[0];assert.deepEqual(JSON.parse(JSON.stringify(request.request)),{type:'export_pip_file',pip_id:p.id});
+ x.answer(request,{opened:true,left_out:['Memory, history, findings and results stay with the original Pip.']});await x.drain(reads);
+ assert.match(x.d.body.textContent,/The shared Pip file is open\. Save it where you like\. Not included: Memory/);
+});
