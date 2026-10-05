@@ -16,7 +16,8 @@ Safety rules that hold for every computer:
 - The model never sees a password; sign-ins happen in the browser and stay in its profile.
 - A Pip with a computer cannot also read connected apps (email, calendar): page text can carry
   instructions, and a browsing Pip must not hold private app data it could be talked into sending.
-- Payments are refused outright by the box.
+- A payment is a change like any other: held for the user (its review says it sends card
+  details), or sent on an Always allow the user gave for that site.
 """
 from __future__ import annotations
 

@@ -495,7 +495,6 @@ class BoxedBrowser(BrowserSession):
         # the owner passes a launcher that runs on a thread living as long as the computer.
         self.launch = lambda start: start()
         self.held: dict[str, HeldWrite] = {}
-        self.refused_payments = 0
         self._box: Box | None = None
         self._pipe: _Pipe | None = None
         self._attached: dict[str, str] = {}      # targetId -> its first (gated) session

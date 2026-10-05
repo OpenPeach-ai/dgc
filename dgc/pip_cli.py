@@ -1384,7 +1384,7 @@ def _computer_command(config, args):
         if action == "give":
             print("This gives the Pip its own browser and files, separate from yours. It can read public websites.\n"
                   "Anything that would submit or change something on a website waits for your approval.\n"
-                  "It never sees your passwords, cannot reach your local network, and cannot make payments.", file=sys.stderr)
+                  "It never sees your passwords and cannot reach your local network. A payment waits for your approval like anything else.", file=sys.stderr)
         if not confirm(("Give " if action == "give" else "Remove the computer from ") + pip["name"] + "?"):
             print("Nothing changed.")
             return None
