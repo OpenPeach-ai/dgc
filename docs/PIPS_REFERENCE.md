@@ -46,7 +46,11 @@ refuses the rest with exit status 2. Memory statements can be listed (and anchor
 reading), never recorded or revoked. A DGC started from a marked shell inherits the
 marker: its `/pips` is refused the same way, and its `dgc serve` (the backend an SDK
 script starts) serves `get_`, `list_` and `inspect_` controls, `export_pip`, `stop_pips`
-and turning Pips off, and refuses everything else with `agent_shell`. This is a guard against a chat taking the wrong path, not a
+and turning Pips off, and refuses everything else with `agent_shell`. The guard is in the CLI,
+so on Linux and macOS the model's shells (and a subscription engine's) find this build's own `dgc`
+first on `PATH`: a launcher in a private temporary directory that starts the same Python on the
+same package, whatever older `dgc` you have installed or whatever `dgc` folder the project holds.
+On Windows the shell keeps your `PATH`. This is a guard against a chat taking the wrong path, not a
 security boundary: an unsandboxed shell runs as you and could edit the registry
 directly, like any other process of yours.
 

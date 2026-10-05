@@ -222,6 +222,9 @@ class OtherMarkedShellsTests(unittest.TestCase):
             with self.assertRaises(subscriptions.EngineLaunchError):
                 subscriptions.run_turn(subscriptions.ENGINES["claude"], "hi", str(self.root), env={sandbox.AGENT_SHELL: "0"})
         self.assertEqual(seen[sandbox.AGENT_SHELL], "1")
+        if os.name != "nt":
+            self.assertEqual(seen["PATH"].split(os.pathsep)[0], sandbox.own_dgc_directory(),
+                             "and finds this build's dgc first")
 
     def test_the_users_own_hooks_and_gate_are_not_marked_as_the_models(self):
         from types import SimpleNamespace
@@ -249,3 +252,50 @@ class OtherMarkedShellsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(os.name == "nt", "the shell keeps the user's PATH on Windows")
+class OwnDgcTests(unittest.TestCase):
+    """The guard lives in the `dgc` CLI, so the model's shell must run a `dgc` that has it: this
+    build, not an older install earlier on the user's PATH or a `dgc` folder in the project."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        base = Path(temp.name)
+        self.ctx = Ctx(base / "project")
+        (base / "project" / "dgc").mkdir(parents=True)                      # a project with its own dgc folder
+        (base / "project" / "dgc" / "__init__.py").write_text('raise SystemExit("the project\'s dgc")\n')
+        old = base / "old-bin"
+        old.mkdir()
+        (old / "dgc").write_text("#!/bin/sh\necho an-old-dgc-without-the-guard\n")
+        (old / "dgc").chmod(0o755)
+        clean = {k: v for k, v in os.environ.items() if k != sandbox.AGENT_SHELL}
+        clean.update(PATH=os.pathsep.join([str(old), clean.get("PATH", "")]), HOME=str(base / "home"))
+        clean.pop("DGC_HOME", None)
+        p = patch.dict(os.environ, clean, clear=True)
+        p.start(); self.addCleanup(p.stop)
+
+    def test_the_models_shell_runs_this_builds_dgc_and_its_guard(self):
+        import dgc
+        out = tools.bash({"command": "dgc --version"}, self.ctx)
+        self.assertIn(f"dgc {dgc.__version__}", out)
+        self.assertNotIn("an-old-dgc", out)
+        self.assertNotIn("the project's dgc", out)
+        out = tools.bash({"command": "dgc pips create Planner --personal --goal 'Plan my week'; echo exit=$?"}, self.ctx)
+        self.assertIn("exit=2", out)
+        self.assertIn("chat", out.lower(), "refused by the guard, with the reason")
+
+    def test_a_command_the_user_typed_keeps_their_own_path(self):
+        self.assertIn("an-old-dgc-without-the-guard", tools.direct_bash("dgc --version", self.ctx))
+        self.assertNotIn(sandbox.own_dgc_directory() or "-", sandbox.tool_env(agent=False)["PATH"])
+
+    def test_the_launcher_is_made_again_if_something_cleans_it_away(self):
+        import shutil
+        first = sandbox.own_dgc_directory()
+        shutil.rmtree(first)
+        again = sandbox.own_dgc_directory()
+        self.assertTrue(Path(again, "dgc").is_file())
+        self.assertEqual(sandbox.tool_env()["PATH"].split(os.pathsep)[0], again)
+        self.assertEqual(sandbox.tool_env()["PATH"].count(again), 1, "never added twice")
+

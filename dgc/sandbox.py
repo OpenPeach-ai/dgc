@@ -9,9 +9,13 @@ workspace, and startup-injection environment variables are never forwarded.
 """
 from __future__ import annotations
 
+import atexit
 import os
+import shlex
 import shutil
 import sys
+import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +51,55 @@ def _is_provider_key_env(name: str) -> bool:
 # A marker, not a boundary: an unsandboxed shell runs as the user (docs/PIPS_REFERENCE.md).
 AGENT_SHELL = "DGC_AGENT_SHELL"
 
+# The guard above lives in the `dgc` CLI, so it holds only if the chat's shell runs a `dgc` that has
+# it. An older install, or another checkout, earlier on the user's PATH would have none, and the
+# model could make or approve Pips through it as if it were the user. So the model's shells find
+# THIS build's `dgc` first: a launcher that starts this Python on this package. The package root
+# goes first on sys.path, because the shell's cwd (any project, perhaps one with its own `dgc`
+# folder) would otherwise outrank it, as for the Pips runner (pip_runtime._SUPERVISOR_BOOTSTRAP).
+_OWN_DGC_BOOTSTRAP = """import sys
+root = sys.argv.pop(1)
+sys.path[:] = [root] + [p for p in sys.path if p and p != root]
+sys.argv[0] = "dgc"
+from dgc.cli import main
+raise SystemExit(main())
+"""
+_own_dgc_dir: str | None = None
+_own_dgc_lock = threading.Lock()
+
+
+def own_dgc_directory() -> str | None:
+    """A private directory whose `dgc` runs this exact build; made once per process, and made again
+    if something cleaned it away. None on Windows, where the shell keeps the user's PATH."""
+    global _own_dgc_dir
+    if os.name == "nt":
+        return None
+    with _own_dgc_lock:
+        launcher = Path(_own_dgc_dir, "dgc") if _own_dgc_dir else None
+        if launcher is not None and launcher.is_file():
+            return _own_dgc_dir
+        try:
+            directory = tempfile.mkdtemp(prefix="dgc-own-")            # 0700: only this user
+            root = str(Path(__file__).resolve().parent.parent)
+            script = Path(directory, "dgc")
+            script.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(part) for part in (
+                sys.executable, "-c", _OWN_DGC_BOOTSTRAP, root)) + ' "$@"\n', encoding="utf-8")
+            script.chmod(0o700)
+        except OSError:
+            return None
+        atexit.register(shutil.rmtree, directory, True)
+        _own_dgc_dir = directory
+        return directory
+
+
+def with_own_dgc(env: dict[str, str]) -> dict[str, str]:
+    """Put this build's `dgc` first on a model shell's PATH (see own_dgc_directory)."""
+    directory = own_dgc_directory()
+    if directory:
+        rest = [part for part in env.get("PATH", "").split(os.pathsep) if part and part != directory]
+        env["PATH"] = os.pathsep.join([directory, *rest])
+    return env
+
 
 def tool_env(extra: dict[str, str] | None = None, *, agent: bool = True) -> dict[str, str]:
     """The environment for an UNSANDBOXED shell/python/monitor tool: the inherited environment
@@ -59,6 +112,7 @@ def tool_env(extra: dict[str, str] | None = None, *, agent: bool = True) -> dict
             env[k] = v
     if agent:
         env[AGENT_SHELL] = "1"
+        with_own_dgc(env)
     return env
 
 

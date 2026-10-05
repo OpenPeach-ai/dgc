@@ -8,6 +8,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- A chat's own shell always runs the `dgc` of the build the chat is running, so the rule that a
+  chat can't create or approve Pips from its shell holds even when an older `dgc` is on your PATH
+  (Linux and macOS).
 Pips are standing agents that work beside the main chat, and they are on for everyone. A Project
 Pip reviews, tests or drafts for one project, on a schedule or when commits land; a Personal Pip
 handles your own tasks across projects. You decide what they do: the chat sets Pips up through your

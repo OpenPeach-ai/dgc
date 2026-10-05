@@ -826,7 +826,7 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     from .goals import Progress, ReportFilter, delegated_instruction, extract_report
     from .llm import normalize_usage
     from .redaction import StreamingRedactor, redact_text, redact_value
-    from .sandbox import AGENT_SHELL          # the engine's own shell is the model's, like DGC's
+    from .sandbox import AGENT_SHELL, with_own_dgc   # the engine's own shell is the model's, like DGC's
 
     binary = preflight(engine)
     if goal_request is not None:
@@ -844,7 +844,7 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
         proc = subprocess.Popen(
             argv, cwd=str(workdir), stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=False, bufsize=0, env={**os.environ, **(env or {}), AGENT_SHELL: "1"}, start_new_session=True)
+            text=False, bufsize=0, env=with_own_dgc({**os.environ, **(env or {}), AGENT_SHELL: "1"}), start_new_session=True)
     except (OSError, ValueError) as exc:
         raise EngineLaunchError(
             f"could not start {engine.short_label}: {type(exc).__name__}: {exc}") from exc
