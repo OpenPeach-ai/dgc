@@ -4,6 +4,14 @@
 
 ### Pips
 
+- A Pip's **Settings** is one short page: what it does, when it runs (when you ask, every day,
+  weekdays or every few hours), what it can use, its model, what it may do without asking, usage,
+  and pause or archive. Everything else is under **Advanced**, and the less-used sections are under
+  **More** beside Chat, Results and Settings.
+- Changes you make save straight away. There is no reason to type: DGC records it for you.
+- Changes waiting for you show at the top of the Pip in plain words, with **Review** and **Reject**.
+  Archiving a Pip that has some offers to reject them and archive, instead of refusing.
+- A cleaner look: one purple action per section, quiet buttons for the rest, and more room.
 - The **Pips** button in the chat header shows Core, the main chat's Pip, breathing and
   blinking softly. It stays still when motion is reduced or the panel is hidden.
 - The new Pips view opens beside the chat (the Pips button in the panel header, or **DGC: Open

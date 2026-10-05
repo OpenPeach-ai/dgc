@@ -109,3 +109,72 @@
 
 /* Allowed without asking: one row per Always-allow grant. */
 .grant-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid var(--line)}
+/* Polish pass (2026-10): one purple action per section, quiet outlines for the rest, room between things.
+   Placed last on purpose: these equal-specificity rules replace the grey button look above. */
+:host,:root{--pip-accent:#6D49E8;--pip-accent-hover:#5B39D6;--pip-ink:color-mix(in srgb,var(--vscode-foreground) 35%,#7C5CFA);--pip-edge:color-mix(in srgb,var(--vscode-foreground) 20%,transparent);--pip-wash:color-mix(in srgb,var(--vscode-foreground) 7%,transparent);--pip-tint:color-mix(in srgb,#7C5CFA 12%,transparent)}
+/* Plain buttons only (no class, or the helper's empty one): special buttons such as list rows, tabs and
+   the rail keep their own look. :is() takes [class=""]'s weight, so these beat the base `button` rule. */
+button:is(:not([class]),[class=""]):not([data-tab]),button.primary,button.quiet,button.link,button.danger{min-height:30px;border-radius:6px;padding:5px 12px;font-weight:500;transition:background-color .12s,border-color .12s}
+button:is(:not([class]),[class=""]):not([data-tab]),button.danger{background:transparent;color:var(--vscode-foreground);border:1px solid var(--pip-edge)}
+button:is(:not([class]),[class=""]):not([data-tab]):hover{background:var(--pip-wash);border-color:color-mix(in srgb,var(--vscode-foreground) 32%,transparent)}
+button.primary{background:var(--pip-accent);border-color:var(--pip-accent);color:#fff}
+button.primary:hover{background:var(--pip-accent-hover);border-color:var(--pip-accent-hover)}
+button.quiet,button.link{background:transparent;border:1px solid transparent;color:var(--pip-ink)}
+button.quiet:hover,button.link:hover{background:var(--pip-wash);border-color:transparent}
+button.link{min-height:24px;padding:2px 6px;font-weight:400}
+button.danger{border-color:color-mix(in srgb,var(--vscode-errorForeground,#f14c4c) 60%,transparent);color:var(--vscode-errorForeground,#f14c4c)}
+button.quiet.danger{border-color:transparent}
+button:is(:not([class]),[class=""]):not([data-tab]):disabled{opacity:.45;background:transparent;border-color:var(--pip-edge)}
+button.primary:disabled,button.quiet:disabled,button.link:disabled,button.danger:disabled{opacity:.45}
+input,textarea,select{border-radius:6px;padding:7px 10px}
+.section{padding:22px 0}
+.section h2{font-size:14px;margin:0 0 10px}
+.section h3{margin:20px 0 6px;font-size:13px}
+.section h2+h3,.section h3:first-child{margin-top:4px}
+.section p.muted,.section .muted{font-size:12px}
+.section .actions,.form .actions{margin-top:12px;gap:8px}
+.section-head .actions{margin-top:0;gap:4px}
+.hero .muted{font-size:12px}
+.review-count{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:999px;background:var(--pip-tint);color:var(--pip-ink);font-size:11px}
+/* What is waiting for the user: a card, with the two choices beside each change. */
+.waiting{margin:0 0 18px;padding:12px 14px;border:1px solid color-mix(in srgb,#7C5CFA 45%,transparent);border-radius:8px;background:var(--pip-tint)}
+.waiting h3{margin:0 0 6px;font-size:13px}
+.waiting-row{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--pip-edge)}
+.waiting-row:first-of-type{border-top:0;padding-top:2px}
+.waiting-row p{margin:0;flex:1 1 220px;line-height:1.45}
+.waiting-row .actions{margin:0}
+.waiting-list{margin:8px 0 0;padding-left:18px;line-height:1.6}
+/* When it runs: one line. */
+.quick-schedule{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.quick-schedule select{width:auto;min-width:150px}
+.quick-schedule label.inline{display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--muted)}
+.quick-schedule input[type=time]{width:auto}
+.quick-schedule input[type=number]{width:72px}
+.drafts-links{display:flex;align-items:center;flex-wrap:wrap;gap:2px 4px;margin-top:12px;font-size:12px}
+.drafts-links .muted{margin-right:4px}
+/* Advanced: one quiet fold at the end of Settings. */
+details.advanced{margin:0;border-bottom:0}
+details.advanced>summary{font-size:13px;font-weight:600;color:var(--vscode-foreground);list-style:none;display:flex;align-items:center;gap:6px}
+details.advanced>summary::-webkit-details-marker{display:none}
+details.advanced>summary::before{content:"";width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .12s;margin-right:2px}
+details.advanced[open]>summary::before{transform:rotate(45deg)}
+details.advanced>.section:first-of-type{padding-top:12px}
+/* Tabs: three, and More. */
+.tabs{align-items:center;position:relative}
+.tabs-more{margin:0;position:relative}
+.tabs-more>summary{list-style:none;padding:7px 2px;color:var(--muted);font-size:inherit}
+.tabs-more>summary::-webkit-details-marker{display:none}
+.tabs-more>summary::after{content:" ▾";font-size:10px}
+.tabs-more[open]>summary{color:var(--vscode-foreground)}
+.tabs-menu{position:absolute;z-index:5;top:calc(100% + 4px);left:0;min-width:190px;display:grid;padding:4px;border:1px solid var(--pip-edge);border-radius:8px;background:var(--vscode-editorWidget-background,var(--vscode-editor-background));box-shadow:0 6px 20px #0005}
+.tabs .tabs-menu button{border:0;border-radius:5px;padding:7px 10px;text-align:left;color:var(--vscode-foreground)}
+.tabs .tabs-menu button:hover{background:var(--pip-wash)}
+.dialog{border-color:var(--pip-edge);border-radius:10px}
+.dialog .actions{gap:8px}
+.notice{border-radius:6px}
+.runner-menu{z-index:30}
+.tabs button[aria-pressed=true]{background:transparent;border-bottom-color:#7C5CFA}
+label>span{display:block}
+#new-pip{background:var(--pip-accent);border-color:var(--pip-accent);color:#fff}
+#new-pip:hover{background:var(--pip-accent-hover)}
+aside>button:not(.job){margin:6px 6px 0 0}
