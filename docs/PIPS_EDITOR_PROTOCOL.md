@@ -90,6 +90,11 @@ no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
 the approved Pip reviews after each new commit to `source_ref`.
 
+`always_allow_pip_app_action {action_id, expected_digest}` (API 41, local only) runs one pending
+action and returns `{action, grant}`; `list_pip_action_grants {pip_id}` and
+`revoke_pip_action_grant {pip_id, grant_id}` return `{pip_id, grants}`. The digest may carry
+`pending_actions` (drafts and prepared actions waiting).
+
 `set_pip_feedback {run_id, rating, note}` and `list_pip_feedback {pip_id}` (API 41, local
 only) rate a succeeded Personal task, audit or Quill draft and list the newest 20 ratings
 `{pip_id, feedback: [{run_id, rating, note, at}]}`. `rating` is `"up"`, `"down"` or null.

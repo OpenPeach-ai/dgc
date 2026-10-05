@@ -11,7 +11,8 @@ settings, finding outcomes and reviewed GitHub reads (`changes.github_plan`). Se
 
 `get_pip_usage` and `set_pip_daily_cap` read a Pip's token usage and set its daily limit. `export_pip` returns a Pip's
 job as a shareable file. `set_pip_feedback` rates a finished result up or down with a note that the Pip's later runs
-read; `list_pip_feedback` lists the ratings.
+read; `list_pip_feedback` lists the ratings. `always_allow_pip_app_action`, `list_pip_action_grants` and
+`revoke_pip_action_grant` let a Personal Pip run one kind of action without asking, and take it back.
 `get_pips_desktop_notifications` and `set_pips_desktop_notifications` read and set the
 runner's desktop notifications. `get_pips_keep_running` and `set_pips_keep_running` read and set the "keep Pips running"
 switch (local mutation; it never enables Pips or clears an emergency stop).

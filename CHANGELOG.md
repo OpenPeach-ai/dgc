@@ -63,6 +63,11 @@ permission mode, and anything that sends, books or runs on your behalf waits for
   previous result, so a watch says what changed and a digest doesn't repeat itself.
 - Rate a Pip's result: `dgc pips feedback RUN_ID up|down --note "…"`. Its later runs read your
   five newest ratings and notes as guidance; a rating never changes the job.
+- Always allow: approving a Pip's email, calendar event or connector action can also let that Pip
+  do the same kind of action again without asking, with the same connection, account and tool.
+  Its scheduled runs can now draft actions too; one you always allow runs after the run and you
+  are told after, anything else waits for you. `dgc pips app-action accept … --always`,
+  `dgc pips allowed PIP [--revoke GRANT_ID]`.
 - Token usage by Pip for the editor's Settings → Token usage (`get_pip_usage_report`): each
   Pip's tokens and runs for a range, as a part of everything DGC counted.
 - `dgc pips usage PIP` shows what a Pip's runs cost in tokens, today and over 30 days, counting

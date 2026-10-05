@@ -16,7 +16,7 @@ from .workspace_registry import RegistryError, identifier
 MAX_PAYLOAD = 20000
 MAX_ACTIONS = 10000
 COMMANDS = frozenset({'inspect_pip_connector_actions','propose_pip_connector_action','inspect_pip_calendar_connection','propose_pip_calendar_action','inspect_pip_send_connection','propose_pip_app_action','get_pip_app_action',
-                     'list_pip_app_actions','accept_pip_app_action','reject_pip_app_action'})
+                     'list_pip_app_actions','accept_pip_app_action','reject_pip_app_action','always_allow_pip_app_action'})
 SCHEMA = """
 CREATE TABLE pip_app_actions(
  id TEXT PRIMARY KEY, pip_id TEXT NOT NULL REFERENCES pips(id),
@@ -51,6 +51,19 @@ def _id(value, prefix):
 def _actor(actor):
     if actor not in ('local-console','editor-user'):
         raise RegistryError('local_only','External action reviews are available only in the local CLI and extension.')
+
+
+def _acting(actor, store=None, payload=None):
+    """The user, or a Pip's Always-allow grant covering exactly this action (pip_action_grants).
+    Only the runner acts as a grant; every control request is the user's (handle_control)."""
+    if isinstance(actor, str) and actor.startswith('pip-grant:'):
+        from .pip_action_grants import ACTOR, check
+        if not ACTOR.fullmatch(actor):
+            raise RegistryError('local_only','External action reviews are available only in the local CLI and extension.')
+        if payload is not None:
+            check(store, actor, payload)
+        return
+    _actor(actor)
 
 
 def _adapter(kind):
@@ -158,7 +171,7 @@ def get(store, action_id):
 
 
 def propose(store,source_run_id,server,connection_digest,account,schema_digest,message,request_key,actor,config,*,kind="gmail_send"):
-    _actor(actor)
+    _acting(actor)
     if kind not in ("gmail_send","calendar_create","connector_call"):raise RegistryError("invalid_app_action","Unknown external action.")
     adapter=_adapter(kind)
     content="call" if kind=="connector_call" else "event" if kind=="calendar_create" else "message"
@@ -180,6 +193,7 @@ def propose(store,source_run_id,server,connection_digest,account,schema_digest,m
     source=_source(store,source_run_id)
     payload=validate({'schema_version':3 if kind=='connector_call' else (4 if calendar.extended(message) else 2) if kind=='calendar_create' else 1,'kind':kind,'source':source,'server':server,
                       'connection_digest':connection_digest,'account':account,'schema_digest':schema_digest,content:message})
+    _acting(actor,store,payload)
     spec,fingerprint=apps.connection(config,server)
     if not (connector.supported(server,spec) if kind=='connector_call' else apps.supported(spec)) or fingerprint!=connection_digest:raise RegistryError('connection_changed','Inspect the selected connection again before reviewing an action.')
     with nullcontext() if store.db.in_transaction else store.registry.transaction():
@@ -198,13 +212,14 @@ def propose(store,source_run_id,server,connection_digest,account,schema_digest,m
 
 
 def _review(store, action_id, expected_digest, actor):
-    _actor(actor);value=get(store,action_id)
+    _acting(actor);value=get(store,action_id);_acting(actor,store,value['payload'])
     if not isinstance(expected_digest,str) or expected_digest!=value['digest']:
         raise RegistryError('action_conflict','Review this exact saved action before deciding.')
     return value
 
 
 def reject(store, action_id, expected_digest, actor):
+    _actor(actor)                       # rejecting is always the user's
     with store.registry.transaction():
         value=_review(store,action_id,expected_digest,actor)
         if value['status']=='rejected':return value

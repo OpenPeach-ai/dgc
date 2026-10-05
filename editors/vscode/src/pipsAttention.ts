@@ -23,7 +23,8 @@ export function pipsAttention(digest: any, previous: PipsAttentionState | undefi
     }
   }
   const reviews = (Number.isSafeInteger(digest.pending_reviews) ? digest.pending_reviews : 0)
-    + (Number.isSafeInteger(digest.pending_setups) ? digest.pending_setups : 0);
+    + (Number.isSafeInteger(digest.pending_setups) ? digest.pending_setups : 0)
+    + (Number.isSafeInteger(digest.pending_actions) ? digest.pending_actions : 0);
   const fresh = alerts.filter((id) => !before.alerts.includes(id));
   const state: PipsAttentionState = { alerts: [...before.alerts, ...fresh].slice(-MAX_REMEMBERED), reviews };
   const headline = typeof digest.headline === 'string' ? digest.headline.replace(/\s+/g, ' ').trim().slice(0, 200) : '';

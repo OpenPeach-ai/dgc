@@ -641,6 +641,25 @@ trigger controller record as an ordinary skip (a skipped occurrence does not run
 manual, chat, handoff and main-chat runs are not limited, and neither is a standalone
 Pulse schedule, which runs its reviewed commands without a model.
 
+**Always allow** (API 41). `always_allow_pip_app_action {action_id, expected_digest}` (local
+only) accepts one pending action like `accept_pip_app_action` and then saves a grant for its Pip:
+`{id: grant_<32 hex>, kind, server, connection_digest, account, schema_digest, tool, label,
+created_at, created_by}`, returned as `{action, grant}`. `list_pip_action_grants {pip_id}` and
+`revoke_pip_action_grant {pip_id, grant_id}` (local only) return `{pip_id, grants}`. Grants live
+in registry metadata (`pip_action_grant:<pip_id>:<grant_id>`, at most 20 per Pip), outside the
+job, and record `pip_action_granted` / `pip_action_grant_revoked`.
+
+A Personal task now pins `email_draft`, `calendar_draft`, `action_grants` (a summary) and, only
+when the Pip has a connector grant, a `connector_draft` snapshot; a handoff run pins none. Its
+worker may return `message_draft`, `calendar_draft` and `connector_action_draft`, which `finish`
+saves as drafts (actor `pip-<kind>:<run_id>`). After each finished run the runner calls
+`pip_action_grants.dispatch_for_run`: a draft whose kind, connection, account, tool and schema a
+grant matches (for connectors, the draft's own pinned digests too) is prepared and accepted as
+`pip-grant:<grant_id>`; `pip_app_actions` checks that grant against the exact payload, and only
+the runner uses that actor. Anything else stays a draft, and a failed match records
+`pip_action_grant_skipped`. The digest counts waiting drafts and actions as `pending_actions`,
+and the desktop notifier names each action a grant ran.
+
 **Token usage by Pip** (editor protocol, capability `pip_usage_report`). `get_pip_usage_report
 {request_id, range}` is answered by one `pip_usage_report {request_id, range, generated_at,
 timezone, all_tokens, totals: {input_tokens, output_tokens, runs}, by_pip: [{pip_id, name,

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
-    "list_pip_feedback", "export_pip", "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
+    "list_pip_action_grants", "list_pip_feedback", "export_pip", "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
     "get_pip_connector_draft", "list_pip_connector_drafts", "inspect_pip_connector_actions", "inspect_pip_calendar_connection", "get_pip_calendar_draft", "list_pip_calendar_drafts",
     "get_pip_message_draft", "list_pip_message_drafts",
     'inspect_pip_send_connection', 'get_pip_app_action', 'list_pip_app_actions',
@@ -58,7 +58,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
-    "set_pip_feedback", "set_pip_daily_cap", "set_pips_desktop_notifications", "set_pips_keep_running", "mark_pip_digest_seen", "set_pip_notify_settings",
+    "always_allow_pip_app_action", "revoke_pip_action_grant", "set_pip_feedback", "set_pip_daily_cap", "set_pips_desktop_notifications", "set_pips_keep_running", "mark_pip_digest_seen", "set_pip_notify_settings",
     "prepare_pip_connector_draft", "dismiss_pip_connector_draft", "propose_pip_connector_action", "propose_pip_calendar_action", "prepare_pip_calendar_draft", "dismiss_pip_calendar_draft",
     "prepare_pip_message_draft", "dismiss_pip_message_draft",
     'propose_pip_app_action', 'accept_pip_app_action', 'reject_pip_app_action',
@@ -158,11 +158,14 @@ READ_COMMANDS |= API37_READS
 MUTATION_COMMANDS |= API37_MUTATIONS
 # API 41: the daily digest, per-Pip notification settings and finding outcomes. Local
 # display state only; setting a threshold changes no job and grants nothing.
-API41_READS = frozenset({'list_pip_feedback', 'export_pip', 'get_pip_usage', 'get_pips_desktop_notifications', 'get_pips_keep_running', 'get_pip_digest', 'get_pip_notify_settings', 'get_pip_outcomes'})
-API41_MUTATIONS = frozenset({'set_pip_feedback', 'set_pip_daily_cap', 'set_pips_desktop_notifications', 'set_pips_keep_running', 'mark_pip_digest_seen', 'set_pip_notify_settings'})
+API41_READS = frozenset({'list_pip_action_grants', 'list_pip_feedback', 'export_pip', 'get_pip_usage', 'get_pips_desktop_notifications', 'get_pips_keep_running', 'get_pip_digest', 'get_pip_notify_settings', 'get_pip_outcomes'})
+API41_MUTATIONS = frozenset({'always_allow_pip_app_action', 'revoke_pip_action_grant', 'set_pip_feedback', 'set_pip_daily_cap', 'set_pips_desktop_notifications', 'set_pips_keep_running', 'mark_pip_digest_seen', 'set_pip_notify_settings'})
 READ_COMMANDS |= API41_READS
 MUTATION_COMMANDS |= API41_MUTATIONS
 COMMAND_FIELDS = {
+    'list_pip_action_grants': frozenset({'pip_id'}),
+    'always_allow_pip_app_action': frozenset({'action_id', 'expected_digest'}),
+    'revoke_pip_action_grant': frozenset({'pip_id', 'grant_id'}),
     'list_pip_feedback': frozenset({'pip_id'}),
     'set_pip_feedback': frozenset({'run_id', 'rating', 'note'}),
     'export_pip': frozenset({'pip_id'}),

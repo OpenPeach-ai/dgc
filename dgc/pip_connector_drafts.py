@@ -90,8 +90,8 @@ def snapshot(config,*,inspect=None,clock=time.monotonic):
 def pin(manifest):
     value=manifest.get('connector_draft')
     if value is None:return None
-    if manifest.get('run_kind')!='conversation' or manifest.get('source_policy')!={'mode':'personal'}:
-        raise RegistryError('invalid_connector_context','Connector drafting belongs to a Personal conversation.')
+    if manifest.get('run_kind') not in ('conversation','personal_task') or manifest.get('source_policy')!={'mode':'personal'}:
+        raise RegistryError('invalid_connector_context','Connector drafting belongs to a Personal Pip.')
     return validate_snapshot(value)
 
 

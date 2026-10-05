@@ -994,6 +994,27 @@ export function pipUsage(value, pip) {
   return value;
 }
 
+// Always allow (API 41): what a Personal Pip may run without asking, each pinned to one action's
+// kind, connection, account, tool and schema. Only the user creates or removes one.
+function actionGrantRow(g) {
+  const hash = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+  const text = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+  return record(g) && Object.keys(g).sort().join() === 'account,connection_digest,created_at,created_by,id,kind,label,schema_digest,server,tool'
+    && /^grant_[a-f0-9]{32}$/.test(g.id) && ['gmail_send', 'calendar_create', 'connector_call'].includes(g.kind)
+    && text(g.server, 80) && text(g.account, 160) && text(g.tool, 160) && text(g.label, 200) && text(g.created_at, 40)
+    && ['editor-user', 'local-console'].includes(g.created_by) && hash(g.connection_digest) && hash(g.schema_digest);
+}
+export function actionGrants(value, pip) {
+  if (!record(value) || Object.keys(value).sort().join() !== 'grants,pip_id' || value.pip_id !== pip
+    || !Array.isArray(value.grants) || value.grants.length > 20 || !value.grants.every(actionGrantRow))
+    throw Error("This Pip's allowed actions are invalid. Refresh this Pip.");
+  return value;
+}
+export function actionGrant(value) {
+  if (!actionGrantRow(value)) throw Error('The allowed action DGC returned is invalid. Refresh this Pip.');
+  return value;
+}
+
 // The user's ratings of a Pip's results (API 41), newest first. Its later runs read the newest five.
 export function pipFeedback(value, pip) {
   const fail = () => { throw Error("This Pip's ratings are invalid. Refresh this Pip."); };
@@ -1026,7 +1047,10 @@ export function pipOutcomes(value, pip) {
 export function pipDigest(value) {
   if (value === null) return null;
   const fail = () => { throw Error('The Pips digest is invalid. Update DGC or open the Pips view.'); };
-  if (!digestKeys(value, ['schema_version','since','until','first','due','reason','headline','pips','omitted_pips','failed_runs','pending_reviews','pending_setups','truncated'])
+  // pending_actions (drafts and prepared actions waiting for you) came later in API 41; a digest may lack it.
+  const base = ['schema_version','since','until','first','due','reason','headline','pips','omitted_pips','failed_runs','pending_reviews','pending_setups','truncated'];
+  if (!(digestKeys(value, base) || digestKeys(value, [...base, 'pending_actions']))
+    || (Object.hasOwn(value, 'pending_actions') && !digestCount(value.pending_actions))
     || value.schema_version !== 1 || !digestTime(value.since) || !digestTime(value.until) || value.since > value.until
     || typeof value.first !== 'boolean' || typeof value.due !== 'boolean' || ![null,'alert','daily'].includes(value.reason) || (value.reason !== null) !== value.due
     || typeof value.headline !== 'string' || !value.headline || value.headline.length > 400 || !Array.isArray(value.pips) || value.pips.length > 20

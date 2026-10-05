@@ -148,7 +148,7 @@ class ChatSetupTests(unittest.TestCase):
         task = self.store.enqueue(job['id'], 'task', 'user', self.cfg)
         raw = json.loads(self.registry.db.execute('SELECT manifest FROM pip_runs WHERE id=?', (task['id'],)).fetchone()[0])
         def chat(client, messages, tools=None, **kwargs):
-            self.assertFalse(tools)
+            self.assertTrue({t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event'}, 'A Personal task may only draft')
             self.assertIn('No spending', json.dumps(messages))
             self.assertIn('historical requests are not new actions', json.dumps(messages))
             return ChatResult(content='Walk and read this morning, without spending.')

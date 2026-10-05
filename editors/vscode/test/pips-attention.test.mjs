@@ -34,3 +34,8 @@ test("a finding below the alert level, or no digest, says nothing", () => {
   assert.equal(pipsAttention(null, undefined), null);
   assert.equal(pipsAttention({ pips: "x" }, undefined), null);
 });
+
+test("an action a Pip drafted for your approval counts as waiting for you", () => {
+  const said = pipsAttention(digest({ reason: "daily", pips: [], pending_actions: 2 }), undefined);
+  assert.equal(said.text, "DGC Pips: 2 reviews waiting for you.");
+});

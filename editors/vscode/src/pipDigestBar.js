@@ -52,7 +52,7 @@ export function mountDigestBar(options) {
     panel.append(list);
    }
   }
-  const waiting=digest.pending_reviews+digest.pending_setups;
+  const waiting=digest.pending_reviews+digest.pending_setups+(digest.pending_actions||0);
   if(waiting)panel.append(node('p','pips-digest-note',`${waiting} review${waiting===1?'':'s'} waiting for you in Pips.`));
   if(digest.omitted_pips)panel.append(node('p','pips-digest-note',`And ${digest.omitted_pips} more Pips. Open Pips to see them all.`));
  }

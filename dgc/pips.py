@@ -32,7 +32,8 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_message_draft", "list_pip_message_drafts", "prepare_pip_message_draft", "dismiss_pip_message_draft",
     "get_pip_connector_draft", "list_pip_connector_drafts", "prepare_pip_connector_draft", "dismiss_pip_connector_draft",
     "get_pip_calendar_draft", "list_pip_calendar_drafts", "prepare_pip_calendar_draft", "dismiss_pip_calendar_draft",
-    "inspect_pip_send_connection", "propose_pip_app_action", "get_pip_app_action", "list_pip_app_actions", "accept_pip_app_action", "reject_pip_app_action",
+    "inspect_pip_send_connection", "propose_pip_app_action", "get_pip_app_action", "list_pip_app_actions", "accept_pip_app_action", "reject_pip_app_action", "always_allow_pip_app_action",
+    "list_pip_action_grants", "revoke_pip_action_grant",
     "list_pip_connections", "inspect_pip_connection", "list_pip_accounts",
     "list_pip_setups", "get_pip_setup", "accept_pip_setup", "reject_pip_setup", "revise_pip_setup",
     "list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context",
@@ -83,6 +84,8 @@ _COMMAND_ARGS = {
     "get_pip_app_action": {"action_id"},
     "list_pip_app_actions": {"pip_id", "before_id", "limit"},
     "accept_pip_app_action": {"action_id", "expected_digest"},
+    "always_allow_pip_app_action": {"action_id", "expected_digest"},
+    "list_pip_action_grants": {"pip_id"}, "revoke_pip_action_grant": {"pip_id", "grant_id"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_connections": set(),
     "inspect_pip_connection": {"server"},
@@ -930,6 +933,13 @@ class PipStore:
             if self.db.in_transaction:raise RegistryError('preparation_required','Discover connector metadata outside the queue transaction.')
             from .pip_connector_drafts import snapshot
             connector_context = snapshot(frozen_config)
+        elif personal and handoff is None and not self.db.in_transaction:
+            # A Personal task drafts connector actions only once the user has always allowed one for
+            # this Pip: discovery talks to the connector, which an ordinary scheduled run need not do.
+            from .pip_action_grants import covers
+            if covers(self.registry, pip_id, 'connector_call'):
+                from .pip_connector_drafts import snapshot
+                connector_context = snapshot(frozen_config)
         from .pip_source_storage import prepare as prepare_source, check_root
         from .redaction import secret_values
         run_id = handoff['run_id'] if handoff is not None else identifier('run')
@@ -1103,10 +1113,23 @@ class PipStore:
                         manifest['email_draft'] = {'schema_version':1}
                         manifest['calendar_draft'] = {'schema_version':1}
                         manifest['connector_draft'] = connector_context
+                        from .pip_action_grants import summary as grant_summary
+                        manifest['action_grants'] = grant_summary(self.registry, pip_id)
                 elif run_kind == 'personal_task':
                     from .pip_chat_setup import task_reference
                     manifest['personal_history'] = task_reference(self, latest, model['context_size'],
                         secrets=secret_values(frozen_config))
+                    # A Personal task may draft an email, an event or a connector action like its chat
+                    # can. One the user always allowed for this Pip runs after the run; any other
+                    # waits for their approval (pip_action_grants).
+                    # A handoff run only works on another Pip's shared result: no drafting there.
+                    if handoff is None:
+                        from .pip_action_grants import summary as grant_summary
+                        manifest['email_draft'] = {'schema_version':1}
+                        manifest['calendar_draft'] = {'schema_version':1}
+                        if connector_context is not None:
+                            manifest['connector_draft'] = connector_context
+                        manifest['action_grants'] = grant_summary(self.registry, pip_id)
                     previous = (_previous_task_result(self.registry, pip_id, secret_values(frozen_config))
                                 if handoff is None else None)
                     if previous is not None:
@@ -1417,7 +1440,7 @@ class PipStore:
             self.db.execute("UPDATE pip_runs SET status=?,finished_at=?,result=?,error=? WHERE id=?",
                             (status, self.registry.clock(), result_json,
                              _json(error) if error else None, run_id))
-            if status == 'succeeded' and run['manifest'].get('run_kind') == 'conversation':
+            if status == 'succeeded' and run['manifest'].get('run_kind') in ('conversation', 'personal_task'):
                 from .pip_message_drafts import commit_reply
                 commit_reply(self, run_id, result)
             if checkpoint_audit:
@@ -1902,6 +1925,17 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 role_instructions = 'Your character is ' + selected_type.name + '. Your job is defined by the approved goal, not a coding preset.'
                 if chat_setup is not None and chat_setup['allowed']:
                     base_instructions += '\n' + pip_chat_setup.NOTICE
+                if kind == 'personal_task' and (email_drafting or calendar_drafting or connector_context is not None):
+                    allowed = manifest.get('action_grants') or []
+                    base_instructions += ('\nThis run is unattended. Draft an action only when your approved goal calls for it. '
+                        + ('The user always allows these for this Pip, so after your result DGC runs a matching draft without asking: '
+                           + _json(allowed) + '. Any other draft waits for the user to approve it. ' if allowed else
+                           'Every draft waits for the user to approve it after this run. ')
+                        + 'Say what you drafted; never claim it ran.')
+                elif kind == 'conversation' and manifest.get('action_grants'):
+                    base_instructions += ('\nThe user always allows these for this Pip, so after your reply DGC runs a matching '
+                        'draft without asking: ' + _json(manifest['action_grants']) + '. Any other draft waits for the user. '
+                        'Never claim a draft ran.')
                 if email_drafting:
                     base_instructions += '\n' + pip_message_drafts.NOTICE
                 if calendar_drafting:
@@ -2183,6 +2217,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     raise RegistryError('model_failed', 'The conversation was cancelled before its checkpoint completed.')
         elif kind == "personal_task":
             result = {"text": pip_chat.validate_text(final, reply=True), "external_actions": False}
+            # Drafts only: nothing ran. The runner runs one a grant covers after this result is saved.
+            for field, candidate in (('message_draft', email_candidate), ('calendar_draft', calendar_candidate),
+                                     ('connector_action_draft', connector_candidate)):
+                if candidate is not None:
+                    result[field] = candidate
         elif execution:
             # Freeform model prose is a preview, not the execution evidence
             # contract. Keep its bounded prefix without discarding actual edits
@@ -2671,6 +2710,15 @@ def _execute_run(registry, row, config):
             pass
 
 
+def _run_granted_actions(registry, config, run_id):
+    """Actions the finished run drafted that the user always allowed for its Pip. Never raises."""
+    try:
+        from .pip_action_grants import dispatch_for_run
+        dispatch_for_run(registry, config, run_id)
+    except Exception:
+        pass
+
+
 def _drain(config, directory):
     from .scheduler import named_process_lock
     lease = named_process_lock("pips-runner", str(directory))
@@ -2694,6 +2742,7 @@ def _drain(config, directory):
                 try:
                     result = _execute_run(registry, row, config)
                     store.finish(row["id"], result=result)
+                    _run_granted_actions(registry, config, row["id"])
                 except Exception as exc:
                     from .redaction import redact_text, secret_values
                     store.finish(row["id"], error={"code": getattr(exc, "code", "run_failed"),
@@ -2873,7 +2922,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "export_pip", "set_pip_feedback", "list_pip_feedback", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -2963,8 +3012,22 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result=pip_app_actions.history(store,pip_id,request.get('before_id'),request.get('limit',20))
                 elif command == 'reject_pip_app_action':
                     result={'action':pip_app_actions.reject(store,request.get('action_id'),request.get('expected_digest'),actor)}
+                elif command == 'always_allow_pip_app_action':
+                    # Send/Run once, then let this Pip run the same kind of action, with the same
+                    # connection, account and tool, without asking. No grant if this one cannot run.
+                    from .pip_action_grants import grant_from_action
+                    done=pip_app_actions.accept(store,request.get('action_id'),request.get('expected_digest'),actor,config)
+                    result={'action':done,'grant':grant_from_action(store,done['id'],done['digest'],actor)}
                 else:
                     result={'action':pip_app_actions.accept(store,request.get('action_id'),request.get('expected_digest'),actor,config)}
+            elif command in ('list_pip_action_grants', 'revoke_pip_action_grant'):
+                from . import pip_action_grants
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', 'Only you can see or change what a Pip may do without asking, on this computer.')
+                store._job(pip_id)
+                grants = (pip_action_grants.revoke(registry, pip_id, request.get('grant_id'), actor)
+                          if command == 'revoke_pip_action_grant' else pip_action_grants.list_grants(registry, pip_id))
+                result = {'pip_id': pip_id, 'grants': grants}
             elif command in ('list_pip_connections', 'inspect_pip_connection', 'list_pip_accounts'):
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', 'Manage shared app connections on the computer.')

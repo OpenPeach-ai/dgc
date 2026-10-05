@@ -550,8 +550,9 @@ reported, and the run continues.
 ### Drafts and reviewed sends
 
 Ask a Personal Pip, in its own chat, to draft an email, a calendar event or a
-connector action. The main chat can also draft them from a completed Personal
-result or reply. A draft is only text: it can't choose an account or send anything.
+connector action, or give it a job that calls for one: its scheduled runs can draft
+them too. The main chat can also draft them from a completed Personal result or
+reply. A draft is only text: it can't choose an account or send anything.
 
 Sending takes two separate decisions:
 
@@ -574,6 +575,30 @@ The CLI has the same steps: `dgc pips email-draft`, `calendar-draft` and
 `connector-draft` (`list`, `show`, `prepare`, `dismiss`), then `dgc pips app-action
 show` and `dgc pips app-action accept ACTION_ID --expected-digest DIGEST`.
 
+### Always allow
+
+Beside **Send once**, **Create once** and **Run once** is **Always allow**: it runs
+this action and lets the Pip do the same kind of action again without asking, with
+the same connection, account and tool. After a later run, the Pip drafts it and DGC
+runs it straight away, then tells you: a desktop notification says what the Pip did,
+and the action is in its reviews like any other. Anything the Pip drafts that no
+Always allow covers still waits for you.
+
+Always allow is pinned to what you approved. If the connection, account, tool or the
+tool's inputs change, it no longer matches, and the action waits for you again.
+Nothing else grants it: not the chat, not auto mode, not a Pip. Money is not special:
+a trade or a payment through a connected app is an action like any other, so allow
+it only for a tool you trust to act on its own.
+
+See and take back what a Pip may do in its **Job** tab, under **Allowed without
+asking** (**Stop allowing**), or in the terminal:
+
+```sh
+dgc pips app-action accept ACTION_ID --expected-digest DIGEST --always
+dgc pips allowed PIP                      # what runs without asking
+dgc pips allowed PIP --revoke GRANT_ID
+```
+
 ## What Pips never do
 
 - **Change your project.** No Pip edits your working files, commits, merges,
@@ -592,10 +617,11 @@ show` and `dgc pips app-action accept ACTION_ID --expected-digest DIGEST`.
 - **Act outside their reviewed reads.** Project Pips read only their approved
   source. Personal Pips see only the app and web reads you approved.
 - **Send, create or call without you.** Every email, event and connector call is a
-  single attempt you approved on its exact content.
-- **Buy, pay or book on their own.** A Pip has no tool that can do this. A connector
-  action you approve runs the exact tool call you reviewed, so check what that
-  tool does before you approve it.
+  single attempt you approved on its exact content, or one you chose to **Always
+  allow** for that Pip, connection, account and tool.
+- **Buy, pay or book on their own,** unless you allowed it. A Pip has no tool of its
+  own for this; a connector action runs the exact tool call you reviewed, or one you
+  always allow, so check what that tool does before you allow it.
 - **Use a cloud service of DGC's.** There is no Pips account or hosted runner.
 
 ## Privacy and where state lives

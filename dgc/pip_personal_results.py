@@ -4,7 +4,9 @@ from .workspace_registry import RegistryError
 
 
 def validate(result):
-    if (not isinstance(result, dict) or set(result)-{'snapshot'} != {'text', 'external_actions', 'tools_called', 'usage'}
+    # Drafts are inert: commit_reply validates and saves each; the runner runs one only on a grant.
+    drafts = {'message_draft', 'calendar_draft', 'connector_action_draft'}
+    if (not isinstance(result, dict) or set(result)-{'snapshot'}-drafts != {'text', 'external_actions', 'tools_called', 'usage'}
             or result.get('external_actions') is not False or type(result.get('tools_called')) is not int
             or result['tools_called'] != 0):
         raise RegistryError('invalid_result', 'A personal result must be text with no executed tools or external actions.')

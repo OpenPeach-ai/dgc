@@ -113,10 +113,13 @@ class Notifier:
         self.last = now
         alerts, headline = self._alerts(registry)
         reviews = self._reviews(registry)
+        from .pip_action_grants import ran_on_their_own
+        ran = ran_on_their_own(registry)
         seen = self._seen(registry)
         new_alerts = [i for i in alerts if i not in seen["alerts"]]
         new_reviews = [i for i in reviews if i not in seen["reviews"]]
-        if not new_alerts and not new_reviews:
+        new_ran = [(i, said) for i, said in ran if i not in seen["ran"]]
+        if not new_alerts and not new_reviews and not new_ran:
             return None
         shown, body = False, None
         # While off, what arrives is still marked seen, so turning it on later announces only
@@ -124,6 +127,9 @@ class Notifier:
         if enabled(registry):
             if new_alerts:
                 body = headline
+            elif new_ran:
+                # Something a Pip did on its own: say what, so it is never a surprise.
+                body = new_ran[0][1] + (f" And {len(new_ran) - 1} more." if len(new_ran) > 1 else "")
             else:
                 count = len(reviews)
                 body = f"{count} review{'' if count == 1 else 's'} waiting for you. Open the Pips view to decide."
@@ -131,6 +137,7 @@ class Notifier:
         # Remembered even when the system could not show it: it is not retried every minute.
         seen["alerts"] = (seen["alerts"] + new_alerts)[-MAX_SEEN:]
         seen["reviews"] = (seen["reviews"] + new_reviews)[-MAX_SEEN:]
+        seen["ran"] = (seen["ran"] + [i for i, _ in new_ran])[-MAX_SEEN:]
         with registry.transaction():
             registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (SEEN_KEY, json.dumps(seen)))
             if body is not None:
@@ -158,6 +165,10 @@ class Notifier:
         ids += ["setup:" + row[0] for row in registry.db.execute(
             "SELECT id FROM pip_setup_proposals WHERE status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 20",
             (now,)).fetchall()]
+        for table in ("pip_message_drafts", "pip_calendar_drafts", "pip_connector_drafts"):
+            ids += ["draft:" + row[0] for row in registry.db.execute(
+                f"SELECT id FROM {table} WHERE status='pending' AND expires_at>? AND actor LIKE 'pip-%' "
+                "ORDER BY created_at DESC LIMIT 20", (now,)).fetchall()]
         return ids
 
     def _seen(self, registry):
@@ -167,4 +178,5 @@ class Notifier:
         except ValueError:
             value = {}
         return {"alerts": [i for i in value.get("alerts", []) if isinstance(i, str)],
-                "reviews": [i for i in value.get("reviews", []) if isinstance(i, str)]}
+                "reviews": [i for i in value.get("reviews", []) if isinstance(i, str)],
+                "ran": [i for i in value.get("ran", []) if isinstance(i, str)]}

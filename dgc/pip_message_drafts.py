@@ -77,7 +77,7 @@ def validate_pin(manifest,*,kind='email'):
     _spec(kind)
     value=manifest.get(kind+'_draft')
     if value is None:return False
-    if value!={'schema_version':1} or type(value.get('schema_version')) is not int or manifest.get('run_kind')!='conversation' or manifest.get('source_policy')!={'mode':'personal'}:
+    if value!={'schema_version':1} or type(value.get('schema_version')) is not int or manifest.get('run_kind') not in ('conversation','personal_task') or manifest.get('source_policy')!={'mode':'personal'}:
         raise RegistryError('invalid_request','Drafting belongs only to its pinned Personal conversation.')
     return True
 
@@ -168,7 +168,7 @@ def dismiss(store,draft_id,expected_digest,actor,*,kind='email'):
 
 def prepare(store,draft_id,expected_digest,server,connection_digest,account,schema_digest,message,actor,config,*,kind='email'):
     table,prefix,content,actor_kind=_spec(kind)
-    actions._actor(actor)
+    actions._acting(actor)
     with store.registry.transaction():
         draft=get(store,draft_id,kind=kind)
         if draft['digest']!=expected_digest:raise RegistryError('conflict','Review the exact saved draft.')
@@ -200,9 +200,16 @@ def _commit_reply(store,run_id,result,kind):
         validate_message(value,kind='connector')
         if candidate({'server':value['server'],**value['call']},context)!=value:raise RegistryError('permission_denied','The connector draft does not match its pinned descriptors.')
     elif not validate_pin(run['manifest'],kind=kind):raise RegistryError('permission_denied','This conversation did not support these drafts.')
-    from .pip_chat_setup import validate_pin as setup_pin
-    pin=setup_pin(run['manifest']);job=store._job(run['pip_id'])
-    if pin is None or job['current_version']!=pin['job_version'] or job['lifecycle_revision']!=pin['lifecycle_revision'] or job['status']=='archived':
+    job=store._job(run['pip_id'])
+    if run['manifest'].get('run_kind')=='personal_task':
+        # An unattended task has no chat setup pin: its own job version is the check. save()
+        # re-reads the source, and an action re-checks the lifecycle before it runs.
+        stale=job['current_version']!=run['manifest'].get('job_version') or job['status']=='archived'
+    else:
+        from .pip_chat_setup import validate_pin as setup_pin
+        pin=setup_pin(run['manifest'])
+        stale=pin is None or job['current_version']!=pin['job_version'] or job['lifecycle_revision']!=pin['lifecycle_revision'] or job['status']=='archived'
+    if stale:
         store.registry.event(run['workspace_id'],('pip_connector_draft_stale' if kind=='connector' else 'pip_calendar_draft_stale' if kind=='calendar' else 'pip_message_draft_stale'),pip_id=run['pip_id'],run_id=run_id,payload={})
         return
     import hashlib

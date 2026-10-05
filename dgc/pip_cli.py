@@ -118,7 +118,10 @@ def parser():
         else:
             item.add_argument('action_id')
             if action in ('accept','reject'):item.add_argument('--expected-digest',required=True)
+            if action=='accept':item.add_argument('--always',action='store_true',help="also let this Pip run the same kind of action, with this connection, account and tool, without asking")
             if action=='accept':item.add_argument('--yes',action='store_true',help='confirm one attempt for the exact displayed external action')
+    allowed=command('allowed',"what a Pip may do without asking (Always allow); --revoke takes one back")
+    job(allowed);allowed.add_argument('--revoke',metavar='GRANT_ID',help='stop allowing this action without asking')
     command("types", "list Pip characters and the source-only roles available on this runner")
     command("workspaces", "list registered local workspaces")
     identity = command("workspace", "inspect session identity, backfill history, or repair a moved directory")
@@ -564,7 +567,7 @@ def _request(args):
         return request
     if name == 'app-action':
         request['type']={'inspect':'inspect_pip_send_connection','propose':'propose_pip_app_action','show':'get_pip_app_action',
-                         'list':'list_pip_app_actions','accept':'accept_pip_app_action','reject':'reject_pip_app_action'}[args.app_action]
+                         'list':'list_pip_app_actions','accept':'always_allow_pip_app_action' if getattr(args,'always',False) else 'accept_pip_app_action','reject':'reject_pip_app_action'}[args.app_action]
         if getattr(args,'kind',None)=='calendar_create':request['type']={'inspect':'inspect_pip_calendar_connection','propose':'propose_pip_calendar_action'}[args.app_action]
         keys=('server','source_run_id','connection_digest','account','schema_digest','request_key','action_id','expected_digest','pip_id','before_id','limit')
         if getattr(args,'kind',None)=='connector_call':
@@ -573,6 +576,12 @@ def _request(args):
         if args.app_action=='propose':
             if args.kind!='connector_call' and not args.account:raise ValueError('--account is required for email and calendar actions.')
             request[{'gmail_send':'message','calendar_create':'event','connector_call':'call'}[args.kind]]=_read_action_json(args)
+    elif name == "allowed":
+        request["type"] = "revoke_pip_action_grant" if args.revoke else "list_pip_action_grants"
+        request["pip_id"] = args.pip_id
+        if args.revoke:
+            request["grant_id"] = args.revoke
+        return request
     elif name == "setup":
         request["type"] = {"list": "list_pip_setups", "show": "get_pip_setup",
                            "accept": "accept_pip_setup", "reject": "reject_pip_setup"}[args.setup_action]
@@ -767,6 +776,10 @@ def usage_text(item) -> str:
 
 
 def _format(value):
+    if set(value) == {"pip_id", "grants"}:
+        if not value["grants"]:
+            return "Nothing runs without asking: every action this Pip drafts waits for you."
+        return "Runs without asking:\n" + "\n".join(f"- {g['label']} (account {g['account']}) · {g['id']}" for g in value["grants"])
     if set(value) == {"pip_id", "feedback"}:
         rows = value["feedback"]
         if not rows:
@@ -1478,6 +1491,8 @@ def agent_shell_allows(args) -> bool:
         return args.state is None
     if args.command == "usage":
         return args.daily_limit is None
+    if args.command == "allowed":
+        return args.revoke is None
     if args.command == "memory" and args.memory_action == "statements":
         return args.statement_action in ("anchor", "list")   # record and revoke are the user's
     spec = _AGENT_SHELL_READ_ACTIONS.get(args.command)
@@ -1591,6 +1606,7 @@ def handle_command(config, argv, *, in_chat=False):
                 print(terminal_safe_text(_format(review['result'])),file=sys.stderr,flush=True)
                 if not args.yes:
                     if not sys.stdin.isatty():raise RegistryError('confirmation_required','Review the displayed account and exact action, then repeat with --yes to authorize one attempt.')
+                    if getattr(args,'always',False):print('Always allow: this Pip will also run this kind of action, with this connection, account and tool, without asking. Take it back with dgc pips allowed PIP --revoke.',file=sys.stderr)
                     try:answer=input('Run this exact connector action once? [y/N] ' if saved['payload']['kind']=='connector_call' else ('Create this exact event/series and send the listed invitations once? [y/N] ' if saved['payload']['event'].get('send_invitations') else 'Create this exact calendar event/series once? [y/N] ') if saved['payload']['kind']=='calendar_create' else 'Send this exact message once? [y/N] ').strip().lower()
                     except EOFError:answer=''
                     if answer not in ('y','yes'):

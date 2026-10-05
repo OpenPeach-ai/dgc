@@ -82,7 +82,8 @@ class PersonalTests(unittest.TestCase):
             def chat(client,messages,tools=None,**kwargs):
                 calls.append(messages)
                 self.assertEqual([t['function']['name'] for t in (tools or [])],
-                                 ['draft_pip_change', 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action'] if chatting else [])
+                                 ['draft_pip_change', 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action'] if chatting
+                                 else ['draft_email', 'draft_calendar_event'])   # a task may only draft (no connector grant here)
                 self.assertIn('UNTRUSTED_REFERENCE_SENTINEL',json.dumps(messages))
                 return ChatResult(content='Here is a suggested plan. No messages were sent.')
             with patch.dict(os.environ,{'DGC_SESSION_POLICY':pips._json(pips.native_policy(personal=True))}), \
@@ -146,7 +147,7 @@ from dgc.pips import _worker_main
 import json
 
 def chat(self,messages,tools=None,**kwargs):
-    assert not tools, 'Personal workers must have no tool catalog'
+    assert {t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event'}, 'A Personal task may only draft: no tool reads or runs anything'
     reference=json.dumps(messages)
     assert 'Untrusted connected-app reference data' in reference, 'Reference envelope missing'
     assert 'GMAIL_FETCH_EMAILS' in reference, 'Read tool source missing'

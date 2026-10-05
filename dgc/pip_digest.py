@@ -326,20 +326,22 @@ def _build(registry, config=None) -> dict:
         item["new_findings"] = item["new_findings"][:MAX_FINDINGS]
 
     reviews = pending_reviews(registry, limit=1)["total_pending"]
+    from .pip_action_grants import pending_count
+    actions = pending_count(registry, until_s)
     setups = registry.db.execute("SELECT count(*) FROM pip_setup_proposals WHERE status='pending' AND expires_at>?",
                                  (until_s,)).fetchone()[0]
     ordered = sorted(pips.values(), key=lambda p: (not p["alert"], -p["new_total"], -p["runs"]["failed"],
                                                    -sum(p["runs"].values()), p["name"]))
     failed = sum(p["runs"]["failed"] for p in ordered)
     alert = any(p["alert"] for p in ordered)
-    anything = bool(ordered) or reviews or setups
+    anything = bool(ordered) or reviews or setups or actions
     today = local_day(now)
     daily = anything and (state is None or state["seen_day"] != today)
     return {"schema_version": 1, "since": since_s, "until": until_s, "first": state is None,
             "due": bool(alert or daily), "reason": "alert" if alert else "daily" if daily else None,
-            "headline": _headline(ordered, failed, reviews + setups),
+            "headline": _headline(ordered, failed, reviews + setups + actions),
             "pips": ordered[:MAX_PIPS], "omitted_pips": max(0, len(ordered) - MAX_PIPS),
-            "failed_runs": failed, "pending_reviews": reviews, "pending_setups": setups,
+            "failed_runs": failed, "pending_reviews": reviews, "pending_setups": setups, "pending_actions": actions,
             "truncated": truncated}
 
 

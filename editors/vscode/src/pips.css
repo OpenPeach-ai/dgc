@@ -101,3 +101,6 @@
 .usage-chart{display:block;width:100%;max-width:252px;height:40px;margin:4px 0 10px}.usage-bar{fill:var(--vscode-charts-purple,#8b7cff)}.usage-bar.empty{fill:var(--line)}.usage-cap{stroke:var(--vscode-charts-orange,#d1902b);stroke-width:1;stroke-dasharray:3 2}
 #usageLimit{max-width:16rem}
 .feedback .thumb{display:inline-flex;align-items:center;gap:6px}.feedback .thumb.is-on{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border-color:transparent}.feedback textarea{width:100%;min-height:44px;resize:vertical}.feedback label{display:block;margin:10px 0 4px}
+
+/* Allowed without asking: one row per Always-allow grant. */
+.grant-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid var(--line)}

@@ -6,7 +6,7 @@ import './pipsTranscript.css';
 import {messageMarkup,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback} from './pipsModel.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -368,6 +368,30 @@ function saveFeedback(rating){
   feedbackState.value=value;draft.feedbackNote=mine?.note??'';
   S.notice=rating===null?'Rating cleared.':`Saved. Its next runs will read your ${rating==='up'?'thumbs up':'thumbs down'}${note?' and note':''}.`;});
 }
+// Allowed without asking (API 41): a Personal Pip's Always-allow grants, each with Stop allowing.
+let grantsState={pip:'',value:null,loading:false,error:'',token:''};
+async function loadGrants(){
+ const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||grantsState.loading&&grantsState.pip===pip)return;
+ const token=scope();grantsState={pip,value:null,loading:true,error:'',token};
+ try{const value=actionGrants(await send('list_pip_action_grants',{pip_id:pip}),pip);if(token!==scope()||S.selected!==pip)return;grantsState.value=value;}
+ catch(error){if(token===scope()&&S.selected===pip)grantsState.error=errorText(error);}
+ finally{if(grantsState.token===token){grantsState.loading=false;if(token!==scope()||S.selected!==pip)grantsState.pip='';render();}}
+}
+function grantsMarkup(){
+ if(S.apiVersion<41||!S.pip||S.pip.source_policy?.mode!=='personal')return '';
+ if(grantsState.pip!==S.selected){void loadGrants();return '';}
+ const g=grantsState.value;
+ if(!g)return grantsState.error?`<section class="section" aria-label="Allowed without asking"><h2>Allowed without asking</h2>${errorMarkup(grantsState.error)}</section>`:'';
+ const off=S.busy||!usable();
+ return `<section class="section" aria-label="Allowed without asking"><h2>Allowed without asking</h2>${g.grants.length
+   ?`<p class="muted">When this Pip drafts one of these, it runs after the run and you are told after. Anything else waits for you.</p>${g.grants.map(x=>`<div class="grant-row"><span>${esc(x.label)} <span class="muted">· account ${esc(x.account)}</span></span><button type="button" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></div>`).join('')}`
+   :'<p class="muted">Nothing. Every email, event or app action this Pip drafts waits for you. Choose <b>Always allow</b> when you approve one to let it do that kind of action on its own.</p>'}</section>`;
+}
+function revokeGrant(grantId){
+ const pip=S.selected;if(S.apiVersion<41||!grantsState.value||grantsState.pip!==pip)return;
+ const label=grantsState.value.grants.find(x=>x.id===grantId)?.label||'that action';
+ void mutate({type:'revoke_pip_action_grant',pip_id:pip,grant_id:grantId},result=>{grantsState.value=actionGrants(result,pip);S.notice=`This Pip will ask you again before: ${label}.`;});
+}
 // "200k", "1.5m", "250,000" or empty (no limit). Null for empty; undefined when it is not a number.
 function parseTokens(text){
  const raw=String(text||'').trim().toLowerCase().replace(/[,_\s]/g,'');
@@ -469,7 +493,7 @@ function reviewLifecycle(restore){
 }
 function jobSettingsMarkup(){
   if(archived())return `<section class="section"><h2>Archived job</h2><p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} · ${esc(modelLabel(S.pip.model_choice))}</p>${lifecycleMarkup()}</section>`;
-  return `<section class="section"><h2>Job and source</h2>${S.apiVersion>=23?button('setup-in-chat','Change setup in chat',S.busy||!usable()):''}<p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} ${personalPip()?'Conversations and scheduled tasks use the details you provide and any separately reviewed app reads. No files or external actions.':pulsePip(S.pip)?'Conversations use read-only tools. A reviewed command plan enables model-free manual and calendar runs on API 21. Separately approved handoffs remain independent.':executionPip(S.pip)?'Conversations use read-only tools. Every edit or test run requires its own reviewed handoff.':documentationPip(S.pip)?'Quill prepares private drafts. Drafts and messages use read-only tools; no project files are changed. Committed-source automation requires a reviewed schedule or trigger on Pips API 20.':'Scheduled audits and messages use the same read-only tool policy.'}</p>${button('toggle-pip',S.pip.status==='paused'?'Resume job':'Pause job',S.busy||!usable()||S.apiVersion>=16&&!canLifecycle())}${lifecycleMarkup()}</section>${sourceSettingsMarkup()}<form id="model-form" class="section form"><h2>Model for this Pip</h2><p class="muted">Current choice: ${esc(modelLabel(S.pip.model_choice))}. Model changes are saved for your review. Running work keeps its pinned model.${pulsePip(S.pip)?' Standalone command plans do not invoke this model; the choice applies to chat and model-based handoffs.':''}</p>${modelPicker('pipModel','Model',draft.pipModel)}${field('modelReason','Reason for changing model')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review model change…</button></form>${adaptationMarkup()}${githubReadsMarkup()}${usageMarkup()}${notifyMarkup()}${shareMarkup()}`;
+  return `<section class="section"><h2>Job and source</h2>${S.apiVersion>=23?button('setup-in-chat','Change setup in chat',S.busy||!usable()):''}<p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} ${personalPip()?'Conversations and scheduled tasks use the details you provide and any separately reviewed app reads. No files or external actions.':pulsePip(S.pip)?'Conversations use read-only tools. A reviewed command plan enables model-free manual and calendar runs on API 21. Separately approved handoffs remain independent.':executionPip(S.pip)?'Conversations use read-only tools. Every edit or test run requires its own reviewed handoff.':documentationPip(S.pip)?'Quill prepares private drafts. Drafts and messages use read-only tools; no project files are changed. Committed-source automation requires a reviewed schedule or trigger on Pips API 20.':'Scheduled audits and messages use the same read-only tool policy.'}</p>${button('toggle-pip',S.pip.status==='paused'?'Resume job':'Pause job',S.busy||!usable()||S.apiVersion>=16&&!canLifecycle())}${lifecycleMarkup()}</section>${sourceSettingsMarkup()}<form id="model-form" class="section form"><h2>Model for this Pip</h2><p class="muted">Current choice: ${esc(modelLabel(S.pip.model_choice))}. Model changes are saved for your review. Running work keeps its pinned model.${pulsePip(S.pip)?' Standalone command plans do not invoke this model; the choice applies to chat and model-based handoffs.':''}</p>${modelPicker('pipModel','Model',draft.pipModel)}${field('modelReason','Reason for changing model')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review model change…</button></form>${adaptationMarkup()}${githubReadsMarkup()}${grantsMarkup()}${usageMarkup()}${notifyMarkup()}${shareMarkup()}`;
 }
 function chooseType(id){const type=S.types.find(t=>t.id===id);if(!S.create||!type?.available||S.busy||!usable())return;rememberCreationDraft();S.createType=id;Object.assign(draft,creationDrafts.get(id)||{name:type.default_name,goal:type.default_goal,source_ref:'HEAD',createModel:'default'});S.createStep='configure';S.error='';render();$('name')?.focus();}
 function jobMarkup(p) {
@@ -1097,7 +1121,7 @@ function readCalendarExtras(){
 function showCalendarReview(a){
  const p=a.payload,e=p.event,pending=a.status==='pending';if(extendedCalendar(e)&&S.apiVersion<38)throw Error('Calendar invitations and series need Pips API 38. Reload with the updated backend.');
  openReview({title:pending?'Review calendar event':a.status==='succeeded'?'Calendar event created':messageStates[a.status],description:pending?'Approval creates this exact event or finite series, with the listed invitations. It grants no permission to create further events.':a.status==='succeeded'?'Google Calendar confirmed the reviewed event or series. Invitation delivery and acceptance are not confirmed.':['unknown','dispatching'].includes(a.status)?'Creation is unconfirmed. Check the calendar or Composio log before preparing another event. DGC will not retry this action.':'This review cannot create an event.',readOnly:!pending,blocked:archived(),confirm:calendarDetails(e).confirm,expiresAt:a.expires_at,messageAction:a.id,messageDigest:a.digest,
- body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>Calendar</dt><dd>Primary</dd><dt>Title</dt><dd>${esc(e.summary)}</dd><dt>Start</dt><dd>${esc(e.start_datetime)}</dd><dt>End</dt><dd>${esc(e.end_datetime)}</dd><dt>Time zone</dt><dd>${esc(e.timezone)}</dd>${calendarExtras(e)}</dl><pre class="message-review-body">${esc(e.description)}</pre><p class="muted">Private and busy; invitees can see event details. No meeting link. The provider expands repeats in the named time zone; invalid dates or local times may be skipped. Calendar reminders, sharing and administrator access still apply. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject event</button>':''}`,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
+ body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>Calendar</dt><dd>Primary</dd><dt>Title</dt><dd>${esc(e.summary)}</dd><dt>Start</dt><dd>${esc(e.start_datetime)}</dd><dt>End</dt><dd>${esc(e.end_datetime)}</dd><dt>Time zone</dt><dd>${esc(e.timezone)}</dd>${calendarExtras(e)}</dl><pre class="message-review-body">${esc(e.description)}</pre><p class="muted">Private and busy; invitees can see event details. No meeting link. The provider expands repeats in the named time zone; invalid dates or local times may be skipped. Calendar reminders, sharing and administrator access still apply. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject event</button>':''}`,always:pending,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
 }
 async function loadConnectorDrafts(){
  if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;const token=scope(),seq=++connectorDraftSeq;
@@ -1153,7 +1177,7 @@ function prepareConnector(review){
 function showConnectorReview(a){
  const p=a.payload,pending=a.status==='pending';
  openReview({title:pending?'Review connector action':actionStatus(a),description:pending?'Run once authorizes this exact call. The connector controls the account and workflow contents. Check those in its dashboard before approving.':a.status==='succeeded'?a.receipt.meaning:['unknown','dispatching'].includes(a.status)?'The action may still be running at the provider. DGC will not retry an uncertain attempt.':'This review is closed. No further attempt can be approved.',readOnly:!pending,blocked:archived(),confirm:'Run once',expiresAt:a.expires_at,messageAction:a.id,messageDigest:a.digest,connectorSummary:p.call.arguments,
- body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Tool</dt><dd>${esc(p.call.tool)}</dd><dt>Account</dt><dd>Managed by this connection</dd></dl><div id="connector-review-values"></div><details><summary>Exact inputs (JSON)</summary><pre class="message-review-body">${esc(JSON.stringify(p.call.arguments,null,2))}</pre></details><p class="muted">One call only. A workflow can keep running after DGC times out. No automatic retry.</p>${a.receipt?.response_preview?`<h3>Connector response</h3><pre>${esc(a.receipt.response_preview)}</pre>`:''}${pending?'<button type="button" id="reject-message-review">Reject action</button>':''}`,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
+ body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Tool</dt><dd>${esc(p.call.tool)}</dd><dt>Account</dt><dd>Managed by this connection</dd></dl><div id="connector-review-values"></div><details><summary>Exact inputs (JSON)</summary><pre class="message-review-body">${esc(JSON.stringify(p.call.arguments,null,2))}</pre></details><p class="muted">One call only. A workflow can keep running after DGC times out. No automatic retry.</p>${a.receipt?.response_preview?`<h3>Connector response</h3><pre>${esc(a.receipt.response_preview)}</pre>`:''}${pending?'<button type="button" id="reject-message-review">Reject action</button>':''}`,always:pending,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
 }
 async function chooseMessageConnection(savedDraft=null,calendar=false){
  if(calendar&&S.apiVersion<34)return;
@@ -1196,7 +1220,7 @@ function showMessageReview(value){
  if(p.kind==='connector_call'){showConnectorReview(a);return;}
  if(p.kind==='calendar_create'){showCalendarReview(a);return;}
  openReview({title:pending?'Review email':messageStates[a.status],description:pending?'Send once authorizes one attempt with this exact account, recipient and message. It does not grant future sending permission.':a.status==='succeeded'?'Gmail accepted the message. Delivery to the recipient is not confirmed.':['unknown','dispatching'].includes(a.status)?'Delivery is unconfirmed. DGC will not retry this action. Check Gmail Sent or the Composio log before preparing another message.':'This review cannot send a message.',readOnly:!pending,blocked:archived(),confirm:'Send once',expiresAt:a.expires_at,messageAction:a.id,messageDigest:a.digest,
- body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>To</dt><dd>${esc(p.message.recipient_email)}</dd><dt>Subject</dt><dd>${esc(p.message.subject)}</dd></dl><pre class="message-review-body">${esc(p.message.body)}</pre><p class="muted">No CC, BCC, attachments or HTML. Source job v${p.source.job_version}. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject message</button>':''}<details><summary>Saved review details</summary><p class="mono">${esc(a.id)}</p><p class="mono">${esc(a.digest)}</p></details>`,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
+ body:`<dl class="meta"><dt>Connection</dt><dd>${esc(p.server)}</dd><dt>Account</dt><dd>${esc(p.account)}</dd><dt>To</dt><dd>${esc(p.message.recipient_email)}</dd><dt>Subject</dt><dd>${esc(p.message.subject)}</dd></dl><pre class="message-review-body">${esc(p.message.body)}</pre><p class="muted">No CC, BCC, attachments or HTML. Source job v${p.source.job_version}. Review expires ${esc(date(a.expires_at))}.</p>${pending?'<button type="button" id="reject-message-review">Reject message</button>':''}<details><summary>Saved review details</summary><p class="mono">${esc(a.id)}</p><p class="mono">${esc(a.digest)}</p></details>`,always:pending,request:{type:'accept_pip_app_action',action_id:a.id,expected_digest:a.digest}});
 }
 async function openMessageReview(id){
  if(!canReviewMessages())return;
@@ -1218,7 +1242,7 @@ const reviewBlocked=r=>!!r.blocked || (r.setup&&(S.apiVersion<23||r.setup.pip_ty
 function renderReview() {
   const r=S.review;if(!r)return;
   $('app').inert=true;
-  $('review-root').innerHTML=`<div class="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.reasonRequired?`<label>Reason for this decision<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label><p class="muted">Required. Up to 1,000 UTF-8 bytes.</p>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.readOnly?'':button('review-confirm',S.busy?'Applying…':r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
+  $('review-root').innerHTML=`<div class="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.reasonRequired?`<label>Reason for this decision<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label><p class="muted">Required. Up to 1,000 UTF-8 bytes.</p>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.always&&!r.readOnly&&S.apiVersion>=41?button('review-always','Always allow',S.busy||!usable()||reviewBlocked(r)):''}${r.readOnly?'':button('review-confirm',S.busy?'Applying…':r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
   if(r.connectorSummary)mountConnectorSummary($('connector-review-values'),r.connectorSummary);
   if(r.connectorForm){
     const form=r.connectorForm,select=$('connector-tool');select.value=String(form.selected);select.disabled=S.busy;
@@ -1483,6 +1507,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.rejectOutcome){void openOutcome(target.dataset.rejectOutcome,true);return;}
   if(target.dataset.pipType){chooseType(target.dataset.pipType);return;}
   if(target.dataset.starter){openStarter(target.dataset.starter);return;}
+  if(target.dataset.revokeGrant){revokeGrant(target.dataset.revokeGrant);return;}
   if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
   if(target.dataset.chatRun){S.tab='runs';S.overview=false;render();void loadRun(target.dataset.chatRun);return;}
   if(target.dataset.run){void loadRun(target.dataset.run);return;}
@@ -1637,6 +1662,19 @@ document.addEventListener('click',event=>{
     case 'reset-schedule':S.scheduleDirty=false;draft.scheduleReason='';hydrateSchedule(S.pip);S.error='';render();break;
     case 'more-history':void history(true);break;
     case 'review-cancel':if(!S.busy)closeReview();break;
+    case 'review-always':{
+      // This one now, and the same kind of action with this connection, account and tool from now on.
+      const review=S.review;if(!review||review.scope!==scope()||!usable()||!review.always||reviewBlocked(review))return;
+      const pip=S.selected;
+      void mutate({type:'always_allow_pip_app_action',action_id:review.request.action_id,expected_digest:review.request.expected_digest},result=>{
+        const a=messageReview(result.action,pip,S.workspace.id),g=actionGrant(result.grant);
+        if(a.id!==review.messageAction||a.digest!==review.messageDigest)throw Error('The receipt does not match this saved review.');
+        grantsState.pip='';
+        S.notice=`Always allowed: ${g.label}. This Pip will do this again without asking and tell you after. Take it back under Allowed without asking in its Job tab.`;
+        showMessageReview(a);
+      });
+      break;
+    }
     case 'review-confirm':{
       const review=S.review;if(!review||review.scope!==scope()||!usable())return;
       if(review.emailDraft){void chooseMessageConnection(review.emailDraft,review.calendarAction===true);return;}
