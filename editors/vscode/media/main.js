@@ -6436,6 +6436,20 @@
   });
 
   $("btn-pips").onclick = () => vscode.postMessage({ type: "openPips" });
+  // The Core Pip (the main chat's own character) sits in the Pips button, idle: a slow breathe
+  // and a blink, paused while the panel is hidden or motion is reduced. Decorative only: the
+  // button is still named "Open Pips". Without the renderer the button is the word alone.
+  (() => {
+    const face = document.querySelector("#btn-pips .pips-nav-core"), plush = window.PipConcepts?.plush;
+    if (!face || !plush) return;
+    try {
+      if (!document.getElementById("plush-styles")) {
+        const style = document.createElement("style"); style.id = "plush-styles"; style.textContent = plush.styles; document.head.append(style);
+      }
+      face.innerHTML = plush.markup({ index: 0, name: "Core" }, "idle", "pips-nav-core", { includeStyles: false });
+      plush.mount(face);
+    } catch { face.replaceChildren(); }
+  })();
   $("btn-pips-back").onclick = closePips;
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
 

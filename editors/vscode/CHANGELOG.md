@@ -4,6 +4,8 @@
 
 ### Pips
 
+- The **Pips** button in the chat header shows Core, the main chat's Pip, breathing and
+  blinking softly. It stays still when motion is reduced or the panel is hidden.
 - The new Pips view opens beside the chat (the Pips button in the panel header, or **DGC: Open
   Pips**). Create Project and Personal Pips, review their setups, proposals, findings, handoffs
   and drafts, and talk to each Pip in its own conversation. Each Pip has its own plush character,

@@ -4485,6 +4485,18 @@ test("Pips is a labelled chat-header control and Settings remains a separate com
  assert.deepEqual(posted.slice(count).map(m=>m.type),['openPips','openSettings']);assert.equal(doc.querySelector('#surface').hidden,true);assert.equal(doc.querySelector('#settings'),null);assert.deepEqual(errors,[]);dom.window.close();
 });
 
+test("the Pips button carries the Core Pip, idle and decorative; without the renderer it is the word alone",()=>{
+ const plush=readFileSync(new URL('../media/pips/plush.js',import.meta.url),'utf8');
+ const {dom,doc,errors}=makeDom({script:plush+'\n'+mainJs});
+ const pips=doc.querySelector('#phead #btn-pips'),face=pips.querySelector('.pips-nav-core');
+ const core=face.querySelector('.dgc-plush');assert.ok(core,'the Core Pip is drawn inside the button');
+ assert.equal(core.dataset.character,'core');assert.equal(core.dataset.state,'idle');
+ assert.equal(face.getAttribute('aria-hidden'),'true');assert.equal(pips.getAttribute('aria-label'),'Open Pips');
+ assert.equal(pips.textContent.trim(),'Pips','no stylesheet text leaks into the button');
+ assert.equal(doc.querySelectorAll('#plush-styles').length,1);assert.deepEqual(errors,[]);dom.window.close();
+ const bare=makeDom();assert.equal(bare.doc.querySelector('#btn-pips .pips-nav-core').childElementCount,0);assert.deepEqual(bare.errors,[]);bare.dom.window.close();
+});
+
 test("Pips mounts once inside the main panel without replacing its chat or draft",()=>{
  const x=makeDom({scope:'pips-test-scope',clock:true});const {dom,doc,send,errors}=x;
  doc.documentElement.dataset.pipsDocumentId='this-document';
