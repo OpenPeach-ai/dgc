@@ -2035,6 +2035,22 @@ test("the Token Usage tab's request reaches get_usage, and an older CLI is told 
   assert.equal(posted.at(-1).requestId, "usage-full");
 });
 
+test("Token Usage's Pips view reaches get_pip_usage_report, and an older CLI is told to update", async () => {
+  const h = harness(), posted = [], sent = [];
+  h.provider.settingsEditor = { webview: { postMessage: m => posted.push(m) } };
+  h.provider.backend.send = command => { sent.push(command); return true; };
+  h.provider.lastReadyEvent = { capabilities: { usage_ledger: true, pip_usage_report: true } };
+  await h.provider.onSettingsMessage({ type: "getPipUsage", range: "month", requestId: "pip-usage-1" });
+  await h.provider.onSettingsMessage({ type: "getPipUsage", range: "forever", requestId: "pip-usage-2" });
+  assert.deepEqual(sent, [{ type: "get_pip_usage_report", request_id: "pip-usage-1", range: "month" },
+                          { type: "get_pip_usage_report", request_id: "pip-usage-2", range: "7d" }]);
+  h.provider.lastReadyEvent = { capabilities: { usage_ledger: true } };
+  await h.provider.onSettingsMessage({ type: "getPipUsage", range: "today", requestId: "pip-usage-old" });
+  assert.equal(sent.length, 2, "a CLI without the report is never sent the command");
+  assert.deepEqual(posted.at(-1), { type: "pip_usage_unavailable", requestId: "pip-usage-old",
+    message: "Update the DGC CLI to see token usage by Pip." });
+});
+
 test("/usage typed in the editor opens Token Usage, with the range it names", async () => {
   // Before: slashText had no /usage route, so the command the slash menu offers went on as a
   // custom command and the backend answered "unknown command: /usage".

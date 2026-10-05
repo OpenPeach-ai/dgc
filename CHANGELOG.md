@@ -63,6 +63,8 @@ permission mode, and anything that sends, books or runs on your behalf waits for
   previous result, so a watch says what changed and a digest doesn't repeat itself.
 - Rate a Pip's result: `dgc pips feedback RUN_ID up|down --note "…"`. Its later runs read your
   five newest ratings and notes as guidance; a rating never changes the job.
+- Token usage by Pip for the editor's Settings → Token usage (`get_pip_usage_report`): each
+  Pip's tokens and runs for a range, as a part of everything DGC counted.
 - `dgc pips usage PIP` shows what a Pip's runs cost in tokens, today and over 30 days, counting
   failed and timed-out runs too. `--daily-limit 200k` skips its schedules and triggers for the rest of
   the day once it reaches that many tokens; runs you start still run. The limit is your setting, not part

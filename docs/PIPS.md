@@ -354,6 +354,11 @@ days, with a chart of the last two weeks. `dgc pips usage PIP` says the same in 
 terminal. It counts every model request a run made, including a run that failed or ran
 out of time.
 
+For every Pip at once, open **Settings → Token usage** and choose **Pips**: each Pip's
+input and output tokens and runs for the range you pick, its share of the Pips' total,
+and what all of the Pips used out of everything DGC counted. It is a breakdown of the
+**Everything** totals, not an addition to them, and includes replies in each Pip's chat.
+
 To keep a scheduled Pip from running up a bill, give it a **daily limit**:
 
 ```sh

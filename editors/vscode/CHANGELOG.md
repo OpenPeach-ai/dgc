@@ -20,6 +20,8 @@
 - A project reviewer or Quill can read open issues, open pull requests, CI checks and failed
   workflow runs from GitHub before each run, with your own GitHub login. Choose the reads under
   **GitHub reads** in its **Job** tab; the proposal review shows exactly what will be read.
+- **Settings → Token usage** has a **Pips** view: each Pip's tokens and runs for the range, its share,
+  and how much of everything the Pips used.
 - A Pip the chat sets up is approved on its permission card, which shows the Pip, its job, what it
   reads and when it runs, instead of raw arguments; once allowed it is created and on.
 - **Share this Pip → Export…** in the Job tab and **Import a shared Pip…** under **New**: an

@@ -4350,6 +4350,74 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "pip_usage_report"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "range": {
+              "type": "string",
+              "enum": [
+                "today",
+                "7d",
+                "30d",
+                "month",
+                "all"
+              ]
+            },
+            "generated_at": {
+              "type": "string"
+            },
+            "timezone": {
+              "type": "string"
+            },
+            "all_tokens": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "totals": {
+              "type": "object"
+            },
+            "by_pip": {
+              "type": "array"
+            },
+            "omitted": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "range",
+            "generated_at",
+            "all_tokens",
+            "totals",
+            "by_pip",
+            "omitted"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "agent_started"
             },
             "seq": {
@@ -7243,6 +7311,38 @@
           "properties": {
             "type": {
               "const": "get_usage"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "range": {
+              "type": "string",
+              "enum": [
+                "today",
+                "7d",
+                "30d",
+                "month",
+                "all"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "range"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_pip_usage_report"
             },
             "chat_id": {
               "type": "string",

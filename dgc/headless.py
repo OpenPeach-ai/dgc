@@ -1991,7 +1991,7 @@ class Backend:
                           # The client answers with set_workspace_roots.agent_faces when it draws
                           # the registry's face slots; only then do agent frames carry face_slot.
                           "agent_faces": True,
-                          "resume_turn": True, "monitors": True, "usage_ledger": True,
+                          "resume_turn": True, "monitors": True, "usage_ledger": True, "pip_usage_report": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           # This CLI accepts `agent_control`: the user may steer or stop ONE
                           # background sub-agent instead of ending the whole turn. Gated because
@@ -3116,6 +3116,21 @@ class Backend:
                 report = usage_ledger.empty_report(range_name, error=f"{type(exc).__name__}: {exc}")
             self.em.emit("usage_report", request_id=request_id, **report)
         threading.Thread(target=run, name="dgc-usage-report", daemon=True).start()
+
+    def _emit_pip_usage(self, request_id: str, range_name: str) -> None:
+        """Answer get_pip_usage_report: the Pips tab of Token Usage, on a short-lived thread like
+        get_usage. Reads the registry even with Pips off, so their past usage still shows."""
+        def run() -> None:
+            from . import pip_usage_report, usage_ledger
+            try:
+                report = pip_usage_report.report(range_name)
+            except Exception as exc:        # informational; say why and carry on
+                empty = usage_ledger.empty_report(range_name)
+                report = {"range": empty["range"], "generated_at": empty["generated_at"], "timezone": empty["timezone"],
+                          "all_tokens": 0, "totals": {"input_tokens": 0, "output_tokens": 0, "runs": 0},
+                          "by_pip": [], "omitted": 0, "error": f"{type(exc).__name__}: {exc}"[:300]}
+            self.em.emit("pip_usage_report", request_id=request_id, **report)
+        threading.Thread(target=run, name="dgc-pip-usage-report", daemon=True).start()
 
     def _emit_doc(self, request_id: str, identifier: str) -> None:
         from .docs import find_id, slug
@@ -4841,6 +4856,14 @@ class Backend:
                              message="request_id must contain 1-128 characters")
             else:
                 self._emit_usage(usage_request, str(cmd["range"]))
+
+        elif t == "get_pip_usage_report":
+            usage_request = str(cmd.get("request_id") or "")
+            if not usage_request or len(usage_request) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+            else:
+                self._emit_pip_usage(usage_request, str(cmd["range"]))
 
         elif t == "list_mcp_servers":
             self._emit_mcp_servers(str(cmd.get("request_id") or ""))

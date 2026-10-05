@@ -314,7 +314,7 @@ function maxLiveChats(): number {
  *  forwarding the raw rejection too both duplicated it and let a failure from the CHAT paint a red
  *  banner over a settings page that was working. */
 const SETTINGS_REJECTIONS = [
-  "set_skill_enabled", "get_usage",
+  "set_skill_enabled", "get_usage", "get_pip_usage_report",
   "upsert_mcp_server", "remove_mcp_server", "set_mcp_enabled", "reconnect_mcp_server", "list_mcp_servers",
 ];
 
@@ -2897,7 +2897,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // duplicate skill name, a full follow-up queue) as a red MCP-server banner over a page that
     // was working, where it then outlived leaving the section.
     const settingsRejection = ev.type === "command_rejected" && SETTINGS_REJECTIONS.includes(String(ev.command || ""));
-    if (this.settingsEditor && (settingsRejection || ["config", "usage_report", "mcp_servers"].includes(ev.type))) {
+    if (this.settingsEditor && (settingsRejection || ["config", "usage_report", "pip_usage_report", "mcp_servers"].includes(ev.type))) {
       this.settingsEditor.webview.postMessage({ type: "event", event: ev });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -5446,6 +5446,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       } else if (!be.send({ type: "get_usage", request_id: requestId, range })) {
         this.settingsEditor?.webview.postMessage({ type: "usage_unavailable", requestId,
           message: "DGC could not ask its backend for token usage. Try Refresh." });
+      }
+    } else if (msg?.type === "getPipUsage") {
+      const range = ["today", "7d", "30d", "month", "all"].includes(msg.range) ? msg.range : "7d";
+      const requestId = String(msg.requestId || this.nextRequestId("pip-usage")).slice(0, 128);
+      if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.pip_usage_report) {
+        this.settingsEditor?.webview.postMessage({ type: "pip_usage_unavailable", requestId,
+          message: "Update the DGC CLI to see token usage by Pip." });
+      } else if (!be.send({ type: "get_pip_usage_report", request_id: requestId, range })) {
+        this.settingsEditor?.webview.postMessage({ type: "pip_usage_unavailable", requestId,
+          message: "DGC could not ask its backend for token usage by Pip. Try Refresh." });
       }
     } else if (msg?.type === "installPlugin") {
       const name = String(msg.name || "");

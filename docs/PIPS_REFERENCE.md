@@ -641,6 +641,15 @@ trigger controller record as an ordinary skip (a skipped occurrence does not run
 manual, chat, handoff and main-chat runs are not limited, and neither is a standalone
 Pulse schedule, which runs its reviewed commands without a model.
 
+**Token usage by Pip** (editor protocol, capability `pip_usage_report`). `get_pip_usage_report
+{request_id, range}` is answered by one `pip_usage_report {request_id, range, generated_at,
+timezone, all_tokens, totals: {input_tokens, output_tokens, runs}, by_pip: [{pip_id, name,
+pip_type, scope, project, status, input_tokens, output_tokens, runs, daily_cap}], omitted,
+error?}` (`dgc/pip_usage_report.py`). Runs that finished in the range count on that local day,
+with the imported totals or the run's own reported usage; `all_tokens` is the same range's
+ledger total, so the Pips are shown as a part of it, never added to it. It reads the registry
+even with Pips off and creates none for a profile that never used them.
+
 **Desktop notifications** (API 41). The runner checks once a minute (`pip_desktop.Notifier`)
 for alert findings in the digest and for pending reviews and setup cards, and shows one
 notification for what is new: the digest headline, or "N reviews waiting". What it has

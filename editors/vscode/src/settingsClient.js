@@ -17,6 +17,7 @@ const serviceLogos = {gmail:gmailLogo, calendar:calendarLogo, contacts:contactsL
 import { renderFields } from './settingsFields.js';
 import { createUsage } from './settingsUsage.js';
 import { usageMarkup } from './settingsUsageMarkup.js';
+import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -25,6 +26,8 @@ const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${pat
 const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
 let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null;
 let mcpError = "";
+// Token usage shows Everything or the Pips' share of it; the range is shared by both.
+let usageView = 'all', pipUsage = null;
 let sequence = 0;
 let directory = false, marketFilter = 'all', marketplaces = [], pluginNotice = '', modal = null, modalKind = '', reviewName = '', preview = null, dialogReturn = null, createdPath = '';
 let operationPending = false;
@@ -115,11 +118,26 @@ function render() {
         return;
     }
     if (section === 'usage') {
-        main.innerHTML = '<h1>Token usage</h1><p class="sub">Your local ledger of model requests.</p>' + usageMarkup;
-        usage = createUsage(main.querySelector('.usage-section'), vscode);
+        const view = (id, label) => `<button type="button" data-usage-view="${id}" class="${usageView === id ? 'on' : ''}" aria-pressed="${usageView === id}">${label}</button>`;
+        main.innerHTML = '<h1>Token usage</h1><p class="sub">Your local ledger of model requests.</p>'
+            + `<div class="chips usage-views" role="group" aria-label="Show token usage for">${view('all', 'Everything')}${view('pips', 'Pips')}</div>`
+            + (usageView === 'pips' ? pipUsageMarkup : usageMarkup);
+        usage?.dispose?.();
+        pipUsage?.dispose?.();
+        usage = pipUsage = null;
+        if (usageView === 'pips')
+            pipUsage = createPipUsage(main.querySelector('.pip-usage-section'), vscode);
+        else
+            usage = createUsage(main.querySelector('.usage-section'), vscode);
         $('usage-range').value = range;
-        usage.request();
+        (pipUsage || usage).request();
         $('usage-range').addEventListener('change', () => range = $('usage-range').value);
+        main.querySelectorAll('[data-usage-view]').forEach(b => b.addEventListener('click', () => {
+            if (usageView === b.dataset.usageView) return;
+            usageView = b.dataset.usageView;
+            render();
+            main.querySelector(`[data-usage-view="${usageView}"]`)?.focus();
+        }));
         return;
     }
     if (!config) {
@@ -583,6 +601,9 @@ window.addEventListener('message', event => {
     else if (msg.type === 'usage_unavailable') {
         usage?.unavailable(msg);
     }
+    else if (msg.type === 'pip_usage_unavailable') {
+        pipUsage?.unavailable(msg);
+    }
     else if (msg.type === 'connectorError') { statusDialog(msg.message,true); }
     else if (msg.type === 'connectorSaveFinished') { operationPending=false; if(modalKind==='connector') { modal.querySelectorAll('form button').forEach(b=>b.disabled=false); $('dialog-cancel').textContent='Close'; $('dialog-cancel').onclick=closeDialog; modal.querySelector('[data-browser]')?.remove(); } }
     else if (msg.type === 'mcpSaved') {
@@ -599,6 +620,8 @@ window.addEventListener('message', event => {
             applyConfig(ev);
         else if (ev.type === 'usage_report')
             usage?.receive(ev);
+        else if (ev.type === 'pip_usage_report')
+            pipUsage?.receive(ev);
         else if (ev.type === 'mcp_servers') {
             servers = ev.items || [];
             const connected = new Set(servers.filter(s => s.state === 'connected').map(s => s.name));
@@ -620,6 +643,8 @@ window.addEventListener('message', event => {
             }
             else if (ev.command === 'get_usage')
                 usage?.unavailable({ requestId: ev.request_id, message: ev.message });
+            else if (ev.command === 'get_pip_usage_report')
+                pipUsage?.unavailable({ requestId: ev.request_id, message: ev.message });
             else if (section === 'mcp') {
                 mcpError = ev.message || 'The server could not be updated.';
                 render();
