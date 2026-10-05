@@ -61,6 +61,8 @@ class EgressPolicyTests(unittest.TestCase):
     def test_payments_are_recognised_and_secret_fields_masked(self):
         self.assertTrue(box.carries_card_number("number=4242 4242 4242 4242&exp=12%2F30"))
         self.assertFalse(box.carries_card_number("order=1234567890123&qty=2"))      # not a Luhn number
+        for encoded in ("number=4242+4242+4242+4242", "number=4242%204242%204242%204242", "number=4242-4242-4242-4242"):
+            self.assertTrue(box.carries_card_number(encoded), encoded)            # how a form sends one typed with spaces
         fields = box._fields("user=ada&password=hunter2&otp=123456&note=hi", "application/x-www-form-urlencoded")
         self.assertEqual(fields, [("user", "ada"), ("password", "•••"), ("otp", "•••"), ("note", "hi")])
         self.assertEqual(box._fields('{"email":"a@b.c","card":"4242"}', "application/json"),
@@ -110,6 +112,16 @@ class RealBoxTests(unittest.TestCase):
         self.browser.release(held.request_id)
         self.assertTrue(self.wait_for(lambda: self.received), "released")
         self.assertEqual(self.received, [("/submit", "name=Ada&password=hunter2")], "the exact request, once")
+
+    def test_a_payment_is_held_like_any_change_and_says_so(self):
+        self.assertEqual(self.browser.navigate(self.base + "/"), "loaded")
+        self.browser.evaluate_json("(() => { document.querySelector('[name=name]').value = '4242 4242 4242 4242'; return true; })()")
+        self.browser.click(self.browser.evaluate_json("(() => { const b=document.getElementById('go'); b.setAttribute('data-dgc-ref','e901'); return 'e901'; })()"))
+        self.assertTrue(self.wait_for(lambda: self.held), "held for the user, never dropped")
+        self.assertIs(self.held[0].summary().get("payment"), True, "its review says it carries card details")
+        self.assertEqual(self.received, [])
+        self.browser.release(self.held[0].request_id)
+        self.assertTrue(self.wait_for(lambda: self.received), "sent once released")
 
     def test_a_popup_is_gated_too_and_the_profile_persists(self):
         self.browser.navigate(self.base + "/")

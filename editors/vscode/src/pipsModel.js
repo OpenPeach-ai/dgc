@@ -1000,7 +1000,7 @@ function actionGrantRow(g) {
   const hash = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
   const text = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
   return record(g) && Object.keys(g).sort().join() === 'account,connection_digest,created_at,created_by,id,kind,label,schema_digest,server,tool'
-    && /^grant_[a-f0-9]{32}$/.test(g.id) && ['gmail_send', 'calendar_create', 'connector_call'].includes(g.kind)
+    && /^grant_[a-f0-9]{32}$/.test(g.id) && ['gmail_send', 'calendar_create', 'connector_call', 'computer_submit'].includes(g.kind)
     && text(g.server, 80) && text(g.account, 160) && text(g.tool, 160) && text(g.label, 200) && text(g.created_at, 40)
     && ['editor-user', 'local-console'].includes(g.created_by) && hash(g.connection_digest) && hash(g.schema_digest);
 }

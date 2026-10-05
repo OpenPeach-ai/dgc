@@ -47,8 +47,8 @@ permission mode, and anything that sends, books or runs on your behalf waits for
   sandbox, separate from yours. It reads public websites on its own. Anything it would submit
   waits for your approval with a screenshot of the page, and is sent exactly once when you
   approve; the Pip then carries on from the result. You sign in to sites yourself in its
-  browser, so it never sees your passwords. It can't reach your home network, can't make
-  payments and can't also have app reads. `dgc pips computer give PIP` gives one;
+  browser, so it never sees your passwords. It can't reach your home network, makes
+  a payment only with your approval (or an Always allow) and can't also have app reads. `dgc pips computer give PIP` gives one;
   `status`, `pending`, `approve`, `reject`, `stop` and `frames` cover the rest, and the digest
   says straight away when something is waiting. Needs bubblewrap and a Chromium build. Pips
   API 42, registry schema 35.

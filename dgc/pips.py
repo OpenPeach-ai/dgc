@@ -60,6 +60,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_digest", "mark_pip_digest_seen", "get_pip_notify_settings", "set_pip_notify_settings", "get_pip_outcomes",
     "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame",
     "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
+    "always_allow_pip_computer_action",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
     "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
@@ -117,6 +118,7 @@ _COMMAND_ARGS = {
     "get_pip_outcomes": {"pip_id"},
     "get_pip_computer": {"pip_id"}, "list_pip_computer_actions": {"pip_id", "limit"},
     "decide_pip_computer_action": {"action_id", "expected_digest", "approve"},
+    "always_allow_pip_computer_action": {"action_id", "expected_digest"},
     "get_pip_computer_frame": {"run_id", "frame"}, "list_pip_computer_frames": {"run_id"},
     "stop_pip_computer": {"pip_id"}, "open_pip_computer": {"pip_id"},
     "use_pip_computer_view": {"pip_id", "op", "x", "y", "text", "key", "dy", "url"},
@@ -2994,7 +2996,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -3154,7 +3156,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = {"outcomes": pip_digest.outcomes(registry, pip_id)}
             elif command in ("get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action",
                              "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer",
-                             "open_pip_computer", "use_pip_computer_view"):
+                             "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action"):
                 from . import pip_computer
                 if actor not in ("editor-user", "local-console"):
                     raise RegistryError("local_only", "A Pip's computer is used on this computer only.")
@@ -3162,6 +3164,10 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = {"computer": pip_computer.status(registry, pip_id)}
                 elif command == "list_pip_computer_actions":
                     result = {"actions": pip_computer.list_actions(registry, pip_id, limit=request.get("limit", 20))}
+                elif command == "always_allow_pip_computer_action":
+                    # Send this one, and let the Pip send the same kind of submit on this site without asking.
+                    action, grant = pip_computer.approve_always(registry, request.get("action_id"), request.get("expected_digest"), actor)
+                    result = {"action": action, "grant": grant}
                 elif command == "decide_pip_computer_action":
                     result = {"action": pip_computer.decide(registry, request.get("action_id"), request.get("expected_digest"),
                                                             request.get("approve"), actor)}

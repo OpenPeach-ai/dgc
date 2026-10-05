@@ -723,13 +723,20 @@ that checks a token. The box has no network except a Unix socket to an egress pr
 supervisor, which allows `CONNECT` to port 443 and plain HTTP to port 80 of names that resolve
 only to global addresses, and connects to the address it checked. WebSockets are blocked.
 Every request from every page and popup is paused in the browser (CDP `Fetch`, Request stage).
-GET, HEAD and OPTIONS continue. Any other request carrying a Luhn-valid card number fails.
-The rest are held, at most eight at a time; more fail.
+GET, HEAD and OPTIONS continue. The rest are held, at most eight at a time; more fail. A held
+request whose body carries a Luhn-valid card number (also when form-encoded) is held like any
+other, and its summary adds `payment: true` so the review can say so.
 
 A held request becomes a `pip_computer_actions` row: `pending` for 24 hours, with a summary
 (method, host, path, page, up to 24 fields with secret-named values masked), the digest of that
 summary and a screenshot. `decide_pip_computer_action` with the expected digest records
-`approved` or `rejected`. The supervisor's next tick then continues or fails the paused
+`approved` or `rejected`. `always_allow_pip_computer_action {action_id, expected_digest}`
+approves it and, in the same transaction, saves an Always-allow grant of kind `computer_submit`
+for its Pip, pinned to the method, host and path (`server` = host, `account` = `browser`,
+`tool` = `METHOD /path`, `connection_digest` binds the Pip's computer, `schema_digest` the
+endpoint); if the grant cannot be saved, nothing is approved. Later, a held request of that Pip
+that matches a grant is recorded `approved` at once with `resolved_by` `pip-grant:GRANT_ID`, and
+the desktop notifier says so after it is sent. Grants are listed and revoked like app-action grants. The supervisor's next tick then continues or fails the paused
 request, and after a send queues one continuation run (actor `local-computer`, request key
 `computer-ACTION_ID`) carrying `manifest.computer_continuation`. Status moves one way:
 `pending` to `approved`, `rejected`, `expired` or `lost`; `approved` to `sent` or `lost`. Every
@@ -740,7 +747,7 @@ The live view (`open_pip_computer`, `use_pip_computer_view`, operations `frame`,
 `type`, `key`, `scroll`, `go` and `back`) is served by the supervisor over its own socket.
 Its token stays in the controller and is never sent to the editor. While no run is active,
 requests the user submits in it are released at once, because the user made them. During a
-run the view only watches. All eight computer commands are for the local user only. Screenshots
+run the view only watches. All nine computer commands are for the local user only. Screenshots
 are JPEG, at most 90 KiB each and 200 per run, under the run's `artifacts/computer`.
 
 **Pulse verification plans** give a Pulse Pip a standing command list:
@@ -976,4 +983,4 @@ Clients check it before using a newer control.
 | 39 | Drive, Notion and Contacts reads |
 | 40 | Reviewed web reads |
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
-| 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |
+| 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |

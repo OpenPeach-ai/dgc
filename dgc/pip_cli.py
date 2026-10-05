@@ -63,6 +63,9 @@ def parser():
             item.add_argument("pip_id")
         if action in ("give", "remove", "approve", "stop"):
             item.add_argument("--yes", action="store_true", help="skip the question")
+        if action == "approve":
+            item.add_argument("--always", action="store_true",
+                              help="also let this Pip send the same kind of submit on this site without asking")
     starter = command("starter", "review a starter Pip's exact job here, then create it")
     from .pip_starters import STARTERS
     starter.add_argument("starter_id", choices=[key.replace("_", "-") for key in STARTERS])
@@ -1402,9 +1405,14 @@ def _computer_command(config, args):
         if current is None or current["status"] != "pending":
             raise RegistryError("conflict", "That change is no longer waiting.")
         print(_format({"actions": [current]}), file=sys.stderr)
-        if action == "approve" and not confirm("Send this exactly as shown?"):
+        always = action == "approve" and getattr(args, "always", False)
+        if action == "approve" and not confirm("Send this exactly as shown" + (", and let this Pip do the same on this site "
+                                                                           "without asking?" if always else "?")):
             print("Nothing was sent.")
             return None
+        if always:
+            return control({"type": "always_allow_pip_computer_action", "action_id": current["id"],
+                            "expected_digest": current["digest"]})
         return {"action": control({"type": "decide_pip_computer_action", "action_id": current["id"],
                                    "expected_digest": current["digest"], "approve": action == "approve"})["action"]}
     if action == "stop":
@@ -1588,6 +1596,7 @@ _AGENT_SHELL_READ_ACTIONS = {
     "context": ("context_action", {"list"}), "session-execution": ("execution_action", {"list", "show"}),
     "memory": ("memory_action", {"source", "list", "statements"}), "notifications": ("notification_action", {"list"}),
     "session-outcome": ("outcome_action", {"inspect", "review", "list"}), "service": ("service_action", {"preview", "status"}),
+    "computer": ("computer_action", {"status", "pending", "frames"}),
 }
 AGENT_SHELL_REFUSAL = ("This ran in a DGC chat's own shell, and changing Pips is your decision, so it was refused. "
                        "The chat can prepare it as a setup card or proposal for you to approve (pips_setup, "

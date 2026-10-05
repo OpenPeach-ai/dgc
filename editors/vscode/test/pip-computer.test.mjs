@@ -21,6 +21,7 @@ const runner={runner_id:'runner',status:'running',online:true,paused:false,count
 const types=['core','scout','lens','patch','rook','pulse','lock','quill'].map((id,character_index)=>{const available=['scout','lens','rook','lock'].includes(id),name=id[0].toUpperCase()+id.slice(1);return{id,name,character_index,role:{core:'Main chat',scout:'Repository exploration',lens:'Repository research',patch:'Code changes',rook:'Code review',pulse:'Test execution',lock:'Security review',quill:'Documentation writing'}[id],description:available?'Inspect committed source with a focused read-only preset.':'This role is planned.',available,unavailable_reason:available?null:'This engine is not available yet.',default_name:name+' job',default_goal:available?'Inspect source for '+id+' findings.':'',engine:available?'source_audit':null};});
 const JPEG='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
 const action=(extra={})=>({id:actionId,pip_id:pipId,workspace_id:'ws',run_id:runId,summary:{method:'POST',host:'shop.example',path:'/order',page:'https://shop.example/cart',fields:[{name:'name',value:'Ada'},{name:'password',value:'•••'}],more_fields:0,body_bytes:30},digest:'d'.repeat(64),frame:'0002.jpg',status:'pending',created_at:'2026-10-04T10:00:00Z',expires_at:'2099-10-05T10:00:00Z',resolved_at:null,resolved_by:null,continuation_run_id:null,...extra});
+const grant={id:'grant_'+'e'.repeat(32),kind:'computer_submit',server:'shop.example',connection_digest:'1'.repeat(64),account:'browser',schema_digest:'2'.repeat(64),tool:'POST /order',label:'Submit in its browser to shop.example/order',created_at:'2026-10-05T10:00:00Z',created_by:'editor-user'};
 const computer=(extra={})=>({pip_id:pipId,granted:true,available:true,reason:'',pending:0,actions:[],...extra});
 async function flush(){for(let i=0;i<12;i++)await Promise.resolve();}
 
@@ -54,7 +55,7 @@ test('an older CLI shows no computer; on API 42 one plain dialog gives it, as a 
  x.click('#give-computer');
  const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog);
  assert.match(dialog.textContent,/Give Shopper a computer\?/);
- for(const rule of [/waits for your approval, with a screenshot/,/never sees your passwords/,/cannot reach your home network and cannot make payments/,/cannot also read your connected apps/])assert.match(dialog.textContent,rule);
+ for(const rule of [/waits for your approval, with a screenshot/,/never sees your passwords/,/cannot reach your home network\. A payment waits for your approval like anything else/,/cannot also read your connected apps/])assert.match(dialog.textContent,rule);
  assert.equal(x.requests('propose_pip_update').length,0,'opening the dialog changes nothing');
  x.click('#review-confirm');
  const proposed=x.requests('propose_pip_update')[0];
@@ -99,6 +100,36 @@ test('a held submit is reviewed with its screenshot; Send once sends that exact 
  assert.deepEqual(JSON.parse(JSON.stringify(decided.request)),{type:'decide_pip_computer_action',action_id:actionId,expected_digest:'d'.repeat(64),approve:true});
  x.setStatus(computer());x.answer(decided,{action:{...hostile,status:'approved',resolved_at:'2026-10-04T10:01:00Z',resolved_by:'editor-user'}});await x.drain();
  assert.equal(x.d.querySelector('[role=dialog]'),null);assert.match(x.d.body.textContent,/Approved. It is sent within a few seconds, exactly as shown/);
+});
+
+test('Always allow sends this submit and lets the Pip make the same one on that site without asking',async()=>{
+ const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[action({frame:null,summary:{...action().summary,payment:true}})]})});await x.openJob();
+ x.click(`[data-computer-action="${actionId}"]`);await flush();
+ const dialog=x.d.querySelector('[role=dialog]');
+ assert.match(dialog.textContent,/This sends payment card details\./,'a payment is said plainly, then decided like anything else');
+ assert.ok(x.d.querySelector('#review-always'),'Always allow sits beside Send once');
+ x.click('#review-always');x.click('#review-always');
+ const asked=x.requests('always_allow_pip_computer_action');
+ assert.equal(asked.length,1,'one decision, however many clicks');
+ assert.deepEqual(JSON.parse(JSON.stringify(asked[0].request)),{type:'always_allow_pip_computer_action',action_id:actionId,expected_digest:'d'.repeat(64)});
+ assert.equal(x.requests('decide_pip_computer_action').length,0,'not also a Send once');
+ x.setStatus(computer());x.answer(asked[0],{action:action({frame:null,status:'approved',resolved_at:'2026-10-05T10:00:00Z',resolved_by:'editor-user'}),grant});await x.drain();
+ assert.equal(x.d.querySelector('[role=dialog]'),null);
+ assert.match(x.d.body.textContent,/Always allowed: Submit in its browser to shop\.example\/order\. It is sent within a few seconds/);
+});
+
+test('an Always allow receipt that is not an approval is not reported as done',async()=>{
+ const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[action({frame:null})]})});await x.openJob();
+ x.click(`[data-computer-action="${actionId}"]`);await flush();x.click('#review-always');
+ const asked=x.requests('always_allow_pip_computer_action')[0];
+ x.answer(asked,{action:action({frame:null,status:'pending'}),grant});await x.drain();
+ assert.doesNotMatch(x.d.body.textContent,/Always allowed/);
+ assert.match(x.d.body.textContent,/differs from your choice/);
+});
+
+test('Always allow for a browser submit needs a CLI with Pip computers',async()=>{
+ const x=setup({apiVersion:41,pip:job({computer_plan:PLAN})});await x.drain();
+ assert.equal(x.requests('get_pip_computer').length,0);assert.equal(x.d.querySelector('#review-always'),null);
 });
 
 test('Reject sends a rejection; a receipt for another decision is not reported as done',async()=>{
@@ -199,9 +230,9 @@ test('the extension host passes computer commands only to an API 42 CLI',()=>{
  for(const api of [41,42]){
   const posted=[],sent=[];const out={exports:{}};new Function('module','exports','require',view)(out,out.exports,name=>name==='vscode'?{}:require(name));
   const editor=new out.exports.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});
-  for(const [type,extra] of [['get_pip_computer',{pip_id:pipId}],['decide_pip_computer_action',{action_id:actionId,expected_digest:'d'.repeat(64),approve:true}],['use_pip_computer_view',{pip_id:pipId,op:'frame'}],['propose_pip_update',{pip_id:pipId,expected_version:1,changes:{computer_plan:PLAN},reason:'x'}]])
+  for(const [type,extra] of [['always_allow_pip_computer_action',{action_id:actionId,expected_digest:'d'.repeat(64)}],['get_pip_computer',{pip_id:pipId}],['decide_pip_computer_action',{action_id:actionId,expected_digest:'d'.repeat(64),approve:true}],['use_pip_computer_view',{pip_id:pipId,op:'frame'}],['propose_pip_update',{pip_id:pipId,expected_version:1,changes:{computer_plan:PLAN},reason:'x'}]])
    editor.receive({type:'pipsRequest',id:type,request:{type,...extra}});
-  assert.equal(sent.length,api>=42?4:0,`API ${api}`);
+  assert.equal(sent.length,api>=42?5:0,`API ${api}`);
   if(api<42)assert.match(posted.at(-1).error.message,/API 42/);
  }
 });

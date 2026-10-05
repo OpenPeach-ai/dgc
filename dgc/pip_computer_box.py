@@ -12,7 +12,7 @@ PUT, PATCH or DELETE from any frame, popup or worker -- is caught inside the bro
 is sent and HELD: the request waits, unsent, until the user approves it, and approval releases
 that exact request rather than a re-typed copy. WebSockets are blocked, because the write gate
 cannot see what they carry, and there is no UDP at all, so WebRTC and QUIC cannot leave the box.
-Payments are refused outright: a held request that carries a card number is dropped.
+A payment is a change like any other: held for the user, its review saying it carries payment card details.
 
 This module is the mechanism only. Who may start a computer, how held requests become reviews
 and how runs use it live in ``pip_computer``.
@@ -433,12 +433,16 @@ class HeldWrite:
     fields: list[tuple[str, str]] = field(default_factory=list)
     body_bytes: int = 0
     held_at: float = 0.0
+    payment: bool = False           # carries a payment card number: the review says so
 
     def summary(self) -> dict:
         parts = urlsplit(self.url)
-        return {"method": self.method, "host": parts.hostname or "", "path": (parts.path or "/")[:300],
-                "fields": [{"name": name[:80], "value": value[:200]} for name, value in self.fields[:MAX_SUMMARY_FIELDS]],
-                "more_fields": max(0, len(self.fields) - MAX_SUMMARY_FIELDS), "body_bytes": self.body_bytes}
+        value = {"method": self.method, "host": parts.hostname or "", "path": (parts.path or "/")[:300],
+                 "fields": [{"name": name[:80], "value": value[:200]} for name, value in self.fields[:MAX_SUMMARY_FIELDS]],
+                 "more_fields": max(0, len(self.fields) - MAX_SUMMARY_FIELDS), "body_bytes": self.body_bytes}
+        if self.payment:
+            value["payment"] = True
+        return value
 
 
 def _luhn(digits: str) -> bool:
@@ -467,7 +471,10 @@ def _fields(post_data: str, content_type: str) -> list[tuple[str, str]]:
 
 
 def carries_card_number(post_data: str) -> bool:
-    for run in re.findall(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", post_data or ""):
+    # A browser form sends "4242 4242 …" as 4242+4242 or 4242%204242: decode before looking.
+    from urllib.parse import unquote_plus
+    text = post_data or ""
+    for run in re.findall(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", text + "\n" + unquote_plus(text)):
         digits = re.sub(r"\D", "", run)
         if 13 <= len(digits) <= 19 and _luhn(digits):
             return True
@@ -583,16 +590,13 @@ class BoxedBrowser(BrowserSession):
             self._fire("Fetch.continueRequest", {"requestId": request_id}, session)
             return
         post = str(request.get("postData", "") or "")
-        if carries_card_number(post):
-            self.refused_payments += 1
-            self._fire("Fetch.failRequest", {"requestId": request_id, "errorReason": "BlockedByClient"}, session)
-            return
         if len(self.held) >= MAX_HELD:
             self._fire("Fetch.failRequest", {"requestId": request_id, "errorReason": "BlockedByClient"}, session)
             return
         headers = {str(k).lower(): str(v) for k, v in (request.get("headers") or {}).items()}
         held = HeldWrite(request_id, session, verb, str(request.get("url", ""))[:2000],
-                         _fields(post, headers.get("content-type", "")), len(post.encode("utf-8")), time.time())
+                         _fields(post, headers.get("content-type", "")), len(post.encode("utf-8")), time.time(),
+                         payment=carries_card_number(post))
         self.held[request_id] = held
         if self.on_write is not None:
             self.on_write(held)

@@ -24,7 +24,9 @@
   computer…** gives it its own browser and files in one step. **Open browser** shows its screen:
   click, type and go to an address to sign in to the sites it needs. What the Pip would submit
   appears under **Waiting for you**; **Review…** shows the screenshot and exactly what would be
-  sent, then **Send once** or **Reject**. The Pips bar says when something is waiting.
+  sent, then **Send once**, **Always allow** (the same submit on that site, from then on) or
+  **Reject**. A payment waits for you like anything else, and its review says it sends card
+  details. The Pips bar says when something is waiting.
   **Stop computer** closes it at once.
 - **Always allow** beside Send once, Create once and Run once: the Pip does that kind of action
   again without asking, and you are told after. Its **Job** tab lists them under **Allowed without

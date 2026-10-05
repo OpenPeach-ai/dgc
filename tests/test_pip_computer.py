@@ -31,7 +31,7 @@ def chat(self, messages, tools=None, on_text=None, **kwargs):
     if len(tool_results) == 1:
         ref = re.search(r'button "Send" \[(e\d+)\]', last).group(1)
         return ChatResult(tool_calls=[ToolCall("c2", "computer", {"op": "click", "ref": ref})])
-    assert "Held for the user's approval" in last, last
+    assert last.startswith("Held:"), last
     return ChatResult(content="Your order form is filled in and waiting for your approval to send.")
 with patch.object(LLMClient, "chat", chat):
     raise SystemExit(_worker_main())
@@ -120,6 +120,64 @@ class PipComputerTests(unittest.TestCase):
         self.assertEqual(follow["manifest"]["computer_continuation"]["action_id"], action_id)
         pip_computer.tick(self.registry, self.cfg)
         self.assertEqual(len(self.received), 1, "never sent twice")
+
+    def test_always_allow_sends_the_same_submit_on_that_site_without_asking(self):
+        from dgc import pip_action_grants as grants
+        pip = self.personal()
+        self.run_worker(pip)
+        [first] = pip_computer.list_actions(self.registry, pip["id"])
+        with patch("dgc.pips.WorkspaceRegistry", return_value=self.registry), patch.object(self.registry, "close"):
+            response = pips.handle_control(self.cfg, {"type": "always_allow_pip_computer_action", "request_id": "r",
+                                                      "action_id": first["id"], "expected_digest": first["digest"]},
+                                           "editor-user", start_worker=False)
+        self.assertTrue(response["ok"], response.get("error"))
+        grant = response["result"]["grant"]
+        self.assertEqual((grant["kind"], grant["server"], grant["tool"], grant["account"]),
+                         ("computer_submit", TEST_HOST, "POST /submit", "browser"))
+        pip_computer.tick(self.registry, self.cfg)
+        self.assertEqual(len(self.received), 1, "the one you allowed is sent")
+        [sent] = pip_computer.list_actions(self.registry, pip["id"])
+        self.store.cancel(sent["continuation_run_id"], "local-console")      # this test drives the next run itself
+        self.run_worker(pip)
+        latest = pip_computer.list_actions(self.registry, pip["id"])[0]
+        self.assertEqual((latest["status"], latest["resolved_by"]), ("approved", "pip-grant:" + grant["id"]),
+                         "the same submit on the same site is approved by the grant, not left for you")
+        pip_computer.tick(self.registry, self.cfg)
+        self.assertEqual(len(self.received), 2, "and sent without asking")
+        said = [text for action_id, text in grants.ran_on_their_own(self.registry) if action_id == latest["id"]]
+        self.assertEqual(said, [f"Shopper submitted to {TEST_HOST}/submit in its browser, as you always allow."])
+
+    def test_an_always_allow_that_cannot_be_made_leaves_the_submit_waiting(self):
+        from dgc import pip_action_grants as grants
+        pip = self.personal()
+        self.run_worker(pip)
+        [held] = pip_computer.list_actions(self.registry, pip["id"])
+        with patch("dgc.pips.WorkspaceRegistry", return_value=self.registry), patch.object(self.registry, "close"), \
+                patch.object(grants, "MAX_PER_PIP", 0):
+            response = pips.handle_control(self.cfg, {"type": "always_allow_pip_computer_action", "request_id": "r",
+                                                      "action_id": held["id"], "expected_digest": held["digest"]},
+                                           "editor-user", start_worker=False)
+        self.assertFalse(response["ok"])
+        self.assertEqual(pip_computer.list_actions(self.registry, pip["id"])[0]["status"], "pending",
+                         "not sent on half a decision")
+        self.assertEqual(grants.list_grants(self.registry, pip["id"]), [])
+        pip_computer.tick(self.registry, self.cfg)
+        self.assertEqual(self.received, [])
+
+    def test_a_grant_covers_one_site_method_and_path_from_one_pips_computer(self):
+        from dgc import pip_action_grants as grants
+        pip = self.personal()
+        self.run_worker(pip)
+        [held] = pip_computer.list_actions(self.registry, pip["id"])
+        with self.registry.transaction():
+            grants.add_computer_grant(self.registry, held["id"], "editor-user")
+        same = {"method": "post", "host": TEST_HOST, "path": "/submit"}
+        self.assertIsNotNone(grants.computer_grant_for(self.registry, pip["id"], same))
+        for other in ({**same, "path": "/submit/delete"}, {**same, "host": "other.example"}, {**same, "method": "DELETE"}):
+            self.assertIsNone(grants.computer_grant_for(self.registry, pip["id"], other), other)
+        self.assertIsNone(grants.computer_grant_for(self.registry, "pip_" + "0" * 32, same), "another Pip's computer")
+        with self.assertRaises(RegistryError):
+            grants.add_computer_grant(self.registry, held["id"], "pip-grant:grant_" + "1" * 32)
 
     def test_rejecting_drops_the_request_and_the_kill_switch_loses_what_is_held(self):
         pip = self.personal()

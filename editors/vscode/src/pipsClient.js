@@ -501,7 +501,7 @@ function grantComputer(give){
  const name=S.pip?.name||'this Pip';
  openReview({computerGrant:give,title:give?`Give ${name} a computer?`:`Remove ${name}'s computer?`,
   description:give?'The Pip gets its own browser and files, separate from yours.':'The Pip will no longer browse. Its saved sign-ins stay on this computer until you remove them.',
-  body:give?'<ul class="computer-rules"><li>It can read public websites.</li><li>Anything that would submit or change something waits for your approval, with a screenshot.</li><li>It never sees your passwords. You sign in yourself with Open browser.</li><li>It cannot reach your home network and cannot make payments.</li><li>It cannot also read your connected apps.</li></ul>':'',
+  body:give?'<ul class="computer-rules"><li>It can read public websites.</li><li>Anything that would submit or change something waits for your approval, with a screenshot.</li><li>It never sees your passwords. You sign in yourself with Open browser.</li><li>It cannot reach your home network. A payment waits for your approval like anything else.</li><li>It cannot also read your connected apps.</li></ul>':'',
   confirm:give?'Give computer':'Remove computer',request:{type:'propose_pip_update'}});
 }
 async function applyComputerGrant(review){
@@ -521,8 +521,8 @@ async function openComputerAction(id){
  if(a.frame&&a.run_id){try{image=pipComputerFrame(await send('get_pip_computer_frame',{run_id:a.run_id,frame:a.frame}),a.run_id,a.frame).image;}catch{image='';}}
  const s=a.summary,rows=s.fields.map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join('');
  openReview({title:'Send this once?',description:`${S.pip?.name||'The Pip'} wants to ${s.method==='POST'?'submit':s.method.toLowerCase()} to ${s.host}. Nothing has been sent.`,
-  body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.method)} ${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
-  confirm:'Send once',expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
+  body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.method)} ${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
+  confirm:'Send once',always:true,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
 }
 async function decideComputerAction(review,approve){
  if(S.busy||!usable())return;const token=scope();S.busy=true;renderReview();
@@ -1794,6 +1794,16 @@ document.addEventListener('click',event=>{
       // This one now, and the same kind of action with this connection, account and tool from now on.
       const review=S.review;if(!review||review.scope!==scope()||!usable()||!review.always||reviewBlocked(review))return;
       const pip=S.selected;
+      if(review.computerAction){
+        // This submit now, and the same kind on this site (method and path) from now on, from this Pip's computer.
+        void mutate({type:'always_allow_pip_computer_action',action_id:review.request.action_id,expected_digest:review.request.expected_digest},result=>{
+          const a=pipComputerAction(result.action,pip),g=actionGrant(result.grant);
+          if(a.id!==review.computerAction||a.status!=='approved')throw Error('The saved decision differs from your choice. Refresh to see it.');
+          computerState.pip='';grantsState.pip='';
+          S.notice=`Always allowed: ${g.label}. It is sent within a few seconds, and this Pip will do the same there without asking and tell you after.`;
+        });
+        break;
+      }
       void mutate({type:'always_allow_pip_app_action',action_id:review.request.action_id,expected_digest:review.request.expected_digest},result=>{
         const a=messageReview(result.action,pip,S.workspace.id),g=actionGrant(result.grant);
         if(a.id!==review.messageAction||a.digest!==review.messageDigest)throw Error('The receipt does not match this saved review.');

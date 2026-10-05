@@ -23,7 +23,9 @@ MAX_PER_PIP = 20
 ACTOR = re.compile(r"pip-grant:grant_[a-f0-9]{32}")
 _FIXED_TOOL = {"gmail_send": "GMAIL_SEND_EMAIL", "calendar_create": "GOOGLECALENDAR_CREATE_EVENT"}
 _DRAFT_KIND = {"gmail_send": "email", "calendar_create": "calendar", "connector_call": "connector"}
-LABEL = {"gmail_send": "Send email", "calendar_create": "Create calendar events", "connector_call": "Run"}
+LABEL = {"gmail_send": "Send email", "calendar_create": "Create calendar events", "connector_call": "Run",
+         "computer_submit": "Submit in its browser"}
+KINDS = frozenset(LABEL)
 
 
 def tool(payload) -> str:
@@ -53,7 +55,7 @@ def list_grants(registry, pip_id) -> list:
             item = json.loads(value)
         except ValueError:
             continue
-        if isinstance(item, dict) and item.get("kind") in _FIXED_TOOL.keys() | {"connector_call"}:
+        if isinstance(item, dict) and item.get("kind") in KINDS:
             grants.append({"id": key[len(start):], **{k: item.get(k) for k in (
                 "kind", "server", "connection_digest", "account", "schema_digest", "tool", "label", "created_at", "created_by")}})
     grants.sort(key=lambda g: (str(g["created_at"]), g["id"]))
@@ -205,6 +207,14 @@ def ran_on_their_own(registry, limit=20) -> list:
         "WHERE a.resolved_by LIKE 'pip-grant:%' AND a.status IN ('succeeded','unknown') "
         "ORDER BY a.resolved_at DESC LIMIT ?", (limit,)).fetchall()
     said = []
+    try:
+        rows = list(rows) + [(r[0], "succeeded", json.dumps({"kind": "computer_submit", "summary": json.loads(r[1])}), r[2])
+            for r in registry.db.execute(
+                "SELECT a.id,a.summary,v.definition FROM pip_computer_actions a JOIN pips p ON p.id=a.pip_id "
+                "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
+                "WHERE a.resolved_by LIKE 'pip-grant:%' AND a.status='sent' ORDER BY a.resolved_at DESC LIMIT ?", (limit,)).fetchall()]
+    except Exception:
+        pass                                  # a registry without computers
     for action_id, status, payload, definition in rows:
         try:
             p, name = json.loads(payload), json.loads(definition).get("name") or "A Pip"
@@ -212,9 +222,57 @@ def ran_on_their_own(registry, limit=20) -> list:
             continue
         if p.get("kind") == "gmail_send":
             what = f"sent an email to {p['message'].get('recipient_email', '')}"
+        elif p.get("kind") == "computer_submit":
+            what = f"submitted to {p['summary'].get('host', '')}{p['summary'].get('path', '')} in its browser"
         elif p.get("kind") == "calendar_create":
             what = f"added \u201c{p['event'].get('summary', '')}\u201d to your calendar"
         else:
             what = f"ran {p.get('call', {}).get('tool', '')} with {p.get('server', '')}"
         said.append((action_id, f"{name} {what}" + (" (not confirmed)" if status == "unknown" else "") + ", as you always allow."))
     return said
+
+
+# --------------------------------------------------------------------------- a Pip's computer
+# A browser submit is the same kind of action when it goes to the same site, method and path, from
+# the same Pip's computer: Gmail's send, a broker's order form, a booking page. Its pins reuse the
+# fields above: server = the site, account = "browser", tool = "METHOD /path", the digests bind the
+# Pip's computer and the exact endpoint.
+
+def _hash(text):
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def computer_pins(pip_id, summary) -> dict:
+    method, host, path = str(summary["method"]).upper(), str(summary["host"]), str(summary["path"])
+    return {"kind": "computer_submit", "server": host, "connection_digest": _hash("dgc.pip.computer\0" + pip_id),
+            "account": "browser", "schema_digest": _hash(f"{method} {host}{path}"), "tool": f"{method} {path}"[:160]}
+
+
+def computer_grant_for(registry, pip_id, summary):
+    pins = computer_pins(pip_id, summary)
+    return next((g for g in list_grants(registry, pip_id) if all(g[k] == v for k, v in pins.items())), None)
+
+
+def add_computer_grant(registry, action_id, actor) -> dict:
+    """Always allow this submit's site, method and path for the Pip whose computer held it. Runs
+    inside the caller's transaction (`pip_computer.approve_always`), which checked the digest."""
+    _local(actor)
+    row = registry.db.execute("SELECT pip_id,workspace_id,summary FROM pip_computer_actions WHERE id=?", (action_id,)).fetchone()
+    if row is None:
+        raise RegistryError("not_found", "That computer action does not exist.")
+    summary = json.loads(row["summary"])
+    pins = computer_pins(row["pip_id"], summary)
+    for existing in list_grants(registry, row["pip_id"]):
+        if all(existing[k] == v for k, v in pins.items()):
+            return existing
+    if len(list_grants(registry, row["pip_id"])) >= MAX_PER_PIP:
+        raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
+    grant_id = identifier("grant")
+    label = f"Submit in its browser to {summary['host']}{summary['path']}"[:200]
+    record = {**pins, "label": label, "created_at": registry.clock(), "created_by": actor, "from_action": action_id}
+    registry.db.execute("INSERT INTO metadata VALUES(?,?)", (_key(row["pip_id"], grant_id), json.dumps(record, ensure_ascii=False)))
+    registry.event(row["workspace_id"], "pip_action_granted", pip_id=row["pip_id"],
+                   payload={"grant_id": grant_id, "kind": "computer_submit", "tool": pins["tool"], "actor": actor})
+    return {"id": grant_id, **{k: record[k] for k in ("kind", "server", "connection_digest", "account", "schema_digest",
+                                                    "tool", "label", "created_at", "created_by")}}

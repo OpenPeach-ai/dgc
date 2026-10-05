@@ -141,6 +141,10 @@ created_at, expires_at, resolved_at, resolved_by, continuation_run_id}`; `summar
 `{method, host, path, page, fields: [{name, value}], more_fields, body_bytes}` with
 secret-named values already masked. `decide_pip_computer_action {action_id, expected_digest,
 approve}` returns `{action}`; the supervisor sends or drops the request within seconds.
+`always_allow_pip_computer_action {action_id, expected_digest}` approves it and saves a
+`computer_submit` grant for the same method, host and path on that Pip, in one step; it returns
+`{action, grant}` (a grant row as in `list_pip_action_grants`). `summary.payment` is `true` when
+the request carries a card number.
 `get_pip_computer_frame {run_id, frame}` returns `{run_id, frame, image}` (a JPEG data URL) and
 `list_pip_computer_frames {run_id}` returns `{run_id, frames}`. `stop_pip_computer {pip_id}`
 returns `{pip_id, stopping: true}`. `open_pip_computer {pip_id}` asks the supervisor to open the

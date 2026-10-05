@@ -155,7 +155,7 @@ job with `create_pip` and a reviewed update.
 | 39 | `app_plan` version 3 (Drive, Notion and Contacts searches) |
 | 40 | `changes.web_plan` |
 | 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`, `get_pips_keep_running`, `set_pips_keep_running`, `get_pips_desktop_notifications`, `set_pips_desktop_notifications`, `get_pip_usage`, `set_pip_daily_cap`, `export_pip`, `list_pip_feedback`, `set_pip_feedback`, `always_allow_pip_app_action`, `list_pip_action_grants`, `revoke_pip_action_grant`; `changes.github_plan` |
-| 42 | Pip computers: `get_pip_computer`, `list_pip_computer_actions`, `get_pip_computer_frame`, `list_pip_computer_frames`, `decide_pip_computer_action`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view`; `changes.computer_plan` |
+| 42 | Pip computers: `get_pip_computer`, `list_pip_computer_actions`, `get_pip_computer_frame`, `list_pip_computer_frames`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view`; `changes.computer_plan` |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -410,6 +410,7 @@ settings are display preferences outside the reviewed job; changing them grants 
 | `get_pip_computer_frame` | R | `run_id`, `frame` (`0001.jpg` style) |
 | `list_pip_computer_frames` | R | `run_id` |
 | `decide_pip_computer_action` | M | `action_id`, `expected_digest`, `approve` (bool) |
+| `always_allow_pip_computer_action` | M | `action_id`, `expected_digest`; sends it and lets its Pip send the same submit (method, site, path) without asking |
 | `stop_pip_computer` | M | `pip_id` |
 | `open_pip_computer` | M | `pip_id` |
 | `use_pip_computer_view` | M | `pip_id`, `op` (`frame`, `click`, `type`, `key`, `scroll`, `go`, `back`), `x?`, `y?`, `text?`, `key?`, `dy?`, `url?` |

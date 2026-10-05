@@ -571,7 +571,8 @@ you can make it: the main chat and the Pip itself can't.
   once, because you did it. While a run is using the computer, the view only watches.
 - **Fenced in.** The browser reaches only public web addresses on ports 80 and 443. Your home
   network, this computer's own services and cloud metadata addresses are refused. A request
-  that carries a payment card number is refused outright, even one you make yourself. A Pip with
+  that carries a payment card number waits for you like any other change, and its review says
+  it sends payment card details. A Pip with
   a computer can't also have app reads, so private data from your accounts never sits in a
   browser that could send it on.
 - **Stop it any time.** **Stop computer**, or `dgc pips computer stop PIP`, closes the browser at
@@ -639,6 +640,11 @@ dgc pips allowed PIP                      # what runs without asking
 dgc pips allowed PIP --revoke GRANT_ID
 ```
 
+A Pip's computer has **Always allow** too, in the review of a waiting submit (or `dgc pips
+computer approve ACTION_ID --always`): the Pip may then send the same kind of submit, to the same
+site, method and path, from its own browser without asking, and you are told after. Anything
+else it would submit still waits for you.
+
 ## What Pips never do
 
 - **Change your project.** No Pip edits your working files, commits, merges,
@@ -662,7 +668,8 @@ dgc pips allowed PIP --revoke GRANT_ID
   allow** for that Pip, connection, account and tool. So is every form a Pip's computer
   would submit.
 - **Buy, pay or book on their own,** unless you allowed it. A Pip has no tool of its
-  own for this, and a Pip's computer refuses any request carrying a payment card number; a connector action runs the exact tool call you reviewed, or one you
+  own for this; a Pip's computer holds every submit, a payment included, for you or for an Always
+  allow that covers it; a connector action runs the exact tool call you reviewed, or one you
   always allow, so check what that tool does before you allow it.
 - **Use a cloud service of DGC's.** There is no Pips account or hosted runner.
 
