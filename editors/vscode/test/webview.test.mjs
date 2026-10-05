@@ -4492,7 +4492,7 @@ test("the Pips button carries the Core Pip, idle and decorative; without the ren
  const core=face.querySelector('.dgc-plush');assert.ok(core,'the Core Pip is drawn inside the button');
  assert.equal(core.dataset.character,'core');assert.equal(core.dataset.state,'idle');
  assert.equal(face.getAttribute('aria-hidden'),'true');assert.equal(pips.getAttribute('aria-label'),'Open Pips');
- assert.equal(pips.textContent.trim(),'Pips','no stylesheet text leaks into the button');
+ assert.equal(pips.textContent.trim(),'Pips','no stylesheet text leaks into the button');assert.equal(pips.lastElementChild,face,'Core sits after the word');
  assert.equal(doc.querySelectorAll('#plush-styles').length,1);assert.deepEqual(errors,[]);dom.window.close();
  const bare=makeDom();assert.equal(bare.doc.querySelector('#btn-pips .pips-nav-core').childElementCount,0);assert.deepEqual(bare.errors,[]);bare.dom.window.close();
 });
