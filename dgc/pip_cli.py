@@ -779,7 +779,8 @@ def _format(value):
     if set(value) == {"pip_id", "grants"}:
         if not value["grants"]:
             return "Nothing runs without asking: every action this Pip drafts waits for you."
-        return "Runs without asking:\n" + "\n".join(f"- {g['label']} (account {g['account']}) · {g['id']}" for g in value["grants"])
+        account = lambda g: "the account its connection uses" if g["account"] == "connection_managed" else f"account {g['account']}"
+        return "Runs without asking:\n" + "\n".join(f"- {g['label']} ({account(g)}) · {g['id']}" for g in value["grants"])
     if set(value) == {"pip_id", "feedback"}:
         rows = value["feedback"]
         if not rows:

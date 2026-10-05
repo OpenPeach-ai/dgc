@@ -384,7 +384,7 @@ function grantsMarkup(){
  if(!g)return grantsState.error?`<section class="section" aria-label="Allowed without asking"><h2>Allowed without asking</h2>${errorMarkup(grantsState.error)}</section>`:'';
  const off=S.busy||!usable();
  return `<section class="section" aria-label="Allowed without asking"><h2>Allowed without asking</h2>${g.grants.length
-   ?`<p class="muted">When this Pip drafts one of these, it runs after the run and you are told after. Anything else waits for you.</p>${g.grants.map(x=>`<div class="grant-row"><span>${esc(x.label)} <span class="muted">· account ${esc(x.account)}</span></span><button type="button" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></div>`).join('')}`
+   ?`<p class="muted">When this Pip drafts one of these, it runs after the run and you are told after. Anything else waits for you.</p>${g.grants.map(x=>`<div class="grant-row"><span>${esc(x.label)} <span class="muted">· ${x.account==='connection_managed'?'the account its connection uses':'account '+esc(x.account)}</span></span><button type="button" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></div>`).join('')}`
    :'<p class="muted">Nothing. Every email, event or app action this Pip drafts waits for you. Choose <b>Always allow</b> when you approve one to let it do that kind of action on its own.</p>'}</section>`;
 }
 function revokeGrant(grantId){
