@@ -212,8 +212,9 @@ TOOL_SCHEMAS = [
          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["pip_id", "expected_version", "changes", "reason", "request_key"]),
-    _fn("pips_setup", "Prepare one saved setup card for a NEW or EXISTING Pip, including a schedule and optional first run. "
-        "This only saves a draft: the human must review it in Pips or the CLI. It never creates, resumes or runs a job. "
+    _fn("pips_setup", "Set up a NEW or EXISTING Pip, including a schedule and optional first run. Calling it asks the user "
+        "like any tool call (auto mode allows it); once allowed, the Pip is created and on. A Pip that reads connected "
+        "accounts (app_plan) or a Pulse with commands is saved as a card the user reviews instead. "
         "First establish project or personal scope. Personal tasks use scope=personal and work_kind=personal_task; they persist across projects and receive no project files or command tools. Use pips_context connections/connection to inspect existing shared app metadata; app_plan requires exact inspected digests and a user-selected connected account ID, never guesses. "
         "For project work establish whether the user wants source review or actual app tests. "
         "target_root must be this chat's project root; ask the user to open the correct project on a mismatch, "
@@ -224,7 +225,7 @@ TOOL_SCHEMAS = [
         "Confirm the actual local URLs. This only checks status, not browser rendering or authenticated journeys. "
         "For an existing Pip read its definition first and provide all three identity/version fields. "
         "Daily schedules require an explicit IANA timezone. With run_now=true the immediate run counts for today "
-        "and the next daily occurrence is tomorrow. Show the saved plan for review; never claim activation. "
+        "and the next daily occurrence is tomorrow. Report what the result says: created, or a card waiting for review. "
         "Retry the same draft with the same request_key; changed content needs a new key.",
         {"target_root": {"type": "string", "maxLength": 4096},
          "name": {"type": "string", "minLength": 1, "maxLength": 120},
@@ -270,9 +271,9 @@ TOOL_SCHEMAS = [
          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["target_root", "name", "goal", "pip_type", "work_kind", "schedule", "run_now", "reason", "request_key"]),
-    _fn("pips_propose", "Draft an update to an EXISTING Pip in this chat's workspace for the user to review. "
-        "Only name, goal and source_ref can change. This records a pending proposal; it cannot apply changes, "
-        "approve proposals, run work, schedule work, or change permissions. Read pips_context definition first. "
+    _fn("pips_propose", "Change an EXISTING Pip in this chat's workspace. Calling it asks the user like any tool call "
+        "(auto mode allows it); once allowed, the change is applied. Only name, goal and source_ref can change; it cannot "
+        "run work, schedule work or change permissions. Read pips_context definition first. "
         "Use the same request_key for a retry of the identical draft; a changed draft needs a new key.",
         {"pip_id": {"type": "string"},
          "expected_version": {"type": "integer", "minimum": 1, "maximum": 999999},

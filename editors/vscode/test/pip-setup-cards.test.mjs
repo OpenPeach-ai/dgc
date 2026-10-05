@@ -108,3 +108,13 @@ test('repeated tool receipts for one saved proposal reuse its existing row',asyn
  x.cards.finish(x.d.querySelector('#turn'));
  assert.equal(x.d.querySelectorAll('.pip-setup-pending > .pip-setup-card').length,1);
 });
+test('a Pip the chat created on its permission reads as created, with nothing left to approve',async t=>{
+ const x=harness(t),s=setup();
+ const created={...s,status:'accepted',receipt:{setup_id:s.id,pip_id:pip,job_version:1,run_id:null,next_run_at:null,accepted:true,actor:'chat-permission:auto',resolved_at:'2099-10-02T04:01:00Z'}};
+ x.send(created);x.answer(x.requests('get_pip_setup').at(-1),{setup:created});await flush();
+ assert.match(x.d.body.textContent,/Created and on, as allowed in the chat\. Pause, change or delete it in Pips\./);
+ assert.equal(x.d.querySelector('.pip-setup-state').textContent,'Created');
+ assert.equal(x.find('Approve'),undefined);
+ assert.equal(x.find('Retry chat notification'),undefined,'the chat already knows: nothing to notify');
+ assert.equal(x.requests('notify_pip_setup').length,0);
+});

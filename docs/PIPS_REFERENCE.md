@@ -23,11 +23,15 @@ made it, and the controller decides what that actor may do.
 | Actor | Who | May |
 | --- | --- | --- |
 | Local user | The Pips view (`editor-user`) and `dgc pips` (`local-console`) | Everything a person decides: create, accept and reject proposals, setups and handoffs, prepare and accept external actions, archive, stop |
-| Main chat | The main DGC chat's model, through its Pips tools | Read Pips data; save setup cards, proposals, handoffs and drafts for review; queue runs of read-only Pips; pause, resume and attach Pips. Each call passes DGC's permission engine. |
+| Main chat | The main DGC chat's model, through its Pips tools | Read Pips data; set up and change Pips when the permission engine allows the call (accepted as `chat-permission:<mode>`), except setups with app reads or Pulse commands, which stay cards; save handoffs and drafts for review; queue runs of read-only Pips; pause, resume and attach Pips. Each call passes DGC's permission engine. |
 | Automation | The runner's scheduler (`local-scheduler`) and event trigger (`local-event-trigger`) | Queue runs that a reviewed schedule or trigger already authorizes |
 | Pip worker | The model inside a run | Only its run kind's tools, listed under [Run kinds](#run-kinds) |
 
-Accepting any setup, proposal, handoff or external action is a local-user decision.
+Accepting a handoff or an external action, and a setup with app reads or Pulse
+commands, is a local-user decision. Another setup or a name, goal or source-ref
+proposal from the main chat is accepted by the call's own permission decision (auto
+mode, an allow rule or the user's Allow), recorded as `chat-permission:<mode>`; a new
+Pip created that way gets a 200,000-token daily limit (`pip_spend.DEFAULT_CHAT_CAP`).
 No main-chat tool, scheduler, trigger or Pip worker can accept one. Personal Pips,
 external actions, connections and setup reviews are available only to the local
 user's own controllers.
@@ -793,8 +797,8 @@ notice, loads them automatically. A new or resumed chat starts without them.
 | --- | --- | --- | --- |
 | `use_pips` | `UsePips` | Allowed | Loads the Pips tools |
 | `pips_context` | `PipsContext` | Allowed | Reads Pips data (below) |
-| `pips_setup` | `PipsSetup` | Allowed (draft only) | Saves a setup card for a new or existing Pip |
-| `pips_propose` | `PipsPropose` | Allowed (draft only) | Saves a proposal to change a project Pip's name, goal or source ref |
+| `pips_setup` | `PipsSetup` | Asks (allowed without asking when it saves a card) | Creates or updates a Pip; one with app reads or Pulse commands is saved as a setup card instead |
+| `pips_propose` | `PipsPropose` | Asks | Applies a change to a project Pip's name, goal or source ref |
 | `pips_adapt` | `PipsAdapt` | Asks | Applies a name or source-ref change that the Pip's adaptation policy allows |
 | `run_pip_now` | `PipsRun` | Asks | Queues one run of a Scout, Lens, Rook, Lock or Quill Pip, or a Personal Pip |
 | `handoff_to_pip` | `PipsHandoff` | Asks | Saves a handoff proposal |

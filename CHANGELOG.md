@@ -10,9 +10,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 Pips are standing agents that work beside the main chat, and they are on for everyone. A Project
 Pip reviews, tests or drafts for one project, on a schedule or when commits land; a Personal Pip
-handles your own tasks across projects. Everything consequential is a proposal you review first:
-the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
+handles your own tasks across projects. You decide what they do: the chat sets Pips up through your
+permission mode, and anything that sends, books or runs on your behalf waits for your approval. See
+[docs/PIPS.md](docs/PIPS.md).
 
+- Setting up a Pip from the chat is a tool call like any other: the default mode asks, showing the
+  Pip, its job, what it reads and when it runs; auto mode allows it; Always allow saves a rule. Once
+  allowed it is created and on, with a 200,000-token daily limit you can change. A Pip that reads
+  your connected accounts or a Pulse that runs commands still waits for you on a setup card.
 - `dgc pips` creates, runs, reviews and stops Pips from the terminal; `dgc pips serve` runs the
   local runner that schedules need.
 - Starter Pips cover three common jobs: review each new commit, a nightly security review, and a

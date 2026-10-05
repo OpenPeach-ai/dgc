@@ -3493,6 +3493,29 @@
   // Request ids restart with every backend process (r1, r2, ...), so a card remembers which backend
   // asked: a new backend's r1 is a new request even while the last one's answered r1 is on screen.
   let requestEpoch = 0;
+  // A Pip setup or change is approved by its permission card, so the card shows the job in words,
+  // not its JSON: what the Pip is, what it does, what it reads, and what Allow does.
+  function pipPermissionDetail(name, args) {
+    if (!args || typeof args !== "object") return "";
+    const row = (label, value) => (value ? `<dt>${label}</dt><dd>${esc(String(value))}</dd>` : "");
+    if (name === "pips_propose") {
+      const changes = args.changes && typeof args.changes === "object" ? Object.entries(args.changes) : [];
+      if (!changes.length) return "";
+      return `<dl class="pip-permission">${changes.map(([key, value]) => row(esc(key.replace(/_/g, " ")), value)).join("")}${row("Why", args.reason)}</dl>`
+        + `<div class="muted pip-permission-note">Allow applies this change to the Pip.</div>`;
+    }
+    if (name !== "pips_setup") return "";
+    const reads = args.web_plan && Array.isArray(args.web_plan.reads) ? args.web_plan.reads : [];
+    const readText = reads.map((r) => (r && r.kind === "search" ? `Search: ${r.query || ""}` : String((r && r.url) || ""))).join("\n");
+    const kind = `${args.pip_type || ""}, ${args.scope === "personal" ? "personal (across your projects)" : "this project"}`;
+    const model = args.model_choice && args.model_choice.mode && args.model_choice.mode !== "default"
+      ? [args.model_choice.provider, args.model_choice.model].filter(Boolean).join(" · ") : "";
+    const fresh = !args.pip_id;
+    return `<dl class="pip-permission">${row("Pip", args.name)}${row("Job", args.goal)}${row("Kind", kind)}`
+      + `${row("Reads", readText)}${row("Model", model)}${row("First run", args.run_now ? "Now, then on its schedule" : "")}</dl>`
+      + `<div class="muted pip-permission-note">${fresh ? "Allow creates this Pip and turns it on, with a daily limit of 200,000 tokens you can change." : "Allow applies this setup to the existing Pip."} `
+      + `Pause, change or delete it any time in Pips.</div>`;
+  }
   function requestCard(c, id) { c.dataset.requestId = String(id); c._requestEpoch = requestEpoch; renderTurnMeta(); return c; }
   // The backend announces an open decision again after a history snapshot; one card per request.
   function requestShown(id) {
@@ -4760,10 +4783,10 @@
         // v7: the step's summary and, for an edit, the diff it would apply — approve against
         // what will happen, not raw JSON. A denial can carry a note for the model.
         const detail = ev.command ? `<pre>$ ${esc(ev.command)}</pre>`
-          : ev.diff ? "" : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
+          : ev.diff ? "" : (pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
         const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
-        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>Run <b>${esc(ev.name)}</b></span></div>${summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>${ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : `Run <b>${esc(ev.name)}</b>`}</span></div>${summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);

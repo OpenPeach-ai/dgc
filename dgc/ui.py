@@ -163,8 +163,54 @@ def display_path(path, root=None) -> str:
         return text
 
 
+def pip_schedule_words(schedule, event_trigger=None) -> str:
+    """When a Pip runs, in words: for a permission prompt and the editor's card."""
+    if isinstance(event_trigger, dict):
+        return "after each new commit"
+    if not isinstance(schedule, dict):
+        return "when you run it"
+    kind = schedule.get("type")
+    if kind == "daily":
+        return f"daily at {schedule.get('time', '?')} ({schedule.get('timezone', '?')})"
+    if kind == "cron":
+        import re
+        zone = schedule.get("timezone", "?")
+        found = re.fullmatch(r"(\d{1,2}) (\d{1,2}) \* \* (\*|1-5|[0-6])", str(schedule.get("cron", "")).strip())
+        if found:
+            minute, hour, days = found.groups()
+            at = f"{int(hour):02d}:{int(minute):02d}"
+            day_names = ("Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays")
+            when = {"*": "daily", "1-5": "weekdays"}.get(days) or day_names[int(days)]
+            return f"{when} at {at} ({zone})"
+        return f"on schedule {schedule.get('cron', '?')} ({zone})"
+    if kind == "interval":
+        return f"every {schedule.get('minutes', '?')} minutes"
+    if kind == "once":
+        return f"once at {schedule.get('at', '?')}"
+    return "on a schedule"
+
+
+def _pip_call_summary(name: str, args: dict) -> str:
+    if name == "pips_propose":
+        changes = args.get("changes") if isinstance(args.get("changes"), dict) else {}
+        return "Change a Pip: " + "; ".join(f"{key.replace('_', ' ')} → {value}" for key, value in changes.items())
+    reads = len((args.get("web_plan") or {}).get("reads") or []) if isinstance(args.get("web_plan"), dict) else 0
+    parts = [("Change" if args.get("pip_id") else "Create") + f" Pip “{args.get('name', '')}”",
+             f"{args.get('pip_type', '')}, {'personal' if args.get('scope') == 'personal' else 'this project'}",
+             pip_schedule_words(args.get("schedule"), args.get("event_trigger"))]
+    if reads:
+        parts.append(f"reads {reads} page{'s' if reads != 1 else ''} or search{'es' if reads != 1 else ''}")
+    if args.get("run_now"):
+        parts.append("runs now")
+    return " · ".join(parts)
+
+
 def arg_summary(name: str, args: dict, root=None) -> str:
     """A one-line human summary of a tool call's primary argument."""
+    if name in ("pips_setup", "pips_propose") and isinstance(args, dict):
+        # What allowing it does, in the user's words: the permission is the approval.
+        value = _pip_call_summary(name, args).replace("\n", " ")
+        return value[:160] + ("…" if len(value) > 160 else "")
     if name == "propose_options" and isinstance(args, dict):
         from .questions import args_summary
         value = args_summary(args).replace("\n", " ")

@@ -138,9 +138,15 @@ class PipSetupControlsTests(unittest.TestCase):
         self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pip_runs').fetchone()[0], 0)
 
     def test_permission_rules_keep_deny_ask_allow_order(self):
-        for mode, expected in [('plan', DENY), ('default', ALLOW), ('acceptEdits', ALLOW), ('auto', ALLOW)]:
+        # Asked like any change; a setup that keeps its own card is not asked twice.
+        for mode, expected, card in [('plan', DENY, DENY), ('default', ASK, ALLOW), ('acceptEdits', ASK, ALLOW), ('auto', ALLOW, ALLOW)]:
             self.cfg.data['mode'] = mode
-            self.assertEqual(PermissionEngine(self.cfg.data['mode'], self.cfg.permissions, self.root).decide('pips_setup', self.request())[0], expected)
+            engine = PermissionEngine(self.cfg.data['mode'], self.cfg.permissions, self.root)
+            self.assertEqual(engine.decide('pips_setup', self.request())[0], expected, mode)
+            with patch('dgc.pip_setup.needs_card', return_value=True):
+                self.assertEqual(engine.decide('pips_setup', self.request())[0], card, mode)
+        self.assertEqual(PermissionEngine('default', {'deny': [], 'ask': [], 'allow': ['PipsSetup']}, self.root)
+                         .decide('pips_setup', self.request())[0], ALLOW, 'Always allow is an ordinary rule')
         for mode in ('default','acceptEdits','auto'):
             self.assertEqual(PermissionEngine(mode, {'deny':[], 'ask':['PipsSetup'], 'allow':['PipsSetup']}, self.root).decide('pips_setup', self.request())[0], ASK)
         self.cfg.permissions = {'deny':['PipsSetup'], 'ask':[], 'allow':['PipsSetup']}

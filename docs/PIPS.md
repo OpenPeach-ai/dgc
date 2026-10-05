@@ -99,18 +99,28 @@ choices; `--yes` approves the job shown without the question.
 **From an answer.** Each answer in the chat has **Make this a Pip** (the calendar
 button). It drafts the ask in your composer, "make this a Pip that does it on a
 schedule", with your original request; adjust it and send. Nothing is created until
-you approve the setup card. And when you start a chat with work you have started
+you allow it. And when you start a chat with work you have started
 chats with before, the chat may offer once to make it a Pip; say no and it won't ask
 again in that chat.
 
 **From the main chat.** Just ask, for example: "Review committed changes in this
 project every weekday at 9:00 Europe/London, and run once now." The main chat loads
-its Pips tools and prepares a **setup card**. The card shows the project folder,
-the job, the character, the source, the schedule with its next run time, whether
-it will run once on approval, the model, and exactly what the Pip may do. Choose
-**Approve** (or **Approve & run**), **Reject** or **Review**. Nothing is saved or run
-until you approve the exact card. A card expires after seven days, or sooner if the
-next run time it shows has already passed.
+its Pips tools and sets the Pip up with a tool call, which follows your permission
+mode like any other: in the default mode it asks first, showing the Pip, its job,
+what it reads, when it runs and whether it runs now (**Allow once**, **Always allow**
+or **Deny**); in auto mode it is allowed; plan mode denies it. Once allowed, the Pip
+is created and on. A Pip the chat creates this way starts with a daily limit of
+200,000 tokens, which you can change in its **Job** tab. Pause, change or delete it
+any time in the Pips view.
+
+Two kinds of Pip still wait for your own review on a **setup card**, in every mode:
+one that reads your connected accounts (mail, calendar, files), and a Pulse that runs
+commands. Those run with nobody watching, long after the chat ends, so you approve
+the exact card: it shows the project folder, the job, the character, the source, the
+schedule with its next run time, whether it will run once on approval, the model,
+and exactly what the Pip may do. Choose **Approve** (or **Approve & run**), **Reject**
+or **Review**. A card expires after seven days, or sooner if the next run time it
+shows has already passed.
 
 The main chat can set up Scout, Lens, Rook and Lock reviews, Quill drafts, Pulse
 command plans and Personal Pips. A new Scout, Lens, Rook, Lock or Quill can run after
@@ -450,9 +460,12 @@ emails, events and connector actions from a Personal result. In the editor, type
 Each of these tools has a permission name, so you can control it with the usual
 rules: `PipsContext`, `PipsSetup`, `PipsPropose`, `PipsAdapt`, `PipsRun`,
 `PipsHandoff`, `PipsEmailDraft`, `PipsCalendarDraft`, `PipsConnectorDraft`,
-`PipsPause`, `PipsResume` and `PipsAttach`. Reading and preparing setup cards or
-proposals don't ask, because nothing happens until you approve the card or
-proposal. The others ask in the default mode, and plan mode denies them.
+`PipsPause`, `PipsResume` and `PipsAttach`. Setting a Pip up (`PipsSetup`) and
+changing one (`PipsPropose`) ask in the default mode, like the rest, and allowing
+them is the approval; **Always allow** saves an ordinary allow rule. A setup that
+reads connected accounts or runs Pulse commands doesn't ask twice: it saves a card
+you approve instead. Reading never asks, auto mode allows everything, and plan mode
+denies every change.
 
 **Memory and context.** You can record facts for future runs:
 
@@ -565,11 +578,12 @@ show` and `dgc pips app-action accept ACTION_ID --expected-digest DIGEST`.
   lists you reviewed, in a confined copy with the network off, apart from fixed checks of
   local `http://127.0.0.1` addresses you approved. No Pip has a shell, installs
   dependencies or picks its own commands.
-- **Approve themselves.** No Pip, and not the main chat, can accept a setup,
-  proposal, handoff or external action. Only you can, in the Pips view or the CLI.
+- **Approve themselves.** No Pip can accept a setup, proposal, handoff or external
+  action. The main chat sets up and changes Pips only through tool calls your
+  permission mode decides; a Pip that reads connected accounts or runs commands, a
+  handoff and an external action still wait for you in the Pips view or the CLI.
   When the chat runs `dgc pips` in its own shell, the CLI only reads (and can make
-  the emergency stop); anything that changes a Pip is refused there, and the chat
-  prepares it as a setup card for you instead.
+  the emergency stop); anything that changes a Pip is refused there.
 - **Act outside their reviewed reads.** Project Pips read only their approved
   source. Personal Pips see only the app and web reads you approved.
 - **Send, create or call without you.** Every email, event and connector call is a

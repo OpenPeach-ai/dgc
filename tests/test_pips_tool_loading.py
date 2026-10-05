@@ -181,8 +181,8 @@ class PipsRepeatHintTests(PipsToolLoadingTests):
         text = loader["function"]["description"]
         self.assertIn("offer once to make it a Pip", text)
         # What Pips can and cannot do travels with their tools, off the always-on surface.
-        self.assertNotIn("no Pip buys, sells, trades or pays", self.agent.system_prompt())
+        self.assertNotIn("actions in any connected app or service", self.agent.system_prompt())
         self.agent._load_pips_tools()
-        for line in ("no Pip buys, sells, trades or pays", "refuses changes from your shell",
-                     "read web pages and searches the user approves"):
+        for line in ("actions in any connected app or service", "run when the user approves them",
+                     "refuses changes from your shell", "read web pages and searches the user approves"):
             self.assertIn(line, self.agent.system_prompt())

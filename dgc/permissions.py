@@ -120,6 +120,11 @@ POLICY_ALIASES = {"monitor": "bash", "view_image": "read_file"}
 ALLOW, ASK, DENY = "allow", "ask", "deny"
 
 
+def _setup_needs_card(args) -> bool:
+    from .pip_setup import needs_card
+    return needs_card(args)
+
+
 def _split_compound(command: str) -> list[str]:
     """Split a shell command on &&, ||, ; and | into subcommands."""
     parts = re.split(r"&&|\|\||[;|]", command)
@@ -548,11 +553,12 @@ class PermissionEngine:
 
         if self.mode == "auto":
             return ALLOW, "auto mode"
-        # These tools save a pending proposal only. Activation still requires
-        # the user's durable review of that exact proposal. Keep this after
-        # plan-mode rejection and explicit deny/ask/allow rules.
-        if policy_tool in ("pips_setup", "pips_propose"):
-            return ALLOW, "draft only; durable Pip review required before activation"
+        # Approving a Pip setup or change here IS the approval: the tool creates the Pip. A setup that
+        # reads the user's connected accounts or runs commands on a schedule keeps its own card in
+        # every mode, so this call only saves that card and asking twice would buy nothing. Kept
+        # after plan-mode rejection and explicit deny/ask/allow rules.
+        if policy_tool == "pips_setup" and _setup_needs_card(policy_args):
+            return ALLOW, "saves a card for your review (connected accounts or scheduled commands)"
         if self.mode == "acceptEdits":
             if policy_tool in READ_ONLY_TOOLS or policy_tool in EDIT_TOOLS:
                 return ALLOW, "acceptEdits mode"

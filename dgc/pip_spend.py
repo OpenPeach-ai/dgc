@@ -39,6 +39,20 @@ def cap(registry, pip_id) -> int | None:
     return value if value is not None and MIN_CAP <= value <= MAX_CAP else None
 
 
+DEFAULT_CHAT_CAP = 200_000
+
+
+def apply_default(registry, pip_id) -> int:
+    """A Pip the chat created on a tool permission, with no card to look at, starts with a daily
+    limit: one created by mistake cannot spend for weeks. The user raises or removes it."""
+    with registry.transaction():
+        registry.db.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)", (CAP_PREFIX + pip_id, str(DEFAULT_CHAT_CAP)))
+        workspace = registry.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
+        registry.event(workspace, "pip_daily_cap_changed", pip_id=pip_id,
+                       payload={"daily_tokens": DEFAULT_CHAT_CAP, "actor": "chat-permission-default"})
+    return DEFAULT_CHAT_CAP
+
+
 def set_cap(registry, pip_id, daily_tokens, actor) -> dict:
     if actor not in ("editor-user", "local-console"):
         raise RegistryError("local_only", "A Pip's daily limit is set on this computer only.")
