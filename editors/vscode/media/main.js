@@ -563,6 +563,7 @@
         },
       });
     }
+    if (sessionsOpen) hideSessions();
     pipsOpen = true;
     document.body.classList.add("pips-active");
     host.hidden = false;
@@ -570,14 +571,103 @@
     $("btn-pips").setAttribute("aria-pressed","true");
     pipsApp.setVisible?.(pipsViewVisible && !document.hidden);
   }
-  function closePips() {
+  // `back`: whether to go back to what was there before -- the side bar's Sessions home goes back to
+  // its list. False when the list itself is what is taking over.
+  function closePips(back = true) {
     pipsOpen = false;
     pipsApp?.setVisible?.(false);
     document.body.classList.remove("pips-active");
     $("pips-host").hidden = true;
     $("btn-pips-back").hidden = true;
     $("btn-pips").setAttribute("aria-pressed","false");
-    input.focus();
+    if (chatPlace === "home") { if (back) showSessions(); }
+    else input.focus();
+  }
+  // ---- #3 Sessions home ----
+  // The side bar opens on this project's sessions, newest first. Each opens in an editor tab of its
+  // own -- "Open in Editor", a double-click or Enter -- and so does New session. In a session's tab
+  // the page is the chat, without the Pips (they stay in the side bar), its + opening another tab.
+  const chatPlace = document.documentElement.dataset.chatPlace || "chat";
+  let sessionsOpen = false;
+  function showSessions() {
+    if (chatPlace !== "home") return;
+    if (pipsOpen) closePips(false);
+    sessionsOpen = true;
+    document.body.classList.add("sessions-active");
+    $("sessions-host").hidden = false;
+  }
+  function hideSessions() {
+    sessionsOpen = false;
+    document.body.classList.remove("sessions-active");
+    $("sessions-host").hidden = true;
+  }
+  const sessionTitle = (item) => item.name || item.preview || "Untitled session";
+  function openSession(item) { vscode.postMessage({ type: "openSessionInEditor", id: item.id, title: sessionTitle(item) }); }
+  function selectSession(row) {
+    for (const other of $("sessions-list").querySelectorAll(".session-row[data-selected]")) delete other.dataset.selected;
+    row.dataset.selected = "";
+  }
+  function sessionButton(cls, codicon, onClick) {
+    const button = el("button", cls); button.type = "button";
+    const glyph = el("span", `codicon codicon-${codicon}`); glyph.setAttribute("aria-hidden", "true");
+    button.append(glyph);
+    button.onclick = (e) => { e.stopPropagation(); onClick(); };
+    button.ondblclick = (e) => e.stopPropagation();
+    return button;
+  }
+  // Session names and previews are the user's own words: text nodes only, never markup.
+  function renderSessions(msg) {
+    const list = $("sessions-list"), status = $("sessions-status");
+    const items = Array.isArray(msg.items) ? msg.items : [];
+    const selected = list.querySelector(".session-row[data-selected]")?.dataset.id;
+    const focused = document.activeElement?.closest?.(".session-row")?.dataset.id;
+    list.replaceChildren();
+    status.textContent = msg.error ? String(msg.error)
+      : items.length ? "" : "No sessions in this project yet. Start one with New session: it opens in an editor tab.";
+    if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
+    status.hidden = !status.textContent;
+    for (const item of items) {
+      const title = sessionTitle(item);
+      const row = el("li", "session-row");
+      row.tabIndex = 0; row.dataset.id = item.id;
+      const main = el("div", "session-main");
+      const name = el("span", "session-name"); name.textContent = title; name.title = title;
+      const meta = el("span", "session-meta");
+      const count = Number(item.count) || 0;
+      for (const part of [item.when, `${count} message${count === 1 ? "" : "s"}`]) {
+        if (part) { const span = el("span"); span.textContent = part; meta.append(span); }
+      }
+      if (item.open) { const open = el("span", "session-tab"); open.textContent = "Open in a tab"; meta.append(open); }
+      main.append(name, meta);
+      const open = sessionButton("session-open", "go-to-file", () => openSession(item));
+      const word = el("span", "session-open-label"); word.textContent = "Open in Editor"; open.append(word);
+      open.title = "Open in an editor tab";
+      open.setAttribute("aria-label", `Open in Editor: ${title}`);
+      const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "deleteSession", id: item.id, title }));
+      remove.title = item.open ? "Close its tab to delete this session" : "Delete this session";
+      remove.setAttribute("aria-label", `Delete session: ${title}`);
+      row.append(main, open, remove);
+      row.onclick = () => selectSession(row);
+      row.ondblclick = () => openSession(item);
+      row.onkeydown = (e) => {
+        if (e.target !== row) return;
+        if (e.key === "Enter") { e.preventDefault(); openSession(item); }
+        else if (e.key === "Delete") { e.preventDefault(); remove.click(); }
+        else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
+          if (next) { selectSession(next); next.focus(); }
+        }
+      };
+      if (item.id === selected) row.dataset.selected = "";
+      list.append(row);
+      if (item.id === focused) row.focus();
+    }
+  }
+  function rememberTab(session) {
+    if (chatPlace !== "tab") return;
+    const key = document.documentElement.dataset.tabKey || "";
+    try { vscode.setState({ ...vscode.getState(), chatTab: { key, session: String(session || "") } }); } catch {}
   }
   document.addEventListener("visibilitychange",()=>pipsApp?.setVisible?.(pipsOpen && pipsViewVisible && !document.hidden));
   // The inline ceilings: what fits in the 4 MiB protocol frame once base64 has inflated it.
@@ -6451,7 +6541,20 @@
       plush.mount(face);
     } catch { face.replaceChildren(); }
   })();
-  $("btn-pips-back").onclick = closePips;
+  $("btn-pips-back").onclick = () => closePips();
+  if (chatPlace === "home") {
+    // The side bar is the Sessions home: it opens on the list, and Pips' back button returns to it.
+    const back = $("btn-pips-back");
+    back.lastChild.textContent = "Sessions";
+    back.title = "Back to Sessions"; back.setAttribute("aria-label", "Back to Sessions");
+    $("sessions-new").onclick = () => vscode.postMessage({ type: "newSessionInEditor" });
+    showSessions();
+    // Sessions also start from the terminal: coming back to the side bar looks again.
+    const refresh = () => { if (sessionsOpen && !document.hidden) vscode.postMessage({ type: "sessionsList" }); };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+  }
+  if (chatPlace === "tab") rememberTab(document.documentElement.dataset.tabSession || "");
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
 
   // ---- replay ----
@@ -6718,6 +6821,9 @@
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (msg.type === "pipsOpen") { showPips(); return; }
+    if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
+    if (msg.type === "sessions_show") { showSessions(); return; }
+    if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
       pipSetupCards?.receive(msg);
       pipDigestBar?.receive(msg);

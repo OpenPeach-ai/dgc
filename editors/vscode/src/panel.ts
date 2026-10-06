@@ -337,6 +337,32 @@ const PER_CHAT_FIELDS = [
   "composerSelections", "skillManagement", "mcpContext", "mcpManagement", "goalInputs",
 ] as const;
 
+/** Where the window's chats are (#3 Sessions home): the side bar's Sessions list, and a session per
+ *  editor tab. sessionTabs.ts implements it. */
+export interface ChatPlaces {
+  /** The tab the user last worked in, while it is open: palette commands and the status bar follow it. */
+  current(): DgcViewProvider | undefined;
+  /** A saved session (its id) in a tab of its own, or the tab it is already in; "" opens a new one. */
+  open(session: string, title?: string): DgcViewProvider;
+  /** The sessions open in tabs. */
+  openSessions(): Set<string>;
+  /** A tab's session changed, or a tab opened or closed. */
+  changed(): void;
+}
+
+/** What an editor tab's chat is given when it is made. */
+export interface ChatTabInit {
+  /** Names the tab's workspace state; kept across a window reload in the webview's own state. */
+  key: string;
+  /** The session it opens on, or "" for a new one. */
+  session: string;
+  places: ChatPlaces;
+  /** The side bar's provider: the window-wide pieces the tab shares. */
+  host: DgcViewProvider;
+  /** Names the tab. */
+  title(text: string): void;
+}
+
 interface ChatSlot {
   /** Stable for the life of the slot; the webview names it when it asks to switch. */
   id: string;
@@ -519,7 +545,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  so a new chat starts from the real initializers and cannot drift from them. */
   private pristineChatState: Record<string, unknown> = {};
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  // ---- #3 Sessions home ------------------------------------------------------------------------
+  // The side bar is the Sessions home (and the Pips); each coding session opens in an editor tab, a
+  // second DgcViewProvider of its own with its own `dgc serve` (sessionTabs.ts). A tab takes the
+  // window-wide pieces from the side bar's provider rather than making its own: one status bar item,
+  // one backend log, one `dgc-review` provider and one file watcher, one settings editor, and the
+  // CLI install/update prompts. Its workspace state is namespaced by its key (stateKey).
+  /** Set on an editor tab's provider. */
+  private readonly tab?: ChatTabInit;
+  /** Set on the side bar's provider once it is the Sessions home (useSessionsHome). */
+  private places?: ChatPlaces;
+  private home = false;
+  /** The side bar's tabs: their review documents and file events go through it. */
+  private readonly tabProviders = new Set<DgcViewProvider>();
+  /** The tab's title has been set from its session or its first prompt. */
+  private tabTitled = false;
+  private sessionsTimer?: ReturnType<typeof setTimeout>;
+  private sessionsRequest = 0;
+
+  constructor(private readonly context: vscode.ExtensionContext, tab?: ChatTabInit) {
     // Before anything mutates them: this is what "a chat nobody has used yet" looks like. Copied,
     // not referenced -- the field initializers hand out live Maps, and holding those would make
     // "pristine" track whatever the first chat did to them.
@@ -527,21 +571,164 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     for (const field of PER_CHAT_FIELDS) {
       this.pristineChatState[field] = this.cloneChatValue((this as any)[field]);
     }
+    this.tab = tab;
+    if (tab) {
+      // A tab opens on its own session (or a new one), never on the window's remembered chat.
+      this.sessionRestoreCandidate = tab.session;
+      this.sessionRestoreSaved = !!tab.session;
+      this.sessionRestoreSuppressed = true;
+      this.tabTitled = !!tab.session;              // opened from the list: it already has its title
+      this.backendLog = tab.host.backendLog;
+      this.sb = tab.host.sb;
+      tab.host.tabProviders.add(this);
+    } else {
+      this.backendLog = vscode.window.createOutputChannel("DGC Backend");
+      // one status-bar item: `model · mode` (click to change model)
+      this.sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+      this.sb.command = "dgc.selectModel";
+    }
     this.adoptQueuedPromptsFromPreviousHost();
-    // one status-bar item: `model · mode` (click to change model)
-    this.sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.sb.command = "dgc.selectModel";
+    if (tab) { return; }
     if (typeof vscode.workspace.registerTextDocumentContentProvider === "function") {
       this.context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider("dgc-review", {
-        provideTextDocumentContent: (uri) => this.reviewDocuments.get(uri.toString()) || "",
+        provideTextDocumentContent: (uri) => {
+          const key = uri.toString();
+          for (const owner of [this, ...this.tabProviders]) {
+            const text = owner.reviewDocuments.get(key);
+            if (text !== undefined) { return text; }
+          }
+          return "";
+        },
       }));
     }
     if (typeof vscode.workspace.createFileSystemWatcher === "function") {
       const watcher = vscode.workspace.createFileSystemWatcher("**/*");
-      watcher.onDidCreate(() => this.scheduleWorkspaceChanges());
-      watcher.onDidChange(() => this.scheduleWorkspaceChanges());
-      watcher.onDidDelete(() => this.scheduleWorkspaceChanges());
+      const changed = () => { for (const owner of [this, ...this.tabProviders]) { owner.scheduleWorkspaceChanges(); } };
+      watcher.onDidCreate(changed);
+      watcher.onDidChange(changed);
+      watcher.onDidDelete(changed);
       this.context.subscriptions.push(watcher);
+    }
+  }
+
+  /** The side bar becomes the Sessions home: its own chat starts empty rather than on the window's
+   *  remembered session (that one opens in a tab from the list), and sessions open in tabs. */
+  useSessionsHome(places: ChatPlaces): void {
+    this.places = places;
+    this.home = true;
+    if (!this.backend) {
+      this.sessionRestoreCandidate = "";
+      this.sessionRestoreSuppressed = true;
+    }
+  }
+
+  /** Workspace state that belongs to one chat: a tab's is its own. */
+  private stateKey(base: string): string {
+    return this.tab ? `${base}#${this.tab.key}` : base;
+  }
+
+  /** The session this chat is on, or about to resume. */
+  sessionId(): string {
+    return this.sessionReady ? this.currentSessionId : (this.sessionRestoreCandidate || this.currentSessionId);
+  }
+
+  /** A tab the user closed: what it kept for a window reload goes with it. */
+  forgetTab(): void {
+    if (!this.tab) { return; }
+    for (const base of [QUEUED_PROMPTS_KEY, GOAL_PURSUIT_KEY, INTERRUPTED_TURN_KEY, UNASSISTED_EXITS_KEY]) {
+      void Promise.resolve(this.context.workspaceState.update(this.stateKey(base), undefined)).catch(() => { /* gone with the tab */ });
+    }
+  }
+
+  /** Whether the status bar describes this chat: the tab palette commands act on, else the side bar. */
+  private ownsStatusBar(): boolean {
+    const places = this.tab?.places ?? this.places;
+    if (!places) { return true; }
+    const current = places.current();
+    return this.tab ? current === this : !current;
+  }
+
+  paintStatusBar(): void {
+    if (!this.ownsStatusBar()) { return; }
+    const profile = this.state.ultra ? "Ultra" : this.state.think;
+    this.sb.text = `$(circuit-board) ${this.state.model || "dgc"} · ${profile} · ${this.state.mode}`;
+    this.sb.tooltip = `DGC — ${this.state.model || "no model"} · ${profile} reasoning · ${this.state.mode} mode · click to change model`;
+    this.sb.show();
+  }
+
+  /** A tab's name follows its session's name, else its first prompt. */
+  private retitle(prompt = ""): void {
+    if (!this.tab) { return; }
+    const name = this.currentSessionName.trim();
+    if (name) { this.tabTitled = true; this.tab.title(name); return; }
+    if (prompt.trim() && !this.tabTitled) { this.tabTitled = true; this.tab.title(prompt); }
+  }
+
+  /** A tab's session changed: its webview keeps the id for a reload, and the list follows. */
+  private tabSessionChanged(): void {
+    if (!this.tab) { return; }
+    // Only a session with a file: one never sent a message would come back as "no such session".
+    this.post({ type: "chat_tab", session: this.currentSessionSaved ? this.currentSessionId : "" });
+    this.tab.places.changed();
+  }
+
+  /** The tabs changed: the Sessions list marks which sessions are open. */
+  sessionsChanged(): void {
+    if (!this.home || !this.webviewReady) { return; }
+    if (this.sessionsTimer) { clearTimeout(this.sessionsTimer); }
+    this.sessionsTimer = setTimeout(() => { this.sessionsTimer = undefined; void this.postSessions(); }, 150);
+  }
+
+  /** The Sessions home's list: this project's saved sessions, newest first, and which are open. */
+  private async postSessions(): Promise<void> {
+    if (!this.home || !this.places) { return; }
+    const request = ++this.sessionsRequest;
+    let items: any[] = [];
+    let error = "";
+    try {
+      const response = await this.requestState(this.ensureBackend(), "sessions", { type: "list_sessions" }, "sessions", 30000);
+      items = Array.isArray(response.items) ? response.items : [];
+    } catch (err: any) {
+      error = err?.message || "DGC could not list this project's sessions.";
+    }
+    if (request !== this.sessionsRequest) { return; }
+    this.postSessionItems(items, error);
+  }
+
+  private postSessionItems(items: any[], error = ""): void {
+    const open = this.places?.openSessions() ?? new Set<string>();
+    this.post({ type: "sessions_list", error, items: items.slice(0, 500).map((item) => {
+      const id = path.basename(String(item?.path || "")).replace(/\.json$/i, "");
+      return { id, path: String(item?.path || ""), name: String(item?.name || ""), preview: String(item?.preview || ""),
+               when: String(item?.when || ""), count: Number(item?.count) || 0, open: open.has(id) };
+    }).filter((item) => /^[A-Za-z0-9_-]{1,128}$/.test(item.id)) });
+  }
+
+  private openSessionInEditor(id: string, title: string): void {
+    if (!this.places || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    this.places.open(id, title);
+  }
+
+  private async deleteSessionFromHome(id: string, title: string): Promise<void> {
+    if (!this.places || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    if (this.places.openSessions().has(id)) {
+      void vscode.window.showInformationMessage("That session is open in a tab. Close its tab first, then delete it.");
+      return;
+    }
+    const DELETE = "Delete";
+    const choice = await vscode.window.showWarningMessage(
+      `Delete the session “${title || id}”? Its conversation is removed from this project, and this can't be undone.`,
+      { modal: true }, DELETE);
+    if (choice !== DELETE) { return; }
+    try {
+      const response = await this.requestState(this.ensureBackend(), "sessions", { type: "delete_session", path: `${id}.json` }, "sessions", 10000);
+      if ((response as any).deleted === false) {
+        void vscode.window.showWarningMessage("DGC could not delete that session. It may be running a turn in another DGC.");
+      }
+      this.sessionsRequest++;
+      this.postSessionItems(Array.isArray(response.items) ? response.items : []);
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(err?.message || "DGC could not delete that session.");
     }
   }
 
@@ -1097,6 +1284,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private rememberSession(): void {
     if (!this.currentSessionId) { return; }
+    // A tab's session is kept by the tab itself (sessionTabs.ts): the window's one remembered chat is
+    // the side bar's, and a tab writing it made the side bar resume a session a tab holds.
+    if (this.tab) { return; }
     // A chat in another folder: its session is that folder's, and the window reopens on its own.
     if (this.slots.find((slot) => slot.id === this.activeSlotId)?.cwd) { return; }
     void this.context.workspaceState.update("dgc.activeSession.v1", {
@@ -1185,7 +1375,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * be safe to repeat.
    */
   private async resumeInterruptedWork(be: ChatBackend): Promise<void> {
-    const goal = this.context.workspaceState.get<{ scope?: string; id?: string }>(GOAL_PURSUIT_KEY);
+    const goal = this.context.workspaceState.get<{ scope?: string; id?: string }>(this.stateKey(GOAL_PURSUIT_KEY));
     if (goal && goal.scope === this.draftScope() && goal.id === this.currentSessionId) {
       await this.forgetInterruptedTurn();          // the goal's own resume covers its turn
       await this.resumeInterruptedGoal(be);
@@ -1196,23 +1386,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private async forgetInterruptedTurn(): Promise<void> {
     try {
-      await this.context.workspaceState.update(INTERRUPTED_TURN_KEY, undefined);
+      await this.context.workspaceState.update(this.stateKey(INTERRUPTED_TURN_KEY), undefined);
     } catch { /* losing the marker only costs a Continue offer */ }
   }
 
   private noteInterruptedTurn(update: Partial<InterruptedTurnMark> | undefined): void {
-    const current = this.context.workspaceState.get<InterruptedTurnMark>(INTERRUPTED_TURN_KEY);
+    const current = this.context.workspaceState.get<InterruptedTurnMark>(this.stateKey(INTERRUPTED_TURN_KEY));
     // A new turn starts a fresh record; anything else only amends the record that exists.
     if (update !== undefined && update.turnId === undefined && !current) { return; }
     if (update === undefined && !current) { return; }
     const next = update === undefined ? undefined
       : { ...(update.turnId !== undefined ? {} : current), ...update };
-    void Promise.resolve(this.context.workspaceState.update(INTERRUPTED_TURN_KEY, next))
+    void Promise.resolve(this.context.workspaceState.update(this.stateKey(INTERRUPTED_TURN_KEY), next))
       .then(undefined, () => { /* losing the marker only costs a Continue offer */ });
   }
 
   private async offerInterruptedTurn(be: ChatBackend): Promise<void> {
-    const mark = this.context.workspaceState.get<InterruptedTurnMark>(INTERRUPTED_TURN_KEY);
+    const mark = this.context.workspaceState.get<InterruptedTurnMark>(this.stateKey(INTERRUPTED_TURN_KEY));
     if (!mark) { return; }
     if (mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return; }
     await this.forgetInterruptedTurn();              // one offer per interruption, never a loop
@@ -1248,7 +1438,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Unassisted exits in the repeat window, oldest first. */
   private recentUnassistedExits(now = Date.now()): UnassistedExit[] {
-    const stored = this.context.workspaceState.get<UnassistedExit[]>(UNASSISTED_EXITS_KEY);
+    const stored = this.context.workspaceState.get<UnassistedExit[]>(this.stateKey(UNASSISTED_EXITS_KEY));
     return (Array.isArray(stored) ? stored : [])
       .filter((row) => row && Number.isFinite(row.at) && now - row.at >= 0 && now - row.at < REPEAT_EXIT_WINDOW_MS);
   }
@@ -1257,7 +1447,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private recordUnassistedExit(cause: string, last: string): number {
     const rows = [...this.recentUnassistedExits(), { at: Date.now(), cause: cause.slice(0, 300), last: last.slice(0, 64) }]
       .slice(-16);
-    void Promise.resolve(this.context.workspaceState.update(UNASSISTED_EXITS_KEY, rows))
+    void Promise.resolve(this.context.workspaceState.update(this.stateKey(UNASSISTED_EXITS_KEY), rows))
       .then(undefined, () => { /* the breaker is a guard, not a ledger */ });
     return rows.length;
   }
@@ -1272,12 +1462,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private noteGoalPursuit(active: boolean): void {
     if (active) {
       if (!this.currentSessionId) { return; }
-      void this.context.workspaceState.update(GOAL_PURSUIT_KEY, {
+      void this.context.workspaceState.update(this.stateKey(GOAL_PURSUIT_KEY), {
         scope: this.draftScope(), id: this.currentSessionId, at: Date.now(),
       }).then(undefined, () => { /* losing the marker only costs an automatic resume */ });
       return;
     }
-    void this.context.workspaceState.update(GOAL_PURSUIT_KEY, undefined)
+    void this.context.workspaceState.update(this.stateKey(GOAL_PURSUIT_KEY), undefined)
       .then(undefined, () => { /* same */ });
   }
 
@@ -1292,10 +1482,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * reopening yesterday's chat still waits for a human.
    */
   private async resumeInterruptedGoal(be: ChatBackend): Promise<void> {
-    const mark = this.context.workspaceState.get<{ scope?: string; id?: string; at?: number }>(GOAL_PURSUIT_KEY);
+    const mark = this.context.workspaceState.get<{ scope?: string; id?: string; at?: number }>(this.stateKey(GOAL_PURSUIT_KEY));
     if (!mark || mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return; }
     const age = Date.now() - Number(mark.at || 0);
-    await this.context.workspaceState.update(GOAL_PURSUIT_KEY, undefined);   // one shot, never a loop
+    await this.context.workspaceState.update(this.stateKey(GOAL_PURSUIT_KEY), undefined);   // one shot, never a loop
     if (!(age >= 0 && age < GOAL_PURSUIT_MAX_AGE_MS)) { return; }
     let goal: any;
     try {
@@ -2107,13 +2297,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // session it is being restarted onto). Reading the workspace's remembered id here is right for
     // the first chat and wrong for a second one: both would resume the same session, and the
     // backend refuses the second because a session is held by whoever is running a turn in it.
-    if (!this.sessionRestoreSuppressed && this.activeSlot().cwd) {
+    if (!this.sessionRestoreSuppressed && (this.tab || this.activeSlot().cwd)) {
       // A chat in another folder is never the window's remembered chat (rememberSession skips it),
       // and its sessions live in its own project. Restart Backend and crash recovery brought it
       // back on the window's remembered id: "no such session", then a new empty chat -- or, in a
       // folder inside the window's project, the window's own last chat. It comes back on its own.
-      this.sessionRestoreCandidate = /^[A-Za-z0-9_-]{1,128}$/.test(this.currentSessionId) ? this.currentSessionId : "";
-      this.sessionRestoreSaved = this.currentSessionSaved;
+      // So does an editor tab's chat: the window's remembered chat is the side bar's.
+      // A tab whose backend died before its own session was restored goes back for that session,
+      // not for the empty one the dead backend started with.
+      const unrestored = !!this.tab && !this.sessionRestoreFinished && !!this.sessionRestoreCandidate
+        && this.sessionRestoreCandidate !== this.currentSessionId;
+      if (!unrestored) {
+        this.sessionRestoreCandidate = /^[A-Za-z0-9_-]{1,128}$/.test(this.currentSessionId) ? this.currentSessionId : "";
+        this.sessionRestoreSaved = this.currentSessionSaved;
+      }
       this.sessionRestoreSuppressed = true;       // so `ready` keeps it instead of re-reading the window's
     }
     if (!this.sessionRestoreSuppressed) {
@@ -2349,7 +2546,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       .map((prompt) => JSON.stringify(prompt.draft).length > QUEUED_PROMPT_DRAFT_CHARS
         ? { ...prompt, draft: { text: prompt.draft.text.slice(0, QUEUED_PROMPT_DRAFT_CHARS), attachments: [] } } : prompt);
     try {
-      void Promise.resolve(this.context.workspaceState.update(QUEUED_PROMPTS_KEY,
+      void Promise.resolve(this.context.workspaceState.update(this.stateKey(QUEUED_PROMPTS_KEY),
         items.length ? { scope: this.draftScope(), items } : undefined)).catch(() => { /* only a reload's restore is lost */ });
     } catch { /* only a reload's restore is lost */ }
   }
@@ -2357,7 +2554,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** What a host that died (a window reload) had queued: its backend died with it, so none of it ran. */
   private adoptQueuedPromptsFromPreviousHost(): void {
     let saved: { scope?: string; items?: any[] } | undefined;
-    try { saved = this.context.workspaceState.get(QUEUED_PROMPTS_KEY); } catch { return; }
+    try { saved = this.context.workspaceState.get(this.stateKey(QUEUED_PROMPTS_KEY)); } catch { return; }
     if (!saved || saved.scope !== this.draftScope() || !Array.isArray(saved.items)) { return; }
     this.unsentPrompts = saved.items.slice(-QUEUED_PROMPTS_LIMIT).filter((item: any) => item && typeof item === "object"
       && typeof item.requestId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(item.requestId)
@@ -2375,11 +2572,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * must not promise the pickup that the goal_resume_held card then contradicts.
    */
   private markInterruptedWork(cause: string, recentExits = this.recentUnassistedExits().length): "goal" | "held" | "offer" | "none" {
-    const goal = this.context.workspaceState.get<{ scope?: string; id?: string }>(GOAL_PURSUIT_KEY);
+    const goal = this.context.workspaceState.get<{ scope?: string; id?: string }>(this.stateKey(GOAL_PURSUIT_KEY));
     if (goal && goal.scope === this.draftScope() && goal.id === this.currentSessionId) {
       return recentExits >= REPEAT_EXIT_LIMIT ? "held" : "goal";
     }
-    const mark = this.context.workspaceState.get<InterruptedTurnMark>(INTERRUPTED_TURN_KEY);
+    const mark = this.context.workspaceState.get<InterruptedTurnMark>(this.stateKey(INTERRUPTED_TURN_KEY));
     if (!mark || mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return "none"; }
     const running = this.confirmedTurnActive || !mark.endedAt;
     const justFailed = !!mark.endedAt && Date.now() - mark.endedAt <= EXIT_AFTER_ERROR_MS;
@@ -2666,12 +2863,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             || (ev.kind !== "new" && ev.kind !== "cleared" && this.currentSessionSaved);
           this.rememberSession();
           this.postChatSlots();                      // the chip carries this chat's name
+          // /new or /clear in a tab: it is a new session's tab now, named by its next prompt.
+          if (this.tab && (ev.kind === "new" || ev.kind === "cleared")) { this.tabTitled = false; this.tab.title(""); }
+          this.retitle();
+          this.tabSessionChanged();
         }
         break;
       case "session_named":
         this.currentSessionName = String(ev.name || "");
         if (!this.currentSessionSaved) { this.currentSessionSaved = true; this.rememberSession(); }   // naming saves it
         this.postChatSlots();
+        this.retitle();
+        this.tabSessionChanged();
         break;
       case "model_changed":
         if (this.routeState.subscriptionEngine) {
@@ -2784,8 +2987,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (ev.state === "queued") { this.markPromptQueued(String(ev.request_id || "")); }
         else { this.forgetPrompt(String(ev.request_id || "")); }   // applied, or handed back to the webview
         break;
-      case "turn_start":
+      case "turn_start": {
         this.forgetPrompt(String(ev.request_id || ""));
+        const wasSaved = this.currentSessionSaved;
         if (!this.currentSessionSaved) { this.currentSessionSaved = true; this.rememberSession(); }   // it has content now
         this.turnActive = this.confirmedTurnActive = true;
         this.monitorTurnActive = ev.kind === "monitor";
@@ -2800,7 +3004,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                      turnId: String(ev.turn_id || ""), at: Date.now() });
         }
         this.postChatSlots();                        // this chat's chip shows it is working now
+        if (ev.kind === "prompt" || !ev.kind) { this.retitle(String(ev.prompt || "").replace(/📷/g, " ")); }
+        if (this.tab && !wasSaved) { this.tabSessionChanged(); }   // its session is in the list now
         break;
+      }
       case "handoff_started":
         this.turnActive = this.confirmedTurnActive = true;
         this.liveTurn = { turnId: "", kind: "prompt", prompt: "", startedAt: Date.now(), handoff: true };
@@ -2875,7 +3082,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (ev.type === "error" && (ev as any).cli_outdated) {
       this.promptUpdateCli();
     }
-    if (ev.type === "error" && (ev as any).extension_outdated) {
+    if (ev.type === "error" && (ev as any).extension_outdated && !this.tab) {
       void checkForExtensionUpdates(this.context, true);
     }
     if (["tool_result", "turn_end", "rewound", "session"].includes(ev.type)) {
@@ -3015,7 +3222,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private promptInstallCli(): void {
-    if (this._installPrompted) { return; }
+    if (this._installPrompted || this.tab) { return; }       // the side bar asks, once for the window
     this._installPrompted = true;
     const INSTALL = "Install DGC CLI", SETPATH = "Set dgc.command…", RETRY = "Retry";
     vscode.window.showErrorMessage(
@@ -3049,7 +3256,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  installer refuses to repoint a launcher that runs a git checkout, so a contributor's working
    *  tree stays in use and the refusal is reported as the reason. */
   private promptUpdateCli(): void {
-    if (this._updatePrompted) { return; }
+    if (this._updatePrompted || this.tab) { return; }        // the side bar updates it, once for the window
     this._updatePrompted = true;
     const executable = resolveDgcExecutable();
     if (!autoUpdateEnabled() || isUserChosenCommand() || executable.ignoredWorkspaceOverride) {
@@ -3266,10 +3473,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
   private postState(): void {
     this.post({ type: "state", state: this.state });
-    const profile = this.state.ultra ? "Ultra" : this.state.think;
-    this.sb.text = `$(circuit-board) ${this.state.model || "dgc"} · ${profile} · ${this.state.mode}`;
-    this.sb.tooltip = `DGC — ${this.state.model || "no model"} · ${profile} reasoning · ${this.state.mode} mode · click to change model`;
-    this.sb.show();
+    this.paintStatusBar();
   }
 
   // ---- webview -------------------------------------------------------------
@@ -3279,7 +3483,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * repeatedly and leave no evidence anywhere. It goes to an output channel now, where it persists
    * across restarts and can be copied into a bug report.
    */
-  private readonly backendLog = vscode.window.createOutputChannel("DGC Backend");
+  private readonly backendLog: vscode.OutputChannel;   // the side bar's; a tab writes to it too (constructor)
   /**
    * ...and to a file, because an output channel only reaches disk once somebody opens it. The
    * crash we needed evidence for happened while nobody was looking at one, which is the normal
@@ -3369,6 +3573,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   focus(): void {
+    if (this.tab) { this.view?.show?.(false); return; }      // an editor tab: bring it forward
     // Focus wherever the chat actually is: the activity bar by default, or the secondary side
     // bar once the user has opened it there.
     vscode.commands.executeCommand(`${this.viewType}.focus`);
@@ -3474,6 +3679,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (this.state.model) { this.postState(); }
         this.postChatSlots();
         this.scheduleWorkspaceChanges(0);
+        if (this.home) { void this.postSessions(); }
         break;
       }
       case "switchChat": {
@@ -3481,9 +3687,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       case "newChat": {
+        // With sessions in tabs, + is a new session in a tab of its own.
+        const places = this.tab?.places ?? this.places;
+        if (places) { places.open(""); return; }
         this.openChatSlot();
         return;
       }
+      case "sessionsList":
+        if (this.home) { void this.postSessions(); }
+        return;
+      case "openSessionInEditor":
+        this.openSessionInEditor(String(msg.id ?? ""), String(msg.title ?? ""));
+        return;
+      case "newSessionInEditor":
+        (this.tab?.places ?? this.places)?.open("");
+        return;
+      case "deleteSession":
+        if (this.home) { await this.deleteSessionFromHome(String(msg.id ?? ""), String(msg.title ?? "")); }
+        return;
       case "newChatInFolder": {
         void this.newChatInFolder();
         return;
@@ -4802,6 +5023,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   async resume(): Promise<void> {
+    // The Sessions home IS the side bar's resume: show it.
+    if (this.home) { this.inVisiblePanel(() => { this.post({ type: "sessions_show" }); void this.postSessions(); }); return; }
     const be = this.ensureBackend();
     const listSessions = async (cmd: any): Promise<any[]> => {
       try {
@@ -4837,7 +5060,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       });
       qp.onDidAccept(() => {
         const pick = qp.selectedItems[0] as any;
-        if (pick) { this.openPastSession(be, String(pick.path || "")); }
+        // In a tab, a session opens in a tab of its own: one session, one tab.
+        if (pick && this.tab) {
+          this.tab.places.open(path.basename(String(pick.path || "")).replace(/\.json$/i, ""), String(pick.label || ""));
+        } else if (pick) { this.openPastSession(be, String(pick.path || "")); }
         qp.hide();
       });
       qp.onDidHide(() => { qp.dispose(); resolve(); });
@@ -5284,11 +5510,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.pipsEditor;
   }
   openPips(): void {
+    if (this.tab) { this.tab.host.openPips(); return; }      // the Pips live in the side bar
     this.ensurePipsBridge();
     this.inVisiblePanel(() => this.post({ type: "pipsOpen" }));
   }
 
   openSettings(section = "general", usageRange?: string): void {
+    if (this.tab) { this.tab.host.openSettings(section, usageRange); return; }   // one Settings tab for the window
     const name = section === "extensions" ? "plugins" : section;
     this.openEditorSettings(name, usageRange);
   }
@@ -6125,6 +6353,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await this.requestState(be, "think", mutation.command, mutation.response);
   }
 
+  /** /new in this chat: a fresh session in place. (DGC: New Session from the palette, and +, open a
+   *  new session's tab instead -- extension.ts and the newChat message.) */
   async newSession(): Promise<void> {
     const be = this.ensureBackend();
     try {
@@ -6152,10 +6382,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   addSelection(): void {
+    const selection = DgcViewProvider.selectionToAdd();
+    if (selection) { this.attachSelection(selection); }
+  }
+
+  /** The selection in the editor in front of you, read BEFORE anything else opens: with sessions in
+   *  tabs, the command may open a new session's tab, which then becomes the editor in front. */
+  static selectionToAdd(): { label: string; resource: any } | undefined {
     const ed = vscode.window.activeTextEditor;
     if (!ed || ed.selection.isEmpty) {
       void vscode.window.showInformationMessage("Select some text first — DGC: Add Selection sends the selection.");
-      return;
+      return undefined;
     }
     const rel = vscode.workspace.asRelativePath(ed.document.uri);
     const a = ed.selection.start.line + 1;
@@ -6163,13 +6400,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const folder = vscode.workspace.getWorkspaceFolder(ed.document.uri);
     let text = ed.document.getText(ed.selection);
     if (text.length > 8192) { text = text.slice(0, 8192); }
-    // Queued until the webview is up: the selection used to be dropped silently when the view
-    // had never been opened.
-    this.inVisiblePanel(() => this.post({ type: "attach", label: `${rel}:${a}-${b}`, resource: {
+    return { label: `${rel}:${a}-${b}`, resource: {
       type: "selection", uri: ed.document.uri.toString(), path: ed.document.uri.fsPath,
       relative_path: rel, workspace: folder?.name || "", language: ed.document.languageId,
       range: { start_line: a, end_line: b }, text,
-    } }));
+    } };
+  }
+
+  attachSelection(selection: { label: string; resource: any }): void {
+    // Queued until the webview is up: the selection used to be dropped silently when the view
+    // had never been opened.
+    this.inVisiblePanel(() => this.post({ type: "attach", label: selection.label, resource: selection.resource }));
   }
 
   /** DGC: Add File to DGC — from the explorer, a tab, the palette, or a drop. From the palette
@@ -6177,18 +6418,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * image preview, a PDF or notebook in a custom editor has no activeTextEditor, and the command
    * used to answer "Open or select a file" with the image open. */
   addFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): void {
+    const list = DgcViewProvider.filesToAdd(uri, uris);
+    if (list.length) { this.attachFiles(list); }
+  }
+
+  /** The files to add: the ones named, else the file in front of you -- read before a session tab
+   *  can open and become the thing in front (see selectionToAdd). */
+  static filesToAdd(uri?: vscode.Uri, uris?: vscode.Uri[]): vscode.Uri[] {
     const picked = (Array.isArray(uris) && uris.length ? uris : uri ? [uri] : [])
       .filter((u): u is vscode.Uri => !!u && u.scheme === "file");
     const active = vscode.window.activeTextEditor?.document.uri ?? activeTabUri();
     const list = picked.length ? picked : active && active.scheme === "file" ? [active] : [];
     if (!list.length) {
       void vscode.window.showInformationMessage("Open or select a file to add it to DGC.");
-      return;
     }
-    this.attachFiles(list);
+    return list;
   }
 
-  private attachFiles(list: vscode.Uri[]): void {
+  attachFiles(list: vscode.Uri[]): void {
     for (const u of list.slice(0, 16)) {
       const folder = vscode.workspace.getWorkspaceFolder(u);
       const rel = folder ? vscode.workspace.asRelativePath(u, false) : u.fsPath;
@@ -6225,6 +6472,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     for (const be of [...opened, ...[...all].filter((be) => !opened.includes(be)), ...this.releasedHosts]) {
       try { be.dispose(PANEL_DISPOSED_CAUSE); } catch { /* already gone */ }
     }
+    if (this.sessionsTimer) { clearTimeout(this.sessionsTimer); this.sessionsTimer = undefined; }
+    if (this.tab) {
+      // The status bar and the log are the side bar's: a closing tab hands the bar back.
+      this.tab.host.tabProviders.delete(this);
+      return;
+    }
     this.sb.dispose();
     // Last: the backend's exit line arrives after this and still reaches backend.log.
     try { this.backendLog.dispose(); } catch { /* already gone */ }
@@ -6252,7 +6505,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob: https:;`;
     const favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) ? "on" : "off";
     const draftScope = this.draftScope();
-    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}"><head>
+    // Where this page is (#3): "home" is the side bar's Sessions home, "tab" a session's editor tab
+    // (its key and saved session go in the webview's state, which is what restores it after a reload).
+    const place = this.tab ? "tab" : this.home ? "home" : "chat";
+    const tabAttrs = this.tab ? ` data-tab-key="${this.tab.key}" data-tab-session="${this.currentSessionSaved ? this.currentSessionId : this.tab.session}"` : "";
+    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}" data-chat-place="${place}"${tabAttrs}><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -6263,6 +6520,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}">
 <header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to DGC chat" aria-label="Back to DGC chat" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Chat</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span><span class="pips-nav-core" aria-hidden="true"></span></button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
 <section id="pips-host" data-style-uri="${pipsStyle}" aria-label="DGC Pips" hidden></section>
+<section id="sessions-host" class="sessions-home" aria-labelledby="sessions-title" hidden><div class="sessions-head"><h2 id="sessions-title">Sessions</h2><button type="button" id="sessions-new" class="sessions-new" title="Start a new session in an editor tab"><span class="codicon codicon-add" aria-hidden="true"></span>New session</button></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul></section>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <section id="agent-page" hidden>

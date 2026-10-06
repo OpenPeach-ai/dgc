@@ -19,6 +19,7 @@ let inspectedCommand;
 globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
   window: {
     registerWebviewViewProvider: () => ({ dispose() {} }),
+    registerWebviewPanelSerializer: () => ({ dispose() {} }),
     showWarningMessage: async (message) => { warnings.push(String(message)); },
     showInformationMessage: async () => undefined,
     createTerminal: (options) => {
@@ -79,6 +80,7 @@ await build({
           commandPathChanged() { globalThis.__DGC_PANEL_CALLS.push("commandPathChanged"); }
           restart(reason) { globalThis.__DGC_PANEL_CALLS.push("restart:" + reason); }
           applyNativeSettings() { globalThis.__DGC_PANEL_CALLS.push("applyNativeSettings"); }
+          useSessionsHome() {}
         };`,
         loader: "js",
       }));
@@ -220,8 +222,10 @@ test("first-run dead ends: a queued selection, a restart on a new command path, 
   assert.match(restart, /this\._installPrompted = false/, "a restart earns a fresh install prompt");
   assert.match(panel, /RETRY = "Retry"/, "the install prompt offers a retry");
   const extension = readFileSync(join(here, "../src/extension.ts"), "utf8");
-  assert.match(extension, /affectsConfiguration\("dgc\.command"\)\) \{[\s\S]{0,600}?if \(next !== commandPath\) \{\s*commandPath = next;\s*provider\.commandPathChanged\(\)/,
+  assert.match(extension, /affectsConfiguration\("dgc\.command"\)\) \{[\s\S]{0,600}?if \(next !== commandPath\) \{\s*commandPath = next;\s*for \(const each of every\(\)\) each\.commandPathChanged\(\)/,
     "changing the resolved dgc.command restarts the backend (after a running turn ends)");
+  assert.match(extension, /const every = \(\) => \[provider, \.\.\.tabs\.all\(\)\]/,
+    "every chat hears it: the side bar's and each session tab's (#3)");
   const changed = panel.slice(panel.indexOf("commandPathChanged(): void {"), restartAt);
   assert.match(changed, /if \(this\.processBusy\(\)\) \{[\s\S]*this\.pendingCommandRestart = true[\s\S]*return;/,
     "a turn in flight -- in this chat or another on its process -- is never killed by a settings change");

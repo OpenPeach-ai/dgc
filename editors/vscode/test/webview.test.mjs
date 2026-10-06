@@ -39,8 +39,10 @@ assert.match(panelSrc, /const attached = Array\.isArray\(msg\.context\)/,
 assert.doesNotMatch(panelSrc, /<selection path=/,
   "selected code must never be concatenated into prompt text by the extension host");
 assert.match(panelSrc, /set_workspace_roots/, "the editor must declare every multi-root workspace folder");
-assert.match(extensionSrc, /onDidChangeWorkspaceFolders\(\(\) => provider\.workspaceRootsChanged\(\)\)/,
+assert.match(extensionSrc, /onDidChangeWorkspaceFolders\(\(\) => \{ for \(const each of every\(\)\) each\.workspaceRootsChanged\(\); \}\)/,
   "live workspace-folder changes must be propagated to the backend");
+assert.match(extensionSrc, /const every = \(\) => \[provider, \.\.\.tabs\.all\(\)\]/,
+  "to every chat's backend: the side bar's and each session tab's (#3)");
 assert.match(panelSrc, /workspaceRootsInFlight/,
   "workspace-root grants must stay pending until the backend acknowledges them");
 assert.match(panelSrc, /path: uri\.fsPath/,

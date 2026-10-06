@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
+import { SessionTabs } from "./sessionTabs";
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
 import { heldCliTerminalOptions, updateCliWithProgress } from "./cliupdate";
@@ -11,6 +12,15 @@ export function activate(context: vscode.ExtensionContext): void | object {
     return;
   }
   const provider = new DgcViewProvider(context);
+  // #3: the side bar is the Sessions home, and each session opens in an editor tab of its own.
+  const tabs = new SessionTabs(context, provider, (init) => new DgcViewProvider(context, init));
+  provider.useSessionsHome(tabs);
+  // The chat a palette command acts on: the tab you last worked in. `chat` opens a new session's tab
+  // when none is open, for commands that put something in a chat; `current` falls back to the side
+  // bar for the ones that only change a setting.
+  const chat = () => tabs.current() ?? tabs.open("");
+  const current = () => tabs.current() ?? provider;
+  const every = () => [provider, ...tabs.all()];
   let commandPath = resolveDgcExecutable().command;
 
   const runCliInTerminal = (subcommand: "update" | "export-training" | "notes"): boolean => {
@@ -33,7 +43,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     // closed at once: the output has to be held on screen until it has been read.
     if (subcommand === "update") {
       // It reports its own progress and outcome, in step with the terminal.
-      void updateCliWithProgress(executable.command, () => provider.restart("manual CLI update"));
+      void updateCliWithProgress(executable.command, () => { for (const each of every()) each.restart("manual CLI update"); });
       return true;
     }
     const term = vscode.window.createTerminal(subcommand === "notes"
@@ -55,37 +65,46 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.window.registerWebviewViewProvider("dgc.chatSecondary", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
+    tabs.register(),
+    tabs,
     provider,
     vscode.commands.registerCommand("dgc.focus", () => provider.focus()),
-    vscode.commands.registerCommand("dgc.openCommandMenu", () => provider.openCommandMenu()),
-    vscode.commands.registerCommand("dgc.newSession", () => provider.newSession()),
-    vscode.commands.registerCommand("dgc.newParallelChat", () => provider.newParallelChat()),
-    vscode.commands.registerCommand("dgc.newChatInFolder", () => provider.newChatInFolder()),
-    vscode.commands.registerCommand("dgc.switchChat", () => provider.pickChat()),
-    vscode.commands.registerCommand("dgc.selectModel", () => provider.selectModel()),
-    vscode.commands.registerCommand("dgc.connect", () => provider.connect()),
-    vscode.commands.registerCommand("dgc.setMode", () => provider.setMode()),
-    vscode.commands.registerCommand("dgc.cycleMode", () => provider.cycleMode()),
-    vscode.commands.registerCommand("dgc.setThinking", () => provider.setThinking()),
-    vscode.commands.registerCommand("dgc.addSelection", () => provider.addSelection()),
-    vscode.commands.registerCommand("dgc.addFile",
-      (uri?: vscode.Uri, uris?: vscode.Uri[]) => provider.addFiles(uri, uris)),
-    vscode.commands.registerCommand("dgc.restart", () => provider.restart("command DGC: Restart Backend")),
+    vscode.commands.registerCommand("dgc.openCommandMenu", () => chat().openCommandMenu()),
+    vscode.commands.registerCommand("dgc.newSession", () => { tabs.open(""); }),
+    vscode.commands.registerCommand("dgc.newParallelChat", () => { tabs.open(""); }),
+    vscode.commands.registerCommand("dgc.newChatInFolder", () => chat().newChatInFolder()),
+    vscode.commands.registerCommand("dgc.switchChat", () => chat().pickChat()),
+    vscode.commands.registerCommand("dgc.selectModel", () => current().selectModel()),
+    vscode.commands.registerCommand("dgc.connect", () => current().connect()),
+    vscode.commands.registerCommand("dgc.setMode", () => current().setMode()),
+    vscode.commands.registerCommand("dgc.cycleMode", () => current().cycleMode()),
+    vscode.commands.registerCommand("dgc.setThinking", () => current().setThinking()),
+    // What to add is read from the editor in front of you first: with no session tab open, `chat()`
+    // opens one, and that tab is then what is in front.
+    vscode.commands.registerCommand("dgc.addSelection", () => {
+      const selection = DgcViewProvider.selectionToAdd();
+      if (selection) { chat().attachSelection(selection); }
+    }),
+    vscode.commands.registerCommand("dgc.addFile", (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+      const files = DgcViewProvider.filesToAdd(uri, uris);
+      if (files.length) { chat().attachFiles(files); }
+    }),
+    vscode.commands.registerCommand("dgc.restart", () => current().restart("command DGC: Restart Backend")),
     vscode.commands.registerCommand("dgc.resume", () => provider.resume()),
-    vscode.commands.registerCommand("dgc.rewind", () => provider.rewind()),
-    vscode.commands.registerCommand("dgc.nameSession", () => provider.nameSession()),
-    vscode.commands.registerCommand("dgc.openSkills", () => provider.openSkills()),
-    vscode.commands.registerCommand("dgc.openMcp", () => provider.openMcp()),
-    vscode.commands.registerCommand("dgc.openDocs", () => provider.openDocs()),
-    vscode.commands.registerCommand("dgc.openPermissions", () => provider.openPermissions()),
-    vscode.commands.registerCommand("dgc.openMemory", () => provider.openMemory()),
-    vscode.commands.registerCommand("dgc.openHooks", () => provider.openHooks()),
-    vscode.commands.registerCommand("dgc.viewPlan", () => provider.runEditorAction("viewPlan")),
-    vscode.commands.registerCommand("dgc.artifacts", () => provider.runEditorAction("artifacts")),
-    vscode.commands.registerCommand("dgc.goal", () => provider.runEditorAction("goal")),
-    vscode.commands.registerCommand("dgc.handoff", () => provider.runEditorAction("handoff")),
-    vscode.commands.registerCommand("dgc.retainedTasks", () => provider.runEditorAction("retainedTasks")),
-    vscode.commands.registerCommand("dgc.compact", () => provider.runEditorAction("compact")),
+    vscode.commands.registerCommand("dgc.rewind", () => chat().rewind()),
+    vscode.commands.registerCommand("dgc.nameSession", () => chat().nameSession()),
+    vscode.commands.registerCommand("dgc.openSkills", () => chat().openSkills()),
+    vscode.commands.registerCommand("dgc.openMcp", () => chat().openMcp()),
+    vscode.commands.registerCommand("dgc.openDocs", () => chat().openDocs()),
+    vscode.commands.registerCommand("dgc.openPermissions", () => chat().openPermissions()),
+    vscode.commands.registerCommand("dgc.openMemory", () => chat().openMemory()),
+    vscode.commands.registerCommand("dgc.openHooks", () => chat().openHooks()),
+    vscode.commands.registerCommand("dgc.viewPlan", () => chat().runEditorAction("viewPlan")),
+    vscode.commands.registerCommand("dgc.artifacts", () => chat().runEditorAction("artifacts")),
+    vscode.commands.registerCommand("dgc.goal", () => chat().runEditorAction("goal")),
+    vscode.commands.registerCommand("dgc.handoff", () => chat().runEditorAction("handoff")),
+    vscode.commands.registerCommand("dgc.retainedTasks", () => chat().runEditorAction("retainedTasks")),
+    vscode.commands.registerCommand("dgc.compact", () => chat().runEditorAction("compact")),
     vscode.commands.registerCommand("dgc.updateExtension", () => checkForExtensionUpdates(context, true)),
     vscode.commands.registerCommand("dgc.updateCli", () => {
       // Keep installer failures readable and reconnect after a successful CLI update.
@@ -119,13 +138,13 @@ export function activate(context: vscode.ExtensionContext): void | object {
         const next = resolveDgcExecutable().command;
         if (next !== commandPath) {
           commandPath = next;
-          provider.commandPathChanged();
+          for (const each of every()) each.commandPathChanged();
           return;
         }
       }
-      if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
+      if (e.affectsConfiguration("dgc")) { for (const each of every()) each.applyNativeSettings(); }
     }),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => provider.workspaceRootsChanged()),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => { for (const each of every()) each.workspaceRootsChanged(); }),
   );
 
   checkForExtensionUpdates(context).catch(() => { /* never raise into activate */ });
@@ -135,6 +154,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
       testOnlyWebviewMessage: (token: string, message: any) =>
         provider.testOnlyWebviewMessage(token, message),
       testOnlyPostedMessages: (token: string) => provider.testOnlyPostedMessages(token),
+      // The session tab palette commands act on (#3), or the side bar's chat when none is open.
+      testOnlyTabPostedMessages: (token: string) => (tabs.current() ?? provider).testOnlyPostedMessages(token),
     });
   }
 }

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Sessions
+
+- DGC opens on your project's **Sessions**: the side bar lists this project's sessions, newest
+  first, with when each was last used and how many messages it has. **Open in Editor**, a
+  double-click or Enter opens a session in an editor tab of its own, as in Claude Code; **New
+  session** opens a new one in a tab. The Pips stay in the side bar.
+- Each tab is a full chat with its own DGC process. It is named by its session's name, else its
+  first prompt. A session open in a tab is marked **Open in a tab**, and opening it again brings that
+  tab forward. Tabs come back on their sessions after a window reload.
+- **DGC: New Session** and **+** open a new session's tab; `/new` in a chat still starts afresh in
+  place. **DGC: Resume** shows the Sessions list.
+- Palette commands (Add Selection, Add File, model, mode, Restart Backend and the rest) act on the
+  tab you last used, and the status bar shows that tab's model and mode. Add Selection and Add File
+  read what is in front of you first, then open a new session's tab if none is open.
+- Deleting a session from the list asks first, and waits until its tab is closed.
+
 ### Fixed
 
 - An image you send shows in your prompt as the same small chip it was in the composer (a tile

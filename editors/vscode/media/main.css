@@ -150,6 +150,48 @@ body {
 body.pips-active > :not(#phead):not(#pips-host):not(#announcer):not(script) { display:none !important; }
 body.pips-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
 body.pips-active #phead .pm { display:inline-flex; flex:1; }
+/* ---- #3 Sessions home ------------------------------------------------------------------------- */
+/* The side bar opens on this project's sessions; each opens in an editor tab. Laid over the chat the
+   way the Pips are: everything but the header, the list, the announcer and the hover label hides. */
+body.sessions-active > :not(#phead):not(#sessions-host):not(#announcer):not(#hover-tip):not(script) { display:none !important; }
+body.sessions-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
+body.sessions-active #phead .pm { display:inline-flex; flex:1; }
+/* A session's own tab: its Pips stay in the side bar, and a chat in another folder is a side bar thing. */
+html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:none !important; }
+#sessions-host { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+  display:flex; flex-direction:column; gap:var(--sp-3); padding:var(--sp-2) var(--sp-2) var(--sp-5); }
+/* The heading, the status line and each row's words start on one edge: the rows' own inset. */
+#sessions-host .sessions-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); padding:0 var(--sp-2) 0 var(--sp-3); }
+#sessions-host .sessions-head h2 { margin:0; font:var(--w-semi) var(--t-sm)/1.3 var(--sans); color:var(--text-strong); letter-spacing:.01em; }
+#sessions-host .sessions-new { flex:none; display:inline-flex; align-items:center; gap:var(--sp-1); min-height:var(--control-sm);
+  padding:0 var(--sp-3) 0 var(--sp-2); border:1px solid var(--accent-fill); border-radius:var(--r-md); background:var(--accent-fill);
+  color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); cursor:pointer; }
+#sessions-host .sessions-new:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+#sessions-host .sessions-status { margin:0; padding:0 var(--sp-2) 0 var(--sp-3); color:var(--muted); font:var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+#sessions-host .sessions-status[data-kind="error"] { color:var(--err-text); }
+#sessions-host .sessions-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:var(--sp-1); }
+#sessions-host .session-row { display:flex; align-items:center; gap:var(--sp-2); min-width:0; padding:var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  border:1px solid transparent; border-radius:var(--r-md); cursor:default; user-select:none; }
+#sessions-host .session-row:hover { background:var(--surface2); }
+#sessions-host .session-row[data-selected] { background:var(--surface2); border-color:var(--border-strong); }
+#sessions-host .session-row:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
+#sessions-host .session-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
+/* A session is known by its first words: two lines of them, not one. */
+#sessions-host .session-name { min-width:0; overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
+  overflow-wrap:anywhere; color:var(--text); font:var(--w-med) var(--t-sm)/1.35 var(--sans); }
+#sessions-host .session-meta { display:flex; flex-wrap:wrap; align-items:center; column-gap:var(--sp-2); min-width:0; color:var(--muted);
+  font:var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric:tabular-nums; }
+#sessions-host .session-meta > * { white-space:nowrap; }
+#sessions-host .session-tab { color:var(--accent-text, var(--accent)); }
+#sessions-host .session-tab::before { content:""; display:inline-block; width:6px; height:6px; margin-right:5px; border-radius:50%; background:currentColor; vertical-align:1px; }
+#sessions-host .session-open { flex:none; display:inline-flex; align-items:center; gap:var(--sp-1); min-height:var(--control-sm); padding:0 var(--sp-2);
+  border:1px solid var(--border-strong); border-radius:var(--r-sm); background:transparent; color:var(--text); font:var(--w-med) var(--t-xs)/1 var(--sans); cursor:pointer; white-space:nowrap; }
+#sessions-host .session-open:hover { background:var(--surface); border-color:var(--text); }
+#sessions-host .session-delete { flex:none; display:inline-flex; align-items:center; justify-content:center; width:var(--control-sm); height:var(--control-sm);
+  padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--faint); cursor:pointer; }
+#sessions-host .session-delete:hover { color:var(--err-text); background:var(--surface); }
+/* A narrow side bar keeps the button and its name for screen readers; the word goes first. */
+@media (max-width: 300px) { #sessions-host .session-open .session-open-label { display:none; } }
 /* ---- running chats -------------------------------------------------------------------------- */
 /* One live `dgc serve` per chat. The rail appears only once a second chat exists, so a single-chat
    panel carries no extra chrome; the header's + is the only permanent cost. */

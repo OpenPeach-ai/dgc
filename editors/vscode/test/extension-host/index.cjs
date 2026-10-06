@@ -752,18 +752,31 @@ async function run() {
     return input instanceof vscode.TabInputCustom && input.uri.fsPath === imageUri.fsPath;
   }, 15_000);
   assert.equal(vscode.window.activeTextEditor, undefined, "the image preview is not a text editor");
-  const attachesBefore = testApi.testOnlyPostedMessages(testToken).filter((m) => m.type === "attach").length;
+  // #3: with no session tab open, the file goes to a new session's tab -- the side bar is the
+  // Sessions home, not a chat.
+  const chatTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+    .filter((tab) => tab.input instanceof vscode.TabInputWebview && /dgc\.chatEditor$/.test(tab.input.viewType));
+  assert.equal(chatTabs().length, 0, "no session tab is open yet");
   await vscode.commands.executeCommand("dgc.addFile");
-  await waitFor(() => testApi.testOnlyPostedMessages(testToken)
-    .filter((m) => m.type === "attach").slice(attachesBefore)
-    .some((m) => /host-add-file\.png$/.test(m.label || "")), 15_000);
-  await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+  await waitFor(() => chatTabs().length === 1, 15_000, "Add File opens a session tab");
+  await waitFor(() => testApi.testOnlyTabPostedMessages(testToken)
+    .some((m) => m.type === "attach" && /host-add-file\.png$/.test(m.label || "")), 15_000, "the file is attached in that tab");
+  assert.equal(testApi.testOnlyPostedMessages(testToken).filter((m) => m.type === "attach")
+    .some((m) => /host-add-file\.png$/.test(m.label || "")), false, "not in the side bar's hidden chat");
+
+  // 6. Sessions open in editor tabs: DGC: New Session is a tab of its own, and a tab comes up on a
+  //    `dgc serve` of its own (its webview reports ready through the same test bridge).
+  await vscode.commands.executeCommand("dgc.newSession");
+  await waitFor(() => chatTabs().length === 2, 15_000, "New Session opens a second session tab");
+  assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.label, "New session", "named New session until its first prompt");
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  await waitFor(() => chatTabs().length === 0, 15_000, "the session tabs close");
 
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
     handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true,
-    decisionLifecycle: true, backendExitLifecycle: true, monitorLifecycle: true, addFileFromImagePreview: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
+    decisionLifecycle: true, backendExitLifecycle: true, monitorLifecycle: true, addFileFromImagePreview: true, sessionTabs: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
 }
 
 module.exports = { run };
