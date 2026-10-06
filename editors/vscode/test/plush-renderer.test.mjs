@@ -28,3 +28,45 @@ test('packaged artwork is a bounded WebP atlas with alpha and the declared dimen
  assert.ok(data[20]&0x10,'the atlas carries an alpha channel');
  assert.equal(1+data.readUIntLE(24,3),1660);assert.equal(1+data.readUIntLE(27,3),948);assert.ok(data.length<300000);
 });
+test('every state has its own motion: eyes look around in a group under the lenses, the body leans with them',t=>{
+ const {d,api}=setup(t);const node=d.createElement('div');d.body.append(node);
+ node.innerHTML=api.markup({index:2},'idle','lens-look',{includeStyles:false});
+ assert.equal(node.querySelectorAll('[clip-path] > .dgc-plush-look > .dgc-plush-track > .dgc-plush-eye').length,2,'Lens looks around inside its glasses');
+ node.innerHTML=api.markup({index:0},'working','core-look',{includeStyles:false});
+ assert.equal(node.querySelectorAll('.dgc-plush-look > .dgc-plush-track > .dgc-plush-eye').length,2);
+ for(const [state,motion] of [['thinking','dgc-plush-ponder'],['working','dgc-plush-scan']])
+  assert.match(api.styles,new RegExp(`\\.dgc-plush\\[data-state=${state}\\] \\.dgc-plush-look\\{animation:${motion} `),state);
+ for(const [state,motion] of [['waiting_approval','dgc-plush-hop'],['success','dgc-plush-success'],['failure','dgc-plush-droop']])
+  assert.match(api.styles,new RegExp(`\\[data-state=${state}\\] \\.dgc-plush-rig\\{animation-name:${motion};`),state);
+ assert.match(api.styles,/\.dgc-plush\{[^}]*animation:dgc-plush-lean 9\.7s[^}]*\}/);assert.match(api.styles,/\.dgc-plush-look\{animation:dgc-plush-look 9\.7s/,'the lean keeps time with the look');
+ assert.match(api.styles,/\.dgc-plush:not\(\[data-state=idle\]\),\.dgc-plush:not\(\[data-state=idle\]\) \.dgc-plush-look\{animation:none\}/,'only an idle Pip looks around');
+ assert.match(api.styles,/prefers-reduced-motion:reduce\)\{\.dgc-plush,\.dgc-plush \*\{animation:none!important/);
+});
+function pointer(t,{reduce=false}={}){
+ const x=setup(t);let now=1000;const frames=[];
+ Object.defineProperty(x.w.performance,'now',{value:()=>now,configurable:true});
+ x.w.requestAnimationFrame=cb=>{frames.push(cb);return frames.length;};x.w.cancelAnimationFrame=()=>{frames.length=0;};
+ if(reduce)x.w.matchMedia=()=>({matches:true});
+ const run=ms=>{for(let i=0;i<ms/16&&frames.length;i++){now+=16;frames.shift()(now);}};
+ const move=(clientX,clientY)=>x.d.dispatchEvent(new x.w.MouseEvent('pointermove',{clientX,clientY}));
+ const pip=(state,uid,left=100)=>{const a=x.d.createElement('div');x.d.body.append(a);a.innerHTML=x.api.markup({index:0},state,uid);const n=a.querySelector('.dgc-plush');n.getBoundingClientRect=()=>({left,top:100,width:40,height:40});return n;};
+ return {...x,frames,run,move,pip};
+}
+test('the eyes follow the pointer on a spring, settle back once it rests, and then stop asking for frames',t=>{
+ const {d,api,frames,run,move,pip}=pointer(t);const node=pip('idle','follow'),off=pip('offline','asleep',300);
+ const clean=api.mount(d.body);assert.equal(frames.length,0,'no frames before the pointer moves');
+ move(0,120);run(400);
+ assert.equal(node.dataset.tracking,'true');
+ assert.ok(parseFloat(node.style.getPropertyValue('--plush-gx'))<-3,'it looks left, toward the pointer');
+ assert.ok(parseFloat(node.style.getPropertyValue('--plush-lean'))<-2,'and leans that way');
+ assert.equal(off.style.getPropertyValue('--plush-gx'),'','an offline Pip does not look');
+ move(600,120);run(400);assert.ok(parseFloat(node.style.getPropertyValue('--plush-gx'))>3,'it turns to follow');
+ run(3000);
+ assert.equal(node.style.getPropertyValue('--plush-gx'),'');assert.equal(node.dataset.tracking,undefined,'back to looking around');
+ assert.equal(frames.length,0,'the loop stops');
+ clean();move(0,120);assert.equal(frames.length,0,'released: no listener left');
+});
+test('with reduced motion the eyes do not follow the pointer',t=>{
+ const {d,api,frames,move,pip}=pointer(t,{reduce:true});const node=pip('idle','still');
+ api.mount(d.body);move(0,120);assert.equal(frames.length,0);assert.equal(node.dataset.tracking,undefined);
+});

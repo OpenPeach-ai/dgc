@@ -4,6 +4,8 @@
 
 Simple Pips (Pips API 43): `introduce_pip` queues a new Personal Pip's first message once. A
 Personal Pip can be created with an empty `goal`, and with `pip_type` `core` (the Primary Pip).
+`send_pip_message` takes `images` (up to 4 image data URIs), and `get_pip_message_image` reads one
+back. Both are refused before sending to a runtime below API 43.
 
 Pip computers (Pips API 42). `session.pips` gains `get_pip_computer`,
 `list_pip_computer_actions`, `get_pip_computer_frame` and `list_pip_computer_frames`, and the

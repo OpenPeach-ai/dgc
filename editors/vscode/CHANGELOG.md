@@ -23,6 +23,12 @@
 - Changes waiting for you show at the top of the Pip in plain words, with **Review** and **Reject**.
   Archiving a Pip that has some offers to reject them and archive, instead of refusing.
 - A cleaner look: one purple action per section, quiet buttons for the rest, and more room.
+- Send a Pip images: the image button in its message box, paste, or drop them on it. Up to 4, 2 MB
+  in all; they show above your message, and you can send them without text. Needs Pips API 43.
+- Pips move more like characters: an idle Pip glances around and leans the way it looks, blinks
+  (sometimes twice), and its eyes follow your pointer, settling back when you stop. Thinking looks
+  up to each side, working reads and bobs, waiting hops for your attention, success bounces and
+  failure droops. Reduced motion keeps them still.
 - The **Pips** button in the chat header shows Core, the main chat's Pip, breathing and
   blinking softly. It stays still when motion is reduced or the panel is hidden.
 - The new Pips view opens beside the chat (the Pips button in the panel header, or **DGC: Open

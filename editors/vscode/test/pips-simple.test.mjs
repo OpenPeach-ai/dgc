@@ -140,6 +140,71 @@ test('a stopped runner is started for a new Pip before it says hello, and a chat
  assert.equal(z.requests('pips_runtime').length,0,'not even to make a Pip');assert.equal(z.requests('introduce_pip').length,1);
 });
 
+const PNG='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+async function dropImage(x,name='dot.png'){
+ const file=new x.w.File([Buffer.from(PNG,'base64')],name,{type:'image/png'});
+ const drop=new x.w.Event('drop',{bubbles:true,cancelable:true});Object.defineProperty(drop,'dataTransfer',{value:{files:[file],types:['Files']}});
+ const before=x.d.querySelectorAll('.chat-image-chip').length;
+ x.d.querySelector('#chatText').dispatchEvent(drop);
+ for(let i=0;i<80&&x.d.querySelectorAll('.chat-image-chip').length===before;i++)await new Promise(r=>setTimeout(r,5));
+}
+test('images go with a message: dropped, previewed, removable, and sent with it or on their own',async()=>{
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ assert.ok(x.d.querySelector('#chat-attach'),'an image button in the message box');
+ await dropImage(x);assert.equal(x.d.querySelectorAll('.chat-image-chip').length,1);
+ await dropImage(x,'two.png');assert.equal(x.d.querySelectorAll('.chat-image-chip').length,2);
+ x.click('[data-remove-image="1"]');assert.equal(x.d.querySelectorAll('.chat-image-chip').length,1);
+ x.input('#chatText','What is in this?');
+ x.d.querySelector('#chat-form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await flush();
+ const sent=x.requests('send_pip_message')[0];assert.ok(sent);
+ assert.equal(sent.request.text,'What is in this?');assert.deepEqual([...sent.request.images],['data:image/png;base64,'+PNG]);
+ const y=setup({jobs:[gmail]});await y.drain();y.click(`[data-job="${gmail.id}"]`);await y.drain();
+ await dropImage(y);y.d.querySelector('#chat-form').dispatchEvent(new y.w.Event('submit',{bubbles:true,cancelable:true}));await flush();
+ const alone=y.requests('send_pip_message')[0];assert.ok(alone,'an image alone is a message');assert.equal(alone.request.text,'');assert.equal(alone.request.images.length,1);
+});
+
+test('a sent image shows in its message, fetched once from the CLI',async()=>{
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const asked=message('message_1','user','What is this?',gmail.id,{images:[{index:0,mime:'image/png',bytes:68}]});
+ const x=setup({jobs:[gmail],messages:{[gmail.id]:[asked]}});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ const img=x.d.querySelector('img[data-message-image="message_1:0"]');assert.ok(img);
+ const fetch=x.requests('get_pip_message_image')[0];assert.deepEqual(JSON.parse(JSON.stringify(fetch.request)),{type:'get_pip_message_image',pip_id:gmail.id,message_id:'message_1',index:0});
+ x.answer(fetch,{pip_id:gmail.id,message_id:'message_1',index:0,image:'data:image/png;base64,'+PNG});await flush();
+ assert.equal(x.d.querySelector('img[data-message-image="message_1:0"]').getAttribute('src'),'data:image/png;base64,'+PNG);
+ x.click('#simple-back');await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ assert.equal(x.requests('get_pip_message_image').length,1,'not fetched again');
+});
+
+test('an older CLI offers no image button',async()=>{
+ const gmail={...pip('pip_'+'g'.repeat(32),'Gmail','scout'),workspace_id:PROJECT};
+ const x=setup({apiVersion:42,jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ assert.ok(x.d.querySelector('#chatText'),'its chat is open');assert.equal(x.d.querySelector('#chat-attach'),null);
+});
+
+test('a photo-sized image passes the host, which still bounds images and every other field',()=>{
+ const photo='data:image/png;base64,'+Buffer.concat([Buffer.from(PNG,'base64'),Buffer.alloc(1_400_000)]).toString('base64');
+ const posted=[],sent=[];const out={exports:{}};new Function('module','exports','require',view)(out,out.exports,name=>name==='vscode'?{}:require(name));
+ const editor=new out.exports.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:43},{});
+ const base={type:'send_pip_message',pip_id:'pip_'+'g'.repeat(32),text:'What is this?',idempotency_key:'k'};
+ editor.receive({type:'pipsRequest',id:'photo',request:{...base,images:[photo]}});
+ assert.equal(sent.length,1,posted.at(-1)?.error?.message);assert.equal(sent[0].request.images[0],photo);
+ for(const [i,changed] of [[{images:[photo,photo]}],[{images:Array(5).fill('data:image/png;base64,'+PNG)}],[{images:['https://example.com/a.png']}],[{images:[]}],[{text:'x'.repeat(20000),images:[photo]}]].entries()){
+  editor.receive({type:'pipsRequest',id:'no'+i,request:{...base,...changed[0]}});
+  assert.equal(sent.length,1,`refused ${i}`);assert.equal(posted.at(-1).ok,false);
+ }
+});
+
+test('the extension host sends images and image reads only to an API 43 CLI',()=>{
+ for(const api of [42,43]){
+  const posted=[],sent=[];const out={exports:{}};new Function('module','exports','require',view)(out,out.exports,name=>name==='vscode'?{}:require(name));
+  const editor=new out.exports.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});
+  editor.receive({type:'pipsRequest',id:'img',request:{type:'send_pip_message',pip_id:'pip_'+'g'.repeat(32),text:'x',idempotency_key:'k',images:['data:image/png;base64,'+PNG]}});
+  editor.receive({type:'pipsRequest',id:'get',request:{type:'get_pip_message_image',pip_id:'pip_'+'g'.repeat(32),message_id:'m',index:0}});
+  assert.equal(sent.length,api>=43?2:0,`API ${api}`);
+ }
+});
+
 test('an older CLI keeps the full Pips view',async()=>{
  const x=setup({apiVersion:42});await x.drain();
  assert.equal(x.d.querySelector('[aria-label="Meet Core"]'),null);

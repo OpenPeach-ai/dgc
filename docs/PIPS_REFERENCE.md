@@ -9,9 +9,9 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | DGC CLI | 0.48.0 |
 | VS Code extension | 0.33.0 |
 | SDK (Python and TypeScript) | 0.7.0 |
-| Pips API | 42 (CLI 0.48.0 advertises 41) |
+| Pips API | 43 (CLI 0.48.0 advertises 41) |
 | Editor protocol | v14 |
-| Pips registry schema | 35 (34 in CLI 0.48.0) |
+| Pips registry schema | 36 (34 in CLI 0.48.0) |
 
 ## Security model
 
@@ -784,6 +784,21 @@ its name what the user wants, and offer the next step. Asking again returns the 
 message. In `list_pip_messages` that user message carries `intro: true`, and the editor does not
 show it as the user's. `send_pip_message` refuses keys that start with `intro_`.
 
+**Images in a chat** (API 43). `send_pip_message` to a Personal Pip takes `images`: up to 4
+`data:image/png|jpeg|gif|webp;base64,…` URIs, 2 MB in all, checked like the main chat's (the bytes
+must be the type they claim). `text` may then be empty; the message reads "(sent an image)". Each
+image is kept once by its SHA-256 under the registry's `chat_images/<pip_id>/` (files 0600), and the
+retry key binds the images as well as the text. Listed user messages carry
+`images: [{index, mime, bytes}]`, never the bytes; `get_pip_message_image {pip_id, message_id,
+index}` returns one as `image` (a data URI), only from that Pip's own chat and only if the kept file
+still has its digest. The worker never receives the bytes in its 128 KiB input: the runner hands it
+the kept paths, and it re-checks each name and digest before the model sees the image (as image
+parts, or described by a vision model for one that cannot see). The images are the only field
+that travels outside a Pips request's 16–32 KiB bound: the extension host, `dgc serve`, the
+control handler and both SDKs bound them on their own (4 data URIs, 2,800,000 characters in all)
+and hold the rest of the message to its usual limit. Registry schema 36 adds the
+`pip_chat_images` table.
+
 **App plans** (`app_plan`) name one connection and one to four read calls:
 
 ```json
@@ -999,5 +1014,5 @@ Clients check it before using a newer control.
 | 39 | Drive, Notion and Contacts reads |
 | 40 | Reviewed web reads |
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
-| 43 | Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages |
 | 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |
+| 43 | Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images in a Personal Pip's chat (`send_pip_message` `images`, `get_pip_message_image`) |

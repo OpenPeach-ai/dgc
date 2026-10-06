@@ -10,6 +10,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 - Meet your Pips (API 43): a Personal Pip needs only a name, Core can be your Primary Pip, and
   a new Pip introduces itself in its chat (`introduce_pip`).
+- Send images to a Personal Pip, like in the main chat: up to 4 per message, 2 MB in all, with or
+  without text. They are checked, kept once on your machine, and shown in the chat
+  (`send_pip_message` `images`, `get_pip_message_image`). Registry schema 36: an older `dgc` can't
+  open the Pips registry once this one has.
 - A chat's own shell always runs the `dgc` of the build the chat is running, so the rule that a
   chat can't create or approve Pips from its shell holds even when an older `dgc` is on your PATH
   (Linux and macOS).

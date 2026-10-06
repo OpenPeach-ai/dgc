@@ -1,9 +1,12 @@
 """Private, bounded per-Pip conversations. Messages never mutate approved jobs."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 import re
+from pathlib import Path
 
 from .workspace_registry import RegistryError, identifier
 
@@ -41,6 +44,126 @@ CREATE TABLE IF NOT EXISTS pip_chat_messages (
 );
 CREATE INDEX IF NOT EXISTS pip_chat_history ON pip_chat_messages(pip_id,seq);
 """
+# Images in a Pip chat (Pips API 43): up to four per message, 2 MiB together (the editor's frame
+# limit), checked like the main chat's. Kept content-addressed under the Pips state directory,
+# never in a run manifest; the worker reads and re-checks them by digest.
+MAX_CHAT_IMAGES = 4
+MAX_CHAT_IMAGE_BYTES = 2 * 1024 * 1024
+IMAGE_ONLY_TEXT = "(sent an image)"
+# Images in transit, as data URIs: 2 MiB of image is at most 2,796,204 base64 characters, plus headers.
+MAX_CHAT_IMAGE_URI_CHARS = 2_800_000
+_IMAGE_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/bmp": "bmp"}
+IMAGES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_chat_images (
+ message_id TEXT NOT NULL REFERENCES pip_chat_messages(id),
+ idx INTEGER NOT NULL CHECK(typeof(idx)='integer' AND idx BETWEEN 0 AND 3),
+ sha256 TEXT NOT NULL CHECK(length(sha256)=64),
+ mime TEXT NOT NULL,
+ bytes INTEGER NOT NULL CHECK(typeof(bytes)='integer' AND bytes BETWEEN 1 AND 2097152),
+ PRIMARY KEY(message_id, idx)
+);
+"""
+
+
+def image_directory(directory, pip_id) -> Path:
+    if not isinstance(pip_id, str) or not re.fullmatch(r"pip_[A-Za-z0-9]{1,64}", pip_id):
+        raise RegistryError("invalid_request", "Choose a Pip.")
+    return Path(directory) / "chat_images" / pip_id
+
+
+def bounded_image_uris(value):
+    """A send's images before they are decoded: 1 to 4 image data URIs, 2 MB in all.
+
+    They travel outside the small budget every other Pips request field keeps; this bound is theirs.
+    """
+    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_IMAGES
+            or any(not isinstance(i, str) or not i.startswith("data:image/") or not i.isascii() for i in value)
+            or sum(len(i) for i in value) > MAX_CHAT_IMAGE_URI_CHARS):
+        raise RegistryError("invalid_images", f"Send up to {MAX_CHAT_IMAGES} images, {MAX_CHAT_IMAGE_BYTES // 1048576} MB in all.")
+    return list(value)
+
+
+def validate_images(value):
+    """The images a message carries, as metadata: digest, type and size."""
+    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_IMAGES
+            or any(not isinstance(i, dict) or set(i) != {"sha256", "mime", "bytes"} or not isinstance(i["sha256"], str)
+                   or not re.fullmatch(r"[0-9a-f]{64}", i["sha256"]) or i["mime"] not in _IMAGE_EXT
+                   or type(i["bytes"]) is not int or not 1 <= i["bytes"] <= MAX_CHAT_IMAGE_BYTES for i in value)
+            or sum(i["bytes"] for i in value) > MAX_CHAT_IMAGE_BYTES):
+        raise RegistryError("invalid_images", f"Send up to {MAX_CHAT_IMAGES} images, {MAX_CHAT_IMAGE_BYTES // 1048576} MB in all.")
+    return [dict(i) for i in value]
+
+
+def store_images(directory, pip_id, values):
+    """Check images the editor sent (data URIs) and keep each once, by its digest."""
+    from .attachments import validate_image_data_uris
+    try:
+        uris = validate_image_data_uris(values, maximum_files=MAX_CHAT_IMAGES, maximum_file_bytes=MAX_CHAT_IMAGE_BYTES,
+                                        maximum_total_bytes=MAX_CHAT_IMAGE_BYTES)
+    except ValueError as exc:
+        raise RegistryError("invalid_images", f"These images cannot be sent: {exc}.") from exc
+    if not uris:
+        return None
+    folder = image_directory(directory, pip_id)
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    kept = []
+    for uri in uris:
+        mime, payload = uri[5:].split(";base64,", 1)
+        raw = base64.b64decode(payload)
+        digest = hashlib.sha256(raw).hexdigest()
+        path = folder / f"{digest}.{_IMAGE_EXT[mime]}"
+        if not path.exists():
+            staging = folder / f".{digest}.{os.getpid()}.{os.urandom(4).hex()}"
+            fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(raw)
+            os.replace(staging, path)
+        kept.append({"sha256": digest, "mime": mime, "bytes": len(raw)})
+    return validate_images(kept)
+
+
+def image_paths(directory, pip_id, images):
+    """Where a message's images are kept; each must still be there, at its size."""
+    paths = []
+    for item in validate_images(images):
+        path = image_directory(directory, pip_id) / f"{item['sha256']}.{_IMAGE_EXT[item['mime']]}"
+        try:
+            if path.stat().st_size != item["bytes"]:
+                raise OSError
+        except OSError as exc:
+            raise RegistryError("invalid_images", "An image for this message is missing. Send it again.") from exc
+        paths.append(path)
+    return paths
+
+
+def read_image(path, item) -> str:
+    """One kept image as a data URI, only if it is still exactly the image that was sent."""
+    from .attachments import _image_matches
+    raw = Path(path).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != item["sha256"] or not _image_matches(raw, item["mime"]):
+        raise RegistryError("invalid_images", "A kept image changed on disk and was not used.")
+    return f"data:{item['mime']};base64," + base64.b64encode(raw).decode("ascii")
+
+
+def message_images(db, message_id):
+    try:
+        rows = db.execute("SELECT idx,sha256,mime,bytes FROM pip_chat_images WHERE message_id=? ORDER BY idx",
+                          (message_id,)).fetchall()
+    except Exception:
+        return []
+    return [{"index": r[0], "mime": r[2], "bytes": r[3]} for r in rows]
+
+
+def get_image(store, pip_id, message_id, index):
+    row = store.db.execute("SELECT i.sha256,i.mime,i.bytes FROM pip_chat_images i JOIN pip_chat_messages m ON m.id=i.message_id "
+                           "WHERE m.pip_id=? AND m.id=? AND i.idx=?", (pip_id, message_id, index)).fetchone()
+    if row is None:
+        raise RegistryError("not_found", "That image is not in this Pip's chat.")
+    item = {"sha256": row[0], "mime": row[1], "bytes": row[2]}
+    [path] = image_paths(store.registry.directory, pip_id, [item])
+    return {"pip_id": pip_id, "message_id": message_id, "index": index, "image": read_image(path, item)}
+
+
 SYSTEM = (
     "You are this user's dedicated DGC Pip, conversing about its workspace and approved job. "
     "Reply naturally in prose or Markdown, not an audit JSON object. Use the provided read_file, "
@@ -70,7 +193,11 @@ def validate_text(value, *, reply=False):
     return value
 
 
-def request(text, key, chat_options=None):
+def request(text, key, chat_options=None, images=None):
+    if images is not None:
+        images = validate_images(images)
+        if isinstance(text, str) and not text.strip():
+            text = IMAGE_ONLY_TEXT
     text = validate_text(text)
     if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
         raise RegistryError("invalid_request", "Conversation retry keys use 1–128 letters, digits, underscores or hyphens.")
@@ -81,6 +208,11 @@ def request(text, key, chat_options=None):
         # Keep legacy text-only request digests stable, but bind new retry keys to
         # all selected inference settings. They cannot change under a queued run.
         result['digest'] = hashlib.sha256(_json({'text': text, 'chat_options': result['chat_options']}).encode()).hexdigest()
+    if images is not None:
+        # The retry key binds the images too: the same key with other images is another request.
+        result['images'] = images
+        result['digest'] = hashlib.sha256(_json({'text': text, 'chat_options': result.get('chat_options'),
+                                                 'images': [i['sha256'] for i in images]}).encode()).hexdigest()
     return result
 
 
@@ -313,14 +445,20 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     from .pip_chat_continuity import prepare as prepare_continuity
     continuity, history = prepare_continuity(store, pip["id"], context_size, secrets=secrets)
     report = _last_report(store, pip["id"])
-    return {"text": req["text"], "history": history, "history_omitted_count": 0,
-            "last_report": report, "continuity": continuity}
+    context = {"text": req["text"], "history": history, "history_omitted_count": 0,
+               "last_report": report, "continuity": continuity}
+    if req.get("images"):
+        context["images"] = req["images"]
+    return context
 
 
 def insert_user(store, pip, req, run_id, model, now):
+    message_id = identifier("message")
     store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at,request_key,request_digest) "
-                     "VALUES(?,?,?,?,?,?,?,?,?,?)", (identifier("message"), pip["id"], pip["workspace_id"], run_id,
+                     "VALUES(?,?,?,?,?,?,?,?,?,?)", (message_id, pip["id"], pip["workspace_id"], run_id,
                      "user", req["text"], model, now, req["request_key"], req["digest"]))
+    for index, item in enumerate(req.get("images") or []):
+        store.db.execute("INSERT INTO pip_chat_images VALUES(?,?,?,?,?)", (message_id, index, item["sha256"], item["mime"], item["bytes"]))
 
 
 def insert_reply(store, run, result, now):
@@ -387,6 +525,10 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
     messages, size = [], 0
     for row in rows[:limit]:
         message = _message(row)
+        if row["role"] == "user":
+            pictures = message_images(store.db, row["id"])
+            if pictures:
+                message["images"] = pictures
         amount = len(_json(message).encode())
         if size + amount > 96 * 1024:
             break
@@ -405,24 +547,33 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             "history_context_omitted_count": omitted, "continuity": continuity}
 
 
-def send(store, pip_id, text, key, actor, config, *, chat_options=None, _intro=False):
+def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, _intro=False):
     if not _intro and isinstance(key, str) and key.startswith(INTRO_KEY):
         raise RegistryError("invalid_request", "That message key is reserved for a Pip's introduction.")
-    req = request(text, key, chat_options)
+    if images is not None:
+        store._job(pip_id)
+        images = store_images(store.registry.directory, pip_id, images)
+    req = request(text, key, chat_options, images=images)
     run = prior(store, pip_id, req, actor)
     if run is None:
         run = store.enqueue(pip_id, "chat_" + hashlib.sha256(key.encode()).hexdigest(), actor, config,
                             conversation_request=req)
     row = store.db.execute("SELECT m.*,r.status FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
                            "WHERE m.run_id=? AND m.role='user'", (run["id"],)).fetchone()
-    return {"run": run, "message": _message(row)}
+    message = _message(row)
+    pictures = message_images(store.db, row["id"])
+    if pictures:
+        message["images"] = pictures
+    return {"run": run, "message": message}
 
 
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) not in (
+    if (not isinstance(value, dict) or set(value) - {"images"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
+    if "images" in value:
+        validate_images(value["images"])
     if 'continuity' in value:
         from .pip_chat_continuity import _validate_envelope
         _validate_envelope(value['continuity'])

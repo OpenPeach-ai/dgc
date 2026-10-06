@@ -26,7 +26,7 @@ class PipChatOptionsSDKTests(unittest.TestCase):
     def test_send_fields_match_runtime_and_options_are_optional_only_at_outer_level(self):
         from dgc.pips import _COMMAND_ARGS
         self.assertEqual(COMMAND_FIELDS['send_pip_message'], _COMMAND_ARGS['send_pip_message'])
-        self.assertEqual(COMMAND_FIELDS['send_pip_message'], {'pip_id', 'text', 'idempotency_key', 'chat_options'})
+        self.assertEqual(COMMAND_FIELDS['send_pip_message'], {'pip_id', 'text', 'idempotency_key', 'chat_options', 'images'})
         self.assertNotIn('chat_options', COMMAND_FIELDS['list_pip_messages'])
 
     def test_option_presence_requires_api24_but_absent_message_keeps_api8_gate(self):
@@ -40,6 +40,28 @@ class PipChatOptionsSDKTests(unittest.TestCase):
             self.assertNotIn('chat_options', result['request'])
             self.assertEqual(result['request']['idempotency_key'], MESSAGE['idempotency_key'])
             self.assertEqual(len(wire.calls), 1)
+
+    def test_images_require_api43_and_must_be_image_data_uris(self):
+        dot = 'data:image/png;base64,iVBORw0KGgo='
+        wire = Wire(); old = session(wire, caps={**CAPS, 'pips_api_version': 42})
+        with self.assertRaisesRegex(DGCUnsupportedError, 'API 43'):
+            old.pips.mutate('send_pip_message', {**MESSAGE, 'images': [dot]}, approved=True)
+        self.assertFalse(wire.calls)
+        current = session(wire, caps={**CAPS, 'pips_api_version': 43})
+        for images in (None, [], dot, [dot] * 5, ['https://example.com/a.png'], [1]):
+            with self.subTest(images=images), self.assertRaises(DGCConfigError):
+                current.pips.mutate('send_pip_message', {**MESSAGE, 'images': images}, approved=True)
+        self.assertFalse(wire.calls)
+        answer = current.pips.mutate('send_pip_message', {**MESSAGE, 'text': '', 'images': [dot]}, approved=True)
+        self.assertEqual(answer['request']['images'], [dot])
+        self.assertEqual(len(wire.calls), 1)
+        photo = 'data:image/png;base64,' + 'A' * 1_900_000
+        answer = current.pips.mutate('send_pip_message', {**MESSAGE, 'images': [photo]}, approved=True)
+        self.assertEqual(answer['request']['images'], [photo], 'a photo-sized image is not held to the 32 KiB budget')
+        for params in ({**MESSAGE, 'images': [photo, photo]}, {**MESSAGE, 'text': 'x' * 40000, 'images': [photo]}):
+            with self.assertRaises(DGCConfigError):
+                current.pips.mutate('send_pip_message', params, approved=True)
+        self.assertEqual(len(wire.calls), 2)
 
     def test_exact_choices_and_boundary_values_forward_detached_once(self):
         wire = Wire(); current = session(wire, caps=CURRENT)

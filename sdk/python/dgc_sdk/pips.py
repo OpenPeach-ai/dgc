@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
-    "get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames",
+    "get_pip_message_image", "get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames",
     "list_pip_action_grants", "list_pip_feedback", "export_pip", "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
     "get_pip_connector_draft", "list_pip_connector_drafts", "inspect_pip_connector_actions", "inspect_pip_calendar_connection", "get_pip_calendar_draft", "list_pip_calendar_drafts",
     "get_pip_message_draft", "list_pip_message_drafts",
@@ -173,6 +173,9 @@ MUTATION_COMMANDS |= API42_MUTATIONS
 # API 43: a new Personal Pip speaks first.
 API43_MUTATIONS = frozenset({'introduce_pip'})
 MUTATION_COMMANDS |= API43_MUTATIONS
+# API 43: the images sent in a Pip's chat, one at a time.
+API43_READS = frozenset({'get_pip_message_image'})
+READ_COMMANDS |= API43_READS
 COMMAND_FIELDS = {
     'always_allow_pip_computer_action': frozenset({'action_id', 'expected_digest'}),
     'get_pip_computer': frozenset({'pip_id'}),
@@ -295,12 +298,15 @@ COMMAND_FIELDS = {
     'review_pip_execution': frozenset(['expected_revision', 'reason', 'run_id', 'status']),
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
-    'send_pip_message': frozenset(['chat_options', 'idempotency_key', 'pip_id', 'text']),
+    'send_pip_message': frozenset(['chat_options', 'idempotency_key', 'images', 'pip_id', 'text']),
+    'get_pip_message_image': frozenset(['index', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),
 }
 
 MAX_REQUEST_BYTES = 32768
+# Images sent with a Pip message travel outside that budget: 4 data URIs, 2 MiB of image in all.
+MAX_IMAGE_URI_CHARS = 2_800_000
 
 
 def _detach(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -389,7 +395,7 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API43_MUTATIONS:
+        if command in API43_MUTATIONS | API43_READS:
             minimum = 43
         elif command in API42_READS | API42_MUTATIONS:
             minimum = 42
@@ -433,6 +439,16 @@ class Pips:
             raise DGCUnsupportedError(f"This control requires a runtime advertising Pips API {minimum} or newer")
         if caps.get("pips_enabled") is not True:
             raise DGCUnsupportedError("Enable Pips locally and open a new control session; the SDK does not enable it")
+        images = None
+        if command == 'send_pip_message' and type(params) is dict and 'images' in params:
+            if version < 43:
+                raise DGCUnsupportedError('Images in a Pip chat require a runtime advertising Pips API 43 or newer')
+            images = params['images']
+            if (type(images) is not list or not 1 <= len(images) <= 4
+                    or any(type(i) is not str or not i.startswith('data:image/') or not i.isascii() for i in images)
+                    or sum(len(i) for i in images) > MAX_IMAGE_URI_CHARS):
+                raise DGCConfigError('images must be 1 to 4 image data URIs, 2 MB in all')
+            images, params = list(images), {key: value for key, value in params.items() if key != 'images'}
         values = _detach(params)
         if (command in ('propose_pip_calendar_action','prepare_pip_calendar_draft')
                 and isinstance(values.get('event'),dict)
@@ -495,6 +511,8 @@ class Pips:
         request = {"type": command, "request_id": rid, **values}
         if len(json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf-8")) > MAX_REQUEST_BYTES:
             raise DGCConfigError("Pip request exceeds 32 KiB")
+        if images is not None:
+            request["images"] = images
         event = session._request({"type": "pips_control", "request": request}, "pips_result", request_id=rid)
         if event.get("request_id") != rid or event.get("command") != command or type(event.get("ok")) is not bool:
             raise DGCProtocolError("Mismatched or malformed Pip response")

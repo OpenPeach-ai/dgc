@@ -74,6 +74,13 @@ The reply is a `pips_result` event that carries the nested request ID:
 - `introduce_pip {pip_id}` (API 43, local only) queues a new Personal Pip's first message once and
   returns `{run, message}` like `send_pip_message`. That message has `intro: true` in
   `list_pip_messages`; the editor hides it and shows the Pip typing until its reply arrives.
+- `send_pip_message` may carry `images` (API 43, Personal Pips): up to 4 image data URIs, 2 MB in
+  all, and then `text` may be empty. A listed user message carries `images: [{index, mime, bytes}]`;
+  `get_pip_message_image {pip_id, message_id, index}` (API 43) returns one as `{image}`. The host
+  refuses both before sending to a CLI below API 43. The images are the one field outside the
+  16 KiB request bound (32 KiB in `dgc serve` and the SDKs): they are bounded on their own, at
+  every hop, to 4 data URIs and 2,800,000 characters in all, and the rest of the message keeps its
+  bound.
 - `run_pip`, `send_pip_message` and `accept_pip_handoff` first check that the
   independent runner is live (a fresh heartbeat and a held lease). The backend never
   starts a worker of its own to run Pips work. If the runner stops after the check,

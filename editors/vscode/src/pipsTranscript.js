@@ -26,9 +26,10 @@ export function replyParts(text) {
   return merged.length>8?[...merged.slice(0,7),merged.slice(7).join('\n\n')]:merged;
 }
 
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>''}) {
   const m=message,user=m.role==='user',label=user?'You':name;
-  const body=user?`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`:split?`<div class="answer split">${replyParts(m.text).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(m.text)}</div></div>`;
+  const pictures=user&&Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,4).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" alt="Image ${Number(i.index)+1}"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
+  const body=user?`${pictures}<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`:split?`<div class="answer split">${replyParts(m.text).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(m.text)}</div></div>`;
   const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${esc(m.status)}">${phase(m.status)}${m.status==='failed'||m.status==='cancelled'?' · No completed reply was recorded.':''}</p>`:'';
   const options=!user&&prompt?`${action('retry','Run this prompt again',m.id,!canSend)}${action('edit','Edit this prompt',m.id,false)}`:'';
   const details=`<details class="message-details" data-details="message-${esc(m.id)}"><summary title="${user?'Message details':'Response details'}" aria-label="${user?'Message details':'Response details'}">${transcriptIcon('info')}<span class="sr-only">${user?'Message details':'Response details'}</span></summary><div class="message-provenance"><dl><dt>${user?'Sent':'Saved'}</dt><dd>${esc(formatDate(m.created_at))}</dd>${!user&&m.model?`<dt>Model</dt><dd>${esc(m.model)}</dd>`:''}<dt>Status</dt><dd>${esc(m.status)}</dd></dl><button type="button" data-chat-run="${esc(m.run_id)}">${m.status==='failed'?'View error':'Run details'}</button></div></details>`;
