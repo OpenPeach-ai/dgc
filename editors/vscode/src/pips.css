@@ -178,3 +178,72 @@ label>span{display:block}
 #new-pip{background:var(--pip-accent);border-color:var(--pip-accent);color:#fff}
 #new-pip:hover{background:var(--pip-accent-hover)}
 aside>button:not(.job){margin:6px 6px 0 0}
+/* Simple Pips (API 43): Personal Pips as characters you chat with. */
+:host,:root{--pip-bubble:color-mix(in srgb,var(--vscode-foreground) 8%,transparent)}
+.simple-pips #app{display:flex;flex-direction:column;min-height:100%}
+.simple-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex:none}
+.simple-bar h1{font-size:15px;margin:0}
+.simple-bar .runner{margin-left:auto;padding-top:0}
+.simple-scope{margin:0}
+.simple-scope select{width:auto;padding:3px 8px;font-size:12px;border-radius:999px}
+.simple-note{margin:10px 14px 0}
+.simple-content{padding:16px 14px 28px;max-width:760px;margin:0 auto;width:100%;box-sizing:border-box}
+button.pill{border-radius:999px;padding:6px 16px}
+.meet-core{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:56px 12px 24px}
+.meet-core .avatar{width:112px;height:108px}
+.meet-core h2{font-size:20px;margin:6px 0 0}
+.meet-core p{max-width:340px;color:var(--muted);margin:0 0 10px;line-height:1.55}
+.simple-home-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}
+.simple-home-head h2{font-size:15px;margin:0}
+.core-offer{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--pip-edge);border-radius:14px;margin:0 0 12px}
+.core-offer p{margin:0;display:grid;gap:2px}
+.core-offer span{color:var(--muted);font-size:12px}
+.core-offer .avatar,.pip-row .avatar{width:44px;height:42px}
+.pip-rows{display:grid;gap:2px}
+.pip-row{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:center;gap:12px;padding:8px 10px;border:0;border-radius:12px;background:transparent;text-align:left;width:100%;color:var(--vscode-foreground);min-height:0}
+.pip-row:hover{background:var(--pip-wash)}
+.pip-row-copy{display:grid;gap:2px;min-width:0}
+.pip-row-copy strong{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
+.pip-row-copy small{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.primary-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#F5A524;color:#1b1b1b;font-size:10px;line-height:1}
+.pip-topbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:10px 12px;flex:none}
+.topbar-icon{width:34px;height:34px;min-height:34px;padding:0;border-radius:50%;border:1px solid var(--pip-edge);background:transparent;display:inline-flex;align-items:center;justify-content:center;color:var(--vscode-foreground);cursor:pointer;list-style:none}
+.topbar-icon:hover{background:var(--pip-wash)}
+.topbar-icon::-webkit-details-marker{display:none}
+.pip-pill{justify-self:center;display:inline-flex;align-items:center;gap:8px;padding:3px 14px 3px 5px;border:1px solid var(--pip-edge);border-radius:999px;max-width:100%;min-width:0;font-weight:600}
+.pip-pill .avatar{width:28px;height:27px;flex:none}
+.pip-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-pill small{color:var(--muted);font-weight:400;white-space:nowrap}
+.topbar-actions{display:flex;gap:6px;align-items:center}
+.pip-menu{position:relative;margin:0}
+.pip-menu .tabs-menu{right:0;left:auto}
+.simple-pips.chat-open #app{height:100%;min-height:0;overflow:hidden}
+.simple-pips.chat-open .simple-content.chat{flex:1 1 0;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0 12px 10px;max-width:760px}
+.simple-pips.chat-open .simple-content.chat .pip-conversation{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
+.simple-pips.chat-open .simple-content.chat .conversation-log{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;padding-top:6px}
+.simple-pips .pip-message.assistant .answer{display:inline-block;max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:10px 14px}
+.simple-pips .pip-message.assistant .answer p:first-child{margin-top:0}
+.simple-pips .pip-message.assistant .answer p:last-child{margin-bottom:0}
+.simple-pips .pip-message.user{border:0;background:transparent;padding:0;display:flex;flex-direction:column;align-items:flex-end}
+.simple-pips .pip-message.user .bubble{max-width:85%;background:var(--pip-accent);color:#fff;border-radius:18px;padding:9px 14px}
+/* pipsTranscript.css loads after this file with equal weight: these carry one more class. */
+.simple-pips .pip-message .response-actions{opacity:0;transition:opacity .12s}
+.simple-pips .pip-message:hover .response-actions,.simple-pips .pip-message:focus-within .response-actions{opacity:1}
+.simple-pips .pip-message .chat-activity-toggle{display:none}
+.simple-pips .pip-composer #chat-model,.simple-pips .pip-composer #chat-context-toggle,.simple-pips .pip-composer #chat-permissions,.simple-pips .simple-content .composer-hint{display:none}
+.simple-pips .simple-content .pip-composer{border-radius:22px}
+.simple-pips .simple-bar .runner-status{font-size:0;gap:0}
+.simple-pips .simple-bar .runner-status .status-dot{width:8px;height:8px}
+.pip-message.typing{display:inline-flex;padding:13px 16px;border-radius:18px;background:var(--pip-bubble);margin-bottom:18px}
+.typing-dots{display:inline-flex;gap:4px}
+.typing-dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:pip-typing 1.2s infinite ease-in-out}
+.typing-dots i:nth-child(2){animation-delay:.15s}
+.typing-dots i:nth-child(3){animation-delay:.3s}
+@keyframes pip-typing{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}
+@media(prefers-reduced-motion:reduce){.typing-dots i{animation:none;opacity:.6}}
+.character-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;margin:4px 0 14px}
+.character-choice{display:grid;justify-items:center;gap:4px;padding:8px 4px;border:1px solid var(--pip-edge);border-radius:12px;background:transparent;color:var(--vscode-foreground);min-height:0}
+.character-choice:hover{background:var(--pip-wash)}
+.character-choice .avatar{width:48px;height:46px}
+.character-choice[aria-checked=true]{border-color:#7C5CFA;background:var(--pip-tint);box-shadow:0 0 0 1px #7C5CFA inset}
+.character-choice span{font-size:11px}

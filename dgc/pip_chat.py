@@ -85,8 +85,38 @@ def request(text, key, chat_options=None):
 
 
 def _message(row):
-    return {key: row[key] for key in ("id", "pip_id", "workspace_id", "role", "text", "run_id",
-                                     "status", "model", "created_at")}
+    message = {key: row[key] for key in ("id", "pip_id", "workspace_id", "role", "text", "run_id",
+                                        "status", "model", "created_at")}
+    if row["role"] == "user" and str(row["request_key"] or "").startswith(INTRO_KEY):
+        message["intro"] = True        # DGC asked the Pip to introduce itself; the editor shows no bubble
+    return message
+
+
+# A new Pip speaks first, like a person you have just met. DGC sends this one turn, under a key
+# no user message can take, and the editor hides it: the chat opens on the Pip's hello.
+INTRO_KEY = "intro_"
+INTRO = ("This message is from DGC, not the user. The user has just created you in the Pips view and "
+         "named you \"{name}\". Write your first message to them. Say hello and who you are in one "
+         "sentence. Guess from your name what they would like help with, then say what you can do for "
+         "that now and what would need connecting or setting up first; do not claim a connection you "
+         "cannot see in your references. End with one short question that offers the next step. Keep it "
+         "warm and brief: two or three short paragraphs, no lists and no headings.")
+CORE_INTRO = ("This message is from DGC, not the user. The user has just created you, Core, their Primary "
+              "Pip. Write your first message to them. Say hello and that you are their Primary Pip: you "
+              "help with everyday tasks, look after their other Pips and check in when you need them. Say "
+              "what you can see from here (their other Pips or connected apps, if your references show "
+              "any; otherwise say nothing is connected yet). End with one short question asking for the "
+              "one thing on their plate today. Two or three short paragraphs, no lists and no headings.")
+
+
+def introduce(store, pip_id, actor, config):
+    """Queue the Pip's first message once; asking again returns the same one."""
+    pip = store._job(pip_id)
+    if pip["source_policy"] != {"mode": "personal"}:
+        raise RegistryError("invalid_request", "Only Personal Pips introduce themselves.")
+    key = INTRO_KEY + re.sub(r"[^A-Za-z0-9_-]", "", pip_id)[:100]
+    text = (CORE_INTRO if pip.get("pip_type") == "core" else INTRO).format(name=pip["name"][:120].replace('"', "'"))
+    return send(store, pip_id, text, key, actor, config, _intro=True)
 
 
 def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):
@@ -375,7 +405,9 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             "history_context_omitted_count": omitted, "continuity": continuity}
 
 
-def send(store, pip_id, text, key, actor, config, *, chat_options=None):
+def send(store, pip_id, text, key, actor, config, *, chat_options=None, _intro=False):
+    if not _intro and isinstance(key, str) and key.startswith(INTRO_KEY):
+        raise RegistryError("invalid_request", "That message key is reserved for a Pip's introduction.")
     req = request(text, key, chat_options)
     run = prior(store, pip_id, req, actor)
     if run is None:

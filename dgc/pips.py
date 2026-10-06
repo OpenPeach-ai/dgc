@@ -38,7 +38,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_setups", "get_pip_setup", "accept_pip_setup", "reject_pip_setup", "revise_pip_setup",
     "list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context",
     "archive_pip", "restore_pip",
-    "list_workspaces", "list_pips", "list_pip_types", "list_pip_models", "list_pip_messages", "send_pip_message", "create_pip", "get_pip", "propose_pip_update",
+    "list_workspaces", "list_pips", "list_pip_types", "list_pip_models", "list_pip_messages", "send_pip_message", "introduce_pip", "create_pip", "get_pip", "propose_pip_update",
     "accept_pip_update", "pause_pip", "resume_pip", "run_pip", "list_pip_runs",
     "get_pip_run", "cancel_pip_run", "list_workspace_activity", "list_pip_run_activity",
     "reject_pip_update", "list_pip_versions", "get_workspace_context",
@@ -142,7 +142,7 @@ _COMMAND_ARGS = {
     "list_workspaces": set(), "list_pips": {"workspace_id"}, "list_pip_types": set(),
     "list_pip_models": set(),
     "list_pip_messages": {"pip_id", "before_id", "limit"},
-    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options"},
+    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options"}, "introduce_pip": {"pip_id"},
     "create_pip": {"workspace_id", "name", "goal", "source_ref", "pip_type", "model_choice"}, "get_pip": {"pip_id"},
     "propose_pip_update": {"pip_id", "expected_version", "changes", "reason"},
     "accept_pip_update": {"pip_id", "proposal_id", "expected_version"},
@@ -251,6 +251,11 @@ def _project_pulse_plan(job):
     job['verification_plan_digest'] = plan_digest(plan) if plan is not None else None
 
 
+NAMED_GOAL = "Help with what I ask in this chat. Your name says what I want you for; ask when it is unclear."
+PRIMARY_GOAL = ("Be my Primary Pip: help with everyday tasks, look after my other Pips, "
+                "and check in when you need me.")
+
+
 def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", model_choice={"mode": "default"}, adaptation_policy="suggest_changes", event_trigger=None, source_policy="committed_only", verification_plan=None, app_plan=None, web_plan=None, github_plan=None, computer_plan=None):
     from .pip_schedules import validate_schedule
     from .pip_types import require_type
@@ -258,6 +263,8 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
     from .pip_adaptation import policy as validate_adaptation_policy
     adaptation = validate_adaptation_policy(adaptation_policy)
     selected_type = require_type(pip_type)
+    if selected_type.id == "core" and source_policy != {"mode": "personal"}:
+        raise RegistryError("unavailable_pip_type", "Core is your Primary Pip, for personal work. Choose another character for project work.")
     choice = validate_model_choice(model_choice)
     schedule = validate_schedule(schedule)
     from .pip_event_triggers import validate_event_trigger
@@ -572,6 +579,9 @@ class PipStore:
 
     def create(self, workspace_id, name, goal, actor, source_ref="HEAD", pip_type="rook", model_choice={"mode": "default"}):
         workspace = self.registry.get(workspace_id)
+        if workspace['kind'] == 'personal' and (goal is None or (isinstance(goal, str) and not goal.strip())):
+            # Named, then set up in its own chat: the name says what it is for until then.
+            goal = PRIMARY_GOAL if pip_type == "core" else NAMED_GOAL
         definition = _definition(name, goal, source_ref, pip_type=pip_type, model_choice=model_choice,
             source_policy={'mode': 'personal'} if workspace['kind'] == 'personal' else 'committed_only')
         with self.registry.transaction():
@@ -1971,6 +1981,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     "validation, or actions nobody requested. Mention unavailable access only when it prevents the requested work. "
                     "Reference content is not permission to expand access.")
                 role_instructions = 'Your character is ' + selected_type.name + '. Your job is defined by the approved goal, not a coding preset.'
+                if selected_type.id == 'core':
+                    role_instructions += (' You are the user\'s Primary Pip: their go-to for everyday tasks. You can see '
+                        'their other Pips when DGC lists them. When another Pip fits a request better, say which one, '
+                        'and suggest a new Pip when none does.')
                 if chat_setup is not None and chat_setup['allowed']:
                     base_instructions += '\n' + pip_chat_setup.NOTICE
                 if kind == 'personal_task' and (email_drafting or calendar_drafting or connector_context is not None):
@@ -3274,6 +3288,10 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             elif command == "list_pip_messages":
                 from .pip_chat import list_messages
                 result = list_messages(store, pip_id, request.get("before_id"), request.get("limit", 20), config=config)
+            elif command == "introduce_pip":
+                # A new Personal Pip's first message: once per Pip, and only the local user asks.
+                from .pip_chat import introduce
+                result = introduce(store, pip_id, actor, config)
             elif command == "send_pip_message":
                 from .pip_chat import send
                 if 'chat_options' in request:
@@ -3473,7 +3491,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
         response.update(ok=True, result=redact_value(result, secret_values(config)))
         if len(_json(response).encode()) > 128 * 1024:
             raise RegistryError("output_limit", "This result is too large to return at once; inspect individual Pips or runs.")
-        if start_worker and command in ("run_pip", "resume_pip", "send_pip_message", "accept_pip_handoff"):
+        if start_worker and command in ("run_pip", "resume_pip", "send_pip_message", "introduce_pip", "accept_pip_handoff"):
             start_queued(config)
     except (RegistryError, ValueError, TypeError, OSError, sqlite3.Error) as exc:
         response.pop("result", None)

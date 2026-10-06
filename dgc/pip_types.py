@@ -75,7 +75,7 @@ def require_type(value: str) -> PipType:
     if not isinstance(value, str) or value not in _BY_ID:
         raise RegistryError("invalid_pip_type", "Choose a supported Pip type from the type directory.")
     item = _BY_ID[value]
-    if not item.available:
+    if not item.available and item.id != "core":
         raise RegistryError("unavailable_pip_type", item.unavailable_reason or "This Pip type is not available.")
     return item
 

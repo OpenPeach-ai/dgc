@@ -4,6 +4,11 @@
 
 ### Pips
 
+- Pips are characters you meet, not jobs you configure (Pips API 43). The first time, the
+  Pips view introduces **Core**, your Primary Pip; **Create Core** opens its chat and Core says
+  hello. **New Pip** is a character and a name; its chat opens on its own greeting, where it
+  guesses from its name what you want. Each Pip's chat has a header with its name, a **computer**
+  button that opens its screen (or offers it one), and a menu for Results and Settings.
 - A Pip's **Settings** is one short page: what it does, when it runs (when you ask, every day,
   weekdays or every few hours), what it can use, its model, what it may do without asking, usage,
   and pause or archive. Everything else is under **Advanced**, and the less-used sections are under

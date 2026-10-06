@@ -8,6 +8,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- Meet your Pips (API 43): a Personal Pip needs only a name, Core can be your Primary Pip, and
+  a new Pip introduces itself in its chat (`introduce_pip`).
 - A chat's own shell always runs the `dgc` of the build the chat is running, so the rule that a
   chat can't create or approve Pips from its shell holds even when an older `dgc` is on your PATH
   (Linux and macOS).

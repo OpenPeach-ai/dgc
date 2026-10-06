@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+Simple Pips (Pips API 43): `introduce_pip` queues a new Personal Pip's first message once. A
+Personal Pip can be created with an empty `goal`, and with `pip_type` `core` (the Primary Pip).
+
 Pip computers (Pips API 42). `session.pips` gains `get_pip_computer`,
 `list_pip_computer_actions`, `get_pip_computer_frame` and `list_pip_computer_frames`, and the
 mutations `decide_pip_computer_action`, `always_allow_pip_computer_action`, `stop_pip_computer`,

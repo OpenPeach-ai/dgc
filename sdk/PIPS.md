@@ -155,6 +155,7 @@ job with `create_pip` and a reviewed update.
 | 39 | `app_plan` version 3 (Drive, Notion and Contacts searches) |
 | 40 | `changes.web_plan` |
 | 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`, `get_pips_keep_running`, `set_pips_keep_running`, `get_pips_desktop_notifications`, `set_pips_desktop_notifications`, `get_pip_usage`, `set_pip_daily_cap`, `export_pip`, `list_pip_feedback`, `set_pip_feedback`, `always_allow_pip_app_action`, `list_pip_action_grants`, `revoke_pip_action_grant`; `changes.github_plan` |
+| 43 | `introduce_pip`; `create_pip` with an empty `goal` and `pip_type` `core` for Personal Pips |
 | 42 | Pip computers: `get_pip_computer`, `list_pip_computer_actions`, `get_pip_computer_frame`, `list_pip_computer_frames`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view`; `changes.computer_plan` |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
@@ -266,6 +267,7 @@ Revising replaces the card with a new pending card that uses another model.
 | `list_pip_checkpoints` | R | `pip_id`, `before_id?`, `limit?` |
 | `list_pip_messages` | R | `pip_id`, `before_id?`, `limit?` |
 | `send_pip_message` | M | `pip_id`, `text`, `idempotency_key`, `chat_options?` |
+| `introduce_pip` | M | `pip_id`; a Personal Pip's first message, queued once (API 43) |
 
 `run_pip` and `send_pip_message` need a running local runner. Queueing is not
 completion: read the run until it reaches a terminal status. Reusing an

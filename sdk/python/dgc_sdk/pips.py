@@ -94,6 +94,7 @@ PipMutationCommand = Literal[
     'review_pip_finding',
     'run_pip',
     'send_pip_message',
+    'introduce_pip',
     'stop_pips',
 ]
 READ_COMMANDS = frozenset(['get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations', 'get_pip', 'get_pip_execution', 'get_pip_handoff', 'get_pip_run', 'get_pip_runner', 'get_workspace_context', 'list_pip_approvals', 'list_pip_checkpoints', 'list_pip_handoffs', 'list_pip_messages', 'list_pip_models', 'list_pip_run_activity', 'list_pip_runs', 'list_pip_types', 'list_pip_versions', 'list_pips', 'list_workspace_activity', 'list_workspaces'])
@@ -169,6 +170,9 @@ API42_READS = frozenset({'get_pip_computer', 'list_pip_computer_actions', 'get_p
 API42_MUTATIONS = frozenset({'always_allow_pip_computer_action', 'decide_pip_computer_action', 'stop_pip_computer', 'open_pip_computer', 'use_pip_computer_view'})
 READ_COMMANDS |= API42_READS
 MUTATION_COMMANDS |= API42_MUTATIONS
+# API 43: a new Personal Pip speaks first.
+API43_MUTATIONS = frozenset({'introduce_pip'})
+MUTATION_COMMANDS |= API43_MUTATIONS
 COMMAND_FIELDS = {
     'always_allow_pip_computer_action': frozenset({'action_id', 'expected_digest'}),
     'get_pip_computer': frozenset({'pip_id'}),
@@ -292,6 +296,7 @@ COMMAND_FIELDS = {
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
     'send_pip_message': frozenset(['chat_options', 'idempotency_key', 'pip_id', 'text']),
+    'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),
 }
 
@@ -384,7 +389,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API42_READS | API42_MUTATIONS:
+        if command in API43_MUTATIONS:
+            minimum = 43
+        elif command in API42_READS | API42_MUTATIONS:
             minimum = 42
         elif command in API41_READS | API41_MUTATIONS:
             minimum = 41

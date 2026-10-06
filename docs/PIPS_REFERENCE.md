@@ -772,6 +772,18 @@ recorded outcome is reported as unknown, never as passed.
 
 ## Personal Pips
 
+**Meeting a Pip** (API 43). A Personal Pip can be created with just a character and a name:
+`create_pip` with an empty `goal` stores a default goal ("Help with what I ask in this chat. Your
+name says what I want you for…") and the Pip's own chat sets it up from there. `pip_type` `core`
+is allowed only for Personal Pips: Core is the Primary Pip (default goal: everyday tasks, looking
+after the other Pips, checking in), and its runs get Primary-Pip instructions. The type catalog
+still marks Core unavailable, so project pickers never offer it.
+`introduce_pip {pip_id}` (local only) queues the Pip's first message once, as a conversation turn
+DGC writes under the reserved request key `intro_<id>`: it asks the Pip to say hello, guess from
+its name what the user wants, and offer the next step. Asking again returns the same run and
+message. In `list_pip_messages` that user message carries `intro: true`, and the editor does not
+show it as the user's. `send_pip_message` refuses keys that start with `intro_`.
+
 **App plans** (`app_plan`) name one connection and one to four read calls:
 
 ```json
@@ -987,4 +999,5 @@ Clients check it before using a newer control.
 | 39 | Drive, Notion and Contacts reads |
 | 40 | Reviewed web reads |
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
+| 43 | Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages |
 | 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |

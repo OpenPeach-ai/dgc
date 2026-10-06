@@ -43,7 +43,9 @@ def validate_policy(value=_MISSING):
 def validate_job(policy, *, pip_type, schedule=None, event_trigger=None):
     """Check source constraints alongside the normal job/type/trigger validators."""
     selected = validate_policy(policy)
-    if not isinstance(pip_type, str) or pip_type not in _KNOWN_TYPES:
+    # Core is a character only a Personal Pip has: your Primary Pip (pips._definition).
+    if not isinstance(pip_type, str) or (pip_type not in _KNOWN_TYPES
+                                         and not (pip_type == 'core' and selected['mode'] == 'personal')):
         raise _error('The source policy requires an available, explicitly identified Pip type.')
     if selected['mode'] == 'personal' and event_trigger is not None:
         raise _error('Personal jobs do not watch project events.', 'unsupported_source')

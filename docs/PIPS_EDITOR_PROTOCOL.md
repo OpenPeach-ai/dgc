@@ -71,6 +71,9 @@ The reply is a `pips_result` event that carries the nested request ID:
 - Controls run on their own worker thread, so they are allowed during a chat turn and
   never touch the chat's agent. At most 16 controls can be pending; more get a `busy`
   error.
+- `introduce_pip {pip_id}` (API 43, local only) queues a new Personal Pip's first message once and
+  returns `{run, message}` like `send_pip_message`. That message has `intro: true` in
+  `list_pip_messages`; the editor hides it and shows the Pip typing until its reply arrives.
 - `run_pip`, `send_pip_message` and `accept_pip_handoff` first check that the
   independent runner is live (a fresh heartbeat and a held lease). The backend never
   starts a worker of its own to run Pips work. If the runner stops after the check,
