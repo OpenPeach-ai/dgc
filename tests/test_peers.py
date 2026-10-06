@@ -48,6 +48,36 @@ class PeerRegistryTest(unittest.TestCase):
         path.write_text(json.dumps(record))
         return path
 
+    # ---- who is working here (#3: the editor's Sessions list keeps an idle `dgc serve`) ----------
+
+    def test_an_idle_dgc_with_nothing_saved_is_not_working_here(self):
+        saved = self.home / "saved.json"; saved.write_text("{}")
+        unsaved = str(self.home / "never-written.json")
+        sessions_list = self.note(session=unsaved)
+        self.assertEqual(peers.working([sessions_list]), [],
+                         "idle, and its one chat has no file: it has done nothing here")
+        self.assertEqual(peers.user_line(peers.working([sessions_list])), "")
+
+    def test_a_dgc_that_is_busy_or_holds_a_conversation_still_counts(self):
+        saved = self.home / "saved.json"; saved.write_text("{}")
+        unsaved = str(self.home / "never-written.json")
+        busy = self.note(session=unsaved, status="working")
+        talked = self.note(session=str(saved))
+        two_chats = self.note(session=unsaved, sessions=[
+            {"session": unsaved, "status": "idle"}, {"session": str(saved), "status": "idle"}])
+        one_busy = self.note(session=unsaved, sessions=[
+            {"session": unsaved, "status": "idle"}, {"session": unsaved, "status": "working"}])
+        older = {k: v for k, v in self.note().items() if k != "session"}      # says nothing of its chat
+        sibling = {"pid": os.getpid(), "chat": "c2", "liveness": "live", "project_root": "/w"}
+        for record in (busy, talked, two_chats, one_busy, older, sibling):
+            self.assertEqual(peers.working([record]), [record], record)
+        self.assertEqual(peers.user_line(peers.working([dict(talked, liveness="live")])),
+                         "1 other DGC is working in this folder.")
+
+    def test_a_relative_session_name_is_not_taken_as_proof(self):
+        # Only an absolute path to a file that is not there proves the chat has nothing saved.
+        self.assertEqual(len(peers.working([self.note(session="never-written.json")])), 1)
+
     # ---- liveness -------------------------------------------------------------------------
 
     def test_this_process_is_live(self):

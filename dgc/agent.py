@@ -8894,8 +8894,8 @@ class Agent(GoalLifecycle):
         and other chats of this one (see Host.siblings_of)."""
         try:
             from . import peers as _peers
-            found = _peers.others(project_root=str(self.config.project_root),
-                                  git_common_dir=self._git_common_dir())
+            found = _peers.working(_peers.others(project_root=str(self.config.project_root),
+                                                 git_common_dir=self._git_common_dir()))
             siblings = getattr(self, "_sibling_peers", None)
             return found + (list(siblings()) if callable(siblings) else [])
         except Exception:

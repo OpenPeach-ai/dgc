@@ -273,6 +273,26 @@ def others(*, project_root: str = "", git_common_dir: str = "", here: bool = Tru
     return found[:MAX_PEERS]
 
 
+def working(peers: list[dict]) -> list[dict]:
+    """The peers that are doing something here. A DGC that is idle with nothing saved in any of its
+    chats has changed nothing and is working on nothing: the editor's Sessions list keeps one
+    `dgc serve` running (to list sessions and run the Pips), and every session tab beside it used to
+    be told "1 other DGC is working in this folder" about it. Dropped only when its note PROVES
+    that -- idle, and each chat's session file named and not on disk; a note that says less (an
+    older DGC, a chat of this process) still counts."""
+    def empty(place: dict) -> bool:
+        session = str(place.get("session") or "")
+        return bool(session) and os.path.isabs(session) and not os.path.exists(session)
+
+    kept = []
+    for peer in peers:
+        places = _places(peer)
+        if peer.get("status") == "idle" and all(p.get("status", "idle") == "idle" and empty(p) for p in places):
+            continue
+        kept.append(peer)
+    return kept
+
+
 def model_line(peers: list[dict]) -> str:
     """One line for the model. Empty when nothing is worth saying.
 

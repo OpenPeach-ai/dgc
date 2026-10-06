@@ -723,6 +723,19 @@ class OpenChatTest(unittest.TestCase):
                          "a chat in another folder counted, or the sibling did not")
         self.assertIn("<dgc-peers>1 other DGC agent", line)
 
+    def test_the_sessions_list_s_idle_backend_is_not_another_dgc_working_here(self):
+        # #3: the editor's Sessions list keeps a `dgc serve` running with an empty chat. Every
+        # session tab beside it was told "1 other DGC is working in this folder" about it.
+        root = str(self.host.default.config.project_root)
+        idle = {"pid": 1, "liveness": "live", "status": "idle", "project_root": root,
+                "session": str(self.tmp / "never-written.json")}
+        busy = dict(idle, pid=2, status="working")
+        with patch("dgc.peers.others", lambda **kw: [idle, busy]):
+            seen = self.host.default.agent._peers_here()
+            line = self.host.default.agent._attach_peer_line("hello")
+        self.assertEqual([p["pid"] for p in seen], [2], "the idle, empty one counted, or the busy one did not")
+        self.assertIn("<dgc-peers>1 other DGC agent", line)
+
     def test_a_session_open_in_another_chat_says_so(self):
         self.host.dispatch({"type": "open_chat", "request_id": "same", "cwd": str(self.tmp / "a")})
         sibling = self.host.chats[self.wait_for(

@@ -1569,18 +1569,32 @@ when it is full, saying so on the same line. Deleting a session deletes it too.
   turn. What a recovery point holds, what it cannot take back, and the editor's Undo are in
   *Checkpoints & rewind*.
 
+## Sessions, each in an editor tab
+
+DGC opens on your project's **Sessions** in the side bar: every saved session of this project,
+newest first, with when it was last used and how many messages it has. **Open in Editor**, a
+double-click or Enter opens one in an editor tab of its own, the way Claude Code does; **New
+session**, *DGC: New Session* and the **+** in a session's tab start a new one in a new tab. A
+session already open says **Open in a tab**, and opening it again brings that tab forward. Each tab
+is a full chat, named by its session's name or else its first prompt, with a `dgc serve` of its own
+so a restart or a crash in one tab never ends a turn in another; tabs come back on their sessions
+after a window reload. `/new` typed in a chat still starts afresh in that tab. Palette commands —
+Add Selection, Add File, the model and the mode — act on the tab you used last, and the status bar
+shows that tab; with none open, Add Selection and Add File start a new session's tab. *DGC: Resume*
+shows the list. Deleting a session from the list asks first, and waits until its tab is closed.
+The Pips stay in the side bar.
+
 ## Several chats, several folders, in one panel
 
-The **+** beside the model name opens another chat in the same folder, and **Open a chat in another
-folder** (also *DGC: Open a Chat in Another Folder…*) opens one in a different project. Every chat
+*DGC: Open a Chat in Another Folder…* opens a chat in a different project beside the one you are
+in. Every chat
 has its own model context, session file, turn and permission mode — not a second view of the same
 conversation — so the chat you switch away from keeps working. A chat in another folder also brings
 that folder's project settings, trust, MCP servers, skills and permission rules with it. A rail
 appears above the transcript with one tab per chat, naming the folder when it is not the window's;
 a pulsing dot means that chat is mid-turn, a square amber dot means it is waiting on a decision
 only you can make, and a number is how much it has said since you last looked. Click a tab to
-switch, the **×** to close one. *DGC: Open a Second Chat* and *DGC: Switch Chat* do the same from
-the command palette.
+switch, the **×** to close one. *DGC: Switch Chat* does the same from the command palette.
 
 All of them run in one `dgc serve`, the way Codex runs its threads: one process, each chat in its
 own folder. Each still starts the MCP servers its own folder configures. What one chat does stays
@@ -1633,7 +1647,8 @@ A note is only trusted when the process behind it can be proved to be the one th
 process ids get reused, and a stale note whose id now belongs to something else must not read as a
 live DGC. Where that cannot be proved, DGC says the agent *may* still be running rather than
 claiming either way. A DGC that exits cleanly removes its note; one that crashes leaves it, and it
-expires.
+expires. A DGC that is idle with nothing saved in any of its chats — the editor's Sessions list keeps
+one running — has changed nothing here, and is not counted.
 
 ## A rewind will not undo somebody else's work
 
