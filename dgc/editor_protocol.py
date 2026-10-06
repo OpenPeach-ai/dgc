@@ -462,13 +462,17 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # Usage. A breakdown of the same range's totals, never added to them: ``all_tokens`` is the
     # whole range (input + output), ``totals`` {input_tokens, output_tokens, runs} the Pips' part.
     #   by_pip [{pip_id, name, pip_type, scope "personal"|"project", project, status, input_tokens,
-    #            output_tokens, runs, daily_cap (int|null)}]  most tokens first, at most 200
+    #            output_tokens, runs, daily_cap (int|null), models [{model, provider, host,
+    #            input_tokens, output_tokens, requests}] (its top 5; [] before runs recorded them)}]
+    #            most tokens first, at most 200
+    #   by_model [{model, provider, host, requests, unmetered_requests, input_tokens, output_tokens,
+    #             cached_input_tokens}]  the Pips' requests in the range by model, most tokens first
     # ``omitted`` counts Pips past that; ``error`` is set when the registry or ledger was unreadable.
     "pip_usage_report": {
         "request_id": _S(),
         "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
         "generated_at": _S(), "timezone": _S(False),
-        "all_tokens": _I(), "totals": _O(), "by_pip": _A(), "omitted": _I(),
+        "all_tokens": _I(), "totals": _O(), "by_pip": _A(), "by_model": _A(), "omitted": _I(),
         "error": _S(False),
     },
     # ---- v14: sub-agents (the agents indicator) -----------------------------------------------

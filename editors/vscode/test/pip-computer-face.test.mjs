@@ -40,8 +40,10 @@ const host = `(${function () {
     const make = m?.type === "pipsRequest" && answers[m.request.type];
     if (make) setTimeout(() => window.postMessage({ type: "pipsReply", id: m.id, ok: true, result: make(m.request) }, "*"), 5);
   } });
-  setTimeout(() => { window.postMessage({ type: "pipComputerInit", pip: PIP, desktop: true }, "*");
-    window.postMessage({ type: "pipsConnection", generation: 7, apiVersion: 43, connected: true, supported: true, enabled: true }, "*"); }, 10);
+  // Sent by the test once the page has loaded: a timer here raced the module script, which under a
+  // loaded machine was not listening yet and missed them.
+  window.__start = () => { window.postMessage({ type: "pipComputerInit", pip: PIP, desktop: true }, "*");
+    window.postMessage({ type: "pipsConnection", generation: 7, apiVersion: 43, connected: true, supported: true, enabled: true }, "*"); };
 }})();`;
 const page = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head><body><main id="app"></main>`
   + `<script>${host}</script><script type="module" src="/ext/dist/pipComputer.js"></script></body></html>`;
@@ -62,7 +64,8 @@ test("the computer tab draws the Pip's own face (its sprite loads from the exten
     return r.fulfill({ status: 404, body: "" });
   });
   try {
-    await p.goto("https://pc.test/webview/index.html");
+    await p.goto("https://pc.test/webview/index.html", { waitUntil: "load" });   // module scripts have run by "load"
+    await p.evaluate(() => window.__start());
     // Attached, not "visible": an SVG <image> lays out at zero size until its picture arrives, and
     // under a loaded machine that took past the default wait. The fetch is checked below.
     await p.waitForSelector(".pc-face .dgc-plush image", { state: "attached", timeout: 60000 });

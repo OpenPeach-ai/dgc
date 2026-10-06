@@ -41,6 +41,37 @@ test('the Pips view shows each Pip and its share of everything in the same range
  assert.match(rows[1].textContent,/rook · demo_project · paused/);
 });
 
+test('the Pips view shows which models the Pips used, and each Pip\'s own models',()=>{
+ // The founder: "we are showing Pips token usage, but not showing by model".
+ const x=setup();x.click('[data-nav=usage]');x.click('[data-usage-view=pips]');
+ const asked=x.sent.at(-1);
+ const models=[{model:'glm-5.3:cloud',provider:'ollama',host:'localhost',input_tokens:6000,output_tokens:600,requests:3},
+               {model:'deepseek-v4.1-flash:cloud',provider:'ollama',host:'localhost',input_tokens:3000,output_tokens:300,requests:4},
+               {model:'qwen3:32b',provider:'ollama',host:'gb10',input_tokens:10,output_tokens:1,requests:1}];
+ x.message({type:'event',event:report(asked,{
+  by_pip:[{pip_id:'pip_'+'1'.repeat(32),name:'Market brief',pip_type:'lens',scope:'personal',project:'',status:'active',input_tokens:70000,output_tokens:5000,runs:9,daily_cap:null,models},
+          {pip_id:'pip_'+'2'.repeat(32),name:'Old runs',pip_type:'rook',scope:'personal',project:'',status:'active',input_tokens:5000,output_tokens:500,runs:2,daily_cap:null,models:[]}],
+  by_model:[{model:'glm-5.3:cloud',provider:'ollama',host:'localhost',requests:5,unmetered_requests:0,input_tokens:30000,output_tokens:3000,cached_input_tokens:0},
+            {model:'deepseek-v4.1-flash:cloud',provider:'ollama',host:'localhost',requests:4,unmetered_requests:0,input_tokens:10000,output_tokens:1000,cached_input_tokens:0}]})});
+ const rows=[...x.d.querySelectorAll('#pip-usage-models tr')];
+ assert.equal(rows.length,2);
+ assert.match(rows[0].textContent,/glm-5.3:cloud/);assert.match(rows[0].textContent,/ollama · localhost/);
+ assert.match(rows[0].textContent,/30,000/);assert.match(rows[0].textContent,/75%/,'its share of the Pips\' model tokens');
+ assert.match(rows[1].textContent,/deepseek-v4.1-flash:cloud/);assert.match(rows[1].textContent,/25%/);
+ assert.equal(x.d.querySelector('#pip-usage-models-empty').hidden,true);
+ const pip=[...x.d.querySelectorAll('#pip-usage-rows tr')];
+ assert.match(pip[0].querySelector('.usage-pip-models').textContent,/^glm-5.3:cloud · deepseek-v4.1-flash:cloud \+1 more$/,'its top models in a few words');
+ assert.equal(pip[1].querySelector('.usage-pip-models'),null,'a Pip whose runs predate models shows none, not a guess');
+ x.message({type:'event',event:report(x.sent.at(-1),{by_model:[]})});
+});
+
+test('a range with Pip runs but no model rows says so under By model',()=>{
+ const x=setup();x.click('[data-nav=usage]');x.click('[data-usage-view=pips]');
+ x.message({type:'event',event:report(x.sent.at(-1),{by_model:[]})});
+ assert.equal(x.d.querySelector('#pip-usage-models').children.length,0);
+ assert.equal(x.d.querySelector('#pip-usage-models-empty').hidden,false);
+});
+
 test('the range is shared, and switching back asks for Everything again',()=>{
  const x=setup();x.click('[data-nav=usage]');x.click('[data-usage-view=pips]');
  const select=x.d.querySelector('#usage-range');select.value='30d';select.dispatchEvent(new x.w.Event('change',{bubbles:true}));

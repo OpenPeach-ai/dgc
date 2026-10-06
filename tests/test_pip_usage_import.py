@@ -24,6 +24,20 @@ class PipUsageImportTests(unittest.TestCase):
         self.source();self.assertTrue(pip_usage.import_run(self.run,home=self.home));self.assertFalse(pip_usage.import_run(self.run,home=self.home))
         self.assertEqual(self.report()['requests'],1);self.assertEqual(self.report()['input_tokens'],20)
         with sqlite3.connect(self.home/ledger.LEDGER_NAME) as db:self.assertEqual(db.execute('SELECT source,host,model FROM requests').fetchall(),[('pip','localhost','model')])
+    def test_import_keeps_each_runs_tokens_by_model_for_token_usage(self):
+        now=int(time.time())
+        self.source([(now,'ollama','localhost','deepseek-v4.1-flash:cloud','main',100,10,0,1),
+                     (now,'ollama','localhost','deepseek-v4.1-flash:cloud','main',50,5,0,1),
+                     (now,'anthropic','api.anthropic.com','claude-x','main',7,3,0,1)])
+        pip_usage.import_run(self.run,home=self.home)
+        got=sorted(pip_usage.run_models([self.run,'run_'+'f'*32,'bad'],home=self.home)[self.run])
+        self.assertEqual(got,[('claude-x','anthropic','api.anthropic.com',7,3,1),('deepseek-v4.1-flash:cloud','ollama','localhost',150,15,2)])
+        self.assertFalse(pip_usage.import_run(self.run,home=self.home),'a second import adds no second set of models')
+        self.assertEqual(len(pip_usage.run_models([self.run],home=self.home)[self.run]),2)
+    def test_a_refused_import_records_no_models(self):
+        now=int(time.time());self.source([(now,'ollama','localhost','model','main',-1,5,0,1)])
+        with self.assertRaises(ValueError):pip_usage.import_run(self.run,home=self.home)
+        self.assertEqual(pip_usage.run_models([self.run],home=self.home),{})
     def test_bad_count_refuses_entire_batch_and_allows_clean_retry(self):
         now=int(time.time());self.source([(now,'ollama','localhost','model','main',20,5,0,1),(now,'ollama','localhost','model','main',-1,5,0,1)])
         with self.assertRaises(ValueError):pip_usage.import_run(self.run,home=self.home)

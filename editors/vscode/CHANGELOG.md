@@ -17,6 +17,10 @@
   tab you last used, and the status bar shows that tab's model and mode. Add Selection and Add File
   read what is in front of you first, then open a new session's tab if none is open.
 - Deleting a session from the list asks first, and waits until its tab is closed.
+- Your Pips sit above your sessions: the ones that need you, each with its face, what is waiting
+  and a count, or a quiet row of faces when nothing is. A click opens that Pip. The Pips bell no
+  longer appears above a session's composer.
+- Token usage → Pips shows which models the Pips used (By model), and each Pip's own models.
 
 ### Fixed
 

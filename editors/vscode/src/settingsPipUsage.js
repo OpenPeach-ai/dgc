@@ -24,6 +24,14 @@ export const pipUsageMarkup = `<section class="set-section usage-section pip-usa
       </table>
     </div>
     <p id="pip-usage-omitted" class="set-note" hidden></p>
+    <div class="set-group">By model <span class="set-hint">what the Pips&rsquo; requests used, sorted by total tokens</span></div>
+    <div class="usage-table-wrap" role="region" aria-label="Pip token usage by model" tabindex="0">
+      <table class="usage-table">
+        <thead><tr><th scope="col">Model <span class="usage-th-sub">provider &middot; host</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Requests</th><th scope="col">Share</th></tr></thead>
+        <tbody id="pip-usage-models"></tbody>
+      </table>
+    </div>
+    <p id="pip-usage-models-empty" class="set-note" hidden>No model requests from the Pips were recorded in this range.</p>
   </div>
   <p class="set-note">A run counts on the day it finished, with the totals its runner recorded. Set a Pip&rsquo;s daily limit in its Job tab in Pips.</p>
 </section>`;
@@ -40,6 +48,24 @@ export function createPipUsage(root, vscode) {
   };
   const node = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; };
   const percent = (part, whole) => { const p = whole > 0 ? part / whole * 100 : 0; return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`; };
+  function shareCell(part, whole, of) {
+    const value = whole > 0 ? part / whole * 100 : 0, text = percent(part, whole);
+    const cell = node('td', 'usage-share-cell'), wrap = node('span', 'usage-share'), track = node('span', 'usage-share-track');
+    const fill = node('span', 'usage-share-fill' + (value > 0 ? ' nonzero' : ''));
+    fill.style.width = `${Math.min(100, value)}%`;
+    wrap.setAttribute('role', 'img');
+    wrap.setAttribute('aria-label', `${text} of ${of}`);
+    track.append(fill);
+    wrap.append(track, node('span', 'usage-share-text', text));
+    cell.append(wrap);
+    return cell;
+  }
+  // A Pip's models in a few words: "glm-5.3:cloud · deepseek-v4.1-flash:cloud +1 more".
+  function modelsLine(models) {
+    const names = (Array.isArray(models) ? models : []).filter(m => m && typeof m === 'object').map(m => String(m.model || '').slice(0, 256)).filter(Boolean);
+    if (!names.length) return '';
+    return names.slice(0, 2).join(' · ') + (names.length > 2 ? ` +${names.length - 2} more` : '');
+  }
   function status(text, busy) {
     $('pip-usage-status').textContent = text;
     if (busy) root.setAttribute('aria-busy', 'true'); else root.removeAttribute('aria-busy');
@@ -106,21 +132,32 @@ export function createPipUsage(root, vscode) {
       line.append(node('span', 'usage-head', String(p.name || 'Pip').slice(0, 120)));
       const sub = node('span', 'usage-clip usage-where');
       sub.append(node('span', 'usage-head', [String(p.pip_type || '').slice(0, 16), where, notes].filter(Boolean).join(' · ')));
-      name.title = `${String(p.name || 'Pip').slice(0, 120)}\n${sub.textContent}`;
+      const used = modelsLine(p.models);
+      name.title = `${String(p.name || 'Pip').slice(0, 120)}\n${sub.textContent}${used ? `\n${used}` : ''}`;
       name.append(line, sub);
+      if (used) { const models = node('span', 'usage-clip usage-where usage-pip-models'); models.append(node('span', 'usage-head', used)); name.append(models); }
       tr.append(name, node('td', 'num', exact(p.input_tokens)), node('td', 'num', exact(p.output_tokens)), node('td', 'num', exact(p.runs)));
-      const share = pipTokens > 0 ? tokensOf(p) / pipTokens * 100 : 0, shareText = percent(tokensOf(p), pipTokens);
-      const cell = node('td', 'usage-share-cell'), wrap = node('span', 'usage-share'), track = node('span', 'usage-share-track');
-      const fill = node('span', 'usage-share-fill' + (share > 0 ? ' nonzero' : ''));
-      fill.style.width = `${Math.min(100, share)}%`;
-      wrap.setAttribute('role', 'img');
-      wrap.setAttribute('aria-label', `${shareText} of Pip tokens`);
-      track.append(fill);
-      wrap.append(track, node('span', 'usage-share-text', shareText));
-      cell.append(wrap);
-      tr.append(cell);
+      tr.append(shareCell(tokensOf(p), pipTokens, 'Pip tokens'));
       body.append(tr);
     }
+    // The Pips' requests by model, from the ledger: the range's whole story, older runs included.
+    const models = (Array.isArray(ev.by_model) ? ev.by_model : []).filter(m => m && typeof m === 'object').slice(0, 100);
+    const modelTokens = models.reduce((sum, m) => sum + tokensOf(m), 0);
+    const modelRows = $('pip-usage-models');
+    modelRows.replaceChildren();
+    for (const m of models) {
+      const tr = node('tr'), cell = node('th', 'usage-model');
+      cell.setAttribute('scope', 'row');
+      const model = String(m.model || 'unknown').slice(0, 256), where = [String(m.provider || '').slice(0, 64), String(m.host || '').slice(0, 255)].filter(Boolean).join(' · ');
+      cell.title = where ? `${model}\n${where}` : model;
+      const first = node('span', 'usage-clip usage-name'), second = node('span', 'usage-clip usage-where');
+      first.append(node('span', 'usage-head', model)); second.append(node('span', 'usage-head', where || '—'));
+      cell.append(first, second);
+      tr.append(cell, node('td', 'num', exact(m.input_tokens)), node('td', 'num', exact(m.output_tokens)), node('td', 'num', exact(m.requests)),
+        shareCell(tokensOf(m), modelTokens, 'Pip tokens by model'));
+      modelRows.append(tr);
+    }
+    $('pip-usage-models-empty').hidden = models.length > 0;
     const omitted = count(ev.omitted);
     $('pip-usage-omitted').hidden = omitted === 0;
     $('pip-usage-omitted').textContent = omitted ? `${omitted.toLocaleString()} more Pip${omitted === 1 ? '' : 's'} with fewer tokens are not listed.` : '';

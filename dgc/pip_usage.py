@@ -48,12 +48,16 @@ def _rows(path):
 
 
 def _imports_table(db):
-    """Which runs are imported, with each run's totals (added in 0.48; older rows have none)."""
+    """Which runs are imported, with each run's totals (added in 0.48; older rows have none), and
+    each run's tokens by model (0.48 too: Token Usage shows which models a Pip used)."""
     db.execute('CREATE TABLE IF NOT EXISTS pip_usage_imports(run_id TEXT PRIMARY KEY, imported_at INTEGER NOT NULL)')
     columns = {row[1] for row in db.execute('PRAGMA table_info(pip_usage_imports)')}
     for name in ('input_tokens', 'output_tokens', 'requests'):
         if name not in columns:
             db.execute(f'ALTER TABLE pip_usage_imports ADD COLUMN {name} INTEGER')
+    db.execute('CREATE TABLE IF NOT EXISTS pip_usage_run_models(run_id TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL, '
+               'host TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, requests INTEGER NOT NULL, '
+               'PRIMARY KEY(run_id, model, provider, host))')
 
 
 def run_totals(run_ids, *, home=None) -> dict:
@@ -83,6 +87,31 @@ def run_totals(run_ids, *, home=None) -> dict:
     return totals
 
 
+def run_models(run_ids, *, home=None) -> dict:
+    """{run_id: [(model, provider, host, input_tokens, output_tokens, requests)]} for runs imported
+    since runs recorded their models; an older run has none (its totals still count)."""
+    from . import config, usage_ledger as ledger
+    ids = [r for r in run_ids if isinstance(r, str) and RUN_ID.fullmatch(r)]
+    path = (Path(home) if home is not None else Path(config.USER_HOME)) / ledger.LEDGER_NAME
+    if not ids or path.is_symlink() or not path.is_file():
+        return {}
+    found = {}
+    try:
+        with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=.2)) as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='pip_usage_run_models'").fetchone() is None:
+                return {}
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                marks = ",".join("?" * len(chunk))
+                for row in db.execute('SELECT run_id,model,provider,host,input_tokens,output_tokens,requests '
+                                      f'FROM pip_usage_run_models WHERE run_id IN ({marks})', chunk):
+                    if all(isinstance(v, str) for v in row[:4]) and all(type(v) is int and v >= 0 for v in row[4:]):
+                        found.setdefault(row[0], []).append(tuple(row[1:]))
+    except sqlite3.Error:
+        return {}
+    return found
+
+
 def import_run(run_id, *, home=None):
     from . import config, usage_ledger as ledger
     if not isinstance(run_id,str) or not RUN_ID.fullmatch(run_id): raise ValueError('Invalid Pip usage run identity')
@@ -107,6 +136,12 @@ def import_run(run_id, *, home=None):
             # including a run that failed or timed out and so reported no usage of its own.
             db.execute('INSERT INTO pip_usage_imports(run_id,imported_at,input_tokens,output_tokens,requests) VALUES (?,?,?,?,?)',
                        (run_id,int(time.time()),sum(r[4] for r in rows),sum(r[5] for r in rows),len(rows)))
+            models={}
+            for r in rows:
+                entry=models.setdefault((r[3],r[1],r[2]),[0,0,0])
+                entry[0]+=r[4];entry[1]+=r[5];entry[2]+=1
+            db.executemany('INSERT INTO pip_usage_run_models(run_id,model,provider,host,input_tokens,output_tokens,requests) VALUES (?,?,?,?,?,?,?)',
+                           [(run_id,model,provider,host,*totals) for (model,provider,host),totals in models.items()])
             db.execute('COMMIT')
         except BaseException:
             db.execute('ROLLBACK');raise

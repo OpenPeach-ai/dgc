@@ -3380,6 +3380,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": true
     },
+    "by_model": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
     "omitted": {
       "types": [
         "integer"

@@ -13,6 +13,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   (the database is newer than any DGC on disk), it stops and says DGC was updated, so you start it
   again after updating.
 - A Pip computer's desktop shows DGC's own wallpaper.
+- Token usage by model for Pips: `pip_usage_report` carries `by_model` (the Pips' requests in the
+  range, from the ledger) and each Pip's `models` (recorded per run as it is imported).
 - Meet your Pips (API 43): a Personal Pip needs only a name, Core can be your Primary Pip, and
   a new Pip introduces itself in its chat (`introduce_pip`).
 - Send images and files to a Personal Pip, like in the main chat: images, text and code files,

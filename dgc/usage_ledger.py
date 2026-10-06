@@ -319,6 +319,36 @@ def range_days(range_name: str, stamp: float) -> tuple[_dt.date, _dt.date | None
                    "month": today.replace(day=1), "all": None}[range_name]
 
 
+def by_model_for_source(source: str, range_name: str = "7d", *, now: float | None = None,
+                        path: Path | None = None) -> list[dict]:
+    """One source's requests in a range by model (provider + host), most tokens first: the Pips
+    tab's "By model" (source "pip"). The same day boundaries as report(); [] when unreadable."""
+    range_name = normalize_range(range_name)
+    stamp = time.time() if now is None else float(now)
+    today, first_day = range_days(range_name, stamp)
+    where, args = "WHERE source = ?", (str(source),)
+    if first_day:
+        where += " AND ts >= ? AND ts < ?"
+        args += (_local_midnight(first_day), _local_midnight(today + _dt.timedelta(days=1)))
+    try:
+        with _lock:
+            db = _open(Path(path) if path is not None else ledger_path(), create=False)
+            if db is None:
+                return []
+            db.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+            rows = db.execute(
+                "SELECT model, provider, host, COUNT(*), COALESCE(SUM(1 - metered),0), SUM(input_tokens), "
+                f"SUM(output_tokens), SUM(cached_input_tokens) FROM requests {where} GROUP BY model, provider, host "
+                "ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, COUNT(*) DESC, model "
+                f"LIMIT {_MAX_BY_MODEL}", args).fetchall()
+    except Exception:
+        return []
+    return [{"model": str(model), "provider": str(provider), "host": str(host), "requests": int(requests),
+             "unmetered_requests": int(unmetered), "input_tokens": int(inp or 0), "output_tokens": int(out or 0),
+             "cached_input_tokens": int(cached or 0)}
+            for model, provider, host, requests, unmetered, inp, out, cached in rows]
+
+
 def report(range_name: str = "7d", *, now: float | None = None, path: Path | None = None) -> dict:
     """Aggregate one range: totals, by model (provider + host), and every local day in it.
 

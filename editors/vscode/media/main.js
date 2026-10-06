@@ -529,8 +529,11 @@
   }
   // The Pips bar above the composer: today's digest, shown when the backend says it is due.
   let pipDigestBar = null;
+  // The bar above the composer is the single-chat page's. A session's tab is about its session (the
+  // founder: a Pips notice there "has nothing to do with that session"), and the side bar's
+  // Sessions home shows the Pips above its list instead (homePips).
   function digestBar() {
-    if (!pipDigestBar && window.DgcPips?.mountDigestBar && document.documentElement.dataset.pipsDocumentId) {
+    if (!pipDigestBar && chatPlace === "chat" && window.DgcPips?.mountDigestBar && document.documentElement.dataset.pipsDocumentId) {
       pipDigestBar = window.DgcPips.mountDigestBar({
         document,
         postMessage: message => vscode.postMessage({...message, documentId:document.documentElement.dataset.pipsDocumentId}),
@@ -588,7 +591,7 @@
   // own -- "Open in Editor", a double-click or Enter -- and so does New session. In a session's tab
   // the page is the chat, without the Pips (they stay in the side bar), its + opening another tab.
   const chatPlace = document.documentElement.dataset.chatPlace || "chat";
-  let sessionsOpen = false;
+  let sessionsOpen = false, homePips = null;
   function showSessions() {
     if (chatPlace !== "home") return;
     if (pipsOpen) closePips(false);
@@ -6548,9 +6551,17 @@
     back.lastChild.textContent = "Sessions";
     back.title = "Back to Sessions"; back.setAttribute("aria-label", "Back to Sessions");
     $("sessions-new").onclick = () => vscode.postMessage({ type: "newSessionInEditor" });
+    // Your Pips, above your sessions: the ones that need you, or a quiet row of faces.
+    if (window.DgcPips?.mountHomePips && document.documentElement.dataset.pipsDocumentId) {
+      homePips = window.DgcPips.mountHomePips({
+        document, root: $("sessions-pips"),
+        postMessage: (message) => vscode.postMessage({ ...message, documentId: document.documentElement.dataset.pipsDocumentId }),
+        onOpen: (navigation) => { showPips(); if (navigation) pipsApp?.navigate?.(navigation); },
+      });
+    }
     showSessions();
     // Sessions also start from the terminal: coming back to the side bar looks again.
-    const refresh = () => { if (sessionsOpen && !document.hidden) vscode.postMessage({ type: "sessionsList" }); };
+    const refresh = () => { if (sessionsOpen && !document.hidden) { vscode.postMessage({ type: "sessionsList" }); homePips?.refresh(); } };
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("focus", refresh);
   }
@@ -6827,6 +6838,7 @@
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
       pipSetupCards?.receive(msg);
       pipDigestBar?.receive(msg);
+      homePips?.receive(msg);
       if (msg.type === "pipsVisibility") {
         pipsViewVisible = msg.visible === true;
         pipsApp?.setVisible?.(pipsOpen && pipsViewVisible && !document.hidden);

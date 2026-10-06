@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 MAX_PIPS = 200
+MAX_PIP_MODELS = 5          # a Pip's own models, most tokens first
 
 
 def _iso(epoch: int) -> str:
@@ -44,7 +45,10 @@ def report(range_name: str = "7d", *, now: float | None = None) -> dict:
     whole = ledger.report(range_name, now=stamp)       # also imports finished Pip runs' usage first
     out = {"range": range_name, "generated_at": whole["generated_at"], "timezone": whole["timezone"],
            "all_tokens": int(whole["totals"]["input_tokens"]) + int(whole["totals"]["output_tokens"]),
-           "totals": {"input_tokens": 0, "output_tokens": 0, "runs": 0}, "by_pip": [], "omitted": 0}
+           "totals": {"input_tokens": 0, "output_tokens": 0, "runs": 0}, "by_pip": [], "omitted": 0,
+           # Which models the Pips used, from their own requests in the ledger (each Pip request is
+           # recorded with its model, source "pip"): complete for the range, older runs included.
+           "by_model": ledger.by_model_for_source("pip", range_name, now=stamp)}
     if whole.get("error"):
         out["error"] = whole["error"]
     if not in_use():
@@ -60,13 +64,21 @@ def report(range_name: str = "7d", *, now: float | None = None) -> dict:
                 "SELECT id,pip_id,finished_at,result FROM pip_runs WHERE finished_at IS NOT NULL "
                 "AND status IN ('succeeded','failed','cancelled')" + window, args).fetchall()
             imported = run_totals([r[0] for r in rows], home=Path(registry.directory).parent)
+            from .pip_usage import run_models
+            by_run = run_models([r[0] for r in rows], home=Path(registry.directory).parent)
             per: dict[str, list[int]] = {}
+            models: dict[str, dict[tuple, list[int]]] = {}
             for row in rows:
                 inp, outp = _split(row, imported)
                 entry = per.setdefault(row[1], [0, 0, 0])
                 entry[0] += inp
                 entry[1] += outp
                 entry[2] += 1
+                for model, provider, host, m_in, m_out, requests in by_run.get(row[0], ()):
+                    used = models.setdefault(row[1], {}).setdefault((model, provider, host), [0, 0, 0])
+                    used[0] += m_in
+                    used[1] += m_out
+                    used[2] += requests
             from .pip_spend import cap
             pips = []
             for pip_id, (inp, outp, runs) in per.items():
@@ -83,7 +95,13 @@ def report(range_name: str = "7d", *, now: float | None = None) -> dict:
                              "project": "" if not meta or meta[1] == "personal" else str(meta[2] or "")[:120],
                              "status": str(meta[0]) if meta else "removed",
                              "input_tokens": inp, "output_tokens": outp, "runs": runs,
-                             "daily_cap": cap(registry, pip_id)})
+                             "daily_cap": cap(registry, pip_id),
+                             # Its runs since runs recorded their models; [] for a Pip whose runs
+                             # all predate that (its totals above still count them).
+                             "models": [{"model": str(m)[:256], "provider": str(pv)[:64], "host": str(h)[:255],
+                                         "input_tokens": u[0], "output_tokens": u[1], "requests": u[2]}
+                                        for (m, pv, h), u in sorted(models.get(pip_id, {}).items(),
+                                                                    key=lambda kv: (-(kv[1][0] + kv[1][1]), kv[0][0]))[:MAX_PIP_MODELS]]})
     except (OSError, sqlite3.Error, RegistryError) as exc:
         out["error"] = f"Pip usage could not be read: {exc}"[:300]
         return out

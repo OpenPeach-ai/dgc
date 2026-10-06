@@ -3137,7 +3137,7 @@ class Backend:
                 empty = usage_ledger.empty_report(range_name)
                 report = {"range": empty["range"], "generated_at": empty["generated_at"], "timezone": empty["timezone"],
                           "all_tokens": 0, "totals": {"input_tokens": 0, "output_tokens": 0, "runs": 0},
-                          "by_pip": [], "omitted": 0, "error": f"{type(exc).__name__}: {exc}"[:300]}
+                          "by_pip": [], "by_model": [], "omitted": 0, "error": f"{type(exc).__name__}: {exc}"[:300]}
             self.em.emit("pip_usage_report", request_id=request_id, **report)
         threading.Thread(target=run, name="dgc-pip-usage-report", daemon=True).start()
 

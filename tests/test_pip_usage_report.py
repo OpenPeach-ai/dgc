@@ -1,12 +1,14 @@
 """The Pips tab of Token Usage: each Pip's share of a range, from the runs that finished in it."""
 import contextlib
+import sqlite3
 import threading
 import time
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
-from dgc import pip_usage_report, usage_ledger
+from dgc import pip_usage, pip_usage_report, usage_ledger
 from dgc.editor_protocol import command_error, event_error
 from tests import test_pip_spend as spend   # the module, not the class: importing a TestCase reruns its tests here
 
@@ -47,6 +49,50 @@ class PipUsageReportTests(unittest.TestCase):
         self.assertEqual(value["totals"], {"input_tokens": sum(p["input_tokens"] for p in value["by_pip"]),
                                            "output_tokens": sum(p["output_tokens"] for p in value["by_pip"]), "runs": 3})
         self.assertEqual(value["omitted"], 0)
+
+    def models(self, run_id, rows):
+        """What the runner records with a run's import: its tokens by model."""
+        path = Path(self.registry.directory).parent / "usage.sqlite"
+        with contextlib.closing(sqlite3.connect(path)) as db:
+            pip_usage._imports_table(db)
+            db.executemany("INSERT INTO pip_usage_run_models(run_id,model,provider,host,input_tokens,output_tokens,requests) "
+                           "VALUES (?,?,?,?,?,?,?)", [(run_id, *row) for row in rows])
+            db.commit()
+
+    def test_each_pip_lists_the_models_its_runs_used_most_tokens_first(self):
+        auditor, docs = self.job(), self.job("Docs writer")
+        one = self.run_for(auditor, "a1", tokens=5_000)
+        two = self.run_for(auditor, "a2", tokens=100)
+        self.run_for(docs, "d1", tokens=1_000)          # a run from before runs recorded models
+        self.models(one["id"], [("glm-5.3:cloud", "ollama", "localhost", 1_000, 100, 2),
+                                ("deepseek-v4.1-flash:cloud", "ollama", "localhost", 3_000, 300, 4)])
+        self.models(two["id"], [("glm-5.3:cloud", "ollama", "localhost", 5_000, 500, 1)])
+        value = self.report()
+        auditor_row = next(p for p in value["by_pip"] if p["name"] == "Auditor")
+        self.assertEqual([(m["model"], m["input_tokens"], m["output_tokens"], m["requests"]) for m in auditor_row["models"]],
+                         [("glm-5.3:cloud", 6_000, 600, 3), ("deepseek-v4.1-flash:cloud", 3_000, 300, 4)])
+        self.assertEqual(next(p for p in value["by_pip"] if p["name"] == "Docs writer")["models"], [],
+                         "an older run has no models; its tokens still count above")
+
+    def test_the_pips_requests_by_model_come_from_the_ledger(self):
+        # A ledger of its own: the shared one would carry these rows into the next test's totals.
+        own = Path(self.registry.directory).parent / "pips-models-ledger.sqlite"
+        patcher = patch.object(usage_ledger, "ledger_path", return_value=own)
+        patcher.start(); self.addCleanup(patcher.stop)
+        with contextlib.suppress(Exception):
+            usage_ledger._reset_for_tests()
+        usage_ledger.record(provider="ollama", base_url="http://127.0.0.1:11434", model="glm-5.3:cloud", source="pip",
+                            input_tokens=900, output_tokens=90, now=NOW - 60)
+        usage_ledger.record(provider="ollama", base_url="http://127.0.0.1:11434", model="glm-5.3:cloud", source="pip",
+                            input_tokens=100, output_tokens=10, now=NOW - 30)
+        usage_ledger.record(provider="ollama", base_url="http://127.0.0.1:11434", model="main-chat-model", source="main",
+                            input_tokens=7_000, output_tokens=500, now=NOW - 60)
+        usage_ledger.record(provider="ollama", base_url="http://127.0.0.1:11434", model="old-model", source="pip",
+                            input_tokens=5, output_tokens=5, now=NOW - 40 * 86400)
+        rows = self.report("7d")["by_model"]
+        self.assertEqual([(r["model"], r["input_tokens"], r["output_tokens"], r["requests"]) for r in rows],
+                         [("glm-5.3:cloud", 1_000, 100, 2)], "only the Pips' requests, only in the range")
+        self.assertEqual(self.report("all")["all_tokens"], 7_500 + 1_100 + 10, "the whole range is everything, as before")
 
     def test_a_run_outside_the_range_is_left_out(self):
         auditor = self.job()
