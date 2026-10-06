@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- An image you send shows in your prompt as the same small chip it was in the composer (a tile
+  beside its type and size; click to open it), not as a large picture. A prompt with an image
+  now stays pinned at the top while you read its answer, like any other prompt: the large picture
+  had made it too tall to pin.
 - While background sub-agents work, the main model's long thought no longer streams as dozens
   of "Thought · raw" rows: a sub-agent's hidden steps and thoughts no longer close it, and a thought
   still streaming always continues in its own row.

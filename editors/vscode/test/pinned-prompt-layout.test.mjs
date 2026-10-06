@@ -347,7 +347,10 @@ test("a prompt whose pinned strip would take more than 30% of the window does no
   if (skipOrFail(t)) return;
   const s = await openPage({ width: 900, height: 500 });
   try {
-    await s.events([...turn("t0", "Two short lines\nof prompt"), ...turn("t1", "📷 What is wrong with this screenshot?"), ...turn("t2", "Thanks")]);
+    // Tall from its words, not its picture: a sent image is a small chip now. A prompt long enough to
+    // fold keeps three lines and its "Show more" under the screenshot's chip.
+    const tallPrompt = "📷 What is wrong with this screenshot?\n" + Array.from({ length: 8 }, (_, i) => `Detail ${i + 1}: the filters wrap under the search box.`).join("\n");
+    await s.events([...turn("t0", "Two short lines\nof prompt"), ...turn("t1", tallPrompt), ...turn("t2", "Thanks")]);
     await s.settle();
     const state = () => s.page.evaluate(async () => {
       const P = window.__pin, [small, tall] = P.heads();
@@ -731,3 +734,62 @@ test("with a translucent sidebar colour, nothing of the answer shows through the
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+// A prompt sent with an image or a file pins like any other. The image in it is the chip it was in the
+// composer -- a small tile beside its type and size -- not a tool's 150px picture: that made the prompt
+// taller than a third of the window, so it never pinned (the founder's report, 0.32.1, at his panel size).
+for (const kind of ["image", "file"]) {
+  test(`a prompt sent with ${kind === "image" ? "an image pins, and the image is the composer's chip" : "a file pins"}`, async (t) => {
+    if (skipOrFail(t)) return;
+    const s = await openPage({ width: 833, height: 793 });
+    try {
+      await s.events(turn("t0", "First question, plain text."));
+      if (kind === "image") {
+        await s.page.evaluate(async () => {
+          const canvas = document.createElement("canvas"); canvas.width = 1920; canvas.height = 1080;
+          const g = canvas.getContext("2d"); g.fillStyle = "#eef"; g.fillRect(0, 0, 1920, 1080);
+          const blob = await new Promise((done) => canvas.toBlob(done, "image/png"));
+          const data = new DataTransfer(); data.items.add(new File([blob], "shot.png", { type: "image/png" }));
+          document.getElementById("input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+        });
+        await s.page.waitForFunction(() => !!document.querySelector("#attachments .image-att-chip img"));
+      } else {
+        await s.send({ type: "attach", label: "frontend/src/components/crm/MeetingDetail.tsx", resource: { type: "file_mention",
+          uri: "file:///w/frontend/src/components/crm/MeetingDetail.tsx", path: "/w/frontend/src/components/crm/MeetingDetail.tsx",
+          relative_path: "frontend/src/components/crm/MeetingDetail.tsx", workspace: "w" } });
+      }
+      await s.settle();
+      const composer = await s.page.evaluate(() => {
+        const chip = document.querySelector("#attachments .chip"), tile = chip.querySelector(".image-tile");
+        return { height: Math.round(chip.getBoundingClientRect().height), tile: tile ? Math.round(tile.getBoundingClientRect().height) : 0,
+          caption: chip.querySelector(".image-caption")?.textContent || "" };
+      });
+      // The founder's own prompt: two lines at his panel's width.
+      const text = 'On Visits page, the "My visits" section, check the attached screen shot, the search and filters are very poorly aligned, fix the alignment and make them look proper.';
+      const id = await s.type(text);
+      await s.send({ type: "event", event: { type: "prompt_accepted", request_id: id } });
+      await s.events(turn("t1", kind === "image" ? `${text} 📷` : text, PROSE(1).repeat(5), { request_id: id }));
+      await s.settle();
+      const m = await s.page.evaluate(async () => {
+        const P = window.__pin, head = P.heads().at(-1), block = head.parentElement.querySelector(":scope > .msg.dgc");
+        await P.bring(block, -block.offsetHeight / 2);
+        const chip = head.querySelector(".prompt-att"), tile = chip.querySelector(".image-tile");
+        return { pinned: P.pinned().includes(head), pinOff: head.classList.contains("pin-off"),
+          height: Math.round(chip.getBoundingClientRect().height), tile: tile ? Math.round(tile.getBoundingClientRect().height) : 0,
+          caption: chip.querySelector(".image-caption")?.textContent || "" };
+      });
+      assert.equal(m.pinOff, false, "the prompt is short enough to pin");
+      assert.equal(m.pinned, true, "mid-answer, the prompt with its attachment is pinned");
+      if (kind === "image") {
+        assert.equal(m.height, composer.height, `its chip is the composer's height (${m.height}px sent, ${composer.height}px in the composer)`);
+        assert.equal(m.tile, 28, "the image is a 28px tile, as in the composer");
+        assert.equal(m.tile, composer.tile);
+        assert.equal(m.caption, "PNG · 1920×1080", "beside its type and size");
+        assert.equal(m.caption, composer.caption, "the same words as in the composer");
+        await s.page.evaluate(() => window.__pin.heads().at(-1).querySelector(".image-chip").click());
+        assert.equal(await s.page.evaluate(() => { const v = document.getElementById("image-viewer"); return !!v && !v.hidden && !!v.querySelector("img"); }), true, "a click opens the image");
+      }
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  });
+}

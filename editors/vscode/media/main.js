@@ -2102,11 +2102,10 @@
         state: item.data && String(item.data).startsWith("data:image/") ? "ready" : "failed",
         src: item.data && String(item.data).startsWith("data:image/") ? item.data : "",
         reason: item.data && String(item.data).startsWith("data:image/") ? "" : "not_found",
+        compact: true,
       };
       images.push(record);
-      const chip = imageChip(record, images.length - 1, images.length);
-      chip.classList.add("prompt-att");
-      return chip;
+      return imageChip(record, images.length - 1, images.length);
     }
     const chip = el("button", `prompt-att chip${item.skill || item.template ? " invocation-chip" : ""}${item.pasted ? " pasted-chip" : ""}`);
     chip.type = "button";
@@ -8516,18 +8515,24 @@
     requestImages(records);
   }
   function imageChip(record, index, count) {
-    const chip = el("button", "image-chip");
+    // `compact`: an image the user sent, drawn in their prompt as the chip it was in the composer -- a
+    // small tile beside its type and size. The full tile made the prompt too tall to stay pinned.
+    const chip = el("button", record.compact ? "image-chip prompt-att chip" : "image-chip");
     chip.type = "button";
     chip.dataset.state = record.state;
     const dims = imageDims(record);
     const failure = record.state === "failed" ? (IMAGE_FAILURES[record.reason] || IMAGE_FAILURES.unreadable) : null;
     chip.setAttribute("aria-label", `Open image ${index + 1} of ${count}: ${record.name}${dims ? `, ${record.width} by ${record.height}` : ""}`);
     chip.title = failure ? failure[2] : [record.name, dims, imageSize(record.bytes)].filter(Boolean).join(" · ");
+    const kind = (String(record.src || "").match(/^data:image\/([a-z]+)/i) || [])[1];
+    const caption = el("span", "image-caption");
+    const describe = () => { caption.textContent = failure ? failure[1] : [kind ? kind.toUpperCase() : "Image", imageDims(record)].filter(Boolean).join(" · "); };
     const tile = el("span", "image-tile");
     if (record.state === "ready") {
       const img = el("img"); img.alt = ""; img.decoding = "async";
       img.addEventListener("load", () => {
         if (!record.width && img.naturalWidth) { record.width = img.naturalWidth; record.height = img.naturalHeight; }
+        if (record.compact) describe();
       });
       img.src = record.src; tile.appendChild(img);
     } else if (failure) {
@@ -8538,8 +8543,9 @@
     chip.appendChild(tile);
     // No caption under a picture that arrived: "PNG · 320x200 · 40 KB" repeated under every tile
     // is noise, and all of it is already in the hover label and the viewer. A FAILURE keeps its
-    // caption -- without it a broken image is just an unexplained empty square.
-    if (failure) chip.appendChild(el("span", "image-caption", esc(failure[1])));
+    // caption -- without it a broken image is just an unexplained empty square. A compact chip
+    // always has one: its tile is too small to recognise the picture by.
+    if (failure || record.compact) { describe(); chip.appendChild(caption); }
     chip.onclick = () => openImageViewer(record, chip);
     record.chip = chip;
     return chip;
