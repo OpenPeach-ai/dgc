@@ -587,7 +587,9 @@ you can make it: the main chat and the Pip itself can't.
   [Privacy](#privacy-and-where-state-lives)) until you delete it.
 
 **Its screen in an editor tab.** The computer button in a Pip's chat (or **Open its computer**
-in Settings) opens "NAME · Computer" as an editor tab with three apps, like Grok's bots:
+in Settings) opens "NAME · Computer" as an editor tab: a desktop with a dock of three apps at the
+bottom, like Grok's bots. Each app opens in a window you can minimise or close; when the Pip starts
+using its browser, the browser window comes up so you can watch.
 
 - **Browser**: the live screen. Click, type, scroll and go to an address; anything the Pip would
   submit shows at the top with **Send once**, **Always allow** and **Reject**.

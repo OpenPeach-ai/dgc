@@ -13,11 +13,6 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex:none}
 .pc-face{width:42px;height:42px;flex:none}
 .pc-title{flex:1;min-width:0}.pc-title h1{font-size:14px;font-weight:600;margin:0}.pc-status{margin:2px 0 0;color:var(--muted);font-size:12px}
-.pc-body{display:flex;flex:1;min-height:0}
-.pc-rail{display:flex;flex-direction:column;gap:4px;padding:10px 8px;border-right:1px solid var(--line);flex:none;width:112px;background:var(--surface)}
-.pc-app{display:flex;align-items:center;gap:8px;text-align:left;color:var(--vscode-foreground);background:transparent;border-radius:6px;padding:7px 9px}
-.pc-app:hover{background:var(--vscode-list-hoverBackground,rgba(127,127,127,.12))}
-.pc-app.active{background:var(--vscode-list-activeSelectionBackground,rgba(124,92,255,.22));color:var(--vscode-list-activeSelectionForeground,inherit)}
 .pc-icon{display:inline-grid;place-items:center;width:18px;font-family:var(--mono);font-size:12px;opacity:.85}
 .pc-pane{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 16px;overflow:auto}
 .pc-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pc-bar input{flex:1}
@@ -45,5 +40,30 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-log .pc-muted{font-family:var(--vscode-font-family,system-ui)}
 .pc-run{display:grid;gap:4px}.pc-prompt{margin:0}.pc-who{color:#b8a6ff}.pc-run pre{background:transparent;border:0;padding:0;color:inherit}.pc-exit{margin:0;color:#ff8a80}
 #pc-run input{font-family:var(--mono)}
-@media(max-width:620px){.pc-rail{width:auto;flex-direction:row;border-right:0;border-bottom:1px solid var(--line)}.pc-body{flex-direction:column}.pc-split{grid-template-columns:minmax(0,1fr)}}
-@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+/* The desktop: a soft grey wallpaper like a fresh machine, the app in a window, a dock below. */
+.pc-desktop{position:relative;flex:1;min-height:0;overflow:hidden;
+ background:radial-gradient(85% 130% at 4% 118%,transparent 52%,rgba(0,0,0,.22) 56%,rgba(0,0,0,.06) 62%,transparent 70%),
+  radial-gradient(130% 120% at 100% 30%,#5d5d61 0%,#8b8b90 34%,#c3c3c7 60%,#dfdfe2 100%)}
+.vscode-dark .pc-desktop,.vscode-high-contrast .pc-desktop{background:radial-gradient(85% 130% at 4% 118%,transparent 52%,rgba(0,0,0,.35) 56%,rgba(0,0,0,.1) 62%,transparent 70%),
+  radial-gradient(130% 120% at 100% 30%,#2a2a2e 0%,#46464b 34%,#6f6f75 62%,#8d8d92 100%)}
+.pc-window{position:absolute;inset:14px 14px 72px;display:flex;flex-direction:column;border-radius:10px;overflow:hidden;
+ background:var(--vscode-editor-background);border:1px solid rgba(0,0,0,.25);box-shadow:0 14px 44px rgba(0,0,0,.38),0 2px 8px rgba(0,0,0,.2)}
+.pc-window.pc-note{inset:auto 14px 72px;padding:14px 16px}
+.pc-titlebar{display:flex;align-items:center;gap:8px;height:34px;flex:none;padding:0 4px 0 12px;background:var(--surface);border-bottom:1px solid var(--line)}
+.pc-titlebar strong{font-size:12px;font-weight:600}
+.pc-win-icon{display:grid;place-items:center}
+.pc-win-sub{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
+.pc-win-buttons{display:flex;gap:2px}
+.pc-win-button{width:28px;height:26px;padding:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);font-size:15px;line-height:1}
+.pc-win-button:hover{background:var(--vscode-toolbar-hoverBackground,rgba(127,127,127,.18))}
+.pc-window-body{flex:1;min-height:0;display:flex}
+.pc-window-body>.pc-pane{flex:1}
+.pc-dock{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;gap:8px;padding:6px 9px;border-radius:14px;
+ background:rgba(255,255,255,.3);border:1px solid rgba(255,255,255,.45);box-shadow:0 8px 28px rgba(0,0,0,.28);backdrop-filter:blur(14px)}
+.vscode-dark .pc-dock,.vscode-high-contrast .pc-dock{background:rgba(30,30,34,.45);border-color:rgba(255,255,255,.14)}
+.pc-dock-app{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:10px;background:transparent;transition:transform .14s ease}
+.pc-dock-app:hover{transform:translateY(-3px);background:rgba(255,255,255,.12)}
+.pc-dock-app.open::after{content:"";position:absolute;bottom:-4px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:rgba(255,255,255,.95);box-shadow:0 0 2px rgba(0,0,0,.4)}
+.pc-dock-app.active{background:rgba(255,255,255,.18)}
+@media(max-width:620px){.pc-split{grid-template-columns:minmax(0,1fr)}.pc-window{inset:8px 8px 66px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}.pc-dock-app{transition:none}.pc-dock-app:hover{transform:none}}

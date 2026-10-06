@@ -41,13 +41,15 @@ function setup({status=computer(),files={'':[{name:'Downloads',kind:'folder',byt
  return {w,d:w.document,sent,timers,answer,requests,drain,setState:s=>{state=s;},setTerminal:t=>{term=t;},
   click:s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.dispatchEvent(new w.MouseEvent('click',{bubbles:true,clientX:el._x||0,clientY:el._y||0}));},
   submit:s=>w.document.querySelector(s).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true})),
-  tick:async()=>{for(const t of timers.filter(t=>t.live))t.fn();await drain();}};
+  tick:async(overrides={})=>{for(const t of timers.filter(t=>t.live))t.fn();await drain(overrides);}};
 }
 
-test('the tab opens on the Browser: the Pip, its live screen and the three apps',async()=>{
+test('the tab is a desktop: the Browser opens in a window, with a dock of three apps below',async()=>{
  const x=setup();await x.drain();
  assert.match(x.d.querySelector('.pc-title h1').textContent,/Shopper · Computer/);
- assert.deepEqual([...x.d.querySelectorAll('[data-app]')].map(b=>b.textContent.trim()),['◎Browser','▤Files','›_Terminal']);
+ assert.deepEqual([...x.d.querySelectorAll('.pc-dock [data-app]')].map(b=>b.getAttribute('aria-label')),['Browser','Files','Terminal']);
+ assert.equal(x.d.querySelector('.pc-window').getAttribute('aria-label'),'Browser');
+ assert.ok(x.d.querySelector('.pc-dock [data-app=browser]').classList.contains('open'),'a dot under the open app');
  assert.equal(x.requests('open_pip_computer').length,1);
  assert.equal(x.d.querySelector('#pc-screen').getAttribute('src'),JPEG);
  assert.equal(x.d.querySelector('#pc-url').value,'https://shop.example/');
@@ -60,6 +62,18 @@ test('a busy page\'s full-size screen shows (an inbox frame is often over 100 KB
  const big='data:image/jpeg;base64,/9j/'+'A'.repeat(400_000);
  const x=setup();await x.drain({use_pip_computer_view:()=>({view:{ok:true,watching:false,url:'https://mail.google.com/',width:1280,height:800,image:big}})});
  assert.equal(x.d.querySelector('#pc-screen').getAttribute('src'),big);
+});
+
+test('minimise or close a window to see the desktop; the browser comes back when the Pip starts using it',async()=>{
+ const x=setup();await x.drain();
+ x.click('[data-minimize=browser]');assert.equal(x.d.querySelector('.pc-window'),null,'the bare desktop');
+ assert.ok(x.d.querySelector('.pc-dock [data-app=browser]').classList.contains('open'),'still open in the dock');
+ x.click('[data-app=terminal]');await x.drain();x.click('[data-close=terminal]');
+ assert.equal(x.d.querySelector('.pc-window'),null);assert.ok(!x.d.querySelector('.pc-dock [data-app=terminal]').classList.contains('open'));
+ await x.tick();assert.equal(x.d.querySelector('.pc-window'),null,'nothing opens while the Pip is idle');
+ await x.tick({use_pip_computer_view:()=>({view:{ok:true,watching:true,url:'https://mail.google.com/',width:1280,height:800,image:JPEG}})});
+ assert.equal(x.d.querySelector('.pc-window')?.getAttribute('aria-label'),'Browser','its browser comes up so you can watch');
+ assert.match(x.d.querySelector('.pc-status').textContent,/is using its computer/);
 });
 
 test('you drive the screen: a click lands at the same point of the page, typing and keys go to it',async()=>{

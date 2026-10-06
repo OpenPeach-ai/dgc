@@ -7,7 +7,7 @@ import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComput
 
 const vscode=acquireVsCodeApi();
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
-const S={connected:false,apiVersion:0,generation:0,pip:null,app:'browser',computer:null,error:'',notice:'',
+const S={connected:false,apiVersion:0,generation:0,pip:null,app:'browser',open:['browser'],computer:null,error:'',notice:'',
  view:null,viewError:'',files:{path:'',entries:[],total:0,more:false,selected:null,preview:null,error:''},
  terminal:{entries:[],error:'',running:false,draft:''},busy:false};
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
@@ -25,9 +25,20 @@ function headerMarkup(){
  const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
  return `<header class="pc-header"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1>${esc(S.pip?.name||'Pip')} · Computer</h1><p class="pc-status" role="status">${esc(status)}</p></div><button type="button" id="pc-stop" class="pc-quiet"${S.busy||!S.computer?.granted?' disabled':''}>Stop computer</button></header>`;
 }
-function railMarkup(){
- const app=(id,label,icon)=>`<button type="button" class="pc-app${S.app===id?' active':''}" data-app="${id}" aria-pressed="${S.app===id}"><span class="pc-icon" aria-hidden="true">${icon}</span>${label}</button>`;
- return `<nav class="pc-rail" aria-label="Apps">${app('browser','Browser','◎')}${app('files','Files','▤')}${app('terminal','Terminal','›_')}</nav>`;
+// A desktop like Grok's bots' computers: a wallpaper, a dock with three apps, apps in windows.
+const APPS={browser:'Browser',files:'Files',terminal:'Terminal'};
+function appIcon(app,size=34){
+ const box=`width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true" focusable="false"`;
+ if(app==='browser')return `<svg ${box}><circle cx="20" cy="20" r="17" fill="#2f7cf6"/><circle cx="20" cy="20" r="17" fill="none" stroke="#fff" stroke-opacity=".9" stroke-width="1.6"/><ellipse cx="20" cy="20" rx="7.5" ry="17" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M3.5 14h33M3.5 26h33M20 3v34" stroke="#fff" stroke-width="1.6" fill="none"/></svg>`;
+ if(app==='files')return `<svg ${box}><path d="M4 11a3 3 0 0 1 3-3h9l4 4h13a3 3 0 0 1 3 3v16a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#f4b23e"/><path d="M4 16h32v15a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#ffc95c"/></svg>`;
+ return `<svg ${box}><rect x="3" y="5" width="34" height="30" rx="5" fill="#1d2430"/><rect x="3" y="5" width="34" height="6" rx="3" fill="#2c3646"/><path d="M10 18l5 4-5 4" stroke="#7ee787" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 27h9" stroke="#e6edf3" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+}
+function dockMarkup(){
+ return `<nav class="pc-dock" aria-label="Apps">${Object.entries(APPS).map(([id,label])=>`<button type="button" class="pc-dock-app${S.open.includes(id)?' open':''}${S.app===id?' active':''}" data-app="${id}" aria-label="${label}" title="${label}" aria-pressed="${S.app===id}">${appIcon(id)}</button>`).join('')}</nav>`;
+}
+function windowMarkup(app,body){
+ const sub=app==='browser'?(S.view?.ok?S.view.url:''):app==='files'?(S.files.path?['Files',...S.files.path.split('/')].join(' / '):''):'No internet · home is its Files';
+ return `<section class="pc-window" aria-label="${APPS[app]}"><div class="pc-titlebar"><span class="pc-win-icon">${appIcon(app,16)}</span><strong>${APPS[app]}</strong><span class="pc-win-sub">${esc(sub)}</span><span class="pc-win-buttons"><button type="button" class="pc-win-button" data-minimize="${app}" aria-label="Minimise ${APPS[app]}" title="Minimise">–</button><button type="button" class="pc-win-button" data-close="${app}" aria-label="Close ${APPS[app]}" title="Close">×</button></span></div><div class="pc-window-body">${body}</div></section>`;
 }
 function waitingMarkup(){
  const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending');
@@ -53,10 +64,10 @@ function terminalMarkup(){
 }
 function render(){
  const app=document.getElementById('app');
- const pane=!S.computer?'':!S.computer.granted?`<section class="pc-pane"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one from its chat.</p></section>`:S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup();
+ const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one from its chat.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
  cleanupFace?.();
- app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${waitingMarkup()}<div class="pc-body">${railMarkup()}${pane}</div>`;
+ app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted?dockMarkup():''}</div>`;
  cleanupFace=window.PipConcepts?.plush?.mount?.(app);
  if(focus&&$(focus)){$(focus).focus();if(caret!=null&&$(focus).setSelectionRange)try{$(focus).setSelectionRange(caret,caret);}catch{}}
  const log=$('pc-log');if(log)log.scrollTop=log.scrollHeight;
@@ -70,12 +81,18 @@ async function loadComputer(){
 }
 async function frame(op='frame',fields={},opening=false){
  if(!S.pip||!S.computer?.granted||frameBusy&&op==='frame')return;frameBusy=true;
+ const was=using();
  try{
   if(opening)await send('open_pip_computer',{pip_id:S.pip.id});
   const reply=pipComputerView((await send('use_pip_computer_view',{pip_id:S.pip.id,op,...fields})).view);
   if(reply.ok){S.view=reply;S.viewError='';}else{S.viewError=reply.error;}
  }catch(error){S.viewError=errorText(error);}
- finally{frameBusy=false;if(S.app==='browser')render();}
+ finally{
+  frameBusy=false;
+  // The Pip started using its browser while you were elsewhere: bring its window up to watch.
+  if(!was&&using()&&S.app!=='browser'){show('browser');return;}
+  if(S.app==='browser')render();else if(was!==using())render();
+ }
 }
 async function loadFiles(path=S.files.path){
  try{const v=pipComputerFiles(await send('list_pip_computer_files',{pip_id:S.pip.id,path}),path);S.files={...S.files,path:v.path,entries:v.entries,total:v.total_bytes,more:v.more,error:''};}
@@ -115,11 +132,12 @@ function schedule(){
  clearInterval(frameTimer);clearInterval(statusTimer);clearInterval(terminalTimer);
  if(document.hidden||!S.computer?.granted)return;
  statusTimer=setInterval(()=>void loadComputer(),5000);
- if(S.app==='browser')frameTimer=setInterval(()=>void frame(),800);
+ // The browser's window refreshes its screen; without it, a slow check notices the Pip starting.
+ frameTimer=setInterval(()=>void frame(),S.app==='browser'?800:4000);
  if(S.app==='terminal')terminalTimer=setInterval(()=>void loadTerminal(),2500);
 }
 function show(app){
- S.app=app;render();
+ S.app=app;if(!S.open.includes(app))S.open=[...S.open,app];render();
  if(app==='browser')void frame('frame',{},true);if(app==='files')void loadFiles();if(app==='terminal')void loadTerminal();
  schedule();vscode.setState({app});
 }
@@ -127,6 +145,8 @@ function show(app){
 document.addEventListener('click',event=>{
  const t=event.target.closest('button,[data-crumb],img');if(!t)return;
  if(t.dataset.app)show(t.dataset.app);
+ else if(t.dataset.minimize){S.app='';render();schedule();vscode.setState({app:''});}
+ else if(t.dataset.close){S.open=S.open.filter(a=>a!==t.dataset.close);S.app='';render();schedule();vscode.setState({app:''});}
  else if(t.id==='pc-stop')void send('stop_pip_computer',{pip_id:S.pip.id}).then(()=>{S.notice='Stopped. Its sign-ins are kept.';S.view=null;return loadComputer();},error=>{S.error=errorText(error);render();});
  else if(t.id==='pc-back')void frame('back');
  else if(t.id==='pc-screen'){const p=screenPoint(event);if(p&&!using())void frame('click',p);}
@@ -171,12 +191,12 @@ document.addEventListener('visibilitychange',schedule);
 window.addEventListener('message',event=>{
  const m=event.data;if(!record(m))return;
  if(m.type==='pipsReply')broker.receive(m);
- else if(m.type==='pipsConnection'){const was=S.connected;S.connected=m.connected&&m.supported&&m.enabled;S.apiVersion=m.apiVersion;S.generation=m.generation;if(!S.connected)broker.reset();render();if(S.connected&&!was)void loadComputer().then(()=>show(S.app));}
+ else if(m.type==='pipsConnection'){const was=S.connected;S.connected=m.connected&&m.supported&&m.enabled;S.apiVersion=m.apiVersion;S.generation=m.generation;if(!S.connected)broker.reset();render();if(S.connected&&!was)void loadComputer().then(()=>{if(S.app)show(S.app);else{void frame('frame',{},true);schedule();}});}
  else if(m.type==='pipComputerInit'&&record(m.pip)){S.pip=m.pip;render();}
  else if(m.type==='pipComputerSaved'){S.notice=m.ok?`Saved ${m.name}.`:m.error||'Not saved.';render();}
 });
 setInterval(()=>broker.expire(Date.now()),5000);
-S.app=['browser','files','terminal'].includes(vscode.getState()?.app)?vscode.getState().app:'browser';
+S.app=['browser','files','terminal',''].includes(vscode.getState()?.app)?vscode.getState().app:'browser';S.open=S.app?[S.app]:[];
 const style=document.createElement('style');style.textContent=window.PipConcepts?.plush?.styles||'';document.head.append(style);
 render();
 vscode.postMessage({type:'pipsReady'});

@@ -31,7 +31,9 @@
   (sometimes twice), and its eyes follow your pointer, settling back when you stop. Thinking looks
   up to each side, working reads and bobs, waiting hops for your attention, success bounces and
   failure droops. Reduced motion keeps them still.
-- A Pip's computer opens as an editor tab, "Gmail · Computer", with three apps: **Browser** (its
+- A Pip's computer opens as an editor tab, "Gmail · Computer": a desktop with a dock of three apps,
+  each in its own window (minimise or close it; the browser comes up when the Pip starts using
+  it): **Browser** (its
   live screen: click, type, scroll, go to an address), **Files** (its own folder: open folders,
   preview, add files, Save to…, remove) and **Terminal** (run a command; yours and the Pip's show
   together; no internet). What it would submit waits at the top with Send once, Always allow and

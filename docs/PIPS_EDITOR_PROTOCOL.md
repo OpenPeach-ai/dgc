@@ -171,7 +171,8 @@ commands, to an older backend.
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·
-Computer" (a second request brings it forward). The tab is a separate webview with its own
+Computer" (a second request brings it forward). It looks like a small desktop: the three apps sit
+in a dock and open in windows. The tab is a separate webview with its own
 script (`dist/pipComputer.js`) and the same CSP. It posts `pipsReady`, receives
 `{type: 'pipComputerInit', pip}` and `pipsConnection`, and sends ordinary `pipsRequest`s with the
 connection generation; the host answers them to that tab only. A tab may send only
