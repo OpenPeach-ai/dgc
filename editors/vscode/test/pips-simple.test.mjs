@@ -23,7 +23,7 @@ const runId='run_'+'a'.repeat(32);
 const message=(id,role,text,pipId,extra={})=>({id,pip_id:pipId,workspace_id:PW,role,text,run_id:runId,status:'succeeded',model:'m',created_at:'2026-10-06T09:47:00.000Z',...extra});
 async function flush(){for(let i=0;i<12;i++)await Promise.resolve();}
 
-function setup({apiVersion=43,jobs=[],messages={},active=null,computer=null}={}){
+function setup({apiVersion=43,jobs=[],messages={},active=null,computer=null,runnerState=runner}={}){
  const dom=new JSDOM(viewModule.exports.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window;windows.push(w);
  const sent=[],answered=new Set();let current=[...jobs];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -32,7 +32,7 @@ function setup({apiVersion=43,jobs=[],messages={},active=null,computer=null}={})
  const answer=(request,result,ok=true)=>{answered.add(request.id);send({type:'pipsReply',id:request.id,ok,...(ok?{result}:{error:result})});};
  const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
  const defaults=r=>({list_workspaces:()=>({workspaces,current_workspace_id:PROJECT}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),list_pips:()=>({pips:current.filter(p=>p.workspace_id===(r.workspace_id||PROJECT))}),
-  get_pip:()=>({pip:current.find(p=>p.id===r.pip_id)}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),get_workspace_context:()=>({context:{workspace_id:r.workspace_id||PW,revision:0,entries:[]}}),
+  get_pip:()=>({pip:current.find(p=>p.id===r.pip_id)}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner:runnerState}),get_workspace_context:()=>({context:{workspace_id:r.workspace_id||PW,revision:0,entries:[]}}),
   list_pip_messages:()=>({pip_id:r.pip_id,workspace_id:PW,messages:messages[r.pip_id]||[],next_before_id:null,active_run:active&&active.pip===r.pip_id?{id:runId,status:'running',created_at:'2026-10-06T09:47:00.000Z',started_at:null,run_kind:'conversation'}:null,history_context_omitted_count:0,continuity:null,chat_controls:controls}),
   list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
   get_pip_computer:()=>({computer:computer||{pip_id:r.pip_id,granted:false,available:true,reason:'',pending:0,actions:[]}}),
@@ -122,6 +122,22 @@ test('back returns to your Pips, and the menu reaches Results and Settings',asyn
  assert.match(x.d.body.textContent,/What it does/);assert.ok(x.d.querySelector('#simple-to-chat'));
  x.click('#simple-to-chat');await x.drain();assert.ok(x.d.querySelector('#chatText'));
  x.click('#simple-back');await x.drain();assert.ok(x.d.querySelector('.pip-rows'));
+});
+
+test('a stopped runner is started for a new Pip before it says hello, and a chat says when Pips are off',async()=>{
+ const off={...runner,status:'stopped',online:false};
+ const x=setup({runnerState:off});await x.drain();
+ x.click('#create-core');const core=pip('pip_'+'c'.repeat(32),'Core','core');x.addPip(core);x.answer(x.requests('create_pip')[0],{pip:core});await flush();
+ const start=x.requests('pips_runtime')[0];assert.ok(start,'the runner is started');assert.equal(start.request.action,'start');
+ assert.equal(x.requests('introduce_pip').length,0,'before the hello is queued');
+ x.answer(start,{});await flush();assert.equal(x.requests('introduce_pip').length,1);
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const y=setup({jobs:[gmail],runnerState:off});await y.drain();y.click(`[data-job="${gmail.id}"]`);await y.drain();
+ const note=y.d.querySelector('.runner-off');assert.ok(note);assert.match(note.textContent,/aren't running/);assert.ok(note.querySelector('#start-runner'));
+ const z=setup({jobs:[gmail],runnerState:{...off,paused:true}});await z.drain();z.click(`[data-job="${gmail.id}"]`);await z.drain();
+ assert.ok(z.d.querySelector('.runner-off #resume-runner'),'a global stop is shown, never lifted here');
+ z.click('#simple-back');await z.drain();z.click('#create-core');const core2=pip('pip_'+'d'.repeat(32),'Core','core');z.addPip(core2);z.answer(z.requests('create_pip')[0],{pip:core2});await z.drain();
+ assert.equal(z.requests('pips_runtime').length,0,'not even to make a Pip');assert.equal(z.requests('introduce_pip').length,1);
 });
 
 test('an older CLI keeps the full Pips view',async()=>{

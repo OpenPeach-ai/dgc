@@ -230,7 +230,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .simple-pips .pip-message .response-actions{opacity:0;transition:opacity .12s}
 .simple-pips .pip-message:hover .response-actions,.simple-pips .pip-message:focus-within .response-actions{opacity:1}
 .simple-pips .pip-message .chat-activity-toggle{display:none}
-.simple-pips .pip-composer #chat-model,.simple-pips .pip-composer #chat-context-toggle,.simple-pips .pip-composer #chat-permissions,.simple-pips .simple-content .composer-hint{display:none}
+.simple-pips .simple-content .composer-hint{display:none}
 .simple-pips .simple-content .pip-composer{border-radius:22px}
 .simple-pips .simple-bar .runner-status{font-size:0;gap:0}
 .simple-pips .simple-bar .runner-status .status-dot{width:8px;height:8px}
@@ -259,3 +259,4 @@ button.pill{border-radius:999px;padding:6px 16px}
 .chat-time{text-align:center;color:var(--muted);font-size:11px;margin:14px 0 10px}
 .simple-pips .pip-message.user .response-actions{opacity:0}
 .simple-pips .pip-message.user:hover .response-actions,.simple-pips .pip-message.user:focus-within .response-actions{opacity:1}
+.runner-off{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 12px;margin:0 0 8px;border:1px solid var(--pip-edge);border-radius:12px;font-size:12px;color:var(--muted);flex:none}

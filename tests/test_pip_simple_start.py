@@ -111,5 +111,28 @@ class SimpleStartTests(unittest.TestCase):
         core = self.store.create(self.personal_id(), "Core", None, "editor-user", pip_type="core")
         self.assertIn("Primary Pip", self.system_prompt(core, True))
 
+    def test_core_knows_the_other_pips_by_name_and_purpose(self):
+        core = self.store.create(self.personal_id(), "Core", None, "editor-user", pip_type="core")
+        self.store.create(self.personal_id(), "Gmail", None, "editor-user", pip_type="lens")
+        prompt = self.system_prompt_and_input(core)
+        self.assertIn('"name":"Gmail"', prompt)
+        gmail = [p for p in self.store.list(self.personal_id()) if p["name"] == "Gmail"][0]
+        self.assertNotIn("The user's other Pips, for reference", self.system_prompt_and_input(gmail), "only Core is told")
+
+    def system_prompt_and_input(self, pip):
+        from dgc.llm import LLMClient, ChatResult
+        run = pip_chat.send(self.store, pip["id"], "Hi", "roster-" + pip["id"][-6:], "user", self.cfg)["run"]
+        raw = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])
+        seen = []
+
+        def chat(client, messages, tools=None, **kwargs):
+            seen.append("\n".join(m["content"] if isinstance(m["content"], str) else json.dumps(m["content"]) for m in messages))
+            return ChatResult(content="Hello.")
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True))}), \
+                patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
+                patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
+            pips.execute_native(self.cfg, self.root, raw, lambda e: None)
+        return seen[0]
+
 if __name__ == "__main__":
     unittest.main()
