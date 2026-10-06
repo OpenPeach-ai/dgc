@@ -837,6 +837,13 @@ control handler and both SDKs bound them on their own (4 data URIs, 2,800,000 ch
 and hold the rest of the message to its usual limit. Registry schema 36 adds the
 `pip_chat_images` table.
 
+**Skills** (API 43). A Personal Pip's task and chat runs get the skills `discover_skills` finds
+outside any project (user, portable user and plugin skills, and the built-ins `deep-research`,
+`dataviz` and `plan`), minus the user's `disabled_skills`. The prompt lists each name and
+description (up to 40), and the run gets the main chat's `skill` tool, which returns a skill's
+rendered instructions; an unknown or disabled name returns an error. Project Pips get no skills.
+A skill grants no tool, access or permission.
+
 **Files in a chat** (API 43). `send_pip_message` also takes `files`: up to 4 `{name, data}`,
 `data` a data URI, 2 MB in all and within one 2,800,000-character budget together with any
 images. A name has no folders, quotes or control characters. Text and code files (by extension,

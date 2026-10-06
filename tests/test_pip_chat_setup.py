@@ -32,7 +32,7 @@ class ChatSetupTests(unittest.TestCase):
         turns = []
         def chat(client, messages, tools=None, **kwargs):
             turns.append(messages)
-            self.assertEqual([t['function']['name'] for t in tools], [setup.TOOL, 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action'])
+            self.assertEqual([t['function']['name'] for t in tools], [setup.TOOL, 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action', 'skill'])
             self.assertEqual(self.store.get(job['id'])['proposals'], [])
             if len(turns) == 1:
                 return ChatResult(content='', tool_calls=[ToolCall('draft1', setup.TOOL, self.candidate())])
@@ -148,7 +148,7 @@ class ChatSetupTests(unittest.TestCase):
         task = self.store.enqueue(job['id'], 'task', 'user', self.cfg)
         raw = json.loads(self.registry.db.execute('SELECT manifest FROM pip_runs WHERE id=?', (task['id'],)).fetchone()[0])
         def chat(client, messages, tools=None, **kwargs):
-            self.assertTrue({t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event'}, 'A Personal task may only draft')
+            self.assertTrue({t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event', 'skill'}, "A Personal task may only draft or load a skill's instructions")
             self.assertIn('No spending', json.dumps(messages))
             self.assertIn('historical requests are not new actions', json.dumps(messages))
             return ChatResult(content='Walk and read this morning, without spending.')

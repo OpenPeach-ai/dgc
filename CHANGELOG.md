@@ -17,6 +17,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   and a Pip with a computer also finds them in its Files, under From chat (`send_pip_message`
   `images` and `files`, `get_pip_message_image`). Registry schema 37 (36 adds `pip_chat_images`,
   37 `pip_chat_files`): an older `dgc` can't open the Pips registry once this one has.
+- Personal Pips use your DGC skills that fit everyday work: your own and plugin skills, and the
+  built-in deep-research, dataviz and plan. A Pip lists them and loads one with the skill tool;
+  skills you turn off are off for Pips too. A skill never grants a tool or access.
 - A Pip's computer has Files and a Terminal beside its browser, like Grok's bots. Browser
   downloads land in its Files. The Terminal runs one command at a time with no network, only the
   computer's Files as its home, and a 60-second limit. The Pip uses both through its computer

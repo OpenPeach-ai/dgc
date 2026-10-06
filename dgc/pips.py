@@ -1843,6 +1843,24 @@ class _ConversationUI(_WorkerUI):
         self._stream(self.redactor.flush(), flush=True)
 
 
+# Skills a Personal Pip uses: the user's own and plugin skills, and the built-ins that fit everyday
+# work. The code-only built-ins (code-review, fix-ci, ship, write-tests and the rest) stay with
+# project work. Skills the user turned off in DGC are off for Pips too.
+PERSONAL_BUILTIN_SKILLS = frozenset({"deep-research", "dataviz", "plan"})
+
+
+def personal_skills(config) -> dict:
+    from .skills import discover_skills
+    found = discover_skills(Path(os.devnull), disabled_names=config.get("disabled_skills", []) or [])
+    return {name: skill for name, skill in found.items() if skill.enabled and (
+        skill.source in ("user", "plugin") or (skill.source == "builtin" and name in PERSONAL_BUILTIN_SKILLS))}
+
+
+def _skill_schema() -> dict:
+    from .tools import TOOL_SCHEMAS
+    return next(tool for tool in TOOL_SCHEMAS if tool["function"]["name"] == "skill")
+
+
 def _attached_files(config, manifest: dict, files, has_computer: bool) -> str:
     """The files the user sent with a chat message, read the main chat's way.
 
@@ -1953,6 +1971,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     computer_pin = manifest.get('computer_socket') if personal and kind in ('personal_task', 'conversation') else None
     if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) != {'socket', 'token'}):
         raise RegistryError('invalid_manifest', 'The computer connection is malformed.')
+    # A Personal Pip's skills: instructions it may load, never tools or permissions.
+    # A reviewed handoff stays the narrow task it was approved as: no skills there.
+    pip_skills = (personal_skills(config) if personal and kind in ('personal_task', 'conversation') and 'handoff' not in manifest
+                  else {})
     task_history = (pip_chat_setup.validate_reference(manifest['personal_history'], manifest)
                     if 'personal_history' in manifest else None)
 
@@ -1991,7 +2013,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None else []) + ([pip_computer.schema()] if computer_pin is not None else [])
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None else []) + ([pip_computer.schema()] if computer_pin is not None else []) + ([_skill_schema()] if pip_skills else [])
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -2136,6 +2158,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return 'Candidate prepared in this reply only. No settings changed. The controller will save a review after a successful reply. Ask the user to review it.'
                 except RegistryError as exc:
                     return 'Invalid setup draft: ' + str(exc)
+            if personal and pip_skills and call.name == 'skill':
+                import types
+                from .tools import skill_tool
+                arguments = call.arguments if isinstance(call.arguments, dict) else {}
+                return skill_tool(arguments, types.SimpleNamespace(skills=pip_skills))
             if personal and computer_pin is not None and call.name == pip_computer.TOOL:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return pip_computer.worker_call(computer_pin, str(arguments.get('op', '')),
@@ -2315,6 +2342,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     if personal and isinstance(manifest.get('pips_roster'), list):
         prompt += ("\nThe user's other Pips, for reference (you cannot run or change them yourself; say which one "
                    "fits a request, or suggest a new Pip): " + (_json(manifest['pips_roster'][:20]) if manifest['pips_roster'] else "none yet."))
+    if personal and pip_skills:
+        prompt += ("\nYour skills, from the user's DGC skills: reusable instructions. When one fits the task, load it "
+                   "with the skill tool and follow it within what you can do here; a skill never gives you new tools, "
+                   "access or permissions.\n" + "\n".join(f"- {skill.name}: {skill.description[:200]}"
+                                                         for skill in list(pip_skills.values())[:40]))
     if personal and manifest.get('computer_continuation') and computer_pin is not None:
         prompt += ("\nThe user approved the change your computer was holding, and DGC sent it exactly as the page "
                    "made it: " + _json(manifest['computer_continuation']['summary']) + ". Read the page to see what "

@@ -127,6 +127,16 @@ test('back returns to your Pips, and the menu reaches Results and Settings',asyn
  x.click('#simple-back');await x.drain();assert.ok(x.d.querySelector('.pip-rows'));
 });
 
+test('Settings shows the Pip\'s skills, managed in DGC Settings',async()=>{
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ x.click('.pip-menu [data-tab="job"]');await x.drain();
+ assert.match(x.d.body.textContent,/Skills.*deep research, charts and planning/s);
+ assert.match(x.d.body.textContent,/never gives the Pip new access/);
+ x.click('#manage-skills');
+ assert.deepEqual(x.sent.filter(m=>m.type==='openSettings').map(m=>m.section),['plugins']);
+});
+
 test('a stopped runner is started for a new Pip before it says hello, and a chat says when Pips are off',async()=>{
  const off={...runner,status:'stopped',online:false};
  const x=setup({runnerState:off});await x.drain();

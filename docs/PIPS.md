@@ -456,6 +456,12 @@ Excel, PowerPoint, OpenDocument, RTF, CSV and TSV files are accepted, up to 4 im
 and 2 MB in all. The Pip sees the images and reads the files' text; a Pip with a computer also
 finds the files in its Files, under **From chat**.
 
+**Skills.** A Personal Pip has your DGC skills that fit everyday work: your own skills, plugin
+skills, and the built-in **deep-research**, **dataviz** and **plan** (the code-only built-ins stay
+with project work). It loads one when it fits the task. Skills you turn off in DGC Settings are off
+for Pips too, and a skill is only instructions: it never gives a Pip new access. **Manage skills…**
+in a Pip's Settings opens them.
+
 ```sh
 dgc pips send PIP_ID "Explain the second finding"
 dgc pips messages PIP_ID

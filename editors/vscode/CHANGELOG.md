@@ -31,6 +31,8 @@
   (sometimes twice), and its eyes follow your pointer, settling back when you stop. Thinking looks
   up to each side, working reads and bobs, waiting hops for your attention, success bounces and
   failure droops. Reduced motion keeps them still.
+- A Pip's Settings shows its **Skills** (your DGC skills that fit everyday work) with **Manage
+  skills…**, which opens them in DGC Settings.
 - A Pip's computer opens as an editor tab, "Gmail · Computer": a desktop with a dock of three apps,
   each in its own window (minimise or close it; the browser comes up when the Pip starts using
   it): **Browser** (its
