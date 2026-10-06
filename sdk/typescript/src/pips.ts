@@ -144,7 +144,7 @@ export type PipMutationParams = {
   review_pip_execution: { expected_revision: number; reason: string; run_id: string; status: string };
   review_pip_finding: { expected_revision: number; finding_index: number; reason: string; run_id: string; status: string };
   run_pip: { idempotency_key: string; pip_id: string; expected_version?: number; expected_lifecycle_revision?: number; expected_plan_digest?: string };
-  send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[] };
+  send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[] };
   introduce_pip: { pip_id: string };
   stop_pips: { [key: string]: never };
 };
@@ -255,6 +255,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   ],
   "send_pip_message": [
     "chat_options",
+    "files",
     "idempotency_key",
     "images",
     "pip_id",
@@ -582,6 +583,24 @@ export class Pips {
       const { images: _sent, ...rest } = params as Record<string, unknown>;
       params = rest;
     }
+    let files: { name: string; data: string }[] | undefined;
+    if (command === "send_pip_message" && params && typeof params === "object" && Object.hasOwn(params, "files")) {
+      // Files sent with a message travel with its images, outside the 32 KiB budget: 4, 2 MB in all.
+      if ((this.caps.pips_api_version as number) < 43) {
+        throw new DGCUnsupportedError("Files in a Pip chat require a runtime advertising Pips API 43 or newer");
+      }
+      const given = (params as Record<string, unknown>).files;
+      const ok = (f: any) => f && typeof f === "object" && !Array.isArray(f) && Object.keys(f).sort().join() === "data,name"
+        && typeof f.name === "string" && f.name.trim() !== "" && f.name.length <= 255 && !/[\/\\"\u0000-\u001f]/.test(f.name)
+        && typeof f.data === "string" && f.data.startsWith("data:") && f.data.slice(0, 200).includes(";base64,") && /^[\x00-\x7f]*$/.test(f.data);
+      if (!Array.isArray(given) || given.length < 1 || given.length > 4 || !given.every(ok)
+        || given.reduce((n: number, f: any) => n + f.data.length, 0) + (images || []).reduce((n, i) => n + i.length, 0) > MAX_IMAGE_URI_CHARS) {
+        throw new DGCConfigError("files must be 1 to 4 {name, data} entries, 2 MB in all with any images");
+      }
+      files = given.map((f: any) => ({ name: f.name, data: f.data }));
+      const { files: _sent, ...rest } = params as Record<string, unknown>;
+      params = rest;
+    }
     let fileData: string | undefined;
     if (command === "add_pip_computer_file" && params && typeof params === "object" && Object.hasOwn(params, "data")) {
       // A file added to a Pip's computer also travels outside the 32 KiB budget: one data URI, 2 MB.
@@ -675,7 +694,7 @@ export class Pips {
     const requestId = `sdk-pips-${randomUUID()}`;
     const request = { type: command, request_id: requestId, ...values };
     if (Buffer.byteLength(JSON.stringify(request), "utf8") > MAX_BYTES) throw new DGCConfigError("Pip request exceeds 32 KiB");
-    const sent = { ...request, ...(images === undefined ? {} : { images }), ...(fileData === undefined ? {} : { data: fileData }) };
+    const sent = { ...request, ...(images === undefined ? {} : { images }), ...(files === undefined ? {} : { files }), ...(fileData === undefined ? {} : { data: fileData }) };
     const event = await this.send({ type: "pips_control", request: sent }, "pips_result", requestId);
     if (event.request_id !== requestId || event.command !== command || typeof event.ok !== "boolean") throw new DGCProtocolError("Mismatched or malformed Pip response");
     if (event.ok) {

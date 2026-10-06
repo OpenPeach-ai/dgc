@@ -175,14 +175,28 @@ def bounded_file_uri(value) -> str:
     return value
 
 
-def bulk_field(command):
-    """The one field of a Pips command that may carry a file's worth of data, and its bound."""
+def bulk_fields(command):
+    """The fields of a Pips command that may carry a file's worth of data, each with its bound."""
     if command == "send_pip_message":
-        from .pip_chat import bounded_image_uris
-        return "images", bounded_image_uris
+        from .pip_chat import bounded_file_uris, bounded_image_uris
+        return (("images", bounded_image_uris), ("files", bounded_file_uris))
     if command == "add_pip_computer_file":
-        return "data", bounded_file_uri
-    return None, None
+        return (("data", bounded_file_uri),)
+    return ()
+
+
+def bound_bulk(command, request: dict) -> tuple[dict, dict]:
+    """A request's small part and its data fields, each checked and all within one 2 MB budget.
+
+    Every other field keeps the request's 16-32 KiB budget; only these travel outside it.
+    """
+    bulk = {field: bound(request[field]) for field, bound in bulk_fields(command) if field in request}
+    size = 0
+    for value in bulk.values():
+        size += len(value) if isinstance(value, str) else sum(len(i if isinstance(i, str) else i["data"]) for i in value)
+    if size > MAX_FILE_URI_CHARS:
+        raise RegistryError("invalid_request", "Send at most 2 MB of images and files with one message.")
+    return {key: value for key, value in request.items() if key not in bulk}, bulk
 
 
 def add_file(root: Path, folder, name, data_uri) -> dict:
@@ -201,6 +215,34 @@ def add_file(root: Path, folder, name, data_uri) -> dict:
         raise RegistryError("invalid_request", "That file could not be read.") from exc
     if len(raw) > MAX_FILE_BYTES:
         raise RegistryError("invalid_request", "Add a file of 2 MB or less.")
+    return _write_new(root, parts, name, raw)
+
+
+def add_raw_file(root: Path, folder: str, name: str, raw: bytes) -> dict:
+    """A file DGC puts in the computer (one you sent in the chat), in a folder it makes if needed."""
+    parts = _parts(folder)
+    named = _parts(name) if isinstance(name, str) and "/" not in name else []
+    if len(named) != 1 or len(raw) > MAX_FILE_BYTES:
+        raise RegistryError("invalid_request", "That file cannot be added.")
+    fd = _open_dir(root, [])
+    try:
+        for part in parts:
+            try:
+                os.mkdir(part, 0o700, dir_fd=fd)
+            except FileExistsError:
+                pass
+            try:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as exc:          # a link or a file where the folder should be
+                raise RegistryError("computer_files", f"{part} in this computer's Files is not a folder.") from exc
+            os.close(fd)
+            fd = nxt
+    finally:
+        os.close(fd)
+    return _write_new(root, parts, named[0], raw)
+
+
+def _write_new(root: Path, parts: list[str], name: str, raw: bytes) -> dict:
     if folder_bytes(root) + len(raw) > MAX_FOLDER_BYTES:
         raise RegistryError("computer_full", "This computer's Files are full (1 GB). Remove something first.")
     fd = _open_dir(root, parts)

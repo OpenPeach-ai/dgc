@@ -4,8 +4,8 @@
 
 Simple Pips (Pips API 43): `introduce_pip` queues a new Personal Pip's first message once. A
 Personal Pip can be created with an empty `goal`, and with `pip_type` `core` (the Primary Pip).
-`send_pip_message` takes `images` (up to 4 image data URIs), and `get_pip_message_image` reads one
-back. Both are refused before sending to a runtime below API 43. A Pip computer's Files and
+`send_pip_message` takes `images` (up to 4 image data URIs) and `files` (up to 4 `{name, data}`),
+2 MB in all, and `get_pip_message_image` reads an image back. Both are refused before sending to a runtime below API 43. A Pip computer's Files and
 Terminal: `list_pip_computer_files`, `read_pip_computer_file` and `list_pip_computer_terminal`
 (reads), and `add_pip_computer_file`, `remove_pip_computer_file` and `run_pip_computer_command`
 (mutations), all API 43; `add_pip_computer_file`'s `data` (2 MB) travels outside the 32 KiB budget.

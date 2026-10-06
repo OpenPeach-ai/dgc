@@ -21,8 +21,8 @@ function fixture(capabilities = caps, changes = {}) {
   return { calls, wire, session: new Session(wire, { capabilities }, { ...init, ...changes }) };
 }
 
-test('send allowlist adds only chat_options and images and never changes list request fields', () => {
-  assert.deepEqual([...COMMAND_FIELDS.send_pip_message].sort(), ['chat_options','idempotency_key','images','pip_id','text']);
+test('send allowlist adds only chat_options, images and files and never changes list request fields', () => {
+  assert.deepEqual([...COMMAND_FIELDS.send_pip_message].sort(), ['chat_options','files','idempotency_key','images','pip_id','text']);
   assert.equal(COMMAND_FIELDS.list_pip_messages.includes('chat_options'), false);
 });
 
@@ -46,6 +46,24 @@ test('images require API43 and must be image data URIs', async () => {
     await assert.rejects(current.session.pips.mutate('send_pip_message', params, { approved: true }), DGCConfigError);
   }
   assert.equal(current.calls.length, 2);
+});
+
+test('files require API43, share the 2 MB budget and keep plain names', async () => {
+  const note = { name: 'notes.txt', data: 'data:text/plain;base64,aGk=' };
+  const old = fixture({ ...caps, pips_api_version: 42 });
+  await assert.rejects(old.session.pips.mutate('send_pip_message', { ...message, files: [note] }, { approved: true }), /API 43/);
+  const current = fixture({ ...caps, pips_api_version: 43 });
+  for (const files of [null, [], [note, note, note, note, note], [{ name: '../x.txt', data: note.data }], [{ name: 'a.txt' }],
+    [{ name: 'a.txt', data: 'https://example.com' }], [{ ...note, extra: 1 }]]) {
+    await assert.rejects(current.session.pips.mutate('send_pip_message', { ...message, files }, { approved: true }), DGCConfigError);
+  }
+  const half = 'data:text/plain;base64,' + 'A'.repeat(1_500_000);
+  await assert.rejects(current.session.pips.mutate('send_pip_message', { ...message, files: [{ name: 'a.txt', data: half }],
+    images: ['data:image/png;base64,' + 'A'.repeat(1_500_000)] }, { approved: true }), DGCConfigError);
+  assert.equal(current.calls.length, 0);
+  const answer = await current.session.pips.mutate('send_pip_message', { ...message, text: '', files: [{ name: 'a.txt', data: half }] }, { approved: true });
+  assert.deepEqual(answer.request.files, [{ name: 'a.txt', data: half }]);
+  assert.equal(current.calls.length, 1);
 });
 
 test('large reply contexts require API25 and smaller requests remain API24 compatible', async () => {

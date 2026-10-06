@@ -26,7 +26,7 @@ class PipChatOptionsSDKTests(unittest.TestCase):
     def test_send_fields_match_runtime_and_options_are_optional_only_at_outer_level(self):
         from dgc.pips import _COMMAND_ARGS
         self.assertEqual(COMMAND_FIELDS['send_pip_message'], _COMMAND_ARGS['send_pip_message'])
-        self.assertEqual(COMMAND_FIELDS['send_pip_message'], {'pip_id', 'text', 'idempotency_key', 'chat_options', 'images'})
+        self.assertEqual(COMMAND_FIELDS['send_pip_message'], {'pip_id', 'text', 'idempotency_key', 'chat_options', 'images', 'files'})
         self.assertNotIn('chat_options', COMMAND_FIELDS['list_pip_messages'])
 
     def test_option_presence_requires_api24_but_absent_message_keeps_api8_gate(self):
@@ -62,6 +62,25 @@ class PipChatOptionsSDKTests(unittest.TestCase):
             with self.assertRaises(DGCConfigError):
                 current.pips.mutate('send_pip_message', params, approved=True)
         self.assertEqual(len(wire.calls), 2)
+
+    def test_files_require_api43_share_the_2_mb_budget_and_keep_plain_names(self):
+        note = {'name': 'notes.txt', 'data': 'data:text/plain;base64,aGk='}
+        wire = Wire(); old = session(wire, caps={**CAPS, 'pips_api_version': 42})
+        with self.assertRaisesRegex(DGCUnsupportedError, 'API 43'):
+            old.pips.mutate('send_pip_message', {**MESSAGE, 'files': [note]}, approved=True)
+        current = session(wire, caps={**CAPS, 'pips_api_version': 43})
+        for files in (None, [], [note] * 5, [{'name': '../x.txt', 'data': note['data']}], [{'name': 'a.txt'}],
+                      [{'name': 'a.txt', 'data': 'https://example.com'}], [{**note, 'extra': 1}]):
+            with self.subTest(files=files), self.assertRaises(DGCConfigError):
+                current.pips.mutate('send_pip_message', {**MESSAGE, 'files': files}, approved=True)
+        half = 'data:text/plain;base64,' + 'A' * 1_500_000
+        with self.assertRaises(DGCConfigError):
+            current.pips.mutate('send_pip_message', {**MESSAGE, 'files': [{'name': 'a.txt', 'data': half}],
+                                                     'images': ['data:image/png;base64,' + 'A' * 1_500_000]}, approved=True)
+        self.assertFalse(wire.calls)
+        answer = current.pips.mutate('send_pip_message', {**MESSAGE, 'text': '', 'files': [{'name': 'a.txt', 'data': half}]}, approved=True)
+        self.assertEqual(answer['request']['files'], [{'name': 'a.txt', 'data': half}])
+        self.assertEqual(len(wire.calls), 1)
 
     def test_exact_choices_and_boundary_values_forward_detached_once(self):
         wire = Wire(); current = session(wire, caps=CURRENT)

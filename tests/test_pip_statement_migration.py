@@ -23,7 +23,7 @@ class StatementMigrationTests(unittest.TestCase):
 
     @staticmethod
     def rows(registry):
-        tables=[row[0] for row in registry.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('pip_memory_statements','pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts','pip_notify_settings','pip_digest_state','pip_computer_actions','pip_chat_images') ORDER BY name")]
+        tables=[row[0] for row in registry.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('pip_memory_statements','pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts','pip_notify_settings','pip_digest_state','pip_computer_actions','pip_chat_images','pip_chat_files') ORDER BY name")]
         return {name:[tuple(row) for row in registry.db.execute('SELECT * FROM "'+name.replace('"','""')+'" ORDER BY rowid')] for name in tables}
 
     def legacy(self):

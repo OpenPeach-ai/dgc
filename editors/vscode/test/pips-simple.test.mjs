@@ -179,6 +179,64 @@ test('a sent image shows in its message, fetched once from the CLI',async()=>{
  assert.equal(x.requests('get_pip_message_image').length,1,'not fetched again');
 });
 
+async function dropFiles(x,files){
+ const drop=new x.w.Event('drop',{bubbles:true,cancelable:true});Object.defineProperty(drop,'dataTransfer',{value:{files,types:['Files']}});
+ const before=x.d.querySelectorAll('.chat-file-chip,.chat-image-chip').length;x.d.querySelector('#chatText').dispatchEvent(drop);
+ for(let i=0;i<80&&x.d.querySelectorAll('.chat-file-chip,.chat-image-chip').length===before;i++)await new Promise(r=>setTimeout(r,5));
+}
+test('files go with a message too: text, code and documents, shown by name, sent with it or on their own',async()=>{
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ assert.match(x.d.querySelector('#chat-attach').getAttribute('title'),/images and files/);
+ assert.match(x.d.querySelector('#chat-attach-input').getAttribute('accept'),/\.pdf.*\.docx|\.docx.*\.pdf/);
+ await dropFiles(x,[new x.w.File(['Sold 5 TCS\n'],'broker notes.txt',{type:'text/plain'})]);
+ await dropFiles(x,[new x.w.File(['%PDF-1.4'],'statement.pdf',{type:'application/pdf'})]);
+ assert.deepEqual([...x.d.querySelectorAll('.chat-file-chip .chat-file-name')].map(e=>e.textContent),['broker notes.txt','statement.pdf']);
+ x.click('[data-remove-file="1"]');assert.equal(x.d.querySelectorAll('.chat-file-chip').length,1);
+ x.d.querySelector('#chat-form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await flush();
+ const sent=x.requests('send_pip_message')[0];assert.ok(sent,'a file alone is a message');
+ assert.equal(sent.request.text,'');assert.equal(sent.request.files.length,1);
+ assert.equal(sent.request.files[0].name,'broker notes.txt');assert.match(sent.request.files[0].data,/^data:application\/octet-stream;base64,/);
+ assert.equal(Buffer.from(sent.request.files[0].data.split(',')[1],'base64').toString(),'Sold 5 TCS\n');
+});
+
+test('a program or an over-budget file is not added, and says why',async()=>{
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ const drop=new x.w.Event('drop',{bubbles:true,cancelable:true});Object.defineProperty(drop,'dataTransfer',{value:{files:[new x.w.File(['MZ'],'setup.exe')],types:['Files']}});
+ x.d.querySelector('#chatText').dispatchEvent(drop);await flush();
+ assert.equal(x.d.querySelectorAll('.chat-file-chip').length,0);assert.match(x.d.body.textContent,/PDF, Word, Excel/);
+ const big=new x.w.File([new Uint8Array(2*1024*1024+1)],'huge.csv',{type:'text/csv'});
+ const drop2=new x.w.Event('drop',{bubbles:true,cancelable:true});Object.defineProperty(drop2,'dataTransfer',{value:{files:[big],types:['Files']}});
+ x.d.querySelector('#chatText').dispatchEvent(drop2);await flush();
+ assert.equal(x.d.querySelectorAll('.chat-file-chip').length,0);assert.match(x.d.body.textContent,/2 MB of images and files/);
+});
+
+test('a sent message shows its files by name, and a files-only message shows just the files',async()=>{
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const asked=message('message_1','user','What changed?',gmail.id,{files:[{index:0,name:'broker notes.txt',bytes:2048}]});
+ const only=message('message_2','user','(sent a file)',gmail.id,{files:[{index:0,name:'plan.docx',bytes:30000}],run_id:'run_'+'c'.repeat(32)});
+ const x=setup({jobs:[gmail],messages:{[gmail.id]:[asked,only]}});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ assert.deepEqual([...x.d.querySelectorAll('.msg-file .chat-file-name')].map(e=>e.textContent),['broker notes.txt','plan.docx']);
+ assert.match(x.d.querySelector('.msg-file .chat-file-size').textContent,/2 KB/);
+ assert.ok(![...x.d.querySelectorAll('.prompt-text')].some(e=>e.textContent==='(sent a file)'),'no stand-in bubble');
+ assert.ok([...x.d.querySelectorAll('.prompt-text')].some(e=>e.textContent==='What changed?'));
+});
+
+test('the extension host sends files only to an API 43 CLI, and images and files share 2 MB',()=>{
+ const make=api=>{const posted=[],sent=[];const out={exports:{}};new Function('module','exports','require',view)(out,out.exports,name=>name==='vscode'?{}:require(name));
+  const editor=new out.exports.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});return {editor,posted,sent};};
+ const base={type:'send_pip_message',pip_id:'pip_'+'g'.repeat(32),text:'x',idempotency_key:'k'};
+ const note={name:'notes.txt',data:'data:application/octet-stream;base64,aGk='};
+ const old=make(42);old.editor.receive({type:'pipsRequest',id:'a',request:{...base,files:[note]}});assert.equal(old.sent.length,0);assert.match(old.posted.at(-1).error.message,/API 43/);
+ const h=make(43);
+ h.editor.receive({type:'pipsRequest',id:'b',request:{...base,files:[{...note,data:'data:application/octet-stream;base64,'+'A'.repeat(1_400_000)}]}});
+ assert.equal(h.sent.length,1,h.posted.at(-1)?.error?.message);
+ for(const [i,files] of [[{...note,name:'../x'}],[{name:'a.txt'}],[note,note,note,note,note]].entries()){h.editor.receive({type:'pipsRequest',id:'c'+i,request:{...base,files}});}
+ h.editor.receive({type:'pipsRequest',id:'d',request:{...base,files:[{...note,data:'data:application/octet-stream;base64,'+'A'.repeat(1_500_000)}],images:['data:image/png;base64,'+'A'.repeat(1_500_000)]}});
+ assert.equal(h.sent.length,1,'refused before sending');assert.match(h.posted.at(-1).error.message,/2 MB of images and files/);
+});
+
 test('an older CLI offers no image button',async()=>{
  const gmail={...pip('pip_'+'g'.repeat(32),'Gmail','scout'),workspace_id:PROJECT};
  const x=setup({apiVersion:42,jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();

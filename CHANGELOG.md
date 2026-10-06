@@ -10,10 +10,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 - Meet your Pips (API 43): a Personal Pip needs only a name, Core can be your Primary Pip, and
   a new Pip introduces itself in its chat (`introduce_pip`).
-- Send images to a Personal Pip, like in the main chat: up to 4 per message, 2 MB in all, with or
-  without text. They are checked, kept once on your machine, and shown in the chat
-  (`send_pip_message` `images`, `get_pip_message_image`). Registry schema 36: an older `dgc` can't
-  open the Pips registry once this one has.
+- Send images and files to a Personal Pip, like in the main chat: images, text and code files,
+  PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV and TSV, up to 4 of each and 2 MB in all
+  per message, with or without text. They are checked, kept once on your machine and shown in
+  the chat. Files are read the main chat's way (documents to text, known credentials redacted),
+  and a Pip with a computer also finds them in its Files, under From chat (`send_pip_message`
+  `images` and `files`, `get_pip_message_image`). Registry schema 37 (36 adds `pip_chat_images`,
+  37 `pip_chat_files`): an older `dgc` can't open the Pips registry once this one has.
 - A Pip's computer has Files and a Terminal beside its browser, like Grok's bots. Browser
   downloads land in its Files. The Terminal runs one command at a time with no network, only the
   computer's Files as its home, and a 60-second limit. The Pip uses both through its computer

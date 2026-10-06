@@ -239,6 +239,7 @@ class SessionExecutionRecordTests(unittest.TestCase):
              patch.object(pip_digest, 'SCHEMA', ''), \
              patch.object(pip_computer, 'SCHEMA', ''), \
              patch.object(pip_chat, 'IMAGES_SCHEMA', ''), \
+             patch.object(pip_chat, 'FILES_SCHEMA', ''), \
              patch.object(session_turn_events, 'SCHEMA', ''), \
              patch.object(pip_memory_statements, 'SCHEMA', ''), \
              patch.object(pip_commit_paths, 'SCHEMA_V22', ''), \

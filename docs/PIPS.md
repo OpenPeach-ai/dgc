@@ -450,6 +450,12 @@ approved source while it answers, but it can't edit files, run commands or chang
 its own job. For one reply you can choose a context size and a reasoning level;
 these don't change the Pip's job. A Pip answers only while the runner is running.
 
+You can send a Personal Pip images and files with a message, as in the main chat: use the attach
+button, paste, or drop them on the message box. Images, text and code files, and PDF, Word,
+Excel, PowerPoint, OpenDocument, RTF, CSV and TSV files are accepted, up to 4 images and 4 files
+and 2 MB in all. The Pip sees the images and reads the files' text; a Pip with a computer also
+finds the files in its Files, under **From chat**.
+
 ```sh
 dgc pips send PIP_ID "Explain the second finding"
 dgc pips messages PIP_ID

@@ -311,7 +311,7 @@ COMMAND_FIELDS = {
     'review_pip_execution': frozenset(['expected_revision', 'reason', 'run_id', 'status']),
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
-    'send_pip_message': frozenset(['chat_options', 'idempotency_key', 'images', 'pip_id', 'text']),
+    'send_pip_message': frozenset(['chat_options', 'files', 'idempotency_key', 'images', 'pip_id', 'text']),
     'get_pip_message_image': frozenset(['index', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),
@@ -462,6 +462,21 @@ class Pips:
                     or sum(len(i) for i in images) > MAX_IMAGE_URI_CHARS):
                 raise DGCConfigError('images must be 1 to 4 image data URIs, 2 MB in all')
             images, params = list(images), {key: value for key, value in params.items() if key != 'images'}
+        files = None
+        if command == 'send_pip_message' and type(params) is dict and 'files' in params:
+            # Files sent with a message travel with its images, outside the 32 KiB budget: 4, 2 MB in all.
+            if version < 43:
+                raise DGCUnsupportedError('Files in a Pip chat require a runtime advertising Pips API 43 or newer')
+            files = params['files']
+            if (type(files) is not list or not 1 <= len(files) <= 4
+                    or any(type(f) is not dict or set(f) != {'name', 'data'} or type(f['name']) is not str
+                           or not f['name'].strip() or len(f['name']) > 255 or any(c in f['name'] for c in '/\\"')
+                           or any(ord(c) < 32 for c in f['name']) or type(f['data']) is not str
+                           or not f['data'].startswith('data:') or ';base64,' not in f['data'][:200]
+                           or not f['data'].isascii() for f in files)
+                    or sum(len(f['data']) for f in files) + sum(len(i) for i in images or []) > MAX_IMAGE_URI_CHARS):
+                raise DGCConfigError('files must be 1 to 4 {name, data} entries, 2 MB in all with any images')
+            files, params = [dict(f) for f in files], {key: value for key, value in params.items() if key != 'files'}
         file_data = None
         if command == 'add_pip_computer_file' and type(params) is dict and 'data' in params:
             # A file added to a Pip's computer also travels outside the 32 KiB budget: one data URI, 2 MB.
@@ -534,6 +549,8 @@ class Pips:
             raise DGCConfigError("Pip request exceeds 32 KiB")
         if images is not None:
             request["images"] = images
+        if files is not None:
+            request["files"] = files
         if file_data is not None:
             request["data"] = file_data
         event = session._request({"type": "pips_control", "request": request}, "pips_result", request_id=rid)

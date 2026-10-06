@@ -71,6 +71,150 @@ def image_directory(directory, pip_id) -> Path:
     return Path(directory) / "chat_images" / pip_id
 
 
+# Files in a chat (schema 37): text and code as they are, and the documents the main chat reads
+# (PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TSV). The worker reads them the main
+# chat's way (attachments.expand_attachments), so the same limits and secret redaction apply.
+MAX_CHAT_FILES = 4
+MAX_CHAT_FILE_BYTES = 2 * 1024 * 1024          # all of one message's files
+FILE_ONLY_TEXT = "(sent a file)"
+TEXT_FILE_EXTENSIONS = frozenset({
+    ".txt", ".md", ".markdown", ".rst", ".log", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini",
+    ".cfg", ".conf", ".xml", ".html", ".htm", ".css", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py",
+    ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".h", ".cpp", ".hpp", ".cs", ".php", ".sh",
+    ".sql", ".r", ".ipynb", ".srt", ".vtt", ".tex", ".bib", ".svg", ".ics", ".vcf", ".eml"})
+FILES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_chat_files (
+ message_id TEXT NOT NULL REFERENCES pip_chat_messages(id),
+ idx INTEGER NOT NULL CHECK(typeof(idx)='integer' AND idx BETWEEN 0 AND 3),
+ name TEXT NOT NULL CHECK(length(CAST(name AS BLOB)) BETWEEN 1 AND 255),
+ sha256 TEXT NOT NULL CHECK(length(sha256)=64),
+ bytes INTEGER NOT NULL CHECK(typeof(bytes)='integer' AND bytes BETWEEN 1 AND 2097152),
+ PRIMARY KEY(message_id, idx)
+);
+"""
+
+
+def file_directory(directory, pip_id) -> Path:
+    return image_directory(directory, pip_id).parent.parent / "chat_files" / pip_id
+
+
+def file_name(value) -> str:
+    """A file's own name, as the user sees it: no folders, quotes or control characters."""
+    if (not isinstance(value, str) or value.strip() in ("", ".", "..") or any(c in value for c in '/\\"')
+            or any(ord(c) < 32 for c in value) or len(value.encode("utf-8")) > 255):
+        raise RegistryError("invalid_files", "Name each file plainly: no folders, quotes or control characters.")
+    return value.strip()
+
+
+def _file_extension(name: str) -> str:
+    return "." + name.lower().rsplit(".", 1)[1] if "." in name.strip(".") else ""
+
+
+def _file_fits(name: str, raw: bytes) -> None:
+    from .documents import SUPPORTED, sniff
+    ext = _file_extension(name)
+    if ext in SUPPORTED and ext not in (".csv", ".tsv"):
+        # The name alone decides nothing: a document must start the way that kind of file does.
+        starts = {".pdf": (b"%PDF-",), ".rtf": (b"{\\rtf",)}.get(ext, (b"PK\x03\x04",))
+        if not raw.startswith(starts) or sniff(name, raw) != ext:
+            raise RegistryError("invalid_files", f"{name} is not the kind of file its name says.")
+        return
+    if ext in TEXT_FILE_EXTENSIONS or ext in (".csv", ".tsv", ""):
+        if b"\0" in raw[:8192]:
+            raise RegistryError("invalid_files", f"{name} is not a text file.")
+        return
+    raise RegistryError("invalid_files", f"{name}: send text, code, PDF, Word, Excel, PowerPoint, "
+                                         "OpenDocument, RTF, CSV or TSV files.")
+
+
+def bounded_file_uris(value):
+    """A send's files before they are decoded: 1 to 4 {name, data} with data URIs, 2 MB in all."""
+    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_FILES
+            or any(not isinstance(i, dict) or set(i) != {"name", "data"} or not isinstance(i["data"], str)
+                   or not i["data"].startswith("data:") or ";base64," not in i["data"][:200] or not i["data"].isascii()
+                   for i in value)
+            or sum(len(i["data"]) for i in value) > MAX_CHAT_IMAGE_URI_CHARS):
+        raise RegistryError("invalid_files", f"Send up to {MAX_CHAT_FILES} files, {MAX_CHAT_FILE_BYTES // 1048576} MB in all.")
+    for item in value:
+        file_name(item["name"])
+    return [dict(i) for i in value]
+
+
+def validate_files(value):
+    """The files a message carries, as metadata: name, digest and size."""
+    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_FILES
+            or any(not isinstance(i, dict) or set(i) != {"name", "sha256", "bytes"} or not isinstance(i["sha256"], str)
+                   or not re.fullmatch(r"[0-9a-f]{64}", i["sha256"]) or type(i["bytes"]) is not int
+                   or not 1 <= i["bytes"] <= MAX_CHAT_FILE_BYTES for i in value)
+            or sum(i["bytes"] for i in value) > MAX_CHAT_FILE_BYTES):
+        raise RegistryError("invalid_files", f"Send up to {MAX_CHAT_FILES} files, {MAX_CHAT_FILE_BYTES // 1048576} MB in all.")
+    for item in value:
+        file_name(item["name"])
+    return [dict(i) for i in value]
+
+
+def store_files(directory, pip_id, values):
+    """Check files the editor sent and keep each once, by its digest, readable only by you."""
+    values = bounded_file_uris(values)
+    decoded = []
+    for item in values:
+        try:
+            raw = base64.b64decode(item["data"].split(";base64,", 1)[1], validate=True)
+        except ValueError as exc:
+            raise RegistryError("invalid_files", f"{item['name']} could not be read.") from exc
+        if not raw:
+            raise RegistryError("invalid_files", f"{item['name']} is empty.")
+        _file_fits(file_name(item["name"]), raw)
+        decoded.append((file_name(item["name"]), raw))
+    if sum(len(raw) for _, raw in decoded) > MAX_CHAT_FILE_BYTES:
+        raise RegistryError("invalid_files", f"Send up to {MAX_CHAT_FILE_BYTES // 1048576} MB of files in all.")
+    folder = file_directory(directory, pip_id)
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    kept = []
+    for name, raw in decoded:
+        digest = hashlib.sha256(raw).hexdigest()
+        path = folder / digest
+        if not path.exists():
+            staging = folder / f".{digest}.{os.getpid()}.{os.urandom(4).hex()}"
+            fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(raw)
+            os.replace(staging, path)
+        kept.append({"name": name, "sha256": digest, "bytes": len(raw)})
+    return validate_files(kept)
+
+
+def file_paths(directory, pip_id, files):
+    """Where a message's files are kept; each must still be there, at its size."""
+    paths = []
+    for item in validate_files(files):
+        path = file_directory(directory, pip_id) / item["sha256"]
+        try:
+            if path.stat().st_size != item["bytes"]:
+                raise OSError
+        except OSError as exc:
+            raise RegistryError("invalid_files", "A file for this message is missing. Send it again.") from exc
+        paths.append(path)
+    return paths
+
+
+def read_file(path, item) -> bytes:
+    """One kept file, only if it is still exactly the file that was sent."""
+    raw = Path(path).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != item["sha256"]:
+        raise RegistryError("invalid_files", "A kept file changed on disk and was not used.")
+    return raw
+
+
+def message_files(db, message_id):
+    try:
+        rows = db.execute("SELECT idx,name,bytes FROM pip_chat_files WHERE message_id=? ORDER BY idx",
+                          (message_id,)).fetchall()
+    except Exception:
+        return []
+    return [{"index": r[0], "name": r[1], "bytes": r[2]} for r in rows]
+
+
 def bounded_image_uris(value):
     """A send's images before they are decoded: 1 to 4 image data URIs, 2 MB in all.
 
@@ -193,11 +337,15 @@ def validate_text(value, *, reply=False):
     return value
 
 
-def request(text, key, chat_options=None, images=None):
+def request(text, key, chat_options=None, images=None, files=None):
     if images is not None:
         images = validate_images(images)
         if isinstance(text, str) and not text.strip():
             text = IMAGE_ONLY_TEXT
+    if files is not None:
+        files = validate_files(files)
+        if isinstance(text, str) and not text.strip():
+            text = FILE_ONLY_TEXT
     text = validate_text(text)
     if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
         raise RegistryError("invalid_request", "Conversation retry keys use 1–128 letters, digits, underscores or hyphens.")
@@ -213,6 +361,12 @@ def request(text, key, chat_options=None, images=None):
         result['images'] = images
         result['digest'] = hashlib.sha256(_json({'text': text, 'chat_options': result.get('chat_options'),
                                                  'images': [i['sha256'] for i in images]}).encode()).hexdigest()
+    if files is not None:
+        # The retry key binds the files (their names and contents) as well.
+        result['files'] = files
+        result['digest'] = hashlib.sha256(_json({'text': text, 'chat_options': result.get('chat_options'),
+                                                 'images': [i['sha256'] for i in images or []],
+                                                 'files': [[i['name'], i['sha256']] for i in files]}).encode()).hexdigest()
     return result
 
 
@@ -464,6 +618,8 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
                "last_report": report, "continuity": continuity}
     if req.get("images"):
         context["images"] = req["images"]
+    if req.get("files"):
+        context["files"] = req["files"]
     return context
 
 
@@ -474,6 +630,8 @@ def insert_user(store, pip, req, run_id, model, now):
                      "user", req["text"], model, now, req["request_key"], req["digest"]))
     for index, item in enumerate(req.get("images") or []):
         store.db.execute("INSERT INTO pip_chat_images VALUES(?,?,?,?,?)", (message_id, index, item["sha256"], item["mime"], item["bytes"]))
+    for index, item in enumerate(req.get("files") or []):
+        store.db.execute("INSERT INTO pip_chat_files VALUES(?,?,?,?,?)", (message_id, index, item["name"], item["sha256"], item["bytes"]))
 
 
 def insert_reply(store, run, result, now):
@@ -552,6 +710,9 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             pictures = message_images(store.db, row["id"])
             if pictures:
                 message["images"] = pictures
+            attached = message_files(store.db, row["id"])
+            if attached:
+                message["files"] = attached
         amount = len(_json(message).encode())
         if size + amount > 96 * 1024:
             break
@@ -570,13 +731,18 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             "history_context_omitted_count": omitted, "continuity": continuity}
 
 
-def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, _intro=False):
+def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, files=None, _intro=False):
     if not _intro and isinstance(key, str) and key.startswith(DGC_KEYS):
         raise RegistryError("invalid_request", "That message key is reserved for messages DGC writes.")
     if images is not None:
         store._job(pip_id)
         images = store_images(store.registry.directory, pip_id, images)
-    req = request(text, key, chat_options, images=images)
+    if files is not None:
+        job = store._job(pip_id)
+        files = store_files(store.registry.directory, pip_id, files)
+        if job.get("computer_plan") is not None:
+            _copy_to_computer(store.registry.directory, pip_id, files)
+    req = request(text, key, chat_options, images=images, files=files)
     run = prior(store, pip_id, req, actor)
     if run is None:
         run = store.enqueue(pip_id, "chat_" + hashlib.sha256(key.encode()).hexdigest(), actor, config,
@@ -587,16 +753,33 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
     pictures = message_images(store.db, row["id"])
     if pictures:
         message["images"] = pictures
+    attached = message_files(store.db, row["id"])
+    if attached:
+        message["files"] = attached
     return {"run": run, "message": message}
 
 
+def _copy_to_computer(directory, pip_id, files) -> None:
+    """A Pip with a computer finds what you sent in its Files, under From chat, to work on there."""
+    from .pip_computer import computer_root
+    from .pip_computer_files import add_raw_file, files_root
+    folder = files_root(computer_root(directory, pip_id))
+    for item, path in zip(files, file_paths(directory, pip_id, files)):
+        try:
+            add_raw_file(folder, "From chat", item["name"], read_file(path, item))
+        except RegistryError:
+            pass                       # a full computer still gets the message; the Pip reads the file in chat
+
+
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) - {"images"} not in (
+    if (not isinstance(value, dict) or set(value) - {"images", "files"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
     if "images" in value:
         validate_images(value["images"])
+    if "files" in value:
+        validate_files(value["files"])
     if 'continuity' in value:
         from .pip_chat_continuity import _validate_envelope
         _validate_envelope(value['continuity'])

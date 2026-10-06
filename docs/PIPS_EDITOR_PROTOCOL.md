@@ -81,6 +81,10 @@ The reply is a `pips_result` event that carries the nested request ID:
   16 KiB request bound (32 KiB in `dgc serve` and the SDKs): they are bounded on their own, at
   every hop, to 4 data URIs and 2,800,000 characters in all, and the rest of the message keeps its
   bound.
+- `send_pip_message` may also carry `files` (API 43): up to 4 `{name, data}` (text, code or the
+  documents the main chat reads), 2 MB in all within the same 2,800,000-character budget as the
+  images. A listed user message carries `files: [{index, name, bytes}]`. The host refuses `files`
+  before sending to a CLI below API 43, and refuses images and files over the shared budget.
 - `run_pip`, `send_pip_message` and `accept_pip_handoff` first check that the
   independent runner is live (a fresh heartbeat and a held lease). The backend never
   starts a worker of its own to run Pips work. If the runner stops after the check,

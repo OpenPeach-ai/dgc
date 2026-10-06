@@ -266,3 +266,9 @@ button.pill{border-radius:999px;padding:6px 16px}
 .chat-image-chip button{position:absolute;top:2px;right:2px;width:18px;height:18px;min-height:18px;padding:0;border-radius:50%;border:0;background:#000a;color:#fff;font-size:12px;line-height:1}
 .msg-images{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin:0 0 6px}
 .msg-image{width:120px;height:90px;object-fit:cover;border-radius:12px;border:1px solid var(--pip-edge);background:var(--pip-wash)}
+.chat-file-chip,.msg-file{display:inline-flex;align-items:center;gap:7px;max-width:240px;height:40px;padding:0 8px 0 6px;border-radius:10px;border:1px solid var(--pip-edge);background:var(--pip-wash);font-size:12px;flex:none}
+.chat-file-ext{display:grid;place-items:center;min-width:28px;height:28px;padding:0 3px;border-radius:7px;background:color-mix(in srgb,var(--pip-accent,#7c5cff) 22%,transparent);color:var(--vscode-foreground);font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.chat-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-file-size{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.chat-file-chip button{width:18px;height:18px;min-height:18px;padding:0;border-radius:50%;border:0;background:transparent;color:var(--muted);font-size:13px;line-height:1}
+.msg-files{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin:0 0 6px}

@@ -11,7 +11,7 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | SDK (Python and TypeScript) | 0.7.0 |
 | Pips API | 43 (CLI 0.48.0 advertises 41) |
 | Editor protocol | v14 |
-| Pips registry schema | 36 (34 in CLI 0.48.0) |
+| Pips registry schema | 37 (34 in CLI 0.48.0) |
 
 ## Security model
 
@@ -837,6 +837,20 @@ control handler and both SDKs bound them on their own (4 data URIs, 2,800,000 ch
 and hold the rest of the message to its usual limit. Registry schema 36 adds the
 `pip_chat_images` table.
 
+**Files in a chat** (API 43). `send_pip_message` also takes `files`: up to 4 `{name, data}`,
+`data` a data URI, 2 MB in all and within one 2,800,000-character budget together with any
+images. A name has no folders, quotes or control characters. Text and code files (by extension,
+with no NUL bytes) and the documents the main chat reads (PDF, Word, Excel, PowerPoint,
+OpenDocument, RTF, CSV, TSV) are accepted; a document must start the way its kind does (`%PDF-`,
+`{\rtf`, or a ZIP). `text` may then be empty; the message reads "(sent a file)". Each file is kept
+once by its SHA-256 under `chat_files/<pip_id>/` (0600), the retry key binds the names and
+contents, and listed user messages carry `files: [{index, name, bytes}]`, never the bytes. The
+runner hands the worker the kept paths; it re-checks each digest, copies the files under their
+names into a private folder and reads them with the main chat's `expand_attachments` (documents
+to text, the same per-file and total limits, known credentials redacted), then adds them to the
+prompt as untrusted reference data. A Pip with a computer also gets each file in its Files, under
+`From chat` (never through a link). Registry schema 37 adds the `pip_chat_files` table.
+
 **App plans** (`app_plan`) name one connection and one to four read calls:
 
 ```json
@@ -1053,4 +1067,4 @@ Clients check it before using a newer control.
 | 40 | Reviewed web reads |
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
 | 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |
-| 43 | Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images in a Personal Pip's chat (`send_pip_message` `images`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |
+| 43 | Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images and files in a Personal Pip's chat (`send_pip_message` `images` and `files`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |
