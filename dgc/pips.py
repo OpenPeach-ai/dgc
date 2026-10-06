@@ -3009,6 +3009,13 @@ def start_queued(config):
 def _controller_failure(exc):
     # This record may be sent to Remote. Exception text can contain local paths,
     # SQL data or credentials, so only the exception class is exposed here.
+    if isinstance(exc, RegistryError) and getattr(exc, "code", "") == "schema_version":
+        # A newer DGC moved the database on (an update, `dgc update`) while this process kept the
+        # code it started with. It used to read "controller stopped (RegistryError)" -- the
+        # founder's runner stopped 24 seconds after his DGC was updated, and nothing said why.
+        # `updated` lets `dgc pips serve` start itself again on the new code (pip_cli).
+        return {"code": "runner_failed", "updated": True, "message":
+                "DGC was updated while the Pips runner was running. Start the runner again to use the new version."}
     detail = type(exc).__name__[:80]
     sqlite_name = getattr(exc, "sqlite_errorname", None)
     if isinstance(sqlite_name, str) and re.fullmatch(r"SQLITE_[A-Z0-9_]{1,70}", sqlite_name):

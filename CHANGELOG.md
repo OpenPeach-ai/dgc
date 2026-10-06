@@ -8,6 +8,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- When DGC is updated while the Pips runner is running, the runner starts itself again on the new
+  version instead of stopping with "The local Pips controller stopped (RegistryError)". If it cannot
+  (the database is newer than any DGC on disk), it stops and says DGC was updated, so you start it
+  again after updating.
+- A Pip computer's desktop shows DGC's own wallpaper.
 - Meet your Pips (API 43): a Personal Pip needs only a name, Core can be your Primary Pip, and
   a new Pip introduces itself in its chat (`introduce_pip`).
 - Send images and files to a Personal Pip, like in the main chat: images, text and code files,

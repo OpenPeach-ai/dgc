@@ -11,6 +11,32 @@ from pathlib import Path
 
 from .workspace_registry import RegistryError, WorkspaceRegistry, canonical_directory, identifier, state_directory
 
+RESTART_ENV = "DGC_PIPS_RESTARTED_AT"
+RESTART_GAP_SECONDS = 60
+
+
+def _restart_on_new_code() -> bool:
+    """DGC was updated under a running supervisor: replace this process with the same command, so
+    it starts again on the new code -- the editor's Start runner and the login service both launch
+    it through this handler, and Python keeps the exact command line. Once a minute at most: a
+    database newer than even the code on disk would otherwise restart forever. Returns False when it
+    cannot restart (the caller then stops with the message saying to start it again)."""
+    import time
+    try:
+        last = float(os.environ.get(RESTART_ENV, "0") or 0)
+    except ValueError:
+        last = 0.0
+    argv = list(getattr(sys, "orig_argv", []) or [])
+    if not argv or time.time() - last < RESTART_GAP_SECONDS:
+        return False
+    os.environ[RESTART_ENV] = str(time.time())
+    print("dgc pips serve: DGC was updated; starting again on the new version.", file=sys.stderr, flush=True)
+    try:
+        os.execv(sys.executable, [sys.executable, *argv[1:]])
+    except OSError:
+        return False
+    return True                                  # not reached: execv replaced the process
+
 
 def parser():
     value = argparse.ArgumentParser(prog="dgc pips", allow_abbrev=False,
@@ -1655,6 +1681,8 @@ def handle_command(config, argv, *, in_chat=False):
             try:
                 result = pip_daemon.serve(config, enable=args.enable)
             except RegistryError as exc:
+                if exc.code == "dgc_updated" and _restart_on_new_code():
+                    raise AssertionError("unreachable: the process was replaced")
                 if not args.service or exc.code not in ("runner_running", "disabled", "runtime_paused"):
                     raise
                 print(f"dgc pips serve: not started: {exc}", file=sys.stderr)

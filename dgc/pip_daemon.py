@@ -310,7 +310,7 @@ def _check_controller(directory):
     from .pips import drain_failure
     failure = drain_failure(directory)
     if failure:
-        raise RegistryError(failure["code"], failure["message"])
+        raise RegistryError("dgc_updated" if failure.get("updated") else failure["code"], failure["message"])
 
 
 def handle_command(config, argv):
