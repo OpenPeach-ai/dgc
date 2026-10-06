@@ -420,6 +420,7 @@ settings are display preferences outside the reviewed job; changing them grants 
 | `list_pip_computer_files` | R | `pip_id`, `path?`; the computer's own Files folder (API 43) |
 | `read_pip_computer_file` | R | `pip_id`, `path`; `text` (first 64 KiB), or `data` up to 2 MB (API 43) |
 | `list_pip_computer_terminal` | R | `pip_id`; the last 200 commands and the one running (API 43) |
+| `get_pip_computer_desktop` | R | `pip_id`; whether the full screen can show here, which browser, what to install (API 43) |
 | `add_pip_computer_file` | M | `pip_id`, `path?`, `name`, `data` (one data URI, 2 MB at most; outside the 32 KiB budget) (API 43) |
 | `remove_pip_computer_file` | M | `pip_id`, `path` (API 43) |
 | `run_pip_computer_command` | M | `pip_id`, `command`; starts it in the computer's Terminal (no internet) and returns at once (API 43) |

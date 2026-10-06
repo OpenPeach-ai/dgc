@@ -186,6 +186,15 @@ name | error}`. The Files and Terminal commands (`list_pip_computer_files`,
 `run_pip_computer_command`, `list_pip_computer_terminal`) need API 43; see PIPS_REFERENCE. A live
 view frame (`use_pip_computer_view`) may be up to 1,400,000 characters.
 
+**The full screen** (capability `pips_desktop: 1`). `pipComputerInit` carries `desktop: true` when
+the CLI streams it. The tab asks `get_pip_computer_desktop`; when `available`, it runs noVNC (bundled,
+MPL-2.0) on a WebSocket-like channel. The tab posts `{type: 'pipDesktop', op: 'open' | 'send' |
+'close', data?}` (`data` is base64); the host sends the command `{type: 'pip_desktop', pip_id, op,
+data?}` for that tab's own Pip only, and routes the events `pip_desktop_data {pip_id, data}` and
+`pip_desktop_closed {pip_id, reason}` back to that tab as `pipDesktopData` and `pipDesktopClosed`.
+Closing the tab closes its stream. `dgc serve` refuses the stream where it refuses Pips controls (a
+closing chat, a model's own shell, a restricted session) and when Pips are off.
+
 `notify_pip_setup {request_id, setup_id}` is a nested control for the chat that
 proposed a setup card. After the user approves the card, send it to that chat; the
 backend checks the session, workspace and accepted receipt, then delivers a

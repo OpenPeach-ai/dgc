@@ -2017,6 +2017,8 @@ class Backend:
                           "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
+                          # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
+                          "pips_desktop": 1,
                           "pips_enabled": self.config.get("pips_enabled", False) is True,
                           # Additive capability data keeps strict older SDK ready-event
                           # validators working. IDs are private registry references,
@@ -3408,6 +3410,9 @@ class Backend:
             self._pips_commands = []
         for command in abandoned:
             self._pips_failure(command, "chat_closed", "This chat closed before its Pip control could run.")
+        streams = self.__dict__.get("_desktop_streams")
+        if streams is not None:
+            streams.close_all()
         inspection = getattr(self, "_editor_inspection", None)
         if inspection is not None:
             inspection.close()
@@ -4128,6 +4133,27 @@ class Backend:
             except Exception:
                 self._pips_failure(cmd, "runner_error", "The local Pip control failed; inspect the backend output and retry.")
 
+    def _pip_desktop(self, cmd):
+        """A Pip computer's screen in the editor: refused exactly where Pips controls are."""
+        pip_id = cmd.get("pip_id") if isinstance(cmd.get("pip_id"), str) else ""
+        from .sandbox import AGENT_SHELL
+        from .pip_access import restricted, MESSAGE
+        refusal = ("This chat closed." if getattr(self, "_pips_closing", False)
+                   else AGENT_SHELL_PIPS_REFUSAL if os.environ.get(AGENT_SHELL) == "1"
+                   else MESSAGE if restricted(self.config)
+                   else "Pips are off." if self.config.get("pips_enabled", False) is not True else "")
+        if refusal:
+            if cmd.get("op") == "open":
+                self.em.emit("pip_desktop_closed", pip_id=pip_id[:80], reason=refusal[:300])
+            return
+        from .pip_screen_stream import DesktopStreams
+        lock = self.__dict__.setdefault("_pips_command_lock", threading.Lock())
+        with lock:
+            streams = self.__dict__.get("_desktop_streams")
+            if streams is None:
+                streams = self._desktop_streams = DesktopStreams(self.em.emit, self.config)
+        streams.handle(cmd)
+
     def _pips_policy_refusal(self, cmd):
         if getattr(self, "_pips_closing", False):
             self._pips_failure(cmd, "chat_closed", "This chat closed before its Pip control could run.")
@@ -4420,6 +4446,10 @@ class Backend:
 
         if t in ("pips_control", "pips_enable", "pips_runtime"):
             self._queue_pips_command(cmd)
+            return
+
+        if t == "pip_desktop":
+            self._pip_desktop(cmd)
             return
 
         if t == "list_prompt_pips":

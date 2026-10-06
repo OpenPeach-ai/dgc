@@ -62,7 +62,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
     "always_allow_pip_computer_action",
     "list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file", "remove_pip_computer_file",
-    "run_pip_computer_command", "list_pip_computer_terminal",
+    "run_pip_computer_command", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
     "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
@@ -127,6 +127,7 @@ _COMMAND_ARGS = {
     "list_pip_computer_files": {"pip_id", "path"}, "read_pip_computer_file": {"pip_id", "path"},
     "add_pip_computer_file": {"pip_id", "path", "name", "data"}, "remove_pip_computer_file": {"pip_id", "path"},
     "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
+    "get_pip_computer_desktop": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
     "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
@@ -3321,6 +3322,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = {"view": pip_computer.view_call(registry, pip_id, request.get("op"), request, actor)}
                 else:
                     result = pip_computer.request_stop(registry, pip_id, actor)
+            elif command == "get_pip_computer_desktop":
+                from . import pip_computer
+                result = {"desktop": pip_computer.desktop_status(registry, pip_id, actor)}
             elif command in ("list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file",
                              "remove_pip_computer_file", "run_pip_computer_command", "list_pip_computer_terminal"):
                 # The computer's Files and Terminal (its browser is above): local only, its own folder only.

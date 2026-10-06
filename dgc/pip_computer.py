@@ -38,6 +38,7 @@ from .workspace_registry import RegistryError
 PLAN = {"schema_version": 1}
 ACTION_TTL_SECONDS = 24 * 3600
 IDLE_SECONDS = 15 * 60
+USER_WRITE_SECONDS = 3.0             # a submit this soon after the user's own input is theirs
 MAX_FRAMES_PER_RUN = 200
 MAX_FRAME_BYTES = 90 * 1024          # base64 still fits a 128 KiB Pips reply
 MAX_VIEW_FRAME_BYTES = 700 * 1024    # the live screen: one reply, well inside the 4 MiB frame
@@ -185,6 +186,9 @@ class Host:
         threading.Thread(target=self._keep, name=f"pip-computer-{pip_id[-8:]}", daemon=True).start()
         self.browser.launch = self._launch
         self.viewer = None
+        self.desktop = None                 # the full screen (pip_screen), when this machine has it
+        self.user_input_at = 0.0            # the user's last click or key on this computer
+        self._pump_thread = None
         self.run_id = None
         self.frames_dir = None
         self.frames = 0
@@ -219,7 +223,67 @@ class Host:
             for request_id in list(self.browser.held):
                 self.browser.drop(request_id)
             self.browser.close()
+            if self.desktop is not None:
+                self.desktop.stop()
+                self.desktop = None
             self.proxy.stop()
+
+    # -- the desktop -------------------------------------------------------------------------
+
+    def ensure_desktop(self) -> bool:
+        """Start this computer's full screen if the machine can show one; the browser moves onto it."""
+        from . import pip_screen
+        with self.lock:
+            if self.desktop is not None and self.desktop.running():
+                return True
+            if not pip_screen.availability()["available"]:
+                return False
+            from .pip_computer_files import files_root
+            desktop = pip_screen.Desktop(socket_dir() / f"{self.pip_id[-12:]}-desk", files_root(self.root), "Pip")
+            desktop.on_launch = self._dock_launch
+            desktop.start(self._launch)
+            self.desktop = desktop
+            if self.browser.display_dir != desktop.x11_dir:
+                self.browser.display_dir = desktop.x11_dir
+                self.browser.close()          # a headless browser restarts as a window on the screen
+            self.browser.start()
+            if self._pump_thread is None:
+                self._pump_thread = threading.Thread(target=self._pump_loop, name=f"pip-desktop-{self.pip_id[-8:]}",
+                                                     daemon=True)
+                self._pump_thread.start()
+            return True
+
+    def _dock_launch(self, what: str) -> None:
+        """The dock's Browser icon: bring the browser back (a new window, or a restart if it closed)."""
+        if what != "browser":
+            return
+        with self.lock:
+            if not self.browser.alive():
+                self.browser.close()
+                self.browser.start()
+            else:
+                try:
+                    self.browser._browser_call("Target.createTarget", {"url": "about:blank", "newWindow": True})
+                except Exception:              # noqa: BLE001 - a dock click never takes the computer down
+                    self.browser.close()
+                    self.browser.start()
+
+    def _pump_loop(self) -> None:
+        """With a desktop, nobody else reads the browser between runs: keep its gate answering."""
+        while not self._closed.is_set():
+            time.sleep(0.05)
+            with self.lock:
+                if self.run_id is not None or not self.browser.alive():
+                    continue
+                try:
+                    self.browser.pump(0.2)
+                    self._settle_writes()
+                except Exception:              # noqa: BLE001 - keep pumping; the next run reports it
+                    continue
+
+    def user_input(self) -> None:
+        self.user_input_at = time.monotonic()
+        self.last_used = self.user_input_at
 
     # -- a run's session ---------------------------------------------------------------------
 
@@ -584,8 +648,11 @@ def tick(registry, config) -> dict:
     return done
 
 
-def _continue(registry, row, config) -> str:
-    """After a held submit is sent: a chat that held it gets the Pip's next reply, a task its next run."""
+def _continue(registry, row, config) -> str | None:
+    """After a held submit is sent: a chat that held it gets the Pip's next reply, a task its next run.
+    One no run made (a page's own submit, approved by the user) has nothing to continue."""
+    if not row["run_id"]:
+        return None
     from .pips import PipStore
     store = PipStore(registry)
     origin = registry.db.execute("SELECT json_extract(manifest,'$.run_kind') FROM pip_runs WHERE id=?",
@@ -722,6 +789,23 @@ class ViewServer:
                 request = json.loads(raw.decode("utf-8"))
                 if not isinstance(request, dict) or not _secrets.compare_digest(str(request.get("token", "")), self.token):
                     reply = {"ok": False, "error": "refused"}
+                elif request.get("op") == "desktop":
+                    # The full screen: after one line of reply, the connection is the viewer's stream.
+                    self.last_used = time.monotonic()
+                    try:
+                        shown = self.host.ensure_desktop()
+                    except RegistryError as error:
+                        shown, reason = False, str(error)
+                    else:
+                        reason = "This computer cannot show a desktop here."
+                    if not shown:
+                        client.sendall(json.dumps({"ok": False, "error": reason}).encode("utf-8") + b"\n")
+                        return
+                    client.sendall(b'{"ok": true}\n')
+                    from .pip_screen import splice
+                    splice(client, self.host.desktop.vnc_socket, watching=lambda: self.host.run_id is not None,
+                           on_input=self.host.user_input)
+                    return
                 else:
                     self.last_used = time.monotonic()
                     reply = self.host.view(str(request.get("op", "")), request)
@@ -766,8 +850,9 @@ def _host_view(self, op: str, request: dict) -> dict:
                     self.browser.evaluate_json("(() => { history.back(); return true; })()")
                 else:
                     return {"ok": False, "error": "Unknown view action."}
+                self.user_input()
                 self.browser.pump(0.8)
-                self._user_writes()
+                self._settle_writes()
             self.browser.start()
             data = self.browser.screenshot_jpeg(55)
             if len(data) > MAX_VIEW_FRAME_BYTES:        # a busy page: the same screen, coarser
@@ -779,18 +864,43 @@ def _host_view(self, op: str, request: dict) -> dict:
             return {"ok": False, "error": str(error)[:300]}
 
 
-def _user_writes(self) -> None:
-    """While the user drives (no run), what they submit is theirs to send: release it now."""
+def _settle_writes(self) -> None:
+    """With no run: a submit right after the user's own click or key is theirs, and is sent; any
+    other (a page's own timer, say) waits for the user's approval like a Pip's."""
     if self.run_id is not None:
         return
     while self._queued:
-        held = self._queued.pop(0)
-        if held.request_id in self.browser.held:
-            self.browser.release(held.request_id)
+        if time.monotonic() - self.user_input_at <= USER_WRITE_SECONDS:
+            held = self._queued.pop(0)
+            if held.request_id in self.browser.held:
+                self.browser.release(held.request_id)
+        else:
+            self._record_held()
 
 
 Host.view = _host_view
-Host._user_writes = _user_writes
+Host._settle_writes = _settle_writes
+
+
+def desktop_status(registry, pip_id: str, actor: str) -> dict:
+    """Whether this computer can show its full screen here, which browser it runs, and what to install."""
+    if actor not in ("editor-user", "local-console"):
+        raise RegistryError("local_only", "Use a Pip's computer on this computer.")
+    from .pips import PipStore
+    from . import pip_screen
+    from .pip_computer_box import browser_name, find_chrome
+    PipStore(registry)._job(pip_id)
+    shown = pip_screen.availability()
+    chrome = find_chrome()
+    using = registry.db.execute("SELECT 1 FROM pip_runs WHERE pip_id=? AND status IN ('running','cancelling') LIMIT 1",
+                                (pip_id,)).fetchone() is not None
+    return {"pip_id": pip_id, "available": shown["available"], "reason": shown["reason"], "install": shown["install"],
+            "using": using,
+            "browser": browser_name(chrome) if chrome is not None else None,
+            "chrome_install": "" if chrome is not None and browser_name(chrome) == "Google Chrome" else CHROME_INSTALL}
+
+
+CHROME_INSTALL = "sudo apt install google-chrome-stable  # after adding Google's repository: https://www.google.com/linuxrepositories/"
 
 
 DESK_COMMANDS = ("list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file",

@@ -9,6 +9,8 @@ Personal Pip can be created with an empty `goal`, and with `pip_type` `core` (th
 Terminal: `list_pip_computer_files`, `read_pip_computer_file` and `list_pip_computer_terminal`
 (reads), and `add_pip_computer_file`, `remove_pip_computer_file` and `run_pip_computer_command`
 (mutations), all API 43; `add_pip_computer_file`'s `data` (2 MB) travels outside the 32 KiB budget.
+`get_pip_computer_desktop` (API 43) says whether a computer's full screen can show, and which
+browser it runs. The vendored editor protocol adds `pip_desktop` and its two events.
 
 Pip computers (Pips API 42). `session.pips` gains `get_pip_computer`,
 `list_pip_computer_actions`, `get_pip_computer_frame` and `list_pip_computer_frames`, and the

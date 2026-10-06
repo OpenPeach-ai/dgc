@@ -31,6 +31,9 @@
   (sometimes twice), and its eyes follow your pointer, settling back when you stop. Thinking looks
   up to each side, working reads and bobs, waiting hops for your attention, success bounces and
   failure droops. Reduced motion keeps them still.
+- With the desktop programs installed, a Pip's computer tab is its real screen, like Grok's bots:
+  Chrome, a file manager and a terminal on a desktop with a dock, which you use directly. While
+  the Pip works you watch. Without them, the tab says what to install and shows the simpler view.
 - A Pip's Settings shows its **Skills** (your DGC skills that fit everyday work) with **Manage
   skills…**, which opens them in DGC Settings.
 - A Pip's computer opens as an editor tab, "Gmail · Computer": a desktop with a dock of three apps,

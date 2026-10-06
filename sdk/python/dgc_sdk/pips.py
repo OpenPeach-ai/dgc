@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
-    "list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal",
+    "list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pip_message_image", "get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames",
     "list_pip_action_grants", "list_pip_feedback", "export_pip", "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
     "get_pip_connector_draft", "list_pip_connector_drafts", "inspect_pip_connector_actions", "inspect_pip_calendar_connection", "get_pip_calendar_draft", "list_pip_calendar_drafts",
@@ -179,7 +179,7 @@ MUTATION_COMMANDS |= API43_MUTATIONS
 API43_READS = frozenset({'get_pip_message_image'})
 READ_COMMANDS |= API43_READS
 # API 43: a Pip computer's Files and Terminal (its browser is API 42).
-API43_READS |= {'list_pip_computer_files', 'read_pip_computer_file', 'list_pip_computer_terminal'}
+API43_READS |= {'list_pip_computer_files', 'read_pip_computer_file', 'list_pip_computer_terminal', 'get_pip_computer_desktop'}
 API43_MUTATIONS |= {'add_pip_computer_file', 'remove_pip_computer_file', 'run_pip_computer_command'}
 READ_COMMANDS |= API43_READS
 MUTATION_COMMANDS |= API43_MUTATIONS
@@ -191,6 +191,7 @@ COMMAND_FIELDS = {
     'remove_pip_computer_file': frozenset({'pip_id', 'path'}),
     'run_pip_computer_command': frozenset({'pip_id', 'command'}),
     'list_pip_computer_terminal': frozenset({'pip_id'}),
+    'get_pip_computer_desktop': frozenset({'pip_id'}),
     'get_pip_computer': frozenset({'pip_id'}),
     'list_pip_computer_actions': frozenset({'pip_id', 'limit'}),
     'get_pip_computer_frame': frozenset({'run_id', 'frame'}),

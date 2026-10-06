@@ -577,6 +577,9 @@ you can make it: the main chat and the Pip itself can't.
   carries on from the result. **Reject** drops it. A held request expires after 24 hours. It is
   also lost, unsent, if the computer stops or the runner restarts, because the browser is what
   holds it.
+- **What you submit is yours, right away.** With no Pip run using the computer, a submit within
+  three seconds of your own click or key is sent, because you made it. Anything a page sends on
+  its own, with nobody at the keyboard, waits for your approval like a Pip's.
 - **You sign in, not the Pip.** **Open browser** shows the Pip's screen. Click on it, type and go
   to an address to sign in to the sites the Pip needs; it keeps those sign-ins in its own
   profile. The Pip never sees your passwords. What you submit in the open browser is sent at
@@ -593,9 +596,24 @@ you can make it: the main chat and the Pip itself can't.
   [Privacy](#privacy-and-where-state-lives)) until you delete it.
 
 **Its screen in an editor tab.** The computer button in a Pip's chat (or **Open its computer**
-in Settings) opens "NAME · Computer" as an editor tab: a desktop with a dock of three apps at the
-bottom, like Grok's bots. Each app opens in a window you can minimise or close; when the Pip starts
-using its browser, the browser window comes up so you can watch.
+in Settings) opens "NAME · Computer" as an editor tab.
+
+With the desktop programs installed, the tab is the Pip's real screen, like Grok's bots: a small
+Linux desktop with a dock at the bottom holding **Browser** (Google Chrome when it is installed,
+otherwise Chromium), **Files** (a file manager) and **Terminal**. Click, type and move windows as
+on any computer. While a Pip run is using it you watch, and your keyboard and mouse wait until it
+is done. The browser is the Pip's own: closing its window and clicking Browser in the dock brings it
+back. To set it up on Ubuntu or Debian:
+
+```sh
+sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm
+# Google Chrome, from Google's repository (https://www.google.com/linuxrepositories/):
+sudo apt install google-chrome-stable
+```
+
+Without them the tab shows a simpler desktop DGC draws itself, and says what to install: a dock of
+three apps at the bottom, each in a window you can minimise or close; when the Pip starts using its
+browser, the browser window comes up so you can watch.
 
 - **Browser**: the live screen. Click, type, scroll and go to an address; anything the Pip would
   submit shows at the top with **Send once**, **Always allow** and **Reject**.

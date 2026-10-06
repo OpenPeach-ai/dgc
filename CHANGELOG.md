@@ -17,6 +17,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   and a Pip with a computer also finds them in its Files, under From chat (`send_pip_message`
   `images` and `files`, `get_pip_message_image`). Registry schema 37 (36 adds `pip_chat_images`,
   37 `pip_chat_files`): an older `dgc` can't open the Pips registry once this one has.
+- A Pip's computer is a real desktop, like Grok's bots, when the desktop programs are installed
+  (`sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm`): Google Chrome (or
+  Chromium) in a window, a file manager and a terminal, on a dock, streamed to the editor. The
+  desktop has no network; the browser keeps its proxy and holds; the Pip's own commands never see
+  the screen. While a run uses it, your input waits. New: `get_pip_computer_desktop`, the
+  `pip_desktop` command and `pip_desktop_data`/`pip_desktop_closed` events (capability
+  `pips_desktop`).
+- Pip computers use Google Chrome when it is installed, and Chromium otherwise.
+- With no run using a computer, a submit counts as yours only within three seconds of your own
+  click or key; anything else a page sends waits for your approval.
 - Personal Pips use your DGC skills that fit everyday work: your own and plugin skills, and the
   built-in deep-research, dataviz and plan. A Pip lists them and loads one with the skill tool;
   skills you turn off are off for Pips too. A skill never grants a tool or access.

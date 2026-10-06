@@ -69,6 +69,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
                     "result": _O(False), "error": _O(False)},
     "pips_status": {"enabled": _B(), "api_version": _I(), "restart_required": _B(),
                     "message": _S(), "request_id": _S(False)},
+    # The screen's bytes for the viewer (base64), and the end of a stream with its reason.
+    "pip_desktop_data": {"pip_id": _S(), "data": _S()},
+    "pip_desktop_closed": {"pip_id": _S(), "reason": _S()},
     "chat_changes": {"roots": _A(), "session_id": _S(), "request_id": _S()},
     "chat_change": {"root": _S(), "path": _S(), "before": _S(), "after": _S(), "kind": _S(),
                     "session_id": _S(), "request_id": _S()},
@@ -532,6 +535,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "pips_control": {"request": _O()},
     "pips_enable": {"enabled": _B(), "request_id": _S(False)},
     "pips_runtime": {"action": _f("string", enum=("start", "resume")), "request_id": _S()},
+    # A Pip computer's screen (capability pips_desktop): open a stream, send the viewer's bytes
+    # (base64), close it. The editor never gets a socket or a path.
+    "pip_desktop": {"pip_id": _S(), "op": _f("string", enum=("open", "send", "close")), "data": _S(False)},
     "get_chat_changes": {"request_id": _S()},
     "get_chat_change": {"root": _S(), "path": _S(), "session_id": _S(), "request_id": _S()},
     "get_workspace_changes": {"request_id": _S()},

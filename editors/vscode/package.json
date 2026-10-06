@@ -606,6 +606,7 @@
     "scroll-check": "node test/render-scroll.mjs"
   },
   "devDependencies": {
+    "@novnc/novnc": "1.7.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.84.0",

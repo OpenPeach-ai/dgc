@@ -756,6 +756,28 @@ run the view only watches. All nine computer commands are for the local user onl
 are JPEG, at most 90 KiB each and 200 per run, under the run's `artifacts/computer`. A live
 view frame is taken at JPEG quality 55, and again at 30 if it is over 700 KiB (a busy page).
 
+**The full screen** (API 43, capability `pips_desktop`). When the machine has the desktop programs
+(TigerVNC's `Xtigervnc`, `openbox`, `tint2`, `pcmanfm`, `xterm`; `pip_screen.availability()`), a
+computer gets a desktop box: `bwrap --unshare-all` with no network, the display on a Unix socket
+only (`-rfbunixpath`, `-rfbport -1`, `-nolisten tcp`; GLX off, because a GPU driver can crash it in
+the box), the window manager, the wallpaper (`pcmanfm --desktop`) and a dock of three launchers. Files
+is bound at `/home/pip/Files`; the rest of home is a tmpfs. The browser then runs headful in its own
+box with the desktop's X socket directory bound at `/tmp/.X11-unix`, 1280×724 above the dock, no
+startup window and only DGC's page restored; it is still driven over its devtools pipe and gated
+the same way. The dock's Browser launcher only writes `browser` to a control FIFO, and the Host
+starts or reopens the Pip's own browser; Files and Terminal open `pcmanfm` and `xterm` in the desktop
+box. The Pip's own `run` commands stay in the Terminal box, which has no display. With a desktop,
+a thread keeps the browser's gate answering between runs.
+
+The editor's viewer reaches the screen through the view socket (op `desktop`, token-checked, the
+token never leaves the controller), which splices it to the VNC socket through a filter that frames
+every viewer message (RFB) and drops key, pointer and clipboard input while a run is active; input
+it passes stamps `user_input_at`. Outside a run, a held submit within `USER_WRITE_SECONDS` (3) of
+the user's input is released; any other is recorded as a pending action (with no run) for approval,
+and an approved one has no continuation. `get_pip_computer_desktop {pip_id}` (local) returns
+`{pip_id, available, reason, install, using, browser, chrome_install}`; `browser` is
+`"Google Chrome"` (a real binary at `/opt/google/chrome/chrome`), `"Chromium"` or null.
+
 **A computer's Files and Terminal** (API 43). Beside the browser, a computer has **Files**:
 `computers/PIP_ID/home/Files`, which the browser sees as `/home/pip/Files`; its downloads go to
 `Files/Downloads` (CDP `Browser.setDownloadBehavior`). The browser's profile beside it is never

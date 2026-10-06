@@ -67,3 +67,14 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-dock-app.active{background:rgba(255,255,255,.18)}
 @media(max-width:620px){.pc-split{grid-template-columns:minmax(0,1fr)}.pc-window{inset:8px 8px 66px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}.pc-dock-app{transition:none}.pc-dock-app:hover{transform:none}}
+/* The full screen: the Pip's real desktop, scaled to fit, with a note over it when needed. */
+.pc-live{background:#3a3a3f}
+.pc-vnc{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.pc-vnc>div{width:100%!important;height:100%!important;background:transparent!important}
+.pc-overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.pc-overlay>*{pointer-events:auto}
+.pc-overlay-note{color:#f3f3f5;background:rgba(20,20,24,.6);padding:8px 14px;border-radius:10px;margin:0}
+.pc-overlay-card{display:grid;gap:10px;justify-items:center;max-width:460px;text-align:center;color:#f3f3f5;background:rgba(20,20,24,.75);padding:16px 20px;border-radius:12px}
+.pc-overlay-card p{margin:0}
+.pc-overlay-badge{align-self:start;margin:12px 0 0;color:#fff;background:rgba(124,92,255,.85);padding:6px 12px;border-radius:999px;font-size:12px;pointer-events:none}
+.pc-install code{font-family:var(--mono);font-size:12px;background:var(--surface);padding:2px 6px;border-radius:4px;user-select:all}

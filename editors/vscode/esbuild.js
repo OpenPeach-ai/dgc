@@ -73,7 +73,8 @@ async function main() {
     minify: production, sourcemap: false,
   });
   await esbuild.build({
-    entryPoints: ["src/pipComputerClient.js"], bundle: true, format: "iife",
+    // An ES module: noVNC (the computer's screen) uses top-level await.
+    entryPoints: ["src/pipComputerClient.js"], bundle: true, format: "esm",
     platform: "browser", target: "chrome108", outfile: "dist/pipComputer.js",
     minify: production, sourcemap: false,
   });

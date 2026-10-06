@@ -1181,3 +1181,10 @@ export function pipComputerTerminal(value){
  value.entries.forEach(pipComputerTerminalEntry);
  return value;
 }
+export function pipComputerDesktop(value,pip){
+ if(!record(value)||Object.keys(value).sort().join()!=='available,browser,chrome_install,install,pip_id,reason,using'||value.pip_id!==pip
+   ||typeof value.available!=='boolean'||typeof value.using!=='boolean'||typeof value.reason!=='string'||typeof value.install!=='string'
+   ||typeof value.chrome_install!=='string'||!(value.browser===null||['Google Chrome','Chromium'].includes(value.browser)))
+  throw Error('This computer\'s screen status is invalid.');
+ return value;
+}

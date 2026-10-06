@@ -8,7 +8,8 @@ import {createRequire} from 'node:module';
 // A Pip's computer as an editor tab (Pips API 43), like Grok's bots: "Gmail · Computer" with its
 // Browser, Files and Terminal. The host opens one tab per Pip and pins it to that Pip's computer.
 const require=createRequire(import.meta.url),src=fileURLToPath(new URL('../src/',import.meta.url));
-const code=(await build({entryPoints:[src+'pipComputerClient.js'],bundle:true,write:false,loader:{'.css':'empty'},format:'iife'})).outputFiles[0].text;
+const code=(await build({entryPoints:[src+'pipComputerClient.js'],bundle:true,write:false,loader:{'.css':'empty'},format:'iife',
+ alias:{'@novnc/novnc':fileURLToPath(new URL('./support/novnc-stub.mjs',import.meta.url))}})).outputFiles[0].text;
 const view=(await build({entryPoints:[src+'pipsView.ts'],bundle:true,write:false,platform:'node',format:'cjs',external:['vscode']})).outputFiles[0].text;
 const windows=[];after(()=>windows.forEach(w=>w.close()));
 const PIP={id:'pip_'+'s'.repeat(32),name:'Shopper',pip_type:'scout'};
@@ -20,11 +21,12 @@ const computer=(extra={})=>({pip_id:PIP.id,granted:true,available:true,reason:''
 async function flush(){for(let i=0;i<14;i++)await Promise.resolve();}
 const viewModule=(stub={})=>{const out={exports:{}};new Function('module','exports','require',view)(out,out.exports,name=>name==='vscode'?stub:require(name));return out.exports;};
 
-function setup({status=computer(),files={'':[{name:'Downloads',kind:'folder',bytes:null,modified:1},{name:'notes.txt',kind:'file',bytes:12,modified:2}],Downloads:[{name:'report.pdf',kind:'file',bytes:2048,modified:3}]},terminal={entries:[],running:null}}={}){
+function setup({desktop=null,screen=false,viewer=null,status=computer(),files={'':[{name:'Downloads',kind:'folder',bytes:null,modified:1},{name:'notes.txt',kind:'file',bytes:12,modified:2}],Downloads:[{name:'report.pdf',kind:'file',bytes:2048,modified:3}]},terminal={entries:[],running:null}}={}){
  const dom=new JSDOM(viewModule().computerDocument(),{runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window;windows.push(w);
  const sent=[],answered=new Set(),timers=[];let state=status,term=terminal;
  w.setInterval=fn=>{timers.push({fn,live:true});return timers.length;};w.clearInterval=id=>{if(timers[id-1])timers[id-1].live=false;};
- w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m),getState:()=>undefined,setState:()=>{}});w.eval(code);
+ w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m),getState:()=>undefined,setState:()=>{}});
+ if(viewer)w.__dgcTestRFB=viewer;w.eval(code);
  const message=data=>w.dispatchEvent(new w.MessageEvent('message',{data}));
  const answer=(request,result,ok=true)=>{answered.add(request.id);message({type:'pipsReply',id:request.id,ok,...(ok?{result}:{error:result})});};
  const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
@@ -34,11 +36,12 @@ function setup({status=computer(),files={'':[{name:'Downloads',kind:'folder',byt
   read_pip_computer_file:()=>({path:r.path,name:r.path.split('/').at(-1),mime:'text/plain',bytes:12,text:'buy milk\n',truncated:false}),
   list_pip_computer_terminal:()=>term,run_pip_computer_command:()=>({running:{by:'you',command:r.command,at:1}}),
   remove_pip_computer_file:()=>({path:r.path,removed:true}),add_pip_computer_file:()=>({path:r.name,name:r.name,bytes:3}),
-  decide_pip_computer_action:()=>({action:{...hold,status:r.approve?'approved':'rejected'}}),stop_pip_computer:()=>({pip_id:PIP.id,stopping:true})}[r.type]?.());
+  decide_pip_computer_action:()=>({action:{...hold,status:r.approve?'approved':'rejected'}}),stop_pip_computer:()=>({pip_id:PIP.id,stopping:true}),
+  get_pip_computer_desktop:()=>({desktop:{pip_id:PIP.id,available:true,reason:'',install:'',using:false,browser:'Google Chrome',chrome_install:'',...(desktop||{})}})}[r.type]?.());
  async function drain(overrides={}){for(let round=0;round<12;round++){await flush();let count=0;for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=m.request.type in overrides?overrides[m.request.type](m.request):defaults(m.request);if(result!==undefined){answer(m,result);count++;}}if(!count)break;}await flush();}
- message({type:'pipComputerInit',pip:PIP});
+ message({type:'pipComputerInit',pip:PIP,desktop:screen});
  message({type:'pipsConnection',generation:7,apiVersion:43,connected:true,supported:true,enabled:true});
- return {w,d:w.document,sent,timers,answer,requests,drain,setState:s=>{state=s;},setTerminal:t=>{term=t;},
+ return {w,d:w.document,sent,timers,answer,requests,drain,message,setState:s=>{state=s;},setTerminal:t=>{term=t;},
   click:s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.dispatchEvent(new w.MouseEvent('click',{bubbles:true,clientX:el._x||0,clientY:el._y||0}));},
   submit:s=>w.document.querySelector(s).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true})),
   tick:async(overrides={})=>{for(const t of timers.filter(t=>t.live))t.fn();await drain(overrides);}};
@@ -182,4 +185,61 @@ test('Save to… writes the file where you choose, from the host',async()=>{
  assert.deepEqual(h.saved,[['/home/me/notes.txt','buy milk\n']]);
  await new Promise(r=>setTimeout(r,1));
  assert.equal(tab.posted.at(-1).type,'pipComputerSaved');assert.equal(tab.posted.at(-1).ok,true);
+});
+
+function fakeViewer(){
+ const made=[];
+ class Viewer{constructor(target,channel,options){this.target=target;this.channel=channel;this.options=options;this.listeners={};made.push(this);
+  channel.onopen=()=>{this.opened=true;};channel.onmessage=e=>{(this.got||=[]).push(new Uint8Array(e.data));};channel.onclose=e=>{this.closed=e;};}
+  addEventListener(kind,fn){this.listeners[kind]=fn;}}
+ return {Viewer,made};
+}
+
+test('with the desktop installed, the tab is the Pip\'s real screen, streamed through the host',async()=>{
+ const {Viewer,made}=fakeViewer();
+ const x=setup({screen:true,viewer:Viewer});await x.drain();
+ assert.equal(made.length,1,'one viewer');assert.equal(made[0].target.id,'pc-vnc');
+ assert.deepEqual(x.sent.filter(m=>m.type==='pipDesktop').map(m=>m.op),['open']);
+ assert.equal(x.requests('use_pip_computer_view').length,0,'no screenshots: the screen streams itself');
+ assert.match(x.d.querySelector('.pc-overlay').textContent,/Opening Shopper's screen/);
+ x.message({type:'pipDesktopData',data:Buffer.from('RFB 003.008\n').toString('base64')});
+ assert.ok(made[0].opened,'the first bytes open the channel');assert.equal(Buffer.from(made[0].got[0]).toString(),'RFB 003.008\n');
+ made[0].listeners.connect();assert.equal(x.d.querySelector('.pc-overlay').textContent,'');
+ made[0].channel.send(new Uint8Array([1,2,3]).buffer);
+ assert.deepEqual(x.sent.filter(m=>m.type==='pipDesktop'&&m.op==='send').map(m=>m.data),[Buffer.from([1,2,3]).toString('base64')]);
+ x.message({type:'pipDesktopClosed',reason:'The computer\'s screen closed.'});
+ assert.match(x.d.querySelector('.pc-overlay').textContent,/screen closed/);assert.ok(made[0].closed);
+ x.click('#pc-reconnect');
+ assert.equal(made.length,2);assert.deepEqual(x.sent.filter(m=>m.type==='pipDesktop').map(m=>m.op),['open','send','open']);
+});
+
+test('while the Pip uses its computer the screen says so; without the desktop it says what to install',async()=>{
+ const {Viewer,made}=fakeViewer();
+ const x=setup({screen:true,viewer:Viewer,desktop:{using:true}});await x.drain();
+ x.message({type:'pipDesktopData',data:Buffer.from('x').toString('base64')});made[0].listeners.connect();
+ assert.match(x.d.querySelector('.pc-overlay').textContent,/Shopper is using its computer/);
+ assert.match(x.d.querySelector('.pc-status').textContent,/is using its computer/);
+ const y=setup({screen:true,viewer:Viewer,desktop:{available:false,reason:'The desktop needs Xtigervnc.',install:'sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm'}});await y.drain();
+ assert.ok(y.d.querySelector('.pc-dock'),'the drawn desktop stays');
+ assert.match(y.d.querySelector('.pc-install').textContent,/sudo apt install tigervnc-standalone-server/);
+ assert.equal(y.sent.filter(m=>m.type==='pipDesktop').length,0);
+ const old=setup({screen:false,viewer:Viewer});await old.drain();
+ assert.equal(old.requests('get_pip_computer_desktop').length,0,'a CLI without the stream is never asked');
+});
+
+test('the host relays the screen for its own tab only, and only to a CLI that streams it',()=>{
+ const make=desktop=>{const h=host();h.editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:43,...(desktop?{pips_desktop:1}:{})},{});h.editor.receive({type:'pipsOpenComputer',pip:PIP});return h;};
+ const h=make(true),tab=h.panels.at(-1);
+ tab.receive({type:'pipsReady'});assert.equal(tab.posted.find(m=>m.type==='pipComputerInit').desktop,true);
+ tab.receive({type:'pipDesktop',op:'open'});tab.receive({type:'pipDesktop',op:'send',data:'AQID'});
+ tab.receive({type:'pipDesktop',op:'send',data:'not base64!'});tab.receive({type:'pipDesktop',op:'erase'});
+ assert.deepEqual(h.sent.filter(m=>m.type==='pip_desktop').map(m=>[m.pip_id,m.op,m.data]),[[PIP.id,'open',undefined],[PIP.id,'send','AQID']]);
+ assert.equal(h.editor.event({type:'pip_desktop_data',pip_id:PIP.id,data:'AQID'}),true);
+ assert.deepEqual(tab.posted.at(-1),{type:'pipDesktopData',data:'AQID'});
+ h.editor.event({type:'pip_desktop_data',pip_id:OTHER,data:'BBBB'});assert.equal(tab.posted.at(-1).data,'AQID','another Pip\'s screen never reaches this tab');
+ h.editor.event({type:'pip_desktop_closed',pip_id:PIP.id,reason:'closed'});assert.deepEqual(tab.posted.at(-1),{type:'pipDesktopClosed',reason:'closed'});
+ tab.dispose();assert.deepEqual(h.sent.filter(m=>m.type==='pip_desktop').at(-1),{type:'pip_desktop',pip_id:PIP.id,op:'close'},'closing the tab closes its stream');
+ const old=make(false),oldTab=old.panels.at(-1);oldTab.receive({type:'pipsReady'});
+ assert.equal(oldTab.posted.find(m=>m.type==='pipComputerInit').desktop,false);
+ oldTab.receive({type:'pipDesktop',op:'open'});assert.equal(old.sent.filter(m=>m.type==='pip_desktop').length,0);
 });

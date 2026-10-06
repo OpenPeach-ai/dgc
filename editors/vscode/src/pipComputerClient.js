@@ -3,23 +3,27 @@
 // the host pins it to this one Pip and to the computer commands.
 import './pipComputer.css';
 import '../media/pips/plush.js';
-import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry} from './pipsModel.js';
+import RFB from '@novnc/novnc';
+import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop} from './pipsModel.js';
 
 const vscode=acquireVsCodeApi();
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
 const S={connected:false,apiVersion:0,generation:0,pip:null,app:'browser',open:['browser'],computer:null,error:'',notice:'',
  view:null,viewError:'',files:{path:'',entries:[],total:0,more:false,selected:null,preview:null,error:''},
- terminal:{entries:[],error:'',running:false,draft:''},busy:false};
+ terminal:{entries:[],error:'',running:false,draft:''},busy:false,
+ // The full screen, like Grok's bots: the CLI can stream it (screenCapable) and this machine has it (desktop.available).
+ screenCapable:false,desktop:null,screen:{state:'off',reason:''}};
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
 const $=id=>document.getElementById(id);
 const send=(type,fields={})=>broker.request({type,...fields});
-let frameTimer=null,frameBusy=false,statusTimer=null,terminalTimer=null,cleanupFace=null;
+let frameTimer=null,frameBusy=false,statusTimer=null,terminalTimer=null,desktopTimer=null,cleanupFace=null;
 
 function plushFace(state){
  const plush=window.PipConcepts?.plush,index=TYPES.indexOf(S.pip?.pip_type);
  return plush&&index>=0?plush.markup({index,name:S.pip.name},state,'computer-face',{includeStyles:false}):'';
 }
-function using(){return S.view?.watching===true;}
+function screenMode(){return S.screenCapable&&S.apiVersion>=43&&S.desktop?.available===true&&S.computer?.granted===true;}
+function using(){return screenMode()?S.desktop?.using===true:S.view?.watching===true;}
 function headerMarkup(){
  const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending').length;
  const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
@@ -62,12 +66,55 @@ function terminalMarkup(){
  const rows=t.entries.map(e=>`<article class="pc-run"><p class="pc-prompt"><span class="pc-who">${e.by==='pip'?esc(S.pip?.name||'Pip'):'You'}</span> $ ${esc(e.command)}</p>${e.output?`<pre>${esc(e.output)}</pre>`:''}${e.exit!==0?`<p class="pc-exit">Exit ${esc(String(e.exit))}</p>`:''}</article>`).join('');
  return `<section class="pc-pane pc-terminal" aria-label="Terminal"><div class="pc-log" id="pc-log" role="log" aria-live="polite">${rows||'<p class="pc-muted">Commands you and the Pip run show here.</p>'}</div>${t.error?`<p class="pc-error" role="alert">${esc(t.error)}</p>`:''}<form id="pc-run" class="pc-bar"><span aria-hidden="true">$</span><input id="pc-command" aria-label="Command" autocomplete="off" spellcheck="false" value="${esc(t.draft)}"${t.running?' disabled':''}><button type="submit"${t.running?' disabled':''}>${t.running?'Running…':'Run'}</button></form><p class="pc-muted">No internet here: the browser is this computer's way online. Its home is the computer's Files.</p></section>`;
 }
+// The screen's bytes ride the extension host's messages; noVNC sees a WebSocket-like channel.
+function toB64(bytes){let text='';for(let i=0;i<bytes.length;i+=0x8000)text+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(text);}
+function fromB64(text){const raw=atob(text),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;}
+class ScreenChannel{
+ constructor(){this.binaryType='arraybuffer';this.protocol='';this.readyState='connecting';this.onopen=null;this.onmessage=null;this.onclose=null;this.onerror=null;}
+ send(data){if(this.readyState!=='open')return;const bytes=ArrayBuffer.isView(data)?new Uint8Array(data.buffer,data.byteOffset,data.byteLength):new Uint8Array(data);vscode.postMessage({type:'pipDesktop',op:'send',data:toB64(bytes)});}
+ close(){if(this.readyState==='closed')return;this.readyState='closed';vscode.postMessage({type:'pipDesktop',op:'close'});this.onclose?.({code:1000,reason:'',wasClean:true});}
+ deliver(text){if(this.readyState==='closed')return;if(this.readyState==='connecting'){this.readyState='open';this.onopen?.();}const bytes=fromB64(text);this.onmessage?.({data:bytes.buffer});}
+ end(reason){if(this.readyState==='closed')return;this.readyState='closed';this.onclose?.({code:1000,reason,wasClean:false});}
+}
+let channel=null,viewer=null;
+function startScreen(){
+ if(!screenMode()||S.screen.state==='opening'||S.screen.state==='live')return;
+ S.screen={state:'opening',reason:''};render();
+ channel=new ScreenChannel();
+ const Viewer=globalThis.__dgcTestRFB||RFB;
+ try{
+  viewer=new Viewer($('pc-vnc'),channel,{shared:true});
+  viewer.scaleViewport=true;viewer.resizeSession=false;viewer.focusOnClick=true;viewer.background='transparent';
+  viewer.addEventListener?.('connect',()=>{S.screen={state:'live',reason:''};render();});
+  viewer.addEventListener?.('disconnect',()=>{if(S.screen.state!=='closed'){S.screen={state:'closed',reason:S.screen.reason||'The screen closed.'};render();}});
+ }catch(error){S.screen={state:'closed',reason:errorText(error)};render();return;}
+ vscode.postMessage({type:'pipDesktop',op:'open'});
+}
+function overlayMarkup(){
+ const name=esc(S.pip?.name||'The Pip');
+ if(S.screen.state==='opening')return `<p class="pc-overlay-note">Opening ${name}'s screen…</p>`;
+ if(S.screen.state==='closed')return `<div class="pc-overlay-card"><p>${esc(S.screen.reason||'The screen closed.')}</p><button type="button" id="pc-reconnect">Open the screen again</button></div>`;
+ return using()?`<p class="pc-overlay-badge">${name} is using its computer. You can watch; it is yours again when it stops.</p>`:'';
+}
+function renderScreen(){
+ const app=document.getElementById('app');
+ if(!$('pc-live'))app.innerHTML=`<div id="pc-top"></div><div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div></div>`;
+ cleanupFace?.();
+ $('pc-top').innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${waitingMarkup()}`;
+ $('pc-overlay').innerHTML=overlayMarkup();
+ cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-top'));
+}
+function installMarkup(){
+ const d=S.desktop;if(!S.screenCapable||!d||d.available||!d.install)return '';
+ return `<p class="pc-notice pc-install" role="status">${esc(d.reason)} <code>${esc(d.install)}</code></p>`;
+}
 function render(){
+ if(screenMode()){renderScreen();return;}
  const app=document.getElementById('app');
  const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one from its chat.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
  cleanupFace?.();
- app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted?dockMarkup():''}</div>`;
+ app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted?dockMarkup():''}</div>`;
  cleanupFace=window.PipConcepts?.plush?.mount?.(app);
  if(focus&&$(focus)){$(focus).focus();if(caret!=null&&$(focus).setSelectionRange)try{$(focus).setSelectionRange(caret,caret);}catch{}}
  const log=$('pc-log');if(log)log.scrollTop=log.scrollHeight;
@@ -77,6 +124,13 @@ async function loadComputer(){
  if(!S.pip||!S.connected)return;
  try{S.computer=pipComputer((await send('get_pip_computer',{pip_id:S.pip.id})).computer,S.pip.id);S.error='';}
  catch(error){S.error=errorText(error);}
+ render();
+}
+async function loadDesktop(){
+ if(!S.pip||!S.connected||S.apiVersion<43||!S.screenCapable)return;
+ try{S.desktop=pipComputerDesktop((await send('get_pip_computer_desktop',{pip_id:S.pip.id})).desktop,S.pip.id);}
+ catch(error){S.desktop=null;}
+ if(screenMode())startScreen();
  render();
 }
 async function frame(op='frame',fields={},opening=false){
@@ -129,9 +183,10 @@ function screenPoint(event){
  return {x:Math.round((event.clientX-box.left)/box.width*Number(img.dataset.width)),y:Math.round((event.clientY-box.top)/box.height*Number(img.dataset.height))};
 }
 function schedule(){
- clearInterval(frameTimer);clearInterval(statusTimer);clearInterval(terminalTimer);
+ clearInterval(frameTimer);clearInterval(statusTimer);clearInterval(terminalTimer);clearInterval(desktopTimer);
  if(document.hidden||!S.computer?.granted)return;
  statusTimer=setInterval(()=>void loadComputer(),5000);
+ if(screenMode()){desktopTimer=setInterval(()=>void loadDesktop(),3000);return;}   // the screen streams itself
  // The browser's window refreshes its screen; without it, a slow check notices the Pip starting.
  frameTimer=setInterval(()=>void frame(),S.app==='browser'?800:4000);
  if(S.app==='terminal')terminalTimer=setInterval(()=>void loadTerminal(),2500);
@@ -147,6 +202,7 @@ document.addEventListener('click',event=>{
  if(t.dataset.app)show(t.dataset.app);
  else if(t.dataset.minimize){S.app='';render();schedule();vscode.setState({app:''});}
  else if(t.dataset.close){S.open=S.open.filter(a=>a!==t.dataset.close);S.app='';render();schedule();vscode.setState({app:''});}
+ else if(t.id==='pc-reconnect'){S.screen={state:'off',reason:''};startScreen();}
  else if(t.id==='pc-stop')void send('stop_pip_computer',{pip_id:S.pip.id}).then(()=>{S.notice='Stopped. Its sign-ins are kept.';S.view=null;return loadComputer();},error=>{S.error=errorText(error);render();});
  else if(t.id==='pc-back')void frame('back');
  else if(t.id==='pc-screen'){const p=screenPoint(event);if(p&&!using())void frame('click',p);}
@@ -191,8 +247,11 @@ document.addEventListener('visibilitychange',schedule);
 window.addEventListener('message',event=>{
  const m=event.data;if(!record(m))return;
  if(m.type==='pipsReply')broker.receive(m);
- else if(m.type==='pipsConnection'){const was=S.connected;S.connected=m.connected&&m.supported&&m.enabled;S.apiVersion=m.apiVersion;S.generation=m.generation;if(!S.connected)broker.reset();render();if(S.connected&&!was)void loadComputer().then(()=>{if(S.app)show(S.app);else{void frame('frame',{},true);schedule();}});}
- else if(m.type==='pipComputerInit'&&record(m.pip)){S.pip=m.pip;render();}
+ else if(m.type==='pipsConnection'){const was=S.connected;S.connected=m.connected&&m.supported&&m.enabled;S.apiVersion=m.apiVersion;S.generation=m.generation;if(!S.connected)broker.reset();render();
+  if(S.connected&&!was)void loadComputer().then(loadDesktop).then(()=>{if(screenMode()){schedule();return;}if(S.app)show(S.app);else{void frame('frame',{},true);schedule();}});}
+ else if(m.type==='pipComputerInit'&&record(m.pip)){S.pip=m.pip;S.screenCapable=m.desktop===true;render();}
+ else if(m.type==='pipDesktopData'&&typeof m.data==='string')channel?.deliver(m.data);
+ else if(m.type==='pipDesktopClosed'){S.screen={state:'closed',reason:typeof m.reason==='string'&&m.reason?m.reason:'The screen closed.'};channel?.end(S.screen.reason);render();}
  else if(m.type==='pipComputerSaved'){S.notice=m.ok?`Saved ${m.name}.`:m.error||'Not saved.';render();}
 });
 setInterval(()=>broker.expire(Date.now()),5000);

@@ -79,3 +79,11 @@ are locked in `package-lock.json`. Every package's copyright notice and license 
 identify a connector without making a request to that service. They are used unmodified, as
 identifiers, and imply no partnership, endorsement or completed authorization. Each file's origin
 and download date is recorded in `media/plugin-logos/SOURCES.md`, which ships with them.
+
+## noVNC 1.7.0
+
+The Pip computer tab bundles the noVNC core library ([`@novnc/novnc` 1.7.0](https://www.npmjs.com/package/@novnc/novnc/v/1.7.0),
+<https://github.com/novnc/noVNC>), unmodified, to show a Pip computer's screen. Copyright © 2022 the
+noVNC authors. The core library is licensed under the Mozilla Public License 2.0; its bundled
+`vendor/pako` is under the MIT License and `core/des.js` under BSD-style licenses. The full texts,
+and where to get the source, are in `licenses/NOVNC-LICENSES.txt`.

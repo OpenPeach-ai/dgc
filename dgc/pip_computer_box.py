@@ -327,11 +327,22 @@ class Box:
     proc: subprocess.Popen | None = None
     read_fd: int = -1
     write_fd: int = -1
+    display_dir: Path | None = None       # a desktop's X socket directory: the browser draws there
 
     def argv(self, forwarder: Path) -> list[str]:
         chrome_dir = self.chrome.parent
-        chrome = ["/opt/chrome/" + self.chrome.name, *_CHROME_FLAGS,
-                  f"--window-size={self.viewport[0]},{self.viewport[1]}", "about:blank"]
+        flags = list(_CHROME_FLAGS)
+        if self.display_dir is not None:
+            # A window on the Pip's desktop, like Chrome on Grok's bots; still driven and gated here.
+            # Sized to leave the dock's strip at the bottom of the screen free, whenever the dock appears.
+            flags = [f for f in flags if f != "--headless=new"] + ["--window-position=0,0", "--password-store=basic",
+                                                                  "--disable-session-crashed-bubble"]
+        # On a desktop the browser opens no window of its own: DGC's first page is its only tab.
+        size = f"--window-size={self.viewport[0]},{self.viewport[1]}" if self.display_dir is None else "--window-size=1280,724"
+        chrome = ["/opt/chrome/" + self.chrome.name, *flags, size,
+                  *(["--no-startup-window"] if self.display_dir is not None else ["about:blank"])]
+        display = ([] if self.display_dir is None else
+                   ["--bind", str(self.display_dir), "/tmp/.X11-unix", "--setenv", "DISPLAY", ":1"])
         inner = "python3 /run/dgc/forward.py & sleep 0.3; exec " + shlex.join(chrome)
         return ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
                 "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/bin", "/bin",
@@ -339,7 +350,7 @@ class Box:
                 "--ro-bind", "/etc/fonts", "/etc/fonts", "--ro-bind-try", "/etc/ssl", "/etc/ssl",
                 "--ro-bind-try", "/etc/ca-certificates", "/etc/ca-certificates",
                 "--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache",
-                "--dev", "/dev", "--proc", "/proc", "--size", str(512 * 1024 * 1024), "--tmpfs", "/tmp",
+                "--dev", "/dev", "--proc", "/proc", "--size", str(512 * 1024 * 1024), "--tmpfs", "/tmp", *display,
                 "--bind", str(self.home), "/home/pip", "--setenv", "HOME", "/home/pip",
                 "--setenv", "TMPDIR", "/tmp", "--unsetenv", "DBUS_SESSION_BUS_ADDRESS",
                 "--ro-bind", str(chrome_dir), "/opt/chrome",
@@ -511,6 +522,7 @@ class BoxedBrowser(BrowserSession):
                  viewport: tuple[int, int] = DEFAULT_VIEWPORT, on_write=None):
         super().__init__(chrome, allow_unsandboxed=True, viewport=viewport)
         self.home = Path(home)
+        self.display_dir: Path | None = None      # set by the Host when the computer has a desktop
         self.egress_socket = Path(egress_socket)
         self.log_path = Path(log_path)
         self.on_write = on_write            # called with a HeldWrite after it is held
@@ -527,7 +539,7 @@ class BoxedBrowser(BrowserSession):
     def start(self) -> None:
         if self._ws is not None:
             return
-        self._box = Box(self.home, self.egress_socket, self.binary, self.viewport)
+        self._box = Box(self.home, self.egress_socket, self.binary, self.viewport, display_dir=self.display_dir)
         self.launch(lambda: self._box.start(self.log_path))
         self._pipe = _Pipe(self._box.read_fd, self._box.write_fd)
         try:
@@ -548,11 +560,25 @@ class BoxedBrowser(BrowserSession):
         self._ws = _PageChannel(self._pipe, session)
         for domain in ("Page", "Runtime", "Log", "Network"):
             self.command(f"{domain}.enable")
+        if self.display_dir is not None:
+            # On a desktop, a profile that kept its sign-ins also remembers its last tabs; DGC's page is
+            # the one the Pip and the user share, so the browser starts with that tab alone.
+            try:
+                for info in self._browser_call("Target.getTargets").get("targetInfos", []):
+                    if info.get("type") == "page" and info.get("targetId") != target:
+                        self._browser_call("Target.closeTarget", {"targetId": info["targetId"]})
+            except (BrowserError, socket.timeout, OSError):
+                pass
         # Downloads land in the computer's Files, which the Files app and the Terminal see.
         try:
             self._browser_call("Browser.setDownloadBehavior", {"behavior": "allow", "downloadPath": "/home/pip/Files/Downloads"})
         except (BrowserError, socket.timeout, OSError):
             pass
+
+    def alive(self) -> bool:
+        """Started, and its process still running (a window the user closed may have ended it)."""
+        return (self._ws is not None and self._box is not None and self._box.proc is not None
+                and self._box.proc.poll() is None)
 
     def _browser_call(self, method: str, params: dict | None = None, *, timeout: float = 20) -> dict:
         self._next_id += 1

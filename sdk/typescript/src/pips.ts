@@ -18,6 +18,7 @@ export type PipReadParams = {
   list_pip_computer_files: { pip_id: string; path?: string };
   read_pip_computer_file: { pip_id: string; path: string };
   list_pip_computer_terminal: { pip_id: string };
+  get_pip_computer_desktop: { pip_id: string };
   get_pip_computer: { pip_id: string };
   list_pip_computer_actions: { pip_id: string; limit?: number };
   get_pip_computer_frame: { run_id: string; frame: string };
@@ -157,6 +158,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   remove_pip_computer_file: ["pip_id", "path"],
   run_pip_computer_command: ["pip_id", "command"],
   list_pip_computer_terminal: ["pip_id"],
+  get_pip_computer_desktop: ["pip_id"],
   always_allow_pip_computer_action: ["action_id", "expected_digest"],
   get_pip_computer: ["pip_id"],
   list_pip_computer_actions: ["pip_id", "limit"],
@@ -470,7 +472,7 @@ for (const command of API43_MUTATIONS) MUTATIONS.add(command);
 // API 43: the images sent in a Pip's chat, one at a time.
 const API43_READS = new Set(["get_pip_message_image"]);
 // API 43: a Pip computer's Files and Terminal (its browser is API 42).
-for (const command of ["list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal"]) API43_READS.add(command);
+for (const command of ["list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal", "get_pip_computer_desktop"]) API43_READS.add(command);
 for (const command of ["add_pip_computer_file", "remove_pip_computer_file", "run_pip_computer_command"]) API43_MUTATIONS.add(command);
 for (const command of API43_READS) READS.add(command);
 for (const command of API43_MUTATIONS) MUTATIONS.add(command);
