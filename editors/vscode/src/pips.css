@@ -247,3 +247,15 @@ button.pill{border-radius:999px;padding:6px 16px}
 .character-choice .avatar{width:48px;height:46px}
 .character-choice[aria-checked=true]{border-color:#7C5CFA;background:var(--pip-tint);box-shadow:0 0 0 1px #7C5CFA inset}
 .character-choice span{font-size:11px}
+/* Grok-style chat: short bubbles, the Pip at work with its name, and time marks. */
+.simple-pips .pip-message.assistant .answer.split{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:none;padding:0;max-width:none}
+.simple-pips .pip-message.assistant .answer.split .reply-part{max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:9px 14px}
+.simple-pips .reply-part>:first-child{margin-top:0}
+.simple-pips .reply-part>:last-child{margin-bottom:0}
+.simple-pips .pip-message.provisional .message-status{display:none}
+.simple-pips .pip-message.user .message-status[data-status=queued],.simple-pips .pip-message.user .message-status[data-status=running]{display:none}
+.pip-working{display:flex;align-items:center;gap:10px;margin:2px 0 18px;color:var(--muted);font-size:13px}
+.pip-working .avatar{width:34px;height:33px;flex:none}
+.chat-time{text-align:center;color:var(--muted);font-size:11px;margin:14px 0 10px}
+.simple-pips .pip-message.user .response-actions{opacity:0}
+.simple-pips .pip-message.user:hover .response-actions,.simple-pips .pip-message.user:focus-within .response-actions{opacity:1}

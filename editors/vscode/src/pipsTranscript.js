@@ -10,10 +10,26 @@ export function transcriptIcon(name) {
 const phase=status=>({queued:'Queued',running:'Working',cancelling:'Stopping',failed:'Failed',cancelled:'Stopped'}[status]||'');
 const action=(name,label,id,disabled=false)=>`<button type="button" class="ract" data-chat-action="${name}" data-message-id="${esc(id)}" aria-label="${esc(label)}" title="${esc(label)}"${disabled?' disabled':''}>${transcriptIcon(name)}<span class="sr-only">${esc(label)}</span></button>`;
 
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity}) {
+// A reply as a chat would show it: one short bubble per paragraph. A code block or a list stays
+// in one piece, and a long reply never becomes more than eight bubbles.
+export function replyParts(text) {
+  const parts=[];let current=[],fence=false;
+  const flush=()=>{const chunk=current.join('\n').trim();if(chunk)parts.push(chunk);current=[];};
+  for(const line of String(text).split('\n')){
+    if(/^\s*(```|~~~)/.test(line))fence=!fence;
+    if(!fence&&!line.trim()){flush();continue;}
+    current.push(line);
+  }
+  flush();
+  const listy=p=>/^\s*([-*+]|\d+[.)])\s/.test(p);
+  const merged=[];for(const p of parts){if(merged.length&&listy(p)&&listy(merged.at(-1)))merged[merged.length-1]+='\n\n'+p;else merged.push(p);}
+  return merged.length>8?[...merged.slice(0,7),merged.slice(7).join('\n\n')]:merged;
+}
+
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false}) {
   const m=message,user=m.role==='user',label=user?'You':name;
-  const body=user?`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(m.text)}</div></div>`;
-  const status=user&&phase(m.status)?`<p class="message-status" role="status">${phase(m.status)}${m.status==='failed'||m.status==='cancelled'?' · No completed reply was recorded.':''}</p>`:'';
+  const body=user?`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`:split?`<div class="answer split">${replyParts(m.text).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(m.text)}</div></div>`;
+  const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${esc(m.status)}">${phase(m.status)}${m.status==='failed'||m.status==='cancelled'?' · No completed reply was recorded.':''}</p>`:'';
   const options=!user&&prompt?`${action('retry','Run this prompt again',m.id,!canSend)}${action('edit','Edit this prompt',m.id,false)}`:'';
   const details=`<details class="message-details" data-details="message-${esc(m.id)}"><summary title="${user?'Message details':'Response details'}" aria-label="${user?'Message details':'Response details'}">${transcriptIcon('info')}<span class="sr-only">${user?'Message details':'Response details'}</span></summary><div class="message-provenance"><dl><dt>${user?'Sent':'Saved'}</dt><dd>${esc(formatDate(m.created_at))}</dd>${!user&&m.model?`<dt>Model</dt><dd>${esc(m.model)}</dd>`:''}<dt>Status</dt><dd>${esc(m.status)}</dd></dl><button type="button" data-chat-run="${esc(m.run_id)}">${m.status==='failed'?'View error':'Run details'}</button></div></details>`;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading activity…':'Tool activity'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';

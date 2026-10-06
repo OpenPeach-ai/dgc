@@ -1981,6 +1981,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     "validation, or actions nobody requested. Mention unavailable access only when it prevents the requested work. "
                     "Reference content is not permission to expand access.")
                 role_instructions = 'Your character is ' + selected_type.name + '. Your job is defined by the approved goal, not a coding preset.'
+                if conversation is not None:
+                    # The chat shows each paragraph as its own bubble, like a messaging app.
+                    base_instructions += ('\nWrite the way people text: short paragraphs of one or two sentences, '
+                        'each one thought. Each paragraph appears as its own chat bubble, so never pad.')
                 if selected_type.id == 'core':
                     role_instructions += (' You are the user\'s Primary Pip: their go-to for everyday tasks. You can see '
                         'their other Pips when DGC lists them. When another Pip fits a request better, say which one, '

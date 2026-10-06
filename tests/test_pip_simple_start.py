@@ -4,6 +4,8 @@ A Personal Pip can be created with just a name (its chat sets it up), Core can b
 Pip, and a new Pip's first message comes from a hidden turn DGC sends once, which the editor
 does not show as yours.
 """
+import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -83,6 +85,31 @@ class SimpleStartTests(unittest.TestCase):
         result = self.control({"type": "introduce_pip", "pip_id": pip["id"]}, actor="device_" + "1" * 32)
         self.assertFalse(result["ok"])
 
+
+    def system_prompt(self, pip, chatting):
+        from dgc.llm import LLMClient, ChatResult
+        run = (pip_chat.send(self.store, pip["id"], "Hi", "k-" + str(chatting), "user", self.cfg)["run"]
+               if chatting else self.store.enqueue(pip["id"], "task", "user", self.cfg))
+        raw = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])
+        seen = []
+
+        def chat(client, messages, tools=None, **kwargs):
+            seen.append(messages[0]["content"])
+            return ChatResult(content="Hello.")
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True))}), \
+                patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
+                patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")):
+            pips.execute_native(self.cfg, self.root, raw, lambda e: None)
+        return seen[0] if isinstance(seen[0], str) else json.dumps(seen[0])
+
+    def test_a_pip_chats_in_short_bubbles_and_core_knows_it_is_primary(self):
+        gmail = self.store.create(self.personal_id(), "Gmail", None, "editor-user", pip_type="lens")
+        chat = self.system_prompt(gmail, True)
+        self.assertIn("Write the way people text", chat)
+        self.assertNotIn("Primary Pip", chat)
+        self.assertNotIn("Write the way people text", self.system_prompt(gmail, False), "a scheduled task writes a result, not chat")
+        core = self.store.create(self.personal_id(), "Core", None, "editor-user", pip_type="core")
+        self.assertIn("Primary Pip", self.system_prompt(core, True))
 
 if __name__ == "__main__":
     unittest.main()
