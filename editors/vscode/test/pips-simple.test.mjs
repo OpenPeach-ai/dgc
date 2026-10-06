@@ -105,6 +105,28 @@ test('while a Pip answers it is in the chat at work, with its name, and its repl
  assert.equal(done.d.querySelectorAll('.chat-time').length,1,'one time mark for messages minutes apart');
 });
 
+test('until its computer is set up, a Pip\'s header says "Setting up your Pip…"; then the computer button appears',async()=>{
+ // The founder: "once downloaded, only then the personal computer icon appears, so user can open it".
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const status=state=>({desktop:{pip_id:gmail.id,available:state==='ready',reason:'',install:'',using:false,browser:'Chromium',chrome_install:'',
+  setup:{state,step:state==='running'?'Downloading Google Chrome and the desktop':'',done:5,total:10,error:''}}});
+ const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);
+ await x.drain({get_pip_computer_desktop:()=>status('running')});
+ assert.ok(x.requests('get_pip_computer_desktop').length>=1,'opening a Pip starts its computer\'s setup in the background');
+ const setupNote=x.d.querySelector('.topbar-setup');
+ assert.ok(setupNote,'the header says it is setting up');
+ assert.equal(setupNote.textContent,'Setting up your Pip…');
+ assert.equal(x.d.querySelector('#pip-computer-open'),null,'no computer button yet');
+ await new Promise(r=>setTimeout(r,2100));
+ await x.drain({get_pip_computer_desktop:()=>status('ready')});
+ assert.ok(x.requests('get_pip_computer_desktop').length>=2,'it looks again on its own');
+ assert.equal(x.d.querySelector('.topbar-setup'),null);
+ assert.ok(x.d.querySelector('#pip-computer-open'),'the computer button appears when it is ready');
+ const y=setup({jobs:[gmail]});await y.drain();y.click(`[data-job="${gmail.id}"]`);
+ await y.drain({get_pip_computer_desktop:()=>({desktop:{...status('running').desktop,available:true}})});
+ assert.ok(y.d.querySelector('#pip-computer-open'),'a daily update check never hides a computer that is ready');
+});
+
 test('the computer button gives a Pip a computer, or opens the one it has in an editor tab',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();

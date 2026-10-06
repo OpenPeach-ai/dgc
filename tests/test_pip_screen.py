@@ -75,10 +75,22 @@ class DesktopBoxTests(unittest.TestCase):
         self.assertFalse(any(src == str(Path.home()) for src, _ in binds), "never the user's own home")
         self.assertNotIn("/run/dgc/egress.sock", argv, "no way online from the desktop")
 
-    def test_without_the_programs_it_says_what_to_install(self):
+    def test_without_the_programs_dgc_sets_them_up_itself_and_shows_no_install_command(self):
+        from dgc import pip_screen_setup
         with patch.object(pip_screen, "components", return_value={"found": {}, "missing": ["Xtigervnc", "tint2"], "prefix": None}), \
                 patch.object(pip_screen.shutil, "which", return_value="/usr/bin/bwrap"), \
-                patch.object(pip_screen.sys, "platform", "linux"):
+                patch.object(pip_screen.sys, "platform", "linux"), \
+                patch.object(pip_screen_setup, "status", return_value={"state": "running", "error": ""}):
+            shown = pip_screen.availability()
+        self.assertFalse(shown["available"])
+        self.assertEqual((shown["reason"], shown["install"]), ("Setting up this computer's desktop.", ""))
+
+    def test_where_dgc_cannot_set_them_up_it_says_what_to_install(self):
+        from dgc import pip_screen_setup
+        with patch.object(pip_screen, "components", return_value={"found": {}, "missing": ["Xtigervnc", "tint2"], "prefix": None}), \
+                patch.object(pip_screen.shutil, "which", return_value="/usr/bin/bwrap"), \
+                patch.object(pip_screen.sys, "platform", "linux"), \
+                patch.object(pip_screen_setup, "status", return_value={"state": "unsupported", "error": ""}):
             shown = pip_screen.availability()
         self.assertFalse(shown["available"])
         self.assertIn("Xtigervnc, tint2", shown["reason"])

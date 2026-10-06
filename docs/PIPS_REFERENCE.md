@@ -775,8 +775,18 @@ every viewer message (RFB) and drops key, pointer and clipboard input while a ru
 it passes stamps `user_input_at`. Outside a run, a held submit within `USER_WRITE_SECONDS` (3) of
 the user's input is released; any other is recorded as a pending action (with no run) for approval,
 and an approved one has no continuation. `get_pip_computer_desktop {pip_id}` (local) returns
-`{pip_id, available, reason, install, using, browser, chrome_install}`; `browser` is
-`"Google Chrome"` (a real binary at `/opt/google/chrome/chrome`), `"Chromium"` or null.
+`{pip_id, available, reason, install, using, browser, chrome_install, setup}`; `browser` is
+`"Google Chrome"` (a real binary at `/opt/google/chrome/chrome`, or the one DGC downloaded),
+`"Chromium"` or null. `setup` is DGC's own download of the desktop and Chrome
+(`pip_screen_setup`): `{state: none|running|ready|failed|unsupported, step, done, total, error}`,
+`done`/`total` in bytes while downloading (packages while unpacking). Reading the status starts the
+download when one is due (nothing set up yet, a day since the last check, or an hour after a
+failure): a private apt state under `~/.dgc/desktop/ARCH/apt` with the distribution's own sources
+and Google's (`signed-by` a key checked against the pinned fingerprint
+`EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796`), `apt-get -s install` to learn what the system lacks,
+`apt-get download` of what changed, `dpkg-deb -x` (no maintainer scripts) into `v-STAMP/root`, and
+an atomic `current` link. The desktop box mounts that root read-only at `/opt/desk`; the browser box
+mounts its `usr` there too when it runs the downloaded Chrome.
 
 **A computer's Files and Terminal** (API 43). Beside the browser, a computer has **Files**:
 `computers/PIP_ID/home/Files`, which the browser sees as `/home/pip/Files`; its downloads go to

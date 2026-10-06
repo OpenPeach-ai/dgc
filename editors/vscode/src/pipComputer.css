@@ -75,4 +75,11 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-overlay-card{display:grid;gap:10px;justify-items:center;max-width:460px;text-align:center;color:#f3f3f5;background:rgba(20,20,24,.75);padding:16px 20px;border-radius:12px}
 .pc-overlay-card p{margin:0}
 .pc-overlay-badge{align-self:start;margin:12px 0 0;color:#fff;background:rgba(124,92,255,.85);padding:6px 12px;border-radius:999px;font-size:12px;pointer-events:none}
+.pc-setup{display:flex;flex-direction:column;gap:4px}
+.pc-setup strong{font-weight:600}
+.pc-setup-step{font-variant-numeric:tabular-nums}
+.pc-setup-bar{display:block;height:6px;max-width:420px;border-radius:3px;background:color-mix(in srgb,var(--fg,currentColor) 14%,transparent);overflow:hidden}
+.pc-setup-bar>span{display:block;height:100%;border-radius:3px;background:#7654F6;transition:width .4s ease}
+.pc-setup small{opacity:.75}
+@media (prefers-reduced-motion:reduce){.pc-setup-bar>span{transition:none}}
 .pc-install code{font-family:var(--mono);font-size:12px;background:var(--surface);padding:2px 6px;border-radius:4px;user-select:all}

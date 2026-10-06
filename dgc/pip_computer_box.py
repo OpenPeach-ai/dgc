@@ -288,6 +288,11 @@ def find_chrome(home: Path | None = None) -> Path | None:
     for path in GOOGLE_CHROME:
         if _real_binary(path):
             return Path(path)
+    # The Google Chrome DGC downloaded itself (pip_screen_setup): no admin password needed.
+    from . import pip_screen_setup
+    own = pip_screen_setup.chrome_path()
+    if own is not None and _real_binary(own):
+        return own
     home = home or Path.home()
     roots = [Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"])] if os.environ.get("PLAYWRIGHT_BROWSERS_PATH") else []
     roots.append(home / ".cache" / "ms-playwright")
@@ -302,7 +307,18 @@ def find_chrome(home: Path | None = None) -> Path | None:
 
 
 def browser_name(path) -> str:
-    return "Google Chrome" if str(path) in GOOGLE_CHROME else "Chromium"
+    return "Google Chrome" if str(path) in GOOGLE_CHROME or str(path).endswith("/opt/google/chrome/chrome") else "Chromium"
+
+
+def _own_libraries(chrome: Path) -> list[str]:
+    """Libraries the downloaded Chrome brought (DGC's copy, mounted at /opt/desk): bwrap arguments.
+    The system's Chrome and Chromium need none."""
+    from . import pip_screen_setup
+    root = pip_screen_setup.current_root()
+    if root is None or not chrome.is_relative_to(root) or not (root / "usr" / "lib").is_dir():
+        return []
+    libs = ":".join(f"/opt/desk/usr/lib/{triplet}" for triplet in ("aarch64-linux-gnu", "x86_64-linux-gnu")) + ":/opt/desk/usr/lib"
+    return ["--ro-bind", str(root / "usr"), "/opt/desk/usr", "--setenv", "LD_LIBRARY_PATH", libs]
 
 
 def capability(home: Path | None = None) -> dict:
@@ -353,7 +369,7 @@ class Box:
                 "--dev", "/dev", "--proc", "/proc", "--size", str(512 * 1024 * 1024), "--tmpfs", "/tmp", *display,
                 "--bind", str(self.home), "/home/pip", "--setenv", "HOME", "/home/pip",
                 "--setenv", "TMPDIR", "/tmp", "--unsetenv", "DBUS_SESSION_BUS_ADDRESS",
-                "--ro-bind", str(chrome_dir), "/opt/chrome",
+                "--ro-bind", str(chrome_dir), "/opt/chrome", *_own_libraries(self.chrome),
                 "--dir", "/run/dgc", "--bind", str(self.egress_socket), "/run/dgc/egress.sock",
                 "--ro-bind", str(forwarder), "/run/dgc/forward.py",
                 "sh", "-c", inner]

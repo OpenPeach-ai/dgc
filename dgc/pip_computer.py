@@ -887,17 +887,28 @@ def desktop_status(registry, pip_id: str, actor: str) -> dict:
     if actor not in ("editor-user", "local-console"):
         raise RegistryError("local_only", "Use a Pip's computer on this computer.")
     from .pips import PipStore
-    from . import pip_screen
+    from . import pip_screen, pip_screen_setup
     from .pip_computer_box import browser_name, find_chrome
     PipStore(registry)._job(pip_id)
+    # Opening a computer is what sets its desktop up: DGC downloads what this machine lacks (the
+    # desktop's programs, Google Chrome) into its own folder, with no password, and checks for a
+    # newer Chrome once a day. The tab shows the progress (setup) and opens the screen when done.
+    if pip_screen_setup.due():
+        needs = pip_screen_setup.wanted()
+        if needs or pip_screen_setup.current_root() is not None:
+            pip_screen_setup.start(needs=needs)
     shown = pip_screen.availability()
+    setup = pip_screen_setup.status()
     chrome = find_chrome()
     using = registry.db.execute("SELECT 1 FROM pip_runs WHERE pip_id=? AND status IN ('running','cancelling') LIMIT 1",
                                 (pip_id,)).fetchone() is not None
+    google = chrome is not None and browser_name(chrome) == "Google Chrome"
     return {"pip_id": pip_id, "available": shown["available"], "reason": shown["reason"], "install": shown["install"],
             "using": using,
             "browser": browser_name(chrome) if chrome is not None else None,
-            "chrome_install": "" if chrome is not None and browser_name(chrome) == "Google Chrome" else CHROME_INSTALL}
+            "chrome_install": "" if google or setup["state"] in ("none", "running", "ready") else CHROME_INSTALL,
+            "setup": {"state": setup["state"], "step": setup["step"], "done": setup["done"], "total": setup["total"],
+                      "error": setup["error"]}}
 
 
 CHROME_INSTALL = "sudo apt install google-chrome-stable  # after adding Google's repository: https://www.google.com/linuxrepositories/"

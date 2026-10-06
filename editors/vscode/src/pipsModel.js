@@ -1181,8 +1181,16 @@ export function pipComputerTerminal(value){
  value.entries.forEach(pipComputerTerminalEntry);
  return value;
 }
+// `setup`: DGC downloading the desktop and Chrome itself (pip_screen_setup); an older CLI sends none.
+const SETUP_STATES=['none','running','ready','failed','unsupported'];
+function desktopSetup(s){
+ return s===undefined||record(s)&&Object.keys(s).sort().join()==='done,error,state,step,total'&&SETUP_STATES.includes(s.state)
+  &&typeof s.step==='string'&&s.step.length<=200&&typeof s.error==='string'&&s.error.length<=400
+  &&[s.done,s.total].every(n=>Number.isSafeInteger(n)&&n>=0);
+}
 export function pipComputerDesktop(value,pip){
- if(!record(value)||Object.keys(value).sort().join()!=='available,browser,chrome_install,install,pip_id,reason,using'||value.pip_id!==pip
+ const keys=record(value)?Object.keys(value).filter(k=>k!=='setup').sort().join():'';
+ if(!record(value)||keys!=='available,browser,chrome_install,install,pip_id,reason,using'||!desktopSetup(value.setup)||value.pip_id!==pip
    ||typeof value.available!=='boolean'||typeof value.using!=='boolean'||typeof value.reason!=='string'||typeof value.install!=='string'
    ||typeof value.chrome_install!=='string'||!(value.browser===null||['Google Chrome','Chromium'].includes(value.browser)))
   throw Error('This computer\'s screen status is invalid.');

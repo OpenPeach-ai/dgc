@@ -26,6 +26,9 @@
 
 - The Pips header no longer breaks when the runner reports an error: the error has its own row,
   and "Pips", "Start runner" and "Controls" keep their words on one line.
+- A Pip's computer sets its desktop up itself the first time you open it: DGC downloads the desktop
+  and Google Chrome into its own folder, with no password and nothing installed on your system, and
+  the tab shows the progress, then the screen.
 - A Pip's computer tab shows the Pip's face again (it showed a broken-image picture), keeps what
   you type in its browser's address bar while the screen refreshes, opens on an empty desktop with
   DGC's own wallpaper, and its Terminal says plainly that it is offline on purpose.

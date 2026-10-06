@@ -598,12 +598,21 @@ you can make it: the main chat and the Pip itself can't.
 **Its screen in an editor tab.** The computer button in a Pip's chat (or **Open its computer**
 in Settings) opens "NAME · Computer" as an editor tab.
 
-With the desktop programs installed, the tab is the Pip's real screen, like Grok's bots: a small
-Linux desktop with a dock at the bottom holding **Browser** (Google Chrome when it is installed,
-otherwise Chromium), **Files** (a file manager) and **Terminal**. Click, type and move windows as
-on any computer. While a Pip run is using it you watch, and your keyboard and mouse wait until it
-is done. The browser is the Pip's own: closing its window and clicking Browser in the dock brings it
-back. To set it up on Ubuntu or Debian:
+The tab is the Pip's real screen, like Grok's bots: a small Linux desktop on DGC's own wallpaper,
+with a dock at the bottom holding **Browser** (Google Chrome), **Files** (a file manager) and
+**Terminal**. It opens with nothing open. Click, type and move windows as on any computer. While a
+Pip run is using it you watch, and your keyboard and mouse wait until it is done. The browser is the
+Pip's own: closing its window and clicking Browser in the dock brings it back.
+
+**Setting it up takes nothing from you.** The first time you open a computer, DGC fetches what this
+machine lacks (the desktop's programs and Google Chrome, about 135 MB on an Ubuntu machine with none
+of them) from the machine's own package sources and Google's, into its own folder
+(`~/.dgc/desktop`). No password, and nothing is installed on your system: the packages are unpacked,
+not installed, and only the computer's box uses them. Apt checks every package against its source's
+signing key; Google's repository is trusted only with Google's key, whose fingerprint DGC pins. The
+tab shows how far it has got, and the screen opens when it is done. DGC checks for a newer Chrome
+once a day and switches to it in one step. This works on Linux with apt (Ubuntu, Debian and their
+family). Elsewhere, or if the download fails, the tab says why and what to install yourself:
 
 ```sh
 sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm
@@ -611,9 +620,14 @@ sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm
 sudo apt install google-chrome-stable
 ```
 
-Without them the tab shows a simpler desktop DGC draws itself, and says what to install: a dock of
-three apps at the bottom, each in a window you can minimise or close; when the Pip starts using its
-browser, the browser window comes up so you can watch.
+Until then the tab shows a simpler desktop DGC draws itself: a dock of three apps at the bottom,
+each in a window you can minimise or close; when the Pip starts using its browser, the browser
+window comes up so you can watch.
+
+**Websites that check for robots.** The Pip's Chrome tells sites that software can drive it
+(`navigator.webdriver`), as every browser an agent drives does, so a site like Google's search may
+ask "I'm not a robot". Solve it yourself on the computer's screen, as you would on any computer; the
+computer keeps its cookies, so a site usually trusts it for a while afterwards.
 
 - **Browser**: the live screen. Click, type, scroll and go to an address; anything the Pip would
   submit shows at the top with **Send once**, **Always allow** and **Reject**.

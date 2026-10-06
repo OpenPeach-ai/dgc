@@ -7,7 +7,7 @@ import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pip
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames} from './pipsModel.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -537,6 +537,26 @@ function webReadsMarkup(){
 // Pip computers (Pips API 42): a Personal Pip's own browser and files. One switch gives it; the
 // user can open the browser and drive it (to sign in); what the Pip would submit waits for Send once.
 let computerState={pip:'',value:null,loading:false,error:''},computerViewTimer=null;
+// Whether this machine is still setting a Pip computer up (DGC downloading its desktop the first time;
+// asking starts it). Until it is ready the header says "Setting up your Pip…" instead of offering the
+// computer (the founder: "once downloaded, only then the personal computer icon appears").
+let screenSetup={pip:'',value:null,loading:false},screenSetupPoll=null;
+async function loadDesktopStatus(){
+ const pip=S.selected;
+ if(S.apiVersion<43||remoteHost||!usable()||!pip||!personalPip()||screenSetup.loading&&screenSetup.pip===pip)return;
+ const token=scope();screenSetup={pip,value:screenSetup.pip===pip?screenSetup.value:null,loading:true};
+ let value=null;
+ try{value=pipComputerDesktop((await send('get_pip_computer_desktop',{pip_id:pip})).desktop,pip);}catch{value=null;}
+ if(token!==scope()||S.selected!==pip)return;
+ screenSetup={pip,value,loading:false};
+ clearTimeout(screenSetupPoll);screenSetupPoll=null;
+ if(settingUpComputer())screenSetupPoll=setTimeout(()=>{screenSetupPoll=null;void loadDesktopStatus();},2000);
+ render();
+}
+function settingUpComputer(){
+ const d=screenSetup.pip===S.selected?screenSetup.value:null;
+ return !!d&&d.available===false&&d.setup?.state==='running';
+}
 async function loadComputer(){
  const pip=S.selected;if(S.apiVersion<42||!usable()||!pip||computerState.loading&&computerState.pip===pip)return;
  const token=scope();computerState={pip,value:null,loading:true,error:''};
@@ -1325,7 +1345,10 @@ function simpleTabContent(){
 function simplePipHeader(){
  const p=S.pip,type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,S.runs,usable(),S.runner),onChat=S.tab==='chat';
  const sections=[['chat','Chat'],['runs','Results'],['job','Settings'],...(S.apiVersion>=14?[['memory','Memory']]:[]),['revisions','Versions and reviews'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])].filter(([key])=>key!==S.tab);
- const computer=S.apiVersion>=42&&personalPip()?`<button type="button" id="pip-computer-open" class="topbar-icon" aria-label="Computer" title="${computerState.pip===S.selected&&computerState.value?.granted?'Open its computer':'Its computer'}"${S.busy||!usable()||archived()?' disabled':''}>${simpleIcon('computer')}</button>`:'';
+ if(S.apiVersion>=43&&!remoteHost&&personalPip()&&screenSetup.pip!==S.selected&&!screenSetup.loading)void loadDesktopStatus();
+ const computer=!(S.apiVersion>=42&&personalPip())?'':settingUpComputer()
+  ?`<span class="topbar-setup" role="status" title="Getting its computer ready. This happens once."><span class="topbar-spinner" aria-hidden="true"></span>Setting up your Pip…</span>`
+  :`<button type="button" id="pip-computer-open" class="topbar-icon" aria-label="Computer" title="${computerState.pip===S.selected&&computerState.value?.granted?'Open its computer':'Its computer'}"${S.busy||!usable()||archived()?' disabled':''}>${simpleIcon('computer')}</button>`;
  return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${avatar(pose.state,type,`pill-${p.id}`)}<span>${esc(p.name)}</span>${onChat?'':`<small>${esc(sections.length&&{runs:'Results',job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div></header>`;
 }
 function simpleMarkup(){

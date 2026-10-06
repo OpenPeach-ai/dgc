@@ -13,6 +13,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   (the database is newer than any DGC on disk), it stops and says DGC was updated, so you start it
   again after updating.
 - A Pip computer's desktop shows DGC's own wallpaper.
+- A Pip computer's desktop needs no admin password: on Linux with apt, DGC downloads the desktop's
+  programs and Google Chrome itself (`pip_screen_setup`) into `~/.dgc/desktop`, unpacked rather than
+  installed, checked by apt against the sources' signing keys (Google's key fingerprint pinned), and
+  checks for a newer Chrome once a day. `get_pip_computer_desktop` reports it as `setup`.
 - Token usage by model for Pips: `pip_usage_report` carries `by_model` (the Pips' requests in the
   range, from the ledger) and each Pip's `models` (recorded per run as it is imported).
 - Meet your Pips (API 43): a Personal Pip needs only a name, Core can be your Primary Pip, and

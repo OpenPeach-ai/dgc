@@ -237,6 +237,39 @@ test('with the desktop installed, the tab is the Pip\'s real screen, streamed th
  assert.equal(made.length,2);assert.deepEqual(x.sent.filter(m=>m.type==='pipDesktop').map(m=>m.op),['open','send','open']);
 });
 
+test('the first time, DGC sets the desktop up itself: the tab shows how far it has got, then opens the screen',async()=>{
+ // The founder: "why does my system need that? Doesn't a Pip create its own virtual OS?"
+ const {Viewer,made}=fakeViewer(),MB=1048576;
+ const running=(done,step='Downloading Google Chrome and the desktop')=>({available:false,reason:"Setting up this computer's desktop.",install:'',using:false,browser:'Chromium',chrome_install:'',setup:{state:'running',step,done,total:133*MB,error:''}});
+ const x=setup({screen:true,viewer:Viewer,desktop:running(44*MB)});await x.drain();
+ const note=()=>x.d.querySelector('.pc-setup');
+ // Plain words: the founder, "lets not show Downloading Google Chrome and desktop ... just Setting up your Pip".
+ assert.match(note().textContent,/Setting up your Pip…/);
+ assert.match(note().textContent,/Getting its computer ready. This happens once./);
+ assert.doesNotMatch(note().textContent,/Chrome|MB|Downloading|package/,'no technical words');
+ assert.equal(note().querySelector('[role=progressbar]').getAttribute('aria-valuenow'),'30','downloading is most of the bar');
+ assert.equal(x.d.querySelector('.pc-install'),null,'no sudo command while DGC does it');
+ assert.equal(x.sent.filter(m=>m.type==='pipDesktop').length,0,'no screen yet');
+ await x.tick({get_pip_computer_desktop:()=>({desktop:{pip_id:PIP.id,...running(133*MB)}})});
+ assert.equal(note().querySelector('[role=progressbar]').getAttribute('aria-valuenow'),'90','it looks again on its own while setting up');
+ await x.tick({get_pip_computer_desktop:()=>({desktop:{pip_id:PIP.id,...running(0,'Unpacking'),setup:{state:'running',step:'Unpacking',done:3,total:19,error:''}}})});
+ assert.equal(note().querySelector('[role=progressbar]').getAttribute('aria-valuenow'),'92','unpacking finishes the bar');
+ await x.tick({get_pip_computer_desktop:()=>({desktop:{pip_id:PIP.id,available:true,reason:'',install:'',using:false,browser:'Google Chrome',chrome_install:'',setup:{state:'ready',step:'',done:0,total:0,error:''}}})});
+ assert.equal(note(),null);
+ assert.equal(made.length,1,'the screen opens when it is ready');
+ assert.deepEqual(x.sent.filter(m=>m.type==='pipDesktop').map(m=>m.op),['open']);
+});
+
+test('a failed setup says why, offers the install command, and an invalid setup report is not shown',async()=>{
+ const {Viewer}=fakeViewer();
+ const x=setup({screen:true,viewer:Viewer,desktop:{available:false,reason:'Updating package lists failed: E: unsigned. You can also install them, then open the computer again.',
+  install:'sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm',setup:{state:'failed',step:'',done:0,total:0,error:'Updating package lists failed: E: unsigned.'}}});await x.drain();
+ assert.equal(x.d.querySelector('.pc-setup'),null);
+ assert.match(x.d.querySelector('.pc-install').textContent,/Updating package lists failed.*sudo apt install tigervnc-standalone-server/s);
+ const y=setup({screen:true,viewer:Viewer,desktop:{available:false,reason:'x',install:'',setup:{state:'downloading',step:'',done:0,total:0,error:''}}});await y.drain();
+ assert.equal(y.d.querySelector('.pc-setup'),null,'an unknown state is refused, not half-shown');
+});
+
 test('while the Pip uses its computer the screen says so; without the desktop it says what to install',async()=>{
  const {Viewer,made}=fakeViewer();
  const x=setup({screen:true,viewer:Viewer,desktop:{using:true}});await x.drain();

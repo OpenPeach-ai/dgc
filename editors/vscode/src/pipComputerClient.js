@@ -23,7 +23,7 @@ const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],compu
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
 const $=id=>document.getElementById(id);
 const send=(type,fields={})=>broker.request({type,...fields});
-let frameTimer=null,frameBusy=false,statusTimer=null,terminalTimer=null,desktopTimer=null,cleanupFace=null;
+let frameTimer=null,frameBusy=false,statusTimer=null,terminalTimer=null,desktopTimer=null,setupTimer=null,cleanupFace=null;
 
 function plushFace(state){
  const plush=window.PipConcepts?.plush,index=TYPES.indexOf(S.pip?.pip_type);
@@ -111,8 +111,20 @@ function renderScreen(){
  $('pc-overlay').innerHTML=overlayMarkup();
  cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-top'));
 }
+// The first time a computer opens, DGC downloads its desktop and Google Chrome itself (no password,
+// nothing installed on the system) and the tab shows how far it has got; the screen opens when done.
 function installMarkup(){
- const d=S.desktop;if(!S.screenCapable||!d||d.available||!d.install)return '';
+ const d=S.desktop;if(!S.screenCapable||!d||d.available)return '';
+ const s=d.setup;
+ if(s&&(s.state==='running'||s.state==='none'&&!d.install)){
+  // Plain words, no package names or megabytes (the founder: "just show it as Setting up your Pip").
+  // Downloading is most of the wait; unpacking finishes the bar.
+  const share=s.total>0?(s.step==='Unpacking'?90+Math.round(s.done/s.total*10):Math.round(s.done/s.total*90)):null;
+  return `<div class="pc-notice pc-setup" role="status"><strong>Setting up your Pip…</strong>`
+   +(share!==null?`<span class="pc-setup-bar" role="progressbar" aria-label="Setting up your Pip" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100,share)}"><span style="width:${Math.min(100,share)}%"></span></span>`:'')
+   +`<small>Getting its computer ready. This happens once.</small></div>`;
+ }
+ if(!d.install)return '';
  return `<p class="pc-notice pc-install" role="status">${esc(d.reason)} <code>${esc(d.install)}</code></p>`;
 }
 function render(){
@@ -135,9 +147,15 @@ async function loadComputer(){
 }
 async function loadDesktop(){
  if(!S.pip||!S.connected||S.apiVersion<43||!S.screenCapable)return;
+ const wasScreen=screenMode();
  try{S.desktop=pipComputerDesktop((await send('get_pip_computer_desktop',{pip_id:S.pip.id})).desktop,S.pip.id);}
  catch(error){S.desktop=null;}
+ // While its desktop is being set up, look again often; once it is there the screen takes over.
+ const settingUp=S.desktop?.setup?.state==='running';
+ if(settingUp&&setupTimer===null)setupTimer=setInterval(()=>void loadDesktop(),1500);
+ if(!settingUp&&setupTimer!==null){clearInterval(setupTimer);setupTimer=null;}
  if(screenMode())startScreen();
+ if(screenMode()!==wasScreen)schedule();
  render();
 }
 async function frame(op='frame',fields={},opening=false){

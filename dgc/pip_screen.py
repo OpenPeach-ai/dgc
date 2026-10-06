@@ -34,17 +34,23 @@ START_SECONDS = 15
 
 def _prefix() -> Path | None:
     """A folder holding unpacked desktop packages (usr/bin, usr/lib), for machines without them
-    installed system-wide. Set by DGC_DESKTOP_PREFIX; the system's own packages otherwise."""
+    installed system-wide: DGC_DESKTOP_PREFIX, else what DGC downloaded itself (pip_screen_setup)."""
     value = os.environ.get("DGC_DESKTOP_PREFIX", "").strip()
-    return Path(value) if value else None
+    if value:
+        return Path(value)
+    from . import pip_screen_setup
+    return pip_screen_setup.current_root()
 
 
 def components() -> dict:
-    """Which desktop programs this machine has, and the one command that installs the rest."""
+    """Which desktop programs this machine has (DGC's own copy first, then the system's), and the
+    one command that installs the rest."""
     prefix = _prefix()
     found, missing = {}, []
     for role, name in PROGRAMS.items():
-        path = prefix / "usr" / "bin" / name if prefix else (Path(shutil.which(name)) if shutil.which(name) else None)
+        own = prefix / "usr" / "bin" / name if prefix else None
+        system = Path(shutil.which(name)) if shutil.which(name) else None
+        path = own if own is not None and own.exists() and os.access(own, os.X_OK) else system
         if path is not None and path.exists() and os.access(path, os.X_OK):
             found[role] = path
         else:
@@ -60,14 +66,19 @@ def availability() -> dict:
         return {"available": False, "reason": "Install bubblewrap to give Pips a computer.", "install": "sudo apt install bubblewrap"}
     parts = components()
     if parts["missing"]:
-        return {"available": False, "install": INSTALL,
-                "reason": "The desktop needs " + ", ".join(parts["missing"]) + ". Install them, then open the computer again."}
+        from . import pip_screen_setup
+        setup = pip_screen_setup.status()
+        if setup["state"] in ("none", "running"):
+            # DGC fetches them itself (pip_screen_setup): no password, nothing installed system-wide.
+            return {"available": False, "install": "", "reason": "Setting up this computer's desktop."}
+        why = setup["error"] or ("The desktop needs " + ", ".join(parts["missing"]) + ".")
+        return {"available": False, "install": INSTALL, "reason": why + " You can also install them, then open the computer again."}
     return {"available": True, "reason": "", "install": ""}
 
 
 def _inside(path: Path, prefix: Path | None) -> str:
-    """Where a desktop program is inside the box."""
-    if prefix is not None:
+    """Where a desktop program is inside the box: DGC's own copy is mounted at /opt/desk."""
+    if prefix is not None and path.is_relative_to(prefix):
         return "/opt/desk/" + str(path.relative_to(prefix)).lstrip("/")
     return str(path)
 

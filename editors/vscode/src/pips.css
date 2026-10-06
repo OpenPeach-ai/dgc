@@ -277,3 +277,9 @@ button.pill{border-radius:999px;padding:6px 16px}
 .chat-file-size{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .chat-file-chip button{width:18px;height:18px;min-height:18px;padding:0;border-radius:50%;border:0;background:transparent;color:var(--muted);font-size:13px;line-height:1}
 .msg-files{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin:0 0 6px}
+
+/* "Setting up your Pip…" where the computer button will be, while its desktop is first set up. */
+.topbar-setup{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:11px;white-space:nowrap;padding:0 4px}
+.topbar-spinner{width:10px;height:10px;border-radius:50%;border:1.5px solid currentColor;border-right-color:transparent;animation:topbar-spin .9s linear infinite}
+@keyframes topbar-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.topbar-spinner{animation:none;border-right-color:currentColor;opacity:.6}}
