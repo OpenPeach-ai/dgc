@@ -264,11 +264,30 @@ class EgressProxy:
 
 # --------------------------------------------------------------------------- the box
 
-def find_chrome(home: Path | None = None) -> Path | None:
-    """A Chromium that can run inside a box: a Playwright build, or a system Chrome install.
+GOOGLE_CHROME = ("/opt/google/chrome/chrome",)
+OTHER_CHROMIUM = ("/opt/chromium/chrome", "/usr/lib/chromium/chromium")
 
-    Snap-packaged Chromium cannot run inside another sandbox, so it is never chosen.
+
+def _real_binary(path) -> bool:
+    """An executable program, not a launcher script and not a snap: only that runs inside a box."""
+    try:
+        with open(path, "rb") as handle:
+            magic = handle.read(4)
+    except OSError:
+        return False
+    return magic == b"\x7fELF" and os.access(path, os.X_OK) and "/snap/" not in os.path.realpath(path)
+
+
+def find_chrome(home: Path | None = None) -> Path | None:
+    """The browser a Pip's computer runs: Google Chrome when it is installed, as on Grok's bots;
+    otherwise a Playwright Chromium build, or a system Chromium.
+
+    Snap-packaged Chromium cannot run inside another sandbox, so it is never chosen, and neither is
+    a launcher script standing in for Chrome.
     """
+    for path in GOOGLE_CHROME:
+        if _real_binary(path):
+            return Path(path)
     home = home or Path.home()
     roots = [Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"])] if os.environ.get("PLAYWRIGHT_BROWSERS_PATH") else []
     roots.append(home / ".cache" / "ms-playwright")
@@ -276,10 +295,14 @@ def find_chrome(home: Path | None = None) -> Path | None:
     for build in sorted(builds, key=lambda b: b.parent.parent.name, reverse=True):
         if os.access(build, os.X_OK):
             return build
-    for path in ("/opt/google/chrome/chrome", "/opt/chromium/chrome", "/usr/lib/chromium/chromium"):
-        if os.access(path, os.X_OK) and "/snap/" not in os.path.realpath(path):
+    for path in OTHER_CHROMIUM:
+        if _real_binary(path):
             return Path(path)
     return None
+
+
+def browser_name(path) -> str:
+    return "Google Chrome" if str(path) in GOOGLE_CHROME else "Chromium"
 
 
 def capability(home: Path | None = None) -> dict:

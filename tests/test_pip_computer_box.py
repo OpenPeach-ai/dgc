@@ -6,6 +6,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from dgc import pip_computer_box as box
 
@@ -48,6 +49,42 @@ def serve():
     server = _Server(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, received
+
+
+class BrowserChoiceTests(unittest.TestCase):
+    """Google Chrome by default, as on Grok's bots; Chromium only when Chrome is not installed."""
+
+    def setUp(self):
+        import tempfile
+        self.base = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.base, True)
+        self.home = self.base / "home"
+        build = self.home / ".cache" / "ms-playwright" / "chromium-1234" / "chrome-linux"
+        build.mkdir(parents=True)
+        self.chromium = build / "chrome"
+        self.chromium.write_bytes(b"\x7fELF fake"); self.chromium.chmod(0o755)
+
+    def program(self, name, content):
+        path = self.base / name
+        path.write_bytes(content); path.chmod(0o755)
+        return str(path)
+
+    def test_google_chrome_wins_when_it_is_installed(self):
+        chrome = self.program("chrome", b"\x7fELF real chrome")
+        with patch.object(box, "GOOGLE_CHROME", (chrome,)), patch.dict(os.environ, {"PLAYWRIGHT_BROWSERS_PATH": ""}):
+            self.assertEqual(str(box.find_chrome(self.home)), chrome)
+            self.assertEqual(box.browser_name(box.find_chrome(self.home)), "Google Chrome")
+
+    def test_a_script_standing_in_for_chrome_is_not_chrome(self):
+        shim = self.program("chrome", b"#!/usr/bin/env bash\nexec chromium \"$@\"\n")
+        with patch.object(box, "GOOGLE_CHROME", (shim,)), patch.object(box, "OTHER_CHROMIUM", ()), \
+                patch.dict(os.environ, {"PLAYWRIGHT_BROWSERS_PATH": ""}):
+            self.assertEqual(box.find_chrome(self.home), self.chromium)
+            self.assertEqual(box.browser_name(box.find_chrome(self.home)), "Chromium")
+        with patch.object(box, "GOOGLE_CHROME", (str(self.base / "missing"),)), patch.object(box, "OTHER_CHROMIUM", ()), \
+                patch.dict(os.environ, {"PLAYWRIGHT_BROWSERS_PATH": ""}):
+            self.chromium.unlink()
+            self.assertIsNone(box.find_chrome(self.home))
 
 
 class EgressPolicyTests(unittest.TestCase):
