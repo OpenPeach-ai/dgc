@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- While background sub-agents work, the main model's long thought no longer streams as dozens
+  of "Thought · raw" rows: a sub-agent's hidden steps and thoughts no longer close it, and a thought
+  still streaming always continues in its own row.
+
 ### Pips
 
 - Pips are characters you meet, not jobs you configure (Pips API 43). The first time, the

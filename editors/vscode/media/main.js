@@ -4649,7 +4649,9 @@
           }
           return;
         }
-        ensureTurn(); finishReasoning();
+        // A sub-agent's step lives on its agent's line, not in the chat: it must not end the parent's
+        // thought, or one long thought streams as a new "Thought" row after every hidden child step.
+        ensureTurn(); if (!childId) finishReasoning();
         turn._tools = turn._tools || Object.create(null);
         // One step, one row. A turn adopted from a reload snapshot can already hold this step, still
         // running, when its live tool_call arrives; a finished row whose id comes back is a new call.
@@ -10128,7 +10130,13 @@
     let entry = id ? blocks.get(id) : null;
     if (entry && !entry.ended) {
       if (entry.kind === "note") { entry.text.appendData(text); return; }
-      if (entry.kind === "group" && entry.group === turn.reasonGroup) { entry.text.appendData(text); return; }
+      // A block still streaming stays in its own row, whatever arrived in between (a sub-agent's
+      // thought or step): it is one thought, never a new row per chunk.
+      if (entry.kind === "group" && entry.group?.body?.isConnected) {
+        entry.text.appendData(text);
+        if (!turn.reasonGroup && !entry.agent) { turn.reasonGroup = entry.group; entry.group.open = true; paintReasonGroup(entry.group); }
+        return;
+      }
     }
     if (identity.source === "withheld") return;             // a withheld block never streams text
     const open0 = turn.reasonGroup;
