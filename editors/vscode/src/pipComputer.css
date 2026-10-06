@@ -1,0 +1,49 @@
+/* A Pip's computer, in an editor tab: a header with the Pip, a rail of three apps, one pane. */
+:root{color-scheme:light dark;font-family:var(--vscode-font-family,system-ui);font-size:var(--vscode-font-size,13px);color:var(--vscode-foreground);background:var(--vscode-editor-background);
+ --line:var(--vscode-panel-border,rgba(128,128,128,.28));--muted:var(--vscode-descriptionForeground,#8b8b8b);--accent:#7c5cff;--surface:var(--vscode-sideBar-background,rgba(127,127,127,.06));
+ --mono:var(--vscode-editor-font-family,ui-monospace,SFMono-Regular,Menlo,monospace)}
+*{box-sizing:border-box}
+body{margin:0;height:100vh;background:var(--vscode-editor-background)}
+#app{display:flex;flex-direction:column;height:100%;min-height:0}
+button{font:inherit;color:var(--vscode-button-foreground,#fff);background:var(--accent);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+button:focus-visible,input:focus-visible,.pc-screen:focus-visible{outline:2px solid var(--vscode-focusBorder,var(--accent));outline-offset:2px}
+.pc-quiet{color:var(--vscode-foreground);background:transparent;border:1px solid var(--line)}
+input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;padding:6px 9px;min-width:0}
+.pc-header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex:none}
+.pc-face{width:42px;height:42px;flex:none}
+.pc-title{flex:1;min-width:0}.pc-title h1{font-size:14px;font-weight:600;margin:0}.pc-status{margin:2px 0 0;color:var(--muted);font-size:12px}
+.pc-body{display:flex;flex:1;min-height:0}
+.pc-rail{display:flex;flex-direction:column;gap:4px;padding:10px 8px;border-right:1px solid var(--line);flex:none;width:112px;background:var(--surface)}
+.pc-app{display:flex;align-items:center;gap:8px;text-align:left;color:var(--vscode-foreground);background:transparent;border-radius:6px;padding:7px 9px}
+.pc-app:hover{background:var(--vscode-list-hoverBackground,rgba(127,127,127,.12))}
+.pc-app.active{background:var(--vscode-list-activeSelectionBackground,rgba(124,92,255,.22));color:var(--vscode-list-activeSelectionForeground,inherit)}
+.pc-icon{display:inline-grid;place-items:center;width:18px;font-family:var(--mono);font-size:12px;opacity:.85}
+.pc-pane{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 16px;overflow:auto}
+.pc-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pc-bar input{flex:1}
+.pc-screen{position:relative;flex:1;min-height:200px;display:grid;place-items:center;border:1px solid var(--line);border-radius:8px;background:#0b0b0d;overflow:hidden}
+.pc-screen img{display:block;max-width:100%;max-height:100%;cursor:crosshair}
+.pc-muted{color:var(--muted);margin:0}.pc-hint{font-size:12px}
+.pc-error{margin:8px 16px 0;color:var(--vscode-errorForeground,#f14c4c)}.pc-pane .pc-error{margin:0}
+.pc-notice{margin:8px 16px 0;color:var(--muted)}
+.pc-waiting{display:grid;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.pc-hold{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.pc-hold div:first-child{display:grid;gap:2px;min-width:0}.pc-hold span{color:var(--muted);font-size:12px}
+.pc-actions{display:flex;gap:6px;flex-wrap:wrap}
+.pc-crumbs{display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden}.pc-crumb{color:var(--vscode-foreground);background:transparent;padding:3px 5px}
+.pc-add{cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:6px 12px}
+.pc-split{display:grid;grid-template-columns:minmax(180px,280px) minmax(0,1fr);gap:12px;flex:1;min-height:0}
+.pc-list{list-style:none;margin:0;padding:0;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.pc-file{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;width:100%;text-align:left;color:var(--vscode-foreground);background:transparent;border-radius:0;padding:6px 8px}
+.pc-file:hover{background:var(--vscode-list-hoverBackground,rgba(127,127,127,.12))}.pc-file.active{background:var(--vscode-list-activeSelectionBackground,rgba(124,92,255,.22))}
+.pc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pc-size{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
+.pc-list .pc-muted{padding:10px}
+.pc-preview{min-width:0;overflow:auto;display:flex;flex-direction:column;gap:8px}
+.pc-text,.pc-run pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:10px;border-radius:8px;background:var(--surface);border:1px solid var(--line)}
+.pc-image{max-width:100%;border-radius:8px}
+.pc-terminal{gap:8px}
+.pc-log{flex:1;min-height:0;overflow:auto;display:grid;align-content:start;gap:10px;font-family:var(--mono);font-size:12px;padding:10px;border-radius:8px;background:#0b0b0d;color:#e6e6e6}
+.pc-log .pc-muted{font-family:var(--vscode-font-family,system-ui)}
+.pc-run{display:grid;gap:4px}.pc-prompt{margin:0}.pc-who{color:#b8a6ff}.pc-run pre{background:transparent;border:0;padding:0;color:inherit}.pc-exit{margin:0;color:#ff8a80}
+#pc-run input{font-family:var(--mono)}
+@media(max-width:620px){.pc-rail{width:auto;flex-direction:row;border-right:0;border-bottom:1px solid var(--line)}.pc-body{flex-direction:column}.pc-split{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}

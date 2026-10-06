@@ -720,7 +720,8 @@ reports whose path is in that run's changed paths. Outcomes walk the latest
 only on Personal Pips, never together with `app_plan`, and only the local user can propose or
 accept it. A `personal_task` run of a job with a computer pins it (`manifest.computer`) and its
 worker gets one tool, `computer`, with the operations `open`, `read`, `click`, `type`, `press`,
-`choose` and `back`. The browser belongs to the supervisor, not the worker: one Chromium per Pip
+`choose` and `back`, and from API 43 `files`, `open_file` and `run` (below). From API 43 a
+`conversation` run of that Pip gets the same tool, so it uses its computer from its chat. The browser belongs to the supervisor, not the worker: one Chromium per Pip
 in `bwrap --unshare-all`, its profile in `computers/PIP_ID/home`, launched with
 `--die-with-parent` from a keeper thread. The worker reaches it through a per-run Unix socket
 that checks a token. The box has no network except a Unix socket to an egress proxy in the
@@ -752,7 +753,44 @@ The live view (`open_pip_computer`, `use_pip_computer_view`, operations `frame`,
 Its token stays in the controller and is never sent to the editor. While no run is active,
 requests the user submits in it are released at once, because the user made them. During a
 run the view only watches. All nine computer commands are for the local user only. Screenshots
-are JPEG, at most 90 KiB each and 200 per run, under the run's `artifacts/computer`.
+are JPEG, at most 90 KiB each and 200 per run, under the run's `artifacts/computer`. A live
+view frame is taken at JPEG quality 55, and again at 30 if it is over 700 KiB (a busy page).
+
+**A computer's Files and Terminal** (API 43). Beside the browser, a computer has **Files**:
+`computers/PIP_ID/home/Files`, which the browser sees as `/home/pip/Files`; its downloads go to
+`Files/Downloads` (CDP `Browser.setDownloadBehavior`). The browser's profile beside it is never
+listed or read. Every path is walked one name at a time with `O_NOFOLLOW`: no `..`, `.`, empty
+or over-long names, at most 8 deep. Links, sockets and devices are not listed and never
+followed, so a link made in the Terminal cannot point DGC anywhere. The folder holds 1 GB at
+most. The **Terminal** runs one command at a time (a lock file across the runner and
+`dgc serve`) in its own `bwrap --unshare-all --clearenv` box: `/usr` read-only, a 256 MiB
+`/tmp`, Files as `/home/pip` (also the working directory), no network at all, 60 seconds of
+CPU and wall time, output cut at 64 KiB, and a process limit just above the user's current
+count. The last 200 commands, yours and the Pip's, are kept in `computers/PIP_ID/terminal.jsonl`.
+
+The Pip's operations: `files {path?}` lists a folder, `open_file {path}` returns a text file
+(marked untrusted, like a page) and `run {command}` runs a command and returns its output.
+They never wait for the browser, and stop like the rest when a change is waiting for the user.
+The user's commands, all local only, and only for a Pip with a computer:
+`list_pip_computer_files {pip_id, path?}` returns `{path, entries: [{name, kind: file|folder,
+bytes, modified}], more, total_bytes}`; `read_pip_computer_file {pip_id, path}` returns
+`{path, name, mime, bytes}` plus `text` and `truncated` (a text file, first 64 KiB), `data` (a
+data URI, up to 2 MB: a PNG, JPEG, GIF, WebP or BMP image, or any other file) or
+`too_large: true`; `add_pip_computer_file {pip_id, path?, name, data}` saves a data URI of up
+to 2 MB as a new file (never overwriting: `name (1).ext`) and returns `{path, name, bytes}`;
+`remove_pip_computer_file {pip_id, path}` removes a file or folder (a link itself, never what it
+points at); `run_pip_computer_command {pip_id, command}` starts a command and returns
+`{running: {by, command, at}}` at once, because Pips controls share one worker in `dgc serve`;
+`list_pip_computer_terminal {pip_id}` returns `{entries: [{by: you|pip, command, exit, output,
+timed_out, seconds, at}], running}`. `add_pip_computer_file`'s `data` is, with a message's
+`images`, the only field outside a Pips request's 16–32 KiB bound; every hop bounds it on its
+own (one data URI, 2,800,000 characters).
+
+**From the chat.** A submit held during a chat turn continues in that chat: once it is sent,
+the supervisor sends the Pip a turn under the reserved request key `computer_ACTION_ID` (shown
+with `intro: true`, like an introduction) asking it to read the page and tell the user what
+happened. A held submit from a task run still queues a continuation run. A chat reply may
+carry `computer: {calls, held}`, only when its run had the computer.
 
 **Pulse verification plans** give a Pulse Pip a standing command list:
 
@@ -1015,4 +1053,4 @@ Clients check it before using a newer control.
 | 40 | Reviewed web reads |
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
 | 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |
-| 43 | Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images in a Personal Pip's chat (`send_pip_message` `images`, `get_pip_message_image`) |
+| 43 | Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images in a Personal Pip's chat (`send_pip_message` `images`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |

@@ -3462,6 +3462,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsReady":
       case "pipsReconnect":
       case "pipsRequest":
+      case "pipsOpenComputer":
         if (msg.documentId !== this.pipsDocumentId) return;
         this.ensurePipsBridge().receive(msg);
         return;

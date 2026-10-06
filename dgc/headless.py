@@ -75,12 +75,15 @@ def _bounded_pips_command(cmd):
     """Bound and detach editor data before handing it to an asynchronous worker."""
     from .workspace_registry import RegistryError
     request = cmd["request"] if cmd["type"] == "pips_control" else cmd
-    images = None
-    if cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") == "send_pip_message" and "images" in request:
-        # A message's images ride outside the 32 KiB budget, bounded on their own (4, 2 MB in all).
-        from .pip_chat import bounded_image_uris
-        images = bounded_image_uris(request["images"])
-        request = {key: value for key, value in request.items() if key != "images"}
+    bulk = None
+    if cmd["type"] == "pips_control" and isinstance(request, dict):
+        # A message's images, or a file added to a Pip's computer, ride outside the 32 KiB budget,
+        # bounded on their own (2 MB of data); every other field keeps the budget.
+        from .pip_computer_files import bulk_field
+        field, bound = bulk_field(request.get("type"))
+        if field is not None and field in request:
+            bulk = (field, bound(request[field]))
+            request = {key: value for key, value in request.items() if key != field}
     pending, count, chars = [(request, 0)], 0, 0
     while pending:
         value, depth = pending.pop()
@@ -122,8 +125,8 @@ def _bounded_pips_command(cmd):
         request_id = detached.get("request_id")
         if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 128:
             raise RegistryError("invalid_request", "Pip request_id must contain 1-128 characters.")
-        if images is not None:
-            detached["images"] = images
+        if bulk is not None:
+            detached[bulk[0]] = bulk[1]
         return {"type": "pips_control", "request": detached}
     return detached
 

@@ -540,7 +540,7 @@ function computerInner(){
  if(!c)return `<h3>Computer</h3>${errorMarkup(computerState.error)||'<p class="muted">Loading…</p>'}`;
  if(!c.granted)return `<h3>Computer</h3><p class="muted">Give this Pip its own browser and files, separate from yours, so it can look things up and fill in forms for you.</p>${c.available?button('give-computer','Give this Pip a computer…',off):`<p class="muted">${esc(c.reason)}</p>`}`;
  const waiting=c.actions.filter(a=>a.status==='pending');
- return `<h3>Computer</h3><p>This Pip has its own browser and files. It reads websites freely; anything it would submit waits for you here.</p>${c.available?'':`<p class="notice">${esc(c.reason)}</p>`}<div class="actions">${button('open-computer','Open browser',off||!c.available)}${button('stop-computer','Stop computer',off)}${button('remove-computer','Remove computer…',off)}</div>${waiting.length?`<h4>Waiting for you</h4>${waiting.map(a=>`<article class="computer-action"><div><strong>${esc(a.summary.method)} ${esc(a.summary.host)}${esc(a.summary.path)}</strong><span class="muted">from ${esc(a.summary.page)}</span></div>${`<button type="button" data-computer-action="${esc(a.id)}"${off?' disabled':''}>Review…</button>`}</article>`).join('')}`:''}`;
+ return `<h3>Computer</h3><p>This Pip has its own browser and files. It reads websites freely; anything it would submit waits for you here.</p>${c.available?'':`<p class="notice">${esc(c.reason)}</p>`}<div class="actions">${button('open-computer',S.apiVersion>=43&&!remoteHost?'Open its computer':'Open browser',off||!c.available)}${button('stop-computer','Stop computer',off)}${button('remove-computer','Remove computer…',off)}</div>${waiting.length?`<h4>Waiting for you</h4>${waiting.map(a=>`<article class="computer-action"><div><strong>${esc(a.summary.method)} ${esc(a.summary.host)}${esc(a.summary.path)}</strong><span class="muted">from ${esc(a.summary.page)}</span></div>${`<button type="button" data-computer-action="${esc(a.id)}"${off?' disabled':''}>Review…</button>`}</article>`).join('')}`:''}`;
 }
 function grantComputer(give){
  const name=S.pip?.name||'this Pip';
@@ -556,7 +556,7 @@ async function applyComputerGrant(review){
   if(token!==scope())return;
   if(!record(proposal)||proposal.pip_id!==pip.id||JSON.stringify(proposal.definition?.computer_plan??null)!==JSON.stringify(review.computerGrant?{schema_version:1}:null))throw Error('The saved change differs from your choice. Refresh and try again.');
   await send('accept_pip_update',{pip_id:pip.id,proposal_id:proposal.id,expected_version:pip.current_version});
-  if(token!==scope())return;closeReview();computerState.pip='';S.notice=review.computerGrant?`${pip.name} has a computer. Use Open browser to sign in to the sites it needs.`:`${pip.name}'s computer was removed.`;await refresh(true);
+  if(token!==scope())return;closeReview();computerState.pip='';S.notice=review.computerGrant?`${pip.name} has a computer. Use ${S.apiVersion>=43&&!remoteHost?'Open its computer':'Open browser'} to sign in to the sites it needs.`:`${pip.name}'s computer was removed.`;await refresh(true);
  }catch(error){if(token===scope()&&S.review===review)review.error=errorText(error);}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }
@@ -585,6 +585,8 @@ async function computerCommand(type,notice){
  finally{if(token===scope()){S.busy=false;render();}}
 }
 function openComputerView(){
+ // API 43: the computer opens as an editor tab with its Browser, Files and Terminal.
+ if(S.apiVersion>=43&&!remoteHost&&S.pip&&S.pip.id===S.selected){vscode.postMessage({type:'pipsOpenComputer',pip:{id:S.pip.id,name:S.pip.name,pip_type:S.pip.pip_type}});return;}
  if(!usable()||computerViewTimer)return;
  openReview({computerView:true,readOnly:true,title:`${S.pip?.name||'Pip'}'s browser`,description:'You are driving. What you submit here is sent; the Pip\'s own submits still wait for you.',
   body:`<form id="computer-go" class="computer-bar"><input id="computer-url" aria-label="Address" placeholder="https://" autocomplete="off"><button type="submit">Go</button>${button('computer-back','Back',false)}</form><div class="computer-screen"><img id="computer-screen" alt="The Pip's browser. Select a point to click there."></div><p id="computer-status" class="muted" role="status">Opening the browser…</p><form id="computer-type" class="computer-bar"><input id="computer-text" aria-label="Type into the page" autocomplete="off" placeholder="Select a field, then type here"><button type="submit">Type</button>${button('computer-enter','Enter',false)}${button('computer-tab','Next field',false)}${button('computer-backspace','Delete',false)}${button('computer-scroll-down','Scroll down',false)}${button('computer-scroll-up','Scroll up',false)}</form>`,

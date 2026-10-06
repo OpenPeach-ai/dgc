@@ -525,6 +525,11 @@ class BoxedBrowser(BrowserSession):
         self._ws = _PageChannel(self._pipe, session)
         for domain in ("Page", "Runtime", "Log", "Network"):
             self.command(f"{domain}.enable")
+        # Downloads land in the computer's Files, which the Files app and the Terminal see.
+        try:
+            self._browser_call("Browser.setDownloadBehavior", {"behavior": "allow", "downloadPath": "/home/pip/Files/Downloads"})
+        except (BrowserError, socket.timeout, OSError):
+            pass
 
     def _browser_call(self, method: str, params: dict | None = None, *, timeout: float = 20) -> dict:
         self._next_id += 1

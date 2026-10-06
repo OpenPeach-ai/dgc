@@ -156,7 +156,7 @@ job with `create_pip` and a reviewed update.
 | 40 | `changes.web_plan` |
 | 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`, `get_pips_keep_running`, `set_pips_keep_running`, `get_pips_desktop_notifications`, `set_pips_desktop_notifications`, `get_pip_usage`, `set_pip_daily_cap`, `export_pip`, `list_pip_feedback`, `set_pip_feedback`, `always_allow_pip_app_action`, `list_pip_action_grants`, `revoke_pip_action_grant`; `changes.github_plan` |
 | 42 | Pip computers: `get_pip_computer`, `list_pip_computer_actions`, `get_pip_computer_frame`, `list_pip_computer_frames`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view`; `changes.computer_plan` |
-| 43 | `introduce_pip`; `create_pip` with an empty `goal` and `pip_type` `core` for Personal Pips; `images` on `send_pip_message`; `get_pip_message_image` |
+| 43 | `introduce_pip`; `create_pip` with an empty `goal` and `pip_type` `core` for Personal Pips; `images` on `send_pip_message`; `get_pip_message_image`; a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `list_pip_computer_terminal`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`) |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -417,6 +417,12 @@ settings are display preferences outside the reviewed job; changing them grants 
 | `stop_pip_computer` | M | `pip_id` |
 | `open_pip_computer` | M | `pip_id` |
 | `use_pip_computer_view` | M | `pip_id`, `op` (`frame`, `click`, `type`, `key`, `scroll`, `go`, `back`), `x?`, `y?`, `text?`, `key?`, `dy?`, `url?` |
+| `list_pip_computer_files` | R | `pip_id`, `path?`; the computer's own Files folder (API 43) |
+| `read_pip_computer_file` | R | `pip_id`, `path`; `text` (first 64 KiB), or `data` up to 2 MB (API 43) |
+| `list_pip_computer_terminal` | R | `pip_id`; the last 200 commands and the one running (API 43) |
+| `add_pip_computer_file` | M | `pip_id`, `path?`, `name`, `data` (one data URI, 2 MB at most; outside the 32 KiB budget) (API 43) |
+| `remove_pip_computer_file` | M | `pip_id`, `path` (API 43) |
+| `run_pip_computer_command` | M | `pip_id`, `command`; starts it in the computer's Terminal (no internet) and returns at once (API 43) |
 
 A Personal Pip's computer is its own sandboxed browser (Linux only for now). It reads public
 websites freely; anything it would submit is held as a pending action until the user decides.

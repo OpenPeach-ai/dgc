@@ -105,14 +105,17 @@ test('while a Pip answers it is in the chat at work, with its name, and its repl
  assert.equal(done.d.querySelectorAll('.chat-time').length,1,'one time mark for messages minutes apart');
 });
 
-test('the computer button gives a Pip a computer, or opens the one it has',async()=>{
+test('the computer button gives a Pip a computer, or opens the one it has in an editor tab',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
  x.click('#pip-computer-open');await x.drain();
  assert.match(x.d.querySelector('[role=dialog]').textContent,/Give Gmail a computer\?/);
  const y=setup({jobs:[gmail],computer:{pip_id:gmail.id,granted:true,available:true,reason:'',pending:0,actions:[]}});await y.drain();y.click(`[data-job="${gmail.id}"]`);await y.drain();
  y.click('#pip-computer-open');await y.drain();
- assert.equal(y.requests('open_pip_computer').length,1,'its screen opens');
+ const opened=y.sent.filter(m=>m.type==='pipsOpenComputer');
+ assert.deepEqual(JSON.parse(JSON.stringify(opened)),[{type:'pipsOpenComputer',pip:{id:gmail.id,name:'Gmail',pip_type:'scout'}}],'the host opens "Gmail · Computer" as a tab');
+ assert.equal(y.requests('open_pip_computer').length,0,'not a dialog in the Pips view');
+ assert.equal(y.d.querySelector('[role=dialog]'),null);
 });
 
 test('back returns to your Pips, and the menu reaches Results and Settings',async()=>{

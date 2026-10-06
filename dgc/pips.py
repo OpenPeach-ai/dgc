@@ -61,6 +61,8 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame",
     "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
     "always_allow_pip_computer_action",
+    "list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file", "remove_pip_computer_file",
+    "run_pip_computer_command", "list_pip_computer_terminal",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
     "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
@@ -122,6 +124,9 @@ _COMMAND_ARGS = {
     "get_pip_computer_frame": {"run_id", "frame"}, "list_pip_computer_frames": {"run_id"},
     "stop_pip_computer": {"pip_id"}, "open_pip_computer": {"pip_id"},
     "use_pip_computer_view": {"pip_id", "op", "x", "y", "text", "key", "dy", "url"},
+    "list_pip_computer_files": {"pip_id", "path"}, "read_pip_computer_file": {"pip_id", "path"},
+    "add_pip_computer_file": {"pip_id", "path", "name", "data"}, "remove_pip_computer_file": {"pip_id", "path"},
+    "run_pip_computer_command": {"pip_id", "command"}, "list_pip_computer_terminal": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
     "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
@@ -1903,7 +1908,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     connector_context = pip_connector_drafts.pin(manifest)
     connector_candidate = None
     from . import pip_computer
-    computer_pin = manifest.get('computer_socket') if personal and kind == 'personal_task' else None
+    # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
+    computer_pin = manifest.get('computer_socket') if personal and kind in ('personal_task', 'conversation') else None
     if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) != {'socket', 'token'}):
         raise RegistryError('invalid_manifest', 'The computer connection is malformed.')
     task_history = (pip_chat_setup.validate_reference(manifest['personal_history'], manifest)
@@ -2023,7 +2029,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if computer_pin is not None:
                     base_instructions = base_instructions.replace(
                         "You have no file, project, browser, command or external-action tools.",
-                        "You have no file, project, command or external-action tools.") + '\n' + pip_computer.NOTICE
+                        "You cannot reach the user's own files or projects; your tools are your own computer's.") + '\n' + pip_computer.NOTICE
             if specialist_pin is not None:
                 base_instructions = base_instructions.replace('network, delegate, load skills', 'network, load skills')
                 if self._pip_specialist_role:
@@ -2659,7 +2665,7 @@ def _execute_run(registry, row, config):
     if personal and 'handoff' in manifest:
         require_personal_handoff(PipStore(registry), manifest, config)
     computer_socket = computer_host = None
-    if personal and manifest.get('computer') is not None and manifest.get('run_kind') == 'personal_task':
+    if personal and manifest.get('computer') is not None and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # The Pip's own computer lives in this supervisor process and outlives the run; the
         # worker reaches it through a socket only this run's token opens.
         from . import pip_computer
@@ -2988,10 +2994,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 from .pip_commit_paths import _encode as bounded_path_request
                 bounded_path_request(request,request_limit)
         sized = request
-        if command == "send_pip_message" and isinstance(request, dict) and "images" in request:
-            from .pip_chat import bounded_image_uris
-            bounded_image_uris(request["images"])
-            sized = {key: value for key, value in request.items() if key != "images"}
+        from .pip_computer_files import bulk_field
+        field, bound = bulk_field(command)
+        if field is not None and isinstance(request, dict) and field in request:
+            bound(request[field])
+            sized = {key: value for key, value in request.items() if key != field}
         if not isinstance(request, dict) or len(_json(sized).encode()) > request_limit:
             raise RegistryError("invalid_request", f"Control requests must be objects no larger than {request_limit // 1024} KiB.")
         if command not in CONTROL_COMMANDS:
@@ -3236,6 +3243,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = {"view": pip_computer.view_call(registry, pip_id, request.get("op"), request, actor)}
                 else:
                     result = pip_computer.request_stop(registry, pip_id, actor)
+            elif command in ("list_pip_computer_files", "read_pip_computer_file", "add_pip_computer_file",
+                             "remove_pip_computer_file", "run_pip_computer_command", "list_pip_computer_terminal"):
+                # The computer's Files and Terminal (its browser is above): local only, its own folder only.
+                from . import pip_computer
+                result = pip_computer.desk(registry, command, pip_id, request, actor)
             elif command in ("set_pip_feedback", "list_pip_feedback"):
                 from . import pip_feedback
                 if actor not in ("editor-user", "local-console"):

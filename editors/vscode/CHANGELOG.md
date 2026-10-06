@@ -29,6 +29,13 @@
   (sometimes twice), and its eyes follow your pointer, settling back when you stop. Thinking looks
   up to each side, working reads and bobs, waiting hops for your attention, success bounces and
   failure droops. Reduced motion keeps them still.
+- A Pip's computer opens as an editor tab, "Gmail · Computer", with three apps: **Browser** (its
+  live screen: click, type, scroll, go to an address), **Files** (its own folder: open folders,
+  preview, add files, Save to…, remove) and **Terminal** (run a command; yours and the Pip's show
+  together; no internet). What it would submit waits at the top with Send once, Always allow and
+  Reject. The tab only ever touches that Pip's computer. Needs Pips API 43.
+- Fixed: a busy page's live screen (an inbox, say) no longer shows "The browser view reply is
+  invalid".
 - The **Pips** button in the chat header shows Core, the main chat's Pip, breathing and
   blinking softly. It stays still when motion is reduced or the panel is hidden.
 - The new Pips view opens beside the chat (the Pips button in the panel header, or **DGC: Open

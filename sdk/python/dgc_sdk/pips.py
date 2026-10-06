@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal",
     "get_pip_message_image", "get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames",
     "list_pip_action_grants", "list_pip_feedback", "export_pip", "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
     "get_pip_connector_draft", "list_pip_connector_drafts", "inspect_pip_connector_actions", "inspect_pip_calendar_connection", "get_pip_calendar_draft", "list_pip_calendar_drafts",
@@ -59,6 +60,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "add_pip_computer_file", "remove_pip_computer_file", "run_pip_computer_command",
     "always_allow_pip_computer_action", "decide_pip_computer_action", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
     "always_allow_pip_app_action", "revoke_pip_action_grant", "set_pip_feedback", "set_pip_daily_cap", "set_pips_desktop_notifications", "set_pips_keep_running", "mark_pip_digest_seen", "set_pip_notify_settings",
     "prepare_pip_connector_draft", "dismiss_pip_connector_draft", "propose_pip_connector_action", "propose_pip_calendar_action", "prepare_pip_calendar_draft", "dismiss_pip_calendar_draft",
@@ -176,8 +178,19 @@ MUTATION_COMMANDS |= API43_MUTATIONS
 # API 43: the images sent in a Pip's chat, one at a time.
 API43_READS = frozenset({'get_pip_message_image'})
 READ_COMMANDS |= API43_READS
+# API 43: a Pip computer's Files and Terminal (its browser is API 42).
+API43_READS |= {'list_pip_computer_files', 'read_pip_computer_file', 'list_pip_computer_terminal'}
+API43_MUTATIONS |= {'add_pip_computer_file', 'remove_pip_computer_file', 'run_pip_computer_command'}
+READ_COMMANDS |= API43_READS
+MUTATION_COMMANDS |= API43_MUTATIONS
 COMMAND_FIELDS = {
     'always_allow_pip_computer_action': frozenset({'action_id', 'expected_digest'}),
+    'list_pip_computer_files': frozenset({'pip_id', 'path'}),
+    'read_pip_computer_file': frozenset({'pip_id', 'path'}),
+    'add_pip_computer_file': frozenset({'pip_id', 'path', 'name', 'data'}),
+    'remove_pip_computer_file': frozenset({'pip_id', 'path'}),
+    'run_pip_computer_command': frozenset({'pip_id', 'command'}),
+    'list_pip_computer_terminal': frozenset({'pip_id'}),
     'get_pip_computer': frozenset({'pip_id'}),
     'list_pip_computer_actions': frozenset({'pip_id', 'limit'}),
     'get_pip_computer_frame': frozenset({'run_id', 'frame'}),
@@ -449,6 +462,14 @@ class Pips:
                     or sum(len(i) for i in images) > MAX_IMAGE_URI_CHARS):
                 raise DGCConfigError('images must be 1 to 4 image data URIs, 2 MB in all')
             images, params = list(images), {key: value for key, value in params.items() if key != 'images'}
+        file_data = None
+        if command == 'add_pip_computer_file' and type(params) is dict and 'data' in params:
+            # A file added to a Pip's computer also travels outside the 32 KiB budget: one data URI, 2 MB.
+            file_data = params['data']
+            if (type(file_data) is not str or not file_data.startswith('data:') or ';base64,' not in file_data[:200]
+                    or not file_data.isascii() or len(file_data) > MAX_IMAGE_URI_CHARS):
+                raise DGCConfigError('data must be one data URI of 2 MB or less')
+            params = {key: value for key, value in params.items() if key != 'data'}
         values = _detach(params)
         if (command in ('propose_pip_calendar_action','prepare_pip_calendar_draft')
                 and isinstance(values.get('event'),dict)
@@ -513,6 +534,8 @@ class Pips:
             raise DGCConfigError("Pip request exceeds 32 KiB")
         if images is not None:
             request["images"] = images
+        if file_data is not None:
+            request["data"] = file_data
         event = session._request({"type": "pips_control", "request": request}, "pips_result", request_id=rid)
         if event.get("request_id") != rid or event.get("command") != command or type(event.get("ok")) is not bool:
             raise DGCProtocolError("Mismatched or malformed Pip response")

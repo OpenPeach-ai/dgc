@@ -38,6 +38,10 @@ with patch.object(LLMClient, "chat", chat):
 '''
 
 
+# The same model in the Pip's chat: it has the computer there too, among the chat's own tools.
+CHAT_WORKER = WORKER.replace('assert names == ["computer"], names', 'assert "computer" in names, names')
+
+
 @unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")
 class PipComputerTests(unittest.TestCase):
     setUp_base = fixtures.LocalPipsTests.setUp
@@ -120,6 +124,46 @@ class PipComputerTests(unittest.TestCase):
         self.assertEqual(follow["manifest"]["computer_continuation"]["action_id"], action_id)
         pip_computer.tick(self.registry, self.cfg)
         self.assertEqual(len(self.received), 1, "never sent twice")
+
+    def test_a_download_lands_in_the_computers_files(self):
+        from dgc import pip_computer_files as desk
+        pip = self.personal()
+        host = pip_computer.host_for(self.registry.directory, pip["id"], pip["workspace_id"])
+        host.call("open", {"url": self.url + "report.txt"})
+        target = desk.files_root(host.root) / "Downloads" / "report.txt"
+        for _ in range(100):
+            if target.exists() and target.read_text() == "quarterly numbers\n":
+                break
+            time.sleep(0.1)
+        self.assertEqual(target.read_text(), "quarterly numbers\n")
+        self.assertIn("report.txt", host.call("files", {"path": "Downloads"}))
+
+    def test_a_submit_held_in_the_pips_chat_continues_in_the_chat(self):
+        from dgc import pip_chat
+        pip = self.personal()
+        sent = pip_chat.send(self.store, pip["id"], "Order the usual", "k1", "editor-user", self.cfg)
+        row = self.store.claim_next()
+        popen = subprocess.Popen
+
+        def process(argv, *a, **kw):
+            if argv[1:] == ["-m", "dgc.pips", "--worker"]:
+                argv = [sys.executable, "-c", CHAT_WORKER % self.url]
+            return popen(argv, *a, **kw)
+        with patch.object(pips.subprocess, "Popen", side_effect=process):
+            result = pips._execute_run(self.registry, row, self.cfg)
+        finished = self.store.finish(sent["run"]["id"], result=result)
+        self.assertEqual(finished["status"], "succeeded", finished.get("error"))
+        [action] = pip_computer.list_actions(self.registry, pip["id"])
+        self.assertEqual((action["status"], action["run_id"]), ("pending", sent["run"]["id"]))
+        self.assertEqual(self.received, [])
+        pip_computer.decide(self.registry, action["id"], action["digest"], True, "editor-user")
+        self.assertEqual(pip_computer.tick(self.registry, self.cfg)["sent"], 1)
+        self.assertEqual(self.received, [("/submit", "name=Ada&password=hunter2")])
+        [done] = pip_computer.list_actions(self.registry, pip["id"])
+        follow = self.store.run(done["continuation_run_id"])
+        self.assertEqual(follow["manifest"]["run_kind"], "conversation", "the Pip carries on in its chat")
+        last = pip_chat.list_messages(self.store, pip["id"])["messages"][-1]
+        self.assertTrue(last["intro"])
 
     def test_always_allow_sends_the_same_submit_on_that_site_without_asking(self):
         from dgc import pip_action_grants as grants

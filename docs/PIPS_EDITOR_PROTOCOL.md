@@ -164,6 +164,23 @@ or `{ok: false, error, ready?}` while it opens or after it closes. `propose_pip_
 accepts `changes.computer_plan` from API 42; the extension refuses to send it, or any of these
 commands, to an older backend.
 
+**The computer tab** (API 43). The Pips view's computer button posts
+`{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
+The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·
+Computer" (a second request brings it forward). The tab is a separate webview with its own
+script (`dist/pipComputer.js`) and the same CSP. It posts `pipsReady`, receives
+`{type: 'pipComputerInit', pip}` and `pipsConnection`, and sends ordinary `pipsRequest`s with the
+connection generation; the host answers them to that tab only. A tab may send only
+`get_pip_computer`, `open_pip_computer`, `use_pip_computer_view`, `stop_pip_computer`,
+`list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`
+and the six Files and Terminal commands, and only with its own `pip_id`; anything else is
+refused before it is sent. `{type: 'pipComputerSave', name, data | text}` asks the host to save a
+file the tab read: the user picks the place, and the tab gets `{type: 'pipComputerSaved', ok,
+name | error}`. The Files and Terminal commands (`list_pip_computer_files`,
+`read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`,
+`run_pip_computer_command`, `list_pip_computer_terminal`) need API 43; see PIPS_REFERENCE. A live
+view frame (`use_pip_computer_view`) may be up to 1,400,000 characters.
+
 `notify_pip_setup {request_id, setup_id}` is a nested control for the chat that
 proposed a setup card. After the user approves the card, send it to that chat; the
 backend checks the session, workspace and accepted receipt, then delivers a

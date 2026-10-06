@@ -580,6 +580,22 @@ you can make it: the main chat and the Pip itself can't.
   **Remove computer…** takes it away; the Pip's saved sign-ins stay in its folder (see
   [Privacy](#privacy-and-where-state-lives)) until you delete it.
 
+**Its screen in an editor tab.** The computer button in a Pip's chat (or **Open its computer**
+in Settings) opens "NAME · Computer" as an editor tab with three apps, like Grok's bots:
+
+- **Browser**: the live screen. Click, type, scroll and go to an address; anything the Pip would
+  submit shows at the top with **Send once**, **Always allow** and **Reject**.
+- **Files**: the computer's own folder, never yours. Downloads from its browser land in
+  **Downloads**. Open a file to see it, **Save to…** to copy it where you choose, **Add files…**
+  (or drop them) to give the Pip something to work on, and **Remove**. It holds 1 GB.
+- **Terminal**: run a command in the computer's Files. Yours and the Pip's commands show
+  together. It has no internet (the browser is the computer's only way online), sees nothing
+  but those Files, and stops a command after 60 seconds.
+
+The Pip uses all three from its chat too, so you can watch it work while you talk to it. If it
+holds a submit there, the chat continues once you send it: the Pip reads what happened and
+tells you.
+
 The terminal has the same steps: `dgc pips computer status PIP`, `pending PIP`,
 `approve ACTION_ID`, `reject ACTION_ID`, `stop PIP` and `frames RUN_ID` (a run's screenshots).
 `give`, `remove` and `approve` ask once; add `--yes` in a script.

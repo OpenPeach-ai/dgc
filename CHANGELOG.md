@@ -14,6 +14,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   without text. They are checked, kept once on your machine, and shown in the chat
   (`send_pip_message` `images`, `get_pip_message_image`). Registry schema 36: an older `dgc` can't
   open the Pips registry once this one has.
+- A Pip's computer has Files and a Terminal beside its browser, like Grok's bots. Browser
+  downloads land in its Files. The Terminal runs one command at a time with no network, only the
+  computer's Files as its home, and a 60-second limit. The Pip uses both through its computer
+  tool, and now also from its chat, so you can watch it work; a submit it holds there continues
+  in the chat once you send it. New commands: `list_pip_computer_files`,
+  `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`,
+  `run_pip_computer_command`, `list_pip_computer_terminal`.
+- The live screen of a busy page shows again: frames over 700 KB are retaken at lower quality,
+  and the editor accepts full-size frames.
 - A chat's own shell always runs the `dgc` of the build the chat is running, so the rule that a
   chat can't create or approve Pips from its shell holds even when an older `dgc` is on your PATH
   (Linux and macOS).

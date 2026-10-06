@@ -219,14 +219,22 @@ def request(text, key, chat_options=None, images=None):
 def _message(row):
     message = {key: row[key] for key in ("id", "pip_id", "workspace_id", "role", "text", "run_id",
                                         "status", "model", "created_at")}
-    if row["role"] == "user" and str(row["request_key"] or "").startswith(INTRO_KEY):
-        message["intro"] = True        # DGC asked the Pip to introduce itself; the editor shows no bubble
+    if row["role"] == "user" and str(row["request_key"] or "").startswith(DGC_KEYS):
+        message["intro"] = True        # DGC wrote this turn (a hello, a follow-up); the editor shows no bubble
     return message
 
 
 # A new Pip speaks first, like a person you have just met. DGC sends this one turn, under a key
 # no user message can take, and the editor hides it: the chat opens on the Pip's hello.
 INTRO_KEY = "intro_"
+# After the user approves something the Pip's computer held from a chat, DGC asks the Pip to carry on
+# in that chat, under this key.
+COMPUTER_KEY = "computer_"
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY)
+COMPUTER_DONE = ("This message is from DGC, not the user. The user approved what your computer was holding, and "
+                 "DGC sent it exactly as the page made it: {what}. Use your computer to read the page and see what "
+                 "happened. Then tell the user in a short message, and carry on with what they asked if more is "
+                 "needed. Do not repeat that change.")
 INTRO = ("This message is from DGC, not the user. The user has just created you in the Pips view and "
          "named you \"{name}\". Write your first message to them. Say hello and who you are in one "
          "sentence. Guess from your name what they would like help with, then say what you can do for "
@@ -249,6 +257,13 @@ def introduce(store, pip_id, actor, config):
     key = INTRO_KEY + re.sub(r"[^A-Za-z0-9_-]", "", pip_id)[:100]
     text = (CORE_INTRO if pip.get("pip_type") == "core" else INTRO).format(name=pip["name"][:120].replace('"', "'"))
     return send(store, pip_id, text, key, actor, config, _intro=True)
+
+
+def continue_after_computer(store, pip_id, action_id, summary, config):
+    """The chat's next turn once a submit its run held has been sent: the Pip looks and replies."""
+    what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
+    key = COMPUTER_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    return send(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config, _intro=True)
 
 
 def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):
@@ -462,8 +477,16 @@ def insert_user(store, pip, req, run_id, model, now):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
+    if "computer" in result:
+        # A chat that used the Pip's computer: how many steps, and what it left waiting for the user.
+        used = result["computer"]
+        if (not isinstance(used, dict) or set(used) != {"calls", "held"} or type(used["calls"]) is not int
+                or not 0 <= used["calls"] <= 10000 or not isinstance(used["held"], list) or len(used["held"]) > 20
+                or any(not isinstance(i, str) or not re.fullmatch(r"compact_[a-f0-9]{32}", i) for i in used["held"])
+                or run["manifest"].get("computer") is None):
+            raise RegistryError("invalid_reply", "This reply's computer summary is invalid.")
     if "connector_action_draft" in result:
         from .pip_connector_drafts import validate, pin, candidate
         value=validate(result['connector_action_draft']);context=pin(run['manifest'])
@@ -548,8 +571,8 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
 
 
 def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, _intro=False):
-    if not _intro and isinstance(key, str) and key.startswith(INTRO_KEY):
-        raise RegistryError("invalid_request", "That message key is reserved for a Pip's introduction.")
+    if not _intro and isinstance(key, str) and key.startswith(DGC_KEYS):
+        raise RegistryError("invalid_request", "That message key is reserved for messages DGC writes.")
     if images is not None:
         store._job(pip_id)
         images = store_images(store.registry.directory, pip_id, images)

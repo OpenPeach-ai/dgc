@@ -15,6 +15,9 @@ export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  list_pip_computer_files: { pip_id: string; path?: string };
+  read_pip_computer_file: { pip_id: string; path: string };
+  list_pip_computer_terminal: { pip_id: string };
   get_pip_computer: { pip_id: string };
   list_pip_computer_actions: { pip_id: string; limit?: number };
   get_pip_computer_frame: { run_id: string; frame: string };
@@ -81,6 +84,9 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  add_pip_computer_file: { pip_id: string; path?: string; name: string; data: string };
+  remove_pip_computer_file: { pip_id: string; path: string };
+  run_pip_computer_command: { pip_id: string; command: string };
   always_allow_pip_computer_action: { action_id: string; expected_digest: string };
   decide_pip_computer_action: { action_id: string; expected_digest: string; approve: boolean };
   stop_pip_computer: { pip_id: string };
@@ -145,6 +151,12 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  list_pip_computer_files: ["pip_id", "path"],
+  read_pip_computer_file: ["pip_id", "path"],
+  add_pip_computer_file: ["pip_id", "path", "name", "data"],
+  remove_pip_computer_file: ["pip_id", "path"],
+  run_pip_computer_command: ["pip_id", "command"],
+  list_pip_computer_terminal: ["pip_id"],
   always_allow_pip_computer_action: ["action_id", "expected_digest"],
   get_pip_computer: ["pip_id"],
   list_pip_computer_actions: ["pip_id", "limit"],
@@ -456,7 +468,11 @@ const API43_MUTATIONS = new Set(["introduce_pip"]);
 for (const command of API43_MUTATIONS) MUTATIONS.add(command);
 // API 43: the images sent in a Pip's chat, one at a time.
 const API43_READS = new Set(["get_pip_message_image"]);
+// API 43: a Pip computer's Files and Terminal (its browser is API 42).
+for (const command of ["list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal"]) API43_READS.add(command);
+for (const command of ["add_pip_computer_file", "remove_pip_computer_file", "run_pip_computer_command"]) API43_MUTATIONS.add(command);
 for (const command of API43_READS) READS.add(command);
+for (const command of API43_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -566,6 +582,18 @@ export class Pips {
       const { images: _sent, ...rest } = params as Record<string, unknown>;
       params = rest;
     }
+    let fileData: string | undefined;
+    if (command === "add_pip_computer_file" && params && typeof params === "object" && Object.hasOwn(params, "data")) {
+      // A file added to a Pip's computer also travels outside the 32 KiB budget: one data URI, 2 MB.
+      const given = (params as Record<string, unknown>).data;
+      if (typeof given !== "string" || !given.startsWith("data:") || !given.slice(0, 200).includes(";base64,")
+        || !/^[\x00-\x7f]*$/.test(given) || given.length > MAX_IMAGE_URI_CHARS) {
+        throw new DGCConfigError("data must be one data URI of 2 MB or less");
+      }
+      fileData = given;
+      const { data: _sent, ...rest } = params as Record<string, unknown>;
+      params = rest;
+    }
     const values = detach(params);
     const calendarEvent = values.event;
     if (["propose_pip_calendar_action", "prepare_pip_calendar_draft"].includes(command) && calendarEvent && typeof calendarEvent === "object"
@@ -647,7 +675,7 @@ export class Pips {
     const requestId = `sdk-pips-${randomUUID()}`;
     const request = { type: command, request_id: requestId, ...values };
     if (Buffer.byteLength(JSON.stringify(request), "utf8") > MAX_BYTES) throw new DGCConfigError("Pip request exceeds 32 KiB");
-    const sent = images === undefined ? request : { ...request, images };
+    const sent = { ...request, ...(images === undefined ? {} : { images }), ...(fileData === undefined ? {} : { data: fileData }) };
     const event = await this.send({ type: "pips_control", request: sent }, "pips_result", requestId);
     if (event.request_id !== requestId || event.command !== command || typeof event.ok !== "boolean") throw new DGCProtocolError("Mismatched or malformed Pip response");
     if (event.ok) {

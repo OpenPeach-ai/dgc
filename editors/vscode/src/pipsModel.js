@@ -1101,7 +1101,9 @@ export function githubReadLabel(read){
 
 // Pip computers (Pips API 42): exact shapes, because review cards show their text and images.
 const COMPUTER_STATES=['pending','approved','rejected','expired','sent','lost'];
-const jpegData=v=>typeof v==='string'&&v.length<=140000&&/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v);
+const jpegData=(v,max=140000)=>typeof v==='string'&&v.length<=max&&/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v);
+// The live screen of a busy page (an inbox at 1280×800) is often over 100 KB; replies carry up to 4 MiB.
+const LIVE_FRAME_CHARS=1_400_000;
 export function pipComputerAction(value,pip){
  const fail=()=>{throw Error('A Pip computer action is invalid. Refresh this Pip.');};
  if(!record(value)||Object.keys(value).sort().join()!=='continuation_run_id,created_at,digest,expires_at,frame,id,pip_id,resolved_at,resolved_by,run_id,status,summary,workspace_id'
@@ -1124,7 +1126,7 @@ export function pipComputer(value,pip){
 export function pipComputerView(value){
  if(!record(value))throw Error('The browser view reply is invalid.');
  if(value.ok!==true)return {ok:false,error:typeof value.error==='string'?value.error.slice(0,300):'The browser is not available.',ready:value.ready!==false};
- if(!jpegData(value.image)||typeof value.url!=='string'||typeof value.watching!=='boolean'||!Number.isSafeInteger(value.width)||!Number.isSafeInteger(value.height))
+ if(!jpegData(value.image,LIVE_FRAME_CHARS)||typeof value.url!=='string'||typeof value.watching!=='boolean'||!Number.isSafeInteger(value.width)||!Number.isSafeInteger(value.height))
   throw Error('The browser view reply is invalid.');
  return value;
 }
@@ -1136,5 +1138,46 @@ export function pipComputerFrames(value,run){
 }
 export function pipComputerFrame(value,run,frame){
  if(!record(value)||value.run_id!==run||value.frame!==frame||!jpegData(value.image))throw Error('That screenshot is invalid.');
+ return value;
+}
+// A Pip computer's Files and Terminal (Pips API 44).
+const FILE_NAME=/^[^/\0]{1,255}$/;
+function computerPath(path){
+ if(path===''||typeof path==='string'&&path.length<=2048&&path.split('/').every(p=>FILE_NAME.test(p)&&p!=='.'&&p!=='..')&&path.split('/').length<=8)return path;
+ throw Error('A Pip computer path is invalid.');
+}
+export function pipComputerFiles(value,path){
+ const fail=()=>{throw Error('This computer\'s files are invalid. Refresh.');};
+ if(!record(value)||Object.keys(value).sort().join()!=='entries,more,path,total_bytes'||value.path!==path||typeof value.more!=='boolean'
+   ||!Number.isSafeInteger(value.total_bytes)||value.total_bytes<0||!Array.isArray(value.entries)||value.entries.length>500)fail();
+ computerPath(value.path);
+ for(const e of value.entries){
+  if(!record(e)||Object.keys(e).sort().join()!=='bytes,kind,modified,name'||typeof e.name!=='string'||!FILE_NAME.test(e.name)||e.name==='.'||e.name==='..'
+    ||!['file','folder'].includes(e.kind)||!(e.kind==='folder'?e.bytes===null:Number.isSafeInteger(e.bytes)&&e.bytes>=0)||!Number.isSafeInteger(e.modified))fail();
+ }
+ return value;
+}
+export function pipComputerFile(value,path){
+ const fail=()=>{throw Error('This file could not be shown.');};
+ if(!record(value)||value.path!==path||typeof value.name!=='string'||value.name!==path.split('/').at(-1)||typeof value.mime!=='string'||value.mime.length>200
+   ||!Number.isSafeInteger(value.bytes)||value.bytes<0)fail();
+ const keys=Object.keys(value).sort().join();
+ if(keys==='bytes,mime,name,path,text,truncated'){if(typeof value.text!=='string'||value.text.length>65536||typeof value.truncated!=='boolean')fail();}
+ else if(keys==='bytes,data,mime,name,path'){if(typeof value.data!=='string'||!value.data.startsWith(`data:${value.mime};base64,`)||value.data.length>2800000)fail();
+  if(value.mime.startsWith('image/')&&!/^data:image\/(png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/]+=*$/.test(value.data))fail();}
+ else if(keys==='bytes,mime,name,path,too_large'){if(value.too_large!==true)fail();}
+ else fail();
+ return value;
+}
+export function pipComputerTerminalEntry(value){
+ if(!record(value)||Object.keys(value).sort().join()!=='at,by,command,exit,output,seconds,timed_out'||!['you','pip'].includes(value.by)
+   ||typeof value.command!=='string'||value.command.length>4000||typeof value.output!=='string'||value.output.length>70000
+   ||!(value.exit===null||Number.isSafeInteger(value.exit))||typeof value.timed_out!=='boolean'||typeof value.seconds!=='number'||!Number.isSafeInteger(value.at))
+  throw Error('A terminal entry is invalid.');
+ return value;
+}
+export function pipComputerTerminal(value){
+ if(!record(value)||!Array.isArray(value.entries)||value.entries.length>200)throw Error('This computer\'s terminal is invalid.');
+ value.entries.forEach(pipComputerTerminalEntry);
  return value;
 }
