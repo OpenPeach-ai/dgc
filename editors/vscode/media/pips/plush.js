@@ -14,7 +14,11 @@ const anchors=[[46.17,67.63,52.5],[43.52,64.86,53.65],[34.4,62.4,52.2],[34.72,56
 const crops=[[65,88,352,350],[468,74,342,356],[866,74,322,356],[1256,94,362,340],
  [48,462,374,392],[461,495,348,355],[856,482,356,370],[1244,502,390,350]];
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const script=globalThis.document?.currentScript?.src;
+// Where this file was loaded from, so the sprite resolves beside the extension's own files. A
+// module script has no currentScript (the computer tab is one, for noVNC), and the sprite then
+// resolved against the page and drew Chromium's broken-image picture: find DGC's bundle instead.
+const script=globalThis.document?.currentScript?.src
+ ||[...(globalThis.document?.scripts||[])].map(s=>s.src).find(src=>/\/dist\/[A-Za-z]+\.js(?:[?#]|$)/.test(src));
 const asset=script?new URL('../media/pips/plush-bodies.webp',script).href:'../media/pips/plush-bodies.webp';
 const styles=`
 .dgc-plush{display:inline-block;position:relative;width:100%;height:100%;vertical-align:middle;isolation:isolate;--plush-reach:4.5px;transform-origin:50% 90%;rotate:var(--plush-lean,0deg);animation:dgc-plush-lean 9.7s ease-in-out var(--plush-delay) infinite}

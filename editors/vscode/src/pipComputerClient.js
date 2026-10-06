@@ -8,9 +8,16 @@ import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComput
 
 const vscode=acquireVsCodeApi();
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
-const S={connected:false,apiVersion:0,generation:0,pip:null,app:'browser',open:['browser'],computer:null,error:'',notice:'',
+// The computer opens on its desktop with nothing open, like a computer you switch on (the founder:
+// "show default OS screen, with nothing opened"). The browser comes up when you open it from the
+// dock, or by itself when the Pip starts using it, so you can watch.
+const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],computer:null,error:'',notice:'',
  view:null,viewError:'',files:{path:'',entries:[],total:0,more:false,selected:null,preview:null,error:''},
  terminal:{entries:[],error:'',running:false,draft:''},busy:false,
+ // What you are typing in the address bar. Every new frame redraws the bar with the page's address,
+ // and that wiped each letter as you typed it (the founder's report); it shows yours until you go,
+ // press Escape or leave the bar.
+ address:null,
  // The full screen, like Grok's bots: the CLI can stream it (screenCapable) and this machine has it (desktop.available).
  screenCapable:false,desktop:null,screen:{state:'off',reason:''}};
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
@@ -41,7 +48,7 @@ function dockMarkup(){
  return `<nav class="pc-dock" aria-label="Apps">${Object.entries(APPS).map(([id,label])=>`<button type="button" class="pc-dock-app${S.open.includes(id)?' open':''}${S.app===id?' active':''}" data-app="${id}" aria-label="${label}" title="${label}" aria-pressed="${S.app===id}">${appIcon(id)}</button>`).join('')}</nav>`;
 }
 function windowMarkup(app,body){
- const sub=app==='browser'?(S.view?.ok?S.view.url:''):app==='files'?(S.files.path?['Files',...S.files.path.split('/')].join(' / '):''):'No internet · home is its Files';
+ const sub=app==='browser'?(S.view?.ok?S.view.url:''):app==='files'?(S.files.path?['Files',...S.files.path.split('/')].join(' / '):''):'Offline on purpose · works in its Files';
  return `<section class="pc-window" aria-label="${APPS[app]}"><div class="pc-titlebar"><span class="pc-win-icon">${appIcon(app,16)}</span><strong>${APPS[app]}</strong><span class="pc-win-sub">${esc(sub)}</span><span class="pc-win-buttons"><button type="button" class="pc-win-button" data-minimize="${app}" aria-label="Minimise ${APPS[app]}" title="Minimise">–</button><button type="button" class="pc-win-button" data-close="${app}" aria-label="Close ${APPS[app]}" title="Close">×</button></span></div><div class="pc-window-body">${body}</div></section>`;
 }
 function waitingMarkup(){
@@ -51,7 +58,7 @@ function waitingMarkup(){
 }
 function browserMarkup(){
  const v=S.view;
- return `<section class="pc-pane pc-browser" aria-label="Browser"><form id="pc-go" class="pc-bar"><button type="button" id="pc-back" class="pc-quiet" aria-label="Back">←</button><input id="pc-url" aria-label="Address" placeholder="Search or type a web address" autocomplete="off" value="${esc(v?.ok?v.url:'')}"><button type="submit">Go</button></form><div class="pc-screen" tabindex="0" aria-label="The Pip's browser. Click to click there; type to type into the page.">${v?.ok?`<img id="pc-screen" alt="" src="${v.image}" data-width="${v.width}" data-height="${v.height}">`:`<p class="pc-muted">${esc(S.viewError||'Opening the browser…')}</p>`}</div><p class="pc-muted pc-hint">${using()?'The Pip is using its browser. You can watch; it is yours again when it stops.':'You are driving. What you submit here is sent; the Pip\'s own submits wait for you.'}</p></section>`;
+ return `<section class="pc-pane pc-browser" aria-label="Browser"><form id="pc-go" class="pc-bar"><button type="button" id="pc-back" class="pc-quiet" aria-label="Back">←</button><input id="pc-url" aria-label="Address" placeholder="Search or type a web address" autocomplete="off" value="${esc(S.address??(v?.ok?v.url:''))}"><button type="submit">Go</button></form><div class="pc-screen" tabindex="0" aria-label="The Pip's browser. Click to click there; type to type into the page.">${v?.ok?`<img id="pc-screen" alt="" src="${v.image}" data-width="${v.width}" data-height="${v.height}">`:`<p class="pc-muted">${esc(S.viewError||'Opening the browser…')}</p>`}</div><p class="pc-muted pc-hint">${using()?'The Pip is using its browser. You can watch; it is yours again when it stops.':'You are driving. What you submit here is sent; the Pip\'s own submits wait for you.'}</p></section>`;
 }
 function filesMarkup(){
  const f=S.files,crumbs=['Files',...(f.path?f.path.split('/'):[])];
@@ -64,7 +71,7 @@ function filesMarkup(){
 function terminalMarkup(){
  const t=S.terminal;
  const rows=t.entries.map(e=>`<article class="pc-run"><p class="pc-prompt"><span class="pc-who">${e.by==='pip'?esc(S.pip?.name||'Pip'):'You'}</span> $ ${esc(e.command)}</p>${e.output?`<pre>${esc(e.output)}</pre>`:''}${e.exit!==0?`<p class="pc-exit">Exit ${esc(String(e.exit))}</p>`:''}</article>`).join('');
- return `<section class="pc-pane pc-terminal" aria-label="Terminal"><div class="pc-log" id="pc-log" role="log" aria-live="polite">${rows||'<p class="pc-muted">Commands you and the Pip run show here.</p>'}</div>${t.error?`<p class="pc-error" role="alert">${esc(t.error)}</p>`:''}<form id="pc-run" class="pc-bar"><span aria-hidden="true">$</span><input id="pc-command" aria-label="Command" autocomplete="off" spellcheck="false" value="${esc(t.draft)}"${t.running?' disabled':''}><button type="submit"${t.running?' disabled':''}>${t.running?'Running…':'Run'}</button></form><p class="pc-muted">No internet here: the browser is this computer's way online. Its home is the computer's Files.</p></section>`;
+ return `<section class="pc-pane pc-terminal" aria-label="Terminal"><div class="pc-log" id="pc-log" role="log" aria-live="polite">${rows||'<p class="pc-muted">Commands you and the Pip run show here.</p>'}</div>${t.error?`<p class="pc-error" role="alert">${esc(t.error)}</p>`:''}<form id="pc-run" class="pc-bar"><span aria-hidden="true">$</span><input id="pc-command" aria-label="Command" autocomplete="off" spellcheck="false" value="${esc(t.draft)}"${t.running?' disabled':''}><button type="submit"${t.running?' disabled':''}>${t.running?'Running…':'Run'}</button></form><p class="pc-muted">Offline on purpose: commands here cannot reach the internet, so nothing leaves this computer without the browser's checks and your approval. It works in the computer's Files; use the browser to go online.</p></section>`;
 }
 // The screen's bytes ride the extension host's messages; noVNC sees a WebSocket-like channel.
 function toB64(bytes){let text='';for(let i=0;i<bytes.length;i+=0x8000)text+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(text);}
@@ -217,13 +224,17 @@ document.addEventListener('click',event=>{
 });
 document.addEventListener('submit',event=>{
  event.preventDefault();
- if(event.target.id==='pc-go'){const url=$('pc-url').value.trim();if(url)void frame('go',{url:/^[a-z]+:\/\//i.test(url)?url:/\s/.test(url)||!url.includes('.')?'https://duckduckgo.com/?q='+encodeURIComponent(url):'https://'+url});}
+ if(event.target.id==='pc-go'){const url=$('pc-url').value.trim();S.address=null;if(url)void frame('go',{url:/^[a-z]+:\/\//i.test(url)?url:/\s/.test(url)||!url.includes('.')?'https://duckduckgo.com/?q='+encodeURIComponent(url):'https://'+url});}
  if(event.target.id==='pc-run')void runCommand($('pc-command').value);
 });
-document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.terminal.draft=event.target.value;});
+document.addEventListener('input',event=>{if(event.target.id==='pc-command')S.terminal.draft=event.target.value;if(event.target.id==='pc-url')S.address=event.target.value;});
+// Leaving the bar (or Escape in it) shows the page's own address again, as a browser does. A redraw
+// replaces the bar, which blurs it too: that is not leaving, so it waits for the redraw to finish.
+document.addEventListener('focusout',event=>{if(event.target.id==='pc-url')setTimeout(()=>{if(document.activeElement?.id!=='pc-url'&&S.address!==null){S.address=null;render();}},0);});
 const KEYS=new Set(['Enter','Tab','Backspace','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End','Delete']);
 let typed='',typeTimer=null;
 document.addEventListener('keydown',event=>{
+ if(event.target.id==='pc-url'&&event.key==='Escape'){S.address=null;render();return;}
  if(!event.target.closest?.('.pc-screen')||using()||event.metaKey||event.ctrlKey||event.altKey)return;
  if(KEYS.has(event.key)){event.preventDefault();flushTyped();void frame('key',{key:event.key});}
  else if(event.key.length===1){event.preventDefault();typed+=event.key;clearTimeout(typeTimer);typeTimer=setTimeout(flushTyped,250);}
@@ -248,14 +259,14 @@ window.addEventListener('message',event=>{
  const m=event.data;if(!record(m))return;
  if(m.type==='pipsReply')broker.receive(m);
  else if(m.type==='pipsConnection'){const was=S.connected;S.connected=m.connected&&m.supported&&m.enabled;S.apiVersion=m.apiVersion;S.generation=m.generation;if(!S.connected)broker.reset();render();
-  if(S.connected&&!was)void loadComputer().then(loadDesktop).then(()=>{if(screenMode()){schedule();return;}if(S.app)show(S.app);else{void frame('frame',{},true);schedule();}});}
+  if(S.connected&&!was)void loadComputer().then(loadDesktop).then(()=>{if(screenMode()){schedule();return;}if(S.app)show(S.app);else{void frame();schedule();}});}
  else if(m.type==='pipComputerInit'&&record(m.pip)){S.pip=m.pip;S.screenCapable=m.desktop===true;render();}
  else if(m.type==='pipDesktopData'&&typeof m.data==='string')channel?.deliver(m.data);
  else if(m.type==='pipDesktopClosed'){S.screen={state:'closed',reason:typeof m.reason==='string'&&m.reason?m.reason:'The screen closed.'};channel?.end(S.screen.reason);render();}
  else if(m.type==='pipComputerSaved'){S.notice=m.ok?`Saved ${m.name}.`:m.error||'Not saved.';render();}
 });
 setInterval(()=>broker.expire(Date.now()),5000);
-S.app=['browser','files','terminal',''].includes(vscode.getState()?.app)?vscode.getState().app:'browser';S.open=S.app?[S.app]:[];
+S.app=['browser','files','terminal',''].includes(vscode.getState()?.app)?vscode.getState().app:'';S.open=S.app?[S.app]:[];
 const style=document.createElement('style');style.textContent=window.PipConcepts?.plush?.styles||'';document.head.append(style);
 render();
 vscode.postMessage({type:'pipsReady'});

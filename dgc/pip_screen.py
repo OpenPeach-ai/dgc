@@ -117,7 +117,7 @@ def write_config(conf: Path, name: str) -> None:
     desktop = conf / "pcmanfm" / "dgc"
     desktop.mkdir(parents=True, exist_ok=True)
     _write(desktop / "desktop-items-0.conf", "[*]\nwallpaper_mode=crop\nwallpaper_common=1\n"
-           "wallpaper=/run/dgc/conf/wallpaper.jpg\ndesktop_bg=#8a8a8f\ndesktop_fg=#ffffff\n"
+           "wallpaper=/run/dgc/conf/wallpaper.jpg\ndesktop_bg=#140c33\ndesktop_fg=#ffffff\n"
            "desktop_shadow=#000000\nshow_wm_menu=0\nshow_documents=0\nshow_trash=0\nshow_mounts=0\n")
     _write(desktop / "pcmanfm.conf", "[config]\nbm_open_method=0\n[ui]\nalways_show_tabs=0\nshow_hidden=0\n")
     _write(conf / "desktop.sh", f"""

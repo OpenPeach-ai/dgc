@@ -76,6 +76,7 @@ async function main() {
     // An ES module: noVNC (the computer's screen) uses top-level await.
     entryPoints: ["src/pipComputerClient.js"], bundle: true, format: "esm",
     platform: "browser", target: "chrome108", outfile: "dist/pipComputer.js",
+    loader: { ".jpg": "dataurl" },                  // the desktop's wallpaper, inside its stylesheet
     minify: production, sourcemap: false,
   });
   const ctx = await esbuild.context({

@@ -181,9 +181,14 @@ aside>button:not(.job){margin:6px 6px 0 0}
 /* Simple Pips (API 43): Personal Pips as characters you chat with. */
 :host,:root{--pip-bubble:color-mix(in srgb,var(--vscode-foreground) 8%,transparent)}
 .simple-pips #app{display:flex;flex-direction:column;min-height:100%}
-.simple-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex:none}
-.simple-bar h1{font-size:15px;margin:0}
+.simple-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex:none}
+.simple-bar h1{font-size:15px;margin:0;flex:none;white-space:nowrap}
 .simple-bar .runner{margin-left:auto;padding-top:0}
+/* The runner's words stay whole: squeezed, "Start runner" wrapped and ran into Controls. */
+.simple-bar .compact-runner button,.simple-bar .runner-controls summary,.simple-bar .runner-status{white-space:nowrap;flex:none}
+/* The runner's error is its own row under the bar. In the bar's row it took the room the title and
+   the buttons needed ("Pi / ps", the founder's screenshot). */
+.simple-bar>.notice{flex:1 0 100%;margin:0;order:9}
 .simple-scope{margin:0}
 .simple-scope select{width:auto;padding:3px 8px;font-size:12px;border-radius:999px}
 .simple-note{margin:10px 14px 0}

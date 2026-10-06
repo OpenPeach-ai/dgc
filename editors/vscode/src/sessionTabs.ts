@@ -93,7 +93,9 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
   }
 
   private adopt(panel: vscode.WebviewPanel, key: string, session: string): DgcViewProvider {
-    panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc.svg");
+    // Not the activity bar's dgc.svg: its currentColor is black in a tab, invisible on a dark theme.
+    panel.iconPath = { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-light.svg"),
+                       dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-dark.svg") };
     const provider = this.make({
       key, session, places: this, host: this.sidebar,
       title: (text) => { if (this.tabs.get(key)?.panel === panel) panel.title = tabTitle(text); },

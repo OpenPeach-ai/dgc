@@ -47,10 +47,15 @@ function setup({desktop=null,screen=false,viewer=null,status=computer(),files={'
   tick:async(overrides={})=>{for(const t of timers.filter(t=>t.live))t.fn();await drain(overrides);}};
 }
 
-test('the tab is a desktop: the Browser opens in a window, with a dock of three apps below',async()=>{
+test('the tab is a desktop with nothing open, a dock of three apps below; the Browser opens in a window from the dock',async()=>{
  const x=setup();await x.drain();
  assert.match(x.d.querySelector('.pc-title h1').textContent,/Shopper · Computer/);
  assert.deepEqual([...x.d.querySelectorAll('.pc-dock [data-app]')].map(b=>b.getAttribute('aria-label')),['Browser','Files','Terminal']);
+ // The founder: "lets show default OS screen, with nothing opened".
+ assert.equal(x.d.querySelector('.pc-window'),null,'the bare desktop');
+ assert.equal(x.d.querySelectorAll('.pc-dock .open').length,0,'nothing open in the dock');
+ assert.equal(x.requests('open_pip_computer').length,0,'opening the tab starts no browser');
+ x.click('[data-app=browser]');await x.drain();
  assert.equal(x.d.querySelector('.pc-window').getAttribute('aria-label'),'Browser');
  assert.ok(x.d.querySelector('.pc-dock [data-app=browser]').classList.contains('open'),'a dot under the open app');
  assert.equal(x.requests('open_pip_computer').length,1);
@@ -63,12 +68,12 @@ test('the tab is a desktop: the Browser opens in a window, with a dock of three 
 
 test('a busy page\'s full-size screen shows (an inbox frame is often over 100 KB)',async()=>{
  const big='data:image/jpeg;base64,/9j/'+'A'.repeat(400_000);
- const x=setup();await x.drain({use_pip_computer_view:()=>({view:{ok:true,watching:false,url:'https://mail.google.com/',width:1280,height:800,image:big}})});
+ const x=setup();await x.drain();x.click('[data-app=browser]');await x.drain({use_pip_computer_view:()=>({view:{ok:true,watching:false,url:'https://mail.google.com/',width:1280,height:800,image:big}})});
  assert.equal(x.d.querySelector('#pc-screen').getAttribute('src'),big);
 });
 
 test('minimise or close a window to see the desktop; the browser comes back when the Pip starts using it',async()=>{
- const x=setup();await x.drain();
+ const x=setup();await x.drain();x.click('[data-app=browser]');await x.drain();
  x.click('[data-minimize=browser]');assert.equal(x.d.querySelector('.pc-window'),null,'the bare desktop');
  assert.ok(x.d.querySelector('.pc-dock [data-app=browser]').classList.contains('open'),'still open in the dock');
  x.click('[data-app=terminal]');await x.drain();x.click('[data-close=terminal]');
@@ -80,7 +85,7 @@ test('minimise or close a window to see the desktop; the browser comes back when
 });
 
 test('you drive the screen: a click lands at the same point of the page, typing and keys go to it',async()=>{
- const x=setup();await x.drain();
+ const x=setup();await x.drain();x.click('[data-app=browser]');await x.drain();
  const img=x.d.querySelector('#pc-screen');img.getBoundingClientRect=()=>({left:10,top:20,width:640,height:400});img._x=10+320;img._y=20+100;
  x.click('#pc-screen');await x.drain();
  const click=x.requests('use_pip_computer_view').find(m=>m.request.op==='click');
@@ -89,6 +94,25 @@ test('you drive the screen: a click lands at the same point of the page, typing 
  assert.ok(x.requests('use_pip_computer_view').some(m=>m.request.op==='key'&&m.request.key==='Enter'));
  x.d.querySelector('#pc-url').value='kettles';x.submit('#pc-go');await x.drain();
  assert.ok(x.requests('use_pip_computer_view').some(m=>m.request.op==='go'&&m.request.url==='https://duckduckgo.com/?q=kettles'),'words search');
+});
+
+test('what you type in the address bar stays while the screen refreshes; Escape, leaving it and Go show the page\'s address',async()=>{
+ const x=setup();await x.drain();x.click('[data-app=browser]');await x.drain();
+ const bar=()=>x.d.querySelector('#pc-url');
+ bar().focus();bar().value='example.or';bar().dispatchEvent(new x.w.Event('input',{bubbles:true}));
+ await x.tick();await x.tick();
+ // The founder: "i am trying to type an address, and it auto removes, as soon as i type a letter".
+ assert.equal(bar().value,'example.or','two refreshes later, still what you typed');
+ assert.equal(x.d.activeElement,bar(),'and still where you are typing');
+ bar().dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+ assert.equal(bar().value,'https://shop.example/','Escape shows the page\'s address again');
+ bar().focus();bar().value='kettle shops';bar().dispatchEvent(new x.w.Event('input',{bubbles:true}));
+ x.submit('#pc-go');await x.drain();
+ assert.ok(x.requests('use_pip_computer_view').some(m=>m.request.op==='go'&&m.request.url==='https://duckduckgo.com/?q=kettle%20shops'));
+ assert.equal(bar().value,'https://shop.example/','after Go the bar follows the page again');
+ bar().focus();bar().value='half typed';bar().dispatchEvent(new x.w.Event('input',{bubbles:true}));
+ x.d.querySelector('#pc-back').focus();await new Promise(r=>setTimeout(r,5));
+ assert.equal(bar().value,'https://shop.example/','leaving the bar puts the page\'s address back');
 });
 
 test('what the Pip would submit waits at the top with Send once, Always allow and Reject',async()=>{
@@ -125,7 +149,7 @@ test('the Terminal runs your command and shows yours and the Pip\'s, with no int
  const pipRan={by:'pip',command:'ls Downloads',exit:0,output:'report.pdf\n',timed_out:false,seconds:0.1,at:1};
  const x=setup({terminal:{entries:[pipRan],running:null}});await x.drain();x.click('[data-app=terminal]');await x.drain();
  assert.match(x.d.querySelector('.pc-log').textContent,/Shopper \$ ls Downloads/);
- assert.match(x.d.querySelector('.pc-terminal').textContent,/No internet here/);
+ assert.match(x.d.querySelector('.pc-terminal').textContent,/Offline on purpose: commands here cannot reach the internet/);
  x.d.querySelector('#pc-command').value='wc -l notes.txt';x.submit('#pc-run');await x.drain();
  assert.equal(x.requests('run_pip_computer_command')[0].request.command,'wc -l notes.txt');
  x.setTerminal({entries:[pipRan,{by:'you',command:'wc -l notes.txt',exit:0,output:'1 notes.txt\n',timed_out:false,seconds:0.1,at:2}],running:null});

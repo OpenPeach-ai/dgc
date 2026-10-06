@@ -40,12 +40,10 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-log .pc-muted{font-family:var(--vscode-font-family,system-ui)}
 .pc-run{display:grid;gap:4px}.pc-prompt{margin:0}.pc-who{color:#b8a6ff}.pc-run pre{background:transparent;border:0;padding:0;color:inherit}.pc-exit{margin:0;color:#ff8a80}
 #pc-run input{font-family:var(--mono)}
-/* The desktop: a soft grey wallpaper like a fresh machine, the app in a window, a dock below. */
+/* The desktop: DGC's own wallpaper (a violet night, aurora light, a silk wave and the DGC mark; the
+   same picture the full desktop shows, dgc/desktop_assets/wallpaper.jpg), apps in windows, a dock. */
 .pc-desktop{position:relative;flex:1;min-height:0;overflow:hidden;
- background:radial-gradient(85% 130% at 4% 118%,transparent 52%,rgba(0,0,0,.22) 56%,rgba(0,0,0,.06) 62%,transparent 70%),
-  radial-gradient(130% 120% at 100% 30%,#5d5d61 0%,#8b8b90 34%,#c3c3c7 60%,#dfdfe2 100%)}
-.vscode-dark .pc-desktop,.vscode-high-contrast .pc-desktop{background:radial-gradient(85% 130% at 4% 118%,transparent 52%,rgba(0,0,0,.35) 56%,rgba(0,0,0,.1) 62%,transparent 70%),
-  radial-gradient(130% 120% at 100% 30%,#2a2a2e 0%,#46464b 34%,#6f6f75 62%,#8d8d92 100%)}
+ background:#140c33 url("../media/pips/computer-wallpaper.jpg") 78% 40%/cover no-repeat}   /* a narrow tab keeps the mark */
 .pc-window{position:absolute;inset:14px 14px 72px;display:flex;flex-direction:column;border-radius:10px;overflow:hidden;
  background:var(--vscode-editor-background);border:1px solid rgba(0,0,0,.25);box-shadow:0 14px 44px rgba(0,0,0,.38),0 2px 8px rgba(0,0,0,.2)}
 .pc-window.pc-note{inset:auto 14px 72px;padding:14px 16px}

@@ -20,6 +20,12 @@
 
 ### Fixed
 
+- The Pips header no longer breaks when the runner reports an error: the error has its own row,
+  and "Pips", "Start runner" and "Controls" keep their words on one line.
+- A Pip's computer tab shows the Pip's face again (it showed a broken-image picture), keeps what
+  you type in its browser's address bar while the screen refreshes, opens on an empty desktop with
+  DGC's own wallpaper, and its Terminal says plainly that it is offline on purpose.
+- A session's editor tab shows the DGC mark in white on dark themes (it was black).
 - An image you send shows in your prompt as the same small chip it was in the composer (a tile
   beside its type and size; click to open it), not as a large picture. A prompt with an image
   now stays pinned at the top while you read its answer, like any other prompt: the large picture
