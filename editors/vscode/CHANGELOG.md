@@ -46,6 +46,11 @@
   of "Thought · raw" rows: a sub-agent's hidden steps and thoughts no longer close it, and a thought
   still streaming always continues in its own row.
 
+### Plugins
+
+- Typing in the plugin search boxes keeps every letter in order. Each key rebuilt the list and put
+  the caret back at the start, so "Granola" typed key by key came out as "alonar".
+
 ### Pips
 
 - **A Personal Pip's page, like a Grok bot's.** Its Settings are one clean page: its face, name and

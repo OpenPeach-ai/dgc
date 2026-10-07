@@ -591,6 +591,7 @@ class MCPServer:
         self._connection_done = threading.Event()
         self._connection_cancel = None
         self._browser_auth_generation: int | None = None
+        self._needs_sign_in = False
 
     # lifecycle ----------------------------------------------------------------
     def start(self, timeout: float = 10.0, cancel: threading.Event | None = None) -> bool:
@@ -1023,7 +1024,13 @@ class MCPServer:
                             # Generic server input sanitization strips this private marker. Only
                             # the local pinned bridge may ask the editor to forward its callback.
                             params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
-                            if auth_count <= 2 and callable(self._auth_handler) and self.proc is proc:
+                            if not callable(self._auth_handler) and self.proc is proc:
+                                # Startup has nobody to sign in: say so now instead of holding the
+                                # session open until the start deadline (an installed plugin that
+                                # was never signed in made every new chat wait, then hang).
+                                self._needs_sign_in = True
+                                self._connection_done.set()
+                            elif auth_count <= 2 and callable(self._auth_handler) and self.proc is proc:
                                 # Once a real authorize URL exists, the human owns the wait.
                                 # Preserve this bridge/callback until initialize completes or
                                 # the user/connection cancels, not the startup request deadline.
@@ -1608,6 +1615,9 @@ class MCPManager:
         # editor connects a credentialed server with its token, and saves it without one.
         self._persisted_specs: dict[str, dict] = {}
         self._closed = False
+        # Hosted (remote) servers being connected on a background thread at startup.
+        self._background: set[str] = set()
+        self._background_thread: threading.Thread | None = None
         self._tool_schema_cache: tuple[dict, ...] = ()
         self._tool_search_cache: tuple[tuple, ...] = ()
         self._catalog_state_lock = threading.RLock()
@@ -1616,10 +1626,24 @@ class MCPManager:
         atexit.register(self.stop_all)
 
     def connect_all(self, config_servers: dict | None, *, startup: bool = False,
-                    cancel: threading.Event | None = None, input_handler=None) -> None:
-        """Connect configured servers, deferring editor-secret entries during cold startup."""
+                    cancel: threading.Event | None = None, input_handler=None,
+                    _background: bool = False) -> None:
+        """Connect configured servers, deferring editor-secret entries during cold startup.
+
+        At startup, hosted (remote bridge) servers connect on a background thread: each one is an
+        npx bridge plus a network round trip, and one waiting for a sign-in held a new chat open
+        past the editor's 10-second session request, so the chat never became ready. A turn waits
+        a little for them (wait_background) so its first request still sees their tools.
+        """
         if not isinstance(config_servers, dict):
             return
+        if startup and not _background and input_handler is None:
+            hosted = {name: spec for name, spec in config_servers.items()
+                      if isinstance(spec, dict) and spec.get("transport") == "remote"
+                      and str(name) not in self.disabled_names and spec.get("defer_until_setup") is not True}
+            if hosted:
+                config_servers = {name: spec for name, spec in config_servers.items() if name not in hosted}
+                self._connect_in_background(hosted)
         for server_index, (raw_name, raw_spec) in enumerate(config_servers.items()):
             if (cancel is not None and cancel.is_set()) or self._closed:
                 break
@@ -1690,8 +1714,36 @@ class MCPManager:
                 server.stop()
                 break
             if not started:
-                self.failures[name] = server.error or "connection failed"
+                self.failures[name] = ("Needs sign-in. Connect it in Settings → Plugins."
+                                       if server._needs_sign_in else server.error or "connection failed")
         self._rebuild_routes()
+
+    def _connect_in_background(self, servers: dict) -> None:
+        with self._catalog_state_lock:
+            if self._closed:
+                return
+            self._background |= {str(name) for name in servers}
+
+        def run():
+            try:
+                self.connect_all(servers, startup=True, _background=True)
+            except Exception as exc:  # noqa: BLE001 - recorded per server, never kills the chat
+                for name in servers:
+                    self.failures.setdefault(str(name), f"connection failed ({type(exc).__name__})")
+            finally:
+                with self._catalog_state_lock:
+                    self._background -= {str(name) for name in servers}
+
+        thread = threading.Thread(target=run, name="dgc-mcp-startup", daemon=True)
+        self._background_thread = thread
+        thread.start()
+
+    def wait_background(self, timeout: float = 20.0) -> bool:
+        """Give hosted servers still connecting at startup a moment, so a turn sees their tools."""
+        thread = self._background_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout)
+        return not self._background
 
     def note_persisted(self, name: str, spec: dict | None) -> None:
         """Record the saved form of a server just connected with a different, runtime one."""
@@ -2030,6 +2082,10 @@ class MCPManager:
                 rows.append({"name": str(name)[:128], "state": "failed", "tool_count": 0,
                              "protocol_version": "", "protocol_era": "", "catalog": "",
                              "dropped_env": [], "error": str(error)[:500]})
+        for name in sorted(self._background - connected - set(self.failures)):
+            rows.append({"name": str(name)[:128], "state": "connecting", "tool_count": 0,
+                         "protocol_version": "", "protocol_era": "", "catalog": "",
+                         "dropped_env": []})
         return rows
 
     def summary(self) -> str:

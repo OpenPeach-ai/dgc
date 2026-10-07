@@ -4647,6 +4647,11 @@ class Agent(GoalLifecycle):
         """
         self._last_turn_error = ""
         self._last_turn_pause = ""
+        # Hosted MCP servers connect in the background when a chat opens: this turn waits a
+        # little for them, so a question asked at once still sees the plugin's tools.
+        wait = getattr(getattr(self, "mcp", None), "wait_background", None)
+        if callable(wait):
+            wait(20.0)
         self._notes_reminded = set()   # a reminder is worth saying once per turn
         # images: nothing an earlier turn or an idle editor action queued rides into this one.
         self._turn_images = []

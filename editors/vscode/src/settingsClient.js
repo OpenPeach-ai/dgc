@@ -215,7 +215,7 @@ function renderPlugins(main) {
         $('plugin-list').insertAdjacentHTML('afterbegin', composioPanel() + connectorPanels() + (rows ? '<h3>From installed plugins</h3><p class="note">These services are declared by installed packages. DGC connects through their MCP servers; a package declaration does not grant account access.</p>' : ''));
     }
     $('browse-directory').onclick = () => { directory = true; query = ''; render(); };
-    $('plugin-search').oninput = e => { query = e.target.value; renderPlugins(main); $('plugin-search').focus(); };
+    $('plugin-search').oninput = e => keepTyping('plugin-search', e, () => renderPlugins(main));
     if (lane === 'plugins') {
         const retired = items.filter(r => r.installed && !offered(r));
         if (retired.length) main.insertAdjacentHTML('beforeend', `<details class="retired-plugins"><summary>Unavailable installed plugins · ${retired.length}</summary><p class="note">These older installations are no longer offered. You can review or uninstall them here.</p>${retired.map(r => `<article class="row"><button class="row-open" data-open="${esc(r.name)}">${logo(r)}<span class="copy"><strong>${esc(r.display_name)}</strong><span class="summary">${esc(r.block_reason || 'This integration is unavailable.')}</span></span></button><button class="secondary" data-uninstall="${esc(r.name)}">Uninstall</button></article>`).join('')}</details>`);
@@ -245,7 +245,7 @@ function renderDirectory(main) {
     const sources = [...new Set(available.map(r => r.marketplace || 'dgc-curated'))];
     main.innerHTML = `<div class="crumbs"><button id="directory-back">Plugins</button><span>›</span><span>Directory</span></div><div class="page-heading"><div><h1>Plugin directory</h1><p class="sub">Find skills and tools for DGC.</p></div><div class="actions">${addMenu()}</div></div>` + notice() + `<div class="directory-toolbar"><input id="directory-search" class="search" type="search" placeholder="Search plugins" aria-label="Search directory" value="${esc(query)}"><select id="market-filter" aria-label="Marketplace"><option value="all">All marketplaces</option>${sources.map(m => `<option value="${esc(m)}"${marketFilter===m?' selected':''}>${esc(m==='dgc-curated'?'DGC curated':m==='personal'?'Personal':m)}</option>`).join('')}</select><button class="secondary" id="manage-marketplaces">Manage marketplaces</button></div><div class="directory-status"><p class="note">${shown.length} of ${available.length} plugins</p></div><div class="directory-grid">${shown.map(r => `<article class="directory-card"><button class="directory-open" data-open="${esc(r.name)}">${logo(r)}<strong>${esc(r.display_name)}</strong><span>${esc(r.summary)}</span></button><div class="directory-card-footer"><span class="status">${esc(r.marketplace || 'DGC curated')} · ${esc(r.license || 'License not provided')}</span>${r.installed ? '<span class="status">Installed</span>' : `<button class="install" data-install="${esc(r.name)}"${r.install==='block'?' disabled':''}>${r.install==='block'?'Not offered':'Install'}</button>`}</div>${r.install==='block'?`<p class="note">${esc(r.block_reason)}</p>`:''}</article>`).join('') || '<p class="empty">No plugins match this search. Add a marketplace to browse another catalog.</p>'}</div>`;
     $('directory-back').onclick = () => { directory = false; query = ''; render(); };
-    $('directory-search').oninput = e => { query = e.target.value; renderDirectory(main); $('directory-search').focus(); };
+    $('directory-search').oninput = e => keepTyping('directory-search', e, () => renderDirectory(main));
     $('market-filter').onchange = e => { marketFilter = e.target.value; renderDirectory(main); };
     $('manage-marketplaces').onclick = () => openForm('marketplace');
     bindPlugins(main); bindAddMenu(main);
@@ -261,6 +261,16 @@ function dialog(kind, title, body, footer='') {
     modal.addEventListener('cancel', e => { e.preventDefault(); closeDialog(); });
     if (typeof modal.showModal === 'function') modal.showModal(); else modal.setAttribute('open','');
     bindPlugins(modal);
+}
+// A search box is rebuilt with the list on every key. Put the caret back where it was: focus()
+// alone left it at the start, so "Granola" typed key by key came out as "alonar".
+function keepTyping(id, event, rerender) {
+    const { selectionStart: start, selectionEnd: end } = event.target;
+    query = event.target.value;
+    rerender();
+    const box = $(id);
+    box.focus();
+    try { box.setSelectionRange(start, end); } catch { /* not a text field */ }
 }
 function reviewPlugin(name) {
     if (APP_CONNECTORS[name]) { openConnector(name); return; }

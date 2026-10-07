@@ -29,6 +29,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - AWS's hosted MCP server is accepted: its address ends in `?oauth=initialize`, which DGC's
   credential check read as a secret. A server address argument is judged as a URL; the flag
   before it still counts.
+- **A plugin waiting for sign-in no longer stops new chats from opening.** Found in real VS Code:
+  with Granola installed but not signed in, every new chat said "DGC is reconnecting to this
+  chat" for good. Startup connected each hosted server in turn, and one waiting for a sign-in
+  nobody could give held the chat past the editor's 10-second session request. Hosted servers now
+  connect on a background thread (MCP servers show "connecting"), a turn waits up to 20 seconds
+  for them so a first question still sees their tools, and a server that asks for sign-in at
+  startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
 - **Routines (app triggers).** A Personal Pip does things on its own, as Grok's bots do: each

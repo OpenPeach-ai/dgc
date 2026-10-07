@@ -139,7 +139,8 @@ class VendorCatalogTests(unittest.TestCase):
                     self.assertNotIn("command", server)
                 if entry["auth"] != "none":
                     self.assertTrue(entry.get("terms_url") and entry.get("privacy_url"))
-                self.assertTrue(entry["verification"].startswith("Checked 2026-10-07"), entry["verification"])
+                # Settings prints "Checked <audited_on>." before this text: say what was checked, once.
+                self.assertTrue(entry["verification"] and not entry["verification"].startswith("Checked"), entry["verification"])
 
     def test_payment_plugins_say_money_moves_and_are_marked(self):
         money = {e["name"] for e in self.vendor if e.get("risk") == "money"}
@@ -154,7 +155,8 @@ class VendorCatalogTests(unittest.TestCase):
              patch.object(plugins, "_source", side_effect=plugins.PluginError("not cached")):
             rows = {r["name"]: r for r in plugins.catalog_for_editor()}
         self.assertEqual(rows["granola"]["category"], "Documents And Files")
-        self.assertTrue(rows["airtable"]["verification"].startswith("Checked 2026-10-07"))
+        self.assertIn("opens Airtable's own login page", rows["airtable"]["verification"])
+        self.assertEqual(rows["airtable"]["audited_on"], "2026-10-07")
         self.assertEqual(rows["brevo"]["auth"], "pat")
 
 

@@ -254,3 +254,20 @@ test('0.44 tool profile survives unrelated settings saves without silently rever
   x.click('#ultra_mode');x.click('#save');assert.equal(x.sent.at(-1).values.tool_profile,profile);
  }
 });
+
+test('typing a search key by key keeps every letter in order',()=>{
+ // Each key rebuilds the list and its search box; the caret went back to the start, so "Granola"
+ // typed in the real editor came out as "alonar".
+ const x=setup();x.message({type:'plugins',items:[plugin,{name:'granola',display_name:'Granola',summary:'Meeting notes',marketplace:'dgc-curated',installed:false}]});
+ x.click('[data-nav=plugins]');x.click('#browse-directory');
+ for(const id of ['directory-search']){
+  let typed='';
+  for(const ch of 'Granola'){
+   const box=x.d.getElementById(id),at=box.selectionStart??box.value.length;
+   box.value=box.value.slice(0,at)+ch+box.value.slice(box.selectionEnd??at);box.setSelectionRange(at+1,at+1);
+   box.dispatchEvent(new x.w.Event('input',{bubbles:true}));typed+=ch;
+   const after=x.d.getElementById(id);assert.equal(after.value,typed);assert.equal(after.selectionStart,typed.length,'the caret stays after what was typed');
+  }
+  assert.equal(x.d.querySelectorAll('.directory-card').length,1);assert.match(x.d.querySelector('.directory-card').textContent,/Granola/);
+ }
+});
