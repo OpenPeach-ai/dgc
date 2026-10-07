@@ -336,3 +336,22 @@ test('the extension host sends introduce_pip only to an API 43 CLI',()=>{
   if(api<43)assert.match(posted.at(-1).error.message,/API 43/);
  }
 });
+
+test('Start in the chat brings Pips back, and Core, like any Pip, takes the message',async()=>{
+ // Battle test 4: after Start brought Pips back, Core's chat still could not send (choices and send
+ // greyed, Enter did nothing). Not the runner: Core's catalog type is "unavailable" (it is never a
+ // background Pip), and the chat required an available type, so nobody could ever message Core.
+ const gmail=pip('pip_'+'c'.repeat(32),'Core','core');
+ const off={...runner,status:'offline',online:false};let state=off;
+ const x=setup({jobs:[gmail],runnerState:off});const live={get_pip_runner:()=>({runner:state})};
+ await x.drain(live);x.click(`[data-job="${gmail.id}"]`);await x.drain(live);
+ assert.ok(x.d.querySelector('.runner-off #start-runner'));
+ x.input('#chatText','Are you there?');x.d.querySelector('#chat-form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await flush();
+ assert.equal(x.requests('send_pip_message').length,0,'not while Pips are stopped');
+ x.click('#start-runner');const start=x.requests('pips_runtime')[0];assert.ok(start);
+ state=runner;x.answer(start,{runner:{status:'running'}});await x.drain(live);
+ assert.equal(x.d.querySelector('.runner-off'),null,'Pips are back');
+ assert.equal(x.d.querySelector('#chatText').value,'Are you there?','the message waited in the box');
+ x.d.querySelector('#chat-form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await flush();
+ assert.equal(x.requests('send_pip_message').length,1,'the chat sends again');
+});

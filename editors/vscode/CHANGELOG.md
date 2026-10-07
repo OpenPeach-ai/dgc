@@ -65,6 +65,9 @@
   for your OK); "the Job tab" (now Settings); "Connect an app once in DGC Settings" (Settings shows
   **Reads before each task** only for a Pip that has them; apps connect from the chat); "Online like
   Grok's bots" in the Terminal; "A completed Pip run never performs one automatically".
+- **You can message Core.** Core's chat never sent: the choices and the send button stayed grey and
+  Enter did nothing, because DGC's type list marks Core "not available" as a background Pip and the
+  chat required an available type. Core's hello worked (DGC sends it), so it went unnoticed.
 - A screen reader names a Pip's replies by the Pip's name, not its character's ("Shopper", not "Lens").
 - A failed message says why on the line under it, for example "Failed · It stopped after 12 steps
   without finishing. Say “continue” and it carries on." (with a DGC that sends it), else "Failed · No
