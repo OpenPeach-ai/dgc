@@ -169,6 +169,8 @@ def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = No
     argv = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--clearenv",
             "--setenv", "LANG", "C.UTF-8", "--setenv", "XDG_DATA_DIRS", "/opt/desk/usr/share:/usr/share",
             "--setenv", "SHELL", "/bin/bash", "--setenv", "TERM", "xterm-256color"]
+    from .pip_computer_box import timezone_args
+    argv += timezone_args()                # the desktop's clock and the Terminal's `date` are the user's
     for key, value in env.items():
         argv += ["--setenv", key, value]
     argv += ["--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/bin", "/bin",

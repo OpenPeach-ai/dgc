@@ -15,6 +15,11 @@ FORM = b"""<!doctype html><title>Order desk</title>
 <form method="post" action="/submit"><input name="name" value="Ada"><input name="password" value="hunter2">
 <button id="go" type="submit">Send</button></form>
 <button id="popup" onclick="window.open('/popup')">Open</button>"""
+# A page that sends its own telemetry and background data as it loads, as most sites do.
+BUSY = b"""<!doctype html><title>Shop</title><script>
+navigator.sendBeacon('/beacon', 'seen=1'); fetch('/background', {method: 'POST', body: 'load=1'});
+</script><button id="add" onclick="fetch('/cart/add', {method: 'POST', body: 'item=7'})">Add to cart</button>
+<a id="next" href="/busy">Next</a>"""
 POPUP = b"""<!doctype html><form id="f" method="post" action="/from-popup"><input name="x" value="1"></form>
 <script>document.getElementById('f').submit()</script>"""
 
@@ -37,7 +42,7 @@ def serve():
                 self.send_header("Content-Disposition", 'attachment; filename="report.txt"')
                 self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
                 return
-            body = POPUP if self.path == "/popup" else FORM
+            body = POPUP if self.path == "/popup" else BUSY if self.path == "/busy" else FORM
             self.send_response(200); self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
@@ -179,6 +184,29 @@ class RealBoxTests(unittest.TestCase):
         self.browser.release(held.request_id)
         self.assertTrue(self.wait_for(lambda: self.received), "released")
         self.assertEqual(self.received, [("/submit", "name=Ada&password=hunter2")], "the exact request, once")
+
+    def test_a_pages_own_traffic_goes_out_and_a_write_the_pip_causes_waits(self):
+        # Every held POST became an approval with a screenshot: Google's results page alone made 18
+        # ("Send a form to www.google.com"), from telemetry nobody clicked.
+        posted = lambda: sorted(path for path, _ in self.received)
+        self.assertEqual(self.browser.navigate(self.base + "/busy"), "loaded")
+        self.assertTrue(self.wait_for(lambda: posted() == ["/background", "/beacon"]), posted())
+        self.assertEqual(self.held, [], "nothing the page sent by itself waits for approval")
+        self.browser.click(self.browser.evaluate_json("(() => { document.getElementById('add').setAttribute('data-dgc-ref','e901'); return 'e901'; })()"))
+        self.assertTrue(self.wait_for(lambda: self.held), "the Pip's click made a write: it waits")
+        self.assertEqual((self.held[0].method, self.held[0].summary()["path"]), ("POST", "/cart/add"))
+        self.assertNotIn("/cart/add", posted())
+        # A link the Pip clicks opens a new page: that page's own traffic is not the click's write.
+        self.received.clear()
+        self.browser.click(self.browser.evaluate_json("(() => { document.getElementById('next').setAttribute('data-dgc-ref','e902'); return 'e902'; })()"))
+        self.assertTrue(self.wait_for(lambda: posted() == ["/background", "/beacon"]), posted())
+        self.assertEqual(len(self.held), 1)
+
+    def test_pages_do_not_see_an_automated_browser(self):
+        # Like Chrome on Grok's bots (founder, 2026-10-07): with navigator.webdriver true, Google's
+        # search answered every Pip with "are you a robot".
+        self.assertEqual(self.browser.navigate(self.base + "/"), "loaded")
+        self.assertIs(self.browser.evaluate_json("navigator.webdriver"), False)
 
     def test_a_payment_is_held_like_any_change_and_says_so(self):
         self.assertEqual(self.browser.navigate(self.base + "/"), "loaded")

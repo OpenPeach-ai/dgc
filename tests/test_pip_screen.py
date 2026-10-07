@@ -254,6 +254,43 @@ class DesktopWithoutBrowserTests(unittest.TestCase):
         self.assertGreaterEqual(len(closed), 2, "the failed browser is closed, so the dock or the next step retries")
 
 
+class BrowserOnTheScreenTests(unittest.TestCase):
+    """A Pip's browser steps run Chrome as a window on its screen when the machine can show one, as on
+    Grok's bots (headless Chrome names itself HeadlessChrome and Google asked it for a robot check)."""
+
+    def host(self, shown):
+        steps = []
+        browser = types.SimpleNamespace(navigate=lambda url: steps.append(("open", url)), pump=lambda s: None)
+        host = types.SimpleNamespace(lock=threading.RLock(), last_used=0, waiting=False, desktop=None,
+                                     browser=browser, _record_held=lambda: [], _frame=lambda label: None,
+                                     _read=lambda: "page text")
+
+        def ensure_desktop():
+            steps.append("screen")
+            if shown is True:
+                host.desktop = types.SimpleNamespace(running=lambda: True)
+                return True
+            if shown is False:
+                return False
+            raise shown
+        host.ensure_desktop = ensure_desktop
+        return host, steps
+
+    def test_the_screen_comes_up_before_the_first_browser_step_and_once(self):
+        host, steps = self.host(True)
+        self.assertEqual(pip_computer.Host.call(host, "open", {"url": "https://example.com/"}), "page text")
+        pip_computer.Host.call(host, "open", {"url": "https://example.com/b"})
+        self.assertEqual(steps, ["screen", ("open", "https://example.com/"), ("open", "https://example.com/b")])
+
+    def test_without_a_screen_the_browser_still_works_headless(self):
+        from dgc.pip_computer_box import BoxError
+        for shown in (False, BoxError("no desktop here"), OSError("no display")):
+            host, steps = self.host(shown)
+            with self.subTest(shown=shown):
+                self.assertEqual(pip_computer.Host.call(host, "open", {"url": "https://example.com/"}), "page text")
+                self.assertEqual(steps, ["screen", ("open", "https://example.com/")])
+
+
 class StreamTests(unittest.TestCase):
     """`dgc serve` joins the editor's viewer to the computer's view socket, in base64."""
 

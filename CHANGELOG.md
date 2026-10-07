@@ -18,6 +18,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   are running on this computer."), not "Personal scope. No project files, shell or browsing". A Pip
   no longer tells you about "web reads the controller passes me", and at a robot check it asks you to
   finish the check on its screen, not to "sign in".
+- A Pip's computer browses more like Chrome on Grok's bots: its Chrome is not marked as automated
+  (`navigator.webdriver` is false), runs as a window on the computer's screen whenever this machine can
+  show one (headless Chrome names itself HeadlessChrome), keeps the user's time zone (the boxes ran in
+  UTC), tells pages it is online (its isolated network made Chrome report offline while it loaded
+  them), and a new window opens on Google. Google can still ask for a robot check on some networks;
+  the Pip then stops and the chat says it needs you.
+- A page's own traffic no longer waits for approval: telemetry (`sendBeacon`, link pings, CSP reports)
+  always goes out, and a page's background requests (XHR, fetch) go out unless they follow the Pip's
+  (or your) click, typing, key or choice within 5 seconds on that page. Form submissions always wait.
+  Before, every held POST became an approval: Google's results page alone made 18.
 - A Pip with its own computer gets 30 steps per task or message instead of 12 (`pips.COMPUTER_STEPS`;
   a Google search through its browser ran out at 12).
 - In auto mode the main chat creates a Pip that reads connected accounts directly, like any other

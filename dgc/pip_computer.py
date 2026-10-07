@@ -273,7 +273,8 @@ class Host:
                 self.browser.start()
             else:
                 try:
-                    self.browser._browser_call("Target.createTarget", {"url": "about:blank", "newWindow": True})
+                    from .pip_computer_box import HOME_PAGE
+                    self.browser._browser_call("Target.createTarget", {"url": HOME_PAGE, "newWindow": True})
                 except Exception:              # noqa: BLE001 - a dock click never takes the computer down
                     self.browser.close()
                     self.browser.start()
@@ -293,6 +294,7 @@ class Host:
 
     def user_input(self) -> None:
         self.user_input_at = time.monotonic()
+        self.browser.acted_at = self.user_input_at     # their typing on the screen: a write after it is theirs
         self.last_used = self.user_input_at
 
     # -- a run's session ---------------------------------------------------------------------
@@ -401,6 +403,13 @@ class Host:
             if self.waiting:
                 return ("A change is already waiting for the user's approval. Stop now and tell the user what is "
                         "waiting; the next run continues after they decide.")
+            # Chrome runs as a window on the computer's screen whenever this machine can show one, as on
+            # Grok's bots: headless Chrome names itself HeadlessChrome, and Google asked it for a robot check.
+            if self.desktop is None or not self.desktop.running():
+                try:
+                    self.ensure_desktop()
+                except (BrowserError, RegistryError, OSError):
+                    pass                       # headless, as before; a run reports a browser that cannot start
             try:
                 if op == "open":
                     self.browser.navigate(_safe_url(args.get("url")))

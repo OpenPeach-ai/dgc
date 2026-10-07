@@ -41,6 +41,12 @@ BOX_PROXY_PORT = 8899                 # the in-box forwarder; only the browser i
 MAX_CONNECTIONS = 64
 IDLE_SECONDS = 120
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# Telemetry a page sends by itself (sendBeacon, <a ping>, CSP reports): never a change the user approves.
+TELEMETRY_KINDS = frozenset({"Ping", "CSPViolationReport"})
+# A page's own background requests (XHR, fetch). A write is the Pip's (or the user's) when it follows
+# their click, typing, key or choice within ACTION_SECONDS, on the same page; then it waits for Allow.
+BACKGROUND_KINDS = frozenset({"XHR", "Fetch", "EventSource"})
+ACTION_SECONDS = 5.0
 MAX_HELD = 8                          # held writes per browser; more are dropped, not queued
 MAX_SUMMARY_FIELDS = 24
 SECRET_FIELD = re.compile(r"pass|pwd|secret|token|otp|cvv|cvc|pin\b|card|iban|ssn", re.I)
@@ -92,7 +98,43 @@ _CHROME_FLAGS = (
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
     f"--proxy-server=http://127.0.0.1:{BOX_PROXY_PORT}", "--proxy-bypass-list=<-loopback>",
     "--remote-debugging-pipe", "--user-data-dir=/home/pip/.browser",
+    # Like Chrome on Grok's bots: not marked as automated (navigator.webdriver), so Google's search
+    # answers instead of asking "are you a robot" every time (founder, 2026-10-07). A check that
+    # still appears stops the Pip and asks the user (pip_computer.human_check); it never solves one.
+    "--disable-blink-features=AutomationControlled",
 )
+# What pages are told about the network: online, an ordinary connection (see BoxedBrowser._guard).
+ONLINE = {"offline": False, "latency": 40, "downloadThroughput": 12_500_000, "uploadThroughput": 2_500_000,
+          "connectionType": "ethernet"}
+# A new window on the computer's screen opens here, as on Grok's bots.
+HOME_PAGE = "https://www.google.com/"
+
+
+def host_timezone() -> str | None:
+    """This computer's IANA time zone, for every box of a Pip's computer: pages see the user's own
+    clock. A box without one ran in UTC, and a UTC clock on an Indian address was the one difference
+    between the Pip's Chrome and a plain Chrome when Google answered the Pip with "are you a robot"."""
+    names = [os.environ.get("TZ", "").lstrip(":")]
+    try:
+        target = os.readlink("/etc/localtime")          # Linux and macOS: .../zoneinfo/Area/City
+        names.append(target.split("zoneinfo/", 1)[1] if "zoneinfo/" in target else "")
+    except OSError:
+        pass
+    try:
+        names.append(Path("/etc/timezone").read_text(encoding="utf-8").strip())
+    except OSError:
+        pass
+    for name in names:
+        if (name and re.fullmatch(r"[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}", name)
+                and ".." not in name and (Path("/usr/share/zoneinfo") / name).is_file()):
+            return name
+    return None
+
+
+def timezone_args() -> list[str]:
+    """bwrap's --setenv TZ for the host's zone, or nothing when it cannot be told."""
+    zone = host_timezone()
+    return ["--setenv", "TZ", zone] if zone else []
 
 
 class BoxError(BrowserError):
@@ -375,7 +417,7 @@ class Box:
                 "--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache",
                 "--dev", "/dev", "--proc", "/proc", "--size", str(512 * 1024 * 1024), "--tmpfs", "/tmp", *display,
                 "--bind", str(self.home), "/home/pip", "--setenv", "HOME", "/home/pip",
-                "--setenv", "TMPDIR", "/tmp", "--unsetenv", "DBUS_SESSION_BUS_ADDRESS",
+                "--setenv", "TMPDIR", "/tmp", "--unsetenv", "DBUS_SESSION_BUS_ADDRESS", *timezone_args(),
                 "--ro-bind", str(chrome_dir), "/opt/chrome", *_own_libraries(self.chrome),
                 "--dir", "/run/dgc", "--bind", str(self.egress_socket), "/run/dgc/egress.sock",
                 "--ro-bind", str(forwarder), "/run/dgc/forward.py",
@@ -556,6 +598,7 @@ class BoxedBrowser(BrowserSession):
         self._box: Box | None = None
         self._pipe: _Pipe | None = None
         self._attached: dict[str, str] = {}      # targetId -> its first (gated) session
+        self.acted_at = 0.0                       # the last click, typing, key or choice (see acting())
 
     # -- lifecycle -------------------------------------------------------------------------
 
@@ -576,7 +619,7 @@ class BoxedBrowser(BrowserSession):
             # Every page -- this one and any popup a site opens -- is attached paused, gated, and
             # only then allowed to run. Set before the first page exists, so none is missed.
             self._browser_call("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True})
-            target = self._browser_call("Target.createTarget", {"url": "about:blank"})["targetId"]
+            target = self._browser_call("Target.createTarget", {"url": HOME_PAGE if self.display_dir is not None else "about:blank"})["targetId"]
             deadline = time.monotonic() + 10
             while target not in self._attached and time.monotonic() < deadline:
                 self._observe(self._pipe.recv())
@@ -634,9 +677,15 @@ class BoxedBrowser(BrowserSession):
 
     def _guard(self, session: str) -> None:
         """Gate one target: intercept every request, block WebSockets."""
+        # Every request, by URL alone: patterns by resource type missed form POSTs (Document) in Chrome 155.
         self._fire("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]}, session)
         self._fire("Network.enable", {}, session)
         self._fire("Network.setBlockedURLs", {"urls": ["ws://*", "wss://*"]}, session)
+        # The box's only way out is DGC's proxy, so Chrome sees no network of its own and tells pages it
+        # is offline (navigator.onLine false) while it loads them: the box-only signal that made Google
+        # ask the Pip "are you a robot" when a plain Chrome on the same machine got results. Pages see
+        # the connection they really have. (Reported state only; replies to unsupported targets ignored.)
+        self._fire("Network.overrideNetworkState", ONLINE, session)
 
     def _cleanup(self) -> None:
         self._ws = None
@@ -662,13 +711,40 @@ class BoxedBrowser(BrowserSession):
                 self._fire("Runtime.runIfWaitingForDebugger", {}, child)
         elif method == "Fetch.requestPaused":
             self._gate(params, message.get("sessionId", ""))
+        elif method == "Page.frameNavigated" and not (params.get("frame") or {}).get("parentId"):
+            self.acted_at = 0.0          # a new page: its own requests are not the last action's effect
         super()._observe(message)
+
+    def acting(self) -> bool:
+        """Whether the Pip or the user acted on this page in the last ACTION_SECONDS."""
+        return time.monotonic() - self.acted_at <= ACTION_SECONDS
+
+    # The Pip's actions (and the user's own hands below) start the window in which a write is theirs.
+    def click(self, ref: str) -> str:
+        self.acted_at = time.monotonic()
+        return super().click(ref)
+
+    def type_text(self, ref: str, text: str, *, replace: bool = True) -> str:
+        self.acted_at = time.monotonic()
+        return super().type_text(ref, text, replace=replace)
+
+    def press(self, key: str) -> str:
+        self.acted_at = time.monotonic()
+        return super().press(key)
+
+    def select_option(self, ref: str, value: str) -> str:
+        self.acted_at = time.monotonic()
+        return super().select_option(ref, value)
 
     def _gate(self, params: dict, session: str) -> None:
         request = params.get("request", {}) or {}
         request_id = str(params.get("requestId", ""))
         verb = str(request.get("method", "GET")).upper()
-        if verb in READ_METHODS:
+        kind = str(params.get("resourceType", ""))
+        if (verb in READ_METHODS or kind in TELEMETRY_KINDS
+                or kind in BACKGROUND_KINDS and not self.acting()):
+            # A read, telemetry, or the page's own background traffic: nothing the Pip did. Holding it
+            # made every page with analytics ask for approval (and kept Google's own checks from running).
             self._fire("Fetch.continueRequest", {"requestId": request_id}, session)
             return
         post = str(request.get("postData", "") or "")
@@ -696,11 +772,13 @@ class BoxedBrowser(BrowserSession):
     # -- the user's own hands (live view); the model never uses these ----------------------
 
     def click_at(self, x: float, y: float) -> None:
+        self.acted_at = time.monotonic()
         for kind in ("mousePressed", "mouseReleased"):
             self.command("Input.dispatchMouseEvent", {"type": kind, "x": float(x), "y": float(y),
                                                       "button": "left", "clickCount": 1})
 
     def insert_text(self, text: str) -> None:
+        self.acted_at = time.monotonic()
         self.command("Input.insertText", {"text": str(text)[:2000]})
 
     def scroll_by(self, dy: float) -> None:

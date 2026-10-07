@@ -333,10 +333,11 @@ def proxy_args(egress: Path, forwarder: Path) -> list[str]:
 
 
 def terminal_argv(files: Path, command: str, *, egress: Path | None = None, forwarder: Path | None = None) -> list[str]:
+    from .pip_computer_box import timezone_args
     online = egress is not None and forwarder is not None
     return ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
             "--clearenv", "--setenv", "HOME", "/home/pip", "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
-            "--setenv", "LANG", "C.UTF-8", "--setenv", "TERM", "dumb", "--setenv", "TMPDIR", "/tmp",
+            "--setenv", "LANG", "C.UTF-8", "--setenv", "TERM", "dumb", "--setenv", "TMPDIR", "/tmp", *timezone_args(),
             *(proxy_args(egress, forwarder) if online else []),
             "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/bin", "/bin",
             "--symlink", "usr/lib64", "/lib64", "--symlink", "usr/sbin", "/sbin",
