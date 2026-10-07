@@ -5613,7 +5613,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       } catch { /* use the shipped logo when a package asset is unavailable */ }
     }
     const png = vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", `${item.name}.png`);
-    const shipped: Record<string,string> = {composio:"composio.svg", zapier:"zapier.ico", make:"make.ico", n8n:"n8n.ico", arcade:"arcade.svg"};
+    const shipped: Record<string,string> = {composio:"composio.svg", zapier:"zapier.ico", make:"make.ico", n8n:"n8n.ico", arcade:"arcade.svg", "google-workspace":"google.png"};
     const mark = item.name && shipped[item.name]
       ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", shipped[item.name])
       : item.icon === "dgc" && item.name?.startsWith("dgc-")
