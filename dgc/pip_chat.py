@@ -742,7 +742,7 @@ def insert_user(store, pip, req, run_id, model, now):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "computer" in result:
         # A chat that used the Pip's computer: how many steps, and what it left waiting for the user.
@@ -773,6 +773,8 @@ def insert_reply(store, run, result, now):
     commit_setup(store, run, result)
     from .pip_routines import commit as commit_routines      # routines it suggested: cards to Add
     commit_routines(store, run, result)
+    from .pip_notes import commit as commit_notes            # notes it kept about you: on its page
+    commit_notes(store, run, result)
     text = validate_text(result.get("text"), reply=True)
     row = store.db.execute("SELECT workspace_id,pip_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
     if not row or (row["workspace_id"], row["pip_id"]) != (run["workspace_id"], run["pip_id"]):

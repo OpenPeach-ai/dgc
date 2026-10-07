@@ -450,3 +450,6 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .attention-detail{font-size:12px;color:var(--vscode-foreground);opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attention-copy small{font-size:11px}.attention-mark{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--surface);border:1px solid var(--line)}
 .attention-more{margin:4px 0 0 52px;font-size:12px}.attention-cut{font-size:11px;margin:4px 0 0 52px}
 .attention-flash{animation:attention-flash 2.4s ease-out 1}@keyframes attention-flash{0%,30%{box-shadow:0 0 0 2px var(--vscode-focusBorder)}100%{box-shadow:0 0 0 0 transparent}}@media(prefers-reduced-motion:reduce){.attention-flash{animation:none;outline:2px solid var(--vscode-focusBorder)}}
+/* What it remembers (#6): notes on its page, and "Remembered" under the reply that kept one. */
+.note-add{gap:8px}.note-add input{flex:1;min-width:0}.note-all{display:flex;justify-content:flex-end;padding:4px 2px 0}.note-confirm{display:flex;align-items:center;gap:6px;font-size:12px}
+.memory-kept{display:flex;flex-direction:column;gap:2px;margin:-10px 0 14px;font-size:11px;color:var(--vscode-descriptionForeground)}.memory-kept-item{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.memory-kept button.link{min-height:0;padding:0 4px;font-size:11px}

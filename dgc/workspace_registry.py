@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 43
+SCHEMA_VERSION = 44
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -378,6 +378,10 @@ class WorkspaceRegistry:
             # A full-text index over Pip chats, for search (pip_search); none without FTS5.
             from .pip_search import install as install_search
             install_search(self.db)
+        if version < 44:
+            # What each Personal Pip remembers about you, from your chat, deletable (pip_notes.SCHEMA).
+            from .pip_notes import SCHEMA as notes_schema
+            _execute_schema(self.db, notes_schema)
         # Schema33 admits explicit version3 bounded additional app-read grants.
         # Schema32 adds explicit guest and finite-series semantics to calendar drafts/actions.
         # Older readers must refuse the registry instead of rendering a partial review.
