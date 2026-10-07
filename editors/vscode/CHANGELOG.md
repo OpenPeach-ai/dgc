@@ -48,6 +48,26 @@
 
 ### Pips
 
+- **Plain words across Pips.** The runner bar says "Pips running", "Pips not running" or "Pips
+  stopped", with **Start Pips**, **Resume Pips…** and **Turn off Pips…**; a Personal Pip's work is
+  "Working", "Done" or "Waiting to start", never "Auditing source" or "Report ready". The shield in the
+  chat box opens **What <Pip> can do** (with a computer: its browser, online Terminal and files, and
+  the apps you connected; anything it would send, submit or change waits for your Allow), replacing
+  "Read-only Pip chat" with "no browser tools". The chat's hints, memory, live reply ("Still
+  writing…"), model menu ("Same as DGC"), email and calendar dialogs (**Send this email?**, From the
+  account's name, "Sent. Gmail accepted it"), change dialogs (**Change <Pip>?**, **Accept** / **Turn
+  down**, app reads in words instead of JSON), Settings, results, notifications and the setup cards
+  ("New Pip") follow, along with the turn-on screen (**Meet your Pips**, **Turn on Pips**) and the
+  shared errors.
+- No longer true, and gone: "It cannot also read your connected apps" and "You sign in yourself with
+  Open browser" in **Give a computer** (it lists the browser, the online Terminal, connected apps,
+  signing in with **Open its computer**, and that anything it would submit, send, pay or change waits
+  for your OK); "the Job tab" (now Settings); "Connect an app once in DGC Settings" (Settings shows
+  **Reads before each task** only for a Pip that has them; apps connect from the chat); "Online like
+  Grok's bots" in the Terminal; "A completed Pip run never performs one automatically".
+- A failed message says why on the line under it, for example "Failed · It stopped after 12 steps
+  without finishing. Say “continue” and it carries on." (with a DGC that sends it), else "Failed · No
+  reply".
 - Pressing Enter while a Pip is answering keeps your message in the box and says "<Pip> is still
   answering. Send this when it is done." (it did nothing before).
 - **A Pip computer's Terminal is online**, like Grok's: public websites only, never this computer or

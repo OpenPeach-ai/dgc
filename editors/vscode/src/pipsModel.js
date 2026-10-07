@@ -3,8 +3,10 @@ import {extraReadTools,validateExtraRead} from './pipsAppPicker.js';
 export const record = value => !!value && typeof value === 'object' && !Array.isArray(value);
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const active = status => ['queued','running','cancelling'].includes(status);
-export const statusLabel = status => ({queued:'Queued',running:'Auditing source',cancelling:'Cancelling',cancelled:'Cancelled',failed:'Failed',succeeded:'Report ready',active:'Ready',paused:'Paused'}[status] || 'Unknown status');
-export const errorText = value => typeof value === 'string' ? value : record(value) && typeof value.message === 'string' ? value.message : 'The backend returned an unreadable error. Refresh before retrying.';
+export const statusLabel = status => ({queued:'Waiting to start',running:'Auditing source',cancelling:'Cancelling',cancelled:'Cancelled',failed:'Failed',succeeded:'Report ready',active:'Ready',paused:'Paused'}[status] || 'Status unknown');
+/** A Personal Pip's run, in its words: it works and is done; it does not audit or report. */
+export const personalStatusLabel = status => ({queued:'Waiting to start',running:'Working',cancelling:'Stopping',cancelled:'Stopped',failed:'Failed',succeeded:'Done',active:'Ready',paused:'Paused'}[status] || 'Status unknown');
+export const errorText = value => typeof value === 'string' ? value : record(value) && typeof value.message === 'string' ? value.message : 'Something went wrong. Refresh and try again.';
 // Only expose recorded, allowlisted metrics. Missing legacy fields are unknown, not zero.
 export const count = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString() : 'Not recorded';
 export function duration(start, end) {
@@ -48,10 +50,10 @@ export function activityLabel(event) {
     if (p.kind === 'tool_call') return `${tool} · started`;
     if (p.kind === 'tool_result') return `${tool} · ${p.status === 'completed' ? 'completed' : p.status === 'failed' ? 'failed' : 'result recorded'}`;
     if (p.kind === 'tool_denied') return `${tool} · denied`;
-    if (p.kind === 'error') return 'Worker error';
+    if (p.kind === 'error') return 'Something went wrong';
     return typeof p.message === 'string' ? p.message : 'Progress recorded';
   }
-  return {pip_run_queued:'Run queued',pip_run_started:'Audit started',pip_run_snapshot:'Source snapshot prepared',pip_run_succeeded:'Report ready',pip_run_failed:'Run failed',pip_run_cancelled:'Run cancelled',pip_run_cancelling:'Cancellation requested',workspace_session_turn_completed:'Session turn saved',workspace_committed_paths_changed:'Selected committed paths changed'}[event.event_type] || 'Run event';
+  return {pip_run_queued:'Waiting to start',pip_run_started:'Started',pip_run_snapshot:'Getting ready',pip_run_succeeded:'Report ready',pip_run_failed:'Run failed',pip_run_cancelled:'Run cancelled',pip_run_cancelling:'Stopping',workspace_session_turn_completed:'Session turn saved',workspace_committed_paths_changed:'Selected committed paths changed'}[event.event_type] || 'Run event';
 }
 export function report(value) {
   if (!record(value) || typeof value.summary !== 'string' || value.tests_executed !== false || typeof value.verification !== 'string' || !Array.isArray(value.findings) || value.findings.length > 16 || !Array.isArray(value.limitations) || value.limitations.length > 12 || !value.limitations.every(v => typeof v === 'string')) return null;
@@ -59,7 +61,7 @@ export function report(value) {
   return value;
 }
 export function runner(value) {
-  if (!record(value) || !['running','stopping','stopped','offline'].includes(value.status) || typeof value.online !== 'boolean' || typeof value.paused !== 'boolean' || !record(value.counts) || !['queued','running','cancelling'].every(k => Number.isInteger(value.counts[k]) && value.counts[k] >= 0)) throw new Error('Runner status is unavailable. Refresh to retry.');
+  if (!record(value) || !['running','stopping','stopped','offline'].includes(value.status) || typeof value.online !== 'boolean' || typeof value.paused !== 'boolean' || !record(value.counts) || !['queued','running','cancelling'].every(k => Number.isInteger(value.counts[k]) && value.counts[k] >= 0)) throw new Error('Can’t tell if Pips are running. Refresh to check again.');
   if (value.error != null && (!record(value.error) || typeof value.error.code !== 'string' || typeof value.error.message !== 'string')) throw new Error('Runner returned an invalid error record.');
   return value;
 }
@@ -160,6 +162,8 @@ export function messagesPage(value,pip,workspace) {
   const ids=new Set();
   for(const m of value.messages){if(!record(m)||m.pip_id!==pip||m.workspace_id!==workspace||typeof m.id!=='string'||!m.id||ids.has(m.id)||!['user','assistant'].includes(m.role)||typeof m.text!=='string'||typeof m.run_id!=='string'||typeof m.model!=='string'||typeof m.created_at!=='string'||!['queued','running','cancelling','succeeded','failed','cancelled'].includes(m.status))throw new Error('Conversation contains an invalid or unrelated message.');ids.add(m.id);}
   // Choices a Pip offered under a reply: 2–4 short lines, never on the user's own message.
+  // Why a turn failed, under the user's message (a newer DGC): one short line.
+  for(const m of value.messages)if(m.error!==undefined&&(m.role!=='user'||m.status!=='failed'||typeof m.error!=='string'||!m.error||m.error.length>300))throw new Error('Conversation error text is invalid.');
   for(const m of value.messages)if(m.choices!==undefined&&(m.role!=='assistant'||!Array.isArray(m.choices)||m.choices.length<2||m.choices.length>4||m.choices.some(c=>typeof c!=='string'||!c||c.length>80)))throw new Error('Conversation choices are invalid.');
   if(value.next_before_id!==null&&value.next_before_id!==value.messages[0]?.id)throw new Error('Conversation history cursor is invalid.');
   if(value.active_run!==null&&(!record(value.active_run)||typeof value.active_run.id!=='string'||!active(value.active_run.status)))throw new Error('Conversation active run is invalid.');
@@ -187,11 +191,11 @@ export function presentation(pip, runs, connected, runnerState) {
   const current = record(pip?.active_run) && active(pip.active_run.status) ? pip.active_run : runs.find(r => ['running','cancelling'].includes(r.status)) || runs.find(r => r.status === 'queued');
   const latest = record(pip?.latest_run) ? pip.latest_run : runs[0];
   const conversation=run=>run?.run_kind==='conversation'||run?.manifest?.run_kind==='conversation';
-  const label=run=>run?.status==='running'&&run.execution_mode==='standalone_plan'?'Running approved commands':run?.status==='running'&&(run?.run_kind||run?.manifest?.run_kind)==='draft'?'Drafting documentation':conversation(run)&&run.status==='running'?'Replying':['patch','test'].includes(run?.run_kind||run?.manifest?.run_kind)&&run.status==='running'?'Executing reviewed handoff':statusLabel(run.status);
-  if (!runnerState || !runnerState.online) return {state:'offline',label:`${runnerState?'Runner offline':'Runner status unavailable'}${current?` · last known: ${label(current)}`:''}`};
+  const label=run=>run?.status==='running'&&run.execution_mode==='standalone_plan'?'Running approved commands':run?.status==='running'&&(run?.run_kind||run?.manifest?.run_kind)==='draft'?'Drafting documentation':conversation(run)&&run.status==='running'?'Replying':(run?.run_kind||run?.manifest?.run_kind)==='personal_task'?personalStatusLabel(run.status):['patch','test'].includes(run?.run_kind||run?.manifest?.run_kind)&&run.status==='running'?'Executing reviewed handoff':statusLabel(run.status);
+  if (!runnerState || !runnerState.online) return {state:'offline',label:`${runnerState?'Pips not running':'Can’t tell if Pips are running'}${current?` · last: ${label(current)}`:''}`};
   if (current) return {state: current.status === 'queued' ? 'idle' : 'working', label:label(current)};
-  if (pendingReviews(pip)>0) return {state:'waiting_approval',label:'Awaiting your review'};
-  if (pip?.status === 'paused' || runnerState.paused) return {state:'idle',label:runnerState.paused?'Runner stopped':'Paused'};
+  if (pendingReviews(pip)>0) return {state:'waiting_approval',label:'Waiting for you'};
+  if (pip?.status === 'paused' || runnerState.paused) return {state:'idle',label:runnerState.paused?'Pips stopped':'Paused'};
   if (latest?.status === 'failed') return {state:'failure',label:'Last run failed'};
   if (latest?.status==='succeeded'&&latest.execution_mode==='standalone_plan'){const p=pulseProgress(latest);return {state:p?.failed?'failure':'idle',label:p?`${p.failed} failed · ${p.passed} passed invocation${p.passed===1?'':'s'}`:'Command capture complete · inspect outcomes'};}
   if (latest?.status === 'succeeded') return {state:'success',label:conversation(latest)?'Reply ready':(latest?.run_kind||latest?.manifest?.run_kind)==='draft'?'Draft ready':['patch','test'].includes(latest?.run_kind||latest?.manifest?.run_kind)?'Execution evidence ready':'Report ready'};
@@ -203,12 +207,12 @@ export function requestBroker(send, namespace=globalThis.crypto.randomUUID()) {
   const pending = new Map();
   return {
     request(request) {
-      if (pending.size >= 48) return Promise.reject(new Error('Too many requests are pending. Reconnect to retry.'));
+      if (pending.size >= 48) return Promise.reject(new Error('DGC is busy. Reconnect and try again.'));
       return new Promise((resolve,reject) => { const id = 'view-' + namespace + '-' + (++sequence); pending.set(id,{resolve,reject,at:Date.now()}); send({type:'pipsRequest',id,request}); });
     },
     receive(message) { const item=pending.get(message.id); if (!item) return; pending.delete(message.id); message.ok === true ? item.resolve(message.result) : item.reject(new Error(errorText(message.error))); },
-    reset() { for(const item of pending.values()) item.reject(new Error('Connection changed. Refresh before retrying.')); pending.clear(); },
-    expire(now) { for(const [id,item] of pending) if(now-item.at > 60000) { pending.delete(id); item.reject(new Error('The request timed out. Its outcome is unknown; refresh before retrying.')); } }
+    reset() { for(const item of pending.values()) item.reject(new Error('The connection to DGC changed. Refresh and try again.')); pending.clear(); },
+    expire(now) { for(const [id,item] of pending) if(now-item.at > 60000) { pending.delete(id); item.reject(new Error('DGC didn’t answer in time. Refresh to see whether it worked before trying again.')); } }
   };
 }
 
@@ -407,7 +411,7 @@ export function savedProposal(value,pip,workspace,id){
  return {...p,approval_id:a.id,approval_status:a.effective_status,expires_at:a.expires_at};
 }
 
-export const ADAPTATION_MODES={locked:'Locked',context_adaptive:'Context adaptive',suggest_changes:'Suggest changes',bounded_adaptive:'Bounded adaptation',autonomous:'Autonomous metadata'};
+export const ADAPTATION_MODES={locked:'Never',context_adaptive:'Uses notes you shared',suggest_changes:'Suggests changes',bounded_adaptive:'Only what I tick',autonomous:'May rename itself'};
 export function adaptationPolicy(value='suggest_changes'){
  const fail=()=>{throw new Error('Choose a supported adaptation policy. Automatic changes may include only the name and source ref.');};
  if(typeof value==='string'){if(!Object.hasOwn(ADAPTATION_MODES,value)||value==='bounded_adaptive')fail();value={mode:value,allowed_fields:value==='autonomous'?['name','source_ref']:[]};}

@@ -80,7 +80,7 @@ test('while the browser is open the card looks by itself, and turns into connect
 test('without Composio the card says how to add it, and Not now declines',async()=>{
  const x=setup({composio:false});await openChat(x);
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);
- assert.match(card.textContent,/Composio connects your apps to DGC\. Add it in Settings → Plugins/);
+ assert.match(card.textContent,/first turn on Composio in Settings → Plugins/);
  x.click(`[data-app-link-settings="${LINK}"]`);assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'openSettings',section:'plugins'});
  x.click(`[data-app-link-decline="${LINK}"]`);
  const no=x.requests('decline_pip_app_link')[0];assert.equal(no.request.link_id,LINK);
@@ -91,7 +91,7 @@ test('without Composio the card says how to add it, and Not now declines',async(
 test('a card for another Pip, or a forged reply, is refused',async()=>{
  const x=setup({links:[link({pip_id:'pip_'+'h'.repeat(32)})]});await openChat(x);
  assert.equal(x.d.querySelector('[data-app-link]'),null);
- assert.match(x.d.body.textContent,/app cards are invalid|app card is invalid/);
+ assert.match(x.d.body.textContent,/cards didn’t load|card didn’t load/);
 });
 
 test('the host opens the sign-in page from the backend reply, and the webview never gets the link',async()=>{

@@ -54,7 +54,7 @@ function windowMarkup(app,body){
 function waitingMarkup(){
  const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending');
  if(!waiting.length)return '';
- return `<section class="pc-waiting" aria-label="Waiting for you">${waiting.map(a=>`<article class="pc-hold"><div><strong>${esc(a.summary.method==='POST'?'Submit':a.summary.method)} to ${esc(a.summary.host)}${esc(a.summary.path)}</strong><span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button><button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`).join('')}</section>`;
+ return `<section class="pc-waiting" aria-label="Waiting for you">${waiting.map(a=>`<article class="pc-hold"><div><strong>Send a form to ${esc(a.summary.host)}</strong><span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button><button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`).join('')}</section>`;
 }
 function browserMarkup(){
  const v=S.view;
@@ -71,7 +71,7 @@ function filesMarkup(){
 function terminalMarkup(){
  const t=S.terminal;
  const rows=t.entries.map(e=>`<article class="pc-run"><p class="pc-prompt"><span class="pc-who">${e.by==='pip'?esc(S.pip?.name||'Pip'):'You'}</span> $ ${esc(e.command)}</p>${e.output?`<pre>${esc(e.output)}</pre>`:''}${e.exit!==0?`<p class="pc-exit">Exit ${esc(String(e.exit))}</p>`:''}${e.reached?.length?`<p class="pc-hosts">Reached ${esc(e.reached.join(', '))}</p>`:''}${e.blocked?.length?`<p class="pc-hosts pc-blocked">Blocked: ${esc(e.blocked.join(', '))}, on this computer or your network</p>`:''}</article>`).join('');
- return `<section class="pc-pane pc-terminal" aria-label="Terminal"><div class="pc-log" id="pc-log" role="log" aria-live="polite">${rows||'<p class="pc-muted">Commands you and the Pip run show here.</p>'}</div>${t.error?`<p class="pc-error" role="alert">${esc(t.error)}</p>`:''}<form id="pc-run" class="pc-bar"><span aria-hidden="true">$</span><input id="pc-command" aria-label="Command" autocomplete="off" spellcheck="false" value="${esc(t.draft)}"${t.running?' disabled':''}><button type="submit"${t.running?' disabled':''}>${t.running?'Running…':'Run'}</button></form><p class="pc-muted">Online like Grok's bots: commands reach public websites through DGC (curl, pip, npm, git over https), never this computer or your network. It works in the computer's Files.</p></section>`;
+ return `<section class="pc-pane pc-terminal" aria-label="Terminal"><div class="pc-log" id="pc-log" role="log" aria-live="polite">${rows||'<p class="pc-muted">Commands you and the Pip run show here.</p>'}</div>${t.error?`<p class="pc-error" role="alert">${esc(t.error)}</p>`:''}<form id="pc-run" class="pc-bar"><span aria-hidden="true">$</span><input id="pc-command" aria-label="Command" autocomplete="off" spellcheck="false" value="${esc(t.draft)}"${t.running?' disabled':''}><button type="submit"${t.running?' disabled':''}>${t.running?'Running…':'Run'}</button></form><p class="pc-muted">Online: commands can reach public websites (to download or install, for example), never this computer or your home network. It works in its Files.</p></section>`;
 }
 // The screen's bytes ride the extension host's messages; noVNC sees a WebSocket-like channel.
 function toB64(bytes){let text='';for(let i=0;i<bytes.length;i+=0x8000)text+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(text);}
@@ -130,7 +130,7 @@ function installMarkup(){
 function render(){
  if(screenMode()){renderScreen();return;}
  const app=document.getElementById('app');
- const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one from its chat.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
+ const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one with the computer button at the top of its chat.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
  cleanupFace?.();
  app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted?dockMarkup():''}</div>`;

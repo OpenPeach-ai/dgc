@@ -87,7 +87,7 @@ test("the Pips that need you sit above your sessions, each with its face, what i
         faceLoaded: [...root.querySelectorAll(".dgc-plush image")].every((i) => new URL(i.getAttribute("href"), document.baseURI).pathname === "/ext/media/pips/plush-bodies.webp") };
     });
     assert.deepEqual(m.rows, [["Core", "3 new findings", "", "core", "success"],
-      ["India Market Brief", "2 waiting for your review", "2", "quill", "waiting_approval"]],
+      ["India Market Brief", "2 waiting for you", "2", "quill", "waiting_approval"]],
       "Core first; only the Pips that need you; an archived Pip never; Gmail has nothing and is not listed");
     assert.equal(m.above, true, "above the Sessions heading");
     assert.equal(m.faceLoaded, true, "the real faces");

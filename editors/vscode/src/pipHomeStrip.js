@@ -33,7 +33,7 @@ export function mountHomePips(options) {
  function news(id) {
   const d = digest?.pips?.find(p => p.pip_id === id);
   if (!d) return '';
-  if (d.alert && d.new_total) return `${d.new_total} new at its alert level`;
+  if (d.alert && d.new_total) return `${d.new_total} new, worth a look now`;
   if (d.new_total) return `${d.new_total} new finding${d.new_total === 1 ? '' : 's'}`;
   if (d.runs.failed) return `${d.runs.failed} run${d.runs.failed === 1 ? '' : 's'} failed`;
   return '';
@@ -57,7 +57,7 @@ export function mountHomePips(options) {
   all.onclick = () => options.onOpen?.(null);
   head.append(all);
   root.append(head);
-  const needing = pips.map(p => ({pip: p, line: p.waiting ? `${p.waiting} waiting for your review` : news(p.id)})).filter(x => x.line);
+  const needing = pips.map(p => ({pip: p, line: p.waiting ? `${p.waiting} waiting for you` : news(p.id)})).filter(x => x.line);
   if (needing.length) {
    const list = node('ul', 'home-pips-list'); list.setAttribute('aria-label', 'Pips that need you');
    for (const {pip, line} of needing) {

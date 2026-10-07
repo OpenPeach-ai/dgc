@@ -2,6 +2,7 @@
 // card is loaded again from the local registry and approved by its exact digest.
 import '../media/pips/plush.js';
 import {pipSetup,pipSetupResolution,pipModels,modelChoice,scheduleLabel} from './pipsModel.js';
+import {appReadWords} from './pipsAppPicker.js';
 import {mountRunCards} from './pipRunCards.js';
 import {mountEmailCards} from './pipEmailCards.js';
 
@@ -65,11 +66,11 @@ export function mountSetupCards(options) {
  function details(entry,{goal=true}={}){
   const s=entry.setup,body=node('div','pip-setup-body');
   if(goal)body.append(node('p','pip-setup-goal',s.goal));          // the docked card shows it already
-  const facts=node('dl','pip-setup-facts');detail(facts,s.source_policy==='personal'?'Scope':'Project',s.source_policy==='personal'?'Personal · across project directories':s.project_root);if(s.event_trigger)detail(facts,'Runs',`After each new commit to ${s.source_ref}`);else detail(facts,'Schedule',s.schedule?scheduleLabel(s.schedule):'When you ask');
+  const facts=node('dl','pip-setup-facts');detail(facts,s.source_policy==='personal'?'Scope':'Project',s.source_policy==='personal'?'Personal':s.project_root);if(s.event_trigger)detail(facts,'Runs',`After each new commit to ${s.source_ref}`);else detail(facts,'Schedule',s.schedule?scheduleLabel(s.schedule):'When you ask');
   if(s.next_run_at)detail(facts,'Next run',`${new Date(s.next_run_at).toLocaleString()} (your local time)`);
   detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal')detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:'Your DGC model');
   if(s.verification_plan){detail(facts,'Execution','Fixed checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Exact check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → HTTP ${test.argv[2]}`:JSON.stringify(test.argv)+' · cwd '+test.cwd);}
-  if(s.app_plan){detail(facts,'Connection',s.app_plan.server);for(const call of s.app_plan.calls||[])detail(facts,'Reads',call.tool+' · account '+(call.account||'server account')+' · '+JSON.stringify(call.arguments));}
+  if(s.app_plan)for(const words of appReadWords(s.app_plan))detail(facts,'Reads',words);
   if(s.web_plan)for(const read of s.web_plan.reads||[])detail(facts,read.kind==='page'?'Web page':'Web search',read.kind==='page'?read.url:read.query);
   body.append(facts,node('p','pip-setup-notice',s.scope_notice),node('p','pip-setup-notice',s.runner_notice));
   if(s.run_now_policy)body.append(node('p','pip-setup-notice',s.run_now_policy));
@@ -96,7 +97,7 @@ export function mountSetupCards(options) {
   if(s.status==='rejected')return 'Not created';return 'This card expired. Ask DGC again.';
  }
  function lineTitle(entry){
-  const s=entry.setup;if(!s)return 'Pip proposal';
+  const s=entry.setup;if(!s)return 'New Pip';
   if(s.status==='accepted')return s.pip_id?`${s.name} is updated`:`${s.name} is on`;
   if(s.status==='pending')return pendingTitle(s);return s.name;
  }
@@ -122,7 +123,7 @@ export function mountSetupCards(options) {
   if(s?.status==='accepted'){
    const allowed=String(s.receipt.actor||'').startsWith('chat-permission:');
    body.append(node('p','pip-setup-receipt',(allowed?(String(s.receipt.actor).endsWith(':auto')?'Created in auto mode. ':'Created on your Allow in the chat. '):'')+'Pause, change or delete it in Pips.'+(s.receipt.run_id?' Its first run is queued.':'')));
-   if(!entry.continued&&!allowed)body.append(button('Tell the chat again',()=>continueChat(entry),'pip-setup-secondary'));
+   if(!entry.continued&&!allowed)body.append(button('Let the chat know',()=>continueChat(entry),'pip-setup-secondary'));
   }
   if(entry.error){const error=node('p','pip-setup-error',entry.error);error.setAttribute('role','alert');body.append(error);}
   if(entry.continued)body.append(node('p','pip-setup-notice','The chat was told it is on.'));
@@ -167,7 +168,7 @@ export function mountSetupCards(options) {
   const token=epoch,s=entry.setup;entry.busy=true;entry.error='';repaint(entry);
   try{
    const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(entry.choice.mode==='default'?'default':'model:'+entry.choice.model,entry.models?.models||[])});if(token!==epoch)return;
-   const next=pipSetup(value.setup,s.workspace_id);if(next.status!=='pending'||next.id===s.id)throw Error('DGC did not return a new pending proposal. Refresh before approving.');
+   const next=pipSetup(value.setup,s.workspace_id);if(next.status!=='pending'||next.id===s.id)throw Error('This was changed or answered somewhere else. Refresh to see it.');
    remap(entry,next.id);entry.setup=next;entry.choice=next.model_choice||{mode:'default'};
   }catch(error){if(token===epoch)entry.error=error.message;}finally{if(token===epoch){entry.busy=false;repaint(entry);}}
  }
@@ -176,7 +177,7 @@ export function mountSetupCards(options) {
   if(entry.busy||!entry.setup)return;const token=epoch,s=entry.setup;entry.busy=true;entry.error='';repaint(entry);
   try{
    const latest=pipSetup((await request('get_pip_setup',{setup_id:s.id})).setup,s.workspace_id,s.id);if(token!==epoch)return;
-   if(latest.digest!==s.digest||latest.status!=='pending') {entry.setup=latest;throw Error('This proposal changed or was resolved elsewhere. Review its current status.');}
+   if(latest.digest!==s.digest||latest.status!=='pending') {entry.setup=latest;throw Error('This was changed or answered somewhere else. Refresh to see it.');}
    const value=await request(accept?'accept_pip_setup':'reject_pip_setup',{setup_id:s.id,expected_digest:s.digest});if(token!==epoch)return;
    entry.setup=pipSetupResolution(value.setup,s,accept);
    if(accept){for(const v of entry.views)v.open=false;continueChat(entry);}
@@ -184,7 +185,7 @@ export function mountSetupCards(options) {
  }
  async function continueChat(entry){
   if(entry.setup?.status!=='accepted'||entry.continued||entry.notifying)return;
-  if(!backgroundSetup){entry.error='Setup is saved. Reload the window to get background approval notifications.';repaint(entry);return;}
+  if(!backgroundSetup){entry.error=`${entry.setup?.name||'The Pip'} is created. Reload the window so the chat hears about it.`;repaint(entry);return;}
   const token=epoch;entry.notifying=true;
   try{const value=await request('notify_pip_setup',{setup_id:entry.setup.id});if(token!==epoch)return;
    if(value.setup_id!==entry.setup.id||!['started','queued','steered','already_notified'].includes(value.notification))throw Error('The notification receipt did not match this setup.');
@@ -216,7 +217,7 @@ export function mountSetupCards(options) {
   const id=value?.setup?.id;if(typeof id!=='string'||!/^setup_[a-f0-9]{32}$/.test(id))return;
   let entry=entries.get(id);if(!entry){if(entries.size>=100)return;entry={id,views:[],setup:null,choice:{mode:'default'},busy:false,loading:false,error:'',continued:false};entries.set(id,entry);}
   const body=card.querySelector('.body');if(!body)return;card.classList.remove('pip-setup-moved');body.replaceChildren();addView(entry,body,false);card.querySelector('.badge').textContent='Review';card.dataset.pipSetup=id;
-  card.querySelector('.verb').textContent='Pip proposal';card.querySelector('.tool-toggle')?.setAttribute('aria-expanded','true');card.classList.add('open');
+  card.querySelector('.verb').textContent='New Pip';card.querySelector('.tool-toggle')?.setAttribute('aria-expanded','true');card.classList.add('open');
   if(!connected)options.postMessage({type:'pipsReady'});else load(entry);
  }
  function finish(block){

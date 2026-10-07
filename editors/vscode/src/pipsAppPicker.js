@@ -4,6 +4,14 @@ const accountId = value => typeof value==='string' && /^(?:ca|coup)_[A-Za-z0-9_-
 export const appLabels={gmail:'Gmail',googlecalendar:'Google Calendar',googledrive:'Google Drive',notion:'Notion',googlecontacts:'Google Contacts'};
 const toolkits={gmail:'GMAIL_FETCH_EMAILS',googlecalendar:'GOOGLECALENDAR_FIND_EVENT',googledrive:'GOOGLEDRIVE_FIND_FILE',notion:'NOTION_SEARCH_NOTION_PAGE',googlecontacts:'GOOGLECONTACTS_SEARCH_CONTACTS'};
 const driveFields='files(id,name,mimeType,modifiedTime,webViewLink),nextPageToken,incompleteSearch';
+const READ_WORDS={GMAIL_FETCH_EMAILS:'Gmail: emails',GOOGLECALENDAR_FIND_EVENT:'Google Calendar: events',GOOGLEDRIVE_FIND_FILE:'Google Drive: files',
+ NOTION_SEARCH_NOTION_PAGE:'Notion: pages',GOOGLECONTACTS_SEARCH_CONTACTS:'Google Contacts: contacts'};
+/** An app-read plan in words, one line per read: "Gmail: emails matching “is:unread”, up to 5". */
+export function appReadWords(plan){
+ if(!plan||typeof plan!=='object'||!Array.isArray(plan.calls))return [];
+ return plan.calls.map(c=>{const a=c?.arguments||{},q=[a.query,a.q,a.search_term].find(v=>typeof v==='string'&&v);
+  return `${READ_WORDS[c?.tool]||String(c?.tool||'An app').toLowerCase().replace(/_/g,' ')}${q?` matching “${q}”`:''}${Number.isInteger(a.max_results)?`, up to ${a.max_results}`:''}${c?.window?.days?`, the next ${c.window.days} ${c.window.days===1?'day':'days'}`:''}`;});
+}
 export const extraReadTools=['GOOGLEDRIVE_FIND_FILE','NOTION_SEARCH_NOTION_PAGE','GOOGLECONTACTS_SEARCH_CONTACTS'];
 export const appReadNotices={googledrive:'Search names in My Drive. Only file names, IDs, types, edit dates and links reach the model. No contents or shared drives.',notion:'Search page titles. Only titles, IDs, edit dates and links reach the model. No page bodies; recently shared pages may not be indexed yet.',googlecontacts:'Search saved contacts. Only names, IDs and email addresses reach the model. No phone numbers or addresses.'};
 export function extraReadArguments(tool,query,limit){

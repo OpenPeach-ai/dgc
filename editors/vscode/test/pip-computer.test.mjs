@@ -51,11 +51,11 @@ test('an older CLI shows no computer; on API 42 one plain dialog gives it, as a 
  assert.equal([...old.d.querySelectorAll('h3')].some(h=>h.textContent==='Computer'),false,'no Computer section at all');
  const x=setup();await x.openJob();
  assert.equal(x.requests('get_pip_computer')[0].request.pip_id,pipId);
- assert.match(x.d.body.textContent,/its own browser and files, separate from yours/);
+ assert.match(x.d.body.textContent,/its own computer, separate from yours: a browser, a Terminal and files/);
  x.click('#give-computer');
  const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog);
  assert.match(dialog.textContent,/Give Shopper a computer\?/);
- for(const rule of [/waits for your approval, with a screenshot/,/never sees your passwords/,/cannot reach your home network\. A payment waits for your approval like anything else/,/cannot also read your connected apps/])assert.match(dialog.textContent,rule);
+ for(const rule of [/waits for your OK, with a screenshot/,/never sees your passwords/,/can’t reach this computer or your home network/,/cannot also read your connected apps/])assert.match(dialog.textContent,rule);
  assert.equal(x.requests('propose_pip_update').length,0,'opening the dialog changes nothing');
  x.click('#review-confirm');
  const proposed=x.requests('propose_pip_update')[0];
@@ -203,7 +203,7 @@ test('a run that used its computer shows how much, and what it saw one screensho
  const run={id:runId,pip_id:pipId,status:'succeeded',created_at:'2026-10-04T10:00:00Z',manifest:{run_kind:'personal_task',job_version:1},result:{text:'Two books renewed; one needs your approval.',external_actions:false,computer:{calls:3,held:[actionId]}}};
  const x=setup({pip:job({computer_plan:PLAN}),status:computer(),runs:[run]});await x.drain();x.click('[data-job]');await x.drain();
  x.click('[data-tab=runs]');await x.drain();if(x.d.querySelector(`[data-run="${runId}"]`))x.click(`[data-run="${runId}"]`);await x.drain();
- assert.match(x.d.body.textContent,/Used its computer: 3 steps · 1 waiting for your approval in the Job tab/);
+ assert.match(x.d.body.textContent,/Used its computer: 3 steps · 1 waiting for you in Settings/);
  x.click('#computer-timeline');await flush();
  const list=x.requests('list_pip_computer_frames')[0];assert.deepEqual(JSON.parse(JSON.stringify(list.request)),{type:'list_pip_computer_frames',run_id:runId});
  const frames=[{frame:'0001.jpg',label:'open https://library.example/',url:'https://library.example/',at:'2026-10-04T10:00:01Z'},{frame:'0002.jpg',label:'<img src=x onerror=alert(1)>',url:'https://library.example/loans',at:'2026-10-04T10:00:02Z'}];

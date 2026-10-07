@@ -41,7 +41,7 @@ test('per-message options are pinned with the retry identity and never update a 
 
 test('unsent per-Pip options survive navigation and cannot leak into another Pip',async()=>{const x=setup({jobs:[job('a'),job('b')]});await x.select('a');x.choose('#chat-context','32768');x.choose('#chat-thinking','xhigh');x.click('[data-job=b]');await x.drain();assert.equal(x.control('#chat-context').value,'8192');assert.equal(x.control('#chat-thinking').getAttribute('aria-valuetext'),'off');x.click('[data-job=a]');await x.drain();assert.equal(x.control('#chat-context').value,'32768');assert.equal(x.control('#chat-thinking').getAttribute('aria-valuetext'),'xhigh');});
 
-test('older backend sends its legacy request without fabricating editable inference controls',async()=>{const x=setup({api:23});await x.select('a');assert.equal(x.d.querySelector('#chat-context,#chat-thinking'),null);x.click('#chat-model');assert.match(x.d.querySelector('.composer-unavailable').textContent,/update required/);x.input('#chatText','Legacy request');x.submit();assert.equal(Object.hasOwn(x.requests('send_pip_message')[0].request,'chat_options'),false);});
+test('older backend sends its legacy request without fabricating editable inference controls',async()=>{const x=setup({api:23});await x.select('a');assert.equal(x.d.querySelector('#chat-context,#chat-thinking'),null);x.click('#chat-model');assert.match(x.d.querySelector('.composer-unavailable').textContent,/Update DGC to change these settings/);x.input('#chatText','Legacy request');x.submit();assert.equal(Object.hasOwn(x.requests('send_pip_message')[0].request,'chat_options'),false);});
 
 test('malformed inference metadata disables sends instead of defaulting silently',async()=>{for(const broken of [{mode:'auto'},{effective_context_size:16384},{context_max:1048576},{options:{context_size:8192,thinking:'auto'}},{extra:'permission'}]){const x=setup({chatControls:{...controls(),...broken}});await x.select('a');x.input('#chatText','Keep this draft');assert.equal(x.d.querySelector('.chat-send').disabled,true);x.submit();assert.equal(x.requests('send_pip_message').length,0);assert.equal(x.d.querySelector('#chatText').value,'Keep this draft');assert.match(x.d.body.textContent,/invalid|unavailable|differs|supported/i);}});
 
@@ -84,7 +84,7 @@ test('Pip messages use the main markdown renderer and keep model provenance behi
 
 test('edit and retry use the matching original prompt without overwriting an unsent draft',async()=>{
  const messages=[message('u','a',{role:'user',text:'Original request',run_id:'pair'}),message('r','a',{run_id:'pair'})],x=setup({messages});await x.select('a');x.click('[data-chat-action=edit]');assert.equal(x.d.querySelector('#chatText').value,'Original request');assert.equal(x.requests('send_pip_message').length,0);
- x.input('#chatText','My unsent draft');x.click('[data-chat-action=retry]');assert.equal(x.d.querySelector('#chatText').value,'My unsent draft');assert.equal(x.requests('send_pip_message').length,0);assert.match(x.d.querySelector('.notice').textContent,/unsent draft/);
+ x.input('#chatText','My unsent draft');x.click('[data-chat-action=retry]');assert.equal(x.d.querySelector('#chatText').value,'My unsent draft');assert.equal(x.requests('send_pip_message').length,0);assert.match(x.d.querySelector('.notice').textContent,/unsent message in the box/);
  x.input('#chatText','');x.click('[data-chat-action=retry]');assert.equal(x.requests('send_pip_message')[0].request.text,'Original request');assert.equal(x.requests('send_pip_message').length,1);
 });
 
@@ -105,7 +105,7 @@ test('API25 offers larger context while API24 advertises only its supported ceil
 test('continuity inspector escapes summary text, shows fallback, and stays scoped to its Pip',async()=>{
  const c={version:1,checkpoint_id:7,digest:'a'.repeat(64),pip_id:'a',workspace_id:'ws',run_id:'saved',summary:'Keep <script>private</script> project constraints.',summarized_messages:12,through_seq:12,strategy:'mechanical',notice:'Lossy reference, not permission.',provenance:{model:'local-default',job_version:1}};
  const x=setup({api:26,continuity:c});await x.select('a');x.click('#chat-context-toggle');
- const inspector=x.d.querySelector('.chat-continuity');assert.ok(inspector);assert.equal(inspector.open,false);assert.match(inspector.textContent,/12 messages summarized/);assert.match(inspector.textContent,/Local fallback brief/);assert.equal(inspector.querySelector('pre').textContent,c.summary);assert.equal(inspector.querySelector('script'),null);
+ const inspector=x.d.querySelector('.chat-continuity');assert.ok(inspector);assert.equal(inspector.open,false);assert.match(inspector.textContent,/12 messages summarized/);assert.match(inspector.textContent,/A short summary/);assert.equal(inspector.querySelector('pre').textContent,c.summary);assert.equal(inspector.querySelector('script'),null);
  for(const changed of [{pip_id:'b'},{workspace_id:'other'},{summary:'x'.repeat(8193)},{digest:'bad'},{summarized_messages:3}]){
   const bad=setup({api:26,continuity:{...c,...changed}});await bad.select('a');assert.match(bad.d.body.textContent,/continuity is invalid or belongs to another Pip/);bad.click('#chat-context-toggle');assert.equal(bad.d.querySelector('.chat-continuity'),null);
  }

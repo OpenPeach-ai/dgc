@@ -117,7 +117,7 @@ test('what you type in the address bar stays while the screen refreshes; Escape,
 
 test('what the Pip would submit waits at the top with Send once, Always allow and Reject',async()=>{
  const x=setup({status:computer({pending:1,actions:[hold]})});await x.drain();
- assert.match(x.d.querySelector('.pc-waiting').textContent,/Submit to shop.example\/order/);
+ assert.match(x.d.querySelector('.pc-waiting').textContent,/Send a form to shop.example/);
  assert.match(x.d.querySelector('.pc-status').textContent,/1 waiting for you/);
  x.click(`[data-send="${actionId}"]`);await x.drain();
  const decided=x.requests('decide_pip_computer_action')[0];
@@ -149,7 +149,7 @@ test('the Terminal runs your command and shows yours and the Pip\'s, with no int
  const pipRan={by:'pip',command:'ls Downloads',exit:0,output:'report.pdf\n',timed_out:false,seconds:0.1,at:1};
  const x=setup({terminal:{entries:[pipRan],running:null}});await x.drain();x.click('[data-app=terminal]');await x.drain();
  assert.match(x.d.querySelector('.pc-log').textContent,/Shopper \$ ls Downloads/);
- assert.match(x.d.querySelector('.pc-terminal').textContent,/Online like Grok's bots: commands reach public websites through DGC/);
+ assert.match(x.d.querySelector('.pc-terminal').textContent,/Online: commands can reach public websites/);
  x.d.querySelector('#pc-command').value='wc -l notes.txt';x.submit('#pc-run');await x.drain();
  assert.equal(x.requests('run_pip_computer_command')[0].request.command,'wc -l notes.txt');
  x.setTerminal({entries:[pipRan,{by:'you',command:'wc -l notes.txt',exit:0,output:'1 notes.txt\n',timed_out:false,seconds:0.1,at:2}],running:null});

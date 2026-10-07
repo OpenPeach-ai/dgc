@@ -33,7 +33,7 @@ export const pipUsageMarkup = `<section class="set-section usage-section pip-usa
     </div>
     <p id="pip-usage-models-empty" class="set-note" hidden>No model requests from the Pips were recorded in this range.</p>
   </div>
-  <p class="set-note">A run counts on the day it finished, with the totals its runner recorded. Set a Pip&rsquo;s daily limit in its Job tab in Pips.</p>
+  <p class="set-note">Each task counts on the day it finished. Set a Pip&rsquo;s daily limit in its Settings in Pips.</p>
 </section>`;
 
 export function createPipUsage(root, vscode) {
@@ -76,7 +76,7 @@ export function createPipUsage(root, vscode) {
     const asked = requestId;
     status('Counting…', true);
     clearTimeout(timer);
-    timer = setTimeout(() => { if (asked === requestId) status('No answer from the DGC backend yet. Try Refresh.', false); }, 15000);
+    timer = setTimeout(() => { if (asked === requestId) status('DGC hasn’t answered yet. Try Refresh.', false); }, 15000);
     vscode.postMessage({ type: 'getPipUsage', range, requestId });
   }
   function unavailable(msg) {

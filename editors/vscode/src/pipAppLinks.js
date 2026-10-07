@@ -7,7 +7,7 @@ const text = (v, max) => typeof v === 'string' && v.length <= max;
 const RECENT_MS = 30 * 60 * 1000;
 
 export function appLink(value, pip) {
-  const fail = () => { throw new Error('This app card is invalid. Refresh the Pip.'); };
+  const fail = () => { throw new Error('This card didn’t load. Refresh to try again.'); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail();
   if (!/^applink_[a-f0-9]{32}$/.test(value.id) || value.pip_id !== pip || !/^[a-z0-9][a-z0-9_]{1,39}$/.test(value.toolkit)
     || !text(value.app, 80) || !value.app || !text(value.reason, 600) || !STATUSES.includes(value.status)
@@ -19,7 +19,7 @@ export function appLink(value, pip) {
 
 export function appLinksPage(value, pip) {
   if (!value || value.pip_id !== pip || !Array.isArray(value.links) || value.links.length > 16 || typeof value.composio !== 'boolean') {
-    throw new Error('The app cards are invalid. Refresh the Pip.');
+    throw new Error('These cards didn’t load. Refresh to try again.');
   }
   return { links: value.links.map(link => appLink(link, pip)), composio: value.composio };
 }
@@ -51,7 +51,7 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Open sign-in again</button>${no}</div>`;
   } else if (!composio) {
     body = head(`Connect ${app}`, esc(link.reason))
-      + `<p class="app-link-note">Composio connects your apps to DGC. Add it in Settings → Plugins, then choose Connect here.</p>`
+      + `<p class="app-link-note">To connect apps, first turn on Composio in Settings → Plugins (once). Then choose Connect here.</p>`
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Settings</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Connect ${app}</button>${no}</div>`;
   } else if (link.status === 'failed') {

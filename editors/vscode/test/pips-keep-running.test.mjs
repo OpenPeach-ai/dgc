@@ -33,7 +33,7 @@ test('the switch shows the backend state and asks once', async()=>{
  const x=setup({keep:status()});await x.drain();
  assert.equal(x.requests('get_pips_keep_running').length,1);
  const box=x.d.getElementById('keep-running');assert.ok(box);assert.equal(box.checked,false);
- assert.match(x.d.body.textContent,/Off: Pips run only while a runner you started is running/);
+ assert.match(x.d.body.textContent,/Off: Pips run only after you start them/);
  await x.drain();assert.equal(x.requests('get_pips_keep_running').length,1,'not on every render');
 });
 
@@ -48,7 +48,7 @@ test('turning it on sends exactly that, and the reply decides what it says', asy
  x.change(false);
  assert.equal(x.requests('set_pips_keep_running')[1].request.enabled,false);
  x.answer(x.requests('set_pips_keep_running')[1],{keep_running:status()});await x.drain();
- assert.match(x.d.body.textContent,/The runner running now keeps going until you stop it/);
+ assert.match(x.d.body.textContent,/They keep running now until you stop them/);
 });
 
 test('where it cannot work it says why instead of offering a switch', async()=>{
@@ -103,7 +103,7 @@ test('a current CLI that cannot run Pips here says why, not "update"', async()=>
   listener({type:'pipsConnection',apiVersion:api,generation:1,connected:true,supported:false,enabled:true});return w.document;};
  const windowsHost=make(41);await flush();
  assert.match(windowsHost.body.textContent,/Pips run on Linux and macOS/);assert.doesNotMatch(windowsHost.body.textContent,/Update the DGC CLI/);
- const old=make(8);await flush();assert.match(old.body.textContent,/Update the DGC CLI to use Pips/);
+ const old=make(8);await flush();assert.match(old.body.textContent,/Update DGC to use Pips/);
 });
 
 test('sharing: export opens the file for Save As, import reads the picked file and never more than 24 KiB', async()=>{

@@ -45,7 +45,7 @@ test('a limit is saved as tokens, a wrong one is refused here, and it can be rem
  const saved=x.requests('set_pip_daily_cap')[0];
  assert.deepEqual(JSON.parse(JSON.stringify(saved.request)),{type:'set_pip_daily_cap',pip_id:pipId,daily_tokens:200000});
  x.answer(saved,{usage:usage({daily_cap:200000})});await x.drain();
- assert.match(x.d.body.textContent,/Daily limit saved: 200,000 tokens for automatic runs/);
+ assert.match(x.d.body.textContent,/Daily limit saved: 200,000 tokens a day for work it does on its own/);
  x.d.getElementById('remove-usage-limit').click();
  assert.equal(x.requests('set_pip_daily_cap')[1].request.daily_tokens,null);
 });
