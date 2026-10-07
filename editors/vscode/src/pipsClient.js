@@ -262,7 +262,7 @@ function chatMarkup(){
   const timed=m=>{const at=Date.parse(m.created_at),mark=simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return mark;};
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
   const messages=shown.map(m=>timed(m)+messageMarkup(m,{imageSrc:messageImageSrc,split:simple,name:type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt:S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null})).join('');
-  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} This saved conversation belongs to ${esc(S.pip.name)}.</p><p class="muted">${personalPip()?'No project files or app connections are included automatically.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span><p class="message-status">Live reply · not yet saved</p>${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Live preview is limited to 16,384 characters. The saved reply will replace it when complete.</p>':''}${S.stream.truncated?'<p class="muted">Earlier live text may no longer be retained.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${S.omitted?`<p class="context-limit">${S.omitted} earlier saved ${S.omitted===1?'message is':'messages are'} outside the current model input. History remains saved.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${archived()?'Archived · Restore to paused before sending another message. ':''}${personalPip()?'Personal · no project tools':(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start the runner to send a message.':S.runner?.paused?' · Resume the runner to send a message.':''}</p></section>`;
+  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} This saved conversation belongs to ${esc(S.pip.name)}.</p><p class="muted">${personalPip()?'No project files or app connections are included automatically.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span><p class="message-status">Live reply · not yet saved</p>${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Live preview is limited to 16,384 characters. The saved reply will replace it when complete.</p>':''}${S.stream.truncated?'<p class="muted">Earlier live text may no longer be retained.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${needsYouCard()}${S.omitted?`<p class="context-limit">${S.omitted} earlier saved ${S.omitted===1?'message is':'messages are'} outside the current model input. History remains saved.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${archived()?'Archived · Restore to paused before sending another message. ':''}${personalPip()?'Personal · no project tools':(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start the runner to send a message.':S.runner?.paused?' · Resume the runner to send a message.':''}</p></section>`;
 }
 async function toggleChatActivity(runId){
   if(!S.messages.some(m=>m.run_id===runId)||!usable())return;
@@ -273,7 +273,7 @@ async function toggleChatActivity(runId){
   finally{if(token===scope()&&chatActivities.get(runId)===value){value.loading=false;render();}}
 }
 async function loadMessages(more=false){
- if(!more){void loadEmailDrafts();void loadAppLinks();}
+ if(!more){void loadEmailDrafts();void loadAppLinks();void refreshComputer();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
   const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
@@ -583,6 +583,27 @@ async function loadComputer(){
  try{const value=pipComputer((await send('get_pip_computer',{pip_id:pip})).computer,pip);if(token!==scope()||S.selected!==pip)return;computerState.value=value;}
  catch(error){if(token===scope()&&S.selected===pip)computerState.error=errorText(error);}
  finally{if(token===scope()&&S.selected===pip){computerState.loading=false;render();}}
+}
+// While the chat is open, look again quietly (no blank button while it loads): a run may have hit a
+// site's robot check, and the chat should say so at once.
+async function refreshComputer(){
+ const pip=S.selected;if(S.apiVersion<43||!personalPip()||!usable()||computerState.loading)return;
+ if(computerState.pip!==pip){void loadComputer();return;}
+ if(!computerState.value?.granted)return;
+ const token=scope(),before=JSON.stringify(computerState.value.needs_you||null);
+ try{const value=pipComputer((await send('get_pip_computer',{pip_id:pip})).computer,pip);if(token!==scope()||S.selected!==pip||computerState.pip!==pip)return;
+  computerState.value=value;if(JSON.stringify(value.needs_you||null)!==before)render();}
+ catch{/* the next look tries again */}
+}
+// A site asked a person to prove they are not a robot: the Pip stopped; the user finishes it on its screen.
+function needsYouCard(){
+ const n=computerState.pip===S.selected?computerState.value?.needs_you:null;if(!n||S.apiVersion<43)return '';
+ const name=esc(S.pip?.name||'This Pip');
+ return `<div class="app-link" data-state="needs" role="group" aria-label="${name} needs you"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">!</span><div class="app-link-words"><strong>${name} needs you</strong><small>${esc(n.host)} wants to check you’re not a robot. Finish it on ${name}’s computer; ${name} carries on after.</small></div></div><div class="app-link-actions"><button type="button" class="primary" data-needs-open="1"${archived()?' disabled':''}>Open its computer</button><button type="button" class="quiet" data-needs-done="1"${S.busy?' disabled':''}>I’ve done it</button></div></div>`;
+}
+async function finishedCheck(){
+ const pip=S.selected;if(!usable()||!pip||S.busy)return;
+ void mutate({type:'finish_pip_computer_check',pip_id:pip},()=>{if(computerState.pip===pip&&computerState.value){const {needs_you:_n,...rest}=computerState.value;computerState.value=rest;}S.notice=`${S.pip?.name||'The Pip'} is carrying on.`;void loadMessages();});
 }
 function computerMarkup(){const inner=computerInner();return inner&&`<div class="computer">${inner}</div>`;}
 function computerInner(){
@@ -2051,6 +2072,8 @@ document.addEventListener('click',event=>{
     else{draft.chatText=choice;void sendChat();}
     return;
   }
+  if(target.dataset.needsOpen){if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();return;}
+  if(target.dataset.needsDone){void finishedCheck();return;}
   if(target.dataset.allowSend){void allowSend(target.dataset.allowSend);return;}
   if(target.dataset.allowAlways){void allowSend(target.dataset.allowAlways,true);return;}
   if(target.dataset.allowDismiss){void allowDismiss(target.dataset.allowDismiss);return;}

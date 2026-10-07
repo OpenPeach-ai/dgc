@@ -8,6 +8,17 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- A Pip computer's Terminal is online, like Grok's bots: commands (the Terminal tab's, the Pip's own and
+  the desktop's Terminal app) reach public websites on ports 80 and 443 through the same egress proxy
+  as its browser, via an in-box relay and the standard proxy variables (curl, pip, npm, git over
+  https); the CA certificates are bound in. Nothing on this computer or the local network is reachable,
+  and the box still has no network of its own. Each command's history entry lists the hosts it
+  `reached` and any DGC `blocked`. (Was: "No internet in the Terminal".)
+- A robot check stops a Pip: when a page it reads is Google's "unusual traffic" page, reCAPTCHA,
+  hCaptcha or Cloudflare's check, the computer tool tells it not to try and to ask the user, and
+  `get_pip_computer` reports `needs_you {host, at}` until a later page is past it.
+  `finish_pip_computer_check {pip_id}` (local only) clears it and queues the Pip's next turn
+  (reserved key `check_`), so it looks again and carries on.
 - A connected app card (`list_pip_app_links`) names its `server` and `account`, as the account picker
   already did, so the editor can prepare a send from the Pip's own account.
 - A Pip's chat reply can offer 2 to 4 choices, like Grok's A/B cards ("Yes, connect Gmail" / "Not

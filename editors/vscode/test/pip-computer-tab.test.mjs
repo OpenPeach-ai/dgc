@@ -149,7 +149,7 @@ test('the Terminal runs your command and shows yours and the Pip\'s, with no int
  const pipRan={by:'pip',command:'ls Downloads',exit:0,output:'report.pdf\n',timed_out:false,seconds:0.1,at:1};
  const x=setup({terminal:{entries:[pipRan],running:null}});await x.drain();x.click('[data-app=terminal]');await x.drain();
  assert.match(x.d.querySelector('.pc-log').textContent,/Shopper \$ ls Downloads/);
- assert.match(x.d.querySelector('.pc-terminal').textContent,/Offline on purpose: commands here cannot reach the internet/);
+ assert.match(x.d.querySelector('.pc-terminal').textContent,/Online like Grok's bots: commands reach public websites through DGC/);
  x.d.querySelector('#pc-command').value='wc -l notes.txt';x.submit('#pc-run');await x.drain();
  assert.equal(x.requests('run_pip_computer_command')[0].request.command,'wc -l notes.txt');
  x.setTerminal({entries:[pipRan,{by:'you',command:'wc -l notes.txt',exit:0,output:'1 notes.txt\n',timed_out:false,seconds:0.1,at:2}],running:null});

@@ -417,7 +417,12 @@ INTRO_KEY = "intro_"
 COMPUTER_KEY = "computer_"
 # After the user connects an app the Pip asked for (pip_app_links), DGC asks it to carry on, under this key.
 APPS_KEY = "apps_"
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY)
+# After the user finishes a site's robot check on the Pip's computer, DGC asks it to carry on, under this key.
+CHECK_KEY = "check_"
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY)
+CHECK_DONE = ("This message is from DGC, not the user. The user says they finished {host}'s check on your computer's "
+              "screen. Read the page again and carry on with what they asked. If the site still asks for a check, "
+              "stop and tell them in one sentence.")
 APP_CONNECTED = ("This message is from DGC, not the user. The user connected {app} to you ({label}). Read it with "
                  "read_app now if that helps with what they asked, then carry on in a short message. To send or change "
                  "anything there, prepare a draft; it waits for their Allow.")
@@ -463,6 +468,12 @@ def continue_after_app(store, pip_id, link, config):
     key = APPS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(link["id"]))[:100]
     text = APP_CONNECTED.format(app=str(link["app"])[:60], label=str(link.get("label") or "their account")[:160])
     return send(store, pip_id, text, key, "local-apps", config, _intro=True)
+
+
+def continue_after_check(store, pip_id, host, at, config):
+    """The chat's next turn once the user has finished a site's robot check on the Pip's computer."""
+    key = CHECK_KEY + hashlib.sha256(f"{pip_id}:{host}:{at}".encode()).hexdigest()[:40]
+    return send(store, pip_id, CHECK_DONE.format(host=str(host)[:255]), key, "local-computer", config, _intro=True)
 
 
 def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):

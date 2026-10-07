@@ -83,3 +83,5 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-setup small{opacity:.75}
 @media (prefers-reduced-motion:reduce){.pc-setup-bar>span{transition:none}}
 .pc-install code{font-family:var(--mono);font-size:12px;background:var(--surface);padding:2px 6px;border-radius:4px;user-select:all}
+.pc-hosts{margin:2px 0 0;font-size:11px;color:var(--vscode-descriptionForeground)}
+.pc-hosts.pc-blocked{color:var(--vscode-errorForeground,#f48771)}

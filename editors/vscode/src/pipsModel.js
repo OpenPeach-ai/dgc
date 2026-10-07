@@ -1118,7 +1118,9 @@ export function pipComputerAction(value,pip){
  return value;
 }
 export function pipComputer(value,pip){
- if(!record(value)||Object.keys(value).sort().join()!=='actions,available,granted,pending,pip_id,reason'||value.pip_id!==pip
+ // needs_you: a site asked a person to prove they are not a robot; the Pip stopped for the user.
+ const needs=value?.needs_you;if(needs!==undefined&&(!record(needs)||Object.keys(needs).sort().join()!=='at,host'||typeof needs.host!=='string'||!needs.host||needs.host.length>255||typeof needs.at!=='string'))throw Error('This Pip\'s computer status is invalid. Refresh this Pip.');
+ if(!record(value)||Object.keys(value).filter(k=>k!=='needs_you').sort().join()!=='actions,available,granted,pending,pip_id,reason'||value.pip_id!==pip
    ||typeof value.granted!=='boolean'||typeof value.available!=='boolean'||typeof value.reason!=='string'
    ||!Number.isSafeInteger(value.pending)||!Array.isArray(value.actions)||value.actions.length>5)
   throw Error('This Pip\'s computer status is invalid. Refresh this Pip.');
@@ -1172,7 +1174,9 @@ export function pipComputerFile(value,path){
  return value;
 }
 export function pipComputerTerminalEntry(value){
- if(!record(value)||Object.keys(value).sort().join()!=='at,by,command,exit,output,seconds,timed_out'||!['you','pip'].includes(value.by)
+ // reached / blocked: the sites a command reached through DGC, and what DGC refused (this computer, your network).
+ const hosts=v=>v===undefined||Array.isArray(v)&&v.length<=12&&v.every(h=>typeof h==='string'&&h.length>0&&h.length<=255);
+ if(!record(value)||Object.keys(value).filter(k=>k!=='reached'&&k!=='blocked').sort().join()!=='at,by,command,exit,output,seconds,timed_out'||!hosts(value.reached)||!hosts(value.blocked)||!['you','pip'].includes(value.by)
    ||typeof value.command!=='string'||value.command.length>4000||typeof value.output!=='string'||value.output.length>70000
    ||!(value.exit===null||Number.isSafeInteger(value.exit))||typeof value.timed_out!=='boolean'||typeof value.seconds!=='number'||!Number.isSafeInteger(value.at))
   throw Error('A terminal entry is invalid.');

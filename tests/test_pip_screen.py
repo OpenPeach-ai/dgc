@@ -147,7 +147,25 @@ class DesktopBoxTests(unittest.TestCase):
         binds = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
         self.assertIn((str(self.base / "Files"), "/home/pip/Files"), binds)
         self.assertFalse(any(src == str(Path.home()) for src, _ in binds), "never the user's own home")
-        self.assertNotIn("/run/dgc/egress.sock", argv, "no way online from the desktop")
+        self.assertNotIn("/run/dgc/egress.sock", argv, "no way online without the computer's egress socket")
+
+    def test_the_desktop_terminal_is_online_only_through_the_computers_egress(self):
+        # Like Grok's: the desktop's Terminal app reaches public sites through DGC's egress proxy, the
+        # same way out as the browser; the box itself still has no network.
+        found = {role: Path("/usr/bin") / name for role, name in pip_screen.PROGRAMS.items()}
+        egress = self.base / "egress.sock"
+        with patch.object(pip_screen, "components", return_value={"found": found, "missing": [], "prefix": None}):
+            argv = pip_screen.desktop_argv(self.base / "rt", self.base / "Files", "Gmail", egress)
+        self.assertIn("--unshare-all", argv)
+        binds = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a in ("--bind", "--ro-bind")]
+        self.assertIn((str(egress), "/run/dgc/egress.sock"), binds)
+        self.assertIn((str(self.base / "rt" / "forward.py"), "/run/dgc/forward.py"), binds)
+        env = {argv[i + 1]: argv[i + 2] for i, a in enumerate(argv) if a == "--setenv"}
+        self.assertEqual(env["https_proxy"], "http://127.0.0.1:8899")
+        self.assertEqual(env["no_proxy"], "localhost,127.0.0.1")
+        conf = self.base / "conf"
+        pip_screen.write_config(conf, "Gmail")
+        self.assertIn("python3 /run/dgc/forward.py", (conf / "desktop.sh").read_text())
 
     def test_without_the_programs_dgc_sets_them_up_itself_and_shows_no_install_command(self):
         from dgc import pip_screen_setup
@@ -365,6 +383,30 @@ class RealScreenTests(unittest.TestCase):
         self.assertEqual(json.loads(line), {"ok": True})
         self.assertTrue(host.browser.alive(), "the browser runs as a window on the screen")
         self.assertEqual(host.browser.display_dir, host.desktop.x11_dir)
+        # The desktop's Terminal is online through the computer's egress, like the browser: the desktop
+        # box runs its own relay to it (Grok's terminal has internet; the founder: "lets copy grok").
+        def parent(pid):
+            try:
+                return int(next(l for l in open(f"/proc/{pid}/status") if l.startswith("PPid:")).split()[1])
+            except (OSError, StopIteration, ValueError):
+                return 0
+        def relay_in_desktop():
+            for pid in filter(str.isdigit, os.listdir("/proc")):
+                try:
+                    argv = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+                except OSError:
+                    continue
+                if argv[:2] == [b"python3", b"/run/dgc/forward.py"]:
+                    node = int(pid)
+                    while node > 1:
+                        if node == host.desktop.proc.pid:
+                            return True
+                        node = parent(node)
+            return False
+        deadline = time.monotonic() + 10
+        while not relay_in_desktop() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertTrue(relay_in_desktop(), "the desktop box runs its own relay to the computer's egress")
         width, height, pixels = self.frame(viewer)
         self.assertEqual((width, height), (pip_screen.WIDTH, pip_screen.HEIGHT))
         self.assertGreater(len(set(pixels[i:i + 4] for i in range(0, len(pixels), 4 * 997))), 8, "a real picture, not one colour")

@@ -23,7 +23,7 @@ const link=(extra={})=>({id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 const viewModule=load(viewCode,name=>name==='vscode'?{}:require(name));
-function setup({links=[link()],composio=true,messages=[],drafts=[]}={}){
+function setup({links=[link()],composio=true,messages=[],drafts=[],computer=null}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set(),timers=[];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -39,7 +39,7 @@ function setup({links=[link()],composio=true,messages=[],drafts=[]}={}){
   list_pips:()=>({pips:r.workspace_id===PW?[pipRow]:[]}),get_pip:()=>({pip:pipRow}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),
   get_workspace_context:()=>({context:{workspace_id:r.workspace_id||PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
   list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages,next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),
-  get_pip_computer:()=>({computer:{pip_id:PIP,granted:false,available:true,reason:'',pending:0,actions:[]}}),
+  get_pip_computer:()=>({computer:computer||{pip_id:PIP,granted:false,available:true,reason:'',pending:0,actions:[]}}),
   list_pip_app_links:()=>({pip_id:PIP,links,composio}),list_pip_message_drafts:()=>({drafts:drafts.map(d=>({id:d.id,pip_id:d.pip_id,workspace_id:d.workspace_id,status:d.status,expired:d.expired,subject:d.payload.message.subject,digest:d.digest,source_run_id:d.source_run_id,expires_at:d.expires_at,action_id:d.action_id})),next_cursor:null}),get_pip_message_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),list_pip_calendar_drafts:()=>({drafts:[],next_cursor:null}),list_pip_connector_drafts:()=>({drafts:[],next_cursor:null}),get_pip_digest:()=>undefined}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion:43,generation:1,connected:true,supported:true,enabled:true});
@@ -186,4 +186,20 @@ test('a Gmail account Composio no longer has is never swapped for another',async
  x.answer(x.requests('inspect_pip_send_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GMAIL_SEND_EMAIL',schema_digest:'b'.repeat(64),account_required:true});await x.drain();
  assert.equal(x.requests('prepare_pip_message_draft').length,0);
  assert.match(x.d.body.textContent,/me@example\.com is no longer in Composio/);
+});
+
+// Google's "unusual traffic" page: the Pip stopped (it never solves a robot check); the chat says it needs
+// you, opens its computer, and "I've done it" lets it carry on.
+test('a robot check on its computer is a "needs you" card: Open its computer, then I’ve done it',async()=>{
+ const computer={pip_id:PIP,granted:true,available:true,reason:'',pending:0,actions:[],needs_you:{host:'www.google.com',at:'2026-10-07T09:00:00.000Z'}};
+ const x=setup({links:[],computer});await openChat(x);
+ const card=x.d.querySelector('[data-state="needs"]');assert.ok(card,'the card is in the chat');
+ assert.match(card.textContent,/Gmail needs you.*www\.google\.com wants to check you’re not a robot/);
+ x.click('[data-needs-open]');
+ assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'pipsOpenComputer',pip:{id:PIP,name:'Gmail',pip_type:'scout'}});
+ x.click('[data-needs-done]');
+ const done=x.requests('finish_pip_computer_check').at(-1);assert.deepEqual(JSON.parse(JSON.stringify(done.request)),{type:'finish_pip_computer_check',pip_id:PIP});
+ delete computer.needs_you;x.answer(done,{pip_id:PIP,continued:true,run_id:'run_'+'9'.repeat(32)});await x.drain();
+ assert.equal(x.d.querySelector('[data-state="needs"]'),null,'gone once you have done it');
+ assert.match(x.d.body.textContent,/Gmail is carrying on\./);
 });

@@ -136,6 +136,8 @@ export LD_LIBRARY_PATH="${{DESK_LIB:-}}" PATH="${{DESK_BIN:-}}:/usr/bin:/bin" HO
 for loaders in /opt/desk/usr/lib/*/imlib2/loaders; do [ -d "$loaders" ] && export IMLIB2_LOADER_PATH="$loaders"; done
 mkdir -p /tmp/config/pcmanfm /tmp/config/openbox /home/pip/Desktop
 cp -r /run/dgc/conf/pcmanfm/dgc /tmp/config/pcmanfm/dgc
+# The Terminal's way online: a relay to DGC's egress socket, when DGC bound one (public sites only).
+[ -S /run/dgc/egress.sock ] && python3 /run/dgc/forward.py > /run/dgc/log/forward.log 2>&1 &
 "$DESK_VNC" {DISPLAY} -geometry {WIDTH}x{HEIGHT} -depth 24 -SecurityTypes None -AlwaysShared \\
   -rfbunixpath /run/dgc/sock/vnc.sock -rfbunixmode 0600 -rfbport -1 -nolisten tcp -extension GLX \\
   -desktop {shlex.quote(name[:60] + ' computer')} > /run/dgc/log/vnc.log 2>&1 &
@@ -151,8 +153,10 @@ wait
 """, 0o700)
 
 
-def desktop_argv(runtime: Path, files: Path, name: str) -> list[str]:
-    """The desktop box: the display, window manager, dock and wallpaper. No network at all."""
+def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = None) -> list[str]:
+    """The desktop box: the display, window manager, dock and wallpaper. Its only way out is the
+    computer's egress socket (``egress``), relayed inside like the browser's, so the Terminal app is
+    online to public websites and nothing on this computer or the local network."""
     parts = components()
     if parts["missing"]:
         raise RegistryError("desktop_unavailable", availability()["reason"])
@@ -179,14 +183,23 @@ def desktop_argv(runtime: Path, files: Path, name: str) -> list[str]:
              "--bind", str(runtime / "log"), "/run/dgc/log"]
     if prefix is not None:
         argv += ["--ro-bind", str(prefix), "/opt/desk"]
+    if egress is not None:
+        from .pip_computer_box import BOX_PROXY_PORT
+        url = f"http://127.0.0.1:{BOX_PROXY_PORT}"
+        for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+            argv += ["--setenv", key, url]
+        argv += ["--setenv", "no_proxy", "localhost,127.0.0.1", "--setenv", "NO_PROXY", "localhost,127.0.0.1",
+                 "--ro-bind-try", "/etc/ssl", "/etc/ssl", "--ro-bind-try", "/etc/ca-certificates", "/etc/ca-certificates",
+                 "--bind", str(egress), "/run/dgc/egress.sock", "--ro-bind", str(runtime / "forward.py"), "/run/dgc/forward.py"]
     return argv + ["sh", "/run/dgc/conf/desktop.sh"]
 
 
 class Desktop:
     """One Pip computer's screen. Owned by its Host in the supervisor; started on first use."""
 
-    def __init__(self, runtime: Path, files: Path, name: str):
+    def __init__(self, runtime: Path, files: Path, name: str, egress: Path | None = None):
         self.runtime, self.files, self.name = Path(runtime), Path(files), name
+        self.egress = Path(egress) if egress is not None else None
         self.proc: subprocess.Popen | None = None
         self._control_thread = None
         self.on_launch = None             # called with "browser" when the dock asks for the browser
@@ -220,7 +233,10 @@ class Desktop:
         control = self.runtime / "sock" / "control"
         if not control.exists():
             os.mkfifo(control, 0o600)
-        argv = desktop_argv(self.runtime, self.files, self.name)
+        if self.egress is not None:
+            from .pip_computer_box import FORWARDER
+            (self.runtime / "forward.py").write_text(FORWARDER)
+        argv = desktop_argv(self.runtime, self.files, self.name, self.egress)
 
         def begin():
             self.proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,

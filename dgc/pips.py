@@ -67,6 +67,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
     "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
     "list_pip_app_links", "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link",
+    "finish_pip_computer_check",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -94,6 +95,7 @@ _COMMAND_ARGS = {
     "list_pip_action_grants": {"pip_id"}, "revoke_pip_action_grant": {"pip_id", "grant_id"},
     "list_pip_app_links": {"pip_id"}, "start_pip_app_link": {"pip_id", "link_id"}, "check_pip_app_link": {"pip_id", "link_id"},
     "decline_pip_app_link": {"pip_id", "link_id"}, "disconnect_pip_app_link": {"pip_id", "link_id"},
+    "finish_pip_computer_check": {"pip_id"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_connections": set(),
     "inspect_pip_connection": {"server"},
@@ -3305,6 +3307,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 grants = (pip_action_grants.revoke(registry, pip_id, request.get('grant_id'), actor)
                           if command == 'revoke_pip_action_grant' else pip_action_grants.list_grants(registry, pip_id))
                 result = {'pip_id': pip_id, 'grants': grants}
+            elif command == 'finish_pip_computer_check':
+                from . import pip_computer
+                result = pip_computer.finished_check(store, pip_id, actor, config)
             elif command in ('list_pip_app_links', 'start_pip_app_link', 'check_pip_app_link', 'decline_pip_app_link', 'disconnect_pip_app_link'):
                 # A Personal Pip's own apps (pip_app_links): only the user, on this computer, connects them.
                 from . import pip_app_links

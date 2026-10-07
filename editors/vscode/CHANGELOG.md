@@ -48,6 +48,10 @@
 
 ### Pips
 
+- **A Pip computer's Terminal is online**, like Grok's: public websites only, never this computer or
+  your network. Under each command it lists the sites reached and anything DGC blocked.
+- **"Needs you" when a site checks for robots.** A Pip stops at a robot check; its chat shows
+  **<Pip> needs you** with **Open its computer** and **I've done it**, and it carries on after.
 - **Allow cards.** An email a Pip wrote shows in its chat as **Send this email?** with who it is from,
   to, subject and the text, and **Send**, **Always allow**, **Edit** and **Don't send**, like Grok's
   Allow card. Send uses the Gmail account connected to that Pip and sends exactly that draft, once;

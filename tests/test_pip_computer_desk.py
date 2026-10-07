@@ -2,7 +2,7 @@
 
 Files is the computer's own folder: listed, read, added to and cleaned up only inside it, never
 through a link, and never the browser's profile beside it. The Terminal runs one command at a time
-with no internet and only that folder as its home. A Pip uses both through its computer tool, from
+online to public sites through DGC (never this computer or the local network) and with only that folder as its home. A Pip uses both through its computer tool, from
 its tasks and now from its chat; a submit its chat held continues in that chat once it is sent.
 """
 import base64
@@ -178,6 +178,46 @@ class DeskTests(unittest.TestCase):
         self.assertIn("files", pip_computer.OPS)
         self.assertEqual(pip_computer.schema()["function"]["parameters"]["properties"]["op"]["enum"], list(pip_computer.OPS))
 
+    def test_a_robot_check_stops_the_pip_and_waits_for_the_user_who_finishes_it(self):
+        # The founder's Google search answered "unusual traffic"; like Grok's bots, a Pip never solves a
+        # robot check: it stops, the chat says it needs the user, and "I've done it" lets it carry on.
+        for url, title, text, frames, expected in [
+                ("https://www.google.com/sorry/index?continue=x", "", "", [], True),
+                ("https://shop.example/", "Just a moment...", "", [], True),
+                ("https://example.com/", "Home", "Our systems have detected unusual traffic from your computer network.", [], True),
+                ("https://example.com/login", "Sign in", "", ["https://www.google.com/recaptcha/api2/anchor?k=x"], True),
+                ("https://example.com/", "Home", "Welcome to our store. Free shipping on orders.", ["https://www.youtube.com/embed/x"], False)]:
+            with self.subTest(url=url, title=title):
+                self.assertEqual(pip_computer.human_check(url, title, text, frames), expected)
+        pip = self.computer_pip()
+        page = {"url": "https://www.google.com/sorry/index", "title": "", "lines": ["About this page"]}
+        browser = types.SimpleNamespace(snapshot=lambda: page, evaluate_json=lambda script: [])
+        host = types.SimpleNamespace(browser=browser, state_directory=self.registry.directory, pip_id=pip["id"], run_id="run_" + "7" * 32)
+        host._check_for_human = lambda data, text: pip_computer.Host._check_for_human(host, data, text)
+        said = pip_computer.Host._read(host)
+        self.assertIn("www.google.com is asking a person to prove they are not a robot", said)
+        self.assertIn("Do not try to solve", said)
+        self.assertNotIn("About this page", said, "the page's own words are not passed on")
+        status = self.ok({"type": "get_pip_computer", "pip_id": pip["id"]})
+        self.assertEqual(status["computer"]["needs_you"]["host"], "www.google.com")
+        refused = self.control({"type": "finish_pip_computer_check", "pip_id": pip["id"]}, actor="device_1")
+        self.assertFalse(refused["ok"])
+        done = self.ok({"type": "finish_pip_computer_check", "pip_id": pip["id"]})
+        self.assertTrue(done["continued"])
+        self.assertNotIn("needs_you", self.ok({"type": "get_pip_computer", "pip_id": pip["id"]})["computer"])
+        turn = self.registry.db.execute("SELECT text, request_key FROM pip_chat_messages WHERE pip_id=? AND role='user' ORDER BY rowid DESC LIMIT 1",
+                                        (pip["id"],)).fetchone()
+        self.assertTrue(turn["request_key"].startswith("check_"), "a turn DGC wrote, hidden from the chat")
+        self.assertIn("finished www.google.com's check", turn["text"])
+        page.update(url="https://www.google.com/search?q=dgc", title="dgc - Google Search", lines=["Results"])
+        pip_computer.Host._read(host)
+        self.assertNotIn("needs_you", self.ok({"type": "get_pip_computer", "pip_id": pip["id"]})["computer"])
+        page.update(url="https://www.google.com/sorry/index")
+        pip_computer.Host._read(host)
+        page.update(url="https://www.google.com/search?q=dgc")
+        pip_computer.Host._read(host)
+        self.assertNotIn("needs_you", self.ok({"type": "get_pip_computer", "pip_id": pip["id"]})["computer"], "a page past the check clears it")
+
     def test_a_busy_pages_live_screen_is_retaken_coarser_not_dropped(self):
         import threading
         shots = []
@@ -194,29 +234,44 @@ class DeskTests(unittest.TestCase):
         self.assertLess(len(view["image"]), 300_000)
 
     @unittest.skipUnless(BOXES, "needs Linux and a working bubblewrap")
-    def test_the_terminal_runs_one_command_with_no_internet_in_files_only(self):
+    def test_the_terminal_is_online_like_grok_but_never_this_computer_or_the_network(self):
+        # The founder: "Terminal internet: lets copy grok". Public sites through DGC's egress proxy (here a
+        # stand-in public site served on this machine), and nothing on this computer or the local network.
+        import http.server, threading
+        from dgc import pip_computer_box
         pip = self.computer_pip()
         (self.folder(pip) / "data.csv").write_text("a,b\n1,2\n")
-        import socket
-        listener = socket.socket(); listener.bind(("127.0.0.1", 0)); listener.listen(1)
-        self.addCleanup(listener.close)
-        port = listener.getsockname()[1]
-        started = self.ok({"type": "run_pip_computer_command", "pip_id": pip["id"],
-                           "command": "cat data.csv; pwd; ls /home; python3 -c \"import urllib.request as u; u.urlopen('https://example.com', timeout=5)\" 2>&1 | tail -1; "
-                                      f"python3 -c \"import socket; socket.create_connection(('127.0.0.1', {port}), timeout=3); print('REACHED THE HOST')\" 2>&1 | tail -1"})
-        self.assertEqual(started["running"]["by"], "you")
-        for _ in range(200):
-            history = self.ok({"type": "list_pip_computer_terminal", "pip_id": pip["id"]})
-            if history["entries"] and history["running"] is None:
-                break
-            time.sleep(0.1)
+        class Site(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200); self.end_headers(); self.wfile.write(b"PUBLIC PAGE BODY")
+            def log_message(self, *a): pass
+        site = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Site)
+        threading.Thread(target=site.serve_forever, daemon=True).start()
+        self.addCleanup(site.shutdown)
+        port = site.server_address[1]
+        real = pip_computer_box.public_addresses
+        policy = lambda host, p, **kw: ["127.0.0.1"] if host == "site.test" else real(host, p, **kw)
+        command = ("cat data.csv; pwd; ls /home; "
+                   f"python3 -c \"import urllib.request as u; print(u.urlopen('http://site.test:{port}/', timeout=5).read().decode())\" 2>&1 | tail -1; "
+                   "python3 -c \"import urllib.request as u; u.urlopen('http://192.168.1.10/', timeout=5)\" 2>&1 | tail -1; "
+                   f"python3 -c \"import socket; socket.create_connection(('127.0.0.1', {port}), timeout=3); print('REACHED THE HOST')\" 2>&1 | tail -1")
+        with patch.object(pip_computer_box, "public_addresses", policy):
+            started = self.ok({"type": "run_pip_computer_command", "pip_id": pip["id"], "command": command})
+            self.assertEqual(started["running"]["by"], "you")
+            for _ in range(200):
+                history = self.ok({"type": "list_pip_computer_terminal", "pip_id": pip["id"]})
+                if history["entries"] and history["running"] is None:
+                    break
+                time.sleep(0.1)
         [entry] = history["entries"]
         self.assertEqual(entry["by"], "you")
         self.assertIn("a,b\n1,2", entry["output"])
         self.assertIn("/home/pip\npip\n", entry["output"], "its home is the Files folder; no one else's home is there")
-        self.assertIn("URLError", entry["output"], "no internet")
-        self.assertNotIn("REACHED THE HOST", entry["output"], "no network at all, not even this computer's own services")
-        self.assertNotIn(os.path.expanduser("~").split("/")[-1] + "\n", entry["output"].split("/home/pip\n", 1)[1].split("URLError")[0])
+        self.assertIn("PUBLIC PAGE BODY", entry["output"], "online: a public site answers through DGC")
+        self.assertIn("403", entry["output"], "the local network is refused at DGC's proxy")
+        self.assertNotIn("REACHED THE HOST", entry["output"], "this computer's own services are never reachable")
+        self.assertEqual(entry["reached"], ["site.test"])
+        self.assertEqual(entry["blocked"], ["192.168.1.10"])
         host = types.SimpleNamespace(root=pip_computer.computer_root(self.registry.directory, pip["id"]), waiting=[], last_used=0)
         out = pip_computer.Host._desk(host, "run", {"command": "echo made > made.txt; ls"})
         self.assertIn("made.txt", out)
@@ -262,7 +317,8 @@ class ChatComputerTests(unittest.TestCase):
             pips.execute_native(self.cfg, self.root, {**raw, "computer_socket": {"socket": "/nonexistent", "token": "t"}}, lambda e: None)
         system, tools = seen[0]
         self.assertIn("computer", tools)
-        self.assertIn("Terminal with no internet", system)
+        self.assertIn("the Terminal reaches public websites", system)
+        self.assertIn("never this computer or the user's network", system)
         self.assertNotIn("You have no file, project, browser, command", system)
 
     def test_a_submit_held_in_a_chat_continues_in_that_chat_once_sent(self):

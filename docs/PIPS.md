@@ -649,8 +649,11 @@ window comes up so you can watch.
 
 **Websites that check for robots.** The Pip's Chrome tells sites that software can drive it
 (`navigator.webdriver`), as every browser an agent drives does, so a site like Google's search may
-ask "I'm not a robot". Solve it yourself on the computer's screen, as you would on any computer; the
-computer keeps its cookies, so a site usually trusts it for a while afterwards.
+ask "I'm not a robot". A Pip never tries to pass one. When a page it reads is a robot check
+(Google's "unusual traffic" page, reCAPTCHA, hCaptcha, Cloudflare's check), it stops and its chat
+shows **<Pip> needs you**: choose **Open its computer**, finish the check on its screen as you would
+on any computer, then **I've done it**, and the Pip looks again and carries on. The computer keeps its
+cookies, so a site usually trusts it for a while afterwards.
 
 - **Browser**: the live screen. Click, type, scroll and go to an address; anything the Pip would
   submit shows at the top with **Send once**, **Always allow** and **Reject**.
@@ -658,8 +661,11 @@ computer keeps its cookies, so a site usually trusts it for a while afterwards.
   **Downloads**. Open a file to see it, **Save to…** to copy it where you choose, **Add files…**
   (or drop them) to give the Pip something to work on, and **Remove**. It holds 1 GB.
 - **Terminal**: run a command in the computer's Files. Yours and the Pip's commands show
-  together. It has no internet (the browser is the computer's only way online), sees nothing
-  but those Files, and stops a command after 60 seconds.
+  together. It is online like Grok's bots: commands reach public websites on ports 80 and 443
+  through DGC, the same way out as the browser (curl, pip, npm and git over https work), and
+  never this computer or your local network. Under each command DGC lists the sites it reached,
+  and anything it refused. It sees nothing but those Files and stops a command after 60 seconds.
+  The desktop's own Terminal app is online the same way.
 
 The Pip uses all three from its chat too, so you can watch it work while you talk to it. If it
 holds a submit there, the chat continues once you send it: the Pip reads what happened and

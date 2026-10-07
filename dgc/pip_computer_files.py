@@ -39,7 +39,12 @@ MAX_COMMAND_CHARS = 4000
 COMMAND_SECONDS = 60
 MAX_OUTPUT_BYTES = 64 * 1024
 MAX_HISTORY = 200
-NO_NETWORK = "No internet in the Terminal: the browser is this computer's way online."
+# The Terminal is online like Grok's bots, through the same way out as the browser: an in-box relay to
+# DGC's egress proxy, which reaches public websites (ports 80 and 443) and never this computer or the
+# local network. Tools that honour the standard proxy settings (curl, pip, npm, git over https) work.
+ONLINE = "Online through DGC: public websites only, never this computer or your network."
+PROXY_ENV = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")
+MAX_HOSTS = 12
 PREVIEW_IMAGES = ("image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp")
 
 def files_root(computer_root: Path) -> Path:
@@ -315,10 +320,24 @@ def folder_bytes(root: Path) -> int:
 
 # --------------------------------------------------------------------------- the Terminal
 
-def terminal_argv(files: Path, command: str) -> list[str]:
+def proxy_args(egress: Path, forwarder: Path) -> list[str]:
+    """The box's way online: DGC's egress socket and the relay that listens for it inside."""
+    from .pip_computer_box import BOX_PROXY_PORT
+    url = f"http://127.0.0.1:{BOX_PROXY_PORT}"
+    env = []
+    for key in PROXY_ENV:
+        env += ["--setenv", key, url]
+    return [*env, "--setenv", "no_proxy", "localhost,127.0.0.1", "--setenv", "NO_PROXY", "localhost,127.0.0.1",
+            "--ro-bind-try", "/etc/ssl", "/etc/ssl", "--ro-bind-try", "/etc/ca-certificates", "/etc/ca-certificates",
+            "--dir", "/run/dgc", "--bind", str(egress), "/run/dgc/egress.sock", "--ro-bind", str(forwarder), "/run/dgc/forward.py"]
+
+
+def terminal_argv(files: Path, command: str, *, egress: Path | None = None, forwarder: Path | None = None) -> list[str]:
+    online = egress is not None and forwarder is not None
     return ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
             "--clearenv", "--setenv", "HOME", "/home/pip", "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
             "--setenv", "LANG", "C.UTF-8", "--setenv", "TERM", "dumb", "--setenv", "TMPDIR", "/tmp",
+            *(proxy_args(egress, forwarder) if online else []),
             "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/bin", "/bin",
             "--symlink", "usr/lib64", "/lib64", "--symlink", "usr/sbin", "/sbin",
             "--ro-bind-try", "/etc/alternatives", "/etc/alternatives",
@@ -326,7 +345,8 @@ def terminal_argv(files: Path, command: str) -> list[str]:
             "--ro-bind-try", "/etc/localtime", "/etc/localtime",
             "--dev", "/dev", "--proc", "/proc", "--size", str(256 * 1024 * 1024), "--tmpfs", "/tmp",
             "--bind", str(files), "/home/pip", "--chdir", "/home/pip",
-            "/bin/sh", "-c", command]
+            *(["/bin/sh", "-c", "python3 /run/dgc/forward.py >/dev/null 2>&1 & sleep 0.2; exec /bin/sh -c \"$0\"", command]
+              if online else ["/bin/sh", "-c", command])]
 
 
 def _user_tasks() -> int:
@@ -420,14 +440,14 @@ def run_command(computer_root: Path, command, by: str) -> dict:
         started, at = time.monotonic(), int(time.time())
         marker.write_text(json.dumps({"by": by, "command": command, "at": at}), encoding="utf-8")
         try:
-            code, text, timed_out = _execute(files, command)
+            code, text, timed_out, reached = _execute(files, command, computer_root)
         finally:
             try:
                 marker.unlink()
             except OSError:
                 pass
         entry = {"by": by, "command": command, "exit": code, "output": text, "timed_out": timed_out,
-                 "seconds": round(time.monotonic() - started, 2), "at": at}
+                 "seconds": round(time.monotonic() - started, 2), "at": at, **reached}
         _remember(computer_root, entry)
         return entry
 
@@ -453,8 +473,31 @@ def start_command(computer_root: Path, command, by: str = "you") -> dict:
     return {"running": {"by": by, "command": command, "at": int(time.time())}}
 
 
-def _execute(files: Path, command: str) -> tuple[int | None, str, bool]:
-    proc = subprocess.Popen(terminal_argv(files, command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+def _execute(files: Path, command: str, computer_root: Path | None = None, *, policy=None):
+    """Run it; returns (exit, output, timed out, {"reached": hosts, "blocked": hosts})."""
+    from .pip_computer_box import EgressProxy, FORWARDER
+    from .pip_computer import socket_dir
+    proxy = forwarder = None
+    if computer_root is not None:
+        forwarder = Path(computer_root) / "forward.py"
+        forwarder.write_text(FORWARDER)
+        proxy = EgressProxy(socket_dir() / f"{os.urandom(6).hex()}-term.sock", policy=policy)
+        proxy.start()
+    try:
+        code, text, timed_out = _run_boxed(terminal_argv(files, command, egress=proxy.path if proxy else None, forwarder=forwarder))
+    finally:
+        if proxy is not None:
+            proxy.stop()
+    hosts = {"reached": [], "blocked": []}
+    for outcome, host in (proxy.log if proxy is not None else []):
+        key = "blocked" if outcome == "refused" else "reached"
+        if host not in hosts[key] and len(hosts[key]) < MAX_HOSTS:
+            hosts[key].append(host)
+    return code, text, timed_out, {k: v for k, v in hosts.items() if v}
+
+
+def _run_boxed(argv: list[str]) -> tuple[int | None, str, bool]:
+    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=_limits(_user_tasks()),
                             env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
     output, timed_out = bytearray(), False

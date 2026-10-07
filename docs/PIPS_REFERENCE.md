@@ -653,6 +653,15 @@ created_at, created_by}`, returned as `{action, grant}`. `list_pip_action_grants
 in registry metadata (`pip_action_grant:<pip_id>:<grant_id>`, at most 20 per Pip), outside the
 job, and record `pip_action_granted` / `pip_action_grant_revoked`.
 
+**Terminal and robot checks** (API 43). A computer's Terminal (the tab's commands, the Pip's `run` and
+the desktop's Terminal app) is online through the computer's egress proxy (public hosts, ports 80 and
+443, CONNECT or plain HTTP) by an in-box relay on 127.0.0.1:8899 and `http(s)_proxy`; terminal history
+entries may carry `reached` and `blocked` host lists (up to 12 each). A page read that is a robot check
+(by address, title, text or challenge frame) returns a stop instruction to the model and sets
+`get_pip_computer`'s `needs_you {host, at}` (registry metadata `computer_needs_you:<pip_id>`), cleared by a
+later page past it or by `finish_pip_computer_check {pip_id}` (local only), which also queues the chat's
+next turn under the reserved key `check_`.
+
 **Choices** (API 43). A chat run offers `offer_choices {choices}` (2–4 distinct lines of up to 80
 characters); the reply keeps them in `pip_chat_choices` and `list_pip_messages` returns them as the
 assistant message's `choices`. The reply's text is everything the Pip said after the user's message,
