@@ -18,6 +18,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   are running on this computer."), not "Personal scope. No project files, shell or browsing". A Pip
   no longer tells you about "web reads the controller passes me", and at a robot check it asks you to
   finish the check on its screen, not to "sign in".
+- A Pip can propose its own web reads and its own computer from its chat: `draft_pip_change` takes
+  `web_plan` (up to four public pages or searches DGC reads before each run) and `computer_plan`
+  `{schema_version: 1}`, saved as a change the user accepts like any other; it cannot remove a
+  computer. Asked for a weekday tech-news brief, a Pip without them said it "can't fetch the
+  headlines" and needed "a search connection set up on your side".
 - A Pip's reply ends when it offers its choices: no further model request. Told to "end your turn
   now", deepseek-v4.1-flash wrote a new Pip's hello again with new choices, twice, and the chat saved
   all three hellos as one message.

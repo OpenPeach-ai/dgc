@@ -113,6 +113,32 @@ class ChatSetupTests(unittest.TestCase):
         with self.assertRaises(RegistryError):
             setup.validate({'changes': {'goal': 'do secret-test-123'}, 'reason': 'secret'}, secrets=['secret-test-123'])
 
+    def test_a_news_brief_proposes_its_own_web_reads_and_a_computer_for_the_user_to_accept(self):
+        # Battle test: asked for a weekday tech-news brief, a Pip without a computer said it "can't fetch
+        # the headlines" and needed "a search connection set up on your side": it could not propose the
+        # web reads Personal Pips already have. It can now, and its computer; the user still accepts both.
+        web = {'schema_version': 1, 'reads': [{'kind': 'search', 'query': 'top tech news today'},
+                                              {'kind': 'page', 'url': 'https://news.ycombinator.com/'}]}
+        draft = {'changes': {'goal': 'A weekday brief of the three biggest tech stories',
+                             'schedule': {'type': 'daily', 'time': '08:00', 'timezone': 'Asia/Kolkata'},
+                             'web_plan': web, 'computer_plan': {'schema_version': 1}},
+                 'reason': 'The user asked for a weekday 8am tech brief.'}
+        job = self.job(); run = self.reply(job)
+        self.store.finish(run['id'], result={'text': 'Review the brief I set up.', 'setup_draft': draft})
+        saved = self.store.get(job['id'])
+        self.assertIsNone(saved.get('web_plan')); self.assertIsNone(saved.get('computer_plan'))
+        proposal = saved['proposals'][0]
+        self.assertEqual(proposal['approval_status'], 'pending')
+        self.store.accept(job['id'], proposal['id'], 1, 'local-console')
+        applied = self.store.get(job['id'])
+        self.assertEqual(applied['web_plan'], web)
+        self.assertEqual(applied['computer_plan'], {'schema_version': 1})
+        for change in ({'web_plan': {'schema_version': 1, 'reads': [{'kind': 'page', 'url': 'http://127.0.0.1/'}]}},
+                       {'web_plan': {'schema_version': 1, 'reads': [{'kind': 'search', 'query': 'x'}] * 5}},
+                       {'computer_plan': None}, {'computer_plan': {'schema_version': 2}}):
+            with self.subTest(change=change), self.assertRaises(RegistryError):
+                setup.validate({'changes': change, 'reason': 'bad'})
+
     def test_bad_schedule_and_model_are_refused(self):
         for change in ({'schedule': {'type': 'daily', 'time': '09:00'}},
                        {'schedule': {'type': 'interval', 'minutes': 1}},
