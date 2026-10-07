@@ -8,6 +8,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- A Pip computer given while DGC was still fetching Chrome gets its browser: the box looks for Chrome
+  when the browser starts, not once when the computer was made. Before, its browser never started
+  until DGC restarted (the dock's Browser icon did nothing, and the Pip fell back on curl). A browser
+  that cannot start no longer keeps the computer's screen from opening: the Terminal and Files work,
+  and the dock or the Pip's next browser step tries again.
+- A failed chat turn says why under the message (`list_pip_messages` adds `error`, one line, to a
+  failed user message): "It stopped after 12 steps without finishing. Say “continue” and it carries
+  on." instead of "No completed reply was recorded".
 - While DGC is still fetching a Pip computer's Chrome, its status says "Setting up its computer. This
   happens once." (or why the setup failed) instead of "No usable Chromium was found. Run: npx playwright
   install chromium".

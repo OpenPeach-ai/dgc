@@ -85,6 +85,25 @@ class PipChatTests(unittest.TestCase):
         self.assertTrue(all(m["role"] == "user" for m in page["messages"]))
         self.assertEqual(pip_chat.snapshot(self.store, self.job["id"]), ([], 0))
 
+    def test_a_failed_turn_says_why_under_the_message(self):
+        # Battle test: a Pip ran out of steps and the chat said only "No completed reply was recorded."
+        self.setup_job()
+        for key, error, said in (
+                ("steps", {"code": "model_failed", "message": "stopped after 12 tool iterations (max_turns) — say 'continue' to keep going"},
+                 "It stopped after 12 steps without finishing. Say “continue” and it carries on."),
+                ("other", {"code": "model_failed", "message": "  The model endpoint refused the request.  "},
+                 "The model endpoint refused the request."),
+                ("bare", {"code": "model_failed"}, None)):
+            sent = self.send(key=key)
+            self.store.claim_next()
+            self.store.finish(sent["run"]["id"], error=error)
+            user = [m for m in pip_chat.list_messages(self.store, self.job["id"])["messages"] if m["run_id"] == sent["run"]["id"]][0]
+            self.assertEqual(user.get("error"), said)
+        done = self.send(key="ok")
+        self.finish(done)
+        self.assertTrue(all("error" not in m for m in pip_chat.list_messages(self.store, self.job["id"])["messages"]
+                            if m["run_id"] == done["run"]["id"]))
+
     def test_per_pip_history_pagination_and_cursor_isolation(self):
         self.setup_job()
         other = self.create()

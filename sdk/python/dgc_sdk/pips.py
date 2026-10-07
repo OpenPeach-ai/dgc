@@ -47,6 +47,7 @@ PipReadCommand = Literal[
     'get_pip_runner',
     'get_workspace_context',
     'list_pip_approvals',
+    'list_pip_app_links',
     'list_pip_checkpoints',
     'list_pip_handoffs',
     'list_pip_messages',
@@ -60,6 +61,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link", "finish_pip_computer_check",
     "add_pip_computer_file", "remove_pip_computer_file", "run_pip_computer_command",
     "always_allow_pip_computer_action", "decide_pip_computer_action", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
     "always_allow_pip_app_action", "revoke_pip_action_grant", "set_pip_feedback", "set_pip_daily_cap", "set_pips_desktop_notifications", "set_pips_keep_running", "mark_pip_digest_seen", "set_pip_notify_settings",
@@ -181,9 +183,18 @@ READ_COMMANDS |= API43_READS
 # API 43: a Pip computer's Files and Terminal (its browser is API 42).
 API43_READS |= {'list_pip_computer_files', 'read_pip_computer_file', 'list_pip_computer_terminal', 'get_pip_computer_desktop'}
 API43_MUTATIONS |= {'add_pip_computer_file', 'remove_pip_computer_file', 'run_pip_computer_command'}
+# API 43: a Personal Pip's own apps, connected from its chat, and a robot check finished on its computer.
+API43_READS |= {'list_pip_app_links'}
+API43_MUTATIONS |= {'start_pip_app_link', 'check_pip_app_link', 'decline_pip_app_link', 'disconnect_pip_app_link', 'finish_pip_computer_check'}
 READ_COMMANDS |= API43_READS
 MUTATION_COMMANDS |= API43_MUTATIONS
 COMMAND_FIELDS = {
+    'list_pip_app_links': frozenset({'pip_id'}),
+    'start_pip_app_link': frozenset({'pip_id', 'link_id'}),
+    'check_pip_app_link': frozenset({'pip_id', 'link_id'}),
+    'decline_pip_app_link': frozenset({'pip_id', 'link_id'}),
+    'disconnect_pip_app_link': frozenset({'pip_id', 'link_id'}),
+    'finish_pip_computer_check': frozenset({'pip_id'}),
     'always_allow_pip_computer_action': frozenset({'action_id', 'expected_digest'}),
     'list_pip_computer_files': frozenset({'pip_id', 'path'}),
     'read_pip_computer_file': frozenset({'pip_id', 'path'}),

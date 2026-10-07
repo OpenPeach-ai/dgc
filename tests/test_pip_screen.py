@@ -219,6 +219,41 @@ class WhoseSubmitTests(unittest.TestCase):
         self.assertEqual((released, recorded), ([], []))
 
 
+class DesktopWithoutBrowserTests(unittest.TestCase):
+    """A browser that cannot start does not take the screen down: Terminal and Files still work."""
+
+    def test_the_screen_opens_when_the_browser_fails_to_start(self):
+        from dgc.pip_computer_box import BoxError
+        root = Path(tempfile.mkdtemp()); self.addCleanup(__import__("shutil").rmtree, root, True)
+        closed = []
+
+        def no_browser():
+            raise BoxError("Setting up its computer. This happens once.")
+        browser = types.SimpleNamespace(display_dir=None, start=no_browser, close=lambda: closed.append(1))
+        host = types.SimpleNamespace(lock=threading.RLock(), desktop=None, pip_id="pip_" + "a" * 32, root=root,
+                                     proxy=types.SimpleNamespace(path=root / "egress.sock"), browser=browser,
+                                     _dock_launch=lambda what: None, _launch=lambda start: start(),
+                                     _pump_thread=object())
+
+        class Screen:
+            def __init__(self, runtime, files, name, egress=None):
+                self.x11_dir = runtime / "x11"
+                self.on_launch = None
+
+            def start(self, launch):
+                self.started = True
+
+            def running(self):
+                return True
+        with patch.object(pip_screen, "availability", return_value={"available": True, "reason": ""}), \
+                patch.object(pip_screen, "Desktop", Screen):
+            self.assertTrue(pip_computer.Host.ensure_desktop(host))
+        self.assertIsInstance(host.desktop, Screen)
+        self.assertTrue(host.desktop.started)
+        self.assertEqual(browser.display_dir, host.desktop.x11_dir)
+        self.assertGreaterEqual(len(closed), 2, "the failed browser is closed, so the dock or the next step retries")
+
+
 class StreamTests(unittest.TestCase):
     """`dgc serve` joins the editor's viewer to the computer's view socket, in base64."""
 

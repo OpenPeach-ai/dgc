@@ -86,6 +86,30 @@ class BrowserChoiceTests(unittest.TestCase):
             self.chromium.unlink()
             self.assertIsNone(box.find_chrome(self.home))
 
+    def test_a_computer_made_before_chrome_arrived_finds_it_when_it_starts(self):
+        # Battle test: the computer was given 15 s before DGC's own Chrome finished downloading. The
+        # box kept "no Chrome" from then, so every browser start failed until DGC restarted.
+        browser = box.BoxedBrowser(self.base / "pip", self.base / "egress.sock", chrome=None,
+                                   log_path=self.base / "browser.log")
+        reason = {"available": False, "reason": "Setting up its computer. This happens once."}
+        with patch.object(box, "find_chrome", return_value=None), patch.object(box, "capability", return_value=reason):
+            with self.assertRaisesRegex(box.BoxError, "Setting up its computer"):
+                browser.start()
+        built = []
+
+        class Built(Exception):
+            pass
+
+        def fake_box(home, egress, chrome, *args, **kwargs):
+            built.append(chrome)
+            raise Built()
+        chrome = Path(self.program("chrome", b"\x7fELF real chrome"))
+        with patch.object(box, "find_chrome", return_value=chrome), patch.object(box, "Box", fake_box):
+            with self.assertRaises(Built):
+                browser.start()
+        self.assertEqual(built, [chrome])
+        self.assertEqual(browser.binary, chrome)
+
 
 class EgressPolicyTests(unittest.TestCase):
     def resolver(self, *addresses):

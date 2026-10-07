@@ -15,6 +15,7 @@ export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  list_pip_app_links: { pip_id: string };
   list_pip_computer_files: { pip_id: string; path?: string };
   read_pip_computer_file: { pip_id: string; path: string };
   list_pip_computer_terminal: { pip_id: string };
@@ -85,6 +86,11 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  start_pip_app_link: { pip_id: string; link_id: string };
+  check_pip_app_link: { pip_id: string; link_id: string };
+  decline_pip_app_link: { pip_id: string; link_id: string };
+  disconnect_pip_app_link: { pip_id: string; link_id: string };
+  finish_pip_computer_check: { pip_id: string };
   add_pip_computer_file: { pip_id: string; path?: string; name: string; data: string };
   remove_pip_computer_file: { pip_id: string; path: string };
   run_pip_computer_command: { pip_id: string; command: string };
@@ -152,6 +158,12 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  list_pip_app_links: ["pip_id"],
+  start_pip_app_link: ["pip_id", "link_id"],
+  check_pip_app_link: ["pip_id", "link_id"],
+  decline_pip_app_link: ["pip_id", "link_id"],
+  disconnect_pip_app_link: ["pip_id", "link_id"],
+  finish_pip_computer_check: ["pip_id"],
   list_pip_computer_files: ["pip_id", "path"],
   read_pip_computer_file: ["pip_id", "path"],
   add_pip_computer_file: ["pip_id", "path", "name", "data"],
@@ -474,6 +486,9 @@ const API43_READS = new Set(["get_pip_message_image"]);
 // API 43: a Pip computer's Files and Terminal (its browser is API 42).
 for (const command of ["list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal", "get_pip_computer_desktop"]) API43_READS.add(command);
 for (const command of ["add_pip_computer_file", "remove_pip_computer_file", "run_pip_computer_command"]) API43_MUTATIONS.add(command);
+// API 43: a Personal Pip's own apps, connected from its chat, and a robot check finished on its computer.
+API43_READS.add("list_pip_app_links");
+for (const command of ["start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link", "finish_pip_computer_check"]) API43_MUTATIONS.add(command);
 for (const command of API43_READS) READS.add(command);
 for (const command of API43_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);

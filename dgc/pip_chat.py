@@ -476,6 +476,20 @@ def continue_after_check(store, pip_id, host, at, config):
     return send(store, pip_id, CHECK_DONE.format(host=str(host)[:255]), key, "local-computer", config, _intro=True)
 
 
+def failure_text(row) -> str:
+    """Why a chat turn failed, in the user's words, for the line under their message (at most 300)."""
+    try:
+        error = json.loads(row[0]) if row and row[0] else None
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(error, dict) or not isinstance(error.get("message"), str):
+        return ""
+    steps = re.search(r"stopped after (\d+) tool iterations \(max_turns\)", error["message"])
+    if steps:
+        return f"It stopped after {steps.group(1)} steps without finishing. Say “continue” and it carries on."
+    return error["message"].strip()[:300]
+
+
 def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):
     mismatch = db.execute("SELECT 1 FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
                           "WHERE m.pip_id=? AND (m.pip_id<>r.pip_id OR m.workspace_id<>r.workspace_id) LIMIT 1",
@@ -766,6 +780,10 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
     messages, size = [], 0
     for row in rows[:limit]:
         message = _message(row)
+        if row["role"] == "user" and row["status"] == "failed":
+            reason = failure_text(store.db.execute("SELECT error FROM pip_runs WHERE id=?", (row["run_id"],)).fetchone())
+            if reason:
+                message["error"] = reason
         if row["role"] == "user":
             pictures = message_images(store.db, row["id"])
             if pictures:

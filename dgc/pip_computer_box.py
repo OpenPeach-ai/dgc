@@ -541,7 +541,7 @@ def carries_card_number(post_data: str) -> bool:
 class BoxedBrowser(BrowserSession):
     """A BrowserSession that runs in a box and holds every write for the user's approval."""
 
-    def __init__(self, home: Path, egress_socket: Path, *, chrome: Path, log_path: Path,
+    def __init__(self, home: Path, egress_socket: Path, *, chrome: Path | None, log_path: Path,
                  viewport: tuple[int, int] = DEFAULT_VIEWPORT, on_write=None):
         super().__init__(chrome, allow_unsandboxed=True, viewport=viewport)
         self.home = Path(home)
@@ -562,6 +562,12 @@ class BoxedBrowser(BrowserSession):
     def start(self) -> None:
         if self._ws is not None:
             return
+        if self.binary is None:
+            # The computer was made while DGC was still fetching Chrome (pip_screen_setup): look
+            # again now instead of keeping the answer from then.
+            self.binary = find_chrome()
+            if self.binary is None:
+                raise BoxError(capability().get("reason") or "No browser is available for this computer yet.")
         self._box = Box(self.home, self.egress_socket, self.binary, self.viewport, display_dir=self.display_dir)
         self.launch(lambda: self._box.start(self.log_path))
         self._pipe = _Pipe(self._box.read_fd, self._box.write_fd)

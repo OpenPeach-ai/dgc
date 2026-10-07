@@ -250,7 +250,13 @@ class Host:
             if self.browser.display_dir != desktop.x11_dir:
                 self.browser.display_dir = desktop.x11_dir
                 self.browser.close()          # a headless browser restarts as a window on the screen
-            self.browser.start()
+            from .browser import BrowserError
+            try:
+                self.browser.start()
+            except BrowserError:
+                # The screen, Terminal and Files work without it; the dock's Browser icon and the
+                # Pip's next browser step try again, and a run reports why.
+                self.browser.close()
             if self._pump_thread is None:
                 self._pump_thread = threading.Thread(target=self._pump_loop, name=f"pip-desktop-{self.pip_id[-8:]}",
                                                      daemon=True)
@@ -839,10 +845,11 @@ class ViewServer:
                 elif request.get("op") == "desktop":
                     # The full screen: after one line of reply, the connection is the viewer's stream.
                     self.last_used = time.monotonic()
+                    from .browser import BrowserError
                     try:
                         shown = self.host.ensure_desktop()
-                    except RegistryError as error:
-                        shown, reason = False, str(error)
+                    except (RegistryError, BrowserError, OSError) as error:
+                        shown, reason = False, str(error)[:300] or "This computer's screen could not start."
                     else:
                         reason = "This computer cannot show a desktop here."
                     if not shown:

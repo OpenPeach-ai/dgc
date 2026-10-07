@@ -11,6 +11,9 @@ Terminal: `list_pip_computer_files`, `read_pip_computer_file` and `list_pip_comp
 (mutations), all API 43; `add_pip_computer_file`'s `data` (2 MB) travels outside the 32 KiB budget.
 `get_pip_computer_desktop` (API 43) says whether a computer's full screen can show, and which
 browser it runs. The vendored editor protocol adds `pip_desktop` and its two events.
+A Personal Pip's own apps (API 43): `list_pip_app_links` (read), and `start_pip_app_link`,
+`check_pip_app_link`, `decline_pip_app_link` and `disconnect_pip_app_link` (mutations, `pip_id` and
+`link_id`); `finish_pip_computer_check` (`pip_id`) says a robot check on its computer is done.
 
 Pip computers (Pips API 42). `session.pips` gains `get_pip_computer`,
 `list_pip_computer_actions`, `get_pip_computer_frame` and `list_pip_computer_frames`, and the
