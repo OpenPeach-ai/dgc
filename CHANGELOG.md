@@ -18,6 +18,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   are running on this computer."), not "Personal scope. No project files, shell or browsing". A Pip
   no longer tells you about "web reads the controller passes me", and at a robot check it asks you to
   finish the check on its screen, not to "sign in".
+- A Pip's reply ends when it offers its choices: no further model request. Told to "end your turn
+  now", deepseek-v4.1-flash wrote a new Pip's hello again with new choices, twice, and the chat saved
+  all three hellos as one message.
 - A failed chat turn says why under the message (`list_pip_messages` adds `error`, one line, to a
   failed user message): "It stopped after 12 steps without finishing. Say “continue” and it carries
   on." instead of "No completed reply was recorded".

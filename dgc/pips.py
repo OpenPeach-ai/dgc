@@ -2195,7 +2195,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return 'Invalid choices: ' + str(exc)
                 choices_candidate = labels
                 choices_cut = len(self.messages)
-                return 'These choices appear as buttons under your message; the user taps one to answer. Your message is complete: end your turn now without writing more.'
+                # The reply is done: no further model request. Asked to "end your turn now", a model
+                # still wrote its hello again with new choices, and the chat saved all three.
+                self._end_turn_after_batch = 'offered'
+                return 'These choices appear as buttons under your message; the user taps one to answer. Your message is complete.'
             if personal and apps_pin is not None and call.name in pip_app_links.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return pip_app_links.worker_call(apps_pin, call.name, arguments)
@@ -2432,7 +2435,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     text = display_text(item, text)
                 if text.strip() and text.strip() not in said:
                     said.append(text.strip())
-            if said:
+            if said or choices_cut is not None:
+                # Ended at its choices, the turn has no closing text of its own: the reply is what it said.
                 final = "\n\n".join(said)
             from .redaction import redact_text, secret_values
             result = {"text": pip_chat.validate_text(redact_text(final, secret_values(config)), reply=True)}

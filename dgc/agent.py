@@ -1925,6 +1925,8 @@ class Agent(GoalLifecycle):
         self._approval_records: dict = {}       # explicit human decisions, persisted with results
         self._decision_records: dict = {}        # options: question outcomes by call id
         self._end_turn_after_batch = ""          # options: end the turn once this batch finishes
+                                                 # ("dismissed" also skips the batch's later calls;
+                                                 # "offered": a Pip's offer_choices, the reply is done)
         # ---- end 0.40 shared plain state ----
         self._monitor_turn_notice_chars = 0
         self._last_turn_tool_intents: set[str] = set()
@@ -7524,10 +7526,11 @@ class Agent(GoalLifecycle):
                 self.messages.append({"role": "user", "content": self._screenshot_parts(shots)})
             next_request_reason = "tool_result"
             self._save_turn_progress()
-            if self._end_turn_after_batch == "dismissed":
+            if self._end_turn_after_batch in ("dismissed", "offered"):
                 # The user closed a question: the batch's results are saved (the model reads the
                 # dismissal next turn) and the turn ends here with no further model request. Not a
-                # Stop: the turn completed, queued prompts still run, monitors keep waking.
+                # Stop: the turn completed, queued prompts still run, monitors keep waking. A Pip
+                # that offered its choices has finished its reply the same way ("offered").
                 return True
 
             # In a timed autonomous run, the configured verifier is an authoritative controller

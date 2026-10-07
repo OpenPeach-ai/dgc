@@ -101,15 +101,23 @@ class PersonalTests(unittest.TestCase):
         from dgc.llm import LLMClient, ChatResult, ToolCall
         job=self.make();run=pip_chat.send(self.store,job['id'],'Hi','hello','user',self.cfg)['run']
         raw=json.loads(self.registry.db.execute('SELECT manifest FROM pip_runs WHERE id=?',(run['id'],)).fetchone()[0])
+        # Battle test (Morning's hello): told to end its turn, the model wrote the hello again with new
+        # choices, twice, and the chat saved all three. Offering choices now ends the turn.
         turns=iter([ChatResult(content='Hi, I am Gmail.',tool_calls=[ToolCall('c1','offer_choices',{'choices':['Yes, connect Gmail','Not yet']})]),
+                    ChatResult(content='Hi, I am Gmail, your Pip.',tool_calls=[ToolCall('c2','offer_choices',{'choices':['Connect Gmail','Just chat']})]),
                     ChatResult(content='Done, your choices are below.')])
+        asked=[0]
+        def chat(*a,**k):
+            asked[0]+=1
+            return next(turns)
         with patch.dict(os.environ,{'DGC_SESSION_POLICY':pips._json(pips.native_policy(personal=True))}), \
-             patch.object(LLMClient,'chat',lambda *a,**k:next(turns)), patch('dgc.agent.discover_skills',return_value={}), \
+             patch.object(LLMClient,'chat',chat), patch('dgc.agent.discover_skills',return_value={}), \
              patch('dgc.agent.load_memories',side_effect=AssertionError('No ambient memory')), \
              patch('requests.sessions.Session.request',side_effect=AssertionError('No network')):
             result=pips.execute_native(self.cfg,self.root,raw,lambda e:None)
         self.assertEqual(result['text'],'Hi, I am Gmail.')
         self.assertEqual(result['choices'],['Yes, connect Gmail','Not yet'])
+        self.assertEqual(asked[0],1,'no model request after the choices')
 
     def test_native_personal_refuses_fabricated_tool_calls(self):
         from dgc.llm import LLMClient, ChatResult, ToolCall
