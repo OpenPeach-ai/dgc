@@ -115,13 +115,21 @@ def sync(directory: Path):
 
 
 def snippet(text, query) -> str:
+    """The words around the first place the query appears, on one line, cut at whole words (a
+    snippet that opens on "…ough starter" reads as a fault). Both the Sessions and Pips lists use it."""
     flat = " ".join(str(text or "").split())
-    words = query.strip().casefold().split()
-    at = flat.casefold().find(words[0]) if words else -1
-    if at < 0:
-        return flat[:SNIPPET] + ("…" if len(flat) > SNIPPET else "")
-    start = max(0, at - 50)
-    return ("…" if start else "") + flat[start:start + SNIPPET] + ("…" if start + SNIPPET < len(flat) else "")
+    words = query.strip().split()
+    found = re.search(r"(?<!\w)" + re.escape(words[0]), flat, re.IGNORECASE) if words else None
+    at = found.start() if found else (flat.casefold().find(words[0].casefold()) if words else -1)
+    start = 0
+    if at > 50:
+        space = flat.find(" ", at - 50, at)
+        start = space + 1 if space >= 0 else at
+    end = start + SNIPPET
+    if end < len(flat):
+        space = flat.rfind(" ", start, end)
+        end = space if space > start else end
+    return ("…" if start else "") + flat[start:end] + ("…" if end < len(flat) else "")
 
 
 def page(directory: Path, *, limit=None, offset=0, query="", redact_secrets=()):

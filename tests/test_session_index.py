@@ -52,6 +52,23 @@ class SessionIndexTests(unittest.TestCase):
         [row] = session_index.page(self.dir, query="deploy", redact_secrets=["sk-live-0123456789abcdef0123"])
         self.assertNotIn("sk-live-0123456789abcdef0123", row[5])
 
+    def test_a_snippet_opens_and_closes_on_whole_words(self):
+        said = ("We baked a loaf yesterday and it came out flat, so today I want to talk about the sourdough "
+                "starter, feeding it twice a day and keeping it warm near the oven while the dough proves for "
+                "hours, which is a long sentence written to run past the end of what a snippet shows.")
+        for query in ("sourdough", "SOURDOUGH", "dough"):
+            text = session_index.snippet(said, query)
+            self.assertTrue(text.startswith("…"), text)
+            body = text.strip("…")
+            self.assertIn(body.split()[0], said.split(), f"opens on a whole word: {text!r}")
+            self.assertIn(body.split()[-1], said.split(), f"closes on a whole word: {text!r}")
+        self.assertTrue(session_index.snippet(said, "sourdough").endswith("…"))
+        self.assertIn("the dough proves", session_index.snippet(said, "dough"),
+                      "the word itself is found, not the inside of an earlier word (sourdough)")
+        self.assertEqual(session_index.snippet("Short note", "note"), "Short note")
+        from dgc import pip_search
+        self.assertIs(pip_search.snippet, session_index.snippet, "the Pips list cuts snippets the same way")
+
     def test_two_thousand_sessions_list_fast_after_the_first_time(self):
         for i in range(2000):
             write(self.dir, f"s{i:04d}", messages=[{"role": "user", "content": f"Question {i}"}, {"role": "assistant", "content": "Answer " * 200}], updated=i)

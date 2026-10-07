@@ -2224,7 +2224,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if conversation is not None:
                     # The chat shows each paragraph as its own bubble, like a messaging app.
                     base_instructions += ('\nWrite the way people text: short paragraphs of one or two sentences, '
-                        'each one thought. Each paragraph appears as its own chat bubble, so never pad.')
+                        'each one thought. Each paragraph appears as its own chat bubble, so never pad. '
+                        # Models said "the card above" for a card the chat shows under the reply.
+                        'Any card or button you make (Connect, Allow, a draft, choices) shows below your reply, so '
+                        'if you mention one, say it is below; never say above.')
                     # Routines and "remind me at" need the user's clock: say when it is, and where.
                     base_instructions += '\n' + _user_clock()
                 if selected_type.id == 'core':
@@ -2296,7 +2299,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if calendar_candidate is not None and candidate != calendar_candidate:
                         return "One calendar draft is already prepared. Ask for another reply to change it."
                     calendar_candidate = candidate
-                    return ("Calendar draft prepared. It shows under your message as a card, so do not repeat the event: say in "
+                    return ("Calendar draft prepared. It shows below your reply as a card, so do not repeat the event: say in "
                             "one sentence what you drafted. Nothing is created until the user approves it.")
                 except RegistryError as exc:
                     return "Invalid calendar draft: " + str(exc)
@@ -2307,7 +2310,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if email_candidate is not None and candidate != email_candidate:
                         return "One email draft is already prepared. Ask for another reply to change it."
                     email_candidate = candidate
-                    return ("Draft prepared. It shows under your message as a card with Send, so do not repeat the email: "
+                    return ("Draft prepared. It shows below your reply as a card with Send, so do not repeat the email: "
                             "say in one sentence what you drafted. Nothing is sent until the user chooses Send.")
                 except RegistryError as exc:
                     return "Invalid email draft: " + str(exc)
@@ -2344,14 +2347,14 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 # The reply is done: no further model request. Asked to "end your turn now", a model
                 # still wrote its hello again with new choices, and the chat saved all three.
                 self._end_turn_after_batch = 'offered'
-                return 'These choices appear as buttons under your message; the user taps one to answer. Your message is complete.'
+                return 'These choices appear as buttons below your reply; the user taps one to answer. Your message is complete.'
             if personal and apps_pin is not None and call.name in pip_app_links.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return pip_app_links.worker_call(apps_pin, call.name, arguments)
             if personal and apps_pin is not None and apps_pin.get('plugins') and call.name in pip_plugins.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 if call.name == 'call_plugin' and connector_candidate is not None:
-                    return ('One action is already waiting for the user under this reply. Finish your reply; '
+                    return ('One action is already waiting for the user below this reply. Finish your reply; '
                             'ask for the next one after they decide.')
                 reply = pip_app_links.worker_reply(apps_pin, call.name, arguments)
                 if 'draft' in reply:

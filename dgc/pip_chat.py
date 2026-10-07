@@ -443,7 +443,7 @@ PLUGIN_UNKNOWN = ("{plugin} did not answer, so it may or may not have happened. 
                   "not repeat it; if it changes anything, tell the user to check in {plugin}. ")
 PLUGIN_ALLOWED = ("This message is from DGC, not the user. The user allowed you to use {plugin}. See its tools with "
                   "plugin_tools, then call the one you need with call_plugin in this turn, and carry on with what they "
-                  "asked in a short message. A [reads] tool answers at once; any other tool shows an Allow card under your "
+                  "asked in a short message. A [reads] tool answers at once; any other tool shows an Allow card below your "
                   "reply only once you call it, so never say a card is there unless call_plugin said so.")
 COMPUTER_DONE = ("This message is from DGC, not the user. The user approved what your computer was holding, and "
                  "DGC sent it exactly as the page made it: {what}. Use your computer to read the page and see what "

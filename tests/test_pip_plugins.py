@@ -161,7 +161,7 @@ class PluginCardTests(PluginWorld, unittest.TestCase):
     def test_anything_else_becomes_an_allow_card_and_nothing_runs(self):
         self.allow()
         reply = self.use("call_plugin", plugin="airtable", tool="create_record", arguments={"table": "Plans", "fields": {"Name": "Run"}})
-        self.assertIn("An Allow card for create_record in Airtable is under your reply", reply["text"])
+        self.assertIn("An Allow card for create_record in Airtable is below your reply", reply["text"])
         self.assertIn("Always allow", reply["text"])
         self.assertEqual(Vendor.made[0].calls, [], "nothing ran")
         draft = reply["draft"]

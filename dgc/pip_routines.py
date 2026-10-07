@@ -291,7 +291,7 @@ def schema() -> dict:
     return {"type": "function", "function": {"name": TOOL, "description": (
         "Suggest a routine: something you will do by yourself, on a schedule or when an app event happens, "
         "like a morning news brief or telling the user when an email from their bank arrives. It shows as a "
-        "card under your message; it starts once the user chooses Add routine there. Use it when the user "
+        "card below your reply; it starts once the user chooses Add routine there. Use it when the user "
         "asks you to do something regularly or whenever something happens, instead of saying you cannot. "
         "when: {kind:'schedule', schedule:{type:'daily', time:'HH:MM', timezone:'Area/City'} or "
         "{type:'cron', cron:'MM HH * * 1-5', timezone:'Area/City'} for weekdays, or {type:'interval', minutes:N} "
@@ -323,7 +323,7 @@ def tool_result(arguments: dict, connected_toolkits) -> tuple[dict | None, str]:
     if kind in APP_KINDS and APP_KINDS[kind][0] not in connected_toolkits:
         app = "Gmail" if kind == "email" else "Google Calendar"
         return None, f"Not suggested: this routine reads {app}, which is not connected to you. Ask the user to connect it first (connect_app)."
-    return candidate, ("Suggested: it shows as a card under your message with Add routine, and runs "
+    return candidate, ("Suggested: it shows as a card below your reply with Add routine, and runs "
                        + label(candidate["trigger"]) + " once the user adds it. Say in one sentence what it will do and when.")
 
 

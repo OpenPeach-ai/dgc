@@ -347,7 +347,7 @@ def schemas(apps_now) -> list[dict]:
         {"type": "function", "function": {"name": "connect_app", "description": (
             "Ask the user to connect one of their apps to you. Apps connect through the user's Composio, so any app "
             "Composio supports works: Gmail, Google Calendar, Google Drive, Notion, Slack, Figma, GitHub, Linear and "
-            "many more. This shows a Connect card in your chat; the user signs in there (or just allows an account they "
+            "many more. This shows a Connect card below your reply; the user signs in there (or just allows an account they "
             "already connected), and you are told when it is connected. Use it whenever the user asks whether you can "
             "use an app, or asks about Composio, and the app is not connected to you yet: call it rather than saying "
             "you have no tools. Never paste sign-in links or describe OAuth steps. " + connected_line),
@@ -416,9 +416,9 @@ class RunSocket:
                     if link["id"] not in self.asked:
                         self.asked.append(link["id"])
                     if composio_server(self.config) is None:
-                        return (f"A Connect {link['app']} card is in your chat, but Composio is not set up in DGC yet. "
+                        return (f"A Connect {link['app']} card is below your reply, but Composio is not set up in DGC yet. "
                                 "Tell the user in one sentence to add Composio in Settings → Plugins, then choose Connect on the card.")
-                    return (f"A Connect {link['app']} card is now in your chat. Tell the user in one sentence to choose "
+                    return (f"A Connect {link['app']} card is now below your reply. Tell the user in one sentence to choose "
                             f"Connect {link['app']} there; you will be told when it is connected. Do not paste links.")
                 if op == "read_app":
                     toolkit = _toolkit(args.get("app"))

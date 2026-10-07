@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from .session_index import snippet  # noqa: F401  (one rule for both lists)
+
 FTS = (
     "CREATE VIRTUAL TABLE IF NOT EXISTS pip_chat_fts USING fts5(text, content='pip_chat_messages', content_rowid='seq')",
     "CREATE TRIGGER IF NOT EXISTS pip_chat_fts_ai AFTER INSERT ON pip_chat_messages BEGIN "
@@ -19,7 +21,6 @@ FTS = (
     "INSERT INTO pip_chat_fts(rowid, text) VALUES (new.seq, new.text); END",
 )
 MAX_MATCHES = 5000          # messages read per search, newest first
-SNIPPET = 160
 
 
 def install(db) -> bool:
@@ -70,14 +71,3 @@ def chat_matches(db, workspace_id, query) -> dict:
         if row["pip_id"] not in found and not _dgc_turn(row):
             found[row["pip_id"]] = row["text"]
     return found
-
-
-def snippet(text, query) -> str:
-    """The words around the first place the query appears, on one line."""
-    flat = " ".join(str(text or "").split())
-    at = flat.casefold().find(query.strip().casefold().split()[0]) if query.strip() else -1
-    if at < 0:
-        return flat[:SNIPPET] + ("…" if len(flat) > SNIPPET else "")
-    start = max(0, at - 50)
-    piece = flat[start:start + SNIPPET]
-    return ("…" if start else "") + piece + ("…" if start + SNIPPET < len(flat) else "")

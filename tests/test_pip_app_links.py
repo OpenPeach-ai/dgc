@@ -151,7 +151,7 @@ class AppLinkTests(unittest.TestCase):
         self.assertIn("error: refused", links.worker_call({**pin, "token": "x"}, "connect_app", {"app": "gmail", "why": "w"}))
         self.assertIn("unknown app operation", links.worker_call(pin, "start", {}))
         said = links.worker_call(pin, "connect_app", {"app": "gmail", "why": "To read your mail."})
-        self.assertIn("A Connect Gmail card is now in your chat", said)
+        self.assertIn("A Connect Gmail card is now below your reply", said)
         self.assertNotIn("http", said, "the model never gets the sign-in link")
         self.assertIn("not connected", links.worker_call(pin, "read_app", {"app": "gmail", "tool": "GMAIL_FETCH_EMAILS", "arguments": {}}))
         self.assertEqual(links.listing(self.registry, self.pip["id"])[0]["status"], "requested")
