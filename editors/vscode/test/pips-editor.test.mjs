@@ -264,7 +264,7 @@ test('When it runs: weekdays at a time saves directly as one schedule in your ti
  const x=setup({conversation:true});await x.drain();x.click('[data-tab=job]');await x.drain();
  assert.equal(x.d.querySelector('#quickKind').value,'manual');assert.equal(x.d.querySelector('#quick-schedule-form [type=submit]').disabled,true,'nothing to save yet');
  choose(x,'#quickKind','weekdays');x.input('#quickTime','08:30');assert.equal(x.d.querySelector('#quick-schedule-form [type=submit]').disabled,false);x.submit('#quick-schedule-form');
- const req=x.requests('propose_pip_update')[0],zone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
+ const req=x.requests('propose_pip_update')[0],browser=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',zone={'Asia/Calcutta':'Asia/Kolkata'}[browser]||browser;   // an old name is sent as its current one
  assert.deepEqual(JSON.parse(JSON.stringify(req.request.changes.schedule)),{type:'cron',cron:'30 8 * * 1-5',timezone:zone,missed_policy:'coalesce_latest',dst_policy:'skip_gap_first_fold'});assert.ok(req.request.changes.event_trigger==null,'no event trigger alongside it');assert.equal(req.request.reason,'Changed in the Pips view.');
  x.answer(req,{proposal:{...proposal(),definition:{...proposal().definition,schedule:req.request.changes.schedule,event_trigger:null}}});await flush();
  assert.equal(x.requests('accept_pip_update').length,1);assert.equal(x.requests('run_pip').length,0,'saving a schedule starts nothing');
