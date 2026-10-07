@@ -1230,7 +1230,24 @@ def set_name(path, name: str, project_root, *, expected_revision: int | None = N
 
 
 def listing(project_root, *, redact_secrets=()) -> list[tuple[Path, float, str, int, str]]:
-    """(path, updated_ts, first-user-message preview, message count, name), newest first."""
+    """(path, updated_ts, first-user-message preview, message count, name), newest first.
+
+    From the project's session index (session_index): only new or changed files are read."""
+    return [row[:5] for row in listing_page(project_root, redact_secrets=redact_secrets)]
+
+
+def listing_page(project_root, *, limit=None, offset=0, query="", redact_secrets=()):
+    """A page of `listing`, optionally matching `query` (name, first message or anything said); each
+    row also carries the words around a match in what was said (None otherwise)."""
+    from .session_index import page
+    try:
+        return page(project_dir(project_root), limit=limit, offset=offset, query=query, redact_secrets=redact_secrets)
+    except Exception:
+        # The index is a cache: a broken or locked one never hides sessions. Read the files.
+        return [(*row, None) for row in _listing_files(project_root, redact_secrets=redact_secrets)][offset:None if limit is None else offset + limit]
+
+
+def _listing_files(project_root, *, redact_secrets=()) -> list[tuple[Path, float, str, int, str]]:
     from .redaction import redact_text
     from .clock import strip_turn_clock   # DGC's clock line is not a preview
     items: list[tuple[Path, float, str, int, str]] = []

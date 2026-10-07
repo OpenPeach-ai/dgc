@@ -9,6 +9,10 @@
 
 ### Sessions
 
+- **Thousands of sessions, and a search.** The Sessions list has **Search sessions**: it finds a
+  session by its name, its first message or anything said in it, and shows the words it found. The
+  list shows 200 at a time with **Load more** (it stopped at 500 before), and lists quickly however
+  many there are. Needs the DGC CLI with this release.
 - DGC opens on your project's **Sessions**: the side bar lists this project's sessions, newest
   first, with when each was last used and how many messages it has. **Open in Editor**, a
   double-click or Enter opens a session in an editor tab of its own, as in Claude Code; **New

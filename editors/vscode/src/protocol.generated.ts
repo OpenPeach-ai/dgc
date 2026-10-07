@@ -5210,6 +5210,24 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "limit": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "offset": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "query": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "delete_session": {

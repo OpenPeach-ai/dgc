@@ -211,3 +211,32 @@ test("a session's tab is the chat: no Pips, no other folder, + opens another tab
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("thousands of sessions: a search over what was said, the words it found, and Load more", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openPage({ items: null });
+  try {
+    await s.send({ type: "sessions_list", items: ITEMS.slice(0, 2), error: "" });
+    assert.equal(await shown(s.page, "#sessions-search"), false, "an older DGC CLI: no search box");
+    await s.send({ type: "sessions_list", items: ITEMS.slice(0, 2), error: "", searchable: true, more: true, query: "" });
+    assert.equal(await shown(s.page, "#sessions-search"), true);
+    assert.equal(await shown(s.page, "#sessions-more"), true);
+    await s.clear();
+    await s.page.fill("#sessions-search", "sourdough");
+    await s.page.waitForTimeout(400);
+    assert.deepEqual((await s.posted()).filter((m) => m.type === "sessionsSearch"), [{ type: "sessionsSearch", query: "sourdough" }]);
+    await s.send({ type: "sessions_list", error: "", searchable: true, more: false, query: "sourdough",
+      items: [{ ...ITEMS[1], match: "…the sourdough starter needs feeding before the launch…" }] });
+    assert.equal(await s.page.locator(".session-match").first().textContent(), "…the sourdough starter needs feeding before the launch…");
+    assert.equal(await shown(s.page, "#sessions-more"), false, "nothing more to load");
+    assert.equal(await s.page.inputValue("#sessions-search"), "sourdough", "the box keeps what you typed");
+    await s.send({ type: "sessions_list", error: "", searchable: true, more: false, query: "nothing", items: [] });
+    assert.match(await s.page.locator("#sessions-status").textContent(), /No session mentions “nothing”\./);
+    await s.send({ type: "sessions_list", items: ITEMS, error: "", searchable: true, more: true, query: "" });
+    await s.clear();
+    await s.page.click("#sessions-more");
+    assert.deepEqual((await s.posted()).filter((m) => m.type === "sessionsMore"), [{ type: "sessionsMore" }]);
+    assert.equal(await s.page.locator("#sessions-more").textContent(), "Loading…");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

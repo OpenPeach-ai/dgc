@@ -7061,6 +7061,19 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "query": {
+              "type": "string"
             }
           },
           "required": [

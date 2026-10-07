@@ -562,6 +562,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private tabTitled = false;
   private sessionsTimer?: ReturnType<typeof setTimeout>;
   private sessionsRequest = 0;
+  // Thousands of sessions (backend capability session_paging): a page at a time, 200 more with Load
+  // more, and a search over names, first messages and everything said.
+  private sessionsQuery = "";
+  private sessionsShown = 200;
 
   constructor(private readonly context: vscode.ExtensionContext, tab?: ChatTabInit) {
     // Before anything mutates them: this is what "a chat nobody has used yet" looks like. Copied,
@@ -686,7 +690,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     let items: any[] = [];
     let error = "";
     try {
-      const response = await this.requestState(this.ensureBackend(), "sessions", { type: "list_sessions" }, "sessions", 30000);
+      const paging = this.lastReadyEvent?.capabilities?.session_paging === true;
+      const command: any = paging
+        ? { type: "list_sessions", limit: this.sessionsShown + 1, ...(this.sessionsQuery ? { query: this.sessionsQuery } : {}) }
+        : { type: "list_sessions" };
+      const response = await this.requestState(this.ensureBackend(), "sessions", command, "sessions", 30000);
       items = Array.isArray(response.items) ? response.items : [];
     } catch (err: any) {
       error = err?.message || "DGC could not list this project's sessions.";
@@ -697,10 +705,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private postSessionItems(items: any[], error = ""): void {
     const open = this.places?.openSessions() ?? new Set<string>();
-    this.post({ type: "sessions_list", error, items: items.slice(0, 500).map((item) => {
+    const paging = this.lastReadyEvent?.capabilities?.session_paging === true;
+    // One more than shown was asked for: its presence is what says there are more.
+    const shown = paging ? this.sessionsShown : 500;
+    this.post({ type: "sessions_list", error, searchable: paging, query: paging ? this.sessionsQuery : "", more: items.length > shown,
+      items: items.slice(0, shown).map((item) => {
       const id = path.basename(String(item?.path || "")).replace(/\.json$/i, "");
       return { id, path: String(item?.path || ""), name: String(item?.name || ""), preview: String(item?.preview || ""),
-               when: String(item?.when || ""), count: Number(item?.count) || 0, open: open.has(id) };
+               when: String(item?.when || ""), count: Number(item?.count) || 0, open: open.has(id),
+               ...(typeof item?.match === "string" && item.match ? { match: item.match.slice(0, 300) } : {}) };
     }).filter((item) => /^[A-Za-z0-9_-]{1,128}$/.test(item.id)) });
   }
 
@@ -3705,6 +3718,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "deleteSession":
         if (this.home) { await this.deleteSessionFromHome(String(msg.id ?? ""), String(msg.title ?? "")); }
         return;
+      case "sessionsSearch":
+        if (this.home) {
+          this.sessionsQuery = String(msg.query ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+          this.sessionsShown = 200;
+          void this.postSessions();
+        }
+        return;
+      case "sessionsMore":
+        if (this.home) { this.sessionsShown = Math.min(this.sessionsShown + 200, 4800); void this.postSessions(); }
+        return;
       case "newChatInFolder": {
         void this.newChatInFolder();
         return;
@@ -6520,7 +6543,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}">
 <header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to DGC chat" aria-label="Back to DGC chat" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Chat</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span><span class="pips-nav-core" aria-hidden="true"></span></button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
 <section id="pips-host" data-style-uri="${pipsStyle}" aria-label="DGC Pips" hidden></section>
-<section id="sessions-host" class="sessions-home" aria-labelledby="sessions-title" hidden><section id="sessions-pips" class="home-pips" aria-label="Your Pips" hidden></section><div class="sessions-head"><h2 id="sessions-title">Sessions</h2><button type="button" id="sessions-new" class="sessions-new" title="Start a new session in an editor tab"><span class="codicon codicon-add" aria-hidden="true"></span>New session</button></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul></section>
+<section id="sessions-host" class="sessions-home" aria-labelledby="sessions-title" hidden><section id="sessions-pips" class="home-pips" aria-label="Your Pips" hidden></section><div class="sessions-head"><h2 id="sessions-title">Sessions</h2><button type="button" id="sessions-new" class="sessions-new" title="Start a new session in an editor tab"><span class="codicon codicon-add" aria-hidden="true"></span>New session</button></div><input id="sessions-search" class="sessions-search" type="search" placeholder="Search sessions" aria-label="Search sessions: names and everything said" autocomplete="off" maxlength="200" hidden><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <section id="agent-page" hidden>

@@ -6,6 +6,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+### Sessions
+
+- **The Sessions list holds thousands and searches them.** Listing read every session file in full on
+  every refresh; a per-project index (`<sessions>/<project>/.index.sqlite`) now keeps what the list
+  shows and a full-text copy of what was said, and reads a file again only when it changed. A broken
+  index never hides a session: the list reads the files. `list_sessions` takes `limit` (1–5000),
+  `offset` and `query` (a session's name, first message or anything said; FTS5, or plain matching
+  without it); a session found by what was said carries `match`, the words around it. The
+  `session_paging` capability says a backend takes them.
+
 ### Plugins
 
 - **The vendors' own plugins.** Settings → Plugins (and `dgc plugin list`) offers 41 more plugins

@@ -2263,3 +2263,11 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 
 .open-ask-collapse { margin-right:auto; background:transparent; color:var(--muted); border:0; cursor:pointer; }
 .open-ask-collapse:hover { color:var(--text); }
+
+/* Thousands of sessions: the search box, the words a search found, Load more. */
+.sessions-search { width: 100%; height: 28px; margin: 0 0 var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface2); color: var(--text-strong); padding: 0 var(--sp-2); font: inherit; font-size: var(--t-sm); }
+.sessions-search:focus { outline: none; border-color: var(--accent); }
+.sessions-search[hidden], .sessions-more[hidden] { display: none; }
+.session-match { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: var(--t-xs); line-height: 1.45; }
+.sessions-more { margin: var(--sp-2) 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: var(--t-sm); cursor: pointer; }
+.sessions-more:hover { text-decoration: underline; }

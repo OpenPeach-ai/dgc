@@ -1987,6 +1987,9 @@ class Backend:
                           "headless_handoff": True, "headless_hook_catalog": True,
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
+                          # list_sessions takes limit, offset and query; an item found by what was said
+                          # carries match (dgc/session_index).
+                          "session_paging": True,
                           "plugin_management": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
@@ -5587,9 +5590,19 @@ class Backend:
                          **_request_fields(request_id))
 
         elif t == "list_sessions":
-            items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
-                      "name": nm}
-                     for (p, ts, pv, c, nm) in sessions_mod.listing(self.config.project_root)]
+            # Optional (capability session_paging): `limit`, `offset` and `query` (a session's name,
+            # first message or anything said). A found session's item carries `match`, the words
+            # around it. Without them, every session, as before.
+            limit, offset, query = cmd.get("limit"), cmd.get("offset", 0), cmd.get("query", "")
+            if (limit is not None and (type(limit) is not int or not 1 <= limit <= 5000)) \
+                    or type(offset) is not int or offset < 0 or not isinstance(query, str) or len(query) > 200:
+                self.em.emit("error", message="list_sessions takes a limit of 1–5000, an offset and a query of up to 200 characters.",
+                             **_request_fields(request_id))
+                return
+            items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c, "name": nm,
+                      **({"match": match} if match else {})}
+                     for (p, ts, pv, c, nm, match) in sessions_mod.listing_page(
+                         self.config.project_root, limit=limit, offset=offset, query=query)]
             self.em.emit("sessions", items=items, **_request_fields(request_id))
         elif t == "delete_session":
             path = cmd.get("path")

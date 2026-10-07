@@ -650,6 +650,15 @@
     button.ondblclick = (e) => e.stopPropagation();
     return button;
   }
+  let sessionsSearchTimer = 0;
+  $("sessions-search")?.addEventListener("input", (e) => {
+    clearTimeout(sessionsSearchTimer);
+    sessionsSearchTimer = setTimeout(() => vscode.postMessage({ type: "sessionsSearch", query: e.target.value }), 250);
+  });
+  $("sessions-more")?.addEventListener("click", (e) => {
+    e.currentTarget.disabled = true; e.currentTarget.textContent = "Loading…";
+    vscode.postMessage({ type: "sessionsMore" });
+  });
   // Session names and previews are the user's own words: text nodes only, never markup.
   function renderSessions(msg) {
     const list = $("sessions-list"), status = $("sessions-status");
@@ -657,8 +666,13 @@
     const selected = list.querySelector(".session-row[data-selected]")?.dataset.id;
     const focused = document.activeElement?.closest?.(".session-row")?.dataset.id;
     list.replaceChildren();
+    // Thousands of sessions: a search over names, first messages and everything said, and Load more.
+    const search = $("sessions-search"), more = $("sessions-more"), query = String(msg.query || "");
+    if (search) { search.hidden = msg.searchable !== true; if (document.activeElement !== search) search.value = query; }
+    if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Load more"; }
     status.textContent = msg.error ? String(msg.error)
-      : items.length ? "" : "No sessions in this project yet. Start one with New session: it opens in an editor tab.";
+      : items.length ? "" : query ? `No session mentions “${query}”.`
+      : "No sessions in this project yet. Start one with New session: it opens in an editor tab.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
     status.hidden = !status.textContent;
     for (const item of items) {
@@ -674,6 +688,9 @@
       }
       if (item.open) { const open = el("span", "session-tab"); open.textContent = "Open in a tab"; meta.append(open); }
       main.append(name, meta);
+      if (typeof item.match === "string" && item.match) {
+        const found = el("span", "session-match"); found.textContent = item.match; main.append(found);
+      }
       const open = sessionButton("session-open", "go-to-file", () => openSession(item));
       const word = el("span", "session-open-label"); word.textContent = "Open in Editor"; open.append(word);
       open.title = "Open in an editor tab";
