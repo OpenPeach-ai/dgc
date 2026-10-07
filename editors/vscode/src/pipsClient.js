@@ -722,7 +722,7 @@ async function openComputerAction(id){
  if(words){
   // Careful mode held it before anything happened: allow the site, or this one carrying of app data.
   openReview({title:words[0],description:words[1],
-   body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta">${s.kind==='site'?`<dt>Site</dt><dd>${esc(s.shown||s.site||s.host)}</dd><dt>Address</dt><dd>${esc(s.host)}${esc(s.path)}</dd>`:`<dt>Goes onto</dt><dd>${esc(s.host)}${esc(s.path)}</dd>${rows}`}${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}</dl>`,
+   body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta">${s.kind==='site'?`<dt>Site</dt><dd>${esc(s.shown||s.site||s.host)}</dd><dt>Address</dt><dd>${esc(s.host)}${esc(s.path)}</dd>`:`<dt>Goes onto</dt><dd>${esc(s.host)}${esc(s.path)}</dd>`}${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}</dl>${s.kind==='text'?`<p class="muted">Exactly this, all of it:</p><pre class="message-review-body">${esc(typeof s.text==='string'?s.text:s.fields.map(f=>f.value).join('\n'))}</pre>`:''}`,
    secondary:{id:'reject-computer-action',label:'Not now'},confirm:words[2],always:false,expiresAt:a.expires_at,computerAction:a.id,carefulKind:s.kind,
    request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
   return;

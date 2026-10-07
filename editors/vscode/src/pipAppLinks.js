@@ -3,7 +3,8 @@
 // the backend's reply, never a link from here), then "I've signed in", or Not now.
 
 const STATUSES = ['requested', 'authorizing', 'connected', 'declined', 'failed'];
-const text = (v, max) => typeof v === 'string' && v.length <= max;
+// Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
+const text = (v, max) => typeof v === 'string' && (v.length <= max || [...v].length <= max);
 const RECENT_MS = 30 * 60 * 1000;
 
 export function appLink(value, pip) {
@@ -79,8 +80,8 @@ export function allowCardMarkup(draft, { esc, link = null, busy = false, pipName
       + editButton(id, editing, off)
     : `<button type="button" class="primary" data-email-draft="${id}"${off}>Choose account…</button>`;
   const shown = editing
-    ? `<div class="allow-fields">${field(esc, draft.id, 'recipient_email', 'To', edit.values.recipient_email, { type: 'email', max: 254 })}`
-      + `${field(esc, draft.id, 'subject', 'Subject', edit.values.subject, { max: 200 })}${field(esc, draft.id, 'body', 'Message', edit.values.body, { area: 8, max: 12000 })}</div>`
+    ? `<div class="allow-fields">${field(esc, draft.id, 'recipient_email', 'To', edit.values.recipient_email, { type: 'email', max: 254, disabled: busy })}`
+      + `${field(esc, draft.id, 'subject', 'Subject', edit.values.subject, { max: 200, disabled: busy })}${field(esc, draft.id, 'body', 'Message', edit.values.body, { area: 8, max: 12000, disabled: busy })}</div>`
     : `<dl class="allow-meta"><dt>To</dt><dd>${esc(m.recipient_email)}</dd><dt>Subject</dt><dd>${esc(m.subject)}</dd></dl><div class="allow-body">${esc(m.body)}</div>`;
   return `<div class="allow-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Send this email?">`
     + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">@</span><div class="app-link-words"><strong>Send this email?</strong><small>${from}</small></div></div>`
@@ -94,26 +95,30 @@ export function calendarCardMarkup(draft, { esc, link = null, busy = false, pipN
   const to = link ? `To ${esc(link.label || 'your Google Calendar')}` : 'No Google Calendar connected to it yet';
   const guests = e.attendees || [], repeat = e.repeat;
   const actions = link
-    ? `<button type="button" class="primary" data-allow-create="${id}"${off}>${busy ? 'Adding…' : guests.length || editing && edit.values.guests.trim() ? 'Add and invite' : 'Add event'}</button>`
+    ? `<button type="button" class="primary" data-allow-create="${id}"${off}>${busy ? 'Adding…' : (editing ? edit.values.guests.trim() : guests.length) ? 'Add and invite' : 'Add event'}</button>`
       + `<button type="button" class="quiet" data-allow-create-always="${id}"${off} title="Add this, and let ${esc(pipName)} add events to this calendar without asking; take it back in its Settings">Always allow</button>`
       + editButton(id, editing, off)
     : `<button type="button" class="primary" data-email-draft="${id}"${off}>Choose account…</button>`;
   const shown = editing
-    ? `<div class="allow-fields">${field(esc, draft.id, 'summary', 'Title', edit.values.summary, { max: 200 })}`
-      + field(esc, draft.id, 'start_datetime', 'Starts (with its UTC offset)', edit.values.start_datetime, { max: 40, hint: '2026-12-01T11:00:00+05:30' })
-      + field(esc, draft.id, 'end_datetime', 'Ends (with its UTC offset)', edit.values.end_datetime, { max: 40, hint: '2026-12-01T11:30:00+05:30' })
-      + field(esc, draft.id, 'timezone', 'Time zone', edit.values.timezone, { max: 80, hint: 'Asia/Kolkata' })
-      + field(esc, draft.id, 'guests', 'Guests, one email per line (they get an invitation)', edit.values.guests, { area: 2, max: 2600 })
-      + field(esc, draft.id, 'description', 'Description', edit.values.description, { area: 4, max: 8000 }) + '</div>'
+    ? `<div class="allow-fields">${field(esc, draft.id, 'summary', 'Title', edit.values.summary, { max: 200, disabled: busy })}`
+      + field(esc, draft.id, 'start_datetime', 'Starts (with its UTC offset)', edit.values.start_datetime, { max: 40, hint: '2026-12-01T11:00:00+05:30', disabled: busy })
+      + field(esc, draft.id, 'end_datetime', 'Ends (with its UTC offset)', edit.values.end_datetime, { max: 40, hint: '2026-12-01T11:30:00+05:30', disabled: busy })
+      + field(esc, draft.id, 'timezone', 'Time zone', edit.values.timezone, { max: 80, hint: 'Asia/Kolkata', disabled: busy })
+      + field(esc, draft.id, 'guests', 'Guests, one email per line (they get an invitation)', edit.values.guests, { area: 2, max: 2600, disabled: busy })
+      + field(esc, draft.id, 'description', 'Description', edit.values.description, { area: 4, max: 8000, disabled: busy })
+      // A series stays a series: say so while editing, so a new time never quietly becomes many events.
+      + (repeat ? `<p class="app-link-note">Repeats ${esc(repeatWords(repeat))}, as ${esc(pipName)} drafted it. Each one moves with the new time.</p>` : '') + '</div>'
     : `<dl class="allow-meta"><dt>Title</dt><dd>${esc(e.summary)}</dd><dt>When</dt><dd>${esc(when(e))}</dd>`
       + (guests.length ? `<dt>Guests</dt><dd>${esc(guests.join(', '))} · invited</dd>` : '')
-      + (repeat ? `<dt>Repeats</dt><dd>${esc(`${repeat.count} times, every ${repeat.interval === 1 ? '' : repeat.interval + ' '}${{ daily: 'day', weekly: 'week', monthly: 'month' }[repeat.frequency]}${repeat.interval === 1 ? '' : 's'}`)}</dd>` : '')
+      + (repeat ? `<dt>Repeats</dt><dd>${esc(repeatWords(repeat))}</dd>` : '')
       + '</dl>' + (e.description ? `<div class="allow-body">${esc(e.description)}</div>` : '');
   return `<div class="allow-card calendar-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Add this event?">`
     + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">▦</span><div class="app-link-words"><strong>Add this event?</strong><small>${to}</small></div></div>`
     + shown + editError(esc, edit)
     + `<div class="app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t add</button></div></div>`;
 }
+
+const repeatWords = r => `${r.count} times, every ${r.interval === 1 ? '' : r.interval + ' '}${{ daily: 'day', weekly: 'week', monthly: 'month' }[r.frequency]}${r.interval === 1 ? '' : 's'}`;
 
 /** "Tue, Dec 1, 11:00 AM – 11:30 AM (Asia/Kolkata)", in the event's own zone; the exact text when a date won't read. */
 export function when(e) {
@@ -126,10 +131,12 @@ export function when(e) {
 }
 
 /** One field of a card being edited: a stable id per draft and field, so a re-render keeps the caret. */
-export function field(esc, draftId, name, label, value, { type = 'text', max = 1000, area = 0, hint = '' } = {}) {
-  const fid = `card-${draftId}-${name}`, data = `data-card-edit="${esc(draftId)}" data-card-field="${esc(name)}"`;
+export function field(esc, draftId, name, label, value, { type = 'text', max = 1000, area = 0, hint = '', disabled = false } = {}) {
+  // Locked while it sends: what was typed during the wait would show on the card but not be sent.
+  const fid = `card-${draftId}-${name}`, data = `data-card-edit="${esc(draftId)}" data-card-field="${esc(name)}"${disabled ? ' disabled' : ''}`;
+  // A newline right after <textarea> is dropped by HTML, so one always goes there: text keeps its own first line.
   const control = area
-    ? `<textarea id="${esc(fid)}" ${data} rows="${area}" maxlength="${max}" spellcheck="true">${esc(value)}</textarea>`
+    ? `<textarea id="${esc(fid)}" ${data} rows="${area}" maxlength="${max}" spellcheck="true">\n${esc(value)}</textarea>`
     : `<input id="${esc(fid)}" ${data} type="${type}" maxlength="${max}" autocomplete="off" spellcheck="${type === 'text' ? 'true' : 'false'}"${hint ? ` placeholder="${esc(hint)}"` : ''} value="${esc(value)}">`;
   return `<label for="${esc(fid)}">${esc(label)}${control}</label>`;
 }

@@ -4370,22 +4370,46 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   // Your own OAuth app: mcp-remote reads its client id and secret from an owner-only file (never from
   // argv, where other local users could see a secret) and listens for the sign-in on the fixed port the
   // app registered: http://localhost:<port>/oauth/callback.
-  private oauthAppFile(name: string): string {
-    return join(homedir(), ".dgc", "mcp-oauth", `${name}.json`);
+  // One file per server name AND content: a save the backend rejects never rewrites the file the
+  // server already uses, and "Asana" and "asana" never share one on a case-blind disk.
+  private oauthAppPrefix(name: string): string {
+    return join(homedir(), ".dgc", "mcp-oauth",
+      `${name.toLowerCase().replace(/[^a-z0-9_.-]/g, "_")}-${createHash("sha256").update(name, "utf8").digest("hex").slice(0, 8)}-`);
+  }
+
+  private oauthAppBody(item: ManagedMcpServer, secrets: ManagedMcpSecrets): string | undefined {
+    if (item.transport !== "remote" || !validOauth(item.oauth)) return undefined;
+    return JSON.stringify({ client_id: item.oauth.clientId,
+      ...(secrets.oauthSecret ? { client_secret: secrets.oauthSecret } : {}),
+      redirect_uris: [`http://localhost:${item.oauth.port}/oauth/callback`] });
+  }
+
+  private oauthAppFile(item: ManagedMcpServer, secrets: ManagedMcpSecrets): string | undefined {
+    const body = this.oauthAppBody(item, secrets);
+    return body === undefined ? undefined
+      : `${this.oauthAppPrefix(item.name)}${createHash("sha256").update(body, "utf8").digest("hex").slice(0, 16)}.json`;
   }
 
   private oauthAppArgs(item: ManagedMcpServer, secrets: ManagedMcpSecrets): string[] {
-    if (item.transport !== "remote" || !validOauth(item.oauth)) return [];
-    const file = this.oauthAppFile(item.name);
+    const file = this.oauthAppFile(item, secrets), body = this.oauthAppBody(item, secrets);
+    if (!file || body === undefined || !item.oauth) return [];
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    const body = JSON.stringify({ client_id: item.oauth.clientId,
-      ...(secrets.oauthSecret ? { client_secret: secrets.oauthSecret } : {}),
-      redirect_uris: [`http://localhost:${item.oauth.port}/oauth/callback`] });
     const temp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(temp, body, { mode: 0o600 });
     fs.renameSync(temp, file);
     fs.chmodSync(file, 0o600);
     return [String(item.oauth.port), "--static-oauth-client-info", `@${file}`];
+  }
+
+  /** Remove a server's own-app files, keeping `keep` (the one it uses now), if any. */
+  private pruneOauthFiles(name: string, keep?: string): void {
+    const prefix = this.oauthAppPrefix(name);
+    let entries: string[] = [];
+    try { entries = fs.readdirSync(path.dirname(prefix)); } catch { return; }
+    for (const entry of entries) {
+      const full = join(path.dirname(prefix), entry);
+      if (full.startsWith(prefix) && full !== keep) fs.rmSync(full, { force: true });
+    }
   }
 
   private mcpSecretKey(name: string): string {
@@ -4653,7 +4677,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return false;
       }
       const sameClient = previous?.oauth?.clientId === clientId;
-      const kept = sameClient && !clearSecrets ? originalSecrets.oauthSecret || "" : "";
+      // Only across the same server URL and client: savedSecrets is empty when either changed.
+      const kept = sameClient ? savedSecrets.oauthSecret || "" : "";
       if (secretInput || kept) secrets.oauthSecret = secretInput || kept;
     }
     const declaredEnvNames = [...new Set([...referencedEnvNames, ...Object.keys(env)])].slice(0, 64);
@@ -4670,6 +4695,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     try {
       await this.sendManagedMcp(be, item, false, secrets, true);
     } catch (err: any) {
+      const attempted = this.oauthAppFile(item, secrets);
+      const inUse = previousAtDestination ? this.oauthAppFile(previousAtDestination, destinationSecrets) : undefined;
+      if (attempted && attempted !== inUse) fs.rmSync(attempted, { force: true });   // a rejected save leaves no secret behind
       void vscode.window.showErrorMessage(err?.message || "DGC rejected that MCP server.");
       return false;
     }
@@ -4699,6 +4727,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.context.globalState.update("dgc.managedMcpServers.v1", managed.slice(0, 64));
       await this.storeMcpSecrets(item, secrets);
       if (original !== name) { await this.context.secrets.delete(this.mcpSecretKey(original)); }
+      // Its own app's file is the one now in use, or none; a renamed server's old files go.
+      this.pruneOauthFiles(name, this.oauthAppFile(item, secrets));
+      if (original !== name) this.pruneOauthFiles(original);
       this.settingsEditor?.webview.postMessage({ type: "mcpSaved", ok: true });
       return true;
     } catch (err: any) {
@@ -4734,7 +4765,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const removed = new Set(names.filter(name => /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)));
     const managed = this.managedMcpServers();
     await this.context.globalState.update("dgc.managedMcpServers.v1", managed.filter(row => !removed.has(row.name)));
-    for (const name of removed) await this.context.secrets.delete(this.mcpSecretKey(name));
+    for (const name of removed) { await this.context.secrets.delete(this.mcpSecretKey(name)); this.pruneOauthFiles(name); }
   }
 
   private async removeMcpServer(name: string): Promise<void> {
@@ -4773,7 +4804,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.context.globalState.update("dgc.managedMcpServers.v1",
         existingManaged.filter((item) => item.name !== name));
       await this.context.secrets.delete(this.mcpSecretKey(name));
-      if (previous.oauth) fs.rmSync(this.oauthAppFile(name), { force: true });   // its own app's secret goes too
+      this.pruneOauthFiles(name);   // its own app's secret goes too
       this.settingsEditor?.webview.postMessage({ type: "mcpSaved", ok: true });
     } catch (err: any) {
       let restored = false;

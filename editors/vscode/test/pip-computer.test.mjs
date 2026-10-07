@@ -264,10 +264,10 @@ test('a careful hold says what it is: a new site to allow, or app data to put on
  const decided=x.requests('decide_pip_computer_action').at(-1);assert.equal(decided.request.approve,true);
  x.setStatus(computer());x.answer(decided,{action:{...site,status:'approved',resolved_at:'2026-10-04T10:01:00Z',resolved_by:'editor-user'}});await x.drain();
  assert.match(x.d.body.textContent,/Allowed\. It opens the site and carries on\./);
- const typed=action({frame:null,summary:{kind:'text',read_from_apps:true,method:'TYPE',host:'shop.example',path:'/checkout',page:'https://shop.example/checkout',fields:[{name:'typed',value:'code 482913'}],more_fields:0,body_bytes:0}});
+ const typed=action({frame:null,summary:{kind:'text',read_from_apps:true,method:'TYPE',host:'shop.example',path:'/checkout',page:'https://shop.example/checkout',fields:[{name:'typed',value:'code 482913'}],text:'code 482913',more_fields:0,body_bytes:0}});
  const y=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[typed]})});await y.openJob();
  y.click(`[data-computer-action="${actionId}"]`);await flush();
- assert.match(y.d.querySelector('[role=dialog]').textContent,/Let Shopper put this on shop\.example\?It read this from your apps.*Goes ontoshop\.example\/checkout.*typedcode 482913/);
+ assert.match(y.d.querySelector('[role=dialog]').textContent,/Let Shopper put this on shop\.example\?It read this from your apps.*Goes ontoshop\.example\/checkout.*Exactly this, all of it:code 482913/);
  assert.equal(y.d.querySelector('#review-confirm').textContent,'Allow once');
  y.click('#reject-computer-action');
  assert.equal(y.requests('decide_pip_computer_action').at(-1).request.approve,false);

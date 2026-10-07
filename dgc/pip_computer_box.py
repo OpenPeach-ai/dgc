@@ -775,9 +775,13 @@ class BoxedBrowser(BrowserSession):
         verb = str(request.get("method", "GET")).upper()
         kind = str(params.get("resourceType", ""))
         gate = self.site_gate
-        if (gate is not None and kind == "Document" and str(params.get("frameId", "")) in self._attached
-                and len(self.held) < MAX_HELD and not gate(str(request.get("url", "")))):
-            # A tab's own page (never a frame inside one) on a site the Pip hasn't visited for this user.
+        if (gate is not None and kind == "Document" and verb in READ_METHODS
+                and str(params.get("frameId", "")) in self._attached and not gate(str(request.get("url", "")))):
+            # A tab's own page (never a frame inside one) on a site the Pip hasn't visited for this user. A
+            # write to such a site is held below like any submit, with its fields; never as a "visit".
+            if len(self.held) >= MAX_HELD:
+                self._fire("Fetch.failRequest", {"requestId": request_id, "errorReason": "BlockedByClient"}, session)
+                return
             held = HeldWrite(request_id, session, verb, str(request.get("url", ""))[:2000], [], 0, time.time(), site=True)
             self.held[request_id] = held
             if self.on_write is not None:

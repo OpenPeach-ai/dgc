@@ -1311,12 +1311,6 @@ class PipStore:
                     # A Personal Pip's chat has no audit exceptions; an empty pin only told it not to keep notes.
                     if not (personal and memory.get("schema_version") == 1 and not memory.get("total_records")):
                         manifest["pip_memory"] = memory
-                if personal and run_kind in ("conversation", "personal_task"):
-                    # What it remembers about you (pip_notes), newest first, redacted as of now.
-                    from . import pip_notes
-                    notes = pip_notes.for_run(self.registry, pip_id, secret_values(frozen_config))
-                    if notes:
-                        manifest["pip_notes"] = notes
                 if run_kind in ("personal_task", "audit", "draft"):
                     from .pip_feedback import for_run as feedback_for_run
                     feedback = feedback_for_run(self.registry, pip_id, secret_values(frozen_config))
@@ -1604,7 +1598,9 @@ class PipStore:
                 validate_result_input(result, run["manifest"])
                 result_json = _json(result)
             else:
-                result_json = _json(result) if result else None
+                # Notes it kept are in pip_notes now; the run keeps no copy, so Forget leaves none.
+                kept = {k: v for k, v in result.items() if k != "memory_notes"} if isinstance(result, dict) else result
+                result_json = _json(kept) if kept else None
             self.db.execute("UPDATE pip_runs SET status=?,finished_at=?,result=?,error=? WHERE id=?",
                             (status, self.registry.clock(), result_json,
                              _json(error) if error else None, run_id))
@@ -2116,7 +2112,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_computer, pip_app_links, pip_plugins, pip_notes
     # It keeps notes about the user only in a reply to the user's own message: never in a routine's run or
     # a turn DGC wrote, whose text can carry an email or a page (pip_notes).
-    keeps_notes = (personal and conversation is not None and manifest.get('requested_by') in pip_notes.LOCAL
+    keeps_notes = (personal and conversation is not None and manifest.get('user_turn') is True
                    and isinstance(conversation.get('text'), str))
     # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
     computer_pin = manifest.get('computer_socket') if personal and kind in ('personal_task', 'conversation') else None
@@ -3019,7 +3015,22 @@ def _execute_run(registry, row, config):
         artifact_input(PipStore(registry), manifest["handoff"], manifest)
     if personal and 'handoff' in manifest:
         require_personal_handoff(PipStore(registry), manifest, config)
-    computer_socket = computer_host = None
+    if personal:
+        # What it remembers about you (pip_notes) and whether this is your own turn: for the worker only.
+        from . import pip_notes
+        from .redaction import secret_values as saved_secrets
+        manifest = pip_notes.runtime(registry, row, manifest, saved_secrets(config))
+    computer_socket = computer_host = taint = None
+    if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
+        # Careful mode remembers what every run of this Pip read from apps, with or without its computer:
+        # a routine's run reads mail now, and the user's next run could carry it to a page.
+        from . import pip_careful
+        taint = pip_careful.taint_for(registry.directory, row['pip_id'])
+        for reference in manifest.get('app_references') or []:
+            taint.add(str(reference.get('text', '')) if isinstance(reference, dict) else '')
+        conversation_turn = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
+        if row['requested_by'] in pip_careful.UNATTENDED and conversation_turn.get('text'):
+            taint.add(str(conversation_turn['text']))    # a routine's turn carries its app items
     if personal and manifest.get('computer') is not None and manifest.get('run_kind') in ('personal_task', 'conversation'):
         from . import pip_careful
         careful = pip_careful.is_on(registry, row['pip_id'])
@@ -3032,11 +3043,8 @@ def _execute_run(registry, row, config):
             from . import pip_computer
             computer_host = pip_computer.host_for(registry.directory, row['pip_id'], row['workspace_id'])
             conversation_pin = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
-            said = str(conversation_pin.get('text') or '') if row['requested_by'] in pip_careful.LOCAL else ''
-            for reference in manifest.get('app_references') or []:
-                computer_host.taint.add(str(reference.get('text', '')) if isinstance(reference, dict) else '')
-            if row['requested_by'] in pip_careful.UNATTENDED and conversation_pin.get('text'):
-                computer_host.taint.add(str(conversation_pin['text']))    # a routine's turn carries its app items
+            # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
+            said = str(conversation_pin.get('text') or '') if manifest.get('user_turn') is True else ''
             computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said,
                                 sites=pip_careful.known(registry, row['pip_id']) if careful else ())
             computer_socket = pip_computer.RunSocket(computer_host, row['id'])
@@ -3047,8 +3055,8 @@ def _execute_run(registry, row, config):
         # the worker reaches it through a socket only this run's token opens.
         from . import pip_app_links
         app_socket = pip_app_links.RunSocket(registry.directory, config, row['pip_id'], row['workspace_id'], row['id'])
-        if computer_host is not None:
-            app_socket.on_read = computer_host.taint.add      # what it reads from apps, for careful mode
+        if taint is not None:
+            app_socket.on_read = taint.add                     # what it reads from apps, for careful mode
         manifest = {**manifest, 'app_socket': app_socket.pin()}
     conversation_pin = manifest.get('conversation')
     if personal and isinstance(conversation_pin, dict) and conversation_pin.get('images'):

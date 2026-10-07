@@ -97,6 +97,8 @@ test('a malformed list is refused whole, never half-shown',()=>{
  assert.throws(()=>attention.attentionPage(page([item('email','maildraft_nothex',PIP,'x')])));
  assert.throws(()=>attention.attentionPage({...page([]),total:-1}));
  assert.throws(()=>attention.attentionPage(page([item('email',DRAFT,'pip_x','x')])));
+ // The CLI cuts text to 200 characters; an emoji is one of them, not two (one emoji refused the whole list).
+ assert.equal(attention.attentionPage(page([item('email',DRAFT,PIP,'Send?',{detail:'🎉'+'x'.repeat(199)})])).items.length,1);
  const ok=attention.attentionPage(page([item('setup',SETUP,null,'Create the Pip “Max”?')]));
  assert.deepEqual(attention.attentionNavigation(ok.items[0]),{setup:SETUP,workspace:PW});
  assert.deepEqual(attention.attentionNavigation(attention.attentionPage(page([item('app_action',ACTION,PIP,'Send?')])).items[0]),

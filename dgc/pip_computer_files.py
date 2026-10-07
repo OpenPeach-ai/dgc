@@ -436,8 +436,9 @@ def running(computer_root: Path) -> dict | None:
     return {"by": value["by"], "command": value["command"][:MAX_COMMAND_CHARS], "at": value["at"]}
 
 
-def run_command(computer_root: Path, command, by: str) -> dict:
-    """Run one command in the computer's Terminal, wait for it, and keep it in the history."""
+def run_command(computer_root: Path, command, by: str, *, policy=None) -> dict:
+    """Run one command in the computer's Terminal, wait for it, and keep it in the history. `policy`
+    (careful mode) narrows where its network may go."""
     command = _check(command, by)
     files = files_root(computer_root)
     if folder_bytes(files) > MAX_FOLDER_BYTES:
@@ -447,7 +448,7 @@ def run_command(computer_root: Path, command, by: str) -> dict:
         started, at = time.monotonic(), int(time.time())
         marker.write_text(json.dumps({"by": by, "command": command, "at": at}), encoding="utf-8")
         try:
-            code, text, timed_out, reached = _execute(files, command, computer_root)
+            code, text, timed_out, reached = _execute(files, command, computer_root, policy=policy)
         finally:
             try:
                 marker.unlink()

@@ -102,8 +102,12 @@ def _info(record, catalog) -> dict:
             "display_name": _text(record.get("display_name") or entry.get("display_name") or record["name"], 80),
             # A payment plugin by its installed record or by today's catalog: either one is enough.
             "money": "money" in (record.get("risk"), entry.get("risk")),
-            # Tools DGC reviewed as reads for a vendor that marks none (Aave): exact names, from DGC's catalog.
-            "reads": frozenset(r for r in entry.get("reviewed_reads") or [] if isinstance(r, str))}
+            # Tools DGC reviewed as reads for a vendor that marks none (Aave): exact names, from DGC's catalog,
+            # and only for the package DGC reviewed (its own catalog entry at the pinned commit), never for
+            # another package that merely calls itself "aave".
+            "reads": frozenset(r for r in entry.get("reviewed_reads") or [] if isinstance(r, str))
+                     if (record.get("marketplace") == "dgc-curated" and record.get("upstream") == entry.get("upstream")
+                         and record.get("source_pin") == entry.get("sha")) else frozenset()}
 
 
 def owner(server):
@@ -429,7 +433,9 @@ def read_only(row, info=None) -> bool:
     marks = marks if isinstance(marks, dict) else {}
     if marks.get("destructiveHint") is True:
         return False
-    return marks.get("readOnlyHint") is True or (isinstance(row, dict) and row.get("name") in ((info or {}).get("reads") or ()))
+    if marks.get("readOnlyHint") is not None:
+        return marks.get("readOnlyHint") is True        # the vendor said, either way: DGC's list never overrides it
+    return isinstance(row, dict) and row.get("name") in ((info or {}).get("reads") or ())
 
 
 def _first_sentence(text, limit=140):

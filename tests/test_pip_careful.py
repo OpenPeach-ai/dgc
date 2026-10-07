@@ -11,11 +11,21 @@ from tests import test_pips_local as fixtures
 
 class SiteTests(unittest.TestCase):
     def test_a_site_is_its_registrable_domain(self):
-        for host, site in (("www.amazon.in", "amazon.in"), ("shop.amazon.co.uk", "amazon.co.uk"), ("a.b.github.io", "b.github.io"),
+        for host, site in (("www.amazon.in", "amazon.in"), ("shop.amazon.co.uk", "amazon.co.uk"), ("a.b.github.io", "a.b.github.io"),
                            ("example.com", "example.com"), ("EXAMPLE.com.", "example.com"), ("192.168.1.5", "192.168.1.5"),
-                           ("[::1]", "::1"), ("my-app.vercel.app", "my-app.vercel.app")):
+                           ("[::1]", "::1"), ("my-app.vercel.app", "my-app.vercel.app"),
+                           # Shared hosting and user-content hosts are each their own site; so is an unlisted ccTLD's com level.
+                           ("mybucket.s3.amazonaws.com", "mybucket.s3.amazonaws.com"), ("app.appspot.com", "app.appspot.com"),
+                           ("script.google.com", "script.google.com"), ("shop.com.ua", "shop.com.ua"), ("www.site.co.th", "site.co.th")):
             with self.subTest(host=host):
                 self.assertEqual(careful.site_of(host), site)
+
+    def test_the_home_page_is_allowed_as_that_host_only(self):
+        self.assertTrue(careful.allowed("www.google.com", set()))
+        for host in ("script.google.com", "docs.google.com", "maps.google.com"):
+            with self.subTest(host=host):
+                self.assertFalse(careful.allowed(host, set()), "google.com as a whole is never pre-allowed")
+        self.assertFalse(careful.allowed("script.google.com", {"google.com"}), "a script anyone publishes is its own site")
 
     def test_a_look_alike_name_shows_its_real_form(self):
         self.assertEqual(careful.shown_host("example.com"), "example.com")
@@ -42,6 +52,26 @@ class TaintTests(unittest.TestCase):
         taint.allow("code 482913")
         self.assertEqual(taint.carried("code 482913"), [], "allowed once, the same text passes")
         self.assertTrue(taint.carried("the code is 482913"), "other text with it still asks")
+
+    def test_the_record_is_per_pip_on_disk_hashed_and_never_stops_recording(self):
+        import tempfile
+        from pathlib import Path
+        folder = Path(tempfile.mkdtemp())
+        first = careful.Taint(folder / "pip.json")
+        first.add(self.MAIL)
+        saved = (folder / "pip.json").read_text()
+        self.assertNotIn("482913", saved, "features are hashed, never the text")
+        self.assertEqual(oct((folder / "pip.json").stat().st_mode & 0o777), "0o600")
+        again = careful.Taint(folder / "pip.json")
+        self.assertTrue(again.carried("code 482913"), "a closed computer or a restarted runner forgets nothing")
+        again.allow_digest(careful._digest("code 482913"))
+        self.assertEqual(careful.Taint(folder / "pip.json").carried("code 482913"), [], "an Allow survives too")
+        with patch.object(careful, "MAX_TAINT_FEATURES", 50):
+            full = careful.Taint()
+            full.add(" ".join(f"word{i}" for i in range(400)))
+            full.add("the newest code 777123 arrived")
+            self.assertTrue(full.carried("777123"), "past the cap the oldest go, the newest still count")
+        self.assertIs(careful.taint_for(folder, "pip_x"), careful.taint_for(folder, "pip_x"))
 
 
 class CarefulStoreTests(unittest.TestCase):
@@ -84,7 +114,7 @@ class CarefulStoreTests(unittest.TestCase):
                                 "local-routine", self.cfg, _intro=True)
         self.assertTrue(routine["run"]["id"])
         sites = careful.known(self.registry, pip["id"])
-        self.assertTrue({"decathlon.in", "nike.com", "google.com"} <= sites, sites)
+        self.assertTrue({"decathlon.in", "nike.com"} <= sites, sites)
         self.assertNotIn("phish.example", sites, "a routine's turn (an email) never adds a site")
 
     def test_an_unattended_run_that_can_read_apps_gets_no_computer(self):
@@ -112,3 +142,20 @@ class CarefulStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_a_careful_hold_outlives_its_computer_and_allow_still_works(self):
+        pip = self.make()
+        summary = {"kind": "text", "method": "TYPE", "host": "shop.example", "path": "/", "fields": [{"name": "typed", "value": "x"}],
+                   "more_fields": 0, "body_bytes": 0, "text": "code 482913", "text_digest": careful._digest("code 482913")}
+        with self.registry.transaction():
+            self.registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",
+                                     ("compact_" + "t" * 32, pip["id"], pip["workspace_id"], None, "host_gone", "careful:x",
+                                      json.dumps(summary), pip_computer._digest(summary), None, "2026-10-08T00:00:00.000Z", "2099-01-01T00:00:00.000Z"))
+        pip_computer.tick(self.registry, self.cfg)
+        self.assertEqual(pip_computer.list_actions(self.registry, pip["id"])[0]["status"], "pending", "no computer needed to decide it")
+        careful.taint_for(self.registry.directory, pip["id"]).add("Your code is 482913.")
+        pip_computer.decide(self.registry, "compact_" + "t" * 32, pip_computer._digest(summary), True, "editor-user")
+        pip_computer.tick(self.registry, self.cfg)
+        self.assertEqual(pip_computer.list_actions(self.registry, pip["id"])[0]["status"], "sent")
+        self.assertEqual(careful.taint_for(self.registry.directory, pip["id"]).carried("code 482913"), [], "exactly that text, allowed once")
+

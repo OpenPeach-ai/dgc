@@ -85,3 +85,5 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-install code{font-family:var(--mono);font-size:12px;background:var(--surface);padding:2px 6px;border-radius:4px;user-select:all}
 .pc-hosts{margin:2px 0 0;font-size:11px;color:var(--vscode-descriptionForeground)}
 .pc-hosts.pc-blocked{color:var(--vscode-errorForeground,#f48771)}
+/* Careful mode: the whole text a hold would put on a page, exactly as it would go. */
+.pc-held-text{margin:6px 0 0;padding:6px 8px;max-height:9em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--vscode-editor-font-family,monospace);border-radius:6px;background:var(--vscode-textCodeBlock-background,rgba(127,127,127,.12))}

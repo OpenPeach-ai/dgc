@@ -297,3 +297,14 @@ test('Don’t add dismisses the calendar draft; without Google Calendar the card
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('dismiss_pip_calendar_draft').at(-1).request)),{type:'dismiss_pip_calendar_draft',draft_id:EVENT,expected_digest:'c'.repeat(64)});
 });
 
+test('editing a repeating event says it stays a series, and Add says invite only when guests are left',async()=>{
+ const series={...meet,attendees:['sam@example.test'],send_invitations:true,repeat:{frequency:'weekly',interval:1,count:4}};
+ const x=setup({links:[calendarLink()],events:[calDraft({payload:{schema_version:1,source,event:series}})]});await openChat(x);
+ assert.equal(x.d.querySelector(`[data-allow-create="${EVENT}"]`).textContent,'Add and invite');
+ x.click(`[data-card-edit-start="${EVENT}"]`);
+ assert.match(x.d.querySelector(`[data-allow-card="${EVENT}"]`).textContent,/Repeats 4 times, every week, as Gmail drafted it/);
+ const links=load(await bundle('pipAppLinks.js'));
+ const draft={id:EVENT,payload:{event:series}},edit={values:{summary:'s',start_datetime:'a',end_datetime:'b',timezone:'Asia/Kolkata',description:'',guests:''}};
+ assert.match(links.calendarCardMarkup(draft,{esc:s=>String(s),link:calendarLink(),edit}),/data-allow-create="[^"]+">Add event</,'no guests left, nobody is invited');
+});
+

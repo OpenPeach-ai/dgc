@@ -57,8 +57,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **What a Personal Pip remembers about you is yours to see and forget.** As it replies to your own
   message, a Personal Pip may keep a short note of something you told it (a new `remember` tool, three a
   reply at most): your name, who people are, what you like. A note that shares nothing with your message
-  is refused, so an email or a page it read can't plant one, and the tool isn't offered in a routine's
-  run or a turn DGC wrote. `list_pip_notes`, `add_pip_note` (`text`, up to 300 characters, no
+  is refused unless at least half its words, and any address or number in it, are the user's own, so an
+  email or a page it read can't plant one; the tool isn't offered in a routine's run or a turn DGC wrote
+  (DGC's hello included), and the supervisor checks each note again. Notes reach a run only as it starts
+  and are never saved with it, so Forget leaves no copy. `list_pip_notes`, `add_pip_note` (`text`, up to 300 characters, no
   credentials) and `forget_pip_note` (`note_id`, or `all: true`) are local only; Forget deletes the note.
   Its later chats and tasks get the newest notes as reference, redacted again at queue time; a Pip keeps
   60. Registry schema 44 (`pip_notes`). A Personal Pip's chat no longer pins an empty exceptions memory,
@@ -70,8 +72,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   an option it picks, an address it opens and a Terminal command are checked against what it read from
   your apps in the last day (emails, events, plugin answers); carrying any of it out waits for your
   Allow, once. A routine, schedule or event run of a Pip that can read your apps runs without its
-  computer. `list_pip_sites`, `set_pip_careful` (`on`) and `forget_pip_site` (`site`) are local only;
-  Always allow is refused for both kinds of hold. All checks run in the supervisor.
+  computer, and a careful run's Terminal reaches only the Pip's sites. The home page is allowed as its exact
+  host only (`www.google.com`, never `script.google.com`); hosts on shared hosting and user-content hosts
+  are each their own site. What it read is remembered per Pip, as hashed features on disk, across a closed
+  computer or a restart. A held text shows all of what Allow lets through. `list_pip_sites`,
+  `set_pip_careful` (`on`) and `forget_pip_site` (`site`) are local only; Always allow is refused for both
+  kinds of hold. All checks run in the supervisor.
 - **Editable drafts.** Nothing changes on the CLI side: `prepare_pip_message_draft`,
   `prepare_pip_calendar_draft` and `prepare_pip_connector_draft` already prepare the content you send
   (see the extension's notes).

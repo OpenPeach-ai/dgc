@@ -208,10 +208,9 @@ class Host:
         self.waiting = []          # action ids this run produced
         # Careful mode (pip_careful): what this Pip read from the user's apps in the last day, and, for
         # the run in progress, whether careful mode is on, the user's own message and the allowed sites.
-        from .pip_careful import Taint
-        self.taint = Taint()
+        from .pip_careful import taint_for
+        self.taint = taint_for(state_directory, pip_id)
         self.careful, self.said, self.sites = False, "", set()
-        self.texts = {}            # careful hold id -> the exact text it held (allowed once on approval)
 
     def _keep(self) -> None:
         while not self._closed.is_set():
@@ -333,14 +332,21 @@ class Host:
             self.last_used = time.monotonic()
 
     def _site_ok(self, url: str) -> bool:
-        from .pip_careful import site_of
+        from .pip_careful import allowed, site_of
         host = urlsplit(str(url or "")).hostname
         if not host:
             return True
-        site = site_of(host)
         if time.monotonic() - self.user_input_at <= USER_WRITE_SECONDS:
-            self.sites.add(site)             # the user's own click on its screen: their site
-        return site in self.sites
+            self.sites.add(site_of(host))    # the user's own click on its screen: their site
+        return allowed(host, self.sites)
+
+    def _terminal_policy(self):
+        """Careful mode: the Terminal reaches only the sites the Pip may visit (it can't ask, so it can't go
+        anywhere new; the command says it was refused)."""
+        from .pip_careful import allowed
+        from .pip_computer_box import public_addresses
+        sites = set(self.sites)
+        return lambda host, port, **kw: public_addresses(host, port, **kw) if allowed(host, sites) else []
 
     def _frame(self, label: str) -> str | None:
         if self.frames_dir is None or self.frames >= MAX_FRAMES_PER_RUN:
@@ -492,7 +498,7 @@ class Host:
 
     def _careful(self, op, args) -> str | None:
         """Careful mode, before a step runs: a new site, or text read from the user's apps, waits for them."""
-        from .pip_careful import shown_host, site_of
+        from .pip_careful import allowed, shown_host, site_of
         page = self.browser.current_url
         if op == "open":
             url = _safe_url(args.get("url"))
@@ -502,7 +508,7 @@ class Host:
                 return self._careful_hold("text", {"method": "OPEN", "host": parts.hostname or "", "path": (parts.path or "/")[:300],
                                                    "fields": [{"name": "address", "value": _preview(url)}]}, url, carried)
             site = site_of(parts.hostname or "")
-            if site not in self.sites:
+            if not allowed(parts.hostname or "", self.sites):
                 self._careful_hold("site", {"method": "GET", "host": parts.hostname or "", "path": (parts.path or "/")[:300],
                                             "fields": [], "site": site, "shown": shown_host(parts.hostname or ""), "page": url[:500]})
                 return SITE_HELD
@@ -526,6 +532,13 @@ class Host:
         summary = {"more_fields": 0, "body_bytes": 0, "page": self.browser.current_url[:500], **summary, "kind": kind}
         if carried:
             summary["read_from_apps"] = True
+        if text is not None:
+            from .pip_careful import MAX_HELD_TEXT, _digest as text_digest
+            if len(text) > MAX_HELD_TEXT:
+                return ("Not done: that is too long to carry what you read from the user's apps onto a page in careful "
+                        "mode. Tell the user what you wanted to put there.")
+            # The card shows all of it, and Allow lets exactly this text through, once.
+            summary.update(text=text, text_digest=text_digest(text))
         action_id, now = identifier("compact"), _now()
         expires = timestamp(_instant(now) + timedelta(seconds=ACTION_TTL_SECONDS))
         frame = self._frame("Waiting for your approval")
@@ -536,8 +549,6 @@ class Host:
                      json.dumps(summary, ensure_ascii=False), _digest(summary), frame, now, expires))
                 registry.event(self.workspace_id, "pip_computer_action_held", pip_id=self.pip_id, run_id=self.run_id,
                                payload={"action_id": action_id, "method": summary["method"], "host": summary["host"], "kind": kind})
-        if text is not None:
-            self.texts[action_id] = text
         self.waiting.append(action_id)
         if kind == "site":
             return SITE_HELD
@@ -561,13 +572,14 @@ class Host:
                 return f"Files/{listing['path']}:\n" + ("\n".join(rows) if rows else "(empty)")
             if op == "open_file":
                 return desk.read_for_pip(files, args.get("path"))
-            if getattr(self, "careful", False) and self.run_id is not None:
+            careful = getattr(self, "careful", False) and self.run_id is not None
+            if careful:
                 command = str(args.get("command") or "")
                 carried = self.taint.carried(command, self.said)
                 if carried:
                     return self._careful_hold("text", {"method": "RUN", "host": "Terminal", "path": "/",
                                                        "fields": [{"name": "command", "value": _preview(command)}]}, command, carried)
-            entry = desk.run_command(self.root, args.get("command"), "pip")
+            entry = desk.run_command(self.root, args.get("command"), "pip", policy=self._terminal_policy() if careful else None)
             from .tools import _UNTRUSTED_PAGE
             status = "timed out" if entry["timed_out"] else f"exit {entry['exit']}"
             return f"{_UNTRUSTED_PAGE}\n$ {entry['command']}\n({status})\n{entry['output']}"
@@ -583,13 +595,8 @@ class Host:
         with self.lock:
             ref = row["request_ref"]
             if ref.startswith(CAREFUL_REF):
-                # Nothing was sent: approving lets the Pip do it once (a site stays allowed), and it retries.
-                text = self.texts.pop(row["id"], None)
-                if row["status"] != "approved":
-                    return None
-                if text is not None:
-                    self.taint.allow(text)
-                return "sent"
+                # Nothing was paused: approving lets the Pip do it once (tick records the site or text), and it retries.
+                return "sent" if row["status"] == "approved" else None
             if ref not in self.browser.held:
                 return "lost"
             if row["status"] == "approved":
@@ -783,14 +790,16 @@ def tick(registry, config) -> dict:
     for row in rows:
         host = HOSTS.get(row["pip_id"])
         live = host is not None and host.id == row["host_id"]
+        careful = str(row["request_ref"]).startswith(CAREFUL_REF)     # nothing paused: no computer needed to decide
         if row["status"] == "pending":
-            if not live:
+            if not live and not careful:
                 with registry.transaction():
                     registry.db.execute("UPDATE pip_computer_actions SET status='lost',resolved_at=? WHERE id=? AND status='pending'",
                                         (_now(), row["id"]))
                 done["lost"] += 1
             elif _now() >= row["expires_at"]:
-                host.apply({**dict(row), "status": "rejected"})
+                if live:
+                    host.apply({**dict(row), "status": "rejected"})
                 with registry.transaction():
                     registry.db.execute("UPDATE pip_computer_actions SET status='expired',resolved_at=? WHERE id=? AND status='pending'",
                                         (_now(), row["id"]))
@@ -801,9 +810,12 @@ def tick(registry, config) -> dict:
                 host.apply(row)
                 done["rejected"] += 1
             continue
-        outcome = host.apply(row) if live else "lost"
+        outcome = host.apply(row) if live else "sent" if careful else "lost"
         continuation = None
         summary = json.loads(row["summary"])
+        if careful and summary.get("kind") == "text" and row["status"] == "approved" and summary.get("text_digest"):
+            from .pip_careful import taint_for
+            taint_for(registry.directory, row["pip_id"]).allow_digest(summary["text_digest"])
         if summary.get("kind") == "site" and row["status"] == "approved" and outcome in ("sent", "lost"):
             # Allowed for good, also when the page it held is gone: the Pip opens it again.
             from .pip_careful import add_site

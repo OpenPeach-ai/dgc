@@ -57,7 +57,7 @@ function waitingMarkup(){
  if(!waiting.length)return '';
  return `<section class="pc-waiting" aria-label="Waiting for you">${waiting.map(a=>{const words=carefulWords(a.summary,S.pip?.name||'The Pip');return words
    // Careful mode: a new site, or something it read from your apps; no Always allow for these.
-   ?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
+   ?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span>${a.summary.kind==='text'&&typeof a.summary.text==='string'?`<pre class="pc-held-text">${esc(a.summary.text)}</pre>`:''}</div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
    :`<article class="pc-hold"><div><strong>Send a form to ${esc(a.summary.host)}</strong><span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button><button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
 }
 function browserMarkup(){

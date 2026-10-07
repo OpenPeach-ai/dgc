@@ -224,3 +224,17 @@ test('Undo changes puts the card back as the Pip wrote it, and Allow then runs t
  assert.deepEqual(clean(x.requests('prepare_pip_connector_draft').at(-1).request.call),call);
 });
 
+test('edited inputs keep their kind exactly: plain decimals only, safe integers, own keys, first lines kept',async()=>{
+ const m=load(await bundle('pipPlugins.js'));
+ const args={amount:5,limit:10,note:'a',__proto__x:1};
+ const v=m.argumentValues(args);
+ assert.throws(()=>m.editedArguments(args,{...v,arg0:'0x10'}),/amount needs a number/);
+ assert.throws(()=>m.editedArguments(args,{...v,arg0:'1e999'}),/amount needs a number/);
+ assert.throws(()=>m.editedArguments(args,{...v,arg0:'9007199254740993'}),/too large to edit here exactly/);
+ assert.deepEqual(clean(m.editedArguments(args,{...v,arg0:' 2.5 '})),{amount:2.5,limit:10,note:'a',__proto__x:1});
+ const proto=JSON.parse('{"__proto__":"x","b":2}');
+ assert.equal(Object.hasOwn(m.editedArguments(proto,m.argumentValues(proto)),'__proto__'),true,'an input named __proto__ is kept');
+ const html=m.pluginActionMarkup({id:DRAFT,payload:{action:{server:'airtable',call:{tool:'t',arguments:{text:'\nfirst line\n'.repeat(1)+'x'.repeat(90)}}}}},{name:'Airtable',money:false},{esc:s=>String(s),edit:{values:{arg0:'\nstarts on a new line'}}});
+ assert.match(html,/<textarea[^>]*>\n\nstarts on a new line<\/textarea>/,'HTML drops one newline after <textarea>; one is always added');
+});
+

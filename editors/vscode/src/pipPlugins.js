@@ -6,7 +6,8 @@
 import { field, editButton, editError } from './pipAppLinks.js';
 
 const STATUSES = ['requested', 'allowed', 'declined'];
-const text = (v, max) => typeof v === 'string' && v.length <= max;
+// Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
+const text = (v, max) => typeof v === 'string' && (v.length <= max || [...v].length <= max);
 const SERVER = /^[A-Za-z0-9_.-]{1,80}$/;
 const RECENT_MS = 30 * 60 * 1000;
 
@@ -91,7 +92,7 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
   const args = a.call.arguments || {};
   return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${esc(`Run ${a.call.tool} in ${plugin.name}?`)}">`
     + head(esc, plugin.name, `Run ${esc(a.call.tool)} in ${esc(plugin.name)}?`, sub)
-    + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', f)).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : inputs(esc, args))
+    + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : inputs(esc, args))
     + editError(esc, edit)
     + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : 'Allow'}</button>${always}`
     + (Object.keys(args).length ? editButton(id, Boolean(edit), off) : '')
@@ -120,21 +121,28 @@ export function argumentValues(args) {
 }
 /** The inputs as the user left them; says which one to fix when one won't read. */
 export function editedArguments(args, values) {
-  const fields = argumentFields(args), out = {};
+  const fields = argumentFields(args), out = [];
   for (const f of fields) {
     const raw = String(values[f.name] ?? '');
-    if (f.kind === 'text') { out[f.key] = raw; continue; }
-    if (f.kind === 'number') { const n = Number(raw.trim()); if (!raw.trim() || !Number.isFinite(n)) throw new Error(`${f.key} needs a number.`); out[f.key] = n; continue; }
-    if (f.kind === 'boolean') { const b = raw.trim().toLowerCase(); if (b !== 'true' && b !== 'false') throw new Error(`${f.key} needs true or false.`); out[f.key] = b === 'true'; continue; }
+    if (f.kind === 'text') { out.push([f.key, raw]); continue; }
+    if (f.kind === 'number') {
+      // Plain decimal only: "0x10" or "1e999" is not quietly turned into another number.
+      const t = raw.trim(), n = Number(t);
+      if (!/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(t) || !Number.isFinite(n)) throw new Error(`${f.key} needs a number.`);
+      if (/^-?\d+$/.test(t) && !Number.isSafeInteger(n)) throw new Error(`${f.key} is too large to edit here exactly. Ask the Pip to change it.`);
+      out.push([f.key, n]); continue;
+    }
+    if (f.kind === 'boolean') { const b = raw.trim().toLowerCase(); if (b !== 'true' && b !== 'false') throw new Error(`${f.key} needs true or false.`); out.push([f.key, b === 'true']); continue; }
     let parsed;
     try { parsed = JSON.parse(raw); } catch { throw new Error(`${f.key === null ? 'The inputs' : f.key} aren’t valid JSON. Check the brackets and quotes.`); }
     if (f.key === null) {
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('The inputs need to be one JSON object.');
       return parsed;
     }
-    out[f.key] = parsed;
+    out.push([f.key, parsed]);
   }
-  return out;
+  // Own keys exactly as the Pip named them (an input called __proto__ included).
+  return Object.fromEntries(out);
 }
 
 /** The Pip's page: the plugins it may use, each taken back here. */

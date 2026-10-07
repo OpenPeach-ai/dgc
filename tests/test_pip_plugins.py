@@ -277,7 +277,12 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
 
     def test_a_tool_on_dgcs_reviewed_reads_runs_at_once_and_destructive_never_does(self):
         # Aave marks none of its tools read-only; DGC's catalog lists the ones it reviewed as reads.
-        with patch("dgc.plugins.load_catalog", return_value={"plugins": [{"name": "aave", "reviewed_reads": ["create_record", "clear_table"]}]}):
+        aave = {"name": "aave", "upstream": "https://github.com/aave/skills", "sha": "a" * 40}
+        catalog = {"plugins": [{**aave, "reviewed_reads": ["create_record", "clear_table", "list_records"]}]}
+        with patch("dgc.plugins.load_catalog", return_value=catalog), \
+             patch("dgc.plugins._installed", return_value=installed(("airtable", "Airtable", AIRTABLE, False), ("aave", "Aave", AAVE, True))
+                   [:1] + [{**installed(("aave", "Aave", AAVE, True))[0], "marketplace": "dgc-curated", "upstream": aave["upstream"],
+                            "source_pin": aave["sha"]}]):
             self.session.call(self.registry, "use_plugin", {"plugin": "aave", "why": "To check rates."})
             card = next(c for c in pip_plugins.listing(self.registry, self.pip_id, self.cfg)["plugins"] if c["plugin"] == "aave")
             pip_plugins.allow(self.registry, self.cfg, card["id"], self.pip_id, "editor-user")
@@ -401,3 +406,19 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ReviewedReadsTests(unittest.TestCase):
+    """DGC's reviewed reads apply only to the package DGC reviewed, and never override what a vendor marked."""
+
+    def test_only_the_reviewed_package_and_only_where_the_vendor_said_nothing(self):
+        info = pip_plugins._info({"name": "aave", "marketplace": "dgc-curated", "upstream": "u", "source_pin": "s"},
+                                 {"aave": {"name": "aave", "upstream": "u", "sha": "s", "reviewed_reads": ["get_markets"]}})
+        self.assertTrue(pip_plugins.read_only({"name": "get_markets"}, info))
+        self.assertFalse(pip_plugins.read_only({"name": "get_markets", "annotations": {"readOnlyHint": False}}, info),
+                         "a vendor's explicit 'not read-only' wins")
+        for record in ({"name": "aave", "marketplace": "personal", "upstream": "u", "source_pin": "s"},
+                       {"name": "aave", "marketplace": "dgc-curated", "upstream": "u", "source_pin": "other"}):
+            with self.subTest(record=record):
+                other = pip_plugins._info(record, {"aave": {"name": "aave", "upstream": "u", "sha": "s", "reviewed_reads": ["get_markets"]}})
+                self.assertFalse(pip_plugins.read_only({"name": "get_markets"}, other), "a package that only calls itself aave")
+

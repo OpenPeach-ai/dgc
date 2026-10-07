@@ -11,7 +11,8 @@ const ID = {email: /^maildraft_[a-f0-9]{32}$/, event: /^caldraft_[a-f0-9]{32}$/,
   setup: /^setup_[a-f0-9]{32}$/, computer_action: /^compact_[a-f0-9]{32}$/, computer_check: /^pip_[a-f0-9]{32}$/,
   routine: /^routine_[a-f0-9]{32}$/};
 const SHOWN = 6;
-const text = (v, max) => typeof v === 'string' && v.length <= max;
+// Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
+const text = (v, max) => typeof v === 'string' && (v.length <= max || [...v].length <= max);
 const PIP = /^pip_[a-f0-9]{32}$/, WORKSPACE = /^ws_[a-f0-9]{32}$/;
 
 export function attentionPage(value) {

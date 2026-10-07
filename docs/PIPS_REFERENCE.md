@@ -723,8 +723,12 @@ workspace_id, text ≤300, source chat|you, run_id, created_at)`. A Personal cha
 message (`requested_by` `editor-user` or `local-console`) has a `remember {note}` tool, three a reply; the
 worker refuses a note that shares no word (beyond common ones) with the user's message or holds a
 credential, and the reply's `memory_notes` are checked again and saved when it is committed (the same
-note twice is kept once; 60 per Pip, the oldest dropped). `conversation` and `personal_task` runs pin
-`pip_notes` (`[{note, kept}]`, newest first, ≤6 KB, redacted at queue time); the chat gets them as
+note twice is kept once; 60 per Pip, the oldest dropped). `conversation` and `personal_task` runs get
+`pip_notes` (`[{note, kept}]`, newest first, ≤6 KB, redacted as the run starts) from the supervisor, with
+`user_turn` (whether the chat turn is the user's own: requested locally, not a DGC-written key); neither is
+saved with the run, and a reply's `memory_notes` are dropped from its stored result, so Forget leaves no
+copy. A note is kept only when at least half its words, and every address, link or long number in it, are
+in the user's message (checked in the worker and again in the supervisor). The chat gets them as
 `user_notes` in its reference data with a notice that they are reference, may be out of date and grant
 nothing. Local-only commands: `list_pip_notes {pip_id}` → `{pip_id, notes: [{id, text, source, run_id,
 created_at}], max}`; `add_pip_note {pip_id, text}` (refused with `secret_note` when redaction would
@@ -732,17 +736,25 @@ change it) and `forget_pip_note {pip_id, note_id | all: true}` return the same. 
 
 **Careful mode** (`pip_careful`, a Personal Pip with a computer; on unless metadata
 `computer_careful_off:<pip>` exists): during a run, the supervisor's `Host` checks each step before it
-runs. `open` to a site (registrable domain, from a built-in suffix list; an IP is its own site) not in
-`computer_sites:<pip>`, the user's own chat messages (DGC's turns excluded) or the home page is recorded
+runs. `open` to a site (registrable domain, from a built-in suffix list; a host under shared hosting such as
+`amazonaws.com` or `github.io`, a user-content host such as `script.google.com`, an unlisted ccTLD's
+`com`/`co` level and an IP are each their own site) not in `computer_sites:<pip>` or the user's own chat
+messages (DGC's turns excluded), and not the home page's exact host (`www.google.com`, never all of
+`google.com`), is recorded
 as a pending `pip_computer_actions` row with `summary.kind: "site"` (`site`, `shown`: the host and its
 `xn--` form), and the browser's gate holds a tab's own page load (`Document` in a frame that is an
-attached target) on such a site the same way. `type`, `choose`, `open` and a Terminal `run` whose text
-carries features (email addresses, 6+ digit runs, 16+ character tokens, 5-word runs) of what the Pip
-read from apps in the last 24 hours (`read_app`, `call_plugin` and `plugin_answer` results,
-`app_references`, a routine's turn), less what the user's own message says, are recorded with
-`summary.kind: "text"` and `read_from_apps: true`. These holds pause nothing in the browser
-(`request_ref` `careful:<id>`): approving a site adds it to the Pip's sites, approving text allows that
-exact text once for 30 minutes, and the continuation tells the Pip to do it now.
+attached target, a read method only; a write to it is held as an ordinary submit, with its fields; with
+8 requests already held it fails) on such a site the same way. A Terminal command in a careful run reaches
+only the Pip's sites (its egress proxy refuses others). `type`, `choose`, `open` and a Terminal `run`
+whose text carries features (email addresses, 6+ digit runs, 16+ character tokens, 5-word runs) of what
+the Pip read from apps in the last 24 hours (`read_app`, `call_plugin` and `plugin_answer` results,
+`app_references`, a routine's turn; every run of the Pip, with or without its computer), less what the
+user's own message says, are recorded with `summary.kind: "text"`, `read_from_apps: true`, the whole
+`text` (up to 4,000 characters; longer is refused) and its `text_digest`. The record is per Pip, hashed
+features only, in `<state>/careful/<pip>.json` (owner-only), the oldest dropped past 200,000. These holds
+pause nothing in the browser (`request_ref` `careful:<id>`) and outlive a closed computer: approving a
+site adds it to the Pip's sites, approving text allows exactly that text once for 30 minutes, and the
+continuation tells the Pip to do it now.
 `always_allow_pip_computer_action` refuses them (`asks_once`, `asks_every_time`). A routine, schedule or
 event run (`local-routine`, `local-scheduler`, `local-event-trigger`) of a Pip with an `app_plan`, a
 connected app or an allowed plugin gets no computer socket and `computer_paused: true`. Local-only
