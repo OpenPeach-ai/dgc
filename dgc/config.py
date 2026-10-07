@@ -91,6 +91,11 @@ def _mcp_sensitive_name(value: object) -> bool:
             or any(normalized.endswith(suffix) for suffix in _MCP_SENSITIVE_NAME_SUFFIXES))
 
 
+# Query fields that look like credentials by name but are fixed, public switches in a vendor's
+# documented server address. AWS's MCP server starts OAuth only with ?oauth=initialize.
+_MCP_PUBLIC_QUERY = frozenset({("oauth", "initialize")})
+
+
 def mcp_url_has_credentials(value: object) -> bool:
     """Detect userinfo and credential-shaped query/fragment fields in a URL-like argument."""
     if not isinstance(value, str):
@@ -109,7 +114,8 @@ def mcp_url_has_credentials(value: object) -> bool:
                 *parse_qsl(parsed.fragment, keep_blank_values=True),
             )
             if bool(parsed.username or parsed.password) or any(
-                    _mcp_sensitive_name(key) for key, _item in parameters):
+                    _mcp_sensitive_name(key) and (key, _item) not in _MCP_PUBLIC_QUERY
+                    for key, _item in parameters):
                 return True
         except ValueError:
             return True
@@ -133,6 +139,15 @@ def persisted_mcp_args_safe(value: object) -> bool:
         normalized_prior = re.sub(r"[^a-z0-9]", "", prior_head.lstrip("-"))
         combined_env = bool(re.fullmatch(r"-e(?:=.*|[A-Za-z_][A-Za-z0-9_]*(?:=.*)?)", raw))
         combined_user = raw.startswith("-u") and len(raw) > 2 and ":" in raw[2:]
+        if lowered.startswith(("http://", "https://")):
+            # A server address is judged as a URL (its userinfo, query and fragment), not as a
+            # --name=value flag: "...mcp?oauth=initialize" is AWS's public switch, not a secret.
+            # The flag before it still counts (--token https://... is a credential).
+            if (mcp_url_has_credentials(raw) or prior == "--header" or prior_raw == "-H"
+                    or prior_head in _MCP_SECRET_FLAGS or normalized_prior in _MCP_SECRET_FLAG_NAMES
+                    or _mcp_sensitive_name(prior_head.lstrip("-"))):
+                return False
+            continue
         if (lowered.startswith("authorization:") or lowered == "--header"
                 or prior == "--header" or raw == "-H" or prior_raw == "-H"
                 or raw.startswith("-H")

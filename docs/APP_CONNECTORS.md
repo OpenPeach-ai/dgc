@@ -29,6 +29,75 @@ DGC checks the address before it saves a connection:
 When the editor runs DGC on another machine over SSH, loopback addresses refer to
 the machine that runs DGC, not the one showing the editor.
 
+## The vendors' own plugins
+
+**Settings → Plugins** also offers 41 plugins published by the services themselves: their
+hosted MCP server, and where the vendor publishes them under an open licence, their skills. Each
+is pinned to a reviewed version of the vendor's own package. Nothing runs on your computer
+except DGC's standard MCP bridge: there is no app to download.
+
+| Plugin | Category | Connecting |
+| --- | --- | --- |
+| Adobe Developer App Builder | Productivity | none needed |
+| Airtable | Productivity | browser sign-in |
+| Coda (Superhuman Docs) | Documents and Files | browser sign-in |
+| Craft | Documents and Files | browser sign-in |
+| Granola | Documents and Files | browser sign-in |
+| Read AI | Documents and Files | browser sign-in |
+| Mobbin | Design | browser sign-in |
+| Mural | Design | browser sign-in |
+| Refero | Design | browser sign-in |
+| Intercom | Customer Support | browser sign-in |
+| Plain | Customer Support | browser sign-in |
+| ActiveCampaign | Inbox and Collaboration | browser sign-in |
+| AgentMail | Inbox and Collaboration | browser sign-in |
+| Ando | Inbox and Collaboration | browser sign-in |
+| Brevo | Inbox and Collaboration | your key (MCP server token) |
+| Adspirer | Sales | browser sign-in |
+| Amplemarket | Sales | browser sign-in |
+| Apollo.io | Sales | browser sign-in |
+| Attio | Sales | browser sign-in |
+| Amplitude | Data Analytics | browser sign-in |
+| Antimetal | Data Analytics | browser sign-in |
+| Apify | Data Analytics | browser sign-in |
+| Astronomer | Data Analytics | browser sign-in |
+| Ahrefs | Research | browser sign-in |
+| Context.dev | Research | browser sign-in |
+| Crustdata | Research | browser sign-in |
+| Harmonic | Research | browser sign-in |
+| Agent Compatibility | MCP | none needed |
+| Aleph | MCP | browser sign-in |
+| Algolia | MCP | browser sign-in |
+| Amazon Location Service | Infrastructure | browser sign-in |
+| Appwrite | Infrastructure | browser sign-in |
+| AWS Amplify | Infrastructure | browser sign-in |
+| AWS Core | Infrastructure | browser sign-in |
+| Arize AX | Agent Orchestration | your key (MCP server token) |
+| Artie | Agent Orchestration | browser sign-in |
+| Atlan | Agent Orchestration | browser sign-in |
+| 1inch | Payments | no account for reading |
+| Aave | Payments | none needed |
+| Airwallex AgentOS | Payments | browser sign-in |
+| Airwallex Developer | Payments | browser sign-in |
+
+Every one was checked on 2026-10-07: DGC registered with the service and its sign-in link opened
+the service's own login page (Aave and 1inch listed their tools with no account; Brevo and Arize
+refused without a key, as they should). Signing in and the tools need your own account, and the
+plugin's page in Settings says exactly what was checked and what each service requires (some need
+a paid plan or an admin).
+
+DGC reads all four plugin formats vendors publish: Claude (`.claude-plugin`), Codex
+(`.codex-plugin`), Cursor (`.cursor-plugin`, with `mcp.json`) and the open Agent Plugins standard
+(`plugin.json` at the root). Skills are imported; host-specific parts (Cursor rules, commands,
+agents, hooks) are listed in the review and not imported.
+
+**Payments.** 1inch, Aave and Airwallex AgentOS can move real money (swaps, orders, payees and
+company cards). Treat every write as a real transaction; DGC asks before each one.
+
+Some services only let approved apps connect (Figma, Google Workspace, Microsoft 365, Zoom,
+Docusign, Asana, Vercel, Canva, Dropbox). They are not offered here yet; Composio reaches several
+of them through its own approved apps.
+
 ## Requirements
 
 - Your own account with the service, any plan it requires, and consent for each

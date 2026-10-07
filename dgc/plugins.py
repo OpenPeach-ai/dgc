@@ -167,11 +167,19 @@ def _copy_logo(source: Path, name: str) -> str:
     return ""
 
 
-def mcp_spec(url: str, bearer: str) -> dict:
+def mcp_spec(url: str, bearer: str, *, oauth_scope: str = "") -> dict:
+    args = ["-y", "mcp-remote", url]
+    if oauth_scope:
+        # A server that needs a scope at sign-in (Plain wants "openid offline_access", or it answers
+        # 403 after a sign-in that looked fine). The bridge uses this metadata instead of its default.
+        if not re.fullmatch(r"[A-Za-z0-9:._/ -]{1,200}", oauth_scope):
+            raise PluginError("Invalid OAuth scope")
+        args += ["--static-oauth-client-metadata",
+                 json.dumps({"client_name": "DGC", "client_uri": "https://vibedgc.com", "scope": oauth_scope})]
     spec = {
         "transport": "remote",
         "command": "npx",
-        "args": ["-y", "mcp-remote", url],
+        "args": args,
         "url": url,
         "env_names": [bearer] if bearer else [],
         "log_level": "warning",
@@ -235,8 +243,7 @@ def catalog_entry_for_url(url: str) -> dict | None:
 
 
 def _declared_license(root: Path) -> str:
-    manifest = (_package_json(root, '.codex-plugin/plugin.json') or
-                _package_json(root, '.claude-plugin/plugin.json') or _package_json(root, 'plugin.json'))
+    manifest = _manifest(root)
     declared = str(manifest.get('license') or '')
     if declared in ('MIT', 'Apache-2.0', 'Proprietary'): return declared
     for name in ('LICENSE', 'LICENSE.txt', 'LICENSE.md'):
@@ -251,7 +258,7 @@ def _declared_license(root: Path) -> str:
 
 def _plugin_name(root: Path, fallback: str) -> tuple[str, str]:
     display = fallback
-    for relative in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "plugin.json"):
+    for relative in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".cursor-plugin/plugin.json", "plugin.json"):
         file = root / relative
         if not file.is_file() or file.stat().st_size > 65536:
             continue
@@ -402,6 +409,20 @@ def _frontmatter_field(skill_md: Path, field: str) -> str:
         return ""
 
 
+# Every plugin format a vendor may ship, in the order DGC prefers them. The same package often
+# carries several (Claude, Codex, Cursor, and the open Agent Plugins standard at the root).
+MANIFESTS = (".codex-plugin/plugin.json", ".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", "plugin.json")
+MCP_FILES = (".mcp.json", "mcp.json")
+
+
+def _manifest(source: Path | None) -> dict:
+    for relative in MANIFESTS:
+        found = _package_json(source, relative)
+        if found:
+            return found
+    return {}
+
+
 def _package_json(source: Path | None, relative: str) -> dict:
     if source is None or not isinstance(relative, str):
         return {}
@@ -419,8 +440,7 @@ def _package_json(source: Path | None, relative: str) -> dict:
 
 
 def _package_metadata(source: Path | None) -> dict:
-    manifest = (_package_json(source, ".codex-plugin/plugin.json")
-                or _package_json(source, ".claude-plugin/plugin.json"))
+    manifest = _manifest(source)
     interface = manifest.get("interface", {})
     interface = interface if isinstance(interface, dict) else {}
     author = manifest.get("author", {})
@@ -441,15 +461,16 @@ def _package_metadata(source: Path | None) -> dict:
         "terms_url": text(interface.get("termsOfServiceURL") or interface.get("terms")),
         "privacy_url": text(interface.get("privacyPolicyURL") or interface.get("privacy")),
         "brand_color": text(interface.get("brandColor"), 32),
-        "package_logo": text(interface.get("logo"), 256),
+        "package_logo": text(interface.get("logo") or manifest.get("logo"), 256),
         "default_prompt": [text(p, 600) for p in prompts[:3] if isinstance(p, str)] if isinstance(prompts, list) else [],
     }
     app_file = manifest.get("apps") if isinstance(manifest.get("apps"), str) else ".app.json"
     apps = _package_json(source, app_file).get("apps", {})
     rows["apps"] = [{"id": text(name, 120), "name": text(value.get("displayName") or value.get("name") or (rows["display_name"] if len(apps) == 1 else name) or name, 120)}
                     for name, value in list(apps.items())[:32] if isinstance(value, dict)] if isinstance(apps, dict) else []
-    mcps = _package_json(source, ".mcp.json")
+    mcps = next((found for found in (_package_json(source, name) for name in MCP_FILES) if found), {})
     mcps = mcps.get("mcpServers") or mcps.get("mcp_servers") or mcps
+    mcps = {k: v for k, v in mcps.items() if k != "$schema"} if isinstance(mcps, dict) else {}
     rows["mcps"] = []
     for name, value in list(mcps.items())[:32]:
         if not isinstance(value, dict):
@@ -678,14 +699,22 @@ def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
 
 
 def _skill_files(source: Path) -> list[Path]:
-    manifest = _package_json(source, '.codex-plugin/plugin.json') or _package_json(source, '.claude-plugin/plugin.json')
+    manifest = _manifest(source)
     declared = manifest.get('skills', 'skills')
+    if not manifest and not (source / 'skills').is_dir() and any(source.glob('*/SKILL.md')):
+        # A package pinned at its skills folder (the rest of the repository has symlinks or a
+        # 23 MB logo that DGC will not fetch): the folder itself holds the skills.
+        declared = '.'
     paths = declared if isinstance(declared, list) else [declared]
     result = []
     for relative in paths:
         folder = sources.contained(source, relative)
-        if folder.is_file() and folder.name == 'SKILL.md': result.append(folder)
-        elif folder.is_dir(): result.extend(sorted(folder.rglob('SKILL.md')))
+        if folder.is_file() and folder.name == 'SKILL.md': found = [folder]
+        elif folder.is_dir(): found = sorted(folder.rglob('SKILL.md'))
+        else: found = []
+        # A manifest may name a folder and, again, folders inside it (Adobe's App Builder lists
+        # ./skills/ and three of its subfolders): one file is one skill, however often it is named.
+        result.extend(f for f in found if f not in result)
     if len(result) > 40: raise PluginError('A plugin can contain at most 40 skills')
     names = [_frontmatter_field(file, 'name') or file.parent.name for file in result]
     if len(names) != len(set(names)): raise PluginError('Plugin contains duplicate skill names')
@@ -697,11 +726,15 @@ def _skill_files(source: Path) -> list[Path]:
 
 
 def _read_server_specs(source: Path | None, entry: dict) -> dict:
-    if source is None:
+    if source is None or isinstance(entry.get('mcp_presets'), dict):
+        # A curated entry can set the package's servers: a vendor's file may name a per-account
+        # placeholder, a pasted key where sign-in works, or no server at all.
         declared = entry.get('mcp_presets', {})
     else:
-        manifest = _package_json(source, '.codex-plugin/plugin.json') or _package_json(source, '.claude-plugin/plugin.json')
-        declared = manifest.get('mcpServers', '.mcp.json')
+        manifest = _manifest(source)
+        declared = manifest.get('mcpServers')
+        if declared is None:
+            declared = next((name for name in MCP_FILES if sources.contained(source, name).is_file()), '.mcp.json')
         if isinstance(declared, str):
             path = sources.contained(source, declared)
             declared = sources.read_json(path, 65536) if path.is_file() else {}
@@ -709,6 +742,8 @@ def _read_server_specs(source: Path | None, entry: dict) -> dict:
             raise PluginError('Unsupported MCP declaration format')
         if not isinstance(declared, dict): raise PluginError('MCP declarations must be an object')
         declared = declared.get('mcpServers', declared.get('mcp_servers', declared))
+    if isinstance(declared, dict):
+        declared = {k: v for k, v in declared.items() if k != '$schema'}
     if not isinstance(declared, dict) or len(declared) > 16: raise PluginError('Plugin MCP declarations must contain at most 16 servers')
     result = {}
     for name, raw in declared.items():
@@ -726,6 +761,8 @@ def _read_server_specs(source: Path | None, entry: dict) -> dict:
             names.append(key)
         if raw.get('url'):
             if raw.get('type') == 'sse': raise PluginError('Legacy SSE packages require manual MCP configuration')
+            if raw.get('type') not in (None, 'http', 'streamable-http', 'streamableHttp'):
+                raise PluginError('Unsupported MCP transport ' + str(raw.get('type')))
             bearer = raw.get('bearer_token_env_var') or raw.get('auth_env') or ''
             headers = raw.get('headers', {})
             if headers:
@@ -733,7 +770,7 @@ def _read_server_specs(source: Path | None, entry: dict) -> dict:
                 match = re.fullmatch(r'Bearer \$\{([A-Za-z_][A-Za-z0-9_]{0,127})\}', str(auth or ''))
                 if not match or len(headers) != 1: raise PluginError('Inline MCP headers are not imported. Use an environment reference for a bearer token.')
                 bearer = match.group(1)
-            spec = mcp_spec(raw['url'], bearer)
+            spec = mcp_spec(raw['url'], bearer, oauth_scope=raw.get('oauth_scope', ''))
             spec['env_names'] = list(dict.fromkeys(spec['env_names'] + names))
         elif raw.get('command'):
             command, args = raw['command'], raw.get('args', [])
@@ -768,8 +805,8 @@ def _preview(entry: dict, source: Path | None) -> dict:
     warnings = []
     if source:
         sources.tree_files(source)
-        manifest = _package_json(source, '.codex-plugin/plugin.json') or _package_json(source, '.claude-plugin/plugin.json')
-        for kind in ('hooks', 'agents', 'commands', 'lspServers', 'outputStyles'):
+        manifest = _manifest(source)
+        for kind in ('hooks', 'agents', 'commands', 'rules', 'lspServers', 'outputStyles'):
             if manifest.get(kind) or (source / kind).exists():
                 warnings.append(f'{kind}: this host-specific component is not imported by DGC.')
         files = _skill_files(source)
@@ -887,7 +924,7 @@ def _review_external_license(entry, source):
             if parent == PLUGIN_HOME: break
     if license_id not in {'MIT', 'Apache-2.0'}:
         raise PluginError('This package has no reviewed MIT or Apache-2.0 license. DGC will not install it (' + (license_id or 'no license declared') + ').')
-    manifest = _package_json(source, '.codex-plugin/plugin.json') or _package_json(source, '.claude-plugin/plugin.json')
+    manifest = _manifest(source)
     if 'github.com/openai/' in entry.get('upstream','').lower() and manifest.get('name') in {'openai-templates','plugin-management','product-design'}:
         raise PluginError('This OpenAI package is not imported. DGC uses its own templates and Plugin Management.')
     return {**entry, 'license':license_id, 'install':'allow', 'review_license':False}

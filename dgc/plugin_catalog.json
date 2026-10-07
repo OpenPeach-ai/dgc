@@ -620,6 +620,1238 @@
     "mcps": []
    },
    "cloud_execution": true
+  },
+  {
+   "name": "airtable",
+   "display_name": "Airtable",
+   "summary": "Read and update your Airtable bases. Browser sign-in.",
+   "developer": "Airtable",
+   "category": "Productivity",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://airtable.com/developers/agents/mcp/getting-started",
+   "requirements": "An Airtable account (all plans). Enterprise Scale admins can block MCP access or allow listed apps only.",
+   "verification": "Checked 2026-10-07: DGC registers with Airtable and its sign-in link opens Airtable's own login page. 8 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/Airtable/skills",
+   "sha": "812ee67f1fd3d76fb45ff8df40afaa0448602ba8",
+   "path": "plugins/airtable",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://www.airtable.com/company/tos",
+   "privacy_url": "https://www.airtable.com/company/privacy"
+  },
+  {
+   "name": "adobe-app-builder",
+   "display_name": "Adobe Developer App Builder",
+   "summary": "Skills to create, test and ship Adobe App Builder apps with the aio CLI.",
+   "developer": "Adobe",
+   "category": "Productivity",
+   "install": "allow",
+   "auth": "none",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://developer.adobe.com/app-builder/docs/get_started/app_builder_get_started/ai-development-tools",
+   "requirements": "A purchased App Builder licence, a Developer or System Admin role, Node 18 or 20 and @adobe/aio-cli (aio login).",
+   "verification": "Checked 2026-10-07: its 10 skills install. It has no connection to sign in to.",
+   "cloud_execution": false,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/adobe/skills",
+   "sha": "05ab1756a0c3091476c3dda88f6c3bb825398e86",
+   "path": "plugins/app-builder",
+   "license": "Apache-2.0",
+   "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+  },
+  {
+   "name": "coda",
+   "display_name": "Coda (Superhuman Docs)",
+   "summary": "Search, read and update your Coda docs. Browser sign-in.",
+   "developer": "Superhuman",
+   "category": "Documents And Files",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://help.superhuman.com/hc/en-us/articles/46210076980365-Connect-to-the-Superhuman-Docs-MCP",
+   "requirements": "A Coda account. Paid Doc Makers get the full MCP; free plans and Editors get 30 requests a week.",
+   "verification": "Checked 2026-10-07: DGC registers with Coda (Superhuman Docs) and its sign-in link opens Coda (Superhuman Docs)'s own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://help.superhuman.com/hc/en-us/articles/46210076980365-Connect-to-the-Superhuman-Docs-MCP",
+   "license": "Superhuman service terms",
+   "license_url": "https://superhuman.com/legal/terms",
+   "mcp_presets": {
+    "coda": {
+     "url": "https://docs.superhuman.com/apis/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Coda (Superhuman Docs)",
+    "developer": "Superhuman",
+    "category": "Documents And Files",
+    "long_summary": "Search, read and update your Coda docs. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "coda",
+      "url": "https://docs.superhuman.com/apis/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://superhuman.com/legal/terms",
+   "privacy_url": "https://superhuman.com/legal/privacy-policy"
+  },
+  {
+   "name": "craft",
+   "display_name": "Craft",
+   "summary": "Search, create and update Craft documents and daily notes. Browser sign-in.",
+   "developer": "Craft",
+   "category": "Documents And Files",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://support.craft.do/en/integrate/mcp",
+   "requirements": "A Craft account. You choose the space when you approve.",
+   "verification": "Checked 2026-10-07: DGC registers with Craft and its sign-in link opens Craft's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://support.craft.do/en/integrate/mcp",
+   "license": "Craft service terms",
+   "license_url": "https://www.craft.do/terms",
+   "mcp_presets": {
+    "craft": {
+     "url": "https://mcp.craft.do/my/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Craft",
+    "developer": "Craft",
+    "category": "Documents And Files",
+    "long_summary": "Search, create and update Craft documents and daily notes. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "craft",
+      "url": "https://mcp.craft.do/my/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.craft.do/terms",
+   "privacy_url": "https://www.craft.do/privacy"
+  },
+  {
+   "name": "read-ai",
+   "display_name": "Read AI",
+   "summary": "Your Read AI meeting reports and transcripts. Browser sign-in.",
+   "developer": "Read AI",
+   "category": "Documents And Files",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://support.read.ai/hc/en-us/articles/49381158409491-MCP-Server",
+   "requirements": "A Read AI account (all plans; open beta). 100 requests a minute.",
+   "verification": "Checked 2026-10-07: DGC registers with Read AI and gets its sign-in link, but Read AI's sign-in page did not answer from our test machine. Sign-in not verified.",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://support.read.ai/hc/en-us/articles/49381158409491-MCP-Server",
+   "license": "Read AI service terms",
+   "license_url": "https://www.read.ai/termsofservice",
+   "mcp_presets": {
+    "read-ai": {
+     "url": "https://api.read.ai/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Read AI",
+    "developer": "Read AI",
+    "category": "Documents And Files",
+    "long_summary": "Your Read AI meeting reports and transcripts. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "read-ai",
+      "url": "https://api.read.ai/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.read.ai/termsofservice",
+   "privacy_url": "https://www.read.ai/privacy-policy"
+  },
+  {
+   "name": "granola",
+   "display_name": "Granola",
+   "summary": "Your Granola meeting notes. Browser sign-in.",
+   "developer": "Granola",
+   "category": "Documents And Files",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.granola.ai/help-center/sharing/integrations/mcp",
+   "requirements": "A Granola account. Free: your notes from the last 30 days. Business: everything. Enterprise: an admin turns MCP on.",
+   "verification": "Checked 2026-10-07: DGC registers with Granola and its sign-in link opens Granola's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://docs.granola.ai/help-center/sharing/integrations/mcp",
+   "license": "Granola service terms",
+   "license_url": "https://docs.granola.ai/help-center/policies/terms-of-service/platform-terms-of-service",
+   "mcp_presets": {
+    "granola": {
+     "url": "https://mcp.granola.ai/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Granola",
+    "developer": "Granola",
+    "category": "Documents And Files",
+    "long_summary": "Your Granola meeting notes. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "granola",
+      "url": "https://mcp.granola.ai/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://docs.granola.ai/help-center/policies/terms-of-service/platform-terms-of-service",
+   "privacy_url": "https://docs.granola.ai/help-center/policies/privacy-policy"
+  },
+  {
+   "name": "mobbin",
+   "display_name": "Mobbin",
+   "summary": "Search real app screens and flows on Mobbin. Browser sign-in.",
+   "developer": "Mobbin",
+   "category": "Design",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.mobbin.com/mcp",
+   "requirements": "A Mobbin Pro, Team or Enterprise plan. 60 requests a minute.",
+   "verification": "Checked 2026-10-07: DGC registers with Mobbin and its sign-in link opens Mobbin's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://docs.mobbin.com/mcp",
+   "license": "Mobbin service terms",
+   "license_url": "https://mobbin.com/terms",
+   "mcp_presets": {
+    "mobbin": {
+     "url": "https://api.mobbin.com/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Mobbin",
+    "developer": "Mobbin",
+    "category": "Design",
+    "long_summary": "Search real app screens and flows on Mobbin. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "mobbin",
+      "url": "https://api.mobbin.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://mobbin.com/terms",
+   "privacy_url": "https://mobbin.com/privacy"
+  },
+  {
+   "name": "refero",
+   "display_name": "Refero",
+   "summary": "Research real product interfaces on Refero while you design. Browser sign-in.",
+   "developer": "Refero",
+   "category": "Design",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://doc.refero.design/mcp/getting-started",
+   "requirements": "A paid Refero plan (Pro, Team or Lifetime).",
+   "verification": "Checked 2026-10-07: DGC registers with Refero and its sign-in link opens Refero's own login page. 1 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/referodesign/refero_skill",
+   "sha": "a9b54a3e62a6391f5f5ab7a20e4ddb32fb79a27d",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://doc.refero.design/legal/terms-of-use",
+   "privacy_url": "https://doc.refero.design/legal/privacy-policy"
+  },
+  {
+   "name": "mural",
+   "display_name": "Mural",
+   "summary": "Create, read and edit Mural boards. Browser sign-in.",
+   "developer": "Mural",
+   "category": "Design",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://www.mural.co/ai/mcp",
+   "requirements": "A paid Mural plan (public preview). An org admin can limit which apps connect.",
+   "verification": "Checked 2026-10-07: DGC registers with Mural and its sign-in link opens Mural's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://www.mural.co/ai/mcp",
+   "license": "Mural service terms",
+   "license_url": "https://www.mural.co/terms/terms-of-service",
+   "mcp_presets": {
+    "mural": {
+     "url": "https://mcp-canvas.mural.co/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Mural",
+    "developer": "Mural",
+    "category": "Design",
+    "long_summary": "Create, read and edit Mural boards. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "mural",
+      "url": "https://mcp-canvas.mural.co/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.mural.co/terms/terms-of-service",
+   "privacy_url": "https://www.mural.co/terms/privacy-statement"
+  },
+  {
+   "name": "intercom",
+   "display_name": "Intercom",
+   "summary": "Search Intercom conversations, contacts and Help Center articles. Browser sign-in.",
+   "developer": "Intercom",
+   "category": "Customer Support",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://developers.intercom.com/docs/guides/mcp",
+   "requirements": "An Intercom workspace hosted in the US. EU workspaces use https://mcp.eu.intercom.com/mcp; AU is not supported.",
+   "verification": "Checked 2026-10-07: DGC registers with Intercom and its sign-in link opens Intercom's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://developers.intercom.com/docs/guides/mcp",
+   "license": "Intercom service terms",
+   "license_url": "https://www.intercom.com/legal/terms-and-policies",
+   "mcp_presets": {
+    "intercom": {
+     "url": "https://mcp.intercom.com/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Intercom",
+    "developer": "Intercom",
+    "category": "Customer Support",
+    "long_summary": "Search Intercom conversations, contacts and Help Center articles. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "intercom",
+      "url": "https://mcp.intercom.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.intercom.com/legal/terms-and-policies",
+   "privacy_url": "https://www.intercom.com/legal/privacy"
+  },
+  {
+   "name": "plain",
+   "display_name": "Plain",
+   "summary": "Manage Plain support threads, customers and help articles. Browser sign-in.",
+   "developer": "Plain",
+   "category": "Customer Support",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://www.plain.com/docs/agents/mcp-server",
+   "requirements": "A Plain workspace.",
+   "verification": "Checked 2026-10-07: DGC registers with Plain and its sign-in link opens Plain's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://www.plain.com/docs/agents/mcp-server",
+   "license": "Plain service terms",
+   "license_url": "https://www.plain.com/legal/terms-and-conditions",
+   "mcp_presets": {
+    "plain": {
+     "url": "https://mcp.plain.com/mcp",
+     "oauth_scope": "openid offline_access"
+    }
+   },
+   "metadata": {
+    "display_name": "Plain",
+    "developer": "Plain",
+    "category": "Customer Support",
+    "long_summary": "Manage Plain support threads, customers and help articles. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "plain",
+      "url": "https://mcp.plain.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.plain.com/legal/terms-and-conditions",
+   "privacy_url": "https://www.plain.com/legal/privacy-policy"
+  },
+  {
+   "name": "activecampaign",
+   "display_name": "ActiveCampaign",
+   "summary": "Contacts, campaigns, automations and deals in ActiveCampaign. Browser sign-in.",
+   "developer": "ActiveCampaign",
+   "category": "Inbox And Collaboration",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://developers.activecampaign.com/page/mcp",
+   "requirements": "An ActiveCampaign account; an account admin connects it. Branding must be turned on for the MCP option.",
+   "verification": "Checked 2026-10-07: DGC registers with ActiveCampaign and its sign-in link opens ActiveCampaign's own login page. 6 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/ActiveCampaign/activecampaign-plugin",
+   "sha": "c00f8f724fc4cd8a1f8aeb00951f9b3b95834991",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "mcp_presets": {
+    "activecampaign": {
+     "url": "https://mcp.app-us1.com/http"
+    }
+   },
+   "terms_url": "https://www.activecampaign.com/legal/terms-of-service",
+   "privacy_url": "https://www.activecampaign.com/legal/privacy-policy"
+  },
+  {
+   "name": "agentmail",
+   "display_name": "AgentMail",
+   "summary": "Email inboxes for agents: create inboxes, send and receive. Browser sign-in.",
+   "developer": "AgentMail",
+   "category": "Inbox And Collaboration",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.agentmail.to/integrations/mcp",
+   "requirements": "An AgentMail account (free tier: 3 inboxes, 3,000 emails a month).",
+   "verification": "Checked 2026-10-07: DGC registers with AgentMail and its sign-in link opens AgentMail's own login page. 9 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/agentmail-to/agentmail-plugins",
+   "sha": "aebd7653dcb868c624330a05cc1717327fa8f271",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://www.agentmail.to/legal/terms",
+   "privacy_url": "https://www.agentmail.to/legal/privacy"
+  },
+  {
+   "name": "ando",
+   "display_name": "Ando",
+   "summary": "Ando, the team messaging app for people and agents. Browser sign-in.",
+   "developer": "Ando",
+   "category": "Inbox And Collaboration",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.ando.so/docs/ando-mcp",
+   "requirements": "An Ando workspace (waitlist). DGC signs in as you, a member of the workspace.",
+   "verification": "Checked 2026-10-07: DGC registers with Ando and its sign-in link opens Ando's own login page. 1 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/Ando-Corporation/ando-grok-plugin",
+   "sha": "4ca4690ba4b99af59798ab88aa3b9b3cba53f05b",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://www.ando.so/security/terms-of-service",
+   "privacy_url": "https://www.ando.so/security/privacy-policy"
+  },
+  {
+   "name": "brevo",
+   "display_name": "Brevo",
+   "summary": "Brevo contacts, email and SMS campaigns, and CRM deals. Uses a Brevo MCP key.",
+   "developer": "Brevo",
+   "category": "Inbox And Collaboration",
+   "install": "allow",
+   "auth": "pat",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://developers.brevo.com/docs/mcp-protocol",
+   "requirements": "A Brevo account and an MCP server API key (Settings → SMTP & API → API Keys & MCP → Create MCP server API key). Save it as this server's token. The key has full access.",
+   "verification": "Checked 2026-10-07: the server refuses without a key, as it should; add your key to connect.",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://developers.brevo.com/docs/mcp-protocol",
+   "license": "Brevo service terms",
+   "license_url": "https://www.brevo.com/legal/termsofuse/",
+   "mcp_presets": {
+    "brevo": {
+     "url": "https://mcp.brevo.com/v1/brevo/mcp",
+     "bearer_token_env_var": "BREVO_MCP_TOKEN"
+    }
+   },
+   "metadata": {
+    "display_name": "Brevo",
+    "developer": "Brevo",
+    "category": "Inbox And Collaboration",
+    "long_summary": "Brevo contacts, email and SMS campaigns, and CRM deals. Uses a Brevo MCP key.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "brevo",
+      "url": "https://mcp.brevo.com/v1/brevo/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.brevo.com/legal/termsofuse/",
+   "privacy_url": "https://www.brevo.com/legal/privacypolicy/"
+  },
+  {
+   "name": "adspirer",
+   "display_name": "Adspirer",
+   "summary": "Create and analyse ad campaigns across Google, Meta, TikTok and LinkedIn Ads. Browser sign-in.",
+   "developer": "Adspirer",
+   "category": "Sales",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://www.adspirer.com/docs/mcp",
+   "requirements": "An Adspirer account (free: 15 tool calls a month) with your ad accounts connected.",
+   "verification": "Checked 2026-10-07: DGC registers with Adspirer and its sign-in link opens Adspirer's own login page. 14 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/Adspirer/adspirer-cursor-plugin",
+   "sha": "4fbb82736f04d4a63341da7b8310a9e15be026a0",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://www.adspirer.com/terms",
+   "privacy_url": "https://www.adspirer.com/privacy"
+  },
+  {
+   "name": "amplemarket",
+   "display_name": "Amplemarket",
+   "summary": "Search people and companies, enrich leads and run sequences. Browser sign-in.",
+   "developer": "Amplemarket",
+   "category": "Sales",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://knowledge.amplemarket.com/articles/8022685319-connecting-to-the-amplemarket-mcp-server",
+   "requirements": "An Amplemarket account. Enrichment uses credits. 100 requests a minute.",
+   "verification": "Checked 2026-10-07: DGC registers with Amplemarket and its sign-in link opens Amplemarket's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://knowledge.amplemarket.com/articles/8022685319-connecting-to-the-amplemarket-mcp-server",
+   "license": "Amplemarket service terms",
+   "license_url": "https://www.amplemarket.com/legal/terms",
+   "mcp_presets": {
+    "amplemarket": {
+     "url": "https://mcp.amplemarket.com/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Amplemarket",
+    "developer": "Amplemarket",
+    "category": "Sales",
+    "long_summary": "Search people and companies, enrich leads and run sequences. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "amplemarket",
+      "url": "https://mcp.amplemarket.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.amplemarket.com/legal/terms",
+   "privacy_url": "https://www.amplemarket.com/legal/privacy"
+  },
+  {
+   "name": "apollo",
+   "display_name": "Apollo.io",
+   "summary": "Prospect, enrich leads and load sequences in Apollo. Browser sign-in.",
+   "developer": "Apollo.io",
+   "category": "Sales",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.apollo.io/docs/apollo-mcp",
+   "requirements": "An Apollo account. Apollo forbids training models on its data: turn training off with your model provider. Free accounts on personal email domains can't search.",
+   "verification": "Checked 2026-10-07: DGC registers with Apollo.io and its sign-in link opens Apollo.io's own login page. 5 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/apolloio/apollo-mcp-plugin",
+   "sha": "bd0513c961f02105492fcff0d7d29c9cccf1ed23",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://www.apollo.io/terms",
+   "privacy_url": "https://www.apollo.io/privacy-policy"
+  },
+  {
+   "name": "attio",
+   "display_name": "Attio",
+   "summary": "Search and update Attio CRM records, lists, notes and tasks. Browser sign-in.",
+   "developer": "Attio",
+   "category": "Sales",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.attio.com/mcp/overview",
+   "requirements": "An Attio workspace.",
+   "verification": "Checked 2026-10-07: DGC registers with Attio and its sign-in link opens Attio's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://docs.attio.com/mcp/overview",
+   "license": "Attio service terms",
+   "license_url": "https://attio.com/legal/services-agreement",
+   "mcp_presets": {
+    "attio": {
+     "url": "https://mcp.attio.com/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Attio",
+    "developer": "Attio",
+    "category": "Sales",
+    "long_summary": "Search and update Attio CRM records, lists, notes and tasks. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "attio",
+      "url": "https://mcp.attio.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://attio.com/legal/services-agreement",
+   "privacy_url": "https://attio.com/legal/privacy"
+  },
+  {
+   "name": "amplitude",
+   "display_name": "Amplitude",
+   "summary": "Analyse product data and instrument analytics with Amplitude. Browser sign-in.",
+   "developer": "Amplitude",
+   "category": "Data Analytics",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://amplitude.com/docs/amplitude-ai/amplitude-mcp",
+   "requirements": "An Amplitude account. Writes need the Use MCP (write) permission; an admin can turn MCP off.",
+   "verification": "Checked 2026-10-07: DGC registers with Amplitude and its sign-in link opens Amplitude's own login page. 37 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/amplitude/mcp-marketplace",
+   "sha": "e61691f81196cfd9f4314a347f6d2b1c6106f780",
+   "path": "plugins/amplitude",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://amplitude.com/terms",
+   "privacy_url": "https://amplitude.com/privacy"
+  },
+  {
+   "name": "antimetal",
+   "display_name": "Antimetal",
+   "summary": "Investigate and fix production issues with Antimetal. Browser sign-in.",
+   "developer": "Antimetal",
+   "category": "Data Analytics",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.antimetal.com/connect",
+   "requirements": "An Antimetal account with your cloud and observability tools connected.",
+   "verification": "Checked 2026-10-07: DGC registers with Antimetal and its sign-in link opens Antimetal's own login page. 3 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/antimetal/skills",
+   "sha": "3a8e8835b7894cf32b3f6d738a8dc616545f478f",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://antimetal.com/terms",
+   "privacy_url": "https://antimetal.com/privacy"
+  },
+  {
+   "name": "apify",
+   "display_name": "Apify",
+   "summary": "Web scraping and data extraction with Apify Actors. Browser sign-in.",
+   "developer": "Apify",
+   "category": "Data Analytics",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.apify.com/integrations/mcp",
+   "requirements": "An Apify account (free plan includes $5 of usage a month).",
+   "verification": "Checked 2026-10-07: DGC registers with Apify and its sign-in link opens Apify's own login page. 5 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/apify/apify-cursor-plugin",
+   "sha": "e58e8b81850e2725d89ef08c9dfc6d8e33c060c0",
+   "path": "apify",
+   "license": "Apache-2.0",
+   "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+   "mcp_presets": {
+    "apify": {
+     "url": "https://mcp.apify.com"
+    }
+   },
+   "terms_url": "https://docs.apify.com/legal/general-terms-and-conditions",
+   "privacy_url": "https://docs.apify.com/legal/privacy-policy"
+  },
+  {
+   "name": "astronomer",
+   "display_name": "Astronomer",
+   "summary": "Airflow and Astro skills, and the Astro control plane over MCP. Browser sign-in.",
+   "developer": "Astronomer",
+   "category": "Data Analytics",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://www.astronomer.io/docs/astro/astro-mcp-server",
+   "requirements": "An Astro account. The hosted Astro MCP is a Labs feature: ask your Astronomer account team to turn it on. The skills work with any Airflow.",
+   "verification": "Checked 2026-10-07: DGC registers with Astronomer and its sign-in link opens Astronomer's own login page. 34 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/astronomer/agents",
+   "sha": "1ec1a1fa00efadd58037fc8bff4e06e707139fc5",
+   "path": "skills",
+   "license": "Apache-2.0",
+   "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+   "mcp_presets": {
+    "astro": {
+     "url": "https://api.astronomer.io/v1alpha1/astro/mcp"
+    }
+   },
+   "terms_url": "https://www.astronomer.io/legal/terms-of-service/",
+   "privacy_url": "https://www.astronomer.io/privacy/"
+  },
+  {
+   "name": "ahrefs",
+   "display_name": "Ahrefs",
+   "summary": "Keywords, backlinks, rankings and site health from Ahrefs. Browser sign-in.",
+   "developer": "Ahrefs",
+   "category": "Research",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.ahrefs.com/docs/mcp/introduction",
+   "requirements": "An Ahrefs Lite plan or higher (API units are shared with the API).",
+   "verification": "Checked 2026-10-07: DGC registers with Ahrefs and its sign-in link opens Ahrefs's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://docs.ahrefs.com/docs/mcp/introduction",
+   "license": "Ahrefs service terms",
+   "license_url": "https://ahrefs.com/legal/terms",
+   "mcp_presets": {
+    "ahrefs": {
+     "url": "https://api.ahrefs.com/mcp/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Ahrefs",
+    "developer": "Ahrefs",
+    "category": "Research",
+    "long_summary": "Keywords, backlinks, rankings and site health from Ahrefs. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "ahrefs",
+      "url": "https://api.ahrefs.com/mcp/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://ahrefs.com/legal/terms",
+   "privacy_url": "https://ahrefs.com/legal/privacy-policy"
+  },
+  {
+   "name": "context-dev",
+   "display_name": "Context.dev",
+   "summary": "Search, scrape, crawl and extract the live web with Context.dev. Browser sign-in.",
+   "developer": "Context.dev",
+   "category": "Research",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.context.dev/install-mcp",
+   "requirements": "A Context.dev account (free: 1,000 credits a month with a work email).",
+   "verification": "Checked 2026-10-07: DGC registers with Context.dev and its sign-in link opens Context.dev's own login page. 11 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/context-dot-dev/cursor-plugin",
+   "sha": "8d790a4980d2ce49827843bdf1e9683b6d55fa2b",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://www.context.dev/term",
+   "privacy_url": "https://www.context.dev/privacy"
+  },
+  {
+   "name": "crustdata",
+   "display_name": "Crustdata",
+   "summary": "Live B2B data on people and companies from Crustdata. Browser sign-in.",
+   "developer": "Crustdata",
+   "category": "Research",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.crustdata.com/for-agents/mcp",
+   "requirements": "A Crustdata account with API credits.",
+   "verification": "Checked 2026-10-07: DGC registers with Crustdata and its sign-in link opens Crustdata's own login page. 9 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/crustdata/skills",
+   "sha": "5a11ac2eaac9ddd9f509fcf1d22ee98217031956",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://crustdata.com/terms",
+   "privacy_url": "https://crustdata.com/privacy"
+  },
+  {
+   "name": "harmonic",
+   "display_name": "Harmonic",
+   "summary": "Discover and research companies and people with Harmonic. Browser sign-in.",
+   "developer": "Harmonic",
+   "category": "Research",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://support.harmonic.ai/en/articles/12785899-harmonic-mcp-server-getting-started-guide",
+   "requirements": "A Harmonic account. Without API access, 100 requests a day.",
+   "verification": "Checked 2026-10-07: DGC registers with Harmonic and its sign-in link opens Harmonic's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://support.harmonic.ai/en/articles/12785899-harmonic-mcp-server-getting-started-guide",
+   "license": "Harmonic service terms",
+   "license_url": "https://harmonic.ai/legal/terms-of-service",
+   "mcp_presets": {
+    "harmonic": {
+     "url": "https://mcp.api.harmonic.ai"
+    }
+   },
+   "metadata": {
+    "display_name": "Harmonic",
+    "developer": "Harmonic",
+    "category": "Research",
+    "long_summary": "Discover and research companies and people with Harmonic. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "harmonic",
+      "url": "https://mcp.api.harmonic.ai",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://harmonic.ai/legal/terms-of-service",
+   "privacy_url": "https://harmonic.ai/legal/privacy-policy"
+  },
+  {
+   "name": "algolia",
+   "display_name": "Algolia",
+   "summary": "Read your Algolia indices and analytics (read-only). Browser sign-in.",
+   "developer": "Algolia",
+   "category": "MCP",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://www.algolia.com/doc/guides/model-context-protocol/productivity-mcp",
+   "requirements": "An Algolia account. Turn on Productivity MCP once in the dashboard (Generative AI → MCP Servers).",
+   "verification": "Checked 2026-10-07: DGC registers with Algolia and its sign-in link opens Algolia's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://www.algolia.com/doc/guides/model-context-protocol/productivity-mcp",
+   "license": "Algolia service terms",
+   "license_url": "https://www.algolia.com/policies/terms",
+   "mcp_presets": {
+    "algolia": {
+     "url": "https://mcp.algolia.com/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Algolia",
+    "developer": "Algolia",
+    "category": "MCP",
+    "long_summary": "Read your Algolia indices and analytics (read-only). Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "algolia",
+      "url": "https://mcp.algolia.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.algolia.com/policies/terms",
+   "privacy_url": "https://www.algolia.com/policies/privacy"
+  },
+  {
+   "name": "aleph",
+   "display_name": "Aleph",
+   "summary": "Your Aleph financial planning data. Browser sign-in.",
+   "developer": "Aleph",
+   "category": "MCP",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://getaleph.com/apps/mcp",
+   "requirements": "An Aleph account; an admin turns on AI features.",
+   "verification": "Checked 2026-10-07: DGC registers with Aleph and its sign-in link opens Aleph's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://getaleph.com/apps/mcp",
+   "license": "Aleph service terms",
+   "license_url": "https://www.getaleph.com/terms-of-service",
+   "mcp_presets": {
+    "aleph": {
+     "url": "https://mcp.getaleph.com/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Aleph",
+    "developer": "Aleph",
+    "category": "MCP",
+    "long_summary": "Your Aleph financial planning data. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "aleph",
+      "url": "https://mcp.getaleph.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.getaleph.com/terms-of-service",
+   "privacy_url": "https://www.getaleph.com/privacy-policy"
+  },
+  {
+   "name": "aws-core",
+   "display_name": "AWS Core",
+   "summary": "Build, deploy and operate on AWS: CDK, Lambda, databases, observability, costs.",
+   "developer": "Amazon Web Services",
+   "category": "Infrastructure",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.aws.amazon.com/agent-toolkit/latest/userguide/oauth-authentication.html",
+   "requirements": "An AWS account. Your IAM user or role needs the AWSMCPSignInOAuthAccessPolicy managed policy to sign in; organisations can limit which apps may.",
+   "verification": "Checked 2026-10-07: DGC registers with AWS Core and its sign-in link opens AWS Core's own login page. 25 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/aws/agent-toolkit-for-aws",
+   "sha": "bd49cc8391b9c95ccd0d45e0a429ddaf5af8202b",
+   "path": "plugins/aws-core",
+   "license": "Apache-2.0",
+   "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+   "mcp_presets": {
+    "aws-mcp": {
+     "url": "https://aws-mcp.us-east-1.api.aws/mcp?oauth=initialize"
+    }
+   },
+   "terms_url": "https://aws.amazon.com/agreement/",
+   "privacy_url": "https://aws.amazon.com/privacy/"
+  },
+  {
+   "name": "aws-amplify",
+   "display_name": "AWS Amplify",
+   "summary": "Build full-stack apps with AWS Amplify Gen 2.",
+   "developer": "Amazon Web Services",
+   "category": "Infrastructure",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://github.com/awslabs/agent-plugins/tree/main/plugins/aws-amplify",
+   "requirements": "An AWS account. Your IAM user or role needs the AWSMCPSignInOAuthAccessPolicy managed policy to sign in; organisations can limit which apps may. Amplify projects also need Node.js 18 or later.",
+   "verification": "Checked 2026-10-07: DGC registers with AWS Amplify and its sign-in link opens AWS Amplify's own login page. 1 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/awslabs/agent-plugins",
+   "sha": "da51970aeb6db40de060020735f8f5376786d248",
+   "path": "plugins/aws-amplify",
+   "license": "Apache-2.0",
+   "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+   "mcp_presets": {
+    "aws-mcp": {
+     "url": "https://aws-mcp.us-east-1.api.aws/mcp?oauth=initialize"
+    }
+   },
+   "terms_url": "https://aws.amazon.com/agreement/",
+   "privacy_url": "https://aws.amazon.com/privacy/"
+  },
+  {
+   "name": "amazon-location-service",
+   "display_name": "Amazon Location Service",
+   "summary": "Add maps, places search, geocoding and routing with Amazon Location Service.",
+   "developer": "Amazon Web Services",
+   "category": "Infrastructure",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://github.com/awslabs/agent-plugins/tree/main/plugins/amazon-location-service",
+   "requirements": "An AWS account. Your IAM user or role needs the AWSMCPSignInOAuthAccessPolicy managed policy to sign in; organisations can limit which apps may.",
+   "verification": "Checked 2026-10-07: DGC registers with Amazon Location Service and its sign-in link opens Amazon Location Service's own login page. 1 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/awslabs/agent-plugins",
+   "sha": "da51970aeb6db40de060020735f8f5376786d248",
+   "path": "plugins/amazon-location-service",
+   "license": "Apache-2.0",
+   "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+   "mcp_presets": {
+    "aws-mcp": {
+     "url": "https://aws-mcp.us-east-1.api.aws/mcp?oauth=initialize"
+    }
+   },
+   "terms_url": "https://aws.amazon.com/agreement/",
+   "privacy_url": "https://aws.amazon.com/privacy/"
+  },
+  {
+   "name": "appwrite",
+   "display_name": "Appwrite",
+   "summary": "Appwrite skills and the Appwrite Cloud MCP. Browser sign-in.",
+   "developer": "Appwrite",
+   "category": "Infrastructure",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://appwrite.io/docs/tooling/ai/mcp-servers",
+   "requirements": "An Appwrite Cloud account.",
+   "verification": "Checked 2026-10-07: DGC registers with Appwrite and its sign-in link opens Appwrite's own login page. 11 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/appwrite/cursor-plugin",
+   "sha": "a9ef9a11cd7f68c4f27bbd57db46ff46499ec049",
+   "path": "skills",
+   "license": "BSD-3-Clause",
+   "license_url": "https://opensource.org/license/bsd-3-clause",
+   "mcp_presets": {
+    "appwrite": {
+     "url": "https://mcp.appwrite.io/"
+    }
+   },
+   "terms_url": "https://appwrite.io/terms",
+   "privacy_url": "https://appwrite.io/privacy"
+  },
+  {
+   "name": "atlan",
+   "display_name": "Atlan",
+   "summary": "Search your Atlan data catalog and context layer. Browser sign-in.",
+   "developer": "Atlan",
+   "category": "Agent Orchestration",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://docs.atlan.com/product/capabilities/atlan-ai/how-tos/remote-mcp-overview",
+   "requirements": "An Atlan tenant account.",
+   "verification": "Checked 2026-10-07: DGC registers with Atlan and its sign-in link opens Atlan's own login page. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://docs.atlan.com/product/capabilities/atlan-ai/how-tos/remote-mcp-overview",
+   "license": "Atlan service terms",
+   "license_url": "https://6880682.fs1.hubspotusercontent-na1.net/hubfs/6880682/Legal/Atlan_SaaS%20Agreement_Website%20Terms.docx.pdf",
+   "mcp_presets": {
+    "atlan": {
+     "url": "https://mcp.atlan.com/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Atlan",
+    "developer": "Atlan",
+    "category": "Agent Orchestration",
+    "long_summary": "Search your Atlan data catalog and context layer. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "atlan",
+      "url": "https://mcp.atlan.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://6880682.fs1.hubspotusercontent-na1.net/hubfs/6880682/Legal/Atlan_SaaS%20Agreement_Website%20Terms.docx.pdf",
+   "privacy_url": "https://atlan.com/privacy-policy/"
+  },
+  {
+   "name": "arize",
+   "display_name": "Arize AX",
+   "summary": "Arize AX tracing and evaluation: skills for the ax CLI, and the read-only Arize MCP. Uses an Arize API key.",
+   "developer": "Arize AI",
+   "category": "Agent Orchestration",
+   "install": "allow",
+   "auth": "pat",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://arize.com/docs/api-clients/mcp/overview",
+   "requirements": "An Arize AX account and API key (Settings → API Keys), saved as this server's token. The skills need the ax CLI (uv or pipx) and ARIZE_SPACE.",
+   "verification": "Checked 2026-10-07: the server refuses without a key, as it should; add your key to connect. 18 skills install.",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/Arize-ai/arize-skills",
+   "sha": "f92b15a001790a4894f5b17e34d3f8f3c5e13514",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "mcp_presets": {
+    "arize": {
+     "url": "https://api.arize.com/mcp",
+     "bearer_token_env_var": "ARIZE_API_KEY"
+    }
+   },
+   "terms_url": "https://arize.com/terms-of-service/",
+   "privacy_url": "https://arize.com/privacy-policy/"
+  },
+  {
+   "name": "artie",
+   "display_name": "Artie",
+   "summary": "Manage Artie real-time CDC pipelines. Browser sign-in.",
+   "developer": "Artie",
+   "category": "Agent Orchestration",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://www.artie.com/docs/api/mcp",
+   "requirements": "An Artie account (free plan available).",
+   "verification": "Checked 2026-10-07: DGC registers with Artie and opens its sign-in. Artie asks you to sign in to the Artie Dashboard first, then retry from DGC. Account tools not tested.",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/artie-labs/artie-mcp",
+   "sha": "57dd1ef93b8ae7279cfce43868293e2261b77c20",
+   "path": "plugins/artie",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "terms_url": "https://www.artie.com/docs/legal/terms-of-service",
+   "privacy_url": "https://www.artie.com/privacy"
+  },
+  {
+   "name": "agent-compatibility",
+   "display_name": "Agent Compatibility",
+   "summary": "Scan a repository for how well coding agents can work in it.",
+   "developer": "Cursor",
+   "category": "MCP",
+   "install": "allow",
+   "auth": "none",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://github.com/cursor/plugins/tree/main/agent-compatibility",
+   "requirements": "Node.js with npx (it runs npx agent-compatibility).",
+   "verification": "Checked 2026-10-07: its 1 skills install. It has no connection to sign in to.",
+   "cloud_execution": false,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/cursor/plugins",
+   "sha": "d0ef80d86795816da932a153458c5dbe192d294e",
+   "path": "agent-compatibility",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit"
+  },
+  {
+   "name": "1inch",
+   "display_name": "1inch",
+   "summary": "Token swap quotes and intent-based swaps on 1inch. Swaps move real money: each one waits for your Allow.",
+   "developer": "1inch",
+   "category": "Payments",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://business.1inch.com/portal/assets/docs-v2/ai-integration/mcp-server.md",
+   "requirements": "Search works without an account. Swaps need a 1inch Business sign-in and your own wallet (WalletConnect). Not for sanctioned people or places.",
+   "verification": "Checked 2026-10-07: connects with no account; 10 tools listed. 9 skills install.",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/1inch/1inch-ai",
+   "sha": "11126423d43d5d67c378ac80450850f5536e2b34",
+   "path": "",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "risk": "money",
+   "terms_url": "https://business.1inch.com/portal/terms-of-service",
+   "privacy_url": "https://business.1inch.com/portal/privacy-policy"
+  },
+  {
+   "name": "aave",
+   "display_name": "Aave",
+   "summary": "Live Aave V3 and V4 markets and positions. Orders move real money: each one waits for your Allow.",
+   "developer": "Aave",
+   "category": "Payments",
+   "install": "allow",
+   "auth": "none",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://github.com/aave/skills",
+   "requirements": "No account. A wallet to sign transactions; DGC never holds keys. 18 or older; not for sanctioned places.",
+   "verification": "Checked 2026-10-07: connects with no account; 53 tools listed. 5 skills install.",
+   "cloud_execution": false,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/aave/skills",
+   "sha": "24d1e2f96c83d30e9470d7492fe350284a36d517",
+   "path": "plugins/mcp",
+   "license": "MIT",
+   "license_url": "https://opensource.org/license/mit",
+   "risk": "money",
+   "terms_url": "https://aave.com/terms-of-service",
+   "privacy_url": "https://aave.com/privacy-policy"
+  },
+  {
+   "name": "airwallex-agentos",
+   "display_name": "Airwallex AgentOS",
+   "summary": "Airwallex billing, payees, cards and cashflow. Writes are real: each one waits for your Allow.",
+   "developer": "Airwallex",
+   "category": "Payments",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://www.airwallex.com/docs/developer-tools/ai/agentos",
+   "requirements": "A verified Airwallex business account; an Owner, Admin or Finance Admin approves the sign-in.",
+   "verification": "Checked 2026-10-07: DGC registers with Airwallex AgentOS and its sign-in link opens Airwallex AgentOS's own login page. 5 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/airwallex/airwallex-marketplace",
+   "sha": "63013d01efdd221a22d13fa1145ef8d707448fec",
+   "path": "plugins/airwallex-agentos",
+   "license": "Apache-2.0",
+   "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+   "risk": "money",
+   "terms_url": "https://www.airwallex.com/global/terms/sign-up-terms",
+   "privacy_url": "https://www.airwallex.com/global/terms/privacy-policy"
+  },
+  {
+   "name": "airwallex-dev",
+   "display_name": "Airwallex Developer",
+   "summary": "Skills to build Airwallex payments, and the Airwallex test-environment and docs MCP.",
+   "developer": "Airwallex",
+   "category": "Payments",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-07",
+   "compatibility_url": "https://www.airwallex.com/docs/developer-tools/ai/developer-connector",
+   "requirements": "A free Airwallex sandbox account for the developer MCP.",
+   "verification": "Checked 2026-10-07: DGC registers with Airwallex Developer and its sign-in link opens Airwallex Developer's own login page. 6 skills install. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "vendor",
+   "upstream": "https://github.com/airwallex/airwallex-marketplace",
+   "sha": "63013d01efdd221a22d13fa1145ef8d707448fec",
+   "path": "plugins/airwallex-dev",
+   "license": "Apache-2.0",
+   "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+   "terms_url": "https://www.airwallex.com/global/terms/sign-up-terms",
+   "privacy_url": "https://www.airwallex.com/global/terms/privacy-policy"
   }
  ]
 }

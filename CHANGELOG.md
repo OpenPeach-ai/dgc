@@ -6,6 +6,29 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+### Plugins
+
+- **The vendors' own plugins.** Settings → Plugins (and `dgc plugin list`) offers 41 more plugins
+  published by the services themselves, each pinned to a reviewed commit of the vendor's package:
+  Airtable, Coda, Craft, Read AI, Granola, Adobe App Builder, Mobbin, Refero, Mural, Intercom,
+  Plain, ActiveCampaign, AgentMail, Ando, Brevo, Adspirer, Amplemarket, Apollo.io, Attio,
+  Amplitude, Antimetal, Apify, Astronomer, Ahrefs, Context.dev, Crustdata, Harmonic, Algolia,
+  Aleph, AWS Core, AWS Amplify, Amazon Location Service, Appwrite, Atlan, Arize AX, Artie,
+  Agent Compatibility, 1inch, Aave, Airwallex AgentOS and Airwallex Developer. Every connection
+  is the vendor's hosted server (no local app). Each was probed with DGC's own connection code:
+  it registers and its sign-in link opens the vendor's login page, or it lists its tools with no
+  account (Aave, 1inch); each plugin's page says what was checked. Payment plugins say that
+  money moves and DGC asks before each write.
+- DGC reads Cursor packages (`.cursor-plugin/plugin.json`, `mcp.json`) and the open Agent Plugins
+  standard (`plugin.json` at the root) as well as Claude and Codex packages. A manifest that names
+  the same skill folder twice installs it once (Adobe's App Builder failed with "duplicate skill
+  names"). A curated entry can set a package's servers (a per-account placeholder URL, a pasted key
+  where sign-in works) and the sign-in scope a server needs (Plain).
+- A remote MCP sign-in link longer than 2,048 characters is shown instead of failing as "could not
+  be completed": Airwallex's lists every scope it supports.
+- AWS's hosted MCP server is accepted: its address ends in `?oauth=initialize`, which DGC's
+  credential check read as a secret. A server address argument is judged as a URL; the flag
+  before it still counts.
 ### Pips
 
 - **Routines (app triggers).** A Personal Pip does things on its own, as Grok's bots do: each

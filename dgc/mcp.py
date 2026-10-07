@@ -399,7 +399,9 @@ def sanitize_input_request(method: str, params) -> dict:
                     "requestedSchema": _sanitize_form_schema(params.get("requestedSchema"))}
         if mode != "url":
             raise MCPInputError("elicitation mode must be form or url")
-        raw_url = _short_text(params.get("url"), "elicitation URL", 2048)
+        # A sign-in link carries every scope the server asks for: Airwallex's runs past 2,000
+        # characters, and the old 2,048 cap dropped it as "could not be completed".
+        raw_url = _short_text(params.get("url"), "elicitation URL", 8192)
         parsed = urlsplit(raw_url)
         host = parsed.hostname or ""
         loopback = host in ("localhost", "127.0.0.1", "::1")
