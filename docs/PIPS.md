@@ -528,6 +528,29 @@ exact source lines.
 
 ## Personal Pips: apps and the web
 
+### Connecting an app from a Pip's chat
+
+Ask a Personal Pip to do something with an app it doesn't have yet, for example "set up
+my Gmail so you can check my inbox every morning". The Pip puts a **Connect Gmail**
+card in its chat, with one line on what it will do with it. Choose **Connect Gmail**:
+DGC asks Composio (your connection in **Settings → Plugins**) for the account. If
+Composio already has a Gmail account, that one is used. Otherwise your browser opens
+Composio's sign-in page; sign in there, and the card turns into **Gmail connected**
+by itself (or choose **I've signed in**). The Pip is told and carries on. **Not now**
+puts the card away; the Pip can ask again later.
+
+A connected app is that Pip's: it reads it when you ask, like Grok's connectors
+(Gmail messages, Calendar events, Drive and Notion search results, Contacts), and the
+results reach the model as untrusted text. Anything it would send or change, such as
+an email or a calendar event, is a draft that waits for your **Allow** (or your
+**Always allow** for that exact kind of action). A Pip can have a computer and
+connected apps at once. The Pip never sees your credentials, the Composio connection
+or the sign-in link: DGC makes those calls, and the editor opens the link.
+
+The Pip's **Settings** list its apps under **Apps**; **Disconnect** stops that Pip
+using the account, which stays connected in Composio. Without Composio in Settings,
+the card says to add it first.
+
 ### App reads
 
 A Personal Pip can read from apps you've connected through Composio (see

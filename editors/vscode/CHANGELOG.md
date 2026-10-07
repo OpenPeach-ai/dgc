@@ -43,6 +43,11 @@
 
 ### Pips
 
+- **Connect your apps from a Pip's chat.** Ask a Pip to set up Gmail and it puts a **Connect Gmail**
+  card in its chat; **Connect Gmail** opens Composio's sign-in in your browser (or uses the account
+  Composio already has), and the card turns into **Gmail connected** by itself. The Pip carries on;
+  it reads the app when you ask, and anything it would send still waits for your Allow. A Pip's
+  **Settings** list its **Apps**, with **Disconnect**.
 - A Pip the main chat proposes docks above the chat box, where questions dock: its face and name,
   what it will do, and chips for when it runs, what it reads and its model, with **Create Pip**,
   **Details** and **Not now** (the founder chose this over the card in the reply). **×** puts it

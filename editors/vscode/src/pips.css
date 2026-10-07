@@ -283,3 +283,18 @@ button.pill{border-radius:999px;padding:6px 16px}
 .topbar-spinner{width:10px;height:10px;border-radius:50%;border:1.5px solid currentColor;border-right-color:transparent;animation:topbar-spin .9s linear infinite}
 @keyframes topbar-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.topbar-spinner{animation:none;border-right-color:currentColor;opacity:.6}}
+/* A Pip's Connect card (pip_app_links): what it asks for, in its chat, with the user's buttons. */
+.app-link{display:flex;flex-direction:column;gap:10px;margin:12px 0;padding:12px 14px;border:1px solid var(--pip-edge);border-radius:12px;background:color-mix(in srgb,var(--pip-accent) 7%,transparent);max-width:560px}
+.app-link[data-state=connected]{background:transparent;padding:9px 12px}
+.app-link-head{display:flex;align-items:center;gap:10px;min-width:0}
+.app-link-mark{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--pip-accent);color:#fff;font-weight:600;font-size:14px}
+.app-link[data-state=connected] .app-link-mark{width:22px;height:22px;border-radius:7px;font-size:11px}
+.app-link-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+.app-link-words strong{font-weight:600;overflow-wrap:anywhere}
+.app-link-words small{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.app-link-note{margin:0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45}
+.app-link-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.app-link-actions button{min-height:28px;border-radius:999px;padding:4px 12px}
+.app-list{list-style:none;margin:0 0 6px;padding:0;display:flex;flex-direction:column;gap:6px}
+.app-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
+.app-list small{color:var(--vscode-descriptionForeground);margin-left:6px}

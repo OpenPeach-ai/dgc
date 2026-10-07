@@ -8,6 +8,18 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- A Personal Pip connects your apps from its own chat, like Grok's connectors. It asks with the new
+  `connect_app` tool (the call records a card; registry schema 38 adds `pip_app_links`); the user's
+  Connect makes DGC call Composio's `COMPOSIO_MANAGE_CONNECTIONS` over their Composio connection
+  ("list" first, so an account Composio already has is used; then "add"), and the editor opens the
+  sign-in link from that reply. Once Composio lists an ACTIVE account it is the Pip's: `read_app`
+  reads it through DGC with the closed read vocabulary and the same checks as reviewed app reads;
+  sends stay drafts that wait for Allow. The model never touches MCP, credentials or the link (both
+  tools reach DGC over a per-run socket only that run's token opens). New Pips commands (API 43,
+  unreleased): `list_pip_app_links`, `start_pip_app_link`, `check_pip_app_link`,
+  `decline_pip_app_link`, `disconnect_pip_app_link`; the Pip is told when an app connects.
+- A Pip with a computer may also read connected apps (the founder chose Grok's model: one Pip can
+  browse and read your mail; what it would send or change still waits for Allow).
 - Outside auto mode, a Pip the main chat proposes is no longer an "Allow this tool?" prompt: the
   `pips_setup` call only saves its card, which the editor docks above the chat box, and the user's
   **Create Pip** there is the approval. Auto mode, an allow rule or the user's Allow on an ask rule

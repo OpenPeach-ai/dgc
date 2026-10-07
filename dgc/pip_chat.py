@@ -384,7 +384,12 @@ INTRO_KEY = "intro_"
 # After the user approves something the Pip's computer held from a chat, DGC asks the Pip to carry on
 # in that chat, under this key.
 COMPUTER_KEY = "computer_"
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY)
+# After the user connects an app the Pip asked for (pip_app_links), DGC asks it to carry on, under this key.
+APPS_KEY = "apps_"
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY)
+APP_CONNECTED = ("This message is from DGC, not the user. The user connected {app} to you ({label}). Read it with "
+                 "read_app now if that helps with what they asked, then carry on in a short message. To send or change "
+                 "anything there, prepare a draft; it waits for their Allow.")
 COMPUTER_DONE = ("This message is from DGC, not the user. The user approved what your computer was holding, and "
                  "DGC sent it exactly as the page made it: {what}. Use your computer to read the page and see what "
                  "happened. Then tell the user in a short message, and carry on with what they asked if more is "
@@ -418,6 +423,13 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
     what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
     key = COMPUTER_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
     return send(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config, _intro=True)
+
+
+def continue_after_app(store, pip_id, link, config):
+    """The chat's next turn once the user has connected an app this Pip asked for."""
+    key = APPS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(link["id"]))[:100]
+    text = APP_CONNECTED.format(app=str(link["app"])[:60], label=str(link.get("label") or "their account")[:160])
+    return send(store, pip_id, text, key, "local-apps", config, _intro=True)
 
 
 def _bounded_rows(db, pip_id, before=2**63 - 1, limit=50, *, successful=False):

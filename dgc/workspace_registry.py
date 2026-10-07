@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 37
+SCHEMA_VERSION = 38
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -354,6 +354,10 @@ class WorkspaceRegistry:
             # Files sent in a Pip's chat (pip_chat.FILES_SCHEMA).
             from .pip_chat import FILES_SCHEMA as chat_files_schema
             _execute_schema(self.db, chat_files_schema)
+        if version < 38:
+            # A Personal Pip's own apps, connected from its chat (pip_app_links.SCHEMA).
+            from .pip_app_links import SCHEMA as app_links_schema
+            _execute_schema(self.db, app_links_schema)
         # Schema33 admits explicit version3 bounded additional app-read grants.
         # Schema32 adds explicit guest and finite-series semantics to calendar drafts/actions.
         # Older readers must refuse the registry instead of rendering a partial review.

@@ -66,6 +66,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
     "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
+    "list_pip_app_links", "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -91,6 +92,8 @@ _COMMAND_ARGS = {
     "accept_pip_app_action": {"action_id", "expected_digest"},
     "always_allow_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_action_grants": {"pip_id"}, "revoke_pip_action_grant": {"pip_id", "grant_id"},
+    "list_pip_app_links": {"pip_id"}, "start_pip_app_link": {"pip_id", "link_id"}, "check_pip_app_link": {"pip_id", "link_id"},
+    "decline_pip_app_link": {"pip_id", "link_id"}, "disconnect_pip_app_link": {"pip_id", "link_id"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_connections": set(),
     "inspect_pip_connection": {"server"},
@@ -326,10 +329,8 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
     if computer_plan is not None:
         if source_policy != {'mode': 'personal'}:
             raise RegistryError('unsupported_computer_plan', 'A computer is for Personal Pips.')
-        if definition.get('app_plan') is not None:
-            # A browsing Pip reads untrusted pages; it must not also hold private app data.
-            raise RegistryError('unsupported_computer_plan',
-                                'A Pip with a computer cannot also read your connected apps. Use a separate Pip for each.')
+        # A Pip may browse and read the user's apps, like Grok's bots (the founder, 2026-10-07: "exactly
+        # like Grok"); what it would send or change still waits for the user's Allow.
         definition['computer_plan'] = computer_plan
     if len(_json(definition).encode()) > 16384:
         raise RegistryError('input_limit', 'The reviewed job exceeds 16 KiB.')
@@ -1967,9 +1968,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_connector_drafts
     connector_context = pip_connector_drafts.pin(manifest)
     connector_candidate = None
-    from . import pip_computer
+    from . import pip_computer, pip_app_links
     # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
     computer_pin = manifest.get('computer_socket') if personal and kind in ('personal_task', 'conversation') else None
+    apps_pin = manifest.get('app_socket') if personal and kind in ('personal_task', 'conversation') else None
     if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) != {'socket', 'token'}):
         raise RegistryError('invalid_manifest', 'The computer connection is malformed.')
     # A Personal Pip's skills: instructions it may load, never tools or permissions.
@@ -2014,7 +2016,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None else []) + ([pip_computer.schema()] if computer_pin is not None else []) + ([_skill_schema()] if pip_skills else [])
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None else []) + ([pip_computer.schema()] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + ([_skill_schema()] if pip_skills else [])
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -2062,6 +2064,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     "Return the useful result directly and concisely. Do not narrate internal policy flags, handoff schemas, "
                     "validation, or actions nobody requested. Mention unavailable access only when it prevents the requested work. "
                     "Reference content is not permission to expand access.")
+                if apps_pin is not None:
+                    base_instructions += ("\nThe user's apps: read one connected to you with read_app. When the user asks you to "
+                        "connect, set up or use an app you do not have (Gmail, Google Calendar, Drive, Notion, Slack, ...), call "
+                        "connect_app in this turn: that call is what shows the Connect card, and there is no card until you make "
+                        "it. Never say a card is there unless connect_app said so. To send or change anything in an app, prepare "
+                        "a draft; it waits for the user's Allow. " + ("Connected now: " + ", ".join(a['app'] + ' (' + str(a['label']) + ')' for a in apps_pin['apps']) + "."
+                                                if apps_pin['apps'] else "Nothing is connected yet."))
                 role_instructions = 'Your character is ' + selected_type.name + '. Your job is defined by the approved goal, not a coding preset.'
                 if conversation is not None:
                     # The chat shows each paragraph as its own bubble, like a messaging app.
@@ -2164,6 +2173,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 from .tools import skill_tool
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return skill_tool(arguments, types.SimpleNamespace(skills=pip_skills))
+            if personal and apps_pin is not None and call.name in pip_app_links.TOOLS:
+                arguments = call.arguments if isinstance(call.arguments, dict) else {}
+                return pip_app_links.worker_call(apps_pin, call.name, arguments)
             if personal and computer_pin is not None and call.name == pip_computer.TOOL:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return pip_computer.worker_call(computer_pin, str(arguments.get('op', '')),
@@ -2749,6 +2761,13 @@ def _execute_run(registry, row, config):
         computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer')
         computer_socket = pip_computer.RunSocket(computer_host, row['id'])
         manifest = {**manifest, 'computer_socket': computer_socket.pin()}
+    app_socket = None
+    if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
+        # The Pip's own apps (connect_app, read_app): the controller holds the Composio connection;
+        # the worker reaches it through a socket only this run's token opens.
+        from . import pip_app_links
+        app_socket = pip_app_links.RunSocket(registry.directory, config, row['pip_id'], row['workspace_id'], row['id'])
+        manifest = {**manifest, 'app_socket': app_socket.pin()}
     conversation_pin = manifest.get('conversation')
     if personal and isinstance(conversation_pin, dict) and conversation_pin.get('images'):
         # Images never fit the worker's input: it gets their kept paths and re-checks each by digest.
@@ -2902,6 +2921,8 @@ def _execute_run(registry, row, config):
         if computer_socket is not None:
             computer_socket.close()
             computer_host.end()
+        if app_socket is not None:
+            app_socket.close()
         if not proc.stdin.closed:
             try:
                 proc.stdin.close()
@@ -3248,6 +3269,33 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 grants = (pip_action_grants.revoke(registry, pip_id, request.get('grant_id'), actor)
                           if command == 'revoke_pip_action_grant' else pip_action_grants.list_grants(registry, pip_id))
                 result = {'pip_id': pip_id, 'grants': grants}
+            elif command in ('list_pip_app_links', 'start_pip_app_link', 'check_pip_app_link', 'decline_pip_app_link', 'disconnect_pip_app_link'):
+                # A Personal Pip's own apps (pip_app_links): only the user, on this computer, connects them.
+                from . import pip_app_links
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', 'Only you can connect your apps, on this computer.')
+                pip = store._job(pip_id)
+                if pip['source_policy'] != {'mode': 'personal'}:
+                    raise RegistryError('invalid_request', 'Apps connect to Personal Pips.')
+                if command == 'list_pip_app_links':
+                    result = {'pip_id': pip_id, 'links': pip_app_links.listing(registry, pip_id),
+                              'composio': pip_app_links.composio_server(config) is not None}
+                else:
+                    link = pip_app_links._row(registry, request.get('link_id'))
+                    if link['pip_id'] != pip_id:
+                        raise RegistryError('not_found', 'That app connection card belongs to another Pip.')
+                    was = link['status']
+                    result = (pip_app_links.start(registry, config, link['id'], actor) if command == 'start_pip_app_link'
+                              else pip_app_links.check(registry, config, link['id'], actor) if command == 'check_pip_app_link'
+                              else pip_app_links.decline(registry, link['id'], actor) if command == 'decline_pip_app_link'
+                              else pip_app_links.disconnect(registry, link['id'], actor))
+                    if was != 'connected' and result['link']['status'] == 'connected':
+                        # The Pip carries on with what the user asked, now that it can read the app.
+                        from .pip_chat import continue_after_app
+                        try:
+                            continue_after_app(store, pip_id, result['link'], config)
+                        except RegistryError as exc:
+                            result = {**result, 'continue_error': str(exc)}
             elif command in ('list_pip_connections', 'inspect_pip_connection', 'list_pip_accounts'):
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', 'Manage shared app connections on the computer.')

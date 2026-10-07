@@ -653,6 +653,21 @@ created_at, created_by}`, returned as `{action, grant}`. `list_pip_action_grants
 in registry metadata (`pip_action_grant:<pip_id>:<grant_id>`, at most 20 per Pip), outside the
 job, and record `pip_action_granted` / `pip_action_grant_revoked`.
 
+**A Pip's own apps** (API 43). A Personal Pip's chat and task runs offer `connect_app {app, why}`
+and `read_app {app, tool, arguments}`, which reach the controller over a per-run Unix socket
+(`pip_app_links.RunSocket`, token-checked, like the computer's). `connect_app` records a
+`pip_app_links` row (`requested`; one open card per app; asking again refreshes its reason);
+`read_app` reads an app whose card is `connected`, only with a tool from the closed read
+vocabulary that belongs to that app, through `pip_app_access.execute` on the card's account.
+Local-only commands, each `{pip_id, link_id}` except the list: `list_pip_app_links {pip_id}` →
+`{pip_id, links, composio}`; `start_pip_app_link` calls `COMPOSIO_MANAGE_CONNECTIONS` with
+`action: "list"` (an ACTIVE account connects at once) and otherwise `"add"`, and returns
+`{link, redirect_url, sign_in_host}` with the card `authorizing` (the editor host opens the link
+and never passes it to the webview); `check_pip_app_link` lists again and connects the first
+ACTIVE account; `decline_pip_app_link` and `disconnect_pip_app_link` set `declined`. A card that
+turns `connected` queues the Pip's next chat turn under the reserved key `apps_<link id>`.
+Statuses: `requested`, `authorizing`, `connected`, `declined`, `failed` (with `error`).
+
 A Personal task now pins `email_draft`, `calendar_draft`, `action_grants` (a summary) and, only
 when the Pip has a connector grant, a `connector_draft` snapshot; a handoff run pins none. Its
 worker may return `message_draft`, `calendar_draft` and `connector_action_draft`, which `finish`
@@ -1106,4 +1121,4 @@ Clients check it before using a newer control.
 | 40 | Reviewed web reads |
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
 | 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |
-| 43 | Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images and files in a Personal Pip's chat (`send_pip_message` `images` and `files`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |
+| 43 | A Pip's own apps (`connect_app`, `read_app`; `list_pip_app_links`, `start_pip_app_link`, `check_pip_app_link`, `decline_pip_app_link`, `disconnect_pip_app_link`); Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images and files in a Personal Pip's chat (`send_pip_message` `images` and `files`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |

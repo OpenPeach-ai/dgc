@@ -1,0 +1,64 @@
+// A Personal Pip's own apps, connected from its chat like Grok's connectors (pip_app_links). The Pip
+// asks with connect_app; this card is the user's side: Connect (the host opens the sign-in page from
+// the backend's reply, never a link from here), then "I've signed in", or Not now.
+
+const STATUSES = ['requested', 'authorizing', 'connected', 'declined', 'failed'];
+const text = (v, max) => typeof v === 'string' && v.length <= max;
+const RECENT_MS = 30 * 60 * 1000;
+
+export function appLink(value, pip) {
+  const fail = () => { throw new Error('This app card is invalid. Refresh the Pip.'); };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail();
+  if (!/^applink_[a-f0-9]{32}$/.test(value.id) || value.pip_id !== pip || !/^[a-z0-9][a-z0-9_]{1,39}$/.test(value.toolkit)
+    || !text(value.app, 80) || !value.app || !text(value.reason, 600) || !STATUSES.includes(value.status)
+    || !(value.label === null || text(value.label, 320)) || !(value.error === null || text(value.error, 600))
+    || !Number.isFinite(Date.parse(value.updated_at))) fail();
+  return value;
+}
+
+export function appLinksPage(value, pip) {
+  if (!value || value.pip_id !== pip || !Array.isArray(value.links) || value.links.length > 16 || typeof value.composio !== 'boolean') {
+    throw new Error('The app cards are invalid. Refresh the Pip.');
+  }
+  return { links: value.links.map(link => appLink(link, pip)), composio: value.composio };
+}
+
+export function appLinkResult(value, pip, id) {
+  const link = appLink(value?.link, pip);
+  if (link.id !== id) throw new Error('DGC answered about another app card. Refresh the Pip.');
+  return { link, opened: value.opened === true, host: typeof value.sign_in_host === 'string' ? value.sign_in_host.slice(0, 200) : '',
+    connected: value.connected === true, error: typeof value.error === 'string' ? value.error.slice(0, 600) : '' };
+}
+
+/** The cards worth showing in the chat: waiting ones, and a connection made in the last half hour. */
+export function shownAppLinks(links, now = Date.now()) {
+  return (links || []).filter(l => l.status === 'requested' || l.status === 'authorizing' || l.status === 'failed'
+    || l.status === 'connected' && now - Date.parse(l.updated_at) < RECENT_MS);
+}
+
+export function appLinkMarkup(link, { esc, busy = false, composio = true, host = '' }) {
+  const id = esc(link.id), app = esc(link.app), off = busy ? ' disabled' : '';
+  const mark = `<span class="app-link-mark" aria-hidden="true">${esc(link.app.slice(0, 1).toUpperCase())}</span>`;
+  const head = (title, sub) => `<div class="app-link-head">${mark}<div class="app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+  const no = `<button type="button" class="quiet" data-app-link-decline="${id}"${off}>Not now</button>`;
+  let body;
+  if (link.status === 'connected') {
+    body = head(`${app} connected`, link.label ? esc(link.label) : '');
+  } else if (link.status === 'authorizing') {
+    body = head(`Finish signing in to ${app}`, `Your browser opened ${esc(host || 'Composio')}. Come back here once it says you are connected.`)
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-check="${id}"${off}>${busy ? 'Checking…' : 'I’ve signed in'}</button>`
+      + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Open sign-in again</button>${no}</div>`;
+  } else if (!composio) {
+    body = head(`Connect ${app}`, esc(link.reason))
+      + `<p class="app-link-note">Composio connects your apps to DGC. Add it in Settings → Plugins, then choose Connect here.</p>`
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Settings</button>`
+      + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Connect ${app}</button>${no}</div>`;
+  } else if (link.status === 'failed') {
+    body = head(`Couldn’t connect ${app}`, esc(link.error || 'Try again.'))
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>Try again</button>${no}</div>`;
+  } else {
+    body = head(`Connect ${app}`, esc(link.reason))
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : `Connect ${app}`}</button>${no}</div>`;
+  }
+  return `<div class="app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : `Connect ${app}`}">${body}</div>`;
+}

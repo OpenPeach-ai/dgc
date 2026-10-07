@@ -7,6 +7,7 @@ import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pip
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
+import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup} from './pipAppLinks.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
@@ -260,7 +261,7 @@ function chatMarkup(){
   let last=null;
   const timed=m=>{const at=Date.parse(m.created_at),mark=simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return mark;};
   const messages=shown.map(m=>timed(m)+messageMarkup(m,{imageSrc:messageImageSrc,split:simple,name:type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt:S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),activity:chatActivities.get(m.run_id)})).join('');
-  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} This saved conversation belongs to ${esc(S.pip.name)}.</p><p class="muted">${personalPip()?'No project files or app connections are included automatically.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span><p class="message-status">Live reply · not yet saved</p>${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Live preview is limited to 16,384 characters. The saved reply will replace it when complete.</p>':''}${S.stream.truncated?'<p class="muted">Earlier live text may no longer be retained.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${S.omitted?`<p class="context-limit">${S.omitted} earlier saved ${S.omitted===1?'message is':'messages are'} outside the current model input. History remains saved.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${archived()?'Archived · Restore to paused before sending another message. ':''}${personalPip()?'Personal · no project tools':(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start the runner to send a message.':S.runner?.paused?' · Resume the runner to send a message.':''}</p></section>`;
+  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} This saved conversation belongs to ${esc(S.pip.name)}.</p><p class="muted">${personalPip()?'No project files or app connections are included automatically.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span><p class="message-status">Live reply · not yet saved</p>${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Live preview is limited to 16,384 characters. The saved reply will replace it when complete.</p>':''}${S.stream.truncated?'<p class="muted">Earlier live text may no longer be retained.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${S.omitted?`<p class="context-limit">${S.omitted} earlier saved ${S.omitted===1?'message is':'messages are'} outside the current model input. History remains saved.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${archived()?'Archived · Restore to paused before sending another message. ':''}${personalPip()?'Personal · no project tools':(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start the runner to send a message.':S.runner?.paused?' · Resume the runner to send a message.':''}</p></section>`;
 }
 async function toggleChatActivity(runId){
   if(!S.messages.some(m=>m.run_id===runId)||!usable())return;
@@ -271,7 +272,7 @@ async function toggleChatActivity(runId){
   finally{if(token===scope()&&chatActivities.get(runId)===value){value.loading=false;render();}}
 }
 async function loadMessages(more=false){
- if(!more)void loadEmailDrafts();
+ if(!more){void loadEmailDrafts();void loadAppLinks();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
   const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
@@ -441,6 +442,16 @@ async function loadGrants(){
  catch(error){if(token===scope()&&S.selected===pip)grantsState.error=errorText(error);}
  finally{if(grantsState.token===token){grantsState.loading=false;if(token!==scope()||S.selected!==pip)grantsState.pip='';render();}}
 }
+// The apps this Pip may read (pip_app_links): connected from its chat, taken back here.
+function appsMarkup(){
+ if(remoteHost||S.apiVersion<43||!personalPip())return '';
+ if(appsSettingsPip!==S.selected){appsSettingsPip=S.selected;void loadAppLinks();}
+ const connected=(S.appLinks||[]).filter(l=>l.status==='connected'),off=S.busy||!usable()||!!appLinkBusy;
+ return `<section class="section" aria-label="Apps"><h2>Apps</h2>${connected.length
+  ?`<ul class="app-list">${connected.map(l=>`<li><span><strong>${esc(l.app)}</strong>${l.label?` <small>${esc(l.label)}</small>`:''}</span><button type="button" class="quiet" data-app-link-disconnect="${esc(l.id)}"${off?' disabled':''}>Disconnect</button></li>`).join('')}</ul><p class="muted">It reads these when you ask. Anything it would send or change waits for your Allow. Disconnect stops this Pip using the account; it stays connected in Composio.</p>`
+  :`<p class="muted">Nothing connected. Ask ${esc(S.pip?.name||'this Pip')} in its chat to connect an app, like Gmail or Google Calendar.</p>`}</section>`;
+}
+let appsSettingsPip='';
 function grantsMarkup(){
  if(S.apiVersion<41||!S.pip||S.pip.source_policy?.mode!=='personal')return '';
  if(grantsState.pip!==S.selected){void loadGrants();return '';}
@@ -717,7 +728,7 @@ function jobSettingsMarkup(){
    +`<section class="section"><h2>When it runs</h2>${quickScheduleMarkup()}</section>`
    +sourceSettingsMarkup()+githubReadsMarkup()
    +`<form id="model-form" class="section form"><h2>Model</h2>${modelPicker('pipModel','Model this Pip uses',draft.pipModel)}<div class="actions"><button type="submit" class="primary"${off||!S.modelDirty?' disabled':''}>Save model</button></div></form>`
-   +grantsMarkup()+usageMarkup()
+   +appsMarkup()+grantsMarkup()+usageMarkup()
    +`<section class="section"><h2>Pause or archive</h2><p class="muted">${p.status==='paused'?'Paused. It does not run until you resume it.':'Pausing stops it from running. Archiving puts it away; you can restore it later.'}</p><div class="actions">${button('toggle-pip',p.status==='paused'?'Resume':'Pause',off||S.apiVersion>=16&&!canLifecycle())}${S.apiVersion>=16&&canLifecycle()?button('archive-pip','Archive…',off,'quiet danger'):''}</div></section>`
    +`<details class="advanced section" data-details="advanced"><summary>Advanced</summary><p class="muted">Most Pips never need these.</p>${notifyMarkup()}${adaptationMarkup()}${personalPip()?'':projectSourceMarkup()}${shareMarkup()}</details>`;
 }
@@ -1431,6 +1442,41 @@ function emailDraftCards(){
  if(remoteHost||S.apiVersion<32||!personalPip())return '';
  return [...(S.emailDrafts||[]),...(S.apiVersion>=35?S.calendarDrafts||[]:[]),...(S.apiVersion>=37?S.connectorDrafts||[]:[])].filter(d=>d.status==='pending'&&!d.expired).map(d=>{const label=d.id.startsWith('conndraft_')?'Connector draft':d.id.startsWith('caldraft_')?'Calendar draft':'Email draft';return `<div class="chat-setup-review" aria-label="${label}"><span class="chat-setup-label">${label} <small>${esc(d.subject)}</small></span><button type="button" data-email-draft="${esc(d.id)}"${S.busy?' disabled':''}>Review</button></div>`;}).join('')+(S.emailDraftError?errorMarkup(S.emailDraftError):'')+(S.calendarDraftError?errorMarkup(S.calendarDraftError):'')+(S.connectorDraftError?errorMarkup(S.connectorDraftError):'');
 }
+// A Personal Pip's own apps (pip_app_links): the Connect card it asks for with connect_app.
+let appLinkSeq=0,appLinkBusy='',appLinkTimer=0,appLinkUntil=0;const appLinkHosts=new Map();
+async function loadAppLinks(){
+ if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
+ const token=scope(),sequence=++appLinkSeq,pip=S.selected;
+ try{const page=appLinksPage(await send('list_pip_app_links',{pip_id:pip}),pip);if(token!==scope()||sequence!==appLinkSeq||S.selected!==pip)return;
+  S.appLinks=page.links;S.composio=page.composio;S.appLinksError='';render();watchAppSignIn();}
+ catch(error){if(token===scope()&&sequence===appLinkSeq){S.appLinksError=errorText(error);render();}}
+}
+function appLinkCards(){
+ if(remoteHost||S.apiVersion<43||!personalPip())return '';
+ const cards=shownAppLinks(S.appLinks).map(link=>appLinkMarkup(link,{esc,busy:appLinkBusy===link.id||S.busy||archived(),composio:S.composio!==false,host:appLinkHosts.get(link.id)||''}));
+ return cards.join('')+(S.appLinksError?`<p class="app-link-note" role="alert">${esc(S.appLinksError)}</p>`:'');
+}
+function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==link.id&&l.toolkit!==link.toolkit)];}
+async function appLinkAction(type,id,quiet=false){
+ if(!usable()||!personalPip()||(appLinkBusy&&!quiet))return;
+ const token=scope(),pip=S.selected;if(!quiet){appLinkBusy=id;render();}
+ try{
+  const answer=appLinkResult(await send(type,{pip_id:pip,link_id:id}),pip,id);if(token!==scope()||S.selected!==pip)return;
+  putAppLink(answer.link);if(answer.host)appLinkHosts.set(id,answer.host);
+  if(type==='start_pip_app_link'&&answer.link.status==='authorizing'){appLinkUntil=Date.now()+5*60*1000;if(!answer.opened)S.notice='DGC could not open your browser. Choose Open sign-in again.';}
+  if(answer.link.status==='connected'){S.notice=`${answer.link.app} is connected to ${S.pip?.name||'this Pip'}.`;void loadMessages();}
+  else if(!quiet&&answer.error)S.notice=answer.error;
+ }catch(error){if(token===scope()&&!quiet)setError(error);}
+ finally{if(token===scope()){if(!quiet)appLinkBusy='';render();watchAppSignIn();}}
+}
+// While a sign-in is open in the browser, look every few seconds (for five minutes) so the card turns
+// into "connected" by itself; "I've signed in" looks at once.
+function watchAppSignIn(){
+ window.clearTimeout(appLinkTimer);
+ const open=(S.appLinks||[]).find(l=>l.status==='authorizing');
+ if(!open||disposed||Date.now()>appLinkUntil)return;
+ appLinkTimer=window.setTimeout(()=>{if(!disposed&&S.selected===open.pip_id)void appLinkAction('check_pip_app_link',open.id,true);},4000);
+}
 async function openEmailDraft(id){
  if(id.startsWith('conndraft_')){await openConnectorDraft(id);return;}
  const calendar=id.startsWith('caldraft_');
@@ -1602,7 +1648,7 @@ function renderReview() {
   }
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
 }
-function clearSelection() { S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.appLinks=[];S.appLinksError='';window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 async function loadRun(id) {
   if(id!==S.runId){activitySeq++;S.activity=null;S.activityLoading=false;S.activityError='';}
   S.runId=id;const sequence=++detailSeq;const token=scope();render();
@@ -1954,6 +2000,11 @@ document.addEventListener('click',event=>{
     }catch(error){setError(error);}return;
   }
   if(target.dataset.finding!==undefined){const index=Number(target.dataset.finding),finding=report(S.run?.result)?.findings[index];if(!finding||!S.context)return;openReview({title:'Save this model assessment?',description:'The exact source excerpt will become workspace context. The conclusion stays labelled as a model assessment, not a verified fact.',body:`<h3>${esc(finding.title)}</h3><p class="mono">${esc(finding.path)}:${finding.line}</p><pre>${esc(finding.evidence)}</pre><p class="muted">From run ${esc(S.run.id)} · context v${S.context.revision}</p>`,confirm:'Save assessment',request:{type:'accept_pip_finding',workspace_id:S.workspace.id,run_id:S.run.id,finding_index:index,expected_revision:S.context.revision}});return;}
+  if(target.dataset.appLinkStart){void appLinkAction('start_pip_app_link',target.dataset.appLinkStart);return;}
+  if(target.dataset.appLinkCheck){void appLinkAction('check_pip_app_link',target.dataset.appLinkCheck);return;}
+  if(target.dataset.appLinkDecline){void appLinkAction('decline_pip_app_link',target.dataset.appLinkDecline);return;}
+  if(target.dataset.appLinkDisconnect){void appLinkAction('disconnect_pip_app_link',target.dataset.appLinkDisconnect);return;}
+  if(target.dataset.appLinkSettings){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.emailDraft){void openEmailDraft(target.dataset.emailDraft);return;}
   if(target.dataset.calendarDraftMore){void emailDraftHistory(target.dataset.calendarDraftMore,true);return;}
   if(target.dataset.emailDraftMore){void emailDraftHistory(target.dataset.emailDraftMore);return;}
@@ -2226,7 +2277,7 @@ if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(fitChat
 // One bounded polling loop for the entire tab, paused while hidden; no timers per avatar or job.
 const pollingTimer=window.setInterval(()=>{broker.expire(Date.now());if(polling||!S.visible||document.hidden||!usable()||S.busy||S.review||S.create||!['runs','chat'].includes(S.tab))return;polling=true;void refresh(false).finally(()=>{polling=false;});},4000);
 motion();render();vscode.postMessage({type:'pipsReady'});
-return {async navigate(value){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
+return {async navigate(value){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);window.clearTimeout(appLinkTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
 
 }
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};
