@@ -876,9 +876,14 @@ def overview(registry, actor: str) -> dict:
         free = None
     setup = pip_screen_setup.status()
     machine = capability()
+    checked = setup.get("checked_at")
+    if isinstance(checked, (int, float)) and not isinstance(checked, bool):
+        from datetime import datetime, timezone          # the setup records seconds since the epoch
+        checked = datetime.fromtimestamp(checked, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     return {"available": machine["available"], "reason": machine["reason"], "platform": sys.platform,
             "setup": {"state": setup["state"], "step": setup["step"], "done": setup["done"], "total": setup["total"],
-                      "error": setup["error"], "chrome": setup.get("chrome", ""), "checked_at": setup.get("checked_at")},
+                      "error": setup["error"], "chrome": setup.get("chrome", ""),
+                      "checked_at": checked if isinstance(checked, str) else None},
             "computers": computers, "programs_bytes": programs, "free_bytes": free}
 
 

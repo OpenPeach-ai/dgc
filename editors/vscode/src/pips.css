@@ -318,8 +318,10 @@ button.pill{border-radius:999px;padding:6px 16px}
 #pipPageTitle{font-size:12px;color:var(--muted)}
 .pip-name-actions{display:flex;gap:6px;margin-top:4px}
 .pip-page-tabs{display:flex;gap:4px;padding:3px;border-radius:999px;background:var(--pip-wash);align-self:center}
-.pip-page-tabs button{border:0;border-radius:999px;padding:5px 14px;min-height:28px;background:transparent;color:var(--muted);font-size:12px}
-.pip-page-tabs button[aria-pressed=true]{background:var(--vscode-editor-background);color:var(--vscode-foreground);box-shadow:0 1px 3px #0003}
+/* button.seg: the generic classless-button rule (0,2,1) would otherwise give each tab a border. */
+.pip-page-tabs button.seg{border:0;border-radius:999px;padding:5px 14px;min-height:28px;background:transparent;color:var(--muted);font-size:12px}
+.pip-page-tabs button.seg:hover{color:var(--vscode-foreground)}
+.pip-page-tabs button.seg[aria-pressed=true]{background:var(--vscode-editor-background);color:var(--vscode-foreground);box-shadow:0 1px 3px #0003}
 .pip-page-body{display:flex;flex-direction:column;gap:12px}
 .pip-page-group{display:flex;flex-direction:column;border:1px solid var(--pip-edge);border-radius:14px;overflow:hidden}
 .pip-page-group>p.muted,.pip-page-group>.pip-page-empty{margin:0;padding:10px 14px}
@@ -400,3 +402,6 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .tabs-menu .danger-text{color:var(--vscode-errorForeground)}
 .settings-pill{padding:6px 16px}
 @container(max-width:420px){.pip-face-edit{left:calc(50% + 26px)}.pip-page-head .avatar{width:96px;height:92px}.shared-when{display:none}}
+.pip-menu .tabs-menu button{border:0;border-radius:5px;padding:7px 10px;text-align:left;background:transparent;color:var(--vscode-foreground);min-height:30px}
+.pip-menu .tabs-menu button:hover:not(:disabled){background:var(--pip-wash)}
+.pip-menu .tabs-menu button.danger-text{color:var(--vscode-errorForeground)}

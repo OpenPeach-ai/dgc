@@ -497,6 +497,17 @@ def _unchanged_since_checkpoint(preparation, job, model, context):
             and prior["context_digest"] == context["digest"])
 
 
+def _user_clock(now=None) -> str:
+    """The user's local time and IANA zone, for a Personal Pip (this computer's zone)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from .pip_computer_box import host_timezone
+    zone = host_timezone()
+    local = (now or datetime.now().astimezone()).astimezone(ZoneInfo(zone)) if zone else (now or datetime.now().astimezone())
+    return (f"It is {local.strftime('%A %d %B %Y, %H:%M')} for the user (time zone {zone or local.strftime('UTC%z')}). "
+            "Use this time zone for any time you suggest.")
+
+
 class PipStore:
     def __init__(self, registry: WorkspaceRegistry):
         self.registry = registry
@@ -2105,6 +2116,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     # The chat shows each paragraph as its own bubble, like a messaging app.
                     base_instructions += ('\nWrite the way people text: short paragraphs of one or two sentences, '
                         'each one thought. Each paragraph appears as its own chat bubble, so never pad.')
+                    # Routines and "remind me at" need the user's clock: say when it is, and where.
+                    base_instructions += '\n' + _user_clock()
                 if selected_type.id == 'core':
                     role_instructions += (' You are the user\'s Primary Pip: their go-to for everyday tasks. You can see '
                         'their other Pips when DGC lists them. When another Pip fits a request better, say which one, '
@@ -2431,7 +2444,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         prompt += _attached_files(config, manifest, conversation['files'], computer_pin is not None)
     try:
         ok = agent.run_turn(prompt)
-        if ok is False or agent.cancelled.is_set():
+        # A model that made a card (a routine, a change, a draft) and then had no words is not a failed
+        # turn: the card is its answer (a default line says so below).
+        wordless = (ok is False and conversation is not None and not agent.cancelled.is_set()
+                    and "without a user-facing response" in str(getattr(agent, "_last_turn_error", ""))
+                    and (bool(routine_candidates) or any(c is not None for c in (setup_candidate, email_candidate,
+                                                                                calendar_candidate, connector_candidate))))
+        if (ok is False and not wordless) or agent.cancelled.is_set():
             raise RegistryError("model_failed", getattr(agent, "_last_turn_error", "") or "The audit model did not finish its bounded turn.")
         final_message = next((m for m in reversed(agent.messages)
                               if m.get("role") == "assistant" and not m.get("tool_calls")), {})
@@ -2462,6 +2481,14 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if said or choices_cut is not None:
                 # Ended at its choices, the turn has no closing text of its own: the reply is what it said.
                 final = "\n\n".join(said)
+            if not final.strip():
+                # Some models end a turn on a tool call with no words. The card it made is the answer:
+                # say so, rather than failing the turn and losing the card.
+                final = ("Here’s a routine for that. Choose Add routine below to start it." if routine_candidates
+                         else "Here’s the change. Review it below." if setup_candidate is not None
+                         else "Here’s a draft. It waits for you below." if (email_candidate or calendar_candidate
+                                                                          or connector_candidate) is not None
+                         else final)
             from .redaction import redact_text, secret_values
             result = {"text": pip_chat.validate_text(redact_text(final, secret_values(config)), reply=True)}
             if setup_candidate is not None:

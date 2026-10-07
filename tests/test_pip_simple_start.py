@@ -106,6 +106,8 @@ class SimpleStartTests(unittest.TestCase):
         gmail = self.store.create(self.personal_id(), "Gmail", None, "editor-user", pip_type="lens")
         chat = self.system_prompt(gmail, True)
         self.assertIn("Write the way people text", chat)
+        self.assertRegex(chat, r"It is \w+day \d\d \w+ \d{4}, \d\d:\d\d for the user \(time zone ",
+                         "it can say when, for a routine or a reminder")
         self.assertNotIn("Primary Pip", chat)
         self.assertNotIn("Write the way people text", self.system_prompt(gmail, False), "a scheduled task writes a result, not chat")
         core = self.store.create(self.personal_id(), "Core", None, "editor-user", pip_type="core")

@@ -8,7 +8,7 @@ import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup} from './pipAppLinks.js';
-import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup} from './pipRoutines.js';
+import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles} from './pipsModel.js';
 import '../media/pips/plush.js';
@@ -57,7 +57,11 @@ S.composerPanel='';S.chatControls=null;S.continuity=null;
 const chatPreferences=new Map();
 const chatActivities=new Map();
 let setupEditing=false,setupRows=[],setupLoading=false,setupError='',setupSeq=0,setupDetailSeq=0;
-const defaultZone=Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+// The browser may still name a zone by its old name (Chromium says Asia/Calcutta); the current name is
+// what every runner has installed (Ubuntu 24.04+ keeps old names in tzdata-legacy).
+const OLD_ZONES={'Asia/Calcutta':'Asia/Kolkata','Asia/Saigon':'Asia/Ho_Chi_Minh','Asia/Katmandu':'Asia/Kathmandu','Asia/Rangoon':'Asia/Yangon','Asia/Dacca':'Asia/Dhaka','Europe/Kiev':'Europe/Kyiv','America/Buenos_Aires':'America/Argentina/Buenos_Aires','America/Godthab':'America/Nuuk','Atlantic/Faeroe':'Atlantic/Faroe','Pacific/Truk':'Pacific/Chuuk'};
+const browserZone=Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+const defaultZone=OLD_ZONES[browserZone]||browserZone;
 S.sourceDirty=false;S.sourceDraftVersion=null;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;S.executionCapability=null;S.executionLoading=false;S.executionError='';S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';S.types=[];S.createStep='type';S.createType='';S.overview=true;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.models=[];S.defaultModel='';S.modelsError='';S.modelsLoading=false;S.modelDirty=false;S.stream=null;
 const creationDrafts=new Map(),avatarIds=new Map(),chatDrafts=new Map(),chatRequests=new Map();let avatarSequence=0,avatarObserver=null,characterCleanup=null,messageSeq=0,streamSeq=0,streamLoading=false,selectionGeneration=0;
 let savedView=options.getState?.(),restoreView=true,navigationPending=!!options.navigation;
@@ -1335,7 +1339,7 @@ function chatTime(at){
  return days===0?`Today ${time}`:days===1?`Yesterday ${time}`:`${when.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'})}, ${time}`;
 }
 function characterType(id){const i=SIMPLE_CHARACTERS.indexOf(id);return S.types.find(t=>t.id===id)||{id,name:id?id[0].toUpperCase()+id.slice(1):'Pip',character_index:i<0?4:i};}
-const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',gear:'<circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>',plus:'<path d="M8 3v10M3 8h10"/>'}[name]}</svg>`;
+const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',gear:'<path d="M2 4h6.5M12 4h2M2 8h2M7.5 8H14M2 12h8.5M14 12h0"/><circle cx="10" cy="4" r="1.6"/><circle cx="5.5" cy="8" r="1.6"/><circle cx="12" cy="12" r="1.6"/>',plus:'<path d="M8 3v10M3 8h10"/>'}[name]}</svg>`;
 function meetCoreMarkup(){
  return `<section class="meet-core" aria-label="Meet Core">${avatar('idle',characterType('core'),'meet-core')}<h2>Meet Core</h2><p>Core is your Primary Pip. It is your go-to for everyday tasks, looks after your other Pips, and checks in when it needs your help.</p>${button('create-core',S.busy?'Creating…':'Create Core',S.busy||!usable(),'primary pill')}</section>`;
 }
@@ -1589,9 +1593,9 @@ function pipPageMarkup(){
  const tab=['links','media','files'].includes(S.pipPage)?S.pipPage:'info';
  if(tab!=='info'&&(shared.pip!==S.selected||shared.kind!==tab)&&!shared.loading)void loadShared(tab);
  const mine=shared.pip===S.selected&&shared.kind===tab,items=mine?shared.items:null,error=mine?shared.error:'',loading=!mine||shared.loading;
- const body=tab==='links'?linksMarkup(items,{esc,formatDate:date,loading,error})
+ const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
-  :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:date,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
+  :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
   :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name});
  return `<div class="pip-page">${head}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
@@ -1620,9 +1624,9 @@ async function pipsSettingsCall(command,args,notice){
 }
 function pipsSettingsMarkup(){
  const view=pipsSettings.view==='apps'?'apps':'computer',busy=pipsSettings.busy||S.busy||!usable();
- const tabs=`<nav class="pip-page-tabs" aria-label="Pips settings">${[['computer','Computer'],['apps','Apps']].map(([k,l])=>`<button type="button" data-pips-settings="${k}" aria-pressed="${view===k}">${l}</button>`).join('')}</nav>`;
+ const tabs=`<nav class="pip-page-tabs" aria-label="Pips settings">${[['computer','Computer'],['apps','Apps']].map(([k,l])=>`<button type="button" class="seg" data-pips-settings="${k}" aria-pressed="${view===k}">${l}</button>`).join('')}</nav>`;
  const body=view==='apps'?appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError})+(skillsMarkup()?`<section class="pip-page-group pip-skills">${skillsMarkup()}</section>`:'')
-  :computersMarkup(pipsSettings.computers,{esc,busy,error:pipsSettings.computersError,formatDate:date,confirming:pipsSettings.confirmReset});
+  :computersMarkup(pipsSettings.computers,{esc,busy,error:pipsSettings.computersError,formatDate:shortDate,confirming:pipsSettings.confirmReset});
  return `<header class="pip-topbar"><button type="button" id="pips-settings-close" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Pips settings</span></div><span></span></header><div class="simple-content"><div class="pip-page">${tabs}<div class="pip-page-body">${body}</div></div></div>`;
 }
 async function appLinkAction(type,id,quiet=false){

@@ -138,7 +138,9 @@ def _time(value, default):
 def _timezone(value):
     if not isinstance(value, str) or not value or len(value) > 64:
         _fail("Choose a time zone such as Asia/Kolkata or Europe/London.")
+    from .pip_schedules import canonical_zone
     try:
+        value = canonical_zone(value)
         ZoneInfo(value)
     except (ValueError, KeyError, OSError):
         _fail(f"{value} is not a time zone this computer knows.")

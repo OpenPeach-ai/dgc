@@ -31,6 +31,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   which Pips use it.
 - An app card for an account another of your Pips already uses says so (`known_label`): the user
   is asked to let this Pip use it, and Connect reuses it without a sign-in.
+- A schedule in an old zone name, such as `Asia/Calcutta` (VS Code's Chromium still reports it on an
+  Indian computer), is accepted and saved as its current name (`Asia/Kolkata`). Ubuntu 24.04 installs
+  the old names only with `tzdata-legacy`, so every daily schedule or routine set from such an editor
+  was refused with "Timezone unavailable". Found by the battle test.
+- A Personal Pip knows the user's local time and time zone in its chat, so "in two minutes" and
+  "every day at 8" are right.
+- A Pip that makes a card (a routine, a change, a draft) and then writes nothing keeps the card, with
+  a short line saying it is below; before, the empty reply failed the turn and the card was lost. A
+  model that sends back nothing at all says "The model sent back an empty reply. Send your message
+  again." under the message, not "Conversation reply exceeds its text limit or is empty".
 - A Pip computer given while DGC was still fetching Chrome gets its browser: the box looks for Chrome
   when the browser starts, not once when the computer was made. Before, its browser never started
   until DGC restarted (the dock's Browser icon did nothing, and the Pip fell back on curl). A browser

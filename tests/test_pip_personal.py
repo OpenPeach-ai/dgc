@@ -119,6 +119,23 @@ class PersonalTests(unittest.TestCase):
         self.assertEqual(result['choices'],['Yes, connect Gmail','Not yet'])
         self.assertEqual(asked[0],1,'no model request after the choices')
 
+    def test_a_routine_suggested_with_no_words_still_reaches_the_chat(self):
+        # Battle test: a model called add_routine, then ended its turn with no text; the empty reply
+        # failed the turn and the routine card was lost.
+        from dgc.llm import LLMClient, ChatResult, ToolCall
+        job=self.make();run=pip_chat.send(self.store,job['id'],'Every morning at 8, a fun fact','fact','user',self.cfg)['run']
+        raw=json.loads(self.registry.db.execute('SELECT manifest FROM pip_runs WHERE id=?',(run['id'],)).fetchone()[0])
+        when={'kind':'schedule','schedule':{'type':'daily','time':'08:00','timezone':'Asia/Kolkata'}}
+        first=[ChatResult(content='',tool_calls=[ToolCall('r1','add_routine',{'title':'Fun fact','prompt':'Tell me a fun fact.','when':when})])]
+        turns=iter(lambda:first.pop() if first else ChatResult(content=''),None)   # then nothing, however often asked
+        with patch.dict(os.environ,{'DGC_SESSION_POLICY':pips._json(pips.native_policy(personal=True))}), \
+             patch.object(LLMClient,'chat',lambda *a,**k:next(turns)), patch('dgc.agent.discover_skills',return_value={}), \
+             patch('dgc.agent.load_memories',side_effect=AssertionError('No ambient memory')), \
+             patch('requests.sessions.Session.request',side_effect=AssertionError('No network')):
+            result=pips.execute_native(self.cfg,self.root,raw,lambda e:None)
+        self.assertEqual(result['text'],'Here’s a routine for that. Choose Add routine below to start it.')
+        self.assertEqual([r['title'] for r in result['routine_drafts']],['Fun fact'])
+
     def test_native_personal_refuses_fabricated_tool_calls(self):
         from dgc.llm import LLMClient, ChatResult, ToolCall
         job=self.make();run=self.store.enqueue(job['id'],'forged','user',self.cfg)

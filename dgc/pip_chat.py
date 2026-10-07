@@ -488,6 +488,9 @@ def failure_text(row) -> str:
     steps = re.search(r"stopped after (\d+) tool iterations \(max_turns\)", error["message"])
     if steps:
         return f"It stopped after {steps.group(1)} steps without finishing. Say “continue” and it carries on."
+    if error.get("code") == "invalid_reply" and "empty" in error["message"]:
+        # The model sent back nothing at all (a provider hiccup): nothing is wrong with the message.
+        return "The model sent back an empty reply. Send your message again."
     return error["message"].strip()[:300]
 
 

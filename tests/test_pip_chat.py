@@ -93,6 +93,8 @@ class PipChatTests(unittest.TestCase):
                  "It stopped after 12 steps without finishing. Say “continue” and it carries on."),
                 ("other", {"code": "model_failed", "message": "  The model endpoint refused the request.  "},
                  "The model endpoint refused the request."),
+                ("empty", {"code": "invalid_reply", "message": "Conversation reply exceeds its text limit or is empty."},
+                 "The model sent back an empty reply. Send your message again."),
                 ("bare", {"code": "model_failed"}, None)):
             sent = self.send(key=key)
             self.store.claim_next()

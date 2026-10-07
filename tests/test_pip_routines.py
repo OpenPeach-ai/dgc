@@ -59,6 +59,20 @@ class RoutineTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(RegistryError):
                 pip_routines.validate_trigger(bad)
 
+    def test_an_old_zone_name_from_the_editor_is_saved_as_its_current_name(self):
+        """VS Code's Chromium said Asia/Calcutta; Ubuntu 24.04 has only Asia/Kolkata (tzdata-legacy)."""
+        from dgc.pip_schedules import canonical_zone, validate_schedule
+        self.assertEqual(canonical_zone("Asia/Calcutta"), "Asia/Kolkata")
+        self.assertEqual(canonical_zone("Asia/Kolkata"), "Asia/Kolkata")
+        spec = validate_schedule({"type": "daily", "time": "09:00", "timezone": "Asia/Calcutta"})
+        self.assertEqual(spec["timezone"], "Asia/Kolkata")
+        routine = pip_routines.add(self.store, self.pip["id"], "Weekday plan", "Plan my day.",
+                                   {"kind": "schedule", "schedule": {"type": "cron", "cron": "0 9 * * 1-5", "timezone": "Asia/Calcutta"}})
+        self.assertEqual(routine["trigger"]["schedule"]["timezone"], "Asia/Kolkata")
+        self.assertIsNotNone(routine["next_due_at"])
+        with self.assertRaises(RegistryError):
+            validate_schedule({"type": "daily", "time": "09:00", "timezone": "Mars/Olympus"})
+
     # ---------------------------------------------------------------- the user's routines
 
     def test_a_routine_the_user_adds_is_on_at_once_and_can_be_edited_paused_and_removed(self):

@@ -75,7 +75,7 @@ export function headMarkup({ esc, avatar, name, title, nameDraft, titleDraft, bu
 
 export function pageTabsMarkup(current) {
   return `<nav class="pip-page-tabs" aria-label="Its page">${[['info', 'Info'], ['links', 'Links'], ['media', 'Media'], ['files', 'Files']]
-    .map(([k, l]) => `<button type="button" data-pip-page-tab="${k}" aria-pressed="${current === k}">${l}</button>`).join('')}</nav>`;
+    .map(([k, l]) => `<button type="button" class="seg" data-pip-page-tab="${k}" aria-pressed="${current === k}">${l}</button>`).join('')}</nav>`;
 }
 
 /** Info: what it does, its routines, and two switches. */
@@ -112,7 +112,8 @@ export function linksMarkup(items, { esc, formatDate, loading = false, error = '
   if (error) return `<p class="error" role="alert">${esc(error)}</p>`;
   if (loading && !items) return '<p class="muted" role="status">Loading…</p>';
   if (!items?.length) return '<p class="pip-page-empty">No links yet. Links you or it share in the chat show up here.</p>';
-  return `<ul class="pip-shared links">${items.map(l => `<li><button type="button" class="pip-shared-row" data-open-link="${esc(l.url)}" title="${esc(l.url)}"><span class="shared-mark" aria-hidden="true">${esc((l.host || '?').slice(0, 1).toUpperCase())}</span><span class="row-words"><strong>${esc(l.host)}</strong><small>${esc(l.url)}</small></span><small class="shared-when">${esc(formatDate(l.at))}</small></button></li>`).join('')}</ul>`;
+  const site = host => { const parts = String(host || '?').split('.'); return parts.length > 1 ? parts[parts.length - 2] : parts[0]; };
+  return `<ul class="pip-shared links">${items.map(l => `<li><button type="button" class="pip-shared-row" data-open-link="${esc(l.url)}" title="${esc(l.url)}"><span class="shared-mark" aria-hidden="true">${esc(site(l.host).slice(0, 1).toUpperCase())}</span><span class="row-words"><strong>${esc(l.host)}</strong><small>${esc(l.url)}</small></span><small class="shared-when">${esc(formatDate(l.at))}</small></button></li>`).join('')}</ul>`;
 }
 
 export function mediaMarkup(items, { esc, imageSrc, loading = false, error = '' }) {
@@ -148,7 +149,7 @@ export function computersMarkup(value, { esc, busy = false, error = '', formatDa
       : `<button type="button" class="quiet pill" data-computer-reset-ask="${esc(c.pip_id)}"${off || c.using || c.resetting ? ' disabled' : ''}>${c.resetting ? 'Resetting…' : 'Reset…'}</button>`) + '</li>').join('');
   return `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Update computer</strong><small>${state}</small></span><button type="button" class="pill" data-computers-update${off || ['running', 'unsupported'].includes(s.state) ? ' disabled' : ''}>${s.state === 'running' ? 'Updating…' : 'Check now'}</button></div></section>`
     + `<section class="pip-page-group"><h3 class="pip-page-label">Reset a computer</h3><p class="muted">Starts its computer fresh: signed out of every site, no browser history. Its Files stay.</p>${rows ? `<ul class="pip-page-list">${rows}</ul>` : '<p class="pip-page-empty">No Pip has a computer yet.</p>'}</section>`
-    + `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Disk space</strong><small>Pip computers use ${esc(bytesLabel(used))}${value.programs_bytes ? ` (the programs they share: ${esc(bytesLabel(value.programs_bytes))})` : ''}${Number.isFinite(value.free_bytes) ? ` · ${esc(bytesLabel(value.free_bytes))} free on this disk` : ''}.</small></span></div></section>`
+    + `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Disk space</strong><small>${[`Pip computers use ${esc(bytesLabel(used))}`, value.programs_bytes ? `${esc(bytesLabel(value.programs_bytes))} of it is the programs they share` : '', Number.isFinite(value.free_bytes) ? `${esc(bytesLabel(value.free_bytes))} free on this disk` : ''].filter(Boolean).join(' · ')}</small></span></div></section>`
     + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '');
 }
 

@@ -9,6 +9,12 @@ const text = (v, max) => typeof v === 'string' && v.length <= max;
 const record = v => !!v && typeof v === 'object' && !Array.isArray(v);
 const time = v => typeof v === 'string' && Number.isFinite(Date.parse(v));
 const pad = n => String(n).padStart(2, '0');
+/** "Wed 8 Oct, 18:52": a routine's times, short and in the user's own clock. */
+export function shortDate(value) {
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export function routine(value, pip) {
   const fail = () => { throw new Error('This routine didn’t load. Refresh to try again.'); };
@@ -36,7 +42,7 @@ export function routineWhen(trigger, formatDate = v => new Date(v).toLocaleStrin
   const s = trigger.schedule;
   if (s.type === 'daily') return `Every day at ${s.time}`;
   if (s.type === 'interval') return s.minutes === 60 ? 'Every hour' : s.minutes % 60 === 0 ? `Every ${s.minutes / 60} hours` : `Every ${s.minutes} minutes`;
-  if (s.type === 'once') return `Once, ${formatDate(s.at)}`;
+  if (s.type === 'once') return `Once, ${shortDate(s.at)}`;
   const m = /^(\d{1,2}) (\d{1,2}) \* \* (1-5|[0-6])$/.exec(s.cron || '');
   if (m) return `${m[3] === '1-5' ? 'Weekdays' : `${WEEKDAYS[Number(m[3])]}`} at ${pad(m[2])}:${pad(m[1])}`;
   return `On the schedule ${s.cron}`;
@@ -130,7 +136,7 @@ export function routinesMarkup(routines, { esc, busy = false, editing = '', form
   const shown = (routines || []).filter(r => r.status !== 'suggested');
   const rows = shown.map(r => editing === r.id ? form : `<li class="routine-row" data-state="${esc(r.status)}">`
     + `<button type="button" class="routine-open" data-routine-edit="${esc(r.id)}"${off}>${mark}<span class="routine-words"><strong>${esc(r.title)}</strong>`
-    + `<small>${esc(routineWhen(r.trigger, formatDate))}${r.status === 'on' && r.next_due_at && r.trigger.kind === 'schedule' ? ` · next ${esc(formatDate(r.next_due_at))}` : ''}</small>`
+    + `<small>${esc(routineWhen(r.trigger, formatDate))}${r.status === 'on' && r.next_due_at && r.trigger.kind === 'schedule' && r.trigger.schedule.type !== 'once' ? ` · next ${esc(shortDate(r.next_due_at))}` : ''}</small>`
     + `${r.last_error ? `<small class="routine-error">${esc(r.last_error)}</small>` : ''}</span></button>`
     + `<label class="switch" title="${r.status === 'on' ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-routine-toggle="${esc(r.id)}"${r.status === 'on' ? ' checked' : ''}${off} aria-label="${esc(r.title)} ${r.status === 'on' ? 'on' : 'off'}"><span aria-hidden="true"></span></label></li>`).join('');
   const legacy = schedule ? `<li class="routine-row legacy"><span class="routine-open static">${mark}<span class="routine-words"><strong>Its task</strong><small>${esc(schedule)}</small></span></span><button type="button" class="quiet" data-routine-legacy${off}>Change</button></li>` : '';

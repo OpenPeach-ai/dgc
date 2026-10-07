@@ -141,13 +141,57 @@ def _compile_cron(expression):
     return plan
 
 
+# Old names for zones, such as Asia/Calcutta for Asia/Kolkata: browsers still report them (VS Code's
+# Chromium said Asia/Calcutta on an Indian machine), and Ubuntu 24.04+ installs them only with
+# tzdata-legacy, so a routine at 09:00 was refused. An old name is accepted and saved as its current one.
+_OLD_ZONES = {"Asia/Calcutta": "Asia/Kolkata", "Asia/Saigon": "Asia/Ho_Chi_Minh", "Asia/Katmandu": "Asia/Kathmandu",
+              "Asia/Rangoon": "Asia/Yangon", "Asia/Dacca": "Asia/Dhaka", "Asia/Thimbu": "Asia/Thimphu",
+              "Europe/Kiev": "Europe/Kyiv", "America/Buenos_Aires": "America/Argentina/Buenos_Aires",
+              "America/Godthab": "America/Nuuk", "Atlantic/Faeroe": "Atlantic/Faroe", "Pacific/Truk": "Pacific/Chuuk",
+              "US/Eastern": "America/New_York", "US/Central": "America/Chicago", "US/Mountain": "America/Denver",
+              "US/Pacific": "America/Los_Angeles"}
+
+
+@lru_cache(maxsize=1)
+def _zone_links() -> dict:
+    """Every old zone name and its current one: the system's tzdata.zi link lines, then the list above."""
+    import zoneinfo
+    from pathlib import Path
+    links = {}
+    for base in zoneinfo.TZPATH:
+        try:
+            text = (Path(base) / "tzdata.zi").read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            parts = line.split()
+            if len(parts) == 3 and parts[0] == "L":
+                links[parts[2]] = parts[1]
+        break
+    return {**_OLD_ZONES, **links}
+
+
+def canonical_zone(zone: str) -> str:
+    """The name of ``zone`` this runner can load: itself, or the current name of an old one."""
+    for _ in range(4):
+        try:
+            ZoneInfo(zone)
+            return zone
+        except (ValueError, ZoneInfoNotFoundError, OSError):
+            nxt = _zone_links().get(zone)
+            if not nxt or nxt == zone:
+                return zone
+            zone = nxt
+    return zone
+
+
 def _timezone(zone):
     if (not isinstance(zone, str) or not 1 <= len(zone) <= 128
             or not re.fullmatch(r"[A-Za-z0-9_+/-]+", zone) or zone.startswith("/")
             or "//" in zone):
         raise RegistryError("invalid_schedule", "Calendar schedules require an IANA timezone such as Asia/Kolkata.")
     try:
-        return ZoneInfo(zone)
+        return ZoneInfo(canonical_zone(zone))
     except (ValueError, ZoneInfoNotFoundError) as exc:
         raise RegistryError("invalid_schedule", "Timezone unavailable. Choose an installed IANA timezone; this runner needs system timezone data.") from exc
 
@@ -200,6 +244,7 @@ def validate_schedule(value):
         raise RegistryError("invalid_schedule", f"A {value['type']} schedule only accepts {field}, timezone and the supported policies.")
     zone = value.get("timezone")
     _timezone(zone)
+    zone = canonical_zone(zone)
     if value.get("dst_policy", DST_POLICY) != DST_POLICY:
         raise RegistryError("invalid_schedule", "Calendar schedules skip nonexistent local times and use the first occurrence of repeated local times.")
     if field == "time":
