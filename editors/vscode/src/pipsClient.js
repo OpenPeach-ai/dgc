@@ -345,6 +345,8 @@ function hydrateMessageImages(){
  }
 }
 async function sendChat(){
+  // Enter while the Pip is answering said nothing before; the draft stays in the box either way.
+  if(S.chatActiveRun&&draft.chatText.trim()&&!S.busy){S.notice=`${S.pip?.name||'The Pip'} is still answering. Send this when it is done.`;render();return;}
   if(S.apiVersion>=24&&!S.chatControls||archived()||!supportedSource()||!usable()||!S.messagesLoaded||S.busy||!S.pip||!pipType(S.pip,S.types)?.available||!S.runner?.online||S.runner?.paused||S.chatActiveRun)return;
   const text=draft.chatText.trim(),images=canAttachImages()?pendingImages().map(i=>i.data):[],files=canAttachImages()?pendingFiles().map(f=>({name:f.name,data:f.data})):[];if(!text&&!images.length&&!files.length){setError('Enter a message.');return;}if(text.length>4000||new TextEncoder().encode(text).length>8192){setError('Use at most 4000 characters and 8 KiB for one message. Nothing was shortened.');return;}
   const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,generation=selectionGeneration,epoch=S.epoch;let pending=chatRequests.get(id);if(!pending||pending.signature!==signature){pending={text,signature,options,images,files,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';render();

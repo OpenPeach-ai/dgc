@@ -48,6 +48,8 @@
 
 ### Pips
 
+- Pressing Enter while a Pip is answering keeps your message in the box and says "<Pip> is still
+  answering. Send this when it is done." (it did nothing before).
 - **A Pip computer's Terminal is online**, like Grok's: public websites only, never this computer or
   your network. Under each command it lists the sites reached and anything DGC blocked.
 - **"Needs you" when a site checks for robots.** A Pip stops at a robot check; its chat shows

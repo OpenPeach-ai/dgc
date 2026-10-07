@@ -153,6 +153,16 @@ test('archiving a Pip from its Settings returns to your Pips',async()=>{
  assert.equal(x.d.querySelector('.pip-topbar'),null,'not the archived Pip');
  assert.match(x.d.body.textContent,/Gmail is archived\. Its chats and history are kept; Show archived brings it back\./);
 });
+// Found battle-testing in real VS Code: Enter while the Pip was answering did nothing, and said nothing.
+test('Enter while the Pip is answering keeps the draft and says to wait',async()=>{
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const x=setup({jobs:[gmail],active:{pip:gmail.id}});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ x.input('#chatText','Yes, connect my Gmail');
+ x.d.getElementById('chatText').dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await x.drain();
+ assert.equal(x.requests('send_pip_message').length,0,'nothing sent over the reply');
+ assert.equal(x.d.getElementById('chatText').value,'Yes, connect my Gmail');
+ assert.match(x.d.body.textContent,/Gmail is still answering\. Send this when it is done\./);
+});
 test('back returns to your Pips, and the menu reaches Results and Settings',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();

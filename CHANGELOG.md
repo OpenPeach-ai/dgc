@@ -8,6 +8,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- A new Pip introduces itself by the name you gave it, not its character's (a Pip named Gmail said
+  "Hi, I'm Scout").
 - A Pip computer's Terminal is online, like Grok's bots: commands (the Terminal tab's, the Pip's own and
   the desktop's Terminal app) reach public websites on ports 80 and 443 through the same egress proxy
   as its browser, via an in-box relay and the standard proxy variables (curl, pip, npm, git over
