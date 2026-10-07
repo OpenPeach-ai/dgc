@@ -23,7 +23,7 @@ const link=(extra={})=>({id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 const viewModule=load(viewCode,name=>name==='vscode'?{}:require(name));
-function setup({links=[link()],composio=true,messages=[]}={}){
+function setup({links=[link()],composio=true,messages=[],drafts=[]}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set(),timers=[];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -40,7 +40,7 @@ function setup({links=[link()],composio=true,messages=[]}={}){
   get_workspace_context:()=>({context:{workspace_id:r.workspace_id||PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
   list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages,next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),
   get_pip_computer:()=>({computer:{pip_id:PIP,granted:false,available:true,reason:'',pending:0,actions:[]}}),
-  list_pip_app_links:()=>({pip_id:PIP,links,composio}),get_pip_digest:()=>undefined}[r.type]?.());
+  list_pip_app_links:()=>({pip_id:PIP,links,composio}),list_pip_message_drafts:()=>({drafts:drafts.map(d=>({id:d.id,pip_id:d.pip_id,workspace_id:d.workspace_id,status:d.status,expired:d.expired,subject:d.payload.message.subject,digest:d.digest,source_run_id:d.source_run_id,expires_at:d.expires_at,action_id:d.action_id})),next_cursor:null}),get_pip_message_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),list_pip_calendar_drafts:()=>({drafts:[],next_cursor:null}),list_pip_connector_drafts:()=>({drafts:[],next_cursor:null}),get_pip_digest:()=>undefined}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion:43,generation:1,connected:true,supported:true,enabled:true});
  const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
@@ -70,7 +70,7 @@ test('while the browser is open the card looks by itself, and turns into connect
  const check=x.requests('check_pip_app_link').at(-1);assert.equal(check.request.link_id,LINK);
  x.answer(check,{link:link({status:'authorizing'}),connected:false});await flush();
  x.click(`[data-app-link-check="${LINK}"]`);
- const now=x.requests('check_pip_app_link').at(-1);x.setLinks([link({status:'connected',label:'me@example.com'})]);x.answer(now,{link:link({status:'connected',label:'me@example.com'}),connected:true});await x.drain();
+ const now=x.requests('check_pip_app_link').at(-1);x.setLinks([link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done'})]);x.answer(now,{link:link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done'}),connected:true});await x.drain();
  const done=x.d.querySelector(`[data-app-link="${LINK}"]`);
  assert.match(done.textContent,/Gmail connected.*me@example\.com/);assert.equal(done.querySelectorAll('button').length,0);
  assert.match(x.d.body.textContent,/Gmail is connected to Gmail\./);
@@ -112,7 +112,7 @@ test('the host opens the sign-in page from the backend reply, and the webview ne
 });
 
 test("a Pip's Settings list its connected apps, and Disconnect stops it using one",async()=>{
- const x=setup({links:[link({status:'connected',label:'me@example.com',updated_at:'2026-10-01T09:00:00.000Z'})]});await openChat(x);
+ const x=setup({links:[link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done',updated_at:'2026-10-01T09:00:00.000Z'})]});await openChat(x);
  assert.equal(x.d.querySelector('[data-app-link]'),null,'an old connection is not a card in the chat');
  x.click('.pip-menu [data-tab="job"]');await x.drain();
  const apps=x.d.querySelector('[aria-label="Apps"]');assert.ok(apps);assert.match(apps.textContent,/Gmail me@example\.com.*Disconnect/);
@@ -139,4 +139,51 @@ test('choices under an older reply are not offered, and words already typed are 
  y.d.querySelector('.msg-choice').click();await flush();
  assert.equal(y.requests('send_pip_message').length,0,'not sent over your draft');
  assert.equal(y.d.getElementById('chatText').value,'and also Gmail');
+});
+
+// Grok's Allow card: the email a Pip wrote, inline, with Send / Always allow; the reviewed steps run
+// without the dialogs, on the Pip's own connected Gmail account.
+const RUN='run_'+'5'.repeat(32),DRAFT='maildraft_'+'3'.repeat(32),ACTION='appaction_'+'2'.repeat(32);
+const mail={recipient_email:'friend@example.test',subject:'A short note',body:'Lunch on Friday? <img src=x>'};
+const source={run_id:RUN,pip_id:PIP,workspace_id:PW,job_version:1,lifecycle_revision:0,result_digest:'e'.repeat(64)};
+const draft=(extra={})=>({id:DRAFT,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status:'pending',digest:'c'.repeat(64),expired:false,expires_at:'2099-10-05T06:00:00Z',action_id:null,payload:{schema_version:1,source,message:mail},...extra});
+const action=(status='pending')=>({id:ACTION,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status,digest:'d'.repeat(64),expires_at:'2099-10-05T06:00:00Z',payload:{schema_version:1,kind:'gmail_send',source,server:'composio',connection_digest:'a'.repeat(64),schema_digest:'b'.repeat(64),account:'ca_home',message:mail},receipt:null});
+const gmail=()=>link({status:'connected',label:'me@example.com',server:'composio',account:'ca_home',updated_at:'2026-10-01T09:00:00.000Z'});
+test('the email a Pip wrote is an Allow card; Send prepares that exact draft on its Gmail account and sends it once',async()=>{
+ const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
+ const card=x.d.querySelector(`[data-allow-card="${DRAFT}"]`);assert.ok(card,'inline in the chat');
+ assert.match(card.textContent,/Send this email\?From me@example\.com.*To.*friend@example\.test.*A short note.*Lunch on Friday\? <img src=x>/);
+ assert.equal(card.querySelector('img'),null,'the body is text');
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Send','Always allow','Edit','Don’t send']);
+ x.click(`[data-allow-send="${DRAFT}"]`);await flush();
+ x.answer(x.requests('list_pip_accounts').at(-1),{server:'composio',connection_digest:'a'.repeat(64),accounts:[{id:'ca_other',label:'Work',toolkit:'gmail'},{id:'ca_home',label:'Home',toolkit:'gmail'}]});
+ x.answer(x.requests('inspect_pip_send_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GMAIL_SEND_EMAIL',schema_digest:'b'.repeat(64),account_required:true});await flush();
+ const prep=x.requests('prepare_pip_message_draft').at(-1);
+ assert.deepEqual(JSON.parse(JSON.stringify(prep.request)),{type:'prepare_pip_message_draft',draft_id:DRAFT,expected_digest:'c'.repeat(64),server:'composio',connection_digest:'a'.repeat(64),account:'ca_home',schema_digest:'b'.repeat(64),message:mail});
+ x.answer(prep,{action:action()});await flush();
+ const ok=x.requests('accept_pip_app_action').at(-1);assert.deepEqual(JSON.parse(JSON.stringify(ok.request)),{type:'accept_pip_app_action',action_id:ACTION,expected_digest:'d'.repeat(64)});
+ assert.equal(x.requests('always_allow_pip_app_action').length,0);
+ x.answer(ok,{action:action('approved')});await x.drain();
+ assert.match(x.d.body.textContent,/Sent, exactly as shown\./);
+});
+test('Always allow sends this one and saves the grant; without a connected Gmail the card asks for an account; Don’t send dismisses',async()=>{
+ const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
+ x.click(`[data-allow-always="${DRAFT}"]`);await flush();
+ x.answer(x.requests('list_pip_accounts').at(-1),{server:'composio',connection_digest:'a'.repeat(64),accounts:[{id:'ca_home',label:'Home',toolkit:'gmail'}]});
+ x.answer(x.requests('inspect_pip_send_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GMAIL_SEND_EMAIL',schema_digest:'b'.repeat(64),account_required:true});await flush();
+ x.answer(x.requests('prepare_pip_message_draft').at(-1),{action:action()});await flush();
+ assert.equal(x.requests('accept_pip_app_action').length,0);assert.ok(x.requests('always_allow_pip_app_action').at(-1),'Always allow');
+ const y=setup({links:[],drafts:[draft()]});await openChat(y);
+ const card=y.d.querySelector(`[data-allow-card="${DRAFT}"]`);
+ assert.match(card.textContent,/No Gmail connected to it yet/);assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Choose account…','Don’t send']);
+ y.click(`[data-allow-dismiss="${DRAFT}"]`);
+ const no=y.requests('dismiss_pip_message_draft').at(-1);assert.deepEqual(JSON.parse(JSON.stringify(no.request)),{type:'dismiss_pip_message_draft',draft_id:DRAFT,expected_digest:'c'.repeat(64)});
+});
+test('a Gmail account Composio no longer has is never swapped for another',async()=>{
+ const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
+ x.click(`[data-allow-send="${DRAFT}"]`);await flush();
+ x.answer(x.requests('list_pip_accounts').at(-1),{server:'composio',connection_digest:'a'.repeat(64),accounts:[{id:'ca_other',label:'Work',toolkit:'gmail'}]});
+ x.answer(x.requests('inspect_pip_send_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GMAIL_SEND_EMAIL',schema_digest:'b'.repeat(64),account_required:true});await x.drain();
+ assert.equal(x.requests('prepare_pip_message_draft').length,0);
+ assert.match(x.d.body.textContent,/me@example\.com is no longer in Composio/);
 });

@@ -82,7 +82,10 @@ def _text(value, limit, what):
 def projection(row) -> dict:
     return {"id": row["id"], "pip_id": row["pip_id"], "workspace_id": row["workspace_id"], "toolkit": row["toolkit"],
             "app": app_name(row["toolkit"]), "reason": row["reason"], "status": row["status"],
-            "label": row["label"], "error": row["error"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
+            "label": row["label"], "error": row["error"], "created_at": row["created_at"], "updated_at": row["updated_at"],
+            # A connected card names its account and connection, as the account picker already does,
+            # so the editor can prepare a send from it; never a credential.
+            **({"server": row["server"], "account": row["account"]} if row["status"] == "connected" else {})}
 
 
 def _row(registry, link_id):

@@ -7,7 +7,7 @@ import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pip
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
-import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup} from './pipAppLinks.js';
+import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup} from './pipAppLinks.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
@@ -1437,11 +1437,15 @@ async function loadEmailDrafts(calendar=false){
  if(!calendar&&S.apiVersion>=37)void loadConnectorDrafts();
  if(!calendar&&S.apiVersion>=35)void loadEmailDrafts(true);
  if(remoteHost||S.apiVersion<(calendar?35:32)||!personalPip()||!usable())return;const token=scope(),sequence=calendar?++calendarDraftSeq:++emailDraftSeq;
- try{const answer=emailDraftsPage(await send(calendar?'list_pip_calendar_drafts':'list_pip_message_drafts',{pip_id:S.selected,limit:20}),S.selected,S.workspace.id,calendar);if(token!==scope()||sequence!==(calendar?calendarDraftSeq:emailDraftSeq))return;S[calendar?'calendarDrafts':'emailDrafts']=answer.drafts;S[calendar?'calendarDraftError':'emailDraftError']='';render();}catch(error){if(token===scope()&&sequence===(calendar?calendarDraftSeq:emailDraftSeq)){S[calendar?'calendarDraftError':'emailDraftError']=errorText(error);render();}}
+ try{const answer=emailDraftsPage(await send(calendar?'list_pip_calendar_drafts':'list_pip_message_drafts',{pip_id:S.selected,limit:20}),S.selected,S.workspace.id,calendar);if(token!==scope()||sequence!==(calendar?calendarDraftSeq:emailDraftSeq))return;S[calendar?'calendarDrafts':'emailDrafts']=answer.drafts;S[calendar?'calendarDraftError':'emailDraftError']='';render();if(!calendar)void loadDraftDetails();}catch(error){if(token===scope()&&sequence===(calendar?calendarDraftSeq:emailDraftSeq)){S[calendar?'calendarDraftError':'emailDraftError']=errorText(error);render();}}
 }
 function emailDraftCards(){
  if(remoteHost||S.apiVersion<32||!personalPip())return '';
- return [...(S.emailDrafts||[]),...(S.apiVersion>=35?S.calendarDrafts||[]:[]),...(S.apiVersion>=37?S.connectorDrafts||[]:[])].filter(d=>d.status==='pending'&&!d.expired).map(d=>{const label=d.id.startsWith('conndraft_')?'Connector draft':d.id.startsWith('caldraft_')?'Calendar draft':'Email draft';return `<div class="chat-setup-review" aria-label="${label}"><span class="chat-setup-label">${label} <small>${esc(d.subject)}</small></span><button type="button" data-email-draft="${esc(d.id)}"${S.busy?' disabled':''}>Review</button></div>`;}).join('')+(S.emailDraftError?errorMarkup(S.emailDraftError):'')+(S.calendarDraftError?errorMarkup(S.calendarDraftError):'')+(S.connectorDraftError?errorMarkup(S.connectorDraftError):'');
+ // An email it wrote is Grok's Allow card: what it would send, and Send / Always allow right here.
+ const gmail=(S.appLinks||[]).find(l=>l.status==='connected'&&l.toolkit==='gmail')||null;
+ const full=d=>S.apiVersion>=43?draftDetails.get(d.id+':'+d.digest):null;
+ const allow=(S.emailDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&full(d)).map(d=>allowCardMarkup(full(d),{esc,link:gmail,busy:allowBusy===d.id||S.busy||archived(),pipName:S.pip?.name||'This Pip'})).join('');
+ return allow+[...(S.emailDrafts||[]).filter(d=>!full(d)),...(S.apiVersion>=35?S.calendarDrafts||[]:[]),...(S.apiVersion>=37?S.connectorDrafts||[]:[])].filter(d=>d.status==='pending'&&!d.expired).map(d=>{const label=d.id.startsWith('conndraft_')?'Connector draft':d.id.startsWith('caldraft_')?'Calendar draft':'Email draft';return `<div class="chat-setup-review" aria-label="${label}"><span class="chat-setup-label">${label} <small>${esc(d.subject)}</small></span><button type="button" data-email-draft="${esc(d.id)}"${S.busy?' disabled':''}>Review</button></div>`;}).join('')+(S.emailDraftError?errorMarkup(S.emailDraftError):'')+(S.calendarDraftError?errorMarkup(S.calendarDraftError):'')+(S.connectorDraftError?errorMarkup(S.connectorDraftError):'');
 }
 // A Personal Pip's own apps (pip_app_links): the Connect card it asks for with connect_app.
 let appLinkSeq=0,appLinkBusy='',appLinkTimer=0,appLinkUntil=0;const appLinkHosts=new Map();
@@ -1477,6 +1481,45 @@ function watchAppSignIn(){
  const open=(S.appLinks||[]).find(l=>l.status==='authorizing');
  if(!open||disposed||Date.now()>appLinkUntil)return;
  appLinkTimer=window.setTimeout(()=>{if(!disposed&&S.selected===open.pip_id)void appLinkAction('check_pip_app_link',open.id,true);},4000);
+}
+// Send on the Allow card: the Pip's connected Gmail account, its send tool, the exact saved draft, then
+// one send (or Always allow). The same reviewed steps as the dialogs, without them.
+let allowBusy='';const draftDetails=new Map();
+// The draft list carries summaries; an Allow card shows the whole message, read once per version.
+async function loadDraftDetails(){
+ if(S.apiVersion<43||!personalPip()||!usable())return;
+ const token=scope(),pip=S.selected;
+ for(const d of (S.emailDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&!draftDetails.has(d.id+':'+d.digest)).slice(0,5)){
+  try{const v=emailDraft((await send('get_pip_message_draft',{draft_id:d.id})).draft,pip,S.workspace.id);if(token!==scope()||S.selected!==pip)return;
+   if(v.id===d.id&&v.digest===d.digest){draftDetails.set(d.id+':'+d.digest,v);render();}}
+  catch{/* the Review row stays */}
+ }
+}
+async function allowSend(id,always=false){
+ const summary=(S.emailDrafts||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest),link=(S.appLinks||[]).find(l=>l.status==='connected'&&l.toolkit==='gmail');
+ if(!d||d.status!=='pending'||d.expired||!usable()||allowBusy)return;
+ if(!link){void openEmailDraft(id);return;}
+ const token=scope(),pip=S.selected;allowBusy=id;render();
+ try{
+  const [discovery,inspection]=await Promise.all([send('list_pip_accounts',{server:link.server}),send('inspect_pip_send_connection',{server:link.server})]);
+  if(token!==scope()||S.selected!==pip)return;
+  const choice=sendAccounts(link.server,discovery,inspection).find(c=>c.id===link.account);
+  if(!choice)throw Error(`${link.label||'This Gmail account'} is no longer in Composio. Ask ${S.pip?.name||'the Pip'} to connect Gmail again.`);
+  const message=messageDraft(d.payload.message);
+  const request={type:'prepare_pip_message_draft',draft_id:d.id,expected_digest:d.digest,server:link.server,connection_digest:discovery.connection_digest,account:choice.id,schema_digest:choice.schema_digest,message};
+  const {type:_t,...fields}=request;
+  const action=messageReview((await send('prepare_pip_message_draft',fields)).action,pip,S.workspace.id,{...request,source_run_id:d.source_run_id});
+  if(token!==scope()||S.selected!==pip)return;
+  await send(always?'always_allow_pip_app_action':'accept_pip_app_action',{action_id:action.id,expected_digest:action.digest});
+  if(token!==scope())return;
+  S.notice=always?`Sent. ${S.pip?.name||'This Pip'} may now send emails from ${link.label||'this account'} without asking; take it back in its Settings.`:'Sent, exactly as shown.';
+  void loadEmailDrafts();
+ }catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){allowBusy='';render();}}
+}
+async function allowDismiss(id){
+ const d=(S.emailDrafts||[]).find(x=>x.id===id);if(!d||S.busy||!usable())return;
+ void mutate({type:'dismiss_pip_message_draft',draft_id:d.id,expected_digest:d.digest},r=>{const v=emailDraft(r.draft,S.selected,S.workspace.id);if(v.id!==d.id||v.status!=='dismissed')throw Error('The dismissal does not match this draft.');S.notice='Not sent.';void loadEmailDrafts();});
 }
 async function openEmailDraft(id){
  if(id.startsWith('conndraft_')){await openConnectorDraft(id);return;}
@@ -2008,6 +2051,9 @@ document.addEventListener('click',event=>{
     else{draft.chatText=choice;void sendChat();}
     return;
   }
+  if(target.dataset.allowSend){void allowSend(target.dataset.allowSend);return;}
+  if(target.dataset.allowAlways){void allowSend(target.dataset.allowAlways,true);return;}
+  if(target.dataset.allowDismiss){void allowDismiss(target.dataset.allowDismiss);return;}
   if(target.dataset.appLinkStart){void appLinkAction('start_pip_app_link',target.dataset.appLinkStart);return;}
   if(target.dataset.appLinkCheck){void appLinkAction('check_pip_app_link',target.dataset.appLinkCheck);return;}
   if(target.dataset.appLinkDecline){void appLinkAction('decline_pip_app_link',target.dataset.appLinkDecline);return;}

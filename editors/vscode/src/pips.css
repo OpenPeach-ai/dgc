@@ -298,3 +298,8 @@ button.pill{border-radius:999px;padding:6px 16px}
 .app-list{list-style:none;margin:0 0 6px;padding:0;display:flex;flex-direction:column;gap:6px}
 .app-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
 .app-list small{color:var(--vscode-descriptionForeground);margin-left:6px}
+/* Grok's Allow card: an email the Pip wrote, with Send / Always allow / Edit / Don't send. */
+.allow-card{display:flex;flex-direction:column;gap:10px;margin:12px 0;padding:12px 14px;border:1px solid var(--pip-edge);border-radius:12px;max-width:560px;background:color-mix(in srgb,var(--pip-accent) 5%,transparent)}
+.allow-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;margin:0;font-size:12px}
+.allow-meta dt{color:var(--vscode-descriptionForeground)}.allow-meta dd{margin:0;overflow-wrap:anywhere}
+.allow-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;max-height:7.5em;overflow:auto;padding:8px 10px;border-radius:8px;background:var(--vscode-textCodeBlock-background,color-mix(in srgb,var(--vscode-foreground) 6%,transparent))}

@@ -48,6 +48,11 @@
 
 ### Pips
 
+- **Allow cards.** An email a Pip wrote shows in its chat as **Send this email?** with who it is from,
+  to, subject and the text, and **Send**, **Always allow**, **Edit** and **Don't send**, like Grok's
+  Allow card. Send uses the Gmail account connected to that Pip and sends exactly that draft, once;
+  Always allow also lets it send from that account without asking (take it back in its Settings).
+  Without a connected Gmail the card offers **Choose account…**, the full review as before.
 - **A Pip's choices.** A Pip can end its message with 2 to 4 choices, shown as buttons under it (A, B,
   …); a tap answers it. A new Pip's hello offers its next steps this way. Choices under an older
   message are gone once you have answered; with words already in the box, a tap adds the choice to

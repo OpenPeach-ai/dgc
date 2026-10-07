@@ -13,6 +13,7 @@ export function appLink(value, pip) {
     || !text(value.app, 80) || !value.app || !text(value.reason, 600) || !STATUSES.includes(value.status)
     || !(value.label === null || text(value.label, 320)) || !(value.error === null || text(value.error, 600))
     || !Number.isFinite(Date.parse(value.updated_at))) fail();
+  if (value.status === 'connected' && (!/^[A-Za-z0-9_.-]{1,80}$/.test(value.server || '') || !/^(?:ca|coup)_[A-Za-z0-9_-]{1,120}$/.test(value.account || ''))) fail();
   return value;
 }
 
@@ -61,4 +62,20 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : `Connect ${app}`}</button>${no}</div>`;
   }
   return `<div class="app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : `Connect ${app}`}">${body}</div>`;
+}
+
+/** A Pip's email draft as Grok's Allow card: what it would send, and the user's Send / Always allow. */
+export function allowCardMarkup(draft, { esc, link = null, busy = false, pipName = 'Your Pip' }) {
+  const m = draft.payload.message, id = esc(draft.id), off = busy ? ' disabled' : '';
+  const from = link ? `From ${esc(link.label || 'your Gmail')}` : 'No Gmail connected to it yet';
+  const actions = link
+    ? `<button type="button" class="primary" data-allow-send="${id}"${off}>${busy ? 'Sending…' : 'Send'}</button>`
+      + `<button type="button" class="quiet" data-allow-always="${id}"${off} title="Send this, and let ${esc(pipName)} send emails from this account without asking; take it back in its Settings">Always allow</button>`
+      + `<button type="button" class="quiet" data-email-draft="${id}"${off}>Edit</button>`
+    : `<button type="button" class="primary" data-email-draft="${id}"${off}>Choose account…</button>`;
+  return `<div class="allow-card" data-allow-card="${id}" role="group" aria-label="Send this email?">`
+    + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">@</span><div class="app-link-words"><strong>Send this email?</strong><small>${from}</small></div></div>`
+    + `<dl class="allow-meta"><dt>To</dt><dd>${esc(m.recipient_email)}</dd><dt>Subject</dt><dd>${esc(m.subject)}</dd></dl>`
+    + `<div class="allow-body">${esc(m.body)}</div>`
+    + `<div class="app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t send</button></div></div>`;
 }

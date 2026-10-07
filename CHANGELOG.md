@@ -8,6 +8,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- A connected app card (`list_pip_app_links`) names its `server` and `account`, as the account picker
+  already did, so the editor can prepare a send from the Pip's own account.
 - A Pip's chat reply can offer 2 to 4 choices, like Grok's A/B cards ("Yes, connect Gmail" / "Not
   yet"): the new `offer_choices` tool (chat runs only) saves them with the reply (registry schema 39,
   `pip_chat_choices`), `list_pip_messages` returns them as the reply's `choices`, and a new Pip's
