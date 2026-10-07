@@ -612,8 +612,9 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
                     _fail('Finish or cancel this Pip\'s queued or active work before accepting setup.', 'pip_busy')
                 if registry.db.execute("SELECT 1 FROM pip_approvals WHERE pip_id=? AND status='pending' AND expires_at>? LIMIT 1", (pip_id, now)).fetchone():
                     _fail('Resolve this Pip\'s existing job reviews before accepting setup.', 'pending_review')
-            elif registry.db.execute('SELECT count(*) FROM pips WHERE workspace_id=?', (workspace_id,)).fetchone()[0] >= 100:
-                _fail('This workspace already has 100 Pips.', 'limit')
+            else:
+                from .pip_limits import require_room
+                require_room(registry.db, workspace_id)
             from .pips import source_revision
             if not personal:source_revision(root, body['definition']['source_ref'])
             version = request.get('expected_version', 0) + 1

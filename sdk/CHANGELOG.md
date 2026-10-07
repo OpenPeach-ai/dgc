@@ -11,7 +11,10 @@ your Pips may use, and which Pips. A plugin action a Pip prepares is a connector
 `get_pip_chat_context` (`pip_id`, optional `context_size`) estimates how much of the context window a
 Personal Pip's chat takes in its next reply (`used_tokens`, `brief_tokens`, `recent_messages`,
 `summarized_messages`). `list_pip_reply_stats` (`pip_id`, `run_ids`: 1–50) says what each reply took: `seconds`, `input_tokens`,
-`output_tokens`, `requests`. All six are refused before sending to a runtime below API 44.
+`output_tokens`, `requests`. `get_pips_limit` and `set_pips_limit` (`max_pips`, 1–100,000) read and set how many live Pips a workspace may
+have (100 unless chosen). All eight are refused before sending to a runtime below API 44. `list_pips` takes
+`limit` (1–100), `offset`, `query` (name or title) and `order` (`created`, the default, or `recent`), and
+returns `total` and `next_offset`; a runtime below API 44 refuses those fields, so send them only to API 44.
 
 Simple Pips (Pips API 43): `introduce_pip` queues a new Personal Pip's first message once. A
 Personal Pip can be created with an empty `goal`, and with `pip_type` `core` (the Primary Pip).

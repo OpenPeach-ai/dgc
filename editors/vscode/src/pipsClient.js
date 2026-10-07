@@ -572,6 +572,12 @@ function saveUsageLimit(limit){
  usageState.error='';
  void mutate({type:'set_pip_daily_cap',pip_id:pip,daily_tokens:limit},result=>{const value=pipUsage(result.usage,pip);if(value.daily_cap!==limit)throw Error('The saved limit differs from your choice. Refresh this Pip.');usageState.value=value;draft.usageLimit=limit===null?'':String(limit);S.notice=limit===null?'Daily limit removed.':`Daily limit saved: ${limit.toLocaleString('en-US')} tokens a day for work it does on its own.`;});
 }
+Object.assign(draft,{pipsMax:'',pipSearch:''});
+// Pips settings: how many Pips you can have (pip_limits; API 44).
+document.addEventListener('submit',event=>{if(event.target.id!=='pips-limit-form')return;event.preventDefault();
+ const value=Number(draft.pipsMax);if(!Number.isSafeInteger(value)||value<1||value>(pipsSettings.limit?.maximum||100000)){setError(`Choose a number from 1 to ${(pipsSettings.limit?.maximum||100000).toLocaleString('en-US')}.`);return;}
+ void mutate({type:'set_pips_limit',max_pips:value},result=>{if(!record(result)||result.max_pips!==value)throw Error('The saved number differs from your choice. Refresh and try again.');pipsSettings.limit=result;draft.pipsMax=String(value);S.notice=`You can have up to ${value.toLocaleString('en-US')} Pips.`;});
+});
 document.addEventListener('submit',event=>{if(event.target.id!=='usage-form')return;event.preventDefault();if(S.busy||!usable())return;saveUsageLimit(parseTokens(draft.usageLimit));});
 function notifyMarkup(){
  if(S.apiVersion<41||!auditPip())return '';
@@ -1404,13 +1410,38 @@ const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="no
 function meetCoreMarkup(){
  return `<section class="meet-core" aria-label="Meet Core">${avatar('idle',characterType('core'),'meet-core')}<h2>Meet Core</h2><p>Core is your Primary Pip. It is your go-to for everyday tasks, looks after your other Pips, and checks in when it needs your help.</p>${button('create-core',S.busy?'Creating…':'Create Core',S.busy||!usable(),'primary pill')}</section>`;
 }
+// Thousands of Pips (Pips settings sets how many): the home reads the most recent hundred, Core
+// first, with Load more and a search over names and titles (list_pips, API 44). The pages already
+// read and the Pip that is open stay as each refresh brings the first page again.
+S.pipSearch='';S.jobsTotal=null;S.jobsNext=null;let jobsExtra=[],pipSearchTimer=0,jobsMoreBusy=false;
+function pipsPaged(){return S.apiVersion>=44&&simpleMode()&&!remoteHost;}
+function mergePage(first,value){
+ S.jobsTotal=Number.isSafeInteger(value.total)?value.total:first.length;
+ if(!jobsExtra.length)S.jobsNext=Number.isSafeInteger(value.next_offset)?value.next_offset:null;
+ const seen=new Set(first.map(p=>p.id));return [...first,...jobsExtra.filter(p=>!seen.has(p.id))];
+}
+async function loadMorePips(){
+ if(jobsMoreBusy||S.jobsNext===null||!pipsPaged()||!usable())return;
+ const token=scope(),query=S.pipSearch;jobsMoreBusy=true;render();
+ try{const v=await send('list_pips',{workspace_id:S.workspace.id,order:'recent',limit:100,offset:S.jobsNext,...(query?{query}:{})});
+  if(token!==scope()||query!==S.pipSearch)return;
+  if(!Array.isArray(v.pips)||!v.pips.every(p=>p.workspace_id===S.workspace.id))throw new Error('Pips list does not match this workspace.');
+  const seen=new Set(S.jobs.map(p=>p.id)),fresh=v.pips.filter(p=>!seen.has(p.id));jobsExtra=[...jobsExtra,...fresh];S.jobs=[...S.jobs,...fresh];
+  S.jobsNext=Number.isSafeInteger(v.next_offset)?v.next_offset:null;S.jobsTotal=Number.isSafeInteger(v.total)?v.total:S.jobsTotal;}
+ catch(error){if(token===scope())setError(error);}
+ finally{jobsMoreBusy=false;if(token===scope())render();}
+}
+function searchPips(value){
+ window.clearTimeout(pipSearchTimer);
+ pipSearchTimer=window.setTimeout(()=>{const query=' '.concat(value).trim().replace(/\s+/g,' ').slice(0,120);if(query===S.pipSearch)return;S.pipSearch=query;jobsExtra=[];S.jobsNext=null;void refresh(false);},250);
+}
 function simpleHomeMarkup(){
  const all=S.jobs.filter(p=>S.showArchived||p.status!=='archived'),live=S.jobs.filter(p=>p.status!=='archived');
- if(!live.length&&!S.jobs.length)return meetCoreMarkup();
+ if(!live.length&&!S.jobs.length&&!S.pipSearch)return meetCoreMarkup();   // a search that finds nothing is not an empty home
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
  const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p);
   return `<button type="button" class="pip-row" data-job="${esc(p.id)}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip" aria-label="Primary Pip">★</span>':''}</strong><small>${p.status==='archived'?'Archived':waiting?`${waiting} waiting for you`:esc(pose.label)}</small></span></button>`;};
- return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers and apps"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${live.some(p=>p.pip_type==='core')?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
+ return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers and apps"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip is named “${esc(S.pipSearch)}”.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
 function newPipBody(){
  return `<div class="character-grid" role="radiogroup" aria-label="Character">${SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>{const t=characterType(id);return `<button type="button" class="character-choice" role="radio" aria-checked="${draft.newPipCharacter===id}" data-new-character="${id}">${avatar('idle',t,`new-${id}`)}<span>${esc(t.name)}</span></button>`;}).join('')}</div><label for="newPipName">Name<input id="newPipName" data-draft="newPipName" maxlength="60" autocomplete="off" placeholder="Like Gmail, Travel or Money" value="${esc(draft.newPipName)}"></label><p class="muted">It says hello and sets itself up in its chat. No job form.</p>`;
@@ -1744,7 +1775,8 @@ function pipPageMenu(){
 async function loadPipsSettings(){
  if(remoteHost||S.apiVersion<43||!usable())return;
  const token=S.epoch,sequence=++pipsSettings.seq,view=pipsSettings.view;
- try{if(view==='apps'){const apps=appsPage(await send('list_pip_apps'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.apps=apps;pipsSettings.appsError='';}
+ try{if(view==='apps'){const apps=appsPage(await send('list_pip_apps'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.apps=apps;pipsSettings.appsError='';
+   if(S.apiVersion>=44){const v=await send('get_pips_limit');if(token===S.epoch&&record(v)&&Number.isSafeInteger(v.max_pips)){pipsSettings.limit=v;if(draft.pipsMax==='')draft.pipsMax=String(v.max_pips);}}}
   else{const value=computersPage(await send('get_pip_computers'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.computers=value;pipsSettings.computersError='';
    if(value.setup.state==='running'||value.computers.some(c=>c.resetting))window.setTimeout(()=>{if(pipsSettings.view==='computer'&&!disposed)void loadPipsSettings();},3000);}}
  catch(error){if(token===S.epoch&&sequence===pipsSettings.seq){if(view==='apps')pipsSettings.appsError=errorText(error);else pipsSettings.computersError=errorText(error);}}
@@ -1759,7 +1791,7 @@ async function pipsSettingsCall(command,args,notice){
 function pipsSettingsMarkup(){
  const view=pipsSettings.view==='apps'?'apps':'computer',busy=pipsSettings.busy||S.busy||!usable();
  const tabs=`<nav class="pip-page-tabs" aria-label="Pips settings">${[['computer','Computer'],['apps','Apps']].map(([k,l])=>`<button type="button" class="seg" data-pips-settings="${k}" aria-pressed="${view===k}">${l}</button>`).join('')}</nav>`;
- const body=view==='apps'?appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError})+(S.apiVersion>=43&&!remoteHost?`<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Skills</strong><small>Your Pips use your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives a Pip new access.</small></span>${button('manage-skills','Manage skills…',false,'quiet pill')}</div></section>`:'')
+ const body=view==='apps'?appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError})+(S.apiVersion>=43&&!remoteHost?`<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Skills</strong><small>Your Pips use your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives a Pip new access.</small></span>${button('manage-skills','Manage skills…',false,'quiet pill')}</div></section>`:'')+(S.apiVersion>=44&&!remoteHost&&pipsSettings.limit?`<section class="pip-page-group"><form id="pips-limit-form" class="pip-page-row static"><span class="row-words"><label for="pipsMax"><strong>How many Pips you can have</strong></label><small>${pipsSettings.limit.default.toLocaleString('en-US')} unless you choose another number, up to ${pipsSettings.limit.maximum.toLocaleString('en-US')}. Archived Pips don’t count. A powerful computer can run thousands.</small></span><input id="pipsMax" data-draft="pipsMax" type="number" min="1" max="${pipsSettings.limit.maximum}" step="1" inputmode="numeric" value="${esc(draft.pipsMax)}" aria-label="How many Pips you can have"><button type="submit" class="quiet pill"${busy||String(pipsSettings.limit.max_pips)===draft.pipsMax?' disabled':''}>Save</button></form></section>`:'')
   :computersMarkup(pipsSettings.computers,{esc,busy,error:pipsSettings.computersError,formatDate:shortDate,confirming:pipsSettings.confirmReset});
  return `<header class="pip-topbar"><button type="button" id="pips-settings-close" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Pips settings</span></div><span></span></header><div class="simple-content"><div class="pip-page">${tabs}<div class="pip-page-body">${body}</div></div></div>`;
 }
@@ -2022,11 +2054,13 @@ function refresh(includeContext=false) {
 async function refreshNow(includeContext=false) {
   if(!usable()||!S.workspace)return;const token=scope(),epoch=S.epoch,sequence=++refreshSeq;S.refreshing=true;void loadSetups();
   try {
-    const results=await Promise.allSettled([send('list_pips',{workspace_id:S.workspace.id}),send('get_pip_runner'),...(includeContext?[send('get_workspace_context',{workspace_id:S.workspace.id})]:[])]);
+    const paged=pipsPaged();
+    const results=await Promise.allSettled([send('list_pips',{workspace_id:S.workspace.id,...(paged?{order:'recent',limit:100,...(S.pipSearch?{query:S.pipSearch}:{})}:{})}),send('get_pip_runner'),...(includeContext?[send('get_workspace_context',{workspace_id:S.workspace.id})]:[])]);
     if(token!==scope())return;
-    if(results[0].status==='fulfilled'){const jobs=results[0].value.pips;if(!Array.isArray(jobs)||!jobs.every(p=>p.workspace_id===S.workspace.id))throw new Error('Pips list does not match this workspace.');S.jobs=jobs;}else S.error=errorText(results[0].reason);
+    if(results[0].status==='fulfilled'){const jobs=results[0].value.pips;if(!Array.isArray(jobs)||!jobs.every(p=>p.workspace_id===S.workspace.id))throw new Error('Pips list does not match this workspace.');S.jobs=paged?mergePage(jobs,results[0].value):jobs;}else S.error=errorText(results[0].reason);
     if(results[1].status==='fulfilled'){S.runner=null;S.runner=runner(results[1].value.runner);}else{S.runner=null;S.error=errorText(results[1].reason);}
     if(includeContext){if(results[2].status==='fulfilled'){S.context=null;S.context=context(results[2].value.context,S.workspace.id);}else{S.context=null;S.error=errorText(results[2].reason);}}
+    if(S.selected&&!S.jobs.some(p=>p.id===S.selected)&&paged&&S.pip?.id===S.selected)S.jobs=[...S.jobs,S.pip];
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)){clearSelection();S.selected='';}
     if(restoreView&&!S.create){restoreView=false;if(savedView?.workspace_id===S.workspace.id&&record(savedView.drafts))for(const [id,text] of Object.entries(savedView.drafts).slice(-20))if(typeof text==='string'&&text.length<=4000)chatDrafts.set(id,text);if(savedView?.workspace_id===S.workspace.id&&!savedView.overview&&S.jobs.some(p=>p.id===savedView.selected))await select(savedView.selected);}if(S.selected)await loadSelected(false);
   }catch(error){if(token===scope())S.error=errorText(error);}
@@ -2047,6 +2081,10 @@ async function navigateFromHost(value) {
     const target=S.workspaces.find(w=>w.id===value.workspace&&w.kind==='personal');
     if(!target)throw Error('The Personal workspace for this draft is unavailable.');
     S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;setupRows=[];setupError='';S.error='';rememberView();await refresh(true);
+  }
+  if(!S.jobs.some(p=>p.id===value.pip)&&pipsPaged()){
+   // A Pip past the pages read so far (a notification, the Sessions home): read it, then open it.
+   try{const found=(await send('get_pip',{pip_id:value.pip})).pip;if(record(found)&&found.id===value.pip&&found.workspace_id===S.workspace.id&&!S.jobs.some(p=>p.id===found.id))S.jobs=[...S.jobs,found];}catch{/* refused below */}
   }
   if(!S.jobs.some(p=>p.id===value.pip))throw new Error('This Pip is not available in the selected workspace. Refresh the dashboard.');
   S.error='';
@@ -2140,6 +2178,7 @@ function proposalReview(id,reject=false) {
   if(S.review&&!personalPip()&&(S.pip?.github_plan||proposal.definition?.github_plan)){let section;try{if(proposal.definition?.github_plan)githubReadPlan(proposal.definition.github_plan);section=githubProposalMarkup(proposal);}catch{section='<p class="notice">These GitHub reads are not supported by this view. Update DGC before accepting.</p>';if(!reject)S.review.blocked=true;}S.review.body+=section;renderReview();}
 }
 function updateDraft(event) {
+  if(event.target.id==='pip-search'){draft.pipSearch=event.target.value;searchPips(event.target.value);return;}
   if(event.target.dataset?.commitRule!==undefined){const row=commitRules[Number(event.target.dataset.commitRule)];if(row){if(event.target.dataset.commitKind!==undefined)row.kind=event.target.value;else row.path=event.target.value;S.scheduleDirty=true;}return;}
   if(event.target.dataset?.pulseCommand!==undefined){const i=Number(event.target.dataset.pulseCommand),row=pulseCommands[i];if(row){if(event.target.dataset.pulseArg!==undefined)row.argv[Number(event.target.dataset.pulseArg)]=event.target.value;else row.cwd=event.target.value;S.scheduleDirty=true;}return;}
   const key=event.target.dataset?.draft;if(!(key in draft))return;draft[key]=event.target.type==='checkbox'?event.target.checked:event.target.value;
@@ -2504,6 +2543,7 @@ document.addEventListener('click',event=>{
     case 'archive-pip':reviewLifecycle(false);break;
     case 'restore-pip':reviewLifecycle(true);break;
     case 'show-archived':S.showArchived=!S.showArchived;render();break;
+    case 'pips-more':void loadMorePips();break;
     case 'cancel-run':openReview({title:personalPip()?'Stop this?':'Cancel this run?',description:personalPip()?`${S.pip?.name||'It'} stops what it’s doing. It can take a moment.`:'The runner will stop this run. Cancellation may take a moment to be confirmed.',body:personalPip()?'':`<p class="mono">${esc(S.runId)}</p>`,confirm:personalPip()?'Stop':'Cancel run',danger:true,request:{type:'cancel_pip_run',run_id:S.runId}});break;
     case 'stop-all':openReview({title:'Stop all Pips?',description:'Every Pip on this computer pauses and stops what it’s doing. They stay stopped after DGC restarts.',body:'<p class="muted">To undo it: Resume Pips, then resume each Pip.</p>',confirm:'Stop all Pips',danger:true,request:{type:'stop_pips'}});break;
     case 'start-runner':if(remoteHost)break;void mutate({type:'pips_runtime',action:'start'});break;

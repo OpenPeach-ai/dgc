@@ -435,3 +435,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 /* DGC's working row: (time · ↓ tokens) after what the Pip is doing; and what each reply took. */
 .pip-working-meta{margin-left:-4px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted)}
 .reply-stats{margin-left:6px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+/* Thousands of Pips: a search over names and titles, and how many are shown. */
+.pip-search{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.pip-search input{flex:1;min-width:0;height:30px;border-radius:8px;padding:0 10px;font-size:12px}
+.pip-search-count{flex:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}

@@ -71,7 +71,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_routines", "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
     "set_pip_profile", "list_pip_shared", "get_pip_computers", "update_pip_computers", "reset_pip_computer", "list_pip_apps",
     "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
-    "list_pip_reply_stats",
+    "list_pip_reply_stats", "get_pips_limit", "set_pips_limit",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -108,6 +108,7 @@ _COMMAND_ARGS = {
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
     "list_pip_plugin_uses": set(), "get_pip_chat_context": {"pip_id", "context_size"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
+    "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_connections": set(),
     "inspect_pip_connection": {"server"},
@@ -162,7 +163,7 @@ _COMMAND_ARGS = {
     "list_pending_pip_reviews": {"workspace_id", "before_id", "limit"},
     "list_recent_workspace_activity": {"workspace_id", "before_seq", "limit"},
     "list_pip_adaptations": {"pip_id", "before_id", "limit"},
-    "list_workspaces": set(), "list_pips": {"workspace_id"}, "list_pip_types": set(),
+    "list_workspaces": set(), "list_pips": {"workspace_id", "limit", "offset", "query", "order"}, "list_pip_types": set(),
     "list_pip_models": set(),
     "list_pip_messages": {"pip_id", "before_id", "limit"},
     "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files"}, "introduce_pip": {"pip_id"},
@@ -606,15 +607,37 @@ class PipStore:
                                         {'run_kind':'test'}) if fresh['status'] in ('queued','running','cancelling') else None
         return result
 
-    def list(self, workspace_id):
+    def list(self, workspace_id, *, limit=100, offset=0, query="", order="created"):
+        """A page of a workspace's Pips: oldest first (the default, as before) or most recently
+        changed first, optionally only those whose name or title contains `query`."""
         self.registry.get(workspace_id)
         # get() may expire a review. Never retain the SELECT cursor's implicit
         # read snapshot across that write: a concurrent runner commit otherwise
         # makes SQLite reject the upgrade with SQLITE_BUSY_SNAPSHOT. The bounded
         # ID list is small, and finishing it also releases the implicit snapshot.
-        rows = self.db.execute(
-            "SELECT id FROM pips WHERE workspace_id=? ORDER BY created_at,id LIMIT 100", (workspace_id,)).fetchall()
+        rows = self.db.execute(*self._page_sql(workspace_id, limit, offset, query, order)).fetchall()
         return [self.get(row[0]) for row in rows]
+
+    def _page_sql(self, workspace_id, limit, offset, query, order, *, count=False):
+        sql = ("SELECT " + ("count(*)" if count else "p.id") + " FROM pips p JOIN pip_versions v "
+               "ON v.pip_id=p.id AND v.version=p.current_version LEFT JOIN pip_profiles f ON f.pip_id=p.id "
+               "WHERE p.workspace_id=?")
+        params = [workspace_id]
+        if query:
+            # Name or title, any case. The pattern's own % and _ are literal.
+            pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            sql += (" AND (json_extract(v.definition,'$.name') LIKE ? ESCAPE '\\'"
+                    " OR coalesce(f.title,'') LIKE ? ESCAPE '\\')")
+            params += [pattern, pattern]
+        if count:
+            return sql, params
+        # Most recent first keeps the Primary Pip (Core) at the top, as the Pips home shows it.
+        sql += (" ORDER BY (json_extract(v.definition,'$.pip_type')='core') DESC, p.updated_at DESC, p.id DESC"
+                if order == "recent" else " ORDER BY p.created_at, p.id")
+        return sql + " LIMIT ? OFFSET ?", params + [limit, offset]
+
+    def count(self, workspace_id, query=""):
+        return self.db.execute(*self._page_sql(workspace_id, 0, 0, query, "created", count=True)).fetchone()[0]
 
     def create(self, workspace_id, name, goal, actor, source_ref="HEAD", pip_type="rook", model_choice={"mode": "default"}):
         workspace = self.registry.get(workspace_id)
@@ -625,8 +648,8 @@ class PipStore:
             source_policy={'mode': 'personal'} if workspace['kind'] == 'personal' else 'committed_only')
         with self.registry.transaction():
             self.registry.get(workspace_id)
-            if self.db.execute("SELECT count(*) FROM pips WHERE workspace_id=?", (workspace_id,)).fetchone()[0] >= 100:
-                raise RegistryError("limit", "This workspace already has 100 Pips.")
+            from .pip_limits import require_room
+            require_room(self.db, workspace_id)
             pip_id, now = identifier("pip"), self.registry.clock()
             self.db.execute("INSERT INTO pips VALUES(?,?,?,?,?,?)", (pip_id, workspace_id, "active", 1, now, now))
             self.db.execute("INSERT INTO pip_versions VALUES(?,?,?,?,?,?)", (pip_id, 1, _json(definition), actor, "Created by user", now))
@@ -3448,6 +3471,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                             continue_after_app(store, pip_id, result['link'], config)
                         except RegistryError as exc:
                             result = {**result, 'continue_error': str(exc)}
+            elif command in ('get_pips_limit', 'set_pips_limit'):
+                # How many Pips you can have (pip_limits): 100 unless you choose another number.
+                from . import pip_limits
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "Your Pips' settings are on this computer only.")
+                result = (pip_limits.status(registry) if command == 'get_pips_limit'
+                          else pip_limits.set_limit(registry, request.get('max_pips'), actor))
             elif command == 'list_pip_reply_stats':
                 # The line under each reply in a Pip's chat: how long it took and its tokens.
                 from .pip_chat import reply_stats
@@ -3723,8 +3753,21 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                               chat_options=request.get('chat_options'), images=request.get('images'),
                               files=request.get('files'))
             elif command == "list_pips":
+                # A page at a time (100 at most, the reply's size), oldest first unless `order` says
+                # "recent"; `query` keeps those whose name or title contains it. `total` is how many
+                # match, and `next_offset` reads on (null at the end). With none of these, the first
+                # 100, as before.
                 from .pip_profile import profiles
-                result = {"pips": store.list(workspace_id)}
+                limit, offset, query, order = (request.get("limit", 100), request.get("offset", 0),
+                                               request.get("query", ""), request.get("order", "created"))
+                if (type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0
+                        or not isinstance(query, str) or len(query) > 120 or order not in ("created", "recent")):
+                    raise RegistryError("invalid_request", "List 1–100 Pips from an offset, optionally matching up to 120 characters.")
+                query = " ".join(query.split())
+                result = {"pips": store.list(workspace_id, limit=limit, offset=offset, query=query, order=order)}
+                total = store.count(workspace_id, query)
+                result["total"] = total
+                result["next_offset"] = offset + len(result["pips"]) if offset + len(result["pips"]) < total else None
                 looks = profiles(registry.db, [item["id"] for item in result["pips"]])
                 for item in result["pips"]:
                     item["goal"] = item["goal"][:240]

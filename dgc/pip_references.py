@@ -156,7 +156,9 @@ def _rows(db, workspace_id, *, pip_id=None):
     if pip_id is not None:
         sql += " AND p.id=?"
         params.append(pip_id)
-    sql += " ORDER BY p.id LIMIT 101"
+    # Every Pip, archived ones too: the limit you set counts only live ones (pip_limits).
+    from .pip_limits import MAXIMUM
+    sql += f" ORDER BY p.id LIMIT {2 * MAXIMUM}"
     for row in db.execute(sql, params):
         yield row
 
@@ -203,8 +205,6 @@ def discover(config, session_id, *, query="", after="", limit=20):
         matched, total, seen_cursor = [], 0, not after
         for row in _rows(db, workspace_id):
             total += 1
-            if total > 100:
-                raise RegistryError("stored_data_limit", "This workspace exceeds its 100-Pip bound.")
             item = _project(row, config)
             if item["pip_id"] == after:
                 seen_cursor = True

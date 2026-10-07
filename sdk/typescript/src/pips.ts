@@ -21,6 +21,7 @@ export type PipReadParams = {
   list_pip_plugins: { pip_id: string };
   list_pip_plugin_uses: Record<string, never>;
   get_pip_chat_context: { pip_id: string; context_size?: number };
+  get_pips_limit: Record<string, never>;
   list_pip_reply_stats: { pip_id: string; run_ids: string[] };
   list_pip_routines: { pip_id: string };
   list_pip_app_links: { pip_id: string };
@@ -89,7 +90,7 @@ export type PipReadParams = {
   list_pip_runs: { pip_id: string };
   list_pip_types: { [key: string]: never };
   list_pip_versions: { before_version?: number; limit?: number; pip_id: string };
-  list_pips: { workspace_id: string };
+  list_pips: { workspace_id: string; limit?: number; offset?: number; query?: string; order?: "created" | "recent" };
   list_workspace_activity: { after?: number; workspace_id: string };
   list_workspaces: { [key: string]: never };
 };
@@ -107,6 +108,7 @@ export type PipMutationParams = {
   disconnect_pip_app_link: { pip_id: string; link_id: string };
   finish_pip_computer_check: { pip_id: string };
   allow_pip_plugin: { pip_id: string; grant_id: string };
+  set_pips_limit: { max_pips: number };
   decline_pip_plugin: { pip_id: string; grant_id: string };
   add_pip_computer_file: { pip_id: string; path?: string; name: string; data: string };
   remove_pip_computer_file: { pip_id: string; path: string };
@@ -187,6 +189,8 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   list_pip_plugin_uses: [],
   get_pip_chat_context: ["pip_id", "context_size"],
   list_pip_reply_stats: ["pip_id", "run_ids"],
+  get_pips_limit: [],
+  set_pips_limit: ["max_pips"],
   list_pip_routines: ["pip_id"],
   add_pip_routine: ["pip_id", "title", "prompt", "trigger"],
   update_pip_routine: ["pip_id", "routine_id", "changes"],
@@ -292,7 +296,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
 
   "list_workspaces": [],
   "list_pips": [
-    "workspace_id"
+    "workspace_id", "limit", "offset", "query", "order"
   ],
   "list_pip_types": [],
   "list_pip_models": [],
@@ -533,8 +537,8 @@ for (const command of ["set_pip_profile", "update_pip_computers", "reset_pip_com
 for (const command of API43_READS) READS.add(command);
 for (const command of API43_MUTATIONS) MUTATIONS.add(command);
 // API 44: a Personal Pip's plugins. It asks to use one; you allow it, or not, on its card; local only.
-const API44_READS = new Set(["list_pip_plugins", "list_pip_plugin_uses", "get_pip_chat_context", "list_pip_reply_stats"]);
-const API44_MUTATIONS = new Set(["allow_pip_plugin", "decline_pip_plugin"]);
+const API44_READS = new Set(["list_pip_plugins", "list_pip_plugin_uses", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit"]);
+const API44_MUTATIONS = new Set(["allow_pip_plugin", "decline_pip_plugin", "set_pips_limit"]);
 for (const command of API44_READS) READS.add(command);
 for (const command of API44_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);

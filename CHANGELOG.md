@@ -38,6 +38,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **How many Pips you can have is yours to choose.** 100 unless you set another number (1 to 100,000)
+  with `set_pips_limit` (Pips settings); archived Pips no longer count. Every place that stopped at
+  100 reads it: creating a Pip, accepting a setup card, and the @-Pip picker, which failed with
+  "This workspace exceeds its 100-Pip bound." `list_pips` pages: `limit` (1–100), `offset`, `query`
+  (name or title, any case) and `order` (`recent` puts Core first, then the most recently changed);
+  it returns `total` and `next_offset`. Without them it returns the first 100, as before. Pips API 44.
 - **Asked about an app or Composio, a Pip offers to connect it.** Asked "can you use Figma tools?"
   and then about Composio, a Personal Pip said it had no tools and that Composio was out of reach.
   It is now told that its apps connect through your Composio (any app Composio supports, Figma
