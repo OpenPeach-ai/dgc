@@ -77,3 +77,17 @@ class AttentionTests(unittest.TestCase):
             with self.subTest(limit=bad), self.assertRaises(RegistryError):
                 self.control("list_pip_attention", limit=bad)
         self.assertEqual(pip_attention.collect(self.registry, self.now)["items"], [])
+
+    def test_a_careful_hold_says_what_it_is(self):
+        pip = self.source["id"]
+        for kind, summary, title in (("site", {"kind": "site", "site": "amazon.in", "host": "www.amazon.in"}, "Visit amazon.in?"),
+                                     ("text", {"kind": "text", "host": "shop.example"}, "Put what it read from your apps on shop.example?"),
+                                     ("form", {"method": "POST", "host": "shop.example"}, "Send this on shop.example?")):
+            with self.registry.transaction():
+                self.registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",
+                                         ("compact_" + kind[0] * 32, pip, self.source["workspace_id"], self.run["id"], "host_x", "r-" + kind,
+                                          json.dumps(summary), "d" * 64, None, self.now, "2099-01-01T00:00:00.000Z"))
+            with self.subTest(kind=kind):
+                items = {i["card"]: i for i in self.control("list_pip_attention")["items"]}
+                self.assertEqual(items["compact_" + kind[0] * 32]["title"], title)
+

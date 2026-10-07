@@ -123,8 +123,11 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
         for row in rows("SELECT id,pip_id,summary,created_at,expires_at FROM pip_computer_actions WHERE status='pending' "
                         f"AND expires_at>? AND {mine} ORDER BY created_at DESC", now, ids):
             summary = _json(row["summary"])
-            add("computer_action", row["id"], row["pip_id"], row["created_at"], row["expires_at"],
-                f"Send this on {summary.get('host', 'a site')}?", summary.get("page", ""))
+            # Careful mode's holds say what they are: a new site, or something read from your apps.
+            title = (f"Visit {summary.get('site') or summary.get('host', 'a new site')}?" if summary.get("kind") == "site"
+                     else f"Put what it read from your apps on {summary.get('host') or 'a page'}?" if summary.get("kind") == "text"
+                     else f"Send this on {summary.get('host', 'a site')}?")
+            add("computer_action", row["id"], row["pip_id"], row["created_at"], row["expires_at"], title, summary.get("page", ""))
         for row in rows("SELECT key,value FROM metadata WHERE key LIKE 'computer\\_needs\\_you:%' ESCAPE '\\'"):
             pip_id, value = row["key"].split(":", 1)[1], _json(row["value"])
             if pip_id in pips:

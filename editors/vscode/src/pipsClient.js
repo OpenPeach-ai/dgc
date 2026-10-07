@@ -1498,11 +1498,12 @@ async function navigateAttention(value){
  if(typeof card==='string')await revealCard(cardSelector(cardKind,card,s=>CSS.escape(s)));
 }
 // The chat draws its cards as they load (drafts, plugins, apps): look for a few seconds, then show it.
+const cardFlash={selector:'',until:0};
 async function revealCard(selector){
  const token=scope(),pip=S.selected;
  for(let i=0;i<30;i++){
   const el=document.querySelector(selector);
-  if(el){el.scrollIntoView?.({block:'center'});el.classList.add('attention-flash');(el.querySelector('button:not([disabled])')||el).focus?.({preventScroll:true});return true;}
+  if(el){el.scrollIntoView?.({block:'center'});cardFlash.selector=selector;cardFlash.until=Date.now()+2400;el.classList.add('attention-flash');(el.querySelector('button:not([disabled])')||el).focus?.({preventScroll:true});return true;}
   await new Promise(r=>window.setTimeout(r,150));if(token!==scope()||S.selected!==pip)return false;
  }
  return false;
@@ -1621,6 +1622,8 @@ function render() {
   $('app').innerHTML=markup;
   for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose&&(old.dataset.tint||'')===(node.dataset.tint||''))node.replaceWith(old);}
   observeAvatars();fitChatInput();hydrateMessageImages();
+  // A card Needs attention opened stays shown as the chat redraws while its drafts and apps load.
+  if(cardFlash.selector&&Date.now()<cardFlash.until)for(const el of document.querySelectorAll(cardFlash.selector))el.classList.add('attention-flash');
   const newLog=document.querySelector('.conversation-log');if(newLog){const first=newLog.querySelector('[data-message]')?.dataset.message;newLog.scrollTop=atEnd?newLog.scrollHeight:first!==oldFirst?oldScroll+newLog.scrollHeight-oldHeight:oldScroll;}
   for(const el of document.querySelectorAll('details[data-details]')) if(opened.has(el.dataset.details)) el.open=true;
   if(focusId && !S.review) { const next=$(focusId);next?.focus({preventScroll:true});if(selection&&next?.setSelectionRange) next.setSelectionRange(...selection); }
