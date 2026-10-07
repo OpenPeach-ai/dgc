@@ -2158,7 +2158,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if calendar_candidate is not None and candidate != calendar_candidate:
                         return "One calendar draft is already prepared. Ask for another reply to change it."
                     calendar_candidate = candidate
-                    return "Calendar draft prepared in this reply only. No account selected and no event created. After this reply the user can edit it, choose an account, and separately approve Create once."
+                    return ("Calendar draft prepared. It shows under your message as a card, so do not repeat the event: say in "
+                            "one sentence what you drafted. Nothing is created until the user approves it.")
                 except RegistryError as exc:
                     return "Invalid calendar draft: " + str(exc)
             if personal and email_drafting and call.name == pip_message_drafts.TOOL:
@@ -2168,7 +2169,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if email_candidate is not None and candidate != email_candidate:
                         return "One email draft is already prepared. Ask for another reply to change it."
                     email_candidate = candidate
-                    return "Draft prepared in this reply only. No account selected and nothing sent. After this reply the user can edit it and choose an account for a separate send review."
+                    return ("Draft prepared. It shows under your message as a card with Send, so do not repeat the email: "
+                            "say in one sentence what you drafted. Nothing is sent until the user chooses Send.")
                 except RegistryError as exc:
                     return "Invalid email draft: " + str(exc)
             if personal and call.name == pip_chat_setup.TOOL and chat_setup is not None and chat_setup['allowed']:

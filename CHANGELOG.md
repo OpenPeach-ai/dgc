@@ -8,6 +8,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- While DGC is still fetching a Pip computer's Chrome, its status says "Setting up its computer. This
+  happens once." (or why the setup failed) instead of "No usable Chromium was found. Run: npx playwright
+  install chromium".
+- A Pip's email or calendar draft shows as its card, and the Pip says in a sentence what it drafted
+  instead of repeating the whole email in the chat.
 - A new Pip introduces itself by the name you gave it, not its character's (a Pip named Gmail said
   "Hi, I'm Scout").
 - A Pip computer's Terminal is online, like Grok's bots: commands (the Terminal tab's, the Pip's own and

@@ -89,7 +89,7 @@ class MessageDraftTests(unittest.TestCase):
         from dgc.llm import LLMClient,ChatResult,ToolCall
         run=self.reply();calls=[]
         def chat(client,messages,tools=None,**kwargs):
-            calls.append(1);self.assertEqual({t['function']['name'] for t in tools},{'draft_pip_change','draft_email','draft_calendar_event','list_connector_tools','draft_connector_action','skill'})
+            calls.append(1);self.assertEqual({t['function']['name'] for t in tools},{'draft_pip_change','draft_email','draft_calendar_event','list_connector_tools','draft_connector_action','offer_choices','skill'})
             self.assertEqual(self.store.db.execute('SELECT count(*) FROM pip_message_drafts').fetchone()[0],0)
             if len(calls)==1:return ChatResult(content='',tool_calls=[ToolCall('draft1','draft_email',self.message)])
             return ChatResult(content='Review the email draft below. Nothing has been sent.')

@@ -329,6 +329,13 @@ def capability(home: Path | None = None) -> dict:
         return {"available": False, "reason": "Install bubblewrap (sudo apt install bubblewrap) to give Pips a computer."}
     chrome = find_chrome(home)
     if chrome is None:
+        # DGC fetches Chrome itself (pip_screen_setup): say that, not an install command, while it can.
+        from . import pip_screen_setup
+        setup = pip_screen_setup.status()
+        if pip_screen_setup.supported()[0] and setup.get("state") in ("none", "running"):
+            return {"available": False, "reason": "Setting up its computer. This happens once."}
+        if setup.get("state") == "failed" and setup.get("error"):
+            return {"available": False, "reason": f"DGC could not set up its computer: {setup['error']}"[:400]}
         return {"available": False, "reason": "No usable Chromium was found. Run: npx playwright install chromium"}
     return {"available": True, "reason": "", "chrome": str(chrome)}
 
