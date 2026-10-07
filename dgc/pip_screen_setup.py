@@ -64,6 +64,9 @@ def home() -> Path:
 
 
 def supported() -> tuple[bool, str]:
+    if sys.platform == "darwin":
+        from . import pip_container            # a Mac sets up a VM image instead (pip_container)
+        return pip_container.supported()
     if not sys.platform.startswith("linux"):
         return False, "The desktop download is for Linux."
     for tool in ("apt-get", "apt-cache", "dpkg-deb", "dpkg", "gpg"):
@@ -78,6 +81,8 @@ def supported() -> tuple[bool, str]:
 
 def current_root() -> Path | None:
     """The unpacked packages the desktop box mounts, when a setup finished."""
+    if sys.platform == "darwin":
+        return None
     link = home() / "current"
     try:
         target = link.resolve(strict=True)
@@ -114,6 +119,9 @@ def _status_path() -> Path:
 
 def status() -> dict:
     """{state: none|running|ready|failed|unsupported, step, done, total, error, chrome, checked_at}."""
+    if sys.platform == "darwin":
+        from . import pip_container
+        return pip_container.status()
     ok, why = supported()
     if not ok:
         return {"state": "unsupported", "step": "", "done": 0, "total": 0, "error": why, "chrome": "", "checked_at": None}
@@ -162,6 +170,9 @@ def _running() -> bool:
 
 def due() -> bool:
     """A check is wanted: none has finished in the last day (a failed one is retried after an hour)."""
+    if sys.platform == "darwin":
+        from . import pip_container
+        return pip_container.due()
     if not supported()[0] or _running():
         return False
     try:
@@ -179,6 +190,9 @@ def start(*, needs) -> bool:
     """Start (or join) a setup in the background. ``needs`` -> the package names this machine
     lacks (desktop programs, Chrome); see wanted(). False when one is already running."""
     global _THREAD
+    if sys.platform == "darwin":
+        from . import pip_container
+        return pip_container.start_setup()
     with _THREAD_LOCK:
         if _THREAD is not None and _THREAD.is_alive() or _running():
             return False
@@ -190,6 +204,9 @@ def start(*, needs) -> bool:
 def wanted() -> list[str]:
     """What this machine lacks: the desktop programs it has no copy of, and Chrome unless the
     system has a real one. (What DGC set up before counts as lacking: an update re-checks it.)"""
+    if sys.platform == "darwin":
+        from . import pip_container            # one image holds both
+        return [] if pip_container.status()["state"] == "ready" else ["dgc-pip-computer"]
     from . import pip_screen
     from .pip_computer_box import GOOGLE_CHROME, _real_binary
     names = [DESKTOP_PACKAGES[role] for role, program in pip_screen.PROGRAMS.items() if not shutil.which(program)]

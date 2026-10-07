@@ -29,6 +29,7 @@ import re
 import sqlite3
 import secrets as _secrets
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -230,6 +231,9 @@ class Host:
                 self.desktop.stop()
                 self.desktop = None
             self.proxy.stop()
+            if sys.platform == "darwin":
+                from .pip_container import release     # its VM goes with it; Files stay on the Mac
+                release(self.root)
 
     # -- the desktop -------------------------------------------------------------------------
 
@@ -242,8 +246,8 @@ class Host:
             if not pip_screen.availability()["available"]:
                 return False
             from .pip_computer_files import files_root
-            desktop = pip_screen.Desktop(socket_dir() / f"{self.pip_id[-12:]}-desk", files_root(self.root), "Pip",
-                                         egress=self.proxy.path)
+            desktop = pip_screen.make_desktop(socket_dir() / f"{self.pip_id[-12:]}-desk", files_root(self.root), "Pip",
+                                              egress=self.proxy.path)
             desktop.on_launch = self._dock_launch
             desktop.start(self._launch)
             self.desktop = desktop

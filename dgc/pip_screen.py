@@ -60,8 +60,21 @@ def components() -> dict:
 
 def availability() -> dict:
     """{available, reason, install}: whether a Pip computer can show a full desktop here."""
+    if sys.platform == "darwin":
+        # A Mac: the desktop is in the computer's VM (pip_container), with nothing to install by hand
+        # beyond Apple's container tool.
+        from . import pip_container
+        ok, why = pip_container.supported()
+        if not ok:
+            return {"available": False, "reason": why, "install": ""}
+        setup = pip_container.status()
+        if setup["state"] == "ready":
+            return {"available": True, "reason": "", "install": ""}
+        if setup["state"] == "failed":
+            return {"available": False, "reason": setup["error"] or "Setting up its computer failed.", "install": ""}
+        return {"available": False, "reason": "Setting up this computer's desktop.", "install": ""}
     if not sys.platform.startswith("linux"):
-        return {"available": False, "reason": "The desktop runs on Linux for now.", "install": ""}
+        return {"available": False, "reason": "The desktop runs on Linux and macOS for now.", "install": ""}
     if not shutil.which("bwrap"):
         return {"available": False, "reason": "Install bubblewrap to give Pips a computer.", "install": "sudo apt install bubblewrap"}
     parts = components()
@@ -194,6 +207,14 @@ def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = No
                  "--ro-bind-try", "/etc/ssl", "/etc/ssl", "--ro-bind-try", "/etc/ca-certificates", "/etc/ca-certificates",
                  "--bind", str(egress), "/run/dgc/egress.sock", "--ro-bind", str(runtime / "forward.py"), "/run/dgc/forward.py"]
     return argv + ["sh", "/run/dgc/conf/desktop.sh"]
+
+
+def make_desktop(runtime: Path, files: Path, name: str, egress: Path | None = None):
+    """This machine's kind of screen: a box here on Linux, the computer's VM on a Mac."""
+    if sys.platform == "darwin":
+        from .pip_container import ContainerDesktop
+        return ContainerDesktop(runtime, files, name, egress)
+    return Desktop(runtime, files, name, egress)
 
 
 class Desktop:

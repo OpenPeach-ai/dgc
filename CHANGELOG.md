@@ -18,6 +18,17 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   are running on this computer."), not "Personal scope. No project files, shell or browsing". A Pip
   no longer tells you about "web reads the controller passes me", and at a robot check it asks you to
   finish the check on its screen, not to "sign in".
+- **Pip computers on macOS.** On Apple silicon with macOS 26 or later, each computer is a small Linux
+  VM made with Apple's `container` tool (`dgc/pip_container.py`): the same desktop, Google Chrome (with
+  its own sandbox) and Terminal, no network of its own, and the way out through DGC's egress proxy on
+  the Mac (`dgc/pip_boxd.py` in the VM, idle connections from the Mac, a channel per browser and
+  Terminal so each command's sites are still recorded). DGC builds the image the first time ("Setting
+  up your Pip…"); the Mac needs only Apple's tool installed. Verified on a Mac Studio (macOS 26.5.1,
+  container 1.5.0): image in under a minute from cache, screen in 1.3 s, the Terminal reaches
+  example.com and is refused 192.168.1.1, the dock's Browser click arrives, and closing deletes the VM.
+- A Pip computer's DevTools pipe never blocks on a read. A second reader of the pipe (a test that
+  drove the browser without taking the computer's lock) took the data `select()` had announced, and the
+  blocking read then held the lock forever; a non-blocking read just waits out its deadline.
 - A Pip's computer browses more like Chrome on Grok's bots: its Chrome is not marked as automated
   (`navigator.webdriver` is false), runs as a window on the computer's screen whenever this machine can
   show one (headless Chrome names itself HeadlessChrome), keeps the user's time zone (the boxes ran in

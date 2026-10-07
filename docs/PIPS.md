@@ -582,7 +582,7 @@ in forms. If a page redirects, DGC follows up to five redirects, each only to a
 public `https` address. Page text is cut at 8,000 characters. A page that can't be read is
 reported, and the run continues.
 
-### A computer of its own (Linux)
+### A computer of its own (Linux and macOS)
 
 A Personal Pip can have its own computer: a web browser and a home folder in a sandbox,
 separate from your browser and your files. Give it one with **Give this Pip a computer…** in
@@ -675,9 +675,20 @@ The terminal has the same steps: `dgc pips computer status PIP`, `pending PIP`,
 `approve ACTION_ID`, `reject ACTION_ID`, `stop PIP` and `frames RUN_ID` (a run's screenshots).
 `give`, `remove` and `approve` ask once; add `--yes` in a script.
 
-A computer needs Linux with bubblewrap (`bwrap`) and a Chromium build: Google Chrome, or the
-Chromium that Playwright installs. If either is missing, the **Job** tab says what to install.
-macOS and Windows are planned.
+On Linux a computer needs bubblewrap (`bwrap`); DGC fetches the desktop's programs and Google
+Chrome itself the first time ("Setting up your Pip…"), with no admin password.
+
+On a Mac (Apple silicon, macOS 26 or later) each computer is a small Linux VM made with Apple's
+`container` tool, which you install once from
+[github.com/apple/container](https://github.com/apple/container/releases). The first time, DGC
+starts its service and builds the computer's image (Debian with the same desktop, Google Chrome
+from Google's repository checked against its signing key, and the Terminal's usual tools); after
+that a computer starts in a few seconds. The VM has no network of its own: like on Linux, the
+browser and the Terminal reach public websites only through DGC's egress proxy on your Mac, and
+nothing on your Mac or your network. Chrome runs with its own sandbox there. The VM gets 4 GB of
+memory and 4 CPUs, its Files are a folder on your Mac, and it is deleted when the computer closes.
+
+If something is missing, the **Job** tab says what. Windows is planned.
 
 ### Drafts and reviewed sends
 

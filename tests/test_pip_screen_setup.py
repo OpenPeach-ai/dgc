@@ -243,7 +243,7 @@ class SetupTests(unittest.TestCase):
 
 class UnsupportedTests(unittest.TestCase):
     def test_off_linux_or_without_apt_it_says_why(self):
-        with patch.object(sys, "platform", "darwin"):
+        with patch.object(sys, "platform", "win32"):        # a Mac sets up a VM instead (test_pip_container)
             self.assertEqual(setup.supported(), (False, "The desktop download is for Linux."))
             self.assertEqual(setup.status()["state"], "unsupported")
         with patch.object(sys, "platform", "linux"), patch("shutil.which", side_effect=lambda n: None if n == "apt-get" else "/usr/bin/" + n):

@@ -327,6 +327,10 @@ def find_chrome(home: Path | None = None) -> Path | None:
     Snap-packaged Chromium cannot run inside another sandbox, so it is never chosen, and neither is
     a launcher script standing in for Chrome.
     """
+    if sys.platform == "darwin":
+        # On a Mac, Chrome is inside the computer's VM (pip_container), once its image is built.
+        from . import pip_container
+        return Path(pip_container.CHROME) if pip_container.status()["state"] == "ready" else None
     for path in GOOGLE_CHROME:
         if _real_binary(path):
             return Path(path)
@@ -365,8 +369,19 @@ def _own_libraries(chrome: Path) -> list[str]:
 
 def capability(home: Path | None = None) -> dict:
     """Whether this computer can host Pip computers, and in one sentence why not."""
+    if sys.platform == "darwin":
+        from . import pip_container
+        ok, why = pip_container.supported()
+        if not ok:
+            return {"available": False, "reason": why}
+        setup = pip_container.status()
+        if setup["state"] == "ready":
+            return {"available": True, "reason": "", "chrome": pip_container.CHROME}
+        if setup["state"] == "failed" and setup["error"]:
+            return {"available": False, "reason": f"DGC could not set up its computer: {setup['error']}"[:400]}
+        return {"available": False, "reason": "Setting up its computer. This happens once."}
     if not sys.platform.startswith("linux"):
-        return {"available": False, "reason": "Pip computers run on Linux for now; macOS and Windows are coming."}
+        return {"available": False, "reason": "Pip computers run on Linux and macOS for now; Windows is coming."}
     if not shutil.which("bwrap"):
         return {"available": False, "reason": "Install bubblewrap (sudo apt install bubblewrap) to give Pips a computer."}
     chrome = find_chrome(home)
@@ -463,6 +478,10 @@ class _Pipe:
 
     def __init__(self, read_fd: int, write_fd: int):
         self.read_fd, self.write_fd = read_fd, write_fd
+        # A read never blocks: if anything else ever reads this pipe, it can take the data select()
+        # announced, and a blocking read would then hold the computer's lock forever (a test that drove
+        # the browser without the lock did exactly that on a Mac). Only lock holders read it.
+        os.set_blocking(read_fd, False)
         self._buffer = b""
         self._timeout = 30.0
         self._write_lock = threading.Lock()
@@ -487,7 +506,10 @@ class _Pipe:
             ready, _, _ = select.select([self.read_fd], [], [], remaining)
             if not ready:
                 raise socket.timeout("devtools pipe read timed out")
-            chunk = os.read(self.read_fd, 1 << 20)
+            try:
+                chunk = os.read(self.read_fd, 1 << 20)
+            except BlockingIOError:
+                continue
             if not chunk:
                 raise BrowserError("the computer's browser closed its devtools pipe")
             self._buffer += chunk
@@ -611,7 +633,11 @@ class BoxedBrowser(BrowserSession):
             self.binary = find_chrome()
             if self.binary is None:
                 raise BoxError(capability().get("reason") or "No browser is available for this computer yet.")
-        self._box = Box(self.home, self.egress_socket, self.binary, self.viewport, display_dir=self.display_dir)
+        if sys.platform == "darwin":
+            from .pip_container import ContainerBox     # Chrome in the computer's VM, the same pipe
+            self._box = ContainerBox(self.home, self.egress_socket, self.viewport, on_screen=self.display_dir is not None)
+        else:
+            self._box = Box(self.home, self.egress_socket, self.binary, self.viewport, display_dir=self.display_dir)
         self.launch(lambda: self._box.start(self.log_path))
         self._pipe = _Pipe(self._box.read_fd, self._box.write_fd)
         try:

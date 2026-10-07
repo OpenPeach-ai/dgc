@@ -375,8 +375,14 @@ def _limits(processes: int):
 
 
 def available() -> tuple[bool, str]:
+    if sys.platform == "darwin":
+        from . import pip_container            # in the computer's VM
+        ok, why = pip_container.supported()
+        if not ok:
+            return False, why
+        return (True, "") if pip_container.status()["state"] == "ready" else (False, "Setting up its computer. This happens once.")
     if not sys.platform.startswith("linux"):
-        return False, "The Terminal runs on Linux for now."
+        return False, "The Terminal runs on Linux and macOS for now."
     if not shutil.which("bwrap"):
         return False, "Install bubblewrap (sudo apt install bubblewrap) to use the Terminal."
     return True, ""
@@ -478,6 +484,8 @@ def _execute(files: Path, command: str, computer_root: Path | None = None, *, po
     """Run it; returns (exit, output, timed out, {"reached": hosts, "blocked": hosts})."""
     from .pip_computer_box import EgressProxy, FORWARDER
     from .pip_computer import socket_dir
+    if sys.platform == "darwin" and computer_root is not None:
+        return _execute_in_vm(files, command, Path(computer_root), policy=policy)
     proxy = forwarder = None
     if computer_root is not None:
         forwarder = Path(computer_root) / "forward.py"
@@ -497,9 +505,43 @@ def _execute(files: Path, command: str, computer_root: Path | None = None, *, po
     return code, text, timed_out, {k: v for k, v in hosts.items() if v}
 
 
-def _run_boxed(argv: list[str]) -> tuple[int | None, str, bool]:
+def _execute_in_vm(files: Path, command: str, computer_root: Path, *, policy=None):
+    """A Mac: the command runs in the computer's VM, in its Files, online through its own channel
+    (pip_boxd's Terminal port), so this command's own proxy records the sites it reached."""
+    from .pip_computer_box import EgressProxy
+    from .pip_computer import socket_dir
+    from . import pip_container
+    proxy = EgressProxy(socket_dir() / f"{os.urandom(6).hex()}-term.sock", policy=policy)
+    proxy.start()
+    computer = pip_container.computer_for(computer_root, proxy.path)
+    computer.terminal_egress = proxy.path
+    url = "http://127.0.0.1:8898"
+    env = {"HOME": "/home/pip", "TERM": "dumb", "LANG": "C.UTF-8",
+           **{key: url for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")},
+           "no_proxy": "localhost,127.0.0.1", "NO_PROXY": "localhost,127.0.0.1"}
+    try:
+        computer.start()
+        # The VM ends the command itself when its time is up: stopping `container exec` does not.
+        inner = ["timeout", "-k", "5", str(COMMAND_SECONDS), "sh", "-c", command]
+        code, text, timed_out = _run_boxed(computer.exec_argv(inner, env=env, workdir="/home/pip/Files"), limits=False)
+        if code == 124:
+            timed_out = True
+            text += f"\nStopped after {COMMAND_SECONDS} seconds."
+    finally:
+        computer.terminal_egress = None
+        proxy.stop()
+    hosts = {"reached": [], "blocked": []}
+    for outcome, host in proxy.log:
+        key = "blocked" if outcome == "refused" else "reached"
+        if host not in hosts[key] and len(hosts[key]) < MAX_HOSTS:
+            hosts[key].append(host)
+    return code, text, timed_out, {k: v for k, v in hosts.items() if v}
+
+
+def _run_boxed(argv: list[str], *, limits: bool = True) -> tuple[int | None, str, bool]:
+    # On a Mac the VM is the limit (its memory and CPUs, and `timeout` inside); here, rlimits on the box.
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=_limits(_user_tasks()),
+                            stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=_limits(_user_tasks()) if limits else None,
                             env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
     output, timed_out = bytearray(), False
     reader = threading.Thread(target=lambda: _drain(proc.stdout, output), daemon=True)
