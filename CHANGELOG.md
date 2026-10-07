@@ -57,6 +57,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   it returns `total` and `next_offset`. Without them it returns the first 100, as before. Pips API 44.
   The chat search uses a full-text index over every Pip's chat (registry schema 43; plain matching
   where SQLite has no FTS5); DGC's own turns in a chat never match.
+- **A Pip whose chat began before it had app tools no longer repeats that it has none.** Asked again
+  "what about using Composio connector?", the founder's Test Pip still said "I don't have a Composio
+  connector": its chat held its own earlier replies, and "Nothing is connected yet" read as "Composio
+  is not connected". A Pip is now told whether your Composio is set up, that connect_app and read_app
+  are its app tools, and, beside your message, that earlier replies saying otherwise are out of date;
+  "No app is connected to you yet" names only its own apps. Over that same history, 6 of 6 replies on
+  the default model corrected themselves (3 put up the Connect card; 3 asked first), against 3 of 4,
+  one of them claiming a card it never made, without the note.
 - **Asked about an app or Composio, a Pip offers to connect it.** Asked "can you use Figma tools?"
   and then about Composio, a Personal Pip said it had no tools and that Composio was out of reach.
   It is now told that its apps connect through your Composio (any app Composio supports, Figma

@@ -156,6 +156,26 @@ class AppLinkTests(unittest.TestCase):
         self.assertIn("not connected", links.worker_call(pin, "read_app", {"app": "gmail", "tool": "GMAIL_FETCH_EMAILS", "arguments": {}}))
         self.assertEqual(links.listing(self.registry, self.pip["id"])[0]["status"], "requested")
 
+    def test_a_pip_is_told_its_app_tools_and_whether_composio_is_set_up_beside_your_message(self):
+        # The founder's Test Pip (2026-10-08) kept saying "I don't have a Composio connector": its
+        # chat held replies from before it had app tools, and "Nothing is connected yet" read as
+        # "Composio is not connected".
+        run = "run_" + "b" * 32
+        server = links.RunSocket(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], run,
+                                 manager_factory=self.factory)
+        self.addCleanup(server.close)
+        self.assertIs(server.pin()["composio"], True)
+        note = pips._app_tools_note(server.pin())
+        self.assertIn("connect_app and read_app", note)
+        self.assertIn("(set up in DGC)", note)
+        self.assertIn("out of date", note)
+        self.assertIn("exists only when connect_app made one", note)
+        self.assertIn("not set up in DGC yet", pips._app_tools_note({"composio": False}))
+        described = links.schemas([])[0]["function"]["description"]
+        self.assertIn("No app is connected to you yet", described)
+        self.assertNotIn("Nothing is connected yet", described)
+        self.assertIn("Composio", described)
+
     def test_the_editor_connects_and_the_pip_carries_on_in_its_chat(self):
         from dgc.workspace_registry import WorkspaceRegistry
         def control(command, actor="editor-user", **fields):

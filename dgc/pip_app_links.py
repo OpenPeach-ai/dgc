@@ -338,8 +338,10 @@ TOOLS = ("connect_app", "read_app")
 
 
 def schemas(apps_now) -> list[dict]:
-    connected_line = ("Connected now: " + ", ".join(f"{a['app']} ({a['label']})" for a in apps_now) + ". "
-                      if apps_now else "Nothing is connected yet. ")
+    # "Nothing is connected yet" read as "Composio is not connected", and a Pip told the user Composio
+    # was out of its reach. Only this Pip's own apps are meant.
+    connected_line = ("Connected to you now: " + ", ".join(f"{a['app']} ({a['label']})" for a in apps_now) + ". "
+                      if apps_now else "No app is connected to you yet. ")
     reads = ", ".join(sorted(f"{t} ({app_name(k)})" for t, k in READ_TOOLKITS.items()))
     return [
         {"type": "function", "function": {"name": "connect_app", "description": (
@@ -398,7 +400,8 @@ class RunSocket:
                 plugins = self.plugins.pin(registry)
             except Exception:
                 plugins = []                      # a broken plugin list never stops the Pip's apps
-        return {"socket": str(self.path), "token": self.token, "apps": now, "plugins": plugins}
+        return {"socket": str(self.path), "token": self.token, "apps": now, "plugins": plugins,
+                "composio": composio_server(self.config) is not None}
 
     def call(self, op: str, args: dict):
         from .pip_plugins import TOOLS as PLUGIN_TOOLS
