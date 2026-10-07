@@ -39,3 +39,11 @@ test("an action a Pip drafted for your approval counts as waiting for you", () =
   const said = pipsAttention(digest({ reason: "daily", pips: [], pending_actions: 2 }), undefined);
   assert.equal(said.text, "DGC Pips: 2 reviews waiting for you.");
 });
+
+test("with Needs attention (API 44) the notice counts every card the Pips home lists, never fewer than the digest", () => {
+  const five = pipsAttention(digest({ reason: null, pips: [], pending_actions: 2 }), undefined, 5);
+  assert.equal(five.text, "DGC Pips: 5 things are waiting for you.", "Connect, plugin and routine cards count too");
+  assert.equal(pipsAttention(digest({ reason: null, pips: [], pending_reviews: 3 }), undefined, 1).text,
+    "DGC Pips: 3 things are waiting for you.", "a project Pip's reviews still count");
+  assert.equal(pipsAttention(digest({ reason: null, pips: [], pending_actions: 2 }), five.state, 5), null, "said once");
+});

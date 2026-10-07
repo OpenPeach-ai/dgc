@@ -114,16 +114,16 @@ export class PipsEditor implements vscode.Disposable {
     for (const id of this.computers.keys()) this.post(connection, 'computer:' + id);
   }
   /** One host-owned read through the same channel: only the digest, only on an API 41 backend. */
-  hostRead(type: 'get_pip_digest'): Promise<any> {
+  hostRead(type: 'get_pip_digest' | 'list_pip_attention', fields: Record<string, unknown> = {}): Promise<any> {
     return new Promise((resolve, reject) => {
-      if (!this.state.connected || !this.state.supported || !this.state.enabled || this.apiVersion < 41) { reject(new Error('Pips are unavailable.')); return; }
+      if (!this.state.connected || !this.state.supported || !this.state.enabled || this.apiVersion < (type === 'list_pip_attention' ? 44 : 41)) { reject(new Error('Pips are unavailable.')); return; }
       const requestId = 'pips-host-' + randomBytes(12).toString('hex');
       const timer = setTimeout(() => { this.hostReads.delete(requestId); reject(new Error('No reply from DGC.')); }, 20000);
       this.hostReads.set(requestId, (event) => {
         clearTimeout(timer); this.hostReads.delete(requestId);
         if (event.type === 'pips_result' && event.ok === true && event.command === type) resolve(event.result); else reject(new Error('DGC could not read Pips.'));
       });
-      if (!this.send({ type: 'pips_control', request: { type, request_id: requestId } }, this.backendIdentity)) {
+      if (!this.send({ type: 'pips_control', request: { ...fields, type, request_id: requestId } }, this.backendIdentity)) {
         clearTimeout(timer); this.hostReads.delete(requestId); reject(new Error('DGC is not connected.'));
       }
     });
