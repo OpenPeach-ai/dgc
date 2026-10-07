@@ -43,7 +43,21 @@ def _what(kind, payload) -> tuple[str, str]:
         return f"Add “{e.get('summary', 'an event')}” to your calendar?", e.get("start_datetime", "")
     a = payload.get("action") or payload
     call = a.get("call") or {}
-    return f"Run {call.get('tool', 'an action')} in {a.get('server', 'an app')}?", ""
+    from .pip_plugins import owner
+    try:
+        found = owner(a.get("server"))
+    except Exception:          # noqa: BLE001 - a name is all this reads
+        found = None
+    return f"Run {call.get('tool', 'an action')} in {found['display_name'] if found else a.get('server', 'an app')}?", ""
+
+
+def _plugin_name(plugin) -> str:
+    """A plugin's own name (Aave), from DGC's catalog; its id when the catalog doesn't know it."""
+    from .pip_plugins import _catalog
+    try:
+        return str(_catalog().get(plugin, {}).get("display_name") or plugin)[:80]
+    except Exception:          # noqa: BLE001
+        return str(plugin)
 
 
 def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
@@ -94,7 +108,7 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
         for row in rows("SELECT id,pip_id,plugin,reason,created_at FROM (SELECT *,ROW_NUMBER() OVER "
                         "(PARTITION BY pip_id,plugin ORDER BY updated_at DESC, id DESC) AS n FROM pip_plugin_grants WHERE " + mine + ") "
                         "WHERE n=1 AND status='requested' ORDER BY updated_at DESC", ids):
-            add("plugin", row["id"], row["pip_id"], row["created_at"], None, f"Use {row['plugin']}?", row["reason"])
+            add("plugin", row["id"], row["pip_id"], row["created_at"], None, f"Use {_plugin_name(row['plugin'])}?", row["reason"])
         for row in rows("SELECT id,pip_id,summary,created_at,expires_at FROM pip_computer_actions WHERE status='pending' "
                         f"AND expires_at>? AND {mine} ORDER BY created_at DESC", now, ids):
             summary = _json(row["summary"])
