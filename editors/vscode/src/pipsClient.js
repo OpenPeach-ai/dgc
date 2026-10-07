@@ -9,6 +9,7 @@ import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
 import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments} from './pipPlugins.js';
+import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles} from './pipsModel.js';
@@ -1420,6 +1421,47 @@ function mergePage(first,value){
  if(!jobsExtra.length)S.jobsNext=Number.isSafeInteger(value.next_offset)?value.next_offset:null;
  const seen=new Set(first.map(p=>p.id));return [...first,...jobsExtra.filter(p=>!seen.has(p.id))];
 }
+// Needs attention (#8): every card your Personal Pips wait on you for, across all of them, on the home.
+S.attention=null;let attentionSeq=0,attentionExpanded=false;
+async function loadAttention(){
+ if(remoteHost||S.apiVersion<44||!simpleMode()||!usable())return;
+ const token=scope(),sequence=++attentionSeq;
+ try{const page=attentionPage(await send('list_pip_attention',{limit:100}));if(token!==scope()||sequence!==attentionSeq)return;
+  const before=JSON.stringify(S.attention);S.attention=page;if(JSON.stringify(page)!==before)render();}
+ catch{/* the home still lists every Pip; the next refresh tries again */}
+}
+function attentionHomeMarkup(){
+ const face=i=>i.pip_id?pipAvatar({id:i.pip_id,name:i.pip_name,pip_type:i.pip_type,workspace_id:i.workspace_id},'waiting_approval',`attn-${i.card}`,characterType(i.pip_type)):'<span class="attention-mark" aria-hidden="true">+</span>';
+ return attentionMarkup(S.attention,{esc,face,expanded:attentionExpanded,busy:!usable()});
+}
+async function navigateAttention(value){
+ const {attention:_a,setup,card,cardKind,computer,...rest}=value;
+ // Personal Pips live in the Personal workspace; open it first when another is showing.
+ if(typeof value.workspace==='string'&&value.workspace!==S.workspace?.id){
+  const target=S.workspaces.find(w=>w.id===value.workspace&&w.kind==='personal');
+  if(!target)throw Error('Your Personal Pips are unavailable here. Refresh the dashboard.');
+  S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;setupRows=[];setupError='';S.error='';rememberView();await refresh(true);
+ }
+ if(typeof setup==='string'){
+  clearSelection();S.selected='';S.create=false;S.overview=true;rememberView();render();await loadSetups();render();
+  const box=document.querySelector('[data-details="setup-inbox"]');if(box){box.open=true;box.scrollIntoView?.({block:'start'});}return;
+ }
+ await navigateFromHost({...rest,section:rest.section||'chat'});
+ if(S.selected!==value.pip)return;
+ if(computer){openComputerView();return;}
+ if(value.reviewKind==='app_action'&&typeof value.review==='string'){await openMessageReview(value.review);return;}
+ if(typeof card==='string')await revealCard(cardSelector(cardKind,card,s=>CSS.escape(s)));
+}
+// The chat draws its cards as they load (drafts, plugins, apps): look for a few seconds, then show it.
+async function revealCard(selector){
+ const token=scope(),pip=S.selected;
+ for(let i=0;i<30;i++){
+  const el=document.querySelector(selector);
+  if(el){el.scrollIntoView?.({block:'center'});el.classList.add('attention-flash');(el.querySelector('button:not([disabled])')||el).focus?.({preventScroll:true});return true;}
+  await new Promise(r=>window.setTimeout(r,150));if(token!==scope()||S.selected!==pip)return false;
+ }
+ return false;
+}
 async function loadMorePips(){
  if(jobsMoreBusy||S.jobsNext===null||!pipsPaged()||!usable())return;
  const token=scope(),query=S.pipSearch;jobsMoreBusy=true;render();
@@ -1438,8 +1480,11 @@ function searchPips(value){
 function simpleHomeMarkup(){
  const all=S.jobs.filter(p=>S.showArchived||p.status!=='archived'),live=S.jobs.filter(p=>p.status!=='archived');
  if(!live.length&&!S.jobs.length&&!S.pipSearch)return meetCoreMarkup();   // a search that finds nothing is not an empty home
+ return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live);
+}
+function simpleHomeList(all,live){
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
- const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p);
+ const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p)+(S.attention?.byPip[p.id]||0);
   return `<button type="button" class="pip-row" data-job="${esc(p.id)}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip" aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you`:esc(pose.label)}</small></span></button>`;};
  return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
@@ -2110,7 +2155,7 @@ function refresh(includeContext=false) {
   return flight.promise;
 }
 async function refreshNow(includeContext=false) {
-  if(!usable()||!S.workspace)return;const token=scope(),epoch=S.epoch,sequence=++refreshSeq;S.refreshing=true;void loadSetups();
+  if(!usable()||!S.workspace)return;const token=scope(),epoch=S.epoch,sequence=++refreshSeq;S.refreshing=true;void loadSetups();void loadAttention();
   try {
     const paged=pipsPaged();
     const results=await Promise.allSettled([send('list_pips',{workspace_id:S.workspace.id,...(paged?{order:'recent',limit:100,...(S.pipSearch?{query:S.pipSearch}:{})}:{})}),send('get_pip_runner'),...(includeContext?[send('get_workspace_context',{workspace_id:S.workspace.id})]:[])]);
@@ -2131,6 +2176,7 @@ async function initialize() {
 }
 async function navigateFromHost(value) {
   if(!record(value))return;
+  if(value.attention===true||typeof value.setup==='string'){await navigateAttention(value);return;}
   if(['context','notifications'].includes(value.section)&&!value.pip){clearSelection();S.selected='';S.tab=value.section;S.overview=false;rememberView();render();if(S.tab==='notifications'){await loadNotifications();return;}if(S.apiVersion>=12){void loadOutcomeSessions();void loadOutcomes();if(value.reviewKind==='session_outcome'&&typeof value.review==='string'&&value.review)await openOutcome(value.review);}return;}
   if(typeof value.pip!=='string'||!value.pip)return;
   if(!remoteHost&&['email_draft','calendar_draft','connector_draft'].includes(value.reviewKind)&&S.apiVersion>=(value.reviewKind==='connector_draft'?37:value.reviewKind==='calendar_draft'?35:32)&&value.workspace!==S.workspace.id){
@@ -2434,6 +2480,8 @@ document.addEventListener('click',event=>{
   if(target.dataset.computerResetCancel!==undefined){pipsSettings.confirmReset='';render();return;}
   if(target.dataset.computerReset){void pipsSettingsCall('reset_pip_computer',{pip_id:target.dataset.computerReset},r=>r?.reset?'Its computer is fresh: signed out, no history. Its Files are still there.':'Resetting its computer: it is fresh the next time it opens. Its Files stay.');return;}
   if(target.dataset.appRemove){void pipsSettingsCall('disconnect_pip_app_link',{pip_id:target.dataset.appRemovePip,link_id:target.dataset.appRemove},'Removed. That Pip no longer uses the account.');return;}
+  if(target.dataset.attention){const item=S.attention?.items.find(i=>i.id===target.dataset.attention);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
+  if(target.dataset.attentionMore!==undefined){attentionExpanded=target.dataset.attentionMore==='1';render();return;}
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}

@@ -38,7 +38,7 @@ const digestPip = (id, name, type, extra = {}) => ({ pip_id: "pip_" + id.repeat(
   min_severity: "low", alert_severity: null, runs: { succeeded: 1, failed: 0, cancelled: 0 }, skipped_unchanged: 0, new_total: 0, below_threshold: 0,
   new_findings: [], gone_after_change: 0, alert: false, latest_run_id: null, ...extra });
 
-async function openHome({ pips, digestPips = [], place = "home", width = 380 }) {
+async function openHome({ pips, digestPips = [], place = "home", width = 380, api = 43, waiting = null }) {
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await (await browser.newContext({ viewport: { width, height: 640 } })).newPage();
   const errors = [];
@@ -53,13 +53,13 @@ async function openHome({ pips, digestPips = [], place = "home", width = 380 }) 
   await page.goto("https://home.test/webview/index.html");
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
   await page.evaluate(() => document.body.classList.add("vscode-dark"));
-  await page.evaluate(([mjs, mdjs, where, list, digest]) => {
+  await page.evaluate(([mjs, mdjs, where, list, digest, apiVersion, attention]) => {
     document.documentElement.dataset.chatPlace = where;
     document.documentElement.dataset.pipsDocumentId = "doc1";
     window.__posted = [];
     const answers = { list_workspaces: () => ({ workspaces: [{ id: "ws_" + "1".repeat(32), name: "Your Pips", kind: "personal" }, { id: "ws_" + "2".repeat(32), name: "demo", kind: "project" }],
       current_workspace_id: "ws_" + "2".repeat(32) }),
-      list_pips: (r) => ({ pips: r.workspace_id === "ws_" + "1".repeat(32) ? list : [] }), get_pip_digest: () => ({ digest }) };
+      list_pips: (r) => ({ pips: r.workspace_id === "ws_" + "1".repeat(32) ? list : [] }), get_pip_digest: () => ({ digest }), list_pip_attention: () => attention };
     window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
       window.__posted.push(m);
       const make = m?.type === "pipsRequest" && answers[m.request.type];
@@ -67,8 +67,8 @@ async function openHome({ pips, digestPips = [], place = "home", width = 380 }) 
     } });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
-    window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsConnection", generation: 1, apiVersion: 43, connected: true, supported: true, enabled: true } }));
-  }, [mainJs, markdownJs, place, pips, DIGEST(digestPips)]);
+    window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsConnection", generation: 1, apiVersion, connected: true, supported: true, enabled: true } }));
+  }, [mainJs, markdownJs, place, pips, DIGEST(digestPips), api, waiting]);
   return { page, errors };
 }
 
@@ -132,3 +132,23 @@ test("with no Pips the home shows no Pips section, and a session's tab never sho
     assert.deepEqual(m, { bar: false, digest: false }, "no bell and no digest polling in a session's tab");
   } finally { await tab.page.context().close(); }
 });
+
+// Needs attention (#8): what a Pip's chat waits on (a Connect card, an email to Send) counts here too, so
+// "All quiet" means nothing waits; a row opens that Pip at its newest card.
+test("cards waiting in a Pip's chat count on the home, and its row opens the Pip at the newest card", async (t) => {
+  if (skipOrFail(t)) return;
+  const gmail = "pip_" + "c".repeat(32), card = "applink_" + "1".repeat(32);
+  const item = { id: "app_link:" + card, kind: "app_link", card, pip_id: gmail, pip_name: "Gmail", pip_type: "scout", workspace_id: P,
+    created_at: new Date().toISOString(), expires_at: null, title: "Connect Gmail?", detail: "To read your new mail." };
+  const { page, errors } = await openHome({ pips: [pip("a", "Core", "core"), pip("c", "Gmail", "scout")], api: 44,
+    waiting: { as_of: new Date().toISOString(), total: 1, counts: { app_link: 1 }, by_pip: { [gmail]: 1 }, items: [item], truncated: false } });
+  try {
+    await page.waitForSelector("#sessions-pips .home-pip-row");
+    const rows = await page.evaluate(() => [...document.querySelectorAll(".home-pip-row")].map((r) => [r.querySelector("strong").textContent, r.querySelector("small").textContent]));
+    assert.deepEqual(rows, [["Gmail", "1 waiting for you"]], "not All quiet: Gmail's chat has a card for you");
+    await page.click(".home-pip-row:has-text('Gmail')");
+    await page.waitForFunction(() => !document.getElementById("pips-host").hidden);
+    assert.deepEqual(errors, []);
+  } finally { await page.context().close(); }
+});
+

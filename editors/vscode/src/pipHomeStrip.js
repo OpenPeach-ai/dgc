@@ -3,6 +3,7 @@
 // needs you is a row with its face waiting and what is waiting; when none does, your Pips sit in a
 // quiet row of faces. Each opens that Pip in the Pips view. Names are the user's words: text only.
 import {pipDigest, pendingReviews} from './pipsModel.js';
+import {attentionPage, attentionNavigation} from './pipAttention.js';
 
 const POLL_MS = 60000;
 const TYPES = ['core','scout','lens','patch','rook','pulse','lock','quill'];
@@ -14,7 +15,7 @@ export function mountHomePips(options) {
  if (!root) return quiet;
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
- let pips = null, digest = null, cleanup = null;
+ let pips = null, digest = null, attention = null, apiVersion = 0, cleanup = null;
  const node = (tag, cls, value) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (value !== undefined) e.textContent = value; return e; };
  const request = (type, fields = {}) => new Promise((resolve, reject) => {
   const id = `home-pips-${epoch}-${++sequence}`;
@@ -27,7 +28,7 @@ export function mountHomePips(options) {
   if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !/^pip_[a-f0-9]{32}$/.test(p.id)) return null;
   if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 200 || !TYPES.includes(p.pip_type)) return null;
   if (p.status === 'archived') return null;
-  return {id: p.id, name: p.name.trim(), type: p.pip_type, waiting: pendingReviews(p)};
+  return {id: p.id, name: p.name.trim(), type: p.pip_type, reviews: pendingReviews(p), waiting: 0};
  }
  // What is new for a Pip since you last looked, from the digest, in a few words.
  function news(id) {
@@ -44,7 +45,8 @@ export function mountHomePips(options) {
   try { if (plush) span.innerHTML = plush.markup({index: TYPES.indexOf(pip.type), name: pip.name}, pose, `home-${pip.id}`, {includeStyles: false}); } catch { span.replaceChildren(); }
   return span;
  }
- function open(pip) { options.onOpen?.({pip: pip.id}); }
+ // A Pip with cards waiting opens at the newest one (its chat, its computer), as Needs attention does.
+ function open(pip) { const first = attention?.items.find(i => i.pip_id === pip.id); options.onOpen?.(first ? attentionNavigation(first) : {pip: pip.id}); }
  function paint() {
   if (disposed) return;
   cleanup?.(); cleanup = null;
@@ -57,6 +59,7 @@ export function mountHomePips(options) {
   all.onclick = () => options.onOpen?.(null);
   head.append(all);
   root.append(head);
+  for (const p of pips) p.waiting = p.reviews + (attention?.byPip[p.id] || 0);
   const needing = pips.map(p => ({pip: p, line: p.waiting ? `${p.waiting} waiting for you` : news(p.id)})).filter(x => x.line);
   if (needing.length) {
    const list = node('ul', 'home-pips-list'); list.setAttribute('aria-label', 'Pips that need you');
@@ -98,12 +101,13 @@ export function mountHomePips(options) {
     const pip = checkedPip(raw);
     if (pip && !seen.has(pip.id)) { seen.add(pip.id); found.push(pip); }
    }
-   let value = null;
+   let value = null, waiting = null;
    try { value = pipDigest((await request('get_pip_digest')).digest); } catch { value = null; }
+   if (apiVersion >= 44) { try { waiting = attentionPage(await request('list_pip_attention', {limit: 100})); } catch { waiting = null; } }
    if (token !== epoch) return;
    // Core first, then the rest as the Pips view orders them.
    pips = [...found.filter(p => p.type === 'core'), ...found.filter(p => p.type !== 'core')].slice(0, MAX_PIPS);
-   digest = value;
+   digest = value; attention = waiting;
   } catch { if (token === epoch) pips = null; }
   finally { if (token === epoch) { loading = false; paint(); } }
  }
@@ -113,6 +117,7 @@ export function mountHomePips(options) {
    if (generation !== message.generation) { epoch++; loading = false; for (const p of pending.values()) { clearTimeout(p.timer); p.reject(Error('The connection changed.')); } pending.clear(); }
    generation = message.generation;
    ready = message.connected === true && message.supported !== false && message.enabled === true && (message.apiVersion || 0) >= 41;
+   apiVersion = message.apiVersion || 0;
    if (ready) { if (timer === null) timer = setTimer(() => { if (!doc.hidden) void load(); }, POLL_MS); void load(); }
    else { pips = null; paint(); }
    return;
