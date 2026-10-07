@@ -704,7 +704,50 @@ answer and does not run again. A plugin whose catalog entry or installed record 
 money` never gets Always allow: `always_allow_pip_app_action` refuses it with `asks_every_time`
 before the action runs, and a grant never covers it. Local-only commands: `list_pip_plugins
 {pip_id}` → `{pip_id, plugins, installed}`; `allow_pip_plugin` and `decline_pip_plugin {pip_id,
-grant_id}` → `{plugin}`; `list_pip_plugin_uses` → `{plugins: [{plugin, name, installed, pips}]}`.
+grant_id}` → `{plugin}`; `list_pip_plugin_uses` → `{plugins: [{plugin, name, installed, money, count,
+pips}], installed: [{plugin, name, money}]}` (the newest card per Pip and plugin decides; 50 Pips named per
+plugin, by name; `count` covers the rest).
+
+**Needs attention** (`pip_attention`, local only): `list_pip_attention {limit?}` (1–100, default 100) →
+`{as_of, total, counts, by_pip, items, truncated}` over every Personal Pip that is not archived. `items`
+are newest first: `{id: "<kind>:<card>", kind, card, pip_id, pip_name, pip_type, workspace_id,
+created_at, expires_at, title, detail}`, `kind` one of `email`, `event`, `action` (Pip-drafted, pending,
+not expired), `app_action` (a prepared action), `app_link` (requested or failed; newest per Pip and app),
+`plugin` (requested; newest per Pip and plugin), `setup` (`pip_id` null for a new Pip), `computer_action`
+(held, not expired), `computer_check` (`card` is the Pip id) and `routine` (suggested by the Pip).
+`counts` and `by_pip` count every item even when `items` is cut. The read runs in a savepoint that is
+rolled back, and decides "waiting" with `expires_at > now` in SQL: it never expires or resolves a row.
+
+**What a Pip remembers** (`pip_notes`, schema 44, Personal Pips only): `pip_notes(id, pip_id,
+workspace_id, text ≤300, source chat|you, run_id, created_at)`. A Personal chat reply to the user's own
+message (`requested_by` `editor-user` or `local-console`) has a `remember {note}` tool, three a reply; the
+worker refuses a note that shares no word (beyond common ones) with the user's message or holds a
+credential, and the reply's `memory_notes` are checked again and saved when it is committed (the same
+note twice is kept once; 60 per Pip, the oldest dropped). `conversation` and `personal_task` runs pin
+`pip_notes` (`[{note, kept}]`, newest first, ≤6 KB, redacted at queue time); the chat gets them as
+`user_notes` in its reference data with a notice that they are reference, may be out of date and grant
+nothing. Local-only commands: `list_pip_notes {pip_id}` → `{pip_id, notes: [{id, text, source, run_id,
+created_at}], max}`; `add_pip_note {pip_id, text}` (refused with `secret_note` when redaction would
+change it) and `forget_pip_note {pip_id, note_id | all: true}` return the same. Forget deletes the row.
+
+**Careful mode** (`pip_careful`, a Personal Pip with a computer; on unless metadata
+`computer_careful_off:<pip>` exists): during a run, the supervisor's `Host` checks each step before it
+runs. `open` to a site (registrable domain, from a built-in suffix list; an IP is its own site) not in
+`computer_sites:<pip>`, the user's own chat messages (DGC's turns excluded) or the home page is recorded
+as a pending `pip_computer_actions` row with `summary.kind: "site"` (`site`, `shown`: the host and its
+`xn--` form), and the browser's gate holds a tab's own page load (`Document` in a frame that is an
+attached target) on such a site the same way. `type`, `choose`, `open` and a Terminal `run` whose text
+carries features (email addresses, 6+ digit runs, 16+ character tokens, 5-word runs) of what the Pip
+read from apps in the last 24 hours (`read_app`, `call_plugin` and `plugin_answer` results,
+`app_references`, a routine's turn), less what the user's own message says, are recorded with
+`summary.kind: "text"` and `read_from_apps: true`. These holds pause nothing in the browser
+(`request_ref` `careful:<id>`): approving a site adds it to the Pip's sites, approving text allows that
+exact text once for 30 minutes, and the continuation tells the Pip to do it now.
+`always_allow_pip_computer_action` refuses them (`asks_once`, `asks_every_time`). A routine, schedule or
+event run (`local-routine`, `local-scheduler`, `local-event-trigger`) of a Pip with an `app_plan`, a
+connected app or an allowed plugin gets no computer socket and `computer_paused: true`. Local-only
+commands: `list_pip_sites {pip_id}` → `{pip_id, careful, sites: [{site, at, by}]}`; `set_pip_careful
+{pip_id, on}` and `forget_pip_site {pip_id, site}` return the same.
 
 A Personal task now pins `email_draft`, `calendar_draft`, `action_grants` (a summary) and, only
 when the Pip has a connector grant, a `connector_draft` snapshot; a handoff run pins none. Its
@@ -1160,4 +1203,4 @@ Clients check it before using a newer control.
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
 | 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |
 | 43 | A Pip's own apps (`connect_app`, `read_app`; `list_pip_app_links`, `start_pip_app_link`, `check_pip_app_link`, `decline_pip_app_link`, `disconnect_pip_app_link`); Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images and files in a Personal Pip's chat (`send_pip_message` `images` and `files`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |
-| 44 | A Pip's plugins (`use_plugin`, `plugin_tools`, `call_plugin`; `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`); a plugin action is a connector draft on the plugin's server; payment plugins refuse Always allow |
+| 44 | A Pip's plugins (`use_plugin`, `plugin_tools`, `call_plugin`; `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`); a plugin action is a connector draft on the plugin's server; payment plugins refuse Always allow; Needs attention (`list_pip_attention`); what a Pip remembers (`remember`; `list_pip_notes`, `add_pip_note`, `forget_pip_note`; schema 44); careful mode (`list_pip_sites`, `set_pip_careful`, `forget_pip_site`) |

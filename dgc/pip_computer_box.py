@@ -555,6 +555,7 @@ class HeldWrite:
     body_bytes: int = 0
     held_at: float = 0.0
     payment: bool = False           # carries a payment card number: the review says so
+    site: bool = False              # careful mode: a page on a site this Pip hasn't visited (pip_careful)
 
     def summary(self) -> dict:
         parts = urlsplit(self.url)
@@ -563,6 +564,9 @@ class HeldWrite:
                  "more_fields": max(0, len(self.fields) - MAX_SUMMARY_FIELDS), "body_bytes": self.body_bytes}
         if self.payment:
             value["payment"] = True
+        if self.site:
+            from .pip_careful import shown_host, site_of
+            value.update(kind="site", site=site_of(parts.hostname or ""), shown=shown_host(parts.hostname or ""))
         return value
 
 
@@ -620,6 +624,9 @@ class BoxedBrowser(BrowserSession):
         self._box: Box | None = None
         self._pipe: _Pipe | None = None
         self._attached: dict[str, str] = {}      # targetId -> its first (gated) session
+        # Careful mode (pip_careful), during a run: url -> True when its site may load. A page on any
+        # other site waits, like a submit, until the user allows the site.
+        self.site_gate = None
         self.acted_at = 0.0                       # the last click, typing, key or choice (see acting())
 
     # -- lifecycle -------------------------------------------------------------------------
@@ -767,6 +774,15 @@ class BoxedBrowser(BrowserSession):
         request_id = str(params.get("requestId", ""))
         verb = str(request.get("method", "GET")).upper()
         kind = str(params.get("resourceType", ""))
+        gate = self.site_gate
+        if (gate is not None and kind == "Document" and str(params.get("frameId", "")) in self._attached
+                and len(self.held) < MAX_HELD and not gate(str(request.get("url", "")))):
+            # A tab's own page (never a frame inside one) on a site the Pip hasn't visited for this user.
+            held = HeldWrite(request_id, session, verb, str(request.get("url", ""))[:2000], [], 0, time.time(), site=True)
+            self.held[request_id] = held
+            if self.on_write is not None:
+                self.on_write(held)
+            return
         if (verb in READ_METHODS or kind in TELEMETRY_KINDS
                 or kind in BACKGROUND_KINDS and not self.acting()):
             # A read, telemetry, or the page's own background traffic: nothing the Pip did. Holding it

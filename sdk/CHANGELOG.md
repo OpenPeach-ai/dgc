@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+More Pips API 44, all local only and refused before sending to a runtime below API 44:
+`list_pip_attention` (`limit`) reads everything your Personal Pips wait on you for; `list_pip_notes`
+(`pip_id`), `add_pip_note` (`pip_id`, `text`) and `forget_pip_note` (`pip_id`, `note_id` or `all`) read
+and change what a Personal Pip remembers; `list_pip_sites` (`pip_id`), `set_pip_careful` (`pip_id`,
+`on`) and `forget_pip_site` (`pip_id`, `site`) read and change careful mode. `list_pip_plugin_uses`
+items gain `money` and `count`, and the reply adds `installed`.
+
 A Personal Pip's plugins (Pips API 44, local only): a Pip asks to use one of the plugins you added
 to DGC, and `list_pip_plugins` (`pip_id`) reads its cards and the plugins it could ask for;
 `allow_pip_plugin` and `decline_pip_plugin` (`pip_id`, `grant_id`) answer a card, and

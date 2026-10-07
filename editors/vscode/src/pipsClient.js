@@ -11,6 +11,7 @@ import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup,c
 import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments} from './pipPlugins.js';
 import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
+import {carefulPage,carefulMarkup,carefulWords} from './pipCareful.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles} from './pipsModel.js';
@@ -693,13 +694,13 @@ function computerInner(){
  if(!c)return `<h3>Computer</h3>${errorMarkup(computerState.error)||'<p class="muted">Loading…</p>'}`;
  if(!c.granted)return `<h3>Computer</h3><p class="muted">Give ${esc(S.pip.name)} its own computer, separate from yours: a browser, a Terminal and files, so it can look things up and fill in forms for you.</p>${c.available?button('give-computer','Give this Pip a computer…',off):`<p class="muted">${esc(c.reason)}</p>`}`;
  const waiting=c.actions.filter(a=>a.status==='pending');
- return `<h3>Computer</h3><p>${esc(S.pip.name)} has its own computer: a browser, a Terminal and files, online to public websites. Anything it would submit waits for you here.</p>${c.available?'':`<p class="notice">${esc(c.reason)}</p>`}<div class="actions">${button('open-computer',S.apiVersion>=43&&!remoteHost?'Open its computer':'Open browser',off||!c.available)}${button('stop-computer','Stop computer',off)}${button('remove-computer','Remove computer…',off)}</div>${waiting.length?`<h4>Waiting for you</h4>${waiting.map(a=>`<article class="computer-action"><div><strong>${esc(a.summary.method)} ${esc(a.summary.host)}${esc(a.summary.path)}</strong><span class="muted">from ${esc(a.summary.page)}</span></div>${`<button type="button" data-computer-action="${esc(a.id)}"${off?' disabled':''}>Review…</button>`}</article>`).join('')}`:''}`;
+ return `<h3>Computer</h3><p>${esc(S.pip.name)} has its own computer: a browser, a Terminal and files, online to public websites. Anything it would submit waits for you here.</p>${c.available?'':`<p class="notice">${esc(c.reason)}</p>`}<div class="actions">${button('open-computer',S.apiVersion>=43&&!remoteHost?'Open its computer':'Open browser',off||!c.available)}${button('stop-computer','Stop computer',off)}${button('remove-computer','Remove computer…',off)}</div>${waiting.length?`<h4>Waiting for you</h4>${waiting.map(a=>`<article class="computer-action"><div><strong>${carefulWords(a.summary,S.pip.name)?esc(carefulWords(a.summary,S.pip.name)[0]):`${esc(a.summary.method)} ${esc(a.summary.host)}${esc(a.summary.path)}`}</strong><span class="muted">from ${esc(a.summary.page)}</span></div>${`<button type="button" data-computer-action="${esc(a.id)}"${off?' disabled':''}>Review…</button>`}</article>`).join('')}`:''}`;
 }
 function grantComputer(give){
  const name=S.pip?.name||'this Pip';
  openReview({computerGrant:give,title:give?`Give ${name} a computer?`:`Remove ${name}'s computer?`,
   description:give?'It gets its own computer, separate from yours: a browser, a Terminal and files.':'The Pip will no longer browse. Its saved sign-ins stay on this computer until you remove them.',
-  body:give?'<ul class="computer-rules"><li>It can browse public websites, and its Terminal can reach them too.</li><li>It can still read the apps you connected.</li><li>You sign in yourself with Open its computer; it never sees your passwords.</li><li>It can’t reach this computer or your home network.</li><li>Anything that would submit, send, pay or change something waits for your OK, with a screenshot.</li></ul>':'',
+  body:give?'<ul class="computer-rules"><li>It can browse public websites, and its Terminal can reach them too.</li><li>It can still read the apps you connected. Careful mode (on unless you turn it off on its page) asks before it opens a new site, and before anything it read from your apps goes onto a website.</li><li>You sign in yourself with Open its computer; it never sees your passwords.</li><li>It can’t reach this computer or your home network.</li><li>Anything that would submit, send, pay or change something waits for your OK, with a screenshot.</li></ul>':'',
   confirm:give?'Give computer':'Remove computer',request:{type:'propose_pip_update'}});
 }
 async function applyComputerGrant(review){
@@ -717,7 +718,15 @@ async function openComputerAction(id){
  const c=computerState.value,a=c?.actions.find(x=>x.id===id);if(!a||!usable())return;
  let image='';
  if(a.frame&&a.run_id){try{image=pipComputerFrame(await send('get_pip_computer_frame',{run_id:a.run_id,frame:a.frame}),a.run_id,a.frame).image;}catch{image='';}}
- const s=a.summary,rows=s.fields.map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join('');
+ const s=a.summary,rows=s.fields.map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join(''),words=carefulWords(s,S.pip?.name||'The Pip');
+ if(words){
+  // Careful mode held it before anything happened: allow the site, or this one carrying of app data.
+  openReview({title:words[0],description:words[1],
+   body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta">${s.kind==='site'?`<dt>Site</dt><dd>${esc(s.shown||s.site||s.host)}</dd><dt>Address</dt><dd>${esc(s.host)}${esc(s.path)}</dd>`:`<dt>Goes onto</dt><dd>${esc(s.host)}${esc(s.path)}</dd>${rows}`}${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}</dl>`,
+   secondary:{id:'reject-computer-action',label:'Not now'},confirm:words[2],always:false,expiresAt:a.expires_at,computerAction:a.id,carefulKind:s.kind,
+   request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
+  return;
+ }
  openReview({title:'Send this once?',description:`${S.pip?.name||'The Pip'} wants to send a form to ${s.host}. Nothing has been sent.`,
   body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
   confirm:'Send once',always:true,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
@@ -727,7 +736,7 @@ async function decideComputerAction(review,approve){
  try{
   const q=review.request,a=pipComputerAction((await send('decide_pip_computer_action',{action_id:q.action_id,expected_digest:q.expected_digest,approve})).action,S.selected);
   if(token!==scope())return;if(a.id!==q.action_id||a.status!==(approve?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh to see it.');
-  closeReview();S.notice=approve?'Approved. It is sent within a few seconds, exactly as shown, and the Pip carries on.':'Rejected. Nothing was sent.';computerState.pip='';render();
+  closeReview();S.notice=!approve?(review.carefulKind?'Not now. It won’t do that.':'Rejected. Nothing was sent.'):review.carefulKind==='site'?'Allowed. It opens the site and carries on.':review.carefulKind==='text'?'Allowed once. It carries on.':'Approved. It is sent within a few seconds, exactly as shown, and the Pip carries on.';computerState.pip='';render();
  }catch(error){if(token===scope()&&S.review===review){review.error=errorText(error);}}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }
@@ -1455,6 +1464,21 @@ function memoryKept(){
  const last=[...(S.messages||[])].reverse().find(m=>m.role==='assistant'&&m.run_id);
  return last?keptMarkup(S.notes,last.run_id,{esc,busy:notesBusy||!usable()}):'';
 }
+// Careful mode (#9): its switch and the sites it may visit, on the page of a Pip with a computer.
+const carefulState={pip:'',value:null,error:'',busy:false,seq:0};let sitesAll=false;
+async function loadCareful(){
+ if(remoteHost||S.apiVersion<44||!personalPip()||!S.pip?.computer_plan||!usable())return;
+ const token=scope(),pip=S.selected,sequence=++carefulState.seq;
+ try{const value=carefulPage(await send('list_pip_sites',{pip_id:pip}),pip);if(token!==scope()||sequence!==carefulState.seq||S.selected!==pip)return;
+  carefulState.pip=pip;carefulState.value=value;carefulState.error='';render();}
+ catch(error){if(token===scope()&&sequence===carefulState.seq){carefulState.error=errorText(error);render();}}
+}
+async function carefulCall(type,fields,notice){
+ if(carefulState.busy||!usable()||!personalPip())return;const token=scope(),pip=S.selected;carefulState.busy=true;carefulState.error='';render();
+ try{const value=carefulPage(await send(type,{pip_id:pip,...fields}),pip);if(token!==scope()||S.selected!==pip)return;carefulState.pip=pip;carefulState.value=value;S.notice=notice;}
+ catch(error){if(token===scope())carefulState.error=errorText(error);}
+ finally{carefulState.busy=false;if(token===scope())render();}
+}
 async function navigateAttention(value){
  const {attention:_a,setup,card,cardKind,computer,...rest}=value;
  // Personal Pips live in the Personal workspace; open it first when another is showing.
@@ -1777,7 +1801,7 @@ function routinesSectionMarkup(){
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
  S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;lookDirty=false;routineEditing='';routineError='';
- void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();noteConfirmAll=false;
+ void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();noteConfirmAll=false;sitesAll=false;
 }
 function putProfile(pipId,value){
  const p=profile(value);if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
@@ -1822,7 +1846,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -2326,7 +2350,7 @@ document.addEventListener('input',updateDraft);
 document.addEventListener('paste',event=>{if(event.target?.id!=='chatText'||!canAttachImages())return;const files=[...(event.clipboardData?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
 document.addEventListener('dragover',event=>{if(canAttachImages()&&event.target?.closest?.('#chat-form')&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
 document.addEventListener('drop',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='computer-go'){event.preventDefault();const url=$('computer-url').value.trim();if(url)void computerView('go',{url:/^https?:\/\//i.test(url)?url:'https://'+url});return;}
   if(event.target.id==='computer-type'){event.preventDefault();const input=$('computer-text'),text=input.value;if(text){input.value='';void computerView('type',{text});}return;}
@@ -2504,6 +2528,8 @@ document.addEventListener('click',event=>{
   if(target.dataset.computerReset){void pipsSettingsCall('reset_pip_computer',{pip_id:target.dataset.computerReset},r=>r?.reset?'Its computer is fresh: signed out, no history. Its Files are still there.':'Resetting its computer: it is fresh the next time it opens. Its Files stay.');return;}
   if(target.dataset.appRemove){void pipsSettingsCall('disconnect_pip_app_link',{pip_id:target.dataset.appRemovePip,link_id:target.dataset.appRemove},'Removed. That Pip no longer uses the account.');return;}
   if(target.dataset.attention){const item=S.attention?.items.find(i=>i.id===target.dataset.attention);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
+  if(target.dataset.siteForget){void carefulCall('forget_pip_site',{site:target.dataset.siteForget},`Removed. It asks before it opens ${target.dataset.siteForget} again.`);return;}
+  if(target.dataset.sitesAll){sitesAll=true;render();return;}
   if(target.dataset.noteForget){const n=(S.notes||[]).find(x=>x.id===target.dataset.noteForget);void noteCall('forget_pip_note',{note_id:target.dataset.noteForget},()=>n?`Forgotten: ${n.text}`:'Forgotten.');return;}
   if(target.dataset.noteForgetAll){if(target.dataset.noteForgetAll==='ask'){noteConfirmAll=true;render();}else if(target.dataset.noteForgetAll==='no'){noteConfirmAll=false;render();}else void noteCall('forget_pip_note',{all:true},()=>{noteConfirmAll=false;return 'Forgotten. It remembers nothing about you now.';});return;}
   if(target.dataset.attentionMore!==undefined){attentionExpanded=target.dataset.attentionMore==='1';render();return;}
@@ -2660,7 +2686,7 @@ document.addEventListener('click',event=>{
     case 'chat-context-toggle':S.composerPanel=S.composerPanel==='context'?'':'context';S.composerNoteOpen=false;render();if(S.composerPanel){void loadChatContext();$('chat-context')?.focus();}break;
     case 'chat-context-close':S.composerPanel='';render();$('chat-context-toggle')?.focus();break;
     case 'chat-refresh-models':void loadModels();break;
-    case 'chat-permissions':S.composerPanel='';render();openReview({title:personalPip()?`What ${S.pip.name} can do`:'Read-only Pip chat',description:personalPip()?(S.pip.computer_plan?`${S.pip.name} has its own computer: a browser, a Terminal that reaches public websites, and files. It can also read the apps you connected. Anything it would send, submit or change waits for your Allow, unless you chose Always allow.`:`${S.pip.name} reads what you share here and the apps you connected. It can’t send, buy or change anything without your OK.`):'Messages can inspect the captured source. They cannot run shell commands, browse a live application, edit files, or change permissions. Execution is configured separately through a reviewed job or handoff.',readOnly:true,request:{}});break;
+    case 'chat-permissions':S.composerPanel='';render();openReview({title:personalPip()?`What ${S.pip.name} can do`:'Read-only Pip chat',description:personalPip()?(S.pip.computer_plan?`${S.pip.name} has its own computer: a browser, a Terminal that reaches public websites, and files. It can also read the apps you connected. Anything it would send, submit or change waits for your Allow, unless you chose Always allow.${S.apiVersion>=44?(carefulState.pip===S.pip.id&&carefulState.value?.careful===false?' Careful mode is off.':' Careful mode: it asks before it opens a new site, and before anything it read from your apps goes onto a website.'):''}`:`${S.pip.name} reads what you share here and the apps you connected. It can’t send, buy or change anything without your OK.`):'Messages can inspect the captured source. They cannot run shell commands, browse a live application, edit files, or change permissions. Execution is configured separately through a reviewed job or handoff.',readOnly:true,request:{}});break;
     case 'older-messages':void loadMessages(true);break;
     case 'refresh-models':void loadModels();break;
     case 'chat-stop':if(S.chatActiveRun?.id)void mutate({type:'cancel_pip_run',run_id:S.chatActiveRun.id},()=>loadMessages());break;

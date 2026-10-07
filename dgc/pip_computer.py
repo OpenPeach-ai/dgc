@@ -42,6 +42,15 @@ PLAN = {"schema_version": 1}
 ACTION_TTL_SECONDS = 24 * 3600
 IDLE_SECONDS = 15 * 60
 USER_WRITE_SECONDS = 3.0             # a submit this soon after the user's own input is theirs
+CAREFUL_REF = "careful:"               # a careful-mode hold (pip_careful): nothing paused in the browser
+CAREFUL_KINDS = ("site", "text")
+SITE_HELD = ("Held: that site is new for this user, so DGC asks them first (careful mode). Stop now and tell the "
+             "user in one sentence which site you want to open and why. Once they allow it, open it again and carry on.")
+
+
+def _preview(text, limit=200) -> str:
+    flat = " ".join(str(text or "").split())
+    return flat if len(flat) <= limit else flat[:limit - 1] + "…"
 MAX_FRAMES_PER_RUN = 200
 MAX_FRAME_BYTES = 90 * 1024          # base64 still fits a 128 KiB Pips reply
 MAX_VIEW_FRAME_BYTES = 700 * 1024    # the live screen: one reply, well inside the 4 MiB frame
@@ -197,6 +206,12 @@ class Host:
         self.frames_dir = None
         self.frames = 0
         self.waiting = []          # action ids this run produced
+        # Careful mode (pip_careful): what this Pip read from the user's apps in the last day, and, for
+        # the run in progress, whether careful mode is on, the user's own message and the allowed sites.
+        from .pip_careful import Taint
+        self.taint = Taint()
+        self.careful, self.said, self.sites = False, "", set()
+        self.texts = {}            # careful hold id -> the exact text it held (allowed once on approval)
 
     def _keep(self) -> None:
         while not self._closed.is_set():
@@ -303,15 +318,29 @@ class Host:
 
     # -- a run's session ---------------------------------------------------------------------
 
-    def begin(self, run_id: str, frames_dir: Path) -> None:
+    def begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=()) -> None:
         with self.lock:
             self.run_id, self.frames_dir, self.frames, self.waiting = run_id, Path(frames_dir), 0, []
             self.frames_dir.mkdir(parents=True, exist_ok=True)
+            self.careful, self.said, self.sites = bool(careful), str(said or ""), set(sites)
+            self.browser.site_gate = self._site_ok if self.careful else None
 
     def end(self) -> None:
         with self.lock:
             self.run_id = None
+            self.careful, self.said = False, ""
+            self.browser.site_gate = None
             self.last_used = time.monotonic()
+
+    def _site_ok(self, url: str) -> bool:
+        from .pip_careful import site_of
+        host = urlsplit(str(url or "")).hostname
+        if not host:
+            return True
+        site = site_of(host)
+        if time.monotonic() - self.user_input_at <= USER_WRITE_SECONDS:
+            self.sites.add(site)             # the user's own click on its screen: their site
+        return site in self.sites
 
     def _frame(self, label: str) -> str | None:
         if self.frames_dir is None or self.frames >= MAX_FRAMES_PER_RUN:
@@ -353,7 +382,7 @@ class Host:
                     # Always allowed for this Pip (same site, method and path): approved now, as the grant;
                     # the supervisor sends it within seconds and the user is told after.
                     from .pip_action_grants import computer_grant_for
-                    grant = computer_grant_for(registry, self.pip_id, summary)
+                    grant = None if summary.get("kind") in CAREFUL_KINDS else computer_grant_for(registry, self.pip_id, summary)
                     if grant is not None:
                         registry.db.execute("UPDATE pip_computer_actions SET status='approved',resolved_at=?,resolved_by=? "
                                             "WHERE id=? AND status='pending'", (_now(), "pip-grant:" + grant["id"], action_id))
@@ -415,6 +444,10 @@ class Host:
                 except (BrowserError, RegistryError, OSError):
                     pass                       # headless, as before; a run reports a browser that cannot start
             try:
+                if getattr(self, "careful", False) and self.run_id is not None:
+                    stop = self._careful(op, args)
+                    if stop:
+                        return stop
                 if op == "open":
                     self.browser.navigate(_safe_url(args.get("url")))
                 elif op == "read":
@@ -435,6 +468,9 @@ class Host:
                 held = self._record_held()
                 self._frame(f"{op} {args.get('url') or args.get('ref') or args.get('key') or ''}".strip())
                 if held:
+                    kinds = {self._kind(action_id) for action_id in held}
+                    if kinds == {"site"}:
+                        return SITE_HELD
                     return ("Held: this would change something on the website, so DGC paused it unsent. Unless the "
                             "user always allows this kind of submit here, it waits for their approval. Stop now and "
                             "tell the user what you submitted and why; a follow-up run continues once it is sent.")
@@ -443,6 +479,71 @@ class Host:
                 return f"error: {str(error)[:500]}"
             except Exception as error:                     # noqa: BLE001 - never into the worker
                 return f"error: the computer failed ({type(error).__name__})"
+
+    def _kind(self, action_id) -> str:
+        from .workspace_registry import WorkspaceRegistry
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                row = registry.db.execute("SELECT json_extract(summary,'$.kind') FROM pip_computer_actions WHERE id=?",
+                                          (action_id,)).fetchone()
+            return (row[0] if row else "") or ""
+        except (OSError, RegistryError, sqlite3.Error):
+            return ""
+
+    def _careful(self, op, args) -> str | None:
+        """Careful mode, before a step runs: a new site, or text read from the user's apps, waits for them."""
+        from .pip_careful import shown_host, site_of
+        page = self.browser.current_url
+        if op == "open":
+            url = _safe_url(args.get("url"))
+            parts = urlsplit(url)
+            carried = self.taint.carried(url, self.said)
+            if carried:
+                return self._careful_hold("text", {"method": "OPEN", "host": parts.hostname or "", "path": (parts.path or "/")[:300],
+                                                   "fields": [{"name": "address", "value": _preview(url)}]}, url, carried)
+            site = site_of(parts.hostname or "")
+            if site not in self.sites:
+                self._careful_hold("site", {"method": "GET", "host": parts.hostname or "", "path": (parts.path or "/")[:300],
+                                            "fields": [], "site": site, "shown": shown_host(parts.hostname or ""), "page": url[:500]})
+                return SITE_HELD
+            return None
+        if op in ("type", "choose"):
+            text = str((args.get("text") if op == "type" else args.get("value")) or "")
+            carried = self.taint.carried(text, self.said)
+            if carried:
+                parts = urlsplit(page)
+                return self._careful_hold("text", {"method": "TYPE" if op == "type" else "CHOOSE", "host": parts.hostname or "",
+                                                   "path": (parts.path or "/")[:300],
+                                                   "fields": [{"name": "typed" if op == "type" else "chosen", "value": _preview(text)}]},
+                                          text, carried)
+        return None
+
+    def _careful_hold(self, kind, summary, text=None, carried=()) -> str:
+        """Record a careful hold: nothing is paused in the browser; Allow lets the Pip do it once."""
+        from datetime import timedelta
+        from .pip_schedules import _instant, timestamp
+        from .workspace_registry import WorkspaceRegistry, identifier
+        summary = {"more_fields": 0, "body_bytes": 0, "page": self.browser.current_url[:500], **summary, "kind": kind}
+        if carried:
+            summary["read_from_apps"] = True
+        action_id, now = identifier("compact"), _now()
+        expires = timestamp(_instant(now) + timedelta(seconds=ACTION_TTL_SECONDS))
+        frame = self._frame("Waiting for your approval")
+        with WorkspaceRegistry(self.state_directory) as registry:
+            with registry.transaction():
+                registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",
+                    (action_id, self.pip_id, self.workspace_id, self.run_id, self.id, CAREFUL_REF + action_id,
+                     json.dumps(summary, ensure_ascii=False), _digest(summary), frame, now, expires))
+                registry.event(self.workspace_id, "pip_computer_action_held", pip_id=self.pip_id, run_id=self.run_id,
+                               payload={"action_id": action_id, "method": summary["method"], "host": summary["host"], "kind": kind})
+        if text is not None:
+            self.texts[action_id] = text
+        self.waiting.append(action_id)
+        if kind == "site":
+            return SITE_HELD
+        return ("Held: that would carry something you read from the user's apps onto "
+                + (summary["host"] or "a page") + ", so DGC asks them first (careful mode). Stop now and tell the user in one "
+                "sentence what you wanted to put there and why. Once they allow it, do it again and carry on.")
 
     def _desk(self, op: str, args: dict) -> str:
         """Files and the Terminal, outside the browser lock: a 60-second command never stalls the screen."""
@@ -460,6 +561,12 @@ class Host:
                 return f"Files/{listing['path']}:\n" + ("\n".join(rows) if rows else "(empty)")
             if op == "open_file":
                 return desk.read_for_pip(files, args.get("path"))
+            if getattr(self, "careful", False) and self.run_id is not None:
+                command = str(args.get("command") or "")
+                carried = self.taint.carried(command, self.said)
+                if carried:
+                    return self._careful_hold("text", {"method": "RUN", "host": "Terminal", "path": "/",
+                                                       "fields": [{"name": "command", "value": _preview(command)}]}, command, carried)
             entry = desk.run_command(self.root, args.get("command"), "pip")
             from .tools import _UNTRUSTED_PAGE
             status = "timed out" if entry["timed_out"] else f"exit {entry['exit']}"
@@ -475,6 +582,14 @@ class Host:
         """Carry out one decided action this host holds. Returns the new status, or None."""
         with self.lock:
             ref = row["request_ref"]
+            if ref.startswith(CAREFUL_REF):
+                # Nothing was sent: approving lets the Pip do it once (a site stays allowed), and it retries.
+                text = self.texts.pop(row["id"], None)
+                if row["status"] != "approved":
+                    return None
+                if text is not None:
+                    self.taint.allow(text)
+                return "sent"
             if ref not in self.browser.held:
                 return "lost"
             if row["status"] == "approved":
@@ -630,6 +745,11 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
     from .pip_action_grants import add_computer_grant
     if actor not in ("editor-user", "local-console"):
         raise RegistryError("local_only", "Approve a Pip's computer actions on this computer.")
+    kind = json.loads(_row(registry, action_id)["summary"]).get("kind")
+    if kind == "site":
+        raise RegistryError("asks_once", "Allow adds this site for good: choose Allow.")
+    if kind == "text":
+        raise RegistryError("asks_every_time", "Carrying what it read from your apps onto a website asks every time.")
     with registry.transaction():
         _decide(registry, action_id, expected_digest, True, actor)
         grant = add_computer_grant(registry, action_id, actor)
@@ -683,6 +803,14 @@ def tick(registry, config) -> dict:
             continue
         outcome = host.apply(row) if live else "lost"
         continuation = None
+        summary = json.loads(row["summary"])
+        if summary.get("kind") == "site" and row["status"] == "approved" and outcome in ("sent", "lost"):
+            # Allowed for good, also when the page it held is gone: the Pip opens it again.
+            from .pip_careful import add_site
+            add_site(registry, row["pip_id"], summary.get("site") or summary.get("host", ""), "you")
+            if live:
+                host.sites.add(summary.get("site") or "")
+            outcome = "sent"
         if outcome == "sent":
             try:
                 continuation = _continue(registry, row, config)

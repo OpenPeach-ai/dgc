@@ -65,6 +65,9 @@ class PipComputerTests(unittest.TestCase):
         pip = self.store.create(self.registry.personal()["id"], "Shopper", "Fill in the order form", "local-console")
         proposal = self.store.propose(pip["id"], 1, {"computer_plan": PLAN, **plan}, "local-console")
         self.store.accept(pip["id"], proposal["id"], 1, "local-console")
+        # Careful mode is on by default: the test shop is a site this user already allowed.
+        from dgc import pip_careful
+        pip_careful.add_site(self.registry, pip["id"], TEST_HOST, "you")
         return self.store.get(pip["id"])
 
     def run_worker(self, pip):
@@ -267,6 +270,87 @@ class PipComputerTests(unittest.TestCase):
         self.assertIn("using its computer", watching["error"])
         self.assertTrue(pip_computer.view_call(self.registry, pip["id"], "frame", {}, "editor-user")["watching"])
         host.run_id = None
+
+
+# Careful mode (pip_careful) on a real browser: the supervisor's checks, no model needed.
+@unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")
+class CarefulComputerTests(unittest.TestCase):
+    setUp_base = fixtures.LocalPipsTests.setUp
+    setUp = PipComputerTests.setUp
+    MAIL = "Your one-time code for the transfer is 482913. Statement for account 004417829931 attached."
+
+    def host(self, *, sites=(), said="", taint=""):
+        from dgc import pip_careful
+        pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop for me", "local-console")
+        proposal = self.store.propose(pip["id"], 1, {"computer_plan": PLAN}, "local-console")
+        self.store.accept(pip["id"], proposal["id"], 1, "local-console")
+        for site in sites:
+            pip_careful.add_site(self.registry, pip["id"], site, "you")
+        queued = self.store.enqueue(pip["id"], "careful-" + str(time.monotonic_ns()), "local-console", self.cfg)
+        self.store.claim_next()
+        host = pip_computer.host_for(self.registry.directory, pip["id"], pip["workspace_id"])
+        if taint:
+            host.taint.add(taint)
+        host.begin(queued["id"], self.registry.directory / "frames", careful=True, said=said,
+                   sites=pip_careful.known(self.registry, pip["id"]))
+        self.addCleanup(host.end)
+        return pip, host
+
+    def test_a_new_site_asks_first_and_allow_keeps_it_for_good(self):
+        from dgc import pip_careful
+        pip, host = self.host()
+        said = host.call("open", {"url": self.url})
+        self.assertTrue(said.startswith("Held: that site is new for this user"), said)
+        [action] = pip_computer.list_actions(self.registry, pip["id"])
+        self.assertEqual((action["summary"]["kind"], action["summary"]["site"]), ("site", TEST_HOST))
+        self.assertIn("A change is already waiting", host.call("read", {}), "the run stops at the card")
+        with self.assertRaises(RegistryError):
+            pip_computer.approve_always(self.registry, action["id"], action["digest"], "editor-user")
+        pip_computer.decide(self.registry, action["id"], action["digest"], True, "editor-user")
+        host.end()
+        self.assertEqual(pip_computer.tick(self.registry, self.cfg)["sent"], 1)
+        self.assertIn(TEST_HOST, pip_careful.known(self.registry, pip["id"]), "allowed for good")
+        [sent] = pip_computer.list_actions(self.registry, pip["id"])
+        follow = self.store.run(sent["continuation_run_id"])
+        self.assertEqual(follow["manifest"]["computer_continuation"]["summary"]["kind"], "site")
+        host.begin("run_" + "c" * 32, self.registry.directory / "frames2", careful=True, sites=pip_careful.known(self.registry, pip["id"]))
+        self.assertIn("Order desk", host.call("open", {"url": self.url}), "the next time it just opens")
+
+    def test_typing_what_it_read_from_your_apps_waits_for_you_once(self):
+        pip, host = self.host(sites=[TEST_HOST], taint=self.MAIL)
+        page = host.call("open", {"url": self.url})
+        ref = __import__("re").search(r'textbox[^\n]*\[(e\d+)\]', page).group(1)
+        self.assertNotIn("Held", host.call("type", {"ref": ref, "text": "Ada Lovelace"}), "your own words type freely")
+        said = host.call("type", {"ref": ref, "text": "code 482913"})
+        self.assertTrue(said.startswith("Held: that would carry something you read from the user's apps"), said)
+        [action] = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"]
+        self.assertEqual((action["summary"]["kind"], action["summary"]["fields"]), ("text", [{"name": "typed", "value": "code 482913"}]))
+        self.assertTrue(action["summary"]["read_from_apps"])
+        pip_computer.decide(self.registry, action["id"], action["digest"], True, "editor-user")
+        self.assertEqual(pip_computer.tick(self.registry, self.cfg)["sent"], 1)
+        host.waiting = []
+        self.assertNotIn("Held", host.call("type", {"ref": ref, "text": "code 482913"}), "allowed once: it types it now")
+        self.assertTrue(host.call("open", {"url": self.url + "?q=004417829931"}).startswith("Held:"), "an address carrying it asks too")
+        self.assertEqual(self.received, [], "nothing left the computer")
+
+    def test_a_link_to_a_new_site_waits_at_the_browser_and_frames_inside_a_page_never_ask(self):
+        port = self.server.server_address[1]
+        policy = lambda host, p, **kw: ["127.0.0.1"] if host in (TEST_HOST, "dgc-box-other.example") and p == port else []
+        with patch.object(box, "public_addresses", policy):
+            pip, host = self.host(sites=[TEST_HOST])
+            host.call("open", {"url": self.url})
+            said = host.call("open", {"url": f"http://{TEST_HOST}:{port}/"})
+            self.assertNotIn("Held", said)
+            host.browser.evaluate_json(f"(() => {{ location.href = 'http://dgc-box-other.example:{port}/'; return true; }})()")
+            host.browser.pump(2.0)
+            held = host._record_held()
+            self.assertEqual(len(held), 1, "the page on the other site waits")
+            [action] = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"]
+            self.assertEqual((action["summary"]["kind"], action["summary"]["site"]), ("site", "dgc-box-other.example"))
+            pip_computer.decide(self.registry, action["id"], action["digest"], True, "editor-user")
+            host.end()
+            self.assertEqual(pip_computer.tick(self.registry, self.cfg)["sent"], 1)
+            self.assertIn("dgc-box-other.example", __import__("dgc.pip_careful", fromlist=["known"]).known(self.registry, pip["id"]))
 
 
 class ComputerCommandLineTests(unittest.TestCase):

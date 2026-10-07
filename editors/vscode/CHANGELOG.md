@@ -62,6 +62,31 @@
 
 ### Pips
 
+- **Needs attention.** The Pips home lists, above Your Pips, every card your Personal Pips are waiting
+  on you for: an email to Send, an event to add, a plugin action, a Connect card, a submit its computer
+  holds, a robot check, a routine it suggested, a new Pip to create. Newest first, six until you choose
+  Show all; each row opens that Pip at the card (the chat scrolls to it and it flashes; a held submit
+  opens its computer). Each Pip's row counts what waits for you there, and the Sessions home only says
+  "All quiet" when nothing does.
+- **Change a draft right on its card.** Edit on an email's Allow card turns To, Subject and Message
+  into fields; Send sends what the card shows ("Sent with your changes."). A calendar event a Pip
+  drafted is now an Allow card too ("Add this event?", its time in its own zone), with Edit for the
+  title, times, time zone, guests (who are invited) and description. A plugin action's Edit gives each
+  input its own field (JSON for a list or an object). A field that won't read says so on the card and
+  nothing is sent; Undo changes puts the card back.
+- **What it remembers.** A Personal Pip's page lists what it remembers about you, notes it kept from
+  your chat and ones you add there, each with Forget (Forget all asks first). Under a reply that kept
+  one, the chat says "Remembered: …" with Forget. The Memory tab and its claims form are gone for
+  Personal Pips.
+- **Careful mode.** A Pip with a computer has a Careful mode switch on its page (on) and the sites it may
+  visit, each with Remove. A new site waits as "Let Ava visit amazon.in?" with Allow this site; something
+  it read from your apps waits as "Let Ava put this on …?" with Allow once. Neither has Always allow.
+- **Pips settings → Plugins** shows which Pips use each plugin, with Remove for one, a count past 50,
+  and the plugins added that no Pip uses.
+- The 41 vendor plugins and Context7 show their own logos in Settings → Plugins (bundled; sources in
+  `media/plugin-logos/SOURCES.md`); Google Workspace shows Google's mark.
+- A search that finds no Pip says it looked in names, instructions and chats. Search snippets in
+  Sessions and Pips start and end on whole words. A Pip says a card is below its reply, where it is.
 - **As many Pips as you want.** Pips settings has **How many Pips you can have**: 100 unless you
   choose another number, up to 100,000; archived Pips don't count. The Pips home shows your most
   recent hundred (Core first) with **Load more** and a **Search your Pips** box over names and

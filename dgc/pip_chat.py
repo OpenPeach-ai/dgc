@@ -449,6 +449,9 @@ COMPUTER_DONE = ("This message is from DGC, not the user. The user approved what
                  "DGC sent it exactly as the page made it: {what}. Use your computer to read the page and see what "
                  "happened. Then tell the user in a short message, and carry on with what they asked if more is "
                  "needed. Do not repeat that change.")
+COMPUTER_ALLOWED = ("This message is from DGC, not the user. The user allowed {what}. Nothing was done yet: "
+                    "do it now with your computer, exactly as you meant to, then carry on with what they asked and "
+                    "tell them in a short message.")
 INTRO = ("This message is from DGC, not the user. The user has just created you in the Pips view and "
          "named you \"{name}\". That is your name: introduce yourself as {name}, never by your character's name. "
          "Write your first message to them. Say hello and who you are in one sentence. Guess from your name what they would like help with, then say what you can do for "
@@ -479,6 +482,11 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
     """The chat's next turn once a submit its run held has been sent: the Pip looks and replies."""
     what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
     key = COMPUTER_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    if summary.get("kind") in ("site", "text"):
+        # Careful mode held it before anything happened: the Pip does it now, once.
+        allowed = (f"you to visit {summary.get('site') or summary.get('host', 'that site')} (open it if it isn't open yet)" if summary["kind"] == "site"
+                   else f"you to put that on {summary.get('host') or 'the page'}: {(summary.get('fields') or [{}])[0].get('value', '')}")
+        return send(store, pip_id, COMPUTER_ALLOWED.format(what=allowed[:400]), key, "local-computer", config, _intro=True)
     return send(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config, _intro=True)
 
 

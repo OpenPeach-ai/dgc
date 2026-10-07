@@ -22,6 +22,7 @@ export type PipReadParams = {
   list_pip_plugin_uses: Record<string, never>;
   list_pip_attention: { limit?: number };
   list_pip_notes: { pip_id: string };
+  list_pip_sites: { pip_id: string };
   get_pip_chat_context: { pip_id: string; context_size?: number };
   get_pips_limit: Record<string, never>;
   list_pip_reply_stats: { pip_id: string; run_ids: string[] };
@@ -112,6 +113,8 @@ export type PipMutationParams = {
   allow_pip_plugin: { pip_id: string; grant_id: string };
   add_pip_note: { pip_id: string; text: string };
   forget_pip_note: { pip_id: string; note_id?: string; all?: true };
+  set_pip_careful: { pip_id: string; on: boolean };
+  forget_pip_site: { pip_id: string; site: string };
   set_pips_limit: { max_pips: number };
   decline_pip_plugin: { pip_id: string; grant_id: string };
   add_pip_computer_file: { pip_id: string; path?: string; name: string; data: string };
@@ -195,6 +198,9 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   list_pip_notes: ["pip_id"],
   add_pip_note: ["pip_id", "text"],
   forget_pip_note: ["pip_id", "note_id", "all"],
+  list_pip_sites: ["pip_id"],
+  set_pip_careful: ["pip_id", "on"],
+  forget_pip_site: ["pip_id", "site"],
   get_pip_chat_context: ["pip_id", "context_size"],
   list_pip_reply_stats: ["pip_id", "run_ids"],
   get_pips_limit: [],
@@ -545,8 +551,8 @@ for (const command of ["set_pip_profile", "update_pip_computers", "reset_pip_com
 for (const command of API43_READS) READS.add(command);
 for (const command of API43_MUTATIONS) MUTATIONS.add(command);
 // API 44: a Personal Pip's plugins. It asks to use one; you allow it, or not, on its card; local only.
-const API44_READS = new Set(["list_pip_plugins", "list_pip_plugin_uses", "list_pip_attention", "list_pip_notes", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit"]);
-const API44_MUTATIONS = new Set(["allow_pip_plugin", "decline_pip_plugin", "set_pips_limit", "add_pip_note", "forget_pip_note"]);
+const API44_READS = new Set(["list_pip_plugins", "list_pip_plugin_uses", "list_pip_attention", "list_pip_notes", "list_pip_sites", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit"]);
+const API44_MUTATIONS = new Set(["allow_pip_plugin", "decline_pip_plugin", "set_pips_limit", "add_pip_note", "forget_pip_note", "set_pip_careful", "forget_pip_site"]);
 for (const command of API44_READS) READS.add(command);
 for (const command of API44_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);

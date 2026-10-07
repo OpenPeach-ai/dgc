@@ -48,6 +48,36 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **Needs attention: one list of everything your Personal Pips wait on you for.** `list_pip_attention`
+  (`limit` 1–100, local only) reads every card across all your Personal Pips, newest first: emails,
+  calendar events and plugin actions to Allow, prepared app actions, Connect cards, plugin requests,
+  setup cards, submits a Pip's computer holds, robot checks and suggested routines. Each item names its
+  Pip and the card (`kind`, `card`, `title`, `detail`); `counts` per kind and `by_pip` stay exact when the
+  items are cut at the limit. Reading it never expires or changes anything (one rolled-back snapshot).
+- **What a Personal Pip remembers about you is yours to see and forget.** As it replies to your own
+  message, a Personal Pip may keep a short note of something you told it (a new `remember` tool, three a
+  reply at most): your name, who people are, what you like. A note that shares nothing with your message
+  is refused, so an email or a page it read can't plant one, and the tool isn't offered in a routine's
+  run or a turn DGC wrote. `list_pip_notes`, `add_pip_note` (`text`, up to 300 characters, no
+  credentials) and `forget_pip_note` (`note_id`, or `all: true`) are local only; Forget deletes the note.
+  Its later chats and tasks get the newest notes as reference, redacted again at queue time; a Pip keeps
+  60. Registry schema 44 (`pip_notes`). A Personal Pip's chat no longer pins an empty exceptions memory,
+  whose notice told it not to keep notes.
+- **Careful mode, for a Personal Pip with a computer, on unless you turn it off.** The first time its
+  browser goes to a site (its registrable domain), the run is held with a card ("Let Ava visit
+  amazon.in?"); Allow adds the site for good. Sites you named in your own messages, the computer's home
+  page and sites you open on its screen never ask, and a frame inside a page never does. Text it types,
+  an option it picks, an address it opens and a Terminal command are checked against what it read from
+  your apps in the last day (emails, events, plugin answers); carrying any of it out waits for your
+  Allow, once. A routine, schedule or event run of a Pip that can read your apps runs without its
+  computer. `list_pip_sites`, `set_pip_careful` (`on`) and `forget_pip_site` (`site`) are local only;
+  Always allow is refused for both kinds of hold. All checks run in the supervisor.
+- **Editable drafts.** Nothing changes on the CLI side: `prepare_pip_message_draft`,
+  `prepare_pip_calendar_draft` and `prepare_pip_connector_draft` already prepare the content you send
+  (see the extension's notes).
+- **Plugins:** `list_pip_plugin_uses` reads the newest card per Pip and plugin in SQL (it read 400 rows
+  and could miss Pips), lists the first 50 Pips per plugin by name with a `count`, and adds `installed`:
+  the plugins a Pip could ask for.
 - **How many Pips you can have is yours to choose.** 100 unless you set another number (1 to 100,000)
   with `set_pips_limit` (Pips settings); archived Pips no longer count. Every place that stopped at
   100 reads it: creating a Pip, accepting a setup card, and the @-Pip picker, which failed with

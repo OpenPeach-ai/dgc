@@ -125,6 +125,17 @@ test('what the Pip would submit waits at the top with Send once, Always allow an
  assert.match(x.d.body.textContent,/Approved/);
 });
 
+test('careful mode: a new site waits as "Let Shopper visit…" with Allow this site and Not now, never Always allow',async()=>{
+ const site={...hold,summary:{kind:'site',site:'shop.example',shown:'shop.example',method:'GET',host:'shop.example',path:'/',page:'https://shop.example/',fields:[],more_fields:0,body_bytes:0}};
+ const x=setup({status:computer({pending:1,actions:[site]})});await x.drain();
+ const card=x.d.querySelector('.pc-waiting');
+ assert.match(card.textContent,/Let Shopper visit shop\.example\?It hasn’t opened shop\.example for you before/);
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Allow this site','Not now']);
+ x.click(`[data-send="${actionId}"]`);await x.drain();
+ assert.equal(x.requests('decide_pip_computer_action')[0].request.approve,true);
+ assert.match(x.d.body.textContent,/Allowed\. It opens the site and carries on\./);
+});
+
 test('Files shows the computer\'s own folder: open folders, preview, save, remove and add',async()=>{
  const x=setup();await x.drain();x.click('[data-app=files]');await x.drain();
  assert.equal(x.requests('list_pip_computer_files')[0].request.path,'');

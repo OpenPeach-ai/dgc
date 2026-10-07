@@ -453,3 +453,5 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 /* What it remembers (#6): notes on its page, and "Remembered" under the reply that kept one. */
 .note-add{gap:8px}.note-add input{flex:1;min-width:0}.note-all{display:flex;justify-content:flex-end;padding:4px 2px 0}.note-confirm{display:flex;align-items:center;gap:6px;font-size:12px}
 .memory-kept{display:flex;flex-direction:column;gap:2px;margin:-10px 0 14px;font-size:11px;color:var(--vscode-descriptionForeground)}.memory-kept-item{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.memory-kept button.link{min-height:0;padding:0 4px;font-size:11px}
+/* Careful mode (#9): its switch and the sites it may visit, on the page of a Pip with a computer. */
+.pip-page-group[aria-label="Careful mode"] .pip-page-label{margin-top:10px}

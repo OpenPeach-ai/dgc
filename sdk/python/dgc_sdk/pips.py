@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
-    "list_pip_plugins", "list_pip_plugin_uses", "list_pip_attention", "list_pip_notes", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit",
+    "list_pip_plugins", "list_pip_plugin_uses", "list_pip_attention", "list_pip_notes", "list_pip_sites", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit",
     "list_pip_routines", "list_pip_shared", "get_pip_computers", "list_pip_apps",
     "list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pip_message_image", "get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames",
@@ -67,7 +67,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
-    "allow_pip_plugin", "decline_pip_plugin", "set_pips_limit", "add_pip_note", "forget_pip_note",
+    "allow_pip_plugin", "decline_pip_plugin", "set_pips_limit", "add_pip_note", "forget_pip_note", "set_pip_careful", "forget_pip_site",
     "set_pip_profile", "update_pip_computers", "reset_pip_computer",
     "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
     "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link", "finish_pip_computer_check",
@@ -205,8 +205,8 @@ API43_MUTATIONS |= {'set_pip_profile', 'update_pip_computers', 'reset_pip_comput
 READ_COMMANDS |= API43_READS
 MUTATION_COMMANDS |= API43_MUTATIONS
 # API 44: a Personal Pip's plugins. It asks to use one; you allow it, or not, on its card; local only.
-API44_READS = frozenset({'list_pip_plugins', 'list_pip_plugin_uses', 'list_pip_attention', 'list_pip_notes', 'get_pip_chat_context', 'list_pip_reply_stats', 'get_pips_limit'})
-API44_MUTATIONS = frozenset({'allow_pip_plugin', 'decline_pip_plugin', 'set_pips_limit', 'add_pip_note', 'forget_pip_note'})
+API44_READS = frozenset({'list_pip_plugins', 'list_pip_plugin_uses', 'list_pip_attention', 'list_pip_notes', 'list_pip_sites', 'get_pip_chat_context', 'list_pip_reply_stats', 'get_pips_limit'})
+API44_MUTATIONS = frozenset({'allow_pip_plugin', 'decline_pip_plugin', 'set_pips_limit', 'add_pip_note', 'forget_pip_note', 'set_pip_careful', 'forget_pip_site'})
 READ_COMMANDS |= API44_READS
 MUTATION_COMMANDS |= API44_MUTATIONS
 COMMAND_FIELDS = {
@@ -218,6 +218,9 @@ COMMAND_FIELDS = {
     'list_pip_notes': frozenset({'pip_id'}),
     'add_pip_note': frozenset({'pip_id', 'text'}),
     'forget_pip_note': frozenset({'pip_id', 'note_id', 'all'}),
+    'list_pip_sites': frozenset({'pip_id'}),
+    'set_pip_careful': frozenset({'pip_id', 'on'}),
+    'forget_pip_site': frozenset({'pip_id', 'site'}),
     'get_pip_chat_context': frozenset({'pip_id', 'context_size'}),
     'list_pip_reply_stats': frozenset({'pip_id', 'run_ids'}),
     'get_pips_limit': frozenset(),

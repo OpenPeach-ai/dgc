@@ -248,3 +248,28 @@ test('validators accept the backend shapes and refuse anything else',()=>{
  assert.throws(()=>m.pipComputerView({ok:true,watching:false,url:'u',width:1,height:1,image:'data:image/svg+xml;base64,PHN2Zz4='}));
  assert.throws(()=>m.pipComputerFrame({run_id:runId,frame:'0001.jpg',image:JPEG},runId,'0002.jpg'));
 });
+
+// Careful mode (#9, Pips API 44): a new site or something it read from your apps is held before anything
+// happens. Its card says which; Allow lets the Pip do it (a site stays allowed); there is no Always allow.
+test('a careful hold says what it is: a new site to allow, or app data to put on a page, and never Always allow',async()=>{
+ const site=action({frame:null,summary:{kind:'site',site:'shop.example',shown:'shop.example',method:'GET',host:'shop.example',path:'/deals',page:'https://shop.example/deals',fields:[],more_fields:0,body_bytes:0}});
+ const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[site]})});await x.openJob();
+ assert.match(x.d.body.textContent,/Let Shopper visit shop\.example\?/);
+ x.click(`[data-computer-action="${actionId}"]`);await flush();
+ const dialog=x.d.querySelector('[role=dialog]');
+ assert.match(dialog.textContent,/Let Shopper visit shop\.example\?It hasn’t opened shop\.example for you before\. Allow adds the site for good/);
+ assert.equal(x.d.querySelector('#review-always'),null,'no Always allow');
+ assert.equal(x.d.querySelector('#review-confirm').textContent,'Allow this site');
+ x.click('#review-confirm');
+ const decided=x.requests('decide_pip_computer_action').at(-1);assert.equal(decided.request.approve,true);
+ x.setStatus(computer());x.answer(decided,{action:{...site,status:'approved',resolved_at:'2026-10-04T10:01:00Z',resolved_by:'editor-user'}});await x.drain();
+ assert.match(x.d.body.textContent,/Allowed\. It opens the site and carries on\./);
+ const typed=action({frame:null,summary:{kind:'text',read_from_apps:true,method:'TYPE',host:'shop.example',path:'/checkout',page:'https://shop.example/checkout',fields:[{name:'typed',value:'code 482913'}],more_fields:0,body_bytes:0}});
+ const y=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[typed]})});await y.openJob();
+ y.click(`[data-computer-action="${actionId}"]`);await flush();
+ assert.match(y.d.querySelector('[role=dialog]').textContent,/Let Shopper put this on shop\.example\?It read this from your apps.*Goes ontoshop\.example\/checkout.*typedcode 482913/);
+ assert.equal(y.d.querySelector('#review-confirm').textContent,'Allow once');
+ y.click('#reject-computer-action');
+ assert.equal(y.requests('decide_pip_computer_action').at(-1).request.approve,false);
+});
+

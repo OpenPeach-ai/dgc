@@ -275,6 +275,21 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         self.assertEqual(done["receipt"]["provider"], "airtable")
         self.assertEqual(self.vendor.calls, [("airtable__create_record", {"table": "Plans"})])
 
+    def test_a_tool_on_dgcs_reviewed_reads_runs_at_once_and_destructive_never_does(self):
+        # Aave marks none of its tools read-only; DGC's catalog lists the ones it reviewed as reads.
+        with patch("dgc.plugins.load_catalog", return_value={"plugins": [{"name": "aave", "reviewed_reads": ["create_record", "clear_table"]}]}):
+            self.session.call(self.registry, "use_plugin", {"plugin": "aave", "why": "To check rates."})
+            card = next(c for c in pip_plugins.listing(self.registry, self.pip_id, self.cfg)["plugins"] if c["plugin"] == "aave")
+            pip_plugins.allow(self.registry, self.cfg, card["id"], self.pip_id, "editor-user")
+            listed = self.session.call(self.registry, "plugin_tools", {"plugin": "aave"})
+            self.assertIn("- create_record [reads]", listed)
+            self.assertIn("- clear_table [asks]", listed, "a tool its vendor marks destructive never runs at once")
+            said = self.session.call(self.registry, "call_plugin", {"plugin": "aave", "tool": "create_record", "arguments": {"table": "T"}})
+            self.assertIsInstance(said, str, "a reviewed read answers at once: no Allow card")
+            self.assertIn("Untrusted data from the user's Aave", said)
+            card_reply = self.session.call(self.registry, "call_plugin", {"plugin": "aave", "tool": "clear_table", "arguments": {"table": "T"}})
+            self.assertIn("draft", card_reply)
+
     def test_the_pip_must_still_be_allowed_when_it_runs(self):
         card, draft = self.offer()
         action = self.propose(draft)
