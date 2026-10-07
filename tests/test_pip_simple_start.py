@@ -31,6 +31,14 @@ class SimpleStartTests(unittest.TestCase):
         blank = self.store.create(self.personal_id(), "Travel", "   ", "editor-user", pip_type="scout")
         self.assertEqual(blank["goal"], pips.NAMED_GOAL)
 
+    def test_the_editor_knows_the_default_goals_so_a_pip_without_a_task_has_no_run_now(self):
+        # The Results tab hides Run now while a Pip has only DGC's default goal and no schedule
+        # (founder, 2026-10-07): pipsModel.DEFAULT_GOALS must be exactly these.
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "editors/vscode/src/pipsModel.js").read_text()
+        listed = json.loads(source.split("export const DEFAULT_GOALS = ", 1)[1].split("];", 1)[0] + "]")
+        self.assertEqual(listed, [pips.NAMED_GOAL, pips.PRIMARY_GOAL])
+
     def test_a_project_pip_still_says_what_it_reviews(self):
         with self.assertRaises(RegistryError):
             self.store.create(self.workspace["id"], "Reviewer", None, "editor-user", pip_type="rook")
