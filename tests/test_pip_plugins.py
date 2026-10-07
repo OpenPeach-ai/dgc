@@ -231,6 +231,9 @@ class PluginCardTests(PluginWorld, unittest.TestCase):
         self.assertTrue(turn["request_key"].startswith("plugins_"))
         uses = control("list_pip_plugin_uses")
         self.assertEqual([(p["name"], [x["name"] for x in p["pips"]]) for p in uses["plugins"]], [("Airtable", ["Ava"])])
+        self.assertEqual((uses["plugins"][0]["count"], uses["plugins"][0]["money"]), (1, False))
+        self.assertEqual([(p["name"], p["money"]) for p in uses["installed"]], [("Aave", True), ("Airtable", False)],
+                         "Settings also lists what a Pip could ask for")
         control("decline_pip_plugin", pip_id=self.pip["id"], grant_id=card["id"])
         self.assertEqual(control("list_pip_plugin_uses")["plugins"], [])
 

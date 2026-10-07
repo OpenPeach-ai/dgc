@@ -299,28 +299,31 @@ def decline(registry, config, grant_id, pip_id, actor) -> dict:
     return {"plugin": projection(row, installed(config))}
 
 
+USES_LISTED = 50                   # Pips named per plugin in Settings; the count covers the rest
+
+
 def overview(registry, config) -> dict:
-    """Settings: every plugin your Pips may use, and which Pips."""
+    """Pips settings → Plugins: which Pips use each plugin (the newest card per Pip and plugin decides),
+    the first 50 by name with the count, and the plugins installed that a Pip could ask for."""
     rows = registry.db.execute(
-        "SELECT g.id,g.pip_id,g.plugin,g.status,g.updated_at,v.definition FROM pip_plugin_grants g JOIN pips p ON p.id=g.pip_id "
-        "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
-        "WHERE p.status<>'archived' ORDER BY g.plugin, g.updated_at DESC LIMIT 400").fetchall()
-    available, groups, latest = installed(config), {}, set()
+        "SELECT id,pip_id,plugin,name FROM (SELECT g.id,g.pip_id,g.plugin,g.status,json_extract(v.definition,'$.name') AS name,"
+        " ROW_NUMBER() OVER (PARTITION BY g.pip_id,g.plugin ORDER BY g.updated_at DESC, g.id DESC) AS n"
+        " FROM pip_plugin_grants g JOIN pips p ON p.id=g.pip_id JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version"
+        " WHERE p.status<>'archived') WHERE n=1 AND status='allowed'").fetchall()
+    available, groups = installed(config), {}
     for row in rows:
-        if (row["pip_id"], row["plugin"]) in latest:
-            continue
-        latest.add((row["pip_id"], row["plugin"]))
-        if row["status"] != "allowed":
-            continue
         info = available.get(row["plugin"])
         group = groups.setdefault(row["plugin"], {"plugin": row["plugin"], "name": info["display_name"] if info else row["plugin"],
-                                                  "installed": info is not None, "pips": []})
-        try:
-            name = json.loads(row["definition"]).get("name") or "Pip"
-        except ValueError:
-            name = "Pip"
-        group["pips"].append({"pip_id": row["pip_id"], "name": str(name)[:120], "grant_id": row["id"]})
-    return {"plugins": list(groups.values())[:40]}
+                                                  "installed": info is not None, "money": bool(info and info["money"]),
+                                                  "count": 0, "pips": []})
+        group["count"] += 1
+        group["pips"].append({"pip_id": row["pip_id"], "name": _text(row["name"], 120) or "Pip", "grant_id": row["id"]})
+    for group in groups.values():
+        group["pips"] = sorted(group["pips"], key=lambda pip: (pip["name"].casefold(), pip["pip_id"]))[:USES_LISTED]
+    used = sorted(groups.values(), key=lambda group: group["name"].casefold())
+    return {"plugins": used[:80],
+            "installed": sorted(({"plugin": name, "name": info["display_name"], "money": bool(info["money"])}
+                                 for name, info in available.items()), key=lambda item: item["name"].casefold())[:80]}
 
 
 # --------------------------------------------------------------------------- the drafts a run offered

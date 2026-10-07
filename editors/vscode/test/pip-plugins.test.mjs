@@ -28,7 +28,7 @@ const action=(server='airtable',status='pending')=>({id:ACTION,pip_id:PIP,worksp
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 const viewModule=load(viewCode,name=>name==='vscode'?{}:require(name));
 
-function setup({plugins=[card()],drafts=[],apiVersion=44,messages=[]}={}){
+function setup({plugins=[card()],drafts=[],apiVersion=44,messages=[],uses={plugins:[],installed}}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -47,7 +47,9 @@ function setup({plugins=[card()],drafts=[],apiVersion=44,messages=[]}={}){
   list_pip_app_links:()=>({pip_id:PIP,links:[],composio:true}),list_pip_plugins:()=>({pip_id:PIP,plugins,installed}),
   list_pip_message_drafts:()=>({drafts:[],next_cursor:null}),list_pip_calendar_drafts:()=>({drafts:[],next_cursor:null}),
   list_pip_connector_drafts:()=>({drafts:drafts.map(summary),next_cursor:null}),get_pip_connector_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),
-  list_pip_routines:()=>({pip_id:PIP,routines:[]}),list_pip_action_grants:()=>({pip_id:PIP,grants:[]}),get_pip_digest:()=>undefined}[r.type]?.());
+  list_pip_routines:()=>({pip_id:PIP,routines:[]}),list_pip_action_grants:()=>({pip_id:PIP,grants:[]}),get_pip_digest:()=>undefined,
+  list_pip_plugin_uses:()=>uses,list_pip_apps:()=>({apps:[]}),get_pips_limit:()=>({max_pips:100,default:100,maximum:100000,count:1}),
+  get_pip_computers:()=>({available:true,reason:'',platform:'linux',setup:{state:'ready',step:'',done:0,total:0,error:'',chrome:'',checked_at:null},computers:[],programs_bytes:0,free_bytes:0})}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion,generation:1,connected:true,supported:true,enabled:true});
  const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
@@ -153,3 +155,36 @@ test('the Pip’s page lists the plugins it may use, each taken back there',asyn
  x.answer(back,{plugin:card({status:'declined'})});await flush();
  assert.match(x.d.body.textContent,/Ava no longer uses Airtable\. It stays in DGC\./);
 });
+
+test('Pips settings → Plugins: which Pips use each plugin, Remove for one, and what a Pip could ask for',async()=>{
+ const many=Array.from({length:50},(_,i)=>({pip_id:'pip_'+String(i).padStart(32,'0'),name:'Helper '+(i+1),grant_id:'pipplugin_'+String(i).padStart(32,'0')}));
+ const uses={plugins:[{plugin:'aave',name:'Aave',money:true,installed:true,count:1,pips:[{pip_id:PIP,name:'Ava',grant_id:MONEY}]},
+  {plugin:'airtable',name:'Airtable',money:false,installed:true,count:1234,pips:many}],installed:[...installed,{plugin:'granola',name:'Granola',money:false}]};
+ const x=setup({uses});await x.drain();
+ x.click('#pips-settings-open');await x.drain();
+ assert.deepEqual([...x.d.querySelectorAll('[data-pips-settings]')].map(b=>b.textContent),['Computer','Apps','Plugins']);
+ x.click('[data-pips-settings="plugins"]');await x.drain();
+ const text=x.d.body.textContent;
+ assert.match(text,/Aave.*Asks before every action: it can move money · 1 Pip.*Ava can use it/);
+ assert.match(text,/Airtable.*1,234 Pips.*Helper 1 can use it/);
+ assert.match(text,/And 1,184 more\. Search your Pips to find one\./,'a plugin thousands of Pips use lists 50 and counts the rest');
+ assert.match(text,/Added, not used by a Pip.*Granola/);
+ assert.equal(x.d.querySelector(`[data-plugin-use-remove="${MONEY}"]`).getAttribute('aria-label'),'Stop Ava using Aave');
+ x.click(`[data-plugin-use-remove="${MONEY}"]`);await flush();
+ assert.deepEqual(clean(x.requests('decline_pip_plugin')[0].request),{type:'decline_pip_plugin',pip_id:PIP,grant_id:MONEY});
+ x.answer(x.requests('decline_pip_plugin')[0],{plugin:aave({status:'declined'})});await x.drain();
+ assert.match(x.d.body.textContent,/Removed\. That Pip no longer uses the plugin\./);
+ assert.ok(x.requests('list_pip_plugin_uses').length>=2,'the list is read again after Remove');
+ x.click('[data-open-plugins]');
+ assert.ok(x.sent.some(m=>m.type==='openSettings'&&m.section==='plugins'));
+});
+
+test('Pips settings → Plugins with none in use says how a Pip asks; an older CLI has no Plugins tab',async()=>{
+ const x=setup();await x.drain();
+ x.click('#pips-settings-open');await x.drain();x.click('[data-pips-settings="plugins"]');await x.drain();
+ assert.match(x.d.body.textContent,/No Pip uses a plugin yet\. When one needs a plugin you added, it asks in its chat/);
+ const old=setup({apiVersion:43});await old.drain();
+ old.click('#pips-settings-open');await old.drain();
+ assert.deepEqual([...old.d.querySelectorAll('[data-pips-settings]')].map(b=>b.textContent),['Computer','Apps']);
+});
+

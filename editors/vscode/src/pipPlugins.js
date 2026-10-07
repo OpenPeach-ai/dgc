@@ -103,3 +103,36 @@ export function pluginsPageMarkup(cards, { esc, busy = false, pipName = 'This Pi
     + `<button type="button" class="quiet pill" data-plugin-remove="${esc(c.id)}"${off}>Take back</button></li>`).join('')}</ul>`
     + `<p class="muted">${esc(pipName)} asks in its chat before it uses another plugin you added to DGC.</p></section>`;
 }
+
+// Pips settings → Plugins (list_pip_plugin_uses): which Pips use each plugin, with Remove per Pip,
+// and the plugins added to DGC that a Pip could ask for.
+export function pluginUsesPage(value) {
+  const fail = () => { throw new Error('Your Pips’ plugins didn’t load. Refresh to try again.'); };
+  if (!value || !Array.isArray(value.plugins) || value.plugins.length > 80 || !Array.isArray(value.installed) || value.installed.length > 80) fail();
+  const plugin = p => p && /^[a-z0-9][a-z0-9-]{0,63}$/.test(p.plugin) && text(p.name, 80) && p.name && typeof p.money === 'boolean';
+  const plugins = value.plugins.map(p => {
+    if (!plugin(p) || typeof p.installed !== 'boolean' || !Number.isSafeInteger(p.count) || p.count < 1 || !Array.isArray(p.pips)
+      || !p.pips.length || p.pips.length > Math.min(50, p.count)) fail();
+    return { plugin: p.plugin, name: p.name, money: p.money, installed: p.installed, count: p.count, pips: p.pips.map(x => {
+      if (!x || typeof x.pip_id !== 'string' || !x.pip_id || x.pip_id.length > 80 || !text(x.name, 120) || !/^pipplugin_[a-f0-9]{32}$/.test(x.grant_id)) fail();
+      return { pip_id: x.pip_id, name: x.name || 'Pip', grant_id: x.grant_id };
+    }) };
+  });
+  const installed = value.installed.map(p => { if (!plugin(p)) fail(); return { plugin: p.plugin, name: p.name, money: p.money }; });
+  return { plugins, installed };
+}
+
+export function pluginUsesMarkup(uses, { esc, busy = false, error = '' }) {
+  const off = busy ? ' disabled' : '';
+  if (error && !uses) return `<p class="error" role="alert">${esc(error)}</p>`;
+  if (!uses) return '<p class="muted" role="status">Loading…</p>';
+  const asks = p => p.money ? 'Asks before every action: it can move money' : 'Asks before anything its maker doesn’t mark read-only';
+  const used = uses.plugins.map(p => `<section class="pip-page-group"><div class="pip-page-row static"><span class="app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${p.installed ? asks(p) : 'Not added in DGC now, so no Pip can use it'} · ${p.count === 1 ? '1 Pip' : `${p.count.toLocaleString('en-US')} Pips`}</small></span></div>`
+    + `<ul class="pip-page-list">${p.pips.map(x => `<li class="pip-page-row static sub"><span class="row-words"><span>${esc(x.name)} can use it</span></span><button type="button" class="quiet pill" data-plugin-use-remove="${esc(x.grant_id)}" data-plugin-use-pip="${esc(x.pip_id)}" aria-label="Stop ${esc(x.name)} using ${esc(p.name)}"${off}>Remove</button></li>`).join('')}</ul>`
+    + (p.count > p.pips.length ? `<p class="muted">And ${(p.count - p.pips.length).toLocaleString('en-US')} more. Search your Pips to find one.</p>` : '') + '</section>').join('');
+  const idle = uses.installed.filter(i => !uses.plugins.some(p => p.plugin === i.plugin));
+  const none = uses.plugins.length ? '' : `<section class="pip-page-group"><p class="pip-page-empty">${uses.installed.length ? 'No Pip uses a plugin yet. When one needs a plugin you added, it asks in its chat, and you choose Allow there.' : 'No plugins yet. Add one in DGC Settings → Plugins; a Pip asks in its chat before it uses it.'}</p></section>`;
+  return none + used + (idle.length ? `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Added, not used by a Pip</strong><small>${idle.map(i => esc(i.name)).join(', ')}</small></span></div></section>` : '')
+    + `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Each Pip asks first</strong><small>${uses.plugins.length ? 'Remove stops that Pip using the plugin; it stays in DGC for your other Pips. ' : ''}Add plugins and sign in to them in DGC Settings → Plugins.</small></span><button type="button" class="quiet pill" data-open-plugins${off}>Open Plugins</button></div></section>${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}`;
+}
+
