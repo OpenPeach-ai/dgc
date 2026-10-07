@@ -24,7 +24,7 @@ const installed=[{plugin:'aave',name:'Aave',money:true},{plugin:'airtable',name:
 const source={run_id:RUN,pip_id:PIP,workspace_id:PW,job_version:1,lifecycle_revision:0,result_digest:'e'.repeat(64)};
 const call={tool:'create_record',arguments:{table:'Plans',fields:{Name:'Run <b>5k</b>'}}};
 const draft=(server='airtable',extra={})=>({id:DRAFT,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status:'pending',digest:'c'.repeat(64),expired:false,expires_at:'2099-10-05T06:00:00Z',action_id:null,created_at:'2026-10-07T09:00:00.000Z',actor:'pip-connector:'+RUN,request_key:'f'.repeat(64),payload:{schema_version:1,source,action:{server,connection_digest:'a'.repeat(64),schema_digest:'b'.repeat(64),call}},...extra});
-const action=(server='airtable',status='pending')=>({id:ACTION,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status,digest:'d'.repeat(64),expires_at:'2099-10-05T06:00:00Z',payload:{schema_version:3,kind:'connector_call',source,server,connection_digest:'a'.repeat(64),account:'connection_managed',schema_digest:'b'.repeat(64),call},receipt:null});
+const action=(server='airtable',status='pending',c=call)=>({id:ACTION,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status,digest:'d'.repeat(64),expires_at:'2099-10-05T06:00:00Z',payload:{schema_version:3,kind:'connector_call',source,server,connection_digest:'a'.repeat(64),account:'connection_managed',schema_digest:'b'.repeat(64),call:c},receipt:null});
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 const viewModule=load(viewCode,name=>name==='vscode'?{}:require(name));
 
@@ -94,7 +94,7 @@ test('what the Pip would do in a plugin is an Allow card; Allow prepares that ex
  const el=x.d.querySelector(`[data-plugin-action="${DRAFT}"]`);assert.ok(el,'inline in the chat');
  assert.match(el.textContent,/Run create_record in Airtable\?Ava wants to do this in Airtable\..*table.*Plans.*fields.*Run <b>5k<\/b>/);
  assert.equal(el.querySelector('b'),null,'inputs are text');
- assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Always allow','Don’t']);
+ assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Always allow','Edit','Don’t']);
  assert.equal(x.d.querySelector('.chat-setup-review'),null,'not also a Review row');
  x.click(`[data-plugin-run="${DRAFT}"]`);await flush();
  const prep=x.requests('prepare_pip_connector_draft').at(-1);
@@ -125,7 +125,7 @@ test('a plugin that can move money asks every time: no Always allow on its card'
  const x=setup({plugins:[aave({status:'allowed'})],drafts:[draft('aave')]});await openChat(x);
  const el=x.d.querySelector(`[data-plugin-action="${DRAFT}"]`);
  assert.match(el.textContent,/Run create_record in Aave\?Aave can move money, so Ava asks you every time\./);
- assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Don’t']);
+ assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t']);
 });
 
 test('the allowed card goes once the Pip has replied after it',async()=>{
@@ -186,5 +186,41 @@ test('Pips settings → Plugins with none in use says how a Pip asks; an older C
  const old=setup({apiVersion:43});await old.drain();
  old.click('#pips-settings-open');await old.drain();
  assert.deepEqual([...old.d.querySelectorAll('[data-pips-settings]')].map(b=>b.textContent),['Computer','Apps']);
+});
+
+test('Edit changes the plugin call on its card: each input in its own field, JSON for objects, and Allow runs the edited call',async()=>{
+ const x=setup({plugins:[card({status:'allowed'})],drafts:[draft()]});await openChat(x);
+ x.click(`[data-card-edit-start="${DRAFT}"]`);
+ const el=()=>x.d.querySelector(`[data-plugin-action="${DRAFT}"]`);
+ assert.ok(el().hasAttribute('data-editing'));
+ const table=x.d.getElementById(`card-${DRAFT}-arg0`),fields=x.d.getElementById(`card-${DRAFT}-arg1`);
+ assert.equal(table.value,'Plans');assert.equal(fields.tagName,'TEXTAREA');
+ assert.deepEqual(JSON.parse(fields.value),{Name:'Run <b>5k</b>'});
+ assert.equal(x.d.activeElement,table,'the first field takes focus');
+ const type=(el,v)=>{el.value=v;el.dispatchEvent(new x.w.Event('input',{bubbles:true}));};
+ type(fields,'{"Name": "Run 10k"');
+ x.click(`[data-plugin-run="${DRAFT}"]`);await flush();
+ assert.equal(x.requests('prepare_pip_connector_draft').length,0,'a field that will not read runs nothing');
+ assert.match(el().querySelector('[role=alert]').textContent,/fields aren’t valid JSON/);
+ type(x.d.getElementById(`card-${DRAFT}-arg1`),'{"Name": "Run 10k", "Day": "Sunday"}');
+ type(x.d.getElementById(`card-${DRAFT}-arg0`),'Weekend plans');
+ x.click(`[data-plugin-run="${DRAFT}"]`);await flush();
+ const prep=x.requests('prepare_pip_connector_draft').at(-1);
+ assert.deepEqual(clean(prep.request.call),{tool:'create_record',arguments:{table:'Weekend plans',fields:{Name:'Run 10k',Day:'Sunday'}}});
+ x.answer(prep,{action:action('airtable','pending',{tool:'create_record',arguments:{table:'Weekend plans',fields:{Name:'Run 10k',Day:'Sunday'}}})});await flush();
+ const ok=x.requests('accept_pip_app_action').at(-1);assert.ok(ok,'the edited call is the one accepted');
+ x.setDrafts([draft('airtable',{status:'prepared',action_id:ACTION})]);x.answer(ok,{action:action('airtable','succeeded')});await x.drain();
+ assert.match(x.d.body.textContent,/Done: create_record ran in Airtable with your changes\./);
+});
+
+test('Undo changes puts the card back as the Pip wrote it, and Allow then runs the original call',async()=>{
+ const x=setup({plugins:[card({status:'allowed'})],drafts:[draft()]});await openChat(x);
+ x.click(`[data-card-edit-start="${DRAFT}"]`);
+ const t=x.d.getElementById(`card-${DRAFT}-arg0`);t.value='Other';t.dispatchEvent(new x.w.Event('input',{bubbles:true}));
+ x.click(`[data-card-edit-undo="${DRAFT}"]`);
+ assert.equal(x.d.getElementById(`card-${DRAFT}-arg0`),null);
+ assert.match(x.d.querySelector(`[data-plugin-action="${DRAFT}"]`).textContent,/table.*Plans/);
+ x.click(`[data-plugin-run="${DRAFT}"]`);await flush();
+ assert.deepEqual(clean(x.requests('prepare_pip_connector_draft').at(-1).request.call),call);
 });
 

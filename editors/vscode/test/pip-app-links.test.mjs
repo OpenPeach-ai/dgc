@@ -23,7 +23,7 @@ const link=(extra={})=>({id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 const viewModule=load(viewCode,name=>name==='vscode'?{}:require(name));
-function setup({links=[link()],composio=true,messages=[],drafts=[],computer=null}={}){
+function setup({links=[link()],composio=true,messages=[],drafts=[],computer=null,events=[]}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set(),timers=[];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -40,7 +40,7 @@ function setup({links=[link()],composio=true,messages=[],drafts=[],computer=null
   get_workspace_context:()=>({context:{workspace_id:r.workspace_id||PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
   list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages,next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),
   get_pip_computer:()=>({computer:computer||{pip_id:PIP,granted:false,available:true,reason:'',pending:0,actions:[]}}),
-  list_pip_app_links:()=>({pip_id:PIP,links,composio}),list_pip_message_drafts:()=>({drafts:drafts.map(d=>({id:d.id,pip_id:d.pip_id,workspace_id:d.workspace_id,status:d.status,expired:d.expired,subject:d.payload.message.subject,digest:d.digest,source_run_id:d.source_run_id,expires_at:d.expires_at,action_id:d.action_id})),next_cursor:null}),get_pip_message_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),list_pip_calendar_drafts:()=>({drafts:[],next_cursor:null}),list_pip_connector_drafts:()=>({drafts:[],next_cursor:null}),get_pip_digest:()=>undefined}[r.type]?.());
+  list_pip_app_links:()=>({pip_id:PIP,links,composio}),list_pip_message_drafts:()=>({drafts:drafts.map(d=>({id:d.id,pip_id:d.pip_id,workspace_id:d.workspace_id,status:d.status,expired:d.expired,subject:d.payload.message.subject,digest:d.digest,source_run_id:d.source_run_id,expires_at:d.expires_at,action_id:d.action_id})),next_cursor:null}),get_pip_message_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),list_pip_calendar_drafts:()=>({drafts:events.map(d=>({id:d.id,pip_id:d.pip_id,workspace_id:d.workspace_id,status:d.status,expired:d.expired,subject:d.payload.event.summary,digest:d.digest,source_run_id:d.source_run_id,expires_at:d.expires_at,action_id:d.action_id})),next_cursor:null}),get_pip_calendar_draft:()=>({draft:events.find(d=>d.id===r.draft_id)}),list_pip_connector_drafts:()=>({drafts:[],next_cursor:null}),get_pip_digest:()=>undefined}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion:43,generation:1,connected:true,supported:true,enabled:true});
  const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
@@ -207,3 +207,93 @@ test('a robot check on its computer is a "needs you" card: Open its computer, th
  assert.equal(x.d.querySelector('[data-state="needs"]'),null,'gone once you have done it');
  assert.match(x.d.body.textContent,/Gmail is carrying on\./);
 });
+
+// Editable drafts (#7): change the email or the event right on its card, then Send / Add what it shows.
+const typeIn=(x,id,v)=>{const el=x.d.getElementById(id);assert.ok(el,'Missing #'+id);el.value=v;el.dispatchEvent(new x.w.Event('input',{bubbles:true}));};
+async function answerGmail(x){
+ x.answer(x.requests('list_pip_accounts').at(-1),{server:'composio',connection_digest:'a'.repeat(64),accounts:[{id:'ca_home',label:'Home',toolkit:'gmail'}]});
+ x.answer(x.requests('inspect_pip_send_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GMAIL_SEND_EMAIL',schema_digest:'b'.repeat(64),account_required:true});await flush();
+}
+test('Edit changes the email on its card; Send sends the edited email, and a bad address is said on the card',async()=>{
+ const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
+ x.click(`[data-card-edit-start="${DRAFT}"]`);
+ const card=()=>x.d.querySelector(`[data-allow-card="${DRAFT}"]`);
+ assert.ok(card().hasAttribute('data-editing'));
+ assert.equal(x.d.getElementById(`card-${DRAFT}-recipient_email`).value,'friend@example.test');
+ assert.equal(x.d.getElementById(`card-${DRAFT}-body`).value,'Lunch on Friday? <img src=x>');
+ assert.deepEqual([...card().querySelectorAll('button')].map(b=>b.textContent),['Send','Always allow','Undo changes','Don’t send']);
+ typeIn(x,`card-${DRAFT}-recipient_email`,'not an address');
+ x.click(`[data-allow-send="${DRAFT}"]`);await flush();
+ assert.equal(x.requests('list_pip_accounts').length,0,'nothing is asked of Gmail for an email that will not send');
+ assert.match(card().querySelector('[role=alert]').textContent,/Use one email address/);
+ typeIn(x,`card-${DRAFT}-recipient_email`,' sam@example.test ');
+ typeIn(x,`card-${DRAFT}-subject`,'Lunch moved');
+ typeIn(x,`card-${DRAFT}-body`,'Lunch on Saturday instead?\n\nSam');
+ x.click(`[data-allow-send="${DRAFT}"]`);await flush();await answerGmail(x);
+ const edited={recipient_email:'sam@example.test',subject:'Lunch moved',body:'Lunch on Saturday instead?\n\nSam'};
+ const prep=x.requests('prepare_pip_message_draft').at(-1);
+ assert.deepEqual(JSON.parse(JSON.stringify(prep.request.message)),edited,'the edited email, trimmed');
+ const act={...action(),payload:{...action().payload,message:edited}};
+ x.answer(prep,{action:act});await flush();
+ const ok=x.requests('accept_pip_app_action').at(-1);assert.ok(ok);
+ x.answer(ok,{action:{...act,status:'approved'}});await x.drain();
+ assert.match(x.d.body.textContent,/Sent with your changes\./);
+});
+test('a prepared email that differs from what the card showed is refused, never sent',async()=>{
+ const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
+ x.click(`[data-card-edit-start="${DRAFT}"]`);typeIn(x,`card-${DRAFT}-subject`,'Lunch moved');
+ x.click(`[data-allow-send="${DRAFT}"]`);await flush();await answerGmail(x);
+ x.answer(x.requests('prepare_pip_message_draft').at(-1),{action:action()});await x.drain();
+ assert.equal(x.requests('accept_pip_app_action').length,0);
+ assert.match(x.d.querySelector(`[data-allow-card="${DRAFT}"] [role=alert]`).textContent,/differs from the prepared review/);
+});
+
+const EVENT='caldraft_'+'4'.repeat(32);
+const meet={summary:'Coffee with Sam',description:'At the corner cafe.',start_datetime:'2026-12-01T11:00:00+05:30',end_datetime:'2026-12-01T11:30:00+05:30',timezone:'Asia/Kolkata'};
+const calDraft=(extra={})=>({id:EVENT,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status:'pending',digest:'c'.repeat(64),expired:false,expires_at:'2099-10-05T06:00:00Z',action_id:null,payload:{schema_version:1,source,event:meet},...extra});
+const calendarLink=()=>link({id:'applink_'+'c'.repeat(32),toolkit:'googlecalendar',app:'Google Calendar',status:'connected',label:'me@example.com',server:'composio',account:'ca_cal',updated_at:'2026-10-01T09:00:00.000Z'});
+const calAction=(event,status='pending')=>({id:ACTION,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status,digest:'d'.repeat(64),expires_at:'2099-10-05T06:00:00Z',payload:{schema_version:event.attendees?4:2,kind:'calendar_create',source,server:'composio',connection_digest:'a'.repeat(64),schema_digest:'b'.repeat(64),account:'ca_cal',event},receipt:null});
+async function answerCalendar(x){
+ x.answer(x.requests('list_pip_accounts').at(-1),{server:'composio',connection_digest:'a'.repeat(64),accounts:[{id:'ca_cal',label:'Home',toolkit:'googlecalendar'}]});
+ x.answer(x.requests('inspect_pip_calendar_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GOOGLECALENDAR_CREATE_EVENT',schema_digest:'b'.repeat(64),account_required:true});await flush();
+}
+test('a calendar event the Pip drafted is an Allow card too: when, in its own zone; Add event creates exactly it',async()=>{
+ const x=setup({links:[calendarLink()],events:[calDraft()]});await openChat(x);
+ const card=x.d.querySelector(`[data-allow-card="${EVENT}"]`);assert.ok(card,'inline in the chat, not a Review row');
+ assert.match(card.textContent,/Add this event\?To me@example\.com.*Coffee with Sam.*Tue, Dec 1, 11:00 AM – 11:30 AM \(Asia\/Kolkata\).*At the corner cafe\./);
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Add event','Always allow','Edit','Don’t add']);
+ assert.equal(x.d.querySelector('.chat-setup-review'),null);
+ x.click(`[data-allow-create="${EVENT}"]`);await flush();await answerCalendar(x);
+ const prep=x.requests('prepare_pip_calendar_draft').at(-1);
+ assert.deepEqual(JSON.parse(JSON.stringify(prep.request)),{type:'prepare_pip_calendar_draft',draft_id:EVENT,expected_digest:'c'.repeat(64),server:'composio',connection_digest:'a'.repeat(64),account:'ca_cal',schema_digest:'b'.repeat(64),event:meet});
+ x.answer(prep,{action:calAction(meet)});await flush();
+ const ok=x.requests('accept_pip_app_action').at(-1);assert.ok(ok);
+ x.answer(ok,{action:calAction(meet,'approved')});await x.drain();
+ assert.match(x.d.body.textContent,/Added, exactly as shown\./);
+});
+test('Edit changes the event on its card: a new time and a guest (who is invited), and Add creates the edited event',async()=>{
+ const x=setup({links:[calendarLink()],events:[calDraft()]});await openChat(x);
+ x.click(`[data-card-edit-start="${EVENT}"]`);
+ assert.equal(x.d.getElementById(`card-${EVENT}-start_datetime`).value,'2026-12-01T11:00:00+05:30');
+ typeIn(x,`card-${EVENT}-start_datetime`,'2026-12-01T12:00:00+05:30');
+ x.click(`[data-allow-create="${EVENT}"]`);await flush();
+ assert.match(x.d.querySelector(`[data-allow-card="${EVENT}"] [role=alert]`).textContent,/End must be after start/);
+ typeIn(x,`card-${EVENT}-end_datetime`,'2026-12-01T12:30:00+05:30');
+ typeIn(x,`card-${EVENT}-guests`,'sam@example.test\n');
+ x.click(`[data-allow-create="${EVENT}"]`);await flush();await answerCalendar(x);
+ const edited={...meet,start_datetime:'2026-12-01T12:00:00+05:30',end_datetime:'2026-12-01T12:30:00+05:30',attendees:['sam@example.test'],send_invitations:true,repeat:null};
+ const prep=x.requests('prepare_pip_calendar_draft').at(-1);
+ assert.deepEqual(JSON.parse(JSON.stringify(prep.request.event)),edited);
+ x.answer(prep,{action:calAction(edited)});await flush();
+ x.answer(x.requests('accept_pip_app_action').at(-1),{action:calAction(edited,'approved')});await x.drain();
+ assert.match(x.d.body.textContent,/Added with your changes\. Invitations went to the guests\./);
+});
+test('Don’t add dismisses the calendar draft; without Google Calendar the card asks for an account',async()=>{
+ const x=setup({links:[],events:[calDraft()]});await openChat(x);
+ const card=x.d.querySelector(`[data-allow-card="${EVENT}"]`);
+ assert.match(card.textContent,/No Google Calendar connected to it yet/);
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Choose account…','Don’t add']);
+ x.click(`[data-allow-dismiss="${EVENT}"]`);
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('dismiss_pip_calendar_draft').at(-1).request)),{type:'dismiss_pip_calendar_draft',draft_id:EVENT,expected_digest:'c'.repeat(64)});
+});
+

@@ -3,6 +3,8 @@
 // or Not now. What the Pip would then do in a plugin is an Allow card: Allow, Always allow (never for
 // a plugin that can move money: those ask every time) or Don't.
 
+import { field, editButton, editError } from './pipAppLinks.js';
+
 const STATUSES = ['requested', 'allowed', 'declined'];
 const text = (v, max) => typeof v === 'string' && v.length <= max;
 const SERVER = /^[A-Za-z0-9_.-]{1,80}$/;
@@ -81,16 +83,58 @@ function inputs(esc, args) {
   return rows.length ? `<dl class="allow-meta">${rows.join('')}</dl>` : '<p class="app-link-note">No inputs.</p>';
 }
 
-/** What the Pip would do in a plugin, as Grok's Allow card. */
-export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName = 'Your Pip' }) {
+/** What the Pip would do in a plugin, as Grok's Allow card. Edit changes its inputs right here. */
+export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName = 'Your Pip', edit = null }) {
   const a = draft.payload.action, id = esc(draft.id), off = busy ? ' disabled' : '';
   const sub = plugin.money ? `${esc(plugin.name)} can move money, so ${esc(pipName)} asks you every time.` : `${esc(pipName)} wants to do this in ${esc(plugin.name)}.`;
   const always = plugin.money ? '' : `<button type="button" class="quiet" data-plugin-always="${id}"${off} title="Run this, and let ${esc(pipName)} run ${esc(a.call.tool)} in ${esc(plugin.name)} without asking; take it back on its page">Always allow</button>`;
-  return `<div class="allow-card plugin-action" data-plugin-action="${id}" role="group" aria-label="${esc(`Run ${a.call.tool} in ${plugin.name}?`)}">`
+  const args = a.call.arguments || {};
+  return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${esc(`Run ${a.call.tool} in ${plugin.name}?`)}">`
     + head(esc, plugin.name, `Run ${esc(a.call.tool)} in ${esc(plugin.name)}?`, sub)
-    + inputs(esc, a.call.arguments)
+    + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', f)).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : inputs(esc, args))
+    + editError(esc, edit)
     + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : 'Allow'}</button>${always}`
+    + (Object.keys(args).length ? editButton(id, Boolean(edit), off) : '')
     + `<button type="button" class="quiet" data-plugin-skip="${id}"${off}>Don’t</button></div></div>`;
+}
+
+// Editing a plugin call: one field per input, shaped by what the Pip put there (text, a number,
+// yes/no, or JSON for a list or an object). More than 20 inputs edit as one JSON text.
+const MANY_INPUTS = 20;
+export function argumentFields(args) {
+  const keys = Object.keys(args || {});
+  if (keys.length > MANY_INPUTS) return [{ name: 'all', key: null, kind: 'json', label: 'Inputs (JSON)', area: 10, max: 10000 }];
+  return keys.map((key, i) => {
+    const v = args[key], kind = typeof v === 'string' ? 'text' : typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : 'json';
+    const long = kind === 'json' || kind === 'text' && (v.length > 80 || v.includes('\n'));
+    return { name: 'arg' + i, key, kind, label: key + (kind === 'json' ? ' (JSON)' : kind === 'boolean' ? ' (true or false)' : ''), area: long ? (kind === 'json' ? 4 : 3) : 0, max: 10000 };
+  });
+}
+export function argumentValues(args) {
+  const values = {};
+  for (const f of argumentFields(args)) {
+    const v = f.key === null ? args : args[f.key];
+    values[f.name] = f.kind === 'text' ? v : f.kind === 'json' ? JSON.stringify(v, null, 2) : String(v);
+  }
+  return values;
+}
+/** The inputs as the user left them; says which one to fix when one won't read. */
+export function editedArguments(args, values) {
+  const fields = argumentFields(args), out = {};
+  for (const f of fields) {
+    const raw = String(values[f.name] ?? '');
+    if (f.kind === 'text') { out[f.key] = raw; continue; }
+    if (f.kind === 'number') { const n = Number(raw.trim()); if (!raw.trim() || !Number.isFinite(n)) throw new Error(`${f.key} needs a number.`); out[f.key] = n; continue; }
+    if (f.kind === 'boolean') { const b = raw.trim().toLowerCase(); if (b !== 'true' && b !== 'false') throw new Error(`${f.key} needs true or false.`); out[f.key] = b === 'true'; continue; }
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { throw new Error(`${f.key === null ? 'The inputs' : f.key} aren’t valid JSON. Check the brackets and quotes.`); }
+    if (f.key === null) {
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('The inputs need to be one JSON object.');
+      return parsed;
+    }
+    out[f.key] = parsed;
+  }
+  return out;
 }
 
 /** The Pip's page: the plugins it may use, each taken back here. */

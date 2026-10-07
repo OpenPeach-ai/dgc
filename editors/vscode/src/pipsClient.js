@@ -7,8 +7,8 @@ import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pip
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
-import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup} from './pipAppLinks.js';
-import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup} from './pipPlugins.js';
+import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
+import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments} from './pipPlugins.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles} from './pipsModel.js';
@@ -1569,15 +1569,16 @@ async function loadEmailDrafts(calendar=false){
  if(!calendar&&S.apiVersion>=37)void loadConnectorDrafts();
  if(!calendar&&S.apiVersion>=35)void loadEmailDrafts(true);
  if(remoteHost||S.apiVersion<(calendar?35:32)||!personalPip()||!usable())return;const token=scope(),sequence=calendar?++calendarDraftSeq:++emailDraftSeq;
- try{const answer=emailDraftsPage(await send(calendar?'list_pip_calendar_drafts':'list_pip_message_drafts',{pip_id:S.selected,limit:20}),S.selected,S.workspace.id,calendar);if(token!==scope()||sequence!==(calendar?calendarDraftSeq:emailDraftSeq))return;S[calendar?'calendarDrafts':'emailDrafts']=answer.drafts;S[calendar?'calendarDraftError':'emailDraftError']='';render();if(!calendar)void loadDraftDetails();}catch(error){if(token===scope()&&sequence===(calendar?calendarDraftSeq:emailDraftSeq)){S[calendar?'calendarDraftError':'emailDraftError']=errorText(error);render();}}
+ try{const answer=emailDraftsPage(await send(calendar?'list_pip_calendar_drafts':'list_pip_message_drafts',{pip_id:S.selected,limit:20}),S.selected,S.workspace.id,calendar);if(token!==scope()||sequence!==(calendar?calendarDraftSeq:emailDraftSeq))return;S[calendar?'calendarDrafts':'emailDrafts']=answer.drafts;S[calendar?'calendarDraftError':'emailDraftError']='';render();void loadDraftDetails();}catch(error){if(token===scope()&&sequence===(calendar?calendarDraftSeq:emailDraftSeq)){S[calendar?'calendarDraftError':'emailDraftError']=errorText(error);render();}}
 }
 function emailDraftCards(){
  if(remoteHost||S.apiVersion<32||!personalPip())return '';
  // An email it wrote is Grok's Allow card: what it would send, and Send / Always allow right here.
- const gmail=(S.appLinks||[]).find(l=>l.status==='connected'&&l.toolkit==='gmail')||null;
- const full=d=>S.apiVersion>=43?draftDetails.get(d.id+':'+d.digest):null;
- const allow=(S.emailDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&full(d)).map(d=>allowCardMarkup(full(d),{esc,link:gmail,busy:allowBusy===d.id||S.busy||archived(),pipName:S.pip?.name||'This Pip'})).join('');
- return allow+[...(S.emailDrafts||[]).filter(d=>!full(d)),...(S.apiVersion>=35?S.calendarDrafts||[]:[]),...(S.apiVersion>=37?(S.connectorDrafts||[]).filter(d=>!pluginDraft(d)):[])].filter(d=>d.status==='pending'&&!d.expired).map(d=>{const label=d.id.startsWith('conndraft_')?'App action for you to check':d.id.startsWith('caldraft_')?'Calendar event for you to check':'Email for you to check';return `<div class="chat-setup-review" aria-label="${label}"><span class="chat-setup-label">${label} <small>${esc(d.subject)}</small></span><button type="button" data-email-draft="${esc(d.id)}"${S.busy?' disabled':''}>Review</button></div>`;}).join('')+(S.emailDraftError?errorMarkup(S.emailDraftError):'')+(S.calendarDraftError?errorMarkup(S.calendarDraftError):'')+(S.connectorDraftError?errorMarkup(S.connectorDraftError):'');
+ const gmail=connectedLink('gmail'),calendar=connectedLink('googlecalendar'),pipName=S.pip?.name||'This Pip';
+ const full=d=>S.apiVersion>=43?draftDetails.get(d.id+':'+d.digest):null,open=d=>d.status==='pending'&&!d.expired&&full(d);
+ const allow=(S.emailDrafts||[]).filter(open).map(d=>allowCardMarkup(full(d),{esc,link:gmail,busy:allowBusy===d.id||S.busy||archived(),pipName,edit:cardEdit(d)})).join('')
+  +(S.apiVersion>=35?S.calendarDrafts||[]:[]).filter(open).map(d=>calendarCardMarkup(full(d),{esc,link:calendar,busy:allowBusy===d.id||S.busy||archived(),pipName,edit:cardEdit(d)})).join('');
+ return allow+[...(S.emailDrafts||[]).filter(d=>!full(d)),...(S.apiVersion>=35?(S.calendarDrafts||[]).filter(d=>!full(d)):[]),...(S.apiVersion>=37?(S.connectorDrafts||[]).filter(d=>!pluginDraft(d)):[])].filter(d=>d.status==='pending'&&!d.expired).map(d=>{const label=d.id.startsWith('conndraft_')?'App action for you to check':d.id.startsWith('caldraft_')?'Calendar event for you to check':'Email for you to check';return `<div class="chat-setup-review" aria-label="${label}"><span class="chat-setup-label">${label} <small>${esc(d.subject)}</small></span><button type="button" data-email-draft="${esc(d.id)}"${S.busy?' disabled':''}>Review</button></div>`;}).join('')+(S.emailDraftError?errorMarkup(S.emailDraftError):'')+(S.calendarDraftError?errorMarkup(S.calendarDraftError):'')+(S.connectorDraftError?errorMarkup(S.connectorDraftError):'');
 }
 // A Personal Pip's own apps (pip_app_links): the Connect card it asks for with connect_app.
 let appLinkSeq=0,appLinkBusy='',appLinkTimer=0,appLinkUntil=0;const appLinkHosts=new Map();
@@ -1620,7 +1621,7 @@ function pluginCards(){
  if(remoteHost||S.apiVersion<44||!personalPip())return '';
  const pipName=S.pip?.name||'This Pip',off=archived()||S.busy;
  const actions=(S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired).map(pluginDraft).filter(Boolean)
-  .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName}));
+  .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName,edit:cardEdit(draft)}));
  const lastReply=Math.max(0,...(S.messages||[]).filter(m=>m.role==='assistant').map(m=>Date.parse(m.created_at)||0));
  const cards=shownPluginCards(S.plugins,Date.now(),lastReply).map(c=>pluginCardMarkup(c,{esc,busy:pluginBusy===c.id||off,pipName}));
  return actions.join('')+cards.join('')+(S.pluginsError?`<p class="app-link-note" role="alert">${esc(S.pluginsError)}</p>`:'');
@@ -1638,20 +1639,23 @@ async function pluginAnswer(type,id,takeBack=false){
 async function pluginRun(id,always=false){
  const d=(S.connectorDrafts||[]).find(x=>x.id===id),found=d&&pluginDraft(d);
  if(!found||found.draft.status!=='pending'||found.draft.expired||!usable()||pluginBusy)return;
- const {draft,plugin}=found,a=draft.payload.action,token=scope(),pip=S.selected,pipName=S.pip?.name||'This Pip';
- always=always&&!plugin.money;pluginBusy=id;render();
+ const {draft,plugin}=found,a=draft.payload.action,token=scope(),pip=S.selected,pipName=S.pip?.name||'This Pip',edit=cardEdit(draft);
+ let call;
+ try{call=connectorCall(edit?{tool:a.call.tool,arguments:editedArguments(a.call.arguments||{},edit.values)}:a.call);}catch(error){cardError(edit,error);return;}
+ const changed=edit&&JSON.stringify(call.arguments)!==JSON.stringify(a.call.arguments);
+ if(edit)edit.error='';always=always&&!plugin.money;pluginBusy=id;render();
  try{
-  const call=connectorCall(a.call);
   const expected={source_run_id:draft.source_run_id,server:a.server,connection_digest:a.connection_digest,schema_digest:a.schema_digest,call};
   const action=messageReview((await send('prepare_pip_connector_draft',{draft_id:draft.id,expected_digest:draft.digest,call})).action,pip,S.workspace.id,expected);
   if(token!==scope()||S.selected!==pip)return;
   const done=await send(always?'always_allow_pip_app_action':'accept_pip_app_action',{action_id:action.id,expected_digest:action.digest});
   if(token!==scope())return;
+  cardEdits.delete(id);
   S.notice=done?.action?.status==='succeeded'
-   ?`Done: ${a.call.tool} ran in ${plugin.name}.`+(always?` ${pipName} may run it without asking now; take it back on its page.`:'')
+   ?`Done: ${a.call.tool} ran in ${plugin.name}${changed?' with your changes':''}.`+(always?` ${pipName} may run it without asking now; take it back on its page.`:'')
    :`${plugin.name} didn’t confirm ${a.call.tool}. Check it there before you try again.`;
   void loadMessages();   // the Pip reads what it answered and carries on
- }catch(error){if(token===scope())setError(error);}
+ }catch(error){if(token===scope()){if(edit)cardError(edit,error);else setError(error);}}
  finally{if(token===scope()){pluginBusy='';render();}}
 }
 function pluginSkip(id){
@@ -1823,37 +1827,90 @@ let allowBusy='';const draftDetails=new Map();
 async function loadDraftDetails(){
  if(S.apiVersion<43||!personalPip()||!usable())return;
  const token=scope(),pip=S.selected;
- for(const d of (S.emailDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&!draftDetails.has(d.id+':'+d.digest)).slice(0,5)){
-  try{const v=emailDraft((await send('get_pip_message_draft',{draft_id:d.id})).draft,pip,S.workspace.id);if(token!==scope()||S.selected!==pip)return;
+ const waiting=list=>(list||[]).filter(d=>d.status==='pending'&&!d.expired&&!draftDetails.has(d.id+':'+d.digest)).slice(0,5);
+ for(const d of [...waiting(S.emailDrafts),...(S.apiVersion>=35?waiting(S.calendarDrafts):[])]){
+  const calendar=d.id.startsWith('caldraft_');
+  try{const v=emailDraft((await send(calendar?'get_pip_calendar_draft':'get_pip_message_draft',{draft_id:d.id})).draft,pip,S.workspace.id,calendar);if(token!==scope()||S.selected!==pip)return;
    if(v.id===d.id&&v.digest===d.digest){draftDetails.set(d.id+':'+d.digest,v);render();}}
   catch{/* the Review row stays */}
  }
 }
 async function allowSend(id,always=false){
- const summary=(S.emailDrafts||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest),link=(S.appLinks||[]).find(l=>l.status==='connected'&&l.toolkit==='gmail');
+ const summary=(S.emailDrafts||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest),link=connectedLink('gmail');
  if(!d||d.status!=='pending'||d.expired||!usable()||allowBusy)return;
  if(!link){void openEmailDraft(id);return;}
- const token=scope(),pip=S.selected;allowBusy=id;render();
+ const edit=cardEdit(d),token=scope(),pip=S.selected;let message;
+ // What the card shows is what is sent: the fields as the user left them, checked before anything else.
+ try{message=messageDraft(edit?{recipient_email:edit.values.recipient_email.trim(),subject:edit.values.subject.trim(),body:edit.values.body.trim()}:d.payload.message);}
+ catch(error){cardError(edit,error);return;}
+ const changed=edit&&JSON.stringify(message)!==JSON.stringify(d.payload.message);
+ if(edit)edit.error='';allowBusy=id;render();
  try{
   const [discovery,inspection]=await Promise.all([send('list_pip_accounts',{server:link.server}),send('inspect_pip_send_connection',{server:link.server})]);
   if(token!==scope()||S.selected!==pip)return;
   const choice=sendAccounts(link.server,discovery,inspection).find(c=>c.id===link.account);
   if(!choice)throw Error(`${link.label||'This Gmail account'} is no longer in Composio. Ask ${S.pip?.name||'the Pip'} to connect Gmail again.`);
-  const message=messageDraft(d.payload.message);
   const request={type:'prepare_pip_message_draft',draft_id:d.id,expected_digest:d.digest,server:link.server,connection_digest:discovery.connection_digest,account:choice.id,schema_digest:choice.schema_digest,message};
   const {type:_t,...fields}=request;
   const action=messageReview((await send('prepare_pip_message_draft',fields)).action,pip,S.workspace.id,{...request,source_run_id:d.source_run_id});
   if(token!==scope()||S.selected!==pip)return;
   await send(always?'always_allow_pip_app_action':'accept_pip_app_action',{action_id:action.id,expected_digest:action.digest});
   if(token!==scope())return;
-  S.notice=always?`Sent. ${S.pip?.name||'This Pip'} may now send emails from ${link.label||'this account'} without asking; take it back in its Settings.`:'Sent, exactly as shown.';
+  cardEdits.delete(id);
+  S.notice=(changed?'Sent with your changes.':'Sent, exactly as shown.')+(always?` ${S.pip?.name||'This Pip'} may now send emails from ${link.label||'this account'} without asking; take it back in its Settings.`:'');
   void loadEmailDrafts();
- }catch(error){if(token===scope())setError(error);}
+ }catch(error){if(token===scope()){if(edit)cardError(edit,error);else setError(error);}}
  finally{if(token===scope()){allowBusy='';render();}}
 }
+// Add on a calendar card: the same steps as Send, for the Pip's connected Google Calendar.
+async function allowCreate(id,always=false){
+ const summary=(S.calendarDrafts||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest),link=connectedLink('googlecalendar');
+ if(!d||d.status!=='pending'||d.expired||!usable()||allowBusy)return;
+ if(!link){void openEmailDraft(id);return;}
+ const edit=cardEdit(d),token=scope(),pip=S.selected,saved=d.payload.event;let event;
+ try{event=edit?editedEvent(saved,edit.values):calendarDraft(saved);}catch(error){cardError(edit,error);return;}
+ const changed=edit&&JSON.stringify(event)!==JSON.stringify(saved);
+ if(edit)edit.error='';allowBusy=id;render();
+ try{
+  const [discovery,inspection]=await Promise.all([send('list_pip_accounts',{server:link.server}),send('inspect_pip_calendar_connection',{server:link.server})]);
+  if(token!==scope()||S.selected!==pip)return;
+  const choice=calendarAccounts(link.server,discovery,inspection).find(c=>c.id===link.account);
+  if(!choice)throw Error(`${link.label||'This Google Calendar account'} is no longer in Composio. Ask ${S.pip?.name||'the Pip'} to connect Google Calendar again.`);
+  const request={type:'prepare_pip_calendar_draft',draft_id:d.id,expected_digest:d.digest,server:link.server,connection_digest:discovery.connection_digest,account:choice.id,schema_digest:choice.schema_digest,event};
+  const {type:_t,...fields}=request;
+  const action=messageReview((await send('prepare_pip_calendar_draft',fields)).action,pip,S.workspace.id,{...request,source_run_id:d.source_run_id});
+  if(token!==scope()||S.selected!==pip)return;
+  await send(always?'always_allow_pip_app_action':'accept_pip_app_action',{action_id:action.id,expected_digest:action.digest});
+  if(token!==scope())return;
+  cardEdits.delete(id);
+  S.notice=(changed?'Added with your changes.':'Added, exactly as shown.')+(event.send_invitations?' Invitations went to the guests.':'')+(always?` ${S.pip?.name||'This Pip'} may now add events to ${link.label||'this calendar'} without asking; take it back in its Settings.`:'');
+  void loadEmailDrafts(true);
+ }catch(error){if(token===scope()){if(edit)cardError(edit,error);else setError(error);}}
+ finally{if(token===scope()){allowBusy='';render();}}
+}
+// Editing a card: the fields as typed, per draft version. A new version from the Pip starts fresh.
+const cardEdits=new Map();
+function cardEdit(d){const e=d&&cardEdits.get(d.id);return e&&e.digest===d.digest?e:null;}
+function cardError(edit,error){if(edit){edit.error=errorText(error);render();}else setError(error);}
+function connectedLink(toolkit){return (S.appLinks||[]).find(l=>l.status==='connected'&&l.toolkit===toolkit)||null;}
+function editedEvent(saved,v){
+ const attendees=v.guests.split('\n').map(x=>x.trim()).filter(Boolean);
+ const base={summary:v.summary.trim(),description:v.description.trim(),start_datetime:v.start_datetime.trim(),end_datetime:v.end_datetime.trim(),timezone:v.timezone.trim()};
+ // Guests are invited: Google sends an invitation to each one, as the card says.
+ return calendarDraft(extendedCalendar(saved)||attendees.length?{...base,attendees,send_invitations:attendees.length>0,repeat:saved.repeat??null}:base);
+}
+function startCardEdit(id){
+ let values=null,digest='';
+ if(id.startsWith('conndraft_')){const d=(S.connectorDrafts||[]).find(x=>x.id===id),found=d&&pluginDraft(d);if(found){digest=found.draft.digest;values=argumentValues(found.draft.payload.action.call.arguments||{});}}
+ else{const calendar=id.startsWith('caldraft_'),summary=(S[calendar?'calendarDrafts':'emailDrafts']||[]).find(x=>x.id===id),d=summary&&draftDetails.get(summary.id+':'+summary.digest);
+  if(d){digest=d.digest;const p=d.payload;values=calendar?{summary:p.event.summary,start_datetime:p.event.start_datetime,end_datetime:p.event.end_datetime,timezone:p.event.timezone,description:p.event.description,guests:(p.event.attendees||[]).join('\n')}:{...p.message};}}
+ if(!values)return;
+ cardEdits.set(id,{digest,values,error:''});render();
+ document.querySelector(`[data-card-edit="${CSS.escape(id)}"]`)?.focus();
+}
 async function allowDismiss(id){
- const d=(S.emailDrafts||[]).find(x=>x.id===id);if(!d||S.busy||!usable())return;
- void mutate({type:'dismiss_pip_message_draft',draft_id:d.id,expected_digest:d.digest},r=>{const v=emailDraft(r.draft,S.selected,S.workspace.id);if(v.id!==d.id||v.status!=='dismissed')throw Error('The dismissal does not match this draft.');S.notice='Not sent.';void loadEmailDrafts();});
+ const calendar=id.startsWith('caldraft_'),d=(S[calendar?'calendarDrafts':'emailDrafts']||[]).find(x=>x.id===id);if(!d||S.busy||!usable())return;
+ void mutate({type:calendar?'dismiss_pip_calendar_draft':'dismiss_pip_message_draft',draft_id:d.id,expected_digest:d.digest},r=>{const v=emailDraft(r.draft,S.selected,S.workspace.id,calendar);if(v.id!==d.id||v.status!=='dismissed')throw Error('The dismissal does not match this draft.');cardEdits.delete(id);S.notice=calendar?'Not added.':'Not sent.';void loadEmailDrafts(calendar);});
 }
 async function openEmailDraft(id){
  if(id.startsWith('conndraft_')){await openConnectorDraft(id);return;}
@@ -2180,6 +2237,7 @@ function proposalReview(id,reject=false) {
 }
 function updateDraft(event) {
   if(event.target.id==='pip-search'){draft.pipSearch=event.target.value;searchPips(event.target.value);return;}
+  if(event.target.dataset?.cardEdit!==undefined){const e=cardEdits.get(event.target.dataset.cardEdit);if(e&&event.target.dataset.cardField in e.values)e.values[event.target.dataset.cardField]=event.target.value;return;}
   if(event.target.dataset?.commitRule!==undefined){const row=commitRules[Number(event.target.dataset.commitRule)];if(row){if(event.target.dataset.commitKind!==undefined)row.kind=event.target.value;else row.path=event.target.value;S.scheduleDirty=true;}return;}
   if(event.target.dataset?.pulseCommand!==undefined){const i=Number(event.target.dataset.pulseCommand),row=pulseCommands[i];if(row){if(event.target.dataset.pulseArg!==undefined)row.argv[Number(event.target.dataset.pulseArg)]=event.target.value;else row.cwd=event.target.value;S.scheduleDirty=true;}return;}
   const key=event.target.dataset?.draft;if(!(key in draft))return;draft[key]=event.target.type==='checkbox'?event.target.checked:event.target.value;
@@ -2434,6 +2492,10 @@ document.addEventListener('click',event=>{
   if(target.dataset.allowSend){void allowSend(target.dataset.allowSend);return;}
   if(target.dataset.allowAlways){void allowSend(target.dataset.allowAlways,true);return;}
   if(target.dataset.allowDismiss){void allowDismiss(target.dataset.allowDismiss);return;}
+  if(target.dataset.allowCreate){void allowCreate(target.dataset.allowCreate);return;}
+  if(target.dataset.allowCreateAlways){void allowCreate(target.dataset.allowCreateAlways,true);return;}
+  if(target.dataset.cardEditStart){startCardEdit(target.dataset.cardEditStart);return;}
+  if(target.dataset.cardEditUndo){cardEdits.delete(target.dataset.cardEditUndo);render();return;}
   if(target.dataset.appLinkStart){void appLinkAction('start_pip_app_link',target.dataset.appLinkStart);return;}
   if(target.dataset.appLinkCheck){void appLinkAction('check_pip_app_link',target.dataset.appLinkCheck);return;}
   if(target.dataset.appLinkDecline){void appLinkAction('decline_pip_app_link',target.dataset.appLinkDecline);return;}
