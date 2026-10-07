@@ -49,6 +49,8 @@
   "India Market Brief is updated. The other waiting change was set aside, not approved." instead
   of "Change recorded.". Notices in the Pips view go away after long enough to read them.
 - The faces in the quiet Pips row above your sessions have room between them.
+- Archiving a Pip takes you back to your Pips instead of leaving you in its chat; the notice says how
+  to bring it back (Show archived).
 - Pips are characters you meet, not jobs you configure (Pips API 43). The first time, the
   Pips view introduces **Core**, your Primary Pip; **Create Core** opens its chat and Core says
   hello. **New Pip** is a character and a name; its chat opens on its own greeting, where it

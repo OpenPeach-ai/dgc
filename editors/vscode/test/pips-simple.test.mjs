@@ -140,6 +140,19 @@ test('the computer button gives a Pip a computer, or opens the one it has in an 
  assert.equal(y.d.querySelector('[role=dialog]'),null);
 });
 
+// The founder: archiving a Pip "takes me back to its chat, it should just take me to Pips home".
+test('archiving a Pip from its Settings returns to your Pips',async()=>{
+ const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
+ const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
+ x.click('.pip-menu [data-tab="job"]');await x.drain();x.click('#archive-pip');x.click('#review-confirm');
+ const request=x.requests('archive_pip')[0];assert.ok(request,'archive asked');
+ x.answer(request,{pip:{...gmail,status:'archived',lifecycle_revision:1},receipt:{id:'archive_'+'4'.repeat(32),operation:'archive',pip_id:gmail.id,workspace_id:PW,job_version:1,
+  lifecycle_revision_before:0,lifecycle_revision_after:1,status_before:'active',status_after:'archived',reason:request.request.reason,actor:'user',created_at:'2026-10-07T02:00:00.000Z'},replayed:false});
+ await x.drain();
+ assert.ok(x.d.querySelector('.pip-rows')||x.d.querySelector('.simple-home'),'your Pips');
+ assert.equal(x.d.querySelector('.pip-topbar'),null,'not the archived Pip');
+ assert.match(x.d.body.textContent,/Gmail is archived\. Its chats and history are kept; Show archived brings it back\./);
+});
 test('back returns to your Pips, and the menu reaches Results and Settings',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();

@@ -935,6 +935,14 @@ test('archive asks once with no reason to type, pins both versions and never can
  const x=lifecycleSetup();await x.drain();x.click('[data-tab=job]');x.click('#archive-pip');assert.match(x.d.querySelector('[role=dialog]').textContent,/you can restore it later/);assert.equal(x.d.querySelector('#findingReviewReason'),null);assert.equal(x.requests('archive_pip').length,0);x.click('#review-cancel');assert.equal(x.requests('archive_pip').length,0);
  x.click('#archive-pip');x.click('#review-confirm');const first=x.requests('archive_pip')[0];assert.equal(first.request.expected_version,1);assert.equal(first.request.expected_lifecycle_revision,2);assert.equal(first.request.reason,'Archived in the Pips view.');x.answer(first,{message:'Resolve pending work before archiving.'},false);await x.drain();assert.match(x.d.querySelector('[role=dialog]').textContent,/Resolve pending work/);x.click('#review-confirm');const retry=x.requests('archive_pip')[1];assert.equal(retry.request.request_key,first.request.request_key);assert.equal(x.requests('cancel_pip_run').length,0);assert.equal(x.requests('stop_pips').length,0);assert.equal(x.requests('reject_pip_handoff').length,0);
 });
+// The founder: archiving a Pip "takes me back to its chat, it should just take me to Pips home".
+test('archiving a Pip returns to the Pips home and says so in plain words',async()=>{
+ const x=lifecycleSetup();await x.drain();x.click('[data-tab=job]');x.click('#archive-pip');x.click('#review-confirm');
+ const request=x.requests('archive_pip')[0];const response=lifecycleResponse();response.receipt.reason=request.request.reason;
+ x.answer(request,response);await x.drain();
+ assert.ok(x.d.querySelector('.layout').classList.contains('overview'),'the Pips home, not the archived Pip');
+ assert.match(x.d.body.textContent,/Auditor \S+ is archived\. Its chats and history are kept; Show archived brings it back\./);
+});
 test('archiving a Pip with changes waiting names them, rejects them first, then archives',async()=>{
  const waiting=proposal({id:'proposal-wait',pip_id:memoryPip,definition:{name:'Auditor '+memoryPip,goal:'Find source issues',source_ref:'HEAD',schedule:interval(60)}});
  const x=lifecycleSetup({jobs:[lifecycleJob({proposals:[waiting]})]});await x.drain();x.click('[data-tab=job]');x.click('#archive-pip');
