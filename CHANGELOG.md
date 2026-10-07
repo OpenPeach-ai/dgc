@@ -8,6 +8,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- Outside auto mode, a Pip the main chat proposes is no longer an "Allow this tool?" prompt: the
+  `pips_setup` call only saves its card, which the editor docks above the chat box, and the user's
+  **Create Pip** there is the approval. Auto mode, an allow rule or the user's Allow on an ask rule
+  still creates it at once (the agent marks such a call `_dgc_create_now`; one the model sends is
+  dropped). The tool's reply tells the model which happened.
+- After **Create Pip** on a Personal Pip proposed from a project's chat, the chat is told again
+  ("Setup not found in this workspace." before): the notification finds the setup in your personal
+  Pips as well as the project's, still only for the chat that proposed it.
 - Typing on a Pip computer's screen no longer closes it ("The computer's screen closed"). The editor's
   viewer sends keys as QEMU extended key events once the desktop offers them, and DGC's input filter
   did not know that message; it also knows noVNC's extended pointer event (mouse buttons 8 and up)

@@ -43,6 +43,13 @@
 
 ### Pips
 
+- A Pip the main chat proposes docks above the chat box, where questions dock: its face and name,
+  what it will do, and chips for when it runs, what it reads and its model, with **Create Pip**,
+  **Details** and **Not now** (the founder chose this over the card in the reply). **×** puts it
+  aside; the reply keeps one line that says what became of it ("Waiting for you", "Morning Brief is
+  on · First run Thu 8:00 AM", "Not created") with **Review**, **Open in Pips** and **Details**. A
+  question that arrives meanwhile takes the place; the Pip docks again after it. In auto mode the Pip
+  is created at once and only the line shows.
 - Typing on a Pip computer's screen, such as a web address in its browser, no longer closes the screen.
 - Approving one of two waiting changes for the same Pip says first that the other will be set aside
   (it was written for the same version, so it is not approved), and afterwards says what happened:

@@ -522,10 +522,42 @@
         document,
         postMessage: message => vscode.postMessage({...message, documentId:document.documentElement.dataset.pipsDocumentId}),
         onOpenRun: navigation => { showPips(); pipsApp?.navigate?.(navigation); },
-
+        // A waiting Pip docks where questions dock (the founder chose it over a card in the reply).
+        // A question docked first keeps the place; the Pip docks again when it is answered.
+        dock: { show: dockPipCard, hide: undockPipCard },
       });
     }
     return pipSetupCards;
+  }
+  let pipDock = null;
+  function dockPipCard(el) {
+    if (ask) return false;
+    const cbox = $("cbox"), textBox = cbox.querySelector(".cinput");
+    if (pipDock) pipDock.el.remove();
+    else pipDock = { hid: { textBox: textBox ? textBox.hidden : false, atts: atts.hidden } };
+    pipDock.el = el;
+    cbox.insertBefore(el, cbox.firstChild);
+    cbox.classList.add("asking");
+    if (textBox) textBox.hidden = true;            // hidden, not rebuilt: an unsent draft stays in it
+    atts.hidden = true;
+    document.body.classList.add("ask-docked");
+    renderComposerControls();
+    return true;
+  }
+  function undockPipCard(el) {
+    if (!pipDock || pipDock.el !== el) return;
+    const focusWasInside = el.contains(document.activeElement);
+    el.remove();
+    const cbox = $("cbox"), textBox = cbox.querySelector(".cinput");
+    if (!ask) {
+      cbox.classList.remove("asking");
+      if (textBox) textBox.hidden = !!pipDock.hid.textBox;
+      atts.hidden = !!pipDock.hid.atts;
+      document.body.classList.remove("ask-docked");
+    }
+    pipDock = null;
+    renderComposerControls();
+    if (focusWasInside) input.focus({ preventScroll: true });
   }
   // The Pips bar above the composer: today's digest, shown when the backend says it is due.
   let pipDigestBar = null;
@@ -2452,8 +2484,8 @@
       if(receipt && kinds.includes(receipt.pip_type) && typeof receipt.name==='string'){
         const face=el('span','pip-run-avatar');face.setAttribute('aria-hidden','true');
         if(window.PipConcepts?.plush)face.innerHTML=window.PipConcepts.plush.markup({index:kinds.indexOf(receipt.pip_type),name:receipt.name},'success',`approval-${id.replace(/[^a-z0-9]/gi,'')}`,{paused:true});
-        note.append(face,el('span','pip-approval-name',receipt.name),el('span','pip-approval-status','Setup saved'));
-      }else note.append(el('span','','Pip setup saved'));
+        note.append(face,el('span','pip-approval-name',receipt.name),el('span','pip-approval-status','Created'));
+      }else note.append(el('span','','Pip created'));
       appendTarget.appendChild(note);head=note;
     } else if (kind === "resume" || kind === "continue") {
       const note = el("div", replaying ? "resume-note hist" : "resume-note");
@@ -9436,6 +9468,7 @@
       answers: questions.map((q, k) => ({ selected: flagged[k] >= 0 ? [flagged[k]] : [], other: "", settled: false })),
       hot: questions.map((q, k) => (flagged[k] >= 0 ? flagged[k] : 0)),
     };
+    pipSetupCards?.yieldDock();                    // a question takes the dock; the Pip waits for it
     ask = state;
     const cbox = $("cbox"), textBox = cbox.querySelector(".cinput");
     state.hid = { textBox: textBox ? textBox.hidden : false, atts: atts.hidden };
@@ -9782,6 +9815,7 @@
     renderTurnMeta();
     renderComposerControls();
     if (reason !== "replaced" && (focusWasInside || state.restoreFocus)) input.focus({ preventScroll: true });
+    if (reason !== "replaced") pipSetupCards?.dockFree();
   }
   function undockAskCard(reason) { if (ask) retireAsk(reason || "closed"); }
   function askOnSessionReset(kind) { undockAskCard("session"); }

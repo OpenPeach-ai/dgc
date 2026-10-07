@@ -49,9 +49,8 @@ def legacy_notice(content, session_id, project_root):
             return None
         with WorkspaceRegistry() as registry:
             from . import pip_setup
-            workspace=registry.lookup(project_root)
-            if workspace is None:return None
-            setup=pip_setup.get(registry,match[1],workspace['id'])
+            if registry.lookup(project_root) is None:return None
+            setup=pip_setup.get(registry,match[1],_home(registry,project_root,match[1]))
             row=registry.db.execute('SELECT session_id FROM pip_setup_proposals WHERE id=?',(match[1],)).fetchone()
             if row is None or row['session_id']!=session_id or setup['status']!='accepted' or receipt!=setup['receipt']:
                 return None
@@ -59,6 +58,22 @@ def legacy_notice(content, session_id, project_root):
                 'run_id':receipt['run_id'],'name':setup['name'],'pip_type':setup['pip_type']})
     except (RegistryError,ValueError,KeyError,TypeError,OSError,sqlite3.Error):
         return None
+
+def _home(registry, project_root, setup_id):
+    """Where a setup proposed from this project's chat lives: the project's own Pips, or the user's
+    personal Pips (a Personal Pip is proposed from any project). Anything else stays not found; the
+    proposing session is checked separately."""
+    project = registry.resolve(project_root)['id']
+    row = registry.db.execute('SELECT workspace_id FROM pip_setup_proposals WHERE id=?', (setup_id,)).fetchone() \
+        if isinstance(setup_id, str) else None
+    if row is not None and row['workspace_id'] != project:
+        try:
+            if registry.get(row['workspace_id']).get('kind') == 'personal':
+                return row['workspace_id']
+        except RegistryError:
+            pass
+    return project
+
 
 def notify(backend, config, request):
     if set(request) - {'type','request_id','setup_id'} or config.get('pips_enabled',False) is not True:
@@ -70,8 +85,7 @@ def notify(backend, config, request):
         raise RegistryError('session_required','Open the conversation that proposed this setup.')
     with WorkspaceRegistry() as registry:
         from . import pip_setup
-        workspace = registry.resolve(config.project_root)
-        setup = pip_setup.get(registry, request.get('setup_id'), workspace['id'])
+        setup = pip_setup.get(registry, request.get('setup_id'), _home(registry, config.project_root, request.get('setup_id')))
         owner = registry.db.execute('SELECT session_id FROM pip_setup_proposals WHERE id=?',(setup['id'],)).fetchone()
         if owner is None or owner['session_id'] != session.stem:
             raise RegistryError('session_mismatch','Notify the conversation that originally proposed this setup.')
@@ -103,7 +117,9 @@ def notify(backend, config, request):
                 and m['_dgc_pip_setup'].get('setup_id') == notice['setup_id'] for m in getattr(backend.agent,'messages',[]) or []):
                 return {'notification':'already_notified','setup_id':notice['setup_id']}
             text = PREFIX + json.dumps(notice,ensure_ascii=False,separators=(',',':')) + '\n' + (
-                'Controller notification, not a new user message. The user approved this exact setup; it is already saved. '
+                'Controller notification, not a new user message. The user chose Create Pip on this exact setup; it is created. '
+                'The editor already shows it is on and when it first runs, so say so in a sentence or two at most, without IDs, '
+                'and add only what the user still needs to know. '
                 'Do not recreate it, request another run, or infer success from a queued run. Read current status if useful. '
                 'Continue the existing task. Keep unanswered questions open; this receipt is not an answer or permission for other work.')
             state, _ = backend._start_turn(text, delivery='steer', kind='pip_setup')

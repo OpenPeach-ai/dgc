@@ -465,10 +465,11 @@ class PipSetupTests(unittest.TestCase):
         self.assertEqual(before, self.state())
 
     def test_an_allowed_setup_creates_the_pip_with_a_default_daily_limit(self):
-        # The tool call's own permission (auto mode, an allow rule or the user's Allow) is the approval.
+        # Auto mode, an allow rule or the user's Allow on an ask rule: the agent marks the call, and
+        # that permission is the approval.
         from dgc import pip_spend
         with patch('dgc.pip_runtime.require_supervisor', return_value={'online': True}):
-            result = self.tool(self.request())
+            result = self.tool({**self.request(), '_dgc_create_now': True})
         self.assertTrue(result['created'])
         self.assertFalse(result['review_required'])
         self.assertTrue(result['job_changed_by_this_call'])
@@ -481,17 +482,36 @@ class PipSetupTests(unittest.TestCase):
         self.assertEqual(pip_spend.cap(self.registry, pip_id), pip_spend.DEFAULT_CHAT_CAP)
         self.assertIn('daily limit of 200,000 tokens', result['message'])
 
+    def test_outside_auto_mode_a_setup_is_a_card_whose_create_is_the_approval(self):
+        # The founder: the setup "can come in the chat and user can click it to approve". Without the
+        # agent's mark the call saves the card the editor docks above the chat box; nothing exists yet.
+        with patch('dgc.pip_runtime.require_supervisor', side_effect=AssertionError('no runner needed for a card')):
+            result = self.tool(self.request())
+        self.assertTrue(result['review_required'])
+        self.assertFalse(result['job_changed_by_this_call'])
+        self.assertEqual(result['setup']['status'], 'pending')
+        self.assertIn('card above the chat box', result['message'])
+        self.assertIn('never claim it is on', result['message'])
+        self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pips').fetchone()[0], 0)
+        with patch('dgc.pip_runtime.require_supervisor', return_value={'online': True}):
+            accepted = self.review(result['setup'])
+        self.assertEqual(accepted['status'], 'accepted')
+        self.assertEqual(accepted['receipt']['actor'], 'local-user', 'the click, not the chat, approved it')
+        loose = self.tool({**self.request(request_key='loose', name='Loose review'), '_dgc_create_now': 'yes'})
+        self.assertEqual(loose['setup']['status'], 'pending', "only the agent's True creates")
+
     def test_a_setup_that_needs_its_own_review_stays_a_card(self):
         # Reading connected accounts or a Pulse with commands keeps a card in every mode.
         self.assertTrue(pip_setup.needs_card({'app_plan': {'schema_version': 1}}))
         self.assertTrue(pip_setup.needs_card({'pip_type': 'pulse'}))
         self.assertFalse(pip_setup.needs_card({'pip_type': 'lens', 'scope': 'personal', 'web_plan': {'reads': []}}))
         with patch.object(pip_setup, 'needs_card', return_value=True):
-            result = self.tool(self.request())
+            result = self.tool({**self.request(), '_dgc_create_now': True})
         self.assertTrue(result['review_required'])
         self.assertFalse(result['job_changed_by_this_call'])
         self.assertEqual(result['setup']['status'], 'pending')
         self.assertIn('connected accounts or runs commands', result['message'])
+        self.assertIn('card above the chat box', result['message'])
         self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pips').fetchone()[0], 0)
 
     def test_run_now_starts_the_runner_and_a_stopped_runner_leaves_a_card(self):
@@ -499,12 +519,12 @@ class PipSetupTests(unittest.TestCase):
         started = []
         with patch('dgc.pip_runtime.require_supervisor', side_effect=[Refused('runner_required', 'Start the runner.'), {'online': True}]), \
                 patch('dgc.pip_runtime.start_runtime', side_effect=lambda config, resume: started.append(resume)):
-            result = self.tool(self.request())
+            result = self.tool({**self.request(), '_dgc_create_now': True})
         self.assertEqual(started, [False], 'started, never resuming an emergency stop')
         self.assertTrue(result['created'])
         with patch('dgc.pip_runtime.require_supervisor', side_effect=Refused('runner_required', 'Start the runner.')), \
                 patch('dgc.pip_runtime.start_runtime', side_effect=Refused('runner_stopped', 'Pips are stopped on this runner.')):
-            result = self.tool(self.request(request_key='morning-2', name='Evening review'))
+            result = self.tool({**self.request(request_key='morning-2', name='Evening review'), '_dgc_create_now': True})
         self.assertTrue(result['review_required'])
         self.assertIn('Pips are stopped on this runner.', result['message'])
         self.assertEqual(result['setup']['status'], 'pending')
@@ -521,7 +541,7 @@ class PipSetupTests(unittest.TestCase):
         from dgc import pip_spend
         pip = self.create()
         with patch('dgc.pip_runtime.require_supervisor', return_value={'online': True}):
-            result = self.tool(self.existing_request(pip, run_now=False))
+            result = self.tool({**self.existing_request(pip, run_now=False), '_dgc_create_now': True})
         self.assertTrue(result['created'])
         self.assertIsNone(result['daily_token_limit'])
         self.assertIsNone(pip_spend.cap(self.registry, pip['id']))

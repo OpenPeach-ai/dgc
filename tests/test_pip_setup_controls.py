@@ -137,9 +137,32 @@ class PipSetupControlsTests(unittest.TestCase):
         self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pips').fetchone()[0], 0)
         self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pip_runs').fetchone()[0], 0)
 
+    def test_in_default_mode_the_model_cannot_mark_its_own_setup_as_approved(self):
+        # The agent alone sets _dgc_create_now; one the model sends is dropped, so the setup is a card.
+        agent, _ = self.agent()
+        self.cfg.data.update(mode='default', api_mode='ollama')
+        request = {**self.request(), '_dgc_create_now': True}
+        responses = iter([ChatResult(tool_calls=[ToolCall('forged', 'pips_setup', request)]),
+                          ChatResult(content='Create it on the card above the chat box.')])
+        sent = []
+        def chat(client, messages, **kwargs):
+            sent.append(copy.deepcopy(messages))
+            return next(responses)
+        with patch.object(pip_setup_tool, 'WorkspaceRegistry', self.reopen), \
+             patch.object(workspace_sessions, 'WorkspaceRegistry', self.reopen), \
+             patch.object(LLMClient, 'chat', chat), \
+             patch('dgc.pip_runtime.require_supervisor', return_value={'online': True}), \
+             patch('requests.sessions.Session.request', side_effect=AssertionError('No network')):
+            self.assertTrue(agent.run_turn('Set up a daily committed-source review at 11 AM Asia/Kolkata.'))
+        receipt = json.loads(next(x for x in sent[-1] if x.get('tool_call_id') == 'forged' and x['role'] == 'tool')['content'])
+        self.assertEqual(receipt['setup']['status'], 'pending')
+        self.assertIn('card above the chat box', receipt['message'])
+        self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pips').fetchone()[0], 0)
+
     def test_permission_rules_keep_deny_ask_allow_order(self):
-        # Asked like any change; a setup that keeps its own card is not asked twice.
-        for mode, expected, card in [('plan', DENY, DENY), ('default', ASK, ALLOW), ('acceptEdits', ASK, ALLOW), ('auto', ALLOW, ALLOW)]:
+        # Outside auto mode a setup is its card above the chat box (its Create Pip is the approval), so
+        # it is never asked twice; plan mode refuses; explicit rules still come first.
+        for mode, expected, card in [('plan', DENY, DENY), ('default', ALLOW, ALLOW), ('acceptEdits', ALLOW, ALLOW), ('auto', ALLOW, ALLOW)]:
             self.cfg.data['mode'] = mode
             engine = PermissionEngine(self.cfg.data['mode'], self.cfg.permissions, self.root)
             self.assertEqual(engine.decide('pips_setup', self.request())[0], expected, mode)

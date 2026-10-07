@@ -20,7 +20,7 @@ function fixture(t){
  const reply=(r,result)=>cards.receive({type:'pipsReply',id:r.id,ok:true,result});
  const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent===label);
  async function load(s){cards.toolResult(w.document.querySelector('.tool'),{name:'pips_setup',output:JSON.stringify({setup:s})});reply(requests('get_pip_setup').at(-1),{setup:s});await flush();}
- async function approve(s){button('Approve').click();reply(requests('get_pip_setup').at(-1),{setup:s});await flush();return requests('accept_pip_setup').at(-1);}
+ async function approve(s){button('Create Pip').click();reply(requests('get_pip_setup').at(-1),{setup:s});await flush();return requests('accept_pip_setup').at(-1);}
  return {w,cards,sent,continued,connection,requests,reply,button,load,approve};
 }
 test('host gates larger context on API25 while 32K continues on API24',()=>{
@@ -36,15 +36,15 @@ test('host gates larger context on API25 while 32K continues on API24',()=>{
 test('same-generation connection publication cannot refresh over an approval in flight',async t=>{
  const x=fixture(t),s=setup();await x.load(s);const approval=await x.approve(s),before=x.requests('get_pip_setup').length;
  x.connection();assert.equal(x.requests('get_pip_setup').length,before);
- x.reply(approval,{setup:accepted(s)});await flush();assert.equal(x.requests('notify_pip_setup').length,1);assert.match(x.w.document.body.textContent,/Setup saved/);
+ x.reply(approval,{setup:accepted(s)});await flush();assert.equal(x.requests('notify_pip_setup').length,1);assert.match(x.w.document.querySelector('.pip-setup-line strong').textContent,/Daily review is on/);
 });
 test('generation switch during approval preflight cannot send acceptance to the next chat',async t=>{
- const x=fixture(t),s=setup();await x.load(s);x.button('Approve').click();const preflight=x.requests('get_pip_setup').at(-1);
+ const x=fixture(t),s=setup();await x.load(s);x.button('Create Pip').click();const preflight=x.requests('get_pip_setup').at(-1);
  x.connection(2,false);x.reply(preflight,{setup:s});await flush();assert.equal(x.requests('accept_pip_setup').length,0);assert.equal(x.continued.length,0);
 });
 test('one final card prevents duplicate decisions and sends one background notification',async t=>{
  const x=fixture(t),s=setup();await x.load(s);x.cards.finish(x.w.document.querySelector('#turn'));
- const buttons=[...x.w.document.querySelectorAll('button')].filter(b=>b.textContent==='Approve');assert.equal(buttons.length,1);
+ const buttons=[...x.w.document.querySelectorAll('button')].filter(b=>b.textContent==='Create Pip');assert.equal(buttons.length,1);
  buttons[0].click();buttons[0].click();assert.equal(x.requests('get_pip_setup').length,2);
  x.reply(x.requests('get_pip_setup').at(-1),{setup:s});await flush();const req=x.requests('accept_pip_setup').at(-1);x.reply(req,{setup:accepted(s)});x.reply(req,{setup:accepted(s)});await flush();assert.equal(x.requests('accept_pip_setup').length,1);assert.equal(x.requests('notify_pip_setup').length,1);
 });

@@ -1,27 +1,29 @@
-/* Native main-chat review cards. Colors follow the existing DGC panel tokens. */
-.pip-setup-card{margin:8px 0;border:1px solid var(--border,#35353a);border-radius:12px;background:var(--surface,#202022);font-size:12px;overflow:hidden;min-width:0}
-.pip-setup-summary{display:flex;align-items:center;gap:10px;cursor:pointer;padding:11px 12px;list-style:none}
-.pip-setup-summary::-webkit-details-marker{display:none}.pip-setup-summary:after{content:'›';font-size:18px;color:var(--muted,#a3a3ad)}
-.pip-setup-card[open]>.pip-setup-summary:after{transform:rotate(90deg)}
-.pip-setup-avatar{display:block;width:34px;height:34px;flex:none}.pip-setup-avatar .dgc-plush{width:34px;height:34px}
-.pip-setup-title{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}.pip-setup-title strong{font-size:13px;font-weight:500;overflow-wrap:anywhere}.pip-setup-title>span{font-size:11px;color:var(--muted,#a3a3ad)}
-.pip-setup-state{font-size:10px;color:var(--link,#ad97f3);text-transform:capitalize;white-space:nowrap}
-.pip-setup-body{padding:0 12px 12px;overflow-wrap:anywhere}.pip-setup-goal{font-size:13px;line-height:1.55;margin:6px 0 12px}
-.pip-setup-facts{margin:0 0 12px}.pip-setup-fact{display:grid;grid-template-columns:80px minmax(0,1fr);gap:10px;margin:5px 0}.pip-setup-fact dt{color:var(--muted,#a3a3ad)}.pip-setup-fact dd{margin:0}
-.pip-setup-notice,.pip-setup-receipt{font-size:11px;line-height:1.5;color:var(--muted,#a3a3ad);margin:8px 0}.pip-setup-reason summary{cursor:pointer;color:var(--muted,#a3a3ad)}
-.pip-setup-actions{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 9px}.pip-setup-card button,.pip-setup-card select{font:inherit;border-radius:6px;border:1px solid var(--border,#45454a);padding:6px 9px;cursor:pointer;background:transparent;color:inherit;max-width:100%}
-.pip-setup-card .pip-setup-primary{background:#6747df;color:#fff;border-color:#6747df}.pip-setup-card button:disabled{opacity:.5;cursor:default}.pip-setup-card button:focus-visible,.pip-setup-card summary:focus-visible,.pip-setup-card select:focus-visible,.pip-setup-card input:focus-visible{outline:2px solid #987ce9;outline-offset:2px}
-.pip-setup-card .pip-setup-refresh{font-size:10px;padding:3px 0;margin-top:9px;border:0;color:var(--muted,#a3a3ad)}
-.pip-setup-error{color:var(--vscode-errorForeground,#f48771);font-size:12px}.pip-setup-model{margin:12px 0}.pip-setup-model label{display:flex;flex-direction:column;gap:6px}.pip-setup-model select{background:var(--vscode-dropdown-background,#252526);color:var(--vscode-dropdown-foreground,#eee)}
-.pip-setup-pending{margin-top:10px}.tool .body:has(>.pip-setup-card){max-height:none;padding:0;overflow:visible}
-@media(max-width:340px){.pip-setup-state{max-width:62px;white-space:normal}.pip-setup-fact{grid-template-columns:68px minmax(0,1fr)}}
+/* Pips in the main chat. A waiting Pip setup docks where questions dock and the reply keeps one line
+   that says what became of it; Pip runs are lines like specialist agents. Panel tokens throughout,
+   so both themes and high contrast follow. */
 
-.pip-setup-quick-actions{display:flex;align-items:center;gap:6px;flex:none}.pip-setup-summary:after{display:none}.pip-setup-summary .pip-setup-review{border-color:transparent;color:var(--muted,#a3a3ad)}
-@media(max-width:520px){.pip-setup-summary{flex-wrap:wrap;gap:7px}.pip-setup-quick-actions{flex-basis:100%;padding-left:44px}.pip-setup-summary .pip-setup-state{margin-left:auto}}
+/* A setup's details: the same facts in the line (Details) and in the docked card (Details). */
+.pip-setup-body{overflow-wrap:anywhere}
+.pip-setup-goal{margin:6px 0 10px;font:var(--w-reg,400) var(--t-sm,13px)/1.55 var(--sans)}
+.pip-setup-facts{margin:0 0 10px;border:1px solid var(--border);border-radius:var(--r-sm,6px);padding:6px 10px}
+.pip-setup-fact{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;margin:3px 0;font:var(--w-reg,400) var(--t-xs,11px)/1.6 var(--sans)}
+.pip-setup-fact dt{color:var(--muted)}.pip-setup-fact dd{margin:0}
+.pip-setup-notice,.pip-setup-receipt{margin:6px 0;color:var(--muted);font:var(--w-reg,400) var(--t-xs,11px)/1.5 var(--sans)}
+.pip-setup-reason summary{cursor:pointer;color:var(--muted);font:var(--w-reg,400) var(--t-xs,11px)/1.6 var(--sans)}
+.pip-setup-reason p{margin:4px 0 0;font:var(--w-reg,400) var(--t-xs,11px)/1.5 var(--sans)}
+.pip-setup-model{margin:10px 0}.pip-setup-model label{display:flex;flex-direction:column;gap:6px;font:var(--w-reg,400) var(--t-xs,11px)/1.4 var(--sans);color:var(--muted)}
+.pip-setup-model select{font:inherit;color:var(--text);background:var(--vscode-dropdown-background,var(--surface));border:1px solid var(--border-strong,var(--border));border-radius:var(--r-sm,6px);padding:5px 8px}
+.pip-setup-body button,.pip-setup-details>button{font:var(--w-med,500) var(--t-xs,11px)/1 var(--sans);border-radius:var(--r-full,999px);border:1px solid var(--border-strong,var(--border));padding:6px 11px;cursor:pointer;background:transparent;color:var(--text)}
+.pip-setup-body button:hover:not(:disabled),.pip-setup-details>button:hover:not(:disabled){border-color:var(--text)}
+.pip-setup-details>.pip-setup-refresh{border:0;padding:3px 0;color:var(--muted)}
+.pip-setup-error{margin:6px 0;color:var(--err-text,var(--vscode-errorForeground,#f48771));font:var(--w-reg,400) var(--t-xs,11px)/1.5 var(--sans)}
+.pip-setup-pending{margin-top:10px}
 
-.pip-setup-card{background:linear-gradient(130deg,#9575de0b,transparent 65%),var(--surface);border-color:var(--border);box-shadow:none}
-.pip-setup-summary{padding:12px;gap:10px}.pip-setup-title strong{letter-spacing:-.015em}.pip-setup-state{border:1px solid #9475d630;border-radius:20px;padding:3px 7px;text-transform:none}
-.pip-setup-card[open]>.pip-setup-summary{border-bottom:1px solid var(--border)}.pip-setup-body{padding-top:10px}.pip-setup-facts{border:1px solid var(--border);border-radius:8px;padding:8px 10px}.pip-setup-fact{font-size:11px;line-height:1.6}
+/* The tool card that carried the setup gives its place to the line; a moved line leaves no husk. */
+.tool:has(>.body>.pip-setup-card)>.head{display:none}.pip-setup-moved{display:none!important}
+.tool-group:has(>.pip-setup-moved):not(:has(>:not(summary,.pip-setup-moved))){display:none}
+.pip-approval-note{display:flex;align-items:center;gap:8px;font-size:11px;padding:8px 0}.pip-approval-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pip-approval-status{color:var(--muted);font-size:10px;flex:none}
+
 /* Pip runs follow specialist-agent lines: face, linked name, current state.
    Details live on the run page, not in a second card under the answer. */
 .pip-run-line{display:flex;align-items:center;gap:6px;min-width:0;margin:0;padding:var(--sp-1,4px) 0;color:var(--muted);font:var(--w-reg,400) var(--t-sm,12px)/1.45 var(--sans);user-select:none}
@@ -36,13 +38,44 @@
 .pip-run-owned{display:none!important}
 @media(max-width:300px){.pip-run-line{flex-wrap:wrap}.pip-run-open{max-width:calc(100% - 24px)}}
 
-/* One approval, one compact row. Expand only when the user asks to review. */
-.pip-setup-card{margin:5px 0;border-radius:8px}.pip-setup-summary{flex-wrap:nowrap;gap:6px;padding:7px 8px;min-height:36px}
-.pip-setup-avatar,.pip-setup-avatar .dgc-plush{width:20px;height:20px}.pip-setup-title strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pip-setup-title>span{display:none}
-.pip-setup-state{font-size:9px;border:0;padding:0;max-width:none;margin:0!important}.pip-setup-quick-actions{flex-basis:auto;padding:0;gap:2px}.pip-setup-quick-actions button{font-size:10px;padding:3px 5px;border-radius:5px;min-height:24px}
-.tool:has(>.body>.pip-setup-card)>.head{display:none}.pip-setup-moved{display:none!important}
-.pip-approval-note{display:flex;align-items:center;gap:8px;font-size:11px;padding:8px 0}.pip-approval-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pip-approval-status{color:var(--muted);font-size:10px;flex:none}
-.pip-setup-card:not([open])>.pip-setup-summary:after{display:none}
-@media(max-width:300px){.pip-setup-summary{gap:4px;padding:6px}.pip-setup-state{display:none}.pip-setup-quick-actions button{padding:3px 4px;font-size:9px}}
-/* Moving the only result out must not leave an empty “Used 1 tool” disclosure. */
-.tool-group:has(>.pip-setup-moved):not(:has(>:not(summary,.pip-setup-moved))){display:none}
+/* The line in the reply, and the card docked above the chat box (the founder's choice, 2026-10-07). */
+.pip-setup-line{margin:6px 0;border-radius:var(--r-md,8px);background:var(--surface)}
+.pip-setup-line[data-status=pending]{background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.pip-setup-line .pip-setup-summary{display:flex;align-items:center;gap:8px;min-width:0;padding:6px 8px}
+.pip-setup-avatar{display:block;flex:none}
+.pip-setup-line .pip-setup-title{display:flex;flex:1;min-width:0;flex-direction:column;gap:1px}
+.pip-setup-line .pip-setup-quick-actions{display:flex;flex:none;align-items:center;gap:4px}
+@media (max-width:340px){.pip-setup-line .pip-setup-summary{flex-wrap:wrap}.pip-setup-line .pip-setup-quick-actions{flex-basis:100%;padding-left:34px}}
+.pip-setup-avatar-line,.pip-setup-avatar-line .dgc-plush{width:26px;height:26px}
+.pip-setup-line .pip-setup-title strong{font:var(--w-med,500) var(--t-sm,13px)/1.3 var(--sans);color:var(--text-strong,var(--text));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-setup-line .pip-setup-title>span{font:var(--w-reg,400) var(--t-xs,11px)/1.35 var(--sans);color:var(--muted)}
+.pip-setup-line[data-status=rejected],.pip-setup-line[data-status=expired]{background:transparent}
+.pip-setup-line[data-status=rejected] .pip-setup-title strong,.pip-setup-line[data-status=expired] .pip-setup-title strong{color:var(--muted)}
+.pip-setup-line button{font:var(--w-med,500) var(--t-xs,11px)/1 var(--sans);border-radius:var(--r-full,999px);border:1px solid var(--border-strong,var(--border));padding:5px 10px;cursor:pointer;background:transparent;color:var(--text);white-space:nowrap}
+.pip-setup-line .pip-setup-primary{background:var(--accent-fill,#6747df);border-color:var(--accent-fill,#6747df);color:#fff}
+.pip-setup-line .pip-setup-review{border-color:transparent;color:var(--muted)}
+.pip-setup-line .pip-setup-review:hover{color:var(--text)}
+.pip-setup-line button:disabled{opacity:.5;cursor:default}
+.pip-setup-line button:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:1px}
+.pip-setup-details{padding:0 8px 8px;overflow-wrap:anywhere}
+.pip-setup-details[hidden]{display:none}
+.pip-setup-details .pip-setup-refresh{border:0;padding:3px 0;color:var(--muted)}
+.tool .body:has(>.pip-setup-line){max-height:none;padding:0;overflow:visible}
+
+.pip-dock .pip-dock-head{align-items:center;gap:10px;padding:0 var(--sp-1,4px) var(--sp-2,8px) var(--sp-2,8px)}
+.pip-setup-avatar-dock,.pip-setup-avatar-dock .dgc-plush{width:40px;height:40px}
+.pip-dock-words{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.pip-dock .pip-dock-title{flex:none;max-height:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-dock-sub{color:var(--muted);font:var(--w-reg,400) var(--t-xs,11px)/1.35 var(--sans)}
+.pip-dock-goal{margin:2px var(--sp-2,8px) var(--sp-2,8px);color:var(--text);font:var(--w-reg,400) var(--t-sm,13px)/1.5 var(--sans);
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;overflow-wrap:anywhere}
+.pip-dock-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 var(--sp-2,8px) var(--sp-3,12px)}
+.pip-dock-chip{display:inline-flex;align-items:center;max-width:100%;padding:1px 9px;border:1px solid var(--border-strong,var(--border));border-radius:var(--r-full,999px);
+  color:var(--muted);font:var(--w-reg,400) var(--t-xs,11px)/1.6 var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pip-dock-details{max-height:38vh;overflow-y:auto;overscroll-behavior:contain;margin:0 var(--sp-1,4px) var(--sp-2,8px);border-top:1px solid var(--border);padding-top:var(--sp-2,8px)}
+.pip-dock-details .pip-setup-body{padding:0 var(--sp-1,4px)}
+.pip-dock .pip-setup-error{margin:0 var(--sp-2,8px) var(--sp-2,8px)}
+.pip-dock-foot{display:flex;align-items:center;gap:var(--sp-2,8px);padding:0 var(--sp-1,4px) var(--sp-2,8px)}
+.pip-dock-foot .pip-dock-no{margin-right:auto}
+@media (max-width:340px){.pip-dock-foot{flex-wrap:wrap}.pip-dock-foot .pip-dock-create{flex:1 1 100%}}
+@media (forced-colors:active){.pip-dock-chip{border-color:CanvasText;color:CanvasText}}

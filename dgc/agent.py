@@ -25,7 +25,7 @@ from .hooks import run_hooks
 from .llm import (ContextOverflowError, LLMClient, LLMError, ToolsUnsupportedError, ToolCall,
                   normalize_usage, usage_reported)
 from .memory import load_instruction_file, load_memories, project_memory_path
-from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
+from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, SETUP_CARD, PermissionEngine
 from .agents import builtin_agents, discover_agents, parse_handoff_files
 from .mcp import MCPInputError, MCPManager
 from .reasoning import (ReasoningTracker, extend_persisted_reasoning, persisted_reasoning,
@@ -3913,9 +3913,10 @@ class Agent(GoalLifecycle):
                "when the user approves them. Set Pips up only with these tools: `dgc pips` refuses changes "
                "from your shell."]
               if pips_on else []),
-            *(["- For conversational Pip setup or schedules, use pips_setup. The user allows it like any tool call; "
-               "once allowed the Pip is created and on, except one that reads connected accounts or runs Pulse "
-               "commands, which waits as a card for the user's review. "
+            *(["- For conversational Pip setup or schedules, use pips_setup. In auto mode the Pip is created and on; "
+               "otherwise it is shown to the user as a card above the chat box and created when they choose Create Pip "
+               "there (one that reads connected accounts or runs Pulse commands is always such a card). Do not repeat "
+               "the card's details in your reply: one or two sentences on what it will do. "
                "Resolve the user's intended project BEFORE any resume/run call. If it differs from this chat's "
                "project root, explain the mismatch and ask the user to open that project; never run an unrelated "
                "tagged/demo Pip as a substitute. Distinguish source review from live app smoke tests. "
@@ -8361,6 +8362,12 @@ class Agent(GoalLifecycle):
                 return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
 
         exec_args = dict(args)
+        if name == "pips_setup":
+            # Internal, never the model's: a Pip setup allowed by auto mode, a rule or the user's own
+            # Allow is created now; one allowed only to save its card (SETUP_CARD) waits for Create Pip.
+            exec_args.pop("_dgc_create_now", None)
+            if not (decision == ALLOW and reason == SETUP_CARD):
+                exec_args["_dgc_create_now"] = True
         if name == "bash" and args.get("background") and self._monitor_delivery():
             # Internal: this frontend delivers the exit notice. On wherever it can be delivered,
             # whether or not this request offered the `monitor` tool itself.

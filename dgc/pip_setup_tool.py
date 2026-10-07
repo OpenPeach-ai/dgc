@@ -1,6 +1,7 @@
-"""The chat's Pip setup. Permitted like any tool call (auto mode, an allow rule, or the user's
-Allow), it creates the Pip at once; a setup that reads connected accounts or runs commands on a
-schedule is saved as a card for the user's own review instead (pip_setup.needs_card)."""
+"""The chat's Pip setup. In auto mode (or on an allow rule, or the user's Allow on an ask rule) it
+creates the Pip at once; otherwise it saves a card the editor docks above the chat box, where the
+user's Create Pip is the approval. A setup that reads connected accounts or runs commands on a
+schedule is always a card (pip_setup.needs_card)."""
 from __future__ import annotations
 
 import json
@@ -38,6 +39,8 @@ def _create(registry, setup, request, config):
 
 
 def propose(args, ctx) -> str:
+    args = dict(args)
+    create_now = args.pop('_dgc_create_now', None) is True   # set by the agent, never by the model
     if ctx.config.get('pips_enabled', False) is not True:
         raise RegistryError('disabled', 'Pips are disabled in this session.')
     from .pip_access import require_unrestricted
@@ -59,6 +62,13 @@ def propose(args, ctx) -> str:
                     or origin['workspace_id'] != workspace['id']):
                 raise RegistryError('session_required', 'The setup chat does not match this project.')
             setup = pip_setup.propose(registry, request, root, origin['session_id'])
+            if setup['status'] == 'pending' and not pip_setup.needs_card(request) and not create_now:
+                return json.dumps({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
+                                   'execution_started': False,
+                                   'message': 'Shown to the user as a card above the chat box. They create it there with '
+                                              'one click (Create Pip), see the details, or say not now. Say in a sentence '
+                                              'what the Pip will do; never claim it is on.'},
+                                  ensure_ascii=False, separators=(',', ':'))
             if setup['status'] == 'pending' and not pip_setup.needs_card(request):
                 created, note = _create(registry, setup, request, ctx.config)
                 if created is not None:
@@ -76,8 +86,9 @@ def propose(args, ctx) -> str:
                                   ensure_ascii=False, separators=(',', ':'))
             return json.dumps({'setup': setup, 'review_required': setup['status'] == 'pending',
                                'job_changed_by_this_call': False, 'execution_started': False,
-                               'message': ('This Pip reads the user\'s connected accounts or runs commands on a schedule, so the user '
-                                           'reviews this card in Pips or the CLI before it exists. Mention the pending card; never claim it is on.')},
+                               'message': ('This Pip reads the user\'s connected accounts or runs commands on a schedule, so it is shown '
+                                           'to the user as a card above the chat box, and it exists only once they choose Create Pip there. '
+                                           'Mention the card; never claim it is on.')},
                               ensure_ascii=False, separators=(',', ':'))
     except RegistryError:
         raise

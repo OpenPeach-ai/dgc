@@ -105,22 +105,22 @@ again in that chat.
 
 **From the main chat.** Just ask, for example: "Review committed changes in this
 project every weekday at 9:00 Europe/London, and run once now." The main chat loads
-its Pips tools and sets the Pip up with a tool call, which follows your permission
-mode like any other: in the default mode it asks first, showing the Pip, its job,
-what it reads, when it runs and whether it runs now (**Allow once**, **Always allow**
-or **Deny**); in auto mode it is allowed; plan mode denies it. Once allowed, the Pip
-is created and on. A Pip the chat creates this way starts with a daily limit of
+its Pips tools and proposes the Pip with a tool call. In auto mode the Pip is created
+and on at once, and the reply shows one line: "Morning review is on", with when it
+first runs and **Open in Pips**. In the default and accept-edits modes the Pip docks
+above the chat box, where questions dock: its face and name, what it will do, and
+chips for when it runs, what it reads and its model. Choose **Create Pip** (or
+**Create & run**, or **Update Pip** for a change to a Pip you have), **Details** for
+the project folder, the source, the next run time, the exact reads and the model, or
+**Not now**. The **×** puts it aside: it waits in the reply, where **Review** docks it
+again. Plan mode refuses it. A Pip the chat creates starts with a daily limit of
 200,000 tokens, which you can change in its **Job** tab. Pause, change or delete it
 any time in the Pips view.
 
-Two kinds of Pip still wait for your own review on a **setup card**, in every mode:
-one that reads your connected accounts (mail, calendar, files), and a Pulse that runs
-commands. Those run with nobody watching, long after the chat ends, so you approve
-the exact card: it shows the project folder, the job, the character, the source, the
-schedule with its next run time, whether it will run once on approval, the model,
-and exactly what the Pip may do. Choose **Approve** (or **Approve & run**), **Reject**
-or **Review**. A card expires after seven days, or sooner if the next run time it
-shows has already passed.
+Two kinds of Pip always dock for your choice, even in auto mode: one that reads your
+connected accounts (mail, calendar, files), and a Pulse that runs commands. Those run
+with nobody watching, long after the chat ends. A card expires after seven days, or
+sooner if the next run time it shows has already passed.
 
 The main chat can set up Scout, Lens, Rook and Lock reviews, Quill drafts, Pulse
 command plans and Personal Pips. A new Scout, Lens, Rook, Lock or Quill can run after

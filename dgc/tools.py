@@ -212,9 +212,9 @@ TOOL_SCHEMAS = [
          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["pip_id", "expected_version", "changes", "reason", "request_key"]),
-    _fn("pips_setup", "Set up a NEW or EXISTING Pip, including a schedule and optional first run. Calling it asks the user "
-        "like any tool call (auto mode allows it); once allowed, the Pip is created and on. A Pip that reads connected "
-        "accounts (app_plan) or a Pulse with commands is saved as a card the user reviews instead. "
+    _fn("pips_setup", "Set up a NEW or EXISTING Pip, including a schedule and optional first run. In auto mode the Pip is "
+        "created and on at once; otherwise the user sees it as a card above the chat box and creates it there with one "
+        "click. A Pip that reads connected accounts (app_plan) or a Pulse with commands is always such a card. "
         "First establish project or personal scope. Personal tasks use scope=personal and work_kind=personal_task; they persist across projects and receive no project files or command tools. Use pips_context connections/connection to inspect existing shared app metadata; app_plan requires exact inspected digests and a user-selected connected account ID, never guesses. "
         "For project work establish whether the user wants source review or actual app tests. "
         "target_root must be this chat's project root; ask the user to open the correct project on a mismatch, "

@@ -120,9 +120,10 @@ POLICY_ALIASES = {"monitor": "bash", "view_image": "read_file"}
 ALLOW, ASK, DENY = "allow", "ask", "deny"
 
 
-def _setup_needs_card(args) -> bool:
-    from .pip_setup import needs_card
-    return needs_card(args)
+# A Pip setup in default and acceptEdits modes is a card above the chat box, like a question: the
+# call only saves it and the user's Create Pip is the approval. The agent marks every other ALLOW of
+# pips_setup (auto mode, a rule, the user's Allow on an ask rule) as one that creates the Pip now.
+SETUP_CARD = "shows the user a card above the chat box; their Create Pip there is the approval"
 
 
 def _split_compound(command: str) -> list[str]:
@@ -553,16 +554,14 @@ class PermissionEngine:
 
         if self.mode == "auto":
             return ALLOW, "auto mode"
-        # Approving a Pip setup or change here IS the approval: the tool creates the Pip. A setup that
-        # reads the user's connected accounts or runs commands on a schedule keeps its own card in
-        # every mode, so this call only saves that card and asking twice would buy nothing. Kept
-        # after plan-mode rejection and explicit deny/ask/allow rules.
-        if policy_tool == "pips_setup" and _setup_needs_card(policy_args):
-            return ALLOW, "saves a card for your review (connected accounts or scheduled commands)"
+        # Outside auto mode a Pip setup only saves its card (SETUP_CARD): asking here as well would ask
+        # twice. Kept after plan-mode rejection and explicit deny/ask/allow rules.
+        if policy_tool == "pips_setup":
+            return ALLOW, SETUP_CARD
         if self.mode == "acceptEdits":
             if policy_tool in READ_ONLY_TOOLS or policy_tool in EDIT_TOOLS:
                 return ALLOW, "acceptEdits mode"
-            if policy_tool in ("pips_setup", "pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session"):
+            if policy_tool in ("pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session"):
                 return ASK, "acceptEdits: Pip changes and background work need approval"
             return ASK, f"acceptEdits auto-approves file edits; {policy_tool} still needs approval"
         # default

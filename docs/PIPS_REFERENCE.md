@@ -985,7 +985,7 @@ notice, loads them automatically. A new or resumed chat starts without them.
 | --- | --- | --- | --- |
 | `use_pips` | `UsePips` | Allowed | Loads the Pips tools |
 | `pips_context` | `PipsContext` | Allowed | Reads Pips data (below) |
-| `pips_setup` | `PipsSetup` | Asks (allowed without asking when it saves a card) | Creates or updates a Pip; one with app reads or Pulse commands is saved as a setup card instead |
+| `pips_setup` | `PipsSetup` | Allowed: outside auto mode it only saves a card the editor docks above the chat box, whose **Create Pip** is the approval | In auto mode (or on an allow rule, or your Allow on an ask rule) creates or updates the Pip; one with app reads or Pulse commands is always a card |
 | `pips_propose` | `PipsPropose` | Asks | Applies a change to a project Pip's name, goal or source ref |
 | `pips_adapt` | `PipsAdapt` | Asks | Applies a name or source-ref change that the Pip's adaptation policy allows |
 | `run_pip_now` | `PipsRun` | Asks | Queues one run of a Scout, Lens, Rook, Lock or Quill Pip, or a Personal Pip |

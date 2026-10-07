@@ -24,6 +24,19 @@ class SetupNotificationTests(PipSetupTests):
         result,_=self.notify(s,b);self.assertEqual(result['notification'],'already_notified')
         self.assertEqual(b._start_turn.call_count,1)
 
+    def test_a_personal_pip_proposed_from_a_project_chat_tells_that_chat(self):
+        # Found filming the docked card in real VS Code: Create Pip worked, then "Setup not found in this
+        # workspace." -- a Personal Pip's setup lives in the personal Pips, not the project's.
+        s=self.draft(self.request(scope='personal',work_kind='personal_task',pip_type='scout',run_now=False,request_key='personal-1'))
+        self.assertEqual(s['workspace_id'],self.registry.personal()['id'])
+        self.review(s,workspace_id=s['workspace_id'])
+        result,b=self.notify(s)
+        self.assertEqual(result['notification'],'queued')
+        self.assertEqual(notices.decode(b._start_turn.call_args.args[0])['setup_id'],s['id'])
+        other=SimpleNamespace(agent=SimpleNamespace(session_file=Path('another.json'),messages=[]),_start_turn=Mock())
+        with self.assertRaises(RegistryError):self.notify(s,other)
+        other._start_turn.assert_not_called()
+
     def test_pending_and_foreign_session_cannot_notify(self):
         s=self.draft(self.request(run_now=False))
         with self.assertRaises(RegistryError):self.notify(s)
