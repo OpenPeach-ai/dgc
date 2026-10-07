@@ -9542,7 +9542,7 @@
       + `<div class="ask-error" id="ask-e-${n}" hidden></div>`;
     const field = el.querySelector(".ask-field");
     field.value = answer.other;
-    field.placeholder = window.innerWidth < 360 ? "Something else…" : "Something else? Tell DGC what you want";
+    askPlaceholder(field);
     field.addEventListener("input", () => { answer.other = field.value; growAskField(field); paintAskChecks(state); paintAskAction(state); fitAskCard(); });
     growAskField(field);
     el.querySelectorAll(".ask-opt").forEach((row) => {
@@ -9581,6 +9581,8 @@
     button.classList.toggle("primary", has || resend);
     button.title = has || resend ? (last ? "Send your answers" : "Go to the next question") : "Skip this question";
     if (skip) skip.hidden = !has;
+    const field = state.el.querySelector(".ask-field");
+    if (field && !field.value) askPlaceholder(field);      // Skip and the button just changed its width
   }
   function paintAskChecks(state) {
     const q = state.questions[state.index], picked = askPicked(q, state.answers[state.index]);
@@ -9591,11 +9593,18 @@
       row.querySelector(".ask-n").textContent = on && q.multi_select ? "✓" : String(k + 1);
     });
   }
+  // The hint fits the field, not the window: beside Skip and Continue in a side bar the long one
+  // wrapped onto a second line and pushed the pencil out of line.
+  function askPlaceholder(field) {
+    const width = field.clientWidth || field.getBoundingClientRect().width;
+    field.placeholder = width && width < 300 ? "Something else…" : "Something else? Tell DGC what you want";
+  }
   function growAskField(field) {
     field.style.height = "auto";
     const line = parseFloat(getComputedStyle(field).lineHeight) || 18;
     const max = line * 4 + 8;
-    const wanted = field.scrollHeight || line;
+    // An empty field is one line: Chromium counts a wrapped placeholder in scrollHeight.
+    const wanted = field.value ? (field.scrollHeight || line) : line;
     field.style.height = `${Math.min(max, Math.max(line + 4, wanted))}px`;
     field.style.overflowY = wanted > max ? "auto" : "hidden";
   }
@@ -9866,7 +9875,12 @@
       else question.removeAttribute("tabindex");
     }
   }
-  window.addEventListener("resize", () => { if (askCardDocked()) { fitAskCard(); } });
+  window.addEventListener("resize", () => {
+    if (!askCardDocked()) return;
+    const field = ask.el.querySelector(".ask-field");
+    if (field) { askPlaceholder(field); growAskField(field); }
+    fitAskCard();
+  });
   // Fonts, rails and wrapped text settle after the card mounts; fit again once they have.
   if (typeof ResizeObserver === "function") {
     let fitting = false;

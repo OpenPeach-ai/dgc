@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Questions
+
+- The Questions card's free-text hint fits its field: beside Skip and Continue in a side bar it says
+  "Something else…" instead of a sentence cut off mid-word, and an empty field stays one line.
+
 ### Sessions
 
 - DGC opens on your project's **Sessions**: the side bar lists this project's sessions, newest
