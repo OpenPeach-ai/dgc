@@ -65,7 +65,7 @@ class CalendarDraftTests(unittest.TestCase):
         from dgc.llm import LLMClient,ChatResult,ToolCall
         run=self.reply();calls=[]
         def chat(client,messages,tools=None,**kwargs):
-            calls.append(1);self.assertEqual({t['function']['name'] for t in tools},{'draft_pip_change','draft_email','draft_calendar_event','list_connector_tools','draft_connector_action','offer_choices','skill'})
+            calls.append(1);self.assertEqual({t['function']['name'] for t in tools},{'draft_pip_change','draft_email','draft_calendar_event','list_connector_tools','draft_connector_action','offer_choices','add_routine','skill'})
             self.assertEqual(self.store.db.execute('SELECT count(*) FROM pip_calendar_drafts').fetchone()[0],0)
             if len(calls)==1:return ChatResult(content='',tool_calls=[ToolCall('calendar1','draft_calendar_event',EVENT)])
             return ChatResult(content='Review the calendar draft. No event was created.')

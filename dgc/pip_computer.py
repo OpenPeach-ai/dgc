@@ -792,16 +792,124 @@ def request_stop(registry, pip_id: str, actor: str) -> dict:
 
 
 def handle_stops(registry) -> int:
-    """In the supervisor: honour kill-switch requests. Held writes are dropped and marked lost."""
-    rows = registry.db.execute("SELECT key FROM metadata WHERE key LIKE 'computer_stop:%'").fetchall()
+    """In the supervisor: honour kill-switch and reset requests. Held writes are dropped and marked lost."""
+    rows = registry.db.execute("SELECT key FROM metadata WHERE key LIKE 'computer_stop:%' OR key LIKE 'computer_reset:%'").fetchall()
     for (key,) in rows:
-        pip_id = key.split(":", 1)[1]
+        kind, pip_id = key.split(":", 1)
         stop_host(pip_id)
+        if kind == "computer_reset":
+            _wipe(registry.directory, pip_id)
         with registry.transaction():
             registry.db.execute("UPDATE pip_computer_actions SET status='lost',resolved_at=? WHERE pip_id=? AND status IN ('pending','approved')",
                                 (_now(), pip_id))
             registry.db.execute("DELETE FROM metadata WHERE key=?", (key,))
     return len(rows)
+
+
+# --------------------------------------------------------------------------- all computers (Settings)
+
+MAX_WALK = 200_000                  # files counted per computer before the size is called "at least"
+
+
+def _size(path: Path) -> tuple[int, bool]:
+    """Bytes under ``path`` (symlinks not followed), and whether the count finished."""
+    total, seen = 0, 0
+    for folder, dirs, files in os.walk(path, followlinks=False):
+        for name in files:
+            seen += 1
+            if seen > MAX_WALK:
+                return total, False
+            try:
+                total += os.lstat(os.path.join(folder, name)).st_blocks * 512
+            except OSError:
+                pass
+    return total, True
+
+
+def _wipe(state_directory, pip_id: str) -> None:
+    """A fresh computer: everything in its home goes (sign-ins, browser history, settings) except Files."""
+    import shutil
+    home = Path(state_directory) / "computers" / pip_id / "home"
+    if not home.is_dir() or home.is_symlink():
+        return
+    for entry in home.iterdir():
+        if entry.name == "Files":
+            continue
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            try:
+                entry.unlink()
+            except OSError:
+                pass
+
+
+def overview(registry, actor: str) -> dict:
+    """Settings → Computer: whether the computers' programs are up to date, and the disk they use."""
+    if actor not in ("editor-user", "local-console"):
+        raise RegistryError("local_only", "Pip computers are on this computer only.")
+    import shutil
+    from . import pip_screen_setup
+    from .pip_computer_box import capability
+    root = Path(registry.directory) / "computers"
+    names = {row[0]: json.loads(row[1]).get("name") or "Pip" for row in registry.db.execute(
+        "SELECT p.id,v.definition FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version")}
+    computers = []
+    if root.is_dir():
+        for entry in sorted(root.iterdir()):
+            if entry.name not in names or not entry.is_dir() or entry.is_symlink():
+                continue
+            size, complete = _size(entry)
+            files, _ = _size(entry / "home" / "Files") if (entry / "home" / "Files").is_dir() else (0, True)
+            using = registry.db.execute("SELECT 1 FROM pip_runs WHERE pip_id=? AND status IN ('running','cancelling') LIMIT 1",
+                                        (entry.name,)).fetchone() is not None
+            resetting = registry.db.execute("SELECT 1 FROM metadata WHERE key=?", ("computer_reset:" + entry.name,)).fetchone() is not None
+            computers.append({"pip_id": entry.name, "name": str(names[entry.name])[:120], "bytes": size, "complete": complete,
+                              "files_bytes": files, "using": using, "resetting": resetting})
+    programs = 0
+    current = pip_screen_setup.current_root() if sys.platform != "darwin" else None
+    if current is not None:
+        programs, _ = _size(Path(current))
+    try:
+        free = shutil.disk_usage(registry.directory).free
+    except OSError:
+        free = None
+    setup = pip_screen_setup.status()
+    machine = capability()
+    return {"available": machine["available"], "reason": machine["reason"], "platform": sys.platform,
+            "setup": {"state": setup["state"], "step": setup["step"], "done": setup["done"], "total": setup["total"],
+                      "error": setup["error"], "chrome": setup.get("chrome", ""), "checked_at": setup.get("checked_at")},
+            "computers": computers, "programs_bytes": programs, "free_bytes": free}
+
+
+def update_now(registry, actor: str) -> dict:
+    """Settings → Update computer: look for newer programs (Chrome, the desktop) now, not tomorrow."""
+    if actor not in ("editor-user", "local-console"):
+        raise RegistryError("local_only", "Pip computers are on this computer only.")
+    from . import pip_screen_setup
+    if not pip_screen_setup.supported()[0]:
+        raise RegistryError("unsupported", pip_screen_setup.status()["error"] or "Pip computers don't run on this computer.")
+    started = pip_screen_setup.start(needs=pip_screen_setup.wanted())
+    return {"started": bool(started), **overview(registry, actor)}
+
+
+def request_reset(registry, pip_id: str, actor: str) -> dict:
+    """Settings → Reset: its computer starts fresh (signed out, no history); its Files stay."""
+    if actor not in ("editor-user", "local-console"):
+        raise RegistryError("local_only", "Reset a Pip's computer on this computer.")
+    from .pips import PipStore
+    job = PipStore(registry)._job(pip_id)
+    if registry.db.execute("SELECT 1 FROM pip_runs WHERE pip_id=? AND status IN ('queued','running','cancelling') LIMIT 1",
+                           (pip_id,)).fetchone():
+        raise RegistryError("computer_busy", f"{job['name']} is working. Reset its computer when it is done.")
+    from .pip_daemon import runner_status
+    if not runner_status(registry)["online"]:
+        _wipe(registry.directory, pip_id)          # no supervisor, so nothing holds its browser: now
+        return {"pip_id": pip_id, "resetting": False, "reset": True}
+    with registry.transaction():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", ("computer_reset:" + pip_id, _now()))
+        registry.event(job["workspace_id"], "pip_computer_reset_requested", pip_id=pip_id, payload={})
+    return {"pip_id": pip_id, "resetting": True, "reset": False}
 
 
 # --------------------------------------------------------------------------- the user's live view

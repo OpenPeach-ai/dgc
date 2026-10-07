@@ -15,6 +15,10 @@ export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  list_pip_shared: { pip_id: string; kind: "links" | "media" | "files" };
+  get_pip_computers: Record<string, never>;
+  list_pip_apps: Record<string, never>;
+  list_pip_routines: { pip_id: string };
   list_pip_app_links: { pip_id: string };
   list_pip_computer_files: { pip_id: string; path?: string };
   read_pip_computer_file: { pip_id: string; path: string };
@@ -86,6 +90,13 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  set_pip_profile: { pip_id: string; changes: { title?: string; body?: string | null; color?: string | null; notify?: boolean } };
+  update_pip_computers: Record<string, never>;
+  reset_pip_computer: { pip_id: string };
+  add_pip_routine: { pip_id: string; title: string; prompt: string; trigger: Record<string, PipJson> };
+  update_pip_routine: { pip_id: string; routine_id: string; changes: Record<string, PipJson> };
+  delete_pip_routine: { pip_id: string; routine_id: string };
+  decide_pip_routine: { pip_id: string; routine_id: string; add: boolean };
   start_pip_app_link: { pip_id: string; link_id: string };
   check_pip_app_link: { pip_id: string; link_id: string };
   decline_pip_app_link: { pip_id: string; link_id: string };
@@ -158,6 +169,17 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  set_pip_profile: ["pip_id", "changes"],
+  list_pip_shared: ["pip_id", "kind"],
+  get_pip_computers: [],
+  update_pip_computers: [],
+  reset_pip_computer: ["pip_id"],
+  list_pip_apps: [],
+  list_pip_routines: ["pip_id"],
+  add_pip_routine: ["pip_id", "title", "prompt", "trigger"],
+  update_pip_routine: ["pip_id", "routine_id", "changes"],
+  delete_pip_routine: ["pip_id", "routine_id"],
+  decide_pip_routine: ["pip_id", "routine_id", "add"],
   list_pip_app_links: ["pip_id"],
   start_pip_app_link: ["pip_id", "link_id"],
   check_pip_app_link: ["pip_id", "link_id"],
@@ -489,6 +511,13 @@ for (const command of ["add_pip_computer_file", "remove_pip_computer_file", "run
 // API 43: a Personal Pip's own apps, connected from its chat, and a robot check finished on its computer.
 API43_READS.add("list_pip_app_links");
 for (const command of ["start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link", "finish_pip_computer_check"]) API43_MUTATIONS.add(command);
+// API 43: a Personal Pip's routines: timed, or on new email or an upcoming calendar event; local only.
+API43_READS.add("list_pip_routines");
+for (const command of ["add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine"]) API43_MUTATIONS.add(command);
+// API 43: a Personal Pip's page (look, title, notifications; what its chat shared), its computer's
+// settings, and every app your Pips use; local only.
+for (const command of ["list_pip_shared", "get_pip_computers", "list_pip_apps"]) API43_READS.add(command);
+for (const command of ["set_pip_profile", "update_pip_computers", "reset_pip_computer"]) API43_MUTATIONS.add(command);
 for (const command of API43_READS) READS.add(command);
 for (const command of API43_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);

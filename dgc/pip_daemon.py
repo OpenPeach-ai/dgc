@@ -208,6 +208,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
     from . import pips
     from .pip_schedules import ScheduleTick, has_due_schedule
     from .pip_event_triggers import EventTick, has_due_trigger
+    from .pip_routines import RoutineTick, has_due as has_due_routine
     if enable:
         config.set("pips_enabled", True)
     if config.get("pips_enabled", False) is not True:
@@ -220,6 +221,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
     handlers = {}
     schedule_tick = None
     event_tick = None
+    routine_tick = None
     try:
         with WorkspaceRegistry(directory, clock=clock) as registry:
             if is_runtime_paused(registry):
@@ -243,6 +245,8 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                         schedule_tick.check()
                     if event_tick is not None:
                         event_tick.check()
+                    if routine_tick is not None:
+                        routine_tick.check()
                     _heartbeat(registry, record, "running")
                     if ((schedule_tick is None or not schedule_tick.is_alive())
                             and has_due_schedule(registry)):
@@ -251,6 +255,9 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                     if ((event_tick is None or not event_tick.is_alive()) and has_due_trigger(registry)):
                         event_tick = EventTick(runtime_config, directory, clock)
                         event_tick.start()
+                    if ((routine_tick is None or not routine_tick.is_alive()) and has_due_routine(registry)):
+                        routine_tick = RoutineTick(runtime_config, directory, clock)
+                        routine_tick.start()
                     _computer_tick(registry, runtime_config)
                     pips.start_queued(runtime_config)
                     _notify(notifier, registry)
@@ -261,6 +268,9 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                         break
             finally:
                 schedule_failure = None
+                if routine_tick is not None:
+                    routine_tick.stop()
+                    routine_tick.join()
                 if event_tick is not None:
                     event_tick.stop()
                     try:

@@ -32,7 +32,7 @@ class ChatSetupTests(unittest.TestCase):
         turns = []
         def chat(client, messages, tools=None, **kwargs):
             turns.append(messages)
-            self.assertEqual([t['function']['name'] for t in tools], [setup.TOOL, 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action', 'offer_choices', 'skill'])
+            self.assertEqual([t['function']['name'] for t in tools], [setup.TOOL, 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action', 'offer_choices', 'add_routine', 'skill'])
             self.assertEqual(self.store.get(job['id'])['proposals'], [])
             if len(turns) == 1:
                 return ChatResult(content='', tool_calls=[ToolCall('draft1', setup.TOOL, self.candidate())])

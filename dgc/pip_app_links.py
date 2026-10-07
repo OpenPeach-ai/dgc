@@ -113,8 +113,38 @@ def listing(registry, pip_id) -> list[dict]:
     for row in rows:
         if row["toolkit"] not in seen:
             seen.add(row["toolkit"])
-            out.append(projection(row))
+            item = projection(row)
+            if row["status"] in ("requested", "failed"):
+                # An account another Pip already uses: the card asks to let this one use it too
+                # (Connect then reuses it, no sign-in), as Grok asks before a bot uses a connector.
+                known = registry.db.execute("SELECT label FROM pip_app_links WHERE toolkit=? AND status='connected' "
+                                            "AND pip_id<>? ORDER BY updated_at DESC LIMIT 1", (row["toolkit"], pip_id)).fetchone()
+                if known is not None:
+                    item["known_label"] = known["label"] or ""
+            out.append(item)
     return out[:16]
+
+
+def apps_overview(registry) -> dict:
+    """Settings → Apps: every app account your Pips use, and which Pips use each one."""
+    rows = registry.db.execute(
+        "SELECT l.id,l.pip_id,l.toolkit,l.account,l.label,v.definition FROM pip_app_links l JOIN pips p ON p.id=l.pip_id "
+        "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
+        "WHERE l.status='connected' AND p.status<>'archived' ORDER BY l.toolkit,l.updated_at DESC LIMIT 200").fetchall()
+    groups, order = {}, []
+    for row in rows:
+        key = (row["toolkit"], row["account"])
+        if key not in groups:
+            groups[key] = {"toolkit": row["toolkit"], "app": app_name(row["toolkit"]), "label": row["label"] or "",
+                           "account": row["account"], "pips": []}
+            order.append(key)
+        try:
+            name = json.loads(row["definition"]).get("name") or "Pip"
+        except ValueError:
+            name = "Pip"
+        if all(p["pip_id"] != row["pip_id"] for p in groups[key]["pips"]):
+            groups[key]["pips"].append({"pip_id": row["pip_id"], "name": str(name)[:120], "link_id": row["id"]})
+    return {"apps": [groups[k] for k in order][:40]}
 
 
 def connected(registry, pip_id) -> list[dict]:

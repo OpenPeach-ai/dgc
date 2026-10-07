@@ -419,7 +419,8 @@ COMPUTER_KEY = "computer_"
 APPS_KEY = "apps_"
 # After the user finishes a site's robot check on the Pip's computer, DGC asks it to carry on, under this key.
 CHECK_KEY = "check_"
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY)
+ROUTINE_KEY = "routine_"          # a routine's turn (pip_routines): the Pip does it and replies here
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY)
 CHECK_DONE = ("This message is from DGC, not the user. The user says they finished {host}'s check on your computer's "
               "screen. Read the page again and carry on with what they asked. If the site still asks for a check, "
               "stop and tell them in one sentence.")
@@ -705,7 +706,7 @@ def insert_user(store, pip, req, run_id, model, now):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "computer" in result:
         # A chat that used the Pip's computer: how many steps, and what it left waiting for the user.
@@ -730,6 +731,8 @@ def insert_reply(store, run, result, now):
         if not validate_pin(run["manifest"]):raise RegistryError("permission_denied", "Email drafting was not pinned for this conversation.")
     from .pip_chat_setup import commit as commit_setup
     commit_setup(store, run, result)
+    from .pip_routines import commit as commit_routines      # routines it suggested: cards to Add
+    commit_routines(store, run, result)
     text = validate_text(result.get("text"), reply=True)
     row = store.db.execute("SELECT workspace_id,pip_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
     if not row or (row["workspace_id"], row["pip_id"]) != (run["workspace_id"], run["pip_id"]):

@@ -14,6 +14,14 @@ browser it runs. The vendored editor protocol adds `pip_desktop` and its two eve
 A Personal Pip's own apps (API 43): `list_pip_app_links` (read), and `start_pip_app_link`,
 `check_pip_app_link`, `decline_pip_app_link` and `disconnect_pip_app_link` (mutations, `pip_id` and
 `link_id`); `finish_pip_computer_check` (`pip_id`) says a robot check on its computer is done.
+A Personal Pip's routines (API 43, local only): `list_pip_routines` (read), and `add_pip_routine`
+(`title`, `prompt`, `trigger`), `update_pip_routine` (`routine_id`, `changes`), `delete_pip_routine`
+and `decide_pip_routine` (`routine_id`, `add`: take or turn down a routine the Pip suggested). A
+trigger is a schedule, new email matching a query, or an upcoming calendar event.
+A Personal Pip's page (API 43, local only): `set_pip_profile` (`changes`: `title`, `body`, `color`,
+`notify`), and `list_pip_shared` (`kind`: `links`, `media` or `files`); `get_pip` and `list_pips` items
+carry its `profile`. Pip computers: `get_pip_computers` and `update_pip_computers`, and
+`reset_pip_computer` (`pip_id`). `list_pip_apps` lists the app accounts your Pips use.
 
 Pip computers (Pips API 42). `session.pips` gains `get_pip_computer`,
 `list_pip_computer_actions`, `get_pip_computer_frame` and `list_pip_computer_frames`, and the

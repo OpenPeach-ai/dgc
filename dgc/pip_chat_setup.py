@@ -9,6 +9,8 @@ from .workspace_registry import RegistryError
 TOOL = 'draft_pip_change'
 NOTICE = (
     'You may use draft_pip_change to prepare one proposed change to your own job when the user asks. '
+    'For something to do regularly, at a time, or whenever something happens in their apps (a new email, a '
+    'meeting about to start), suggest a routine with add_routine instead; leave the schedule alone. '
     'Ask for missing schedule time/timezone or task details in ordinary chat first. '
     'Include lasting user requirements in the proposed goal. The draft is NOT applied: '
     'the controller saves a review after your reply and only the human can accept it. '

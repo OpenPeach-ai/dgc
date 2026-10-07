@@ -50,12 +50,14 @@ class QuillSemanticMigrationTests(unittest.TestCase):
         from dgc.pip_computer import SCHEMA as COMPUTER_SCHEMA
         from dgc.pip_chat import IMAGES_SCHEMA, FILES_SCHEMA, CHOICES_SCHEMA
         from dgc.pip_app_links import SCHEMA as APP_LINKS_SCHEMA
+        from dgc.pip_routines import SCHEMA as ROUTINES_SCHEMA
+        from dgc.pip_profile import SCHEMA as PROFILE_SCHEMA
         with patch.object(schema, '_execute_schema', wraps=schema._execute_schema) as ddl:
             with WorkspaceRegistry(self.registry.directory, clock=self.registry.clock) as upgraded:
                 self.assertEqual([call.args for call in ddl.call_args_list],
                                  [(upgraded.db, SCHEMA_V22), (upgraded.db, SETUP_SCHEMA),
                                   (upgraded.db, CONTINUITY_SCHEMA), (upgraded.db, APP_ACTION_SCHEMA), (upgraded.db, MESSAGE_DRAFT_SCHEMA), (upgraded.db, CALENDAR_SCHEMA), (upgraded.db, CONNECTOR_SCHEMA), (upgraded.db, DIGEST_SCHEMA), (upgraded.db, COMPUTER_SCHEMA), (upgraded.db, IMAGES_SCHEMA), (upgraded.db, FILES_SCHEMA),
-                                  (upgraded.db, APP_LINKS_SCHEMA), (upgraded.db, CHOICES_SCHEMA)])
+                                  (upgraded.db, APP_LINKS_SCHEMA), (upgraded.db, CHOICES_SCHEMA), (upgraded.db, ROUTINES_SCHEMA), (upgraded.db, PROFILE_SCHEMA)])
                 self.assertEqual(upgraded.db.execute('SELECT count(*) FROM pip_commit_path_observations').fetchone()[0], 0)
                 self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0], schema.SCHEMA_VERSION)
                 self.assertEqual(self.snapshot(upgraded.db), before)

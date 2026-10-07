@@ -239,7 +239,8 @@ skipped and a repeated one runs once.
 
 Scout, Lens, Rook, Lock and Quill can have schedules. Pulse can run on a schedule
 only with a reviewed verification plan. Patch never runs on a schedule. Personal
-Pips can have schedules.
+Pips use [routines](#routines) instead: several per Pip, at a time, on a new email or
+before a calendar event.
 
 **Event triggers** start a run when one of these happens:
 
@@ -526,6 +527,68 @@ GitHub `origin`. The review shows the repository and each read. An issue or a
 failing check is context for the model, not evidence: every finding still needs
 exact source lines.
 
+## A Personal Pip's page
+
+A Personal Pip's **Settings** (the **…** menu in its chat) is one simple page, like a Grok bot's:
+its face, its name and an optional title at the top, then four tabs.
+
+- **Info**: **Instructions** (what it is for and how it should work; it reads them before every
+  reply), its **Routines**, a **Notifications** switch, and **Share as template**.
+- **Links**: every link you or it shared in the chat, newest first. A link opens in your browser.
+- **Media**: the images sent in the chat.
+- **Files**: the files sent in the chat, and the ones in its computer's Files folder.
+
+**Edit** under its face changes its look: one of the eight Pip faces and a colour. **Reset to
+default** puts back the face its type gives it. A look never changes what a Pip can do. Its
+model is chosen in the chat (the model button by the message box). The **…** menu has **Copy ID**,
+**Pause** and **Archive**.
+
+With **Notifications** on (the default), the runner tells you, as a desktop notification, when the
+Pip finishes a routine on its own or needs you: a routine or an app it asks you to say yes to, or a
+robot check on its computer. Turn it off for a Pip that is chatty; its chat still has everything.
+
+### Routines
+
+A routine is something a Personal Pip does on its own. It has a name, what to do, and when:
+
+| When | Example | Notes |
+| --- | --- | --- |
+| A time | Every day at 08:00, weekdays, every Monday, every 3 hours, once | Times are in your time zone |
+| A new email | `from:alerts@bank.com` | A Gmail search; it looks every 10 minutes. Needs Gmail connected to this Pip |
+| A calendar event | 15 minutes before each event | 5 to 120 minutes before. Needs Google Calendar connected to this Pip |
+
+Add one with **+ Add routine** on its page, or ask the Pip ("every morning, tell me what my day
+looks like"): it suggests a routine as a card under its reply, and nothing runs until you choose
+**Add routine** (**Not now** puts it away). Each routine has an on/off switch; tap one to edit or
+delete it.
+
+When a routine is due, DGC writes a turn in the Pip's chat (you see only its reply) and the Pip does
+the work with whatever it already has: its computer, its apps, its drafts that wait for your
+**Allow**. A routine never gives a Pip anything new. An email routine's first look only notes the
+emails already there; each new matching email after that starts one run (up to five emails at once),
+and an email is never handled twice. The emails and events reach the model as untrusted data. A
+routine whose app is not connected waits and says so ("Waiting for Gmail: ask Ava to connect it").
+
+A Pip has at most ten routines. While the Pip is busy, a due routine waits for it; while it is
+paused, or has reached its daily limit, the routine's time is skipped. Routines run while Pips are
+running on this computer. A Pip made before routines that has a schedule shows it as **Its task**,
+with **Change**.
+
+## Pips settings
+
+The gear on **Your Pips** opens settings for all of them:
+
+- **Computer**: **Update computer** checks now for newer programs (Google Chrome, the desktop),
+  instead of waiting for the daily check. **Reset** starts one Pip's computer fresh: signed out of
+  every site, no browser history; its Files stay. DGC asks first, and refuses while that Pip is
+  working. **Disk space** shows what the computers use and what is free.
+- **Apps**: every app account your Pips use, and which Pips use each one. **Remove** stops one Pip
+  using it; the account stays connected for the others. Accounts themselves are signed in and out
+  in DGC **Settings → Plugins**, and so are the skills your Pips use.
+
+Each Pip still has its own computer: a separate home, browser profile and sign-ins, so one Pip's
+sites never see another's. Settings are shared; computers are not.
+
 ## Personal Pips: apps and the web
 
 ### Connecting an app from a Pip's chat
@@ -537,7 +600,9 @@ DGC asks Composio (your connection in **Settings → Plugins**) for the account.
 Composio already has a Gmail account, that one is used. Otherwise your browser opens
 Composio's sign-in page; sign in there, and the card turns into **Gmail connected**
 by itself (or choose **I've signed in**). The Pip is told and carries on. **Not now**
-puts the card away; the Pip can ask again later.
+puts the card away; the Pip can ask again later. When another of your Pips already uses
+a Gmail account, the card asks **Let Ava use your Gmail?** with that account, and
+**Allow** gives this Pip the same account with no sign-in.
 
 A connected app is that Pip's: it reads it when you ask, like Grok's connectors
 (Gmail messages, Calendar events, Drive and Notion search results, Contacts), and the
@@ -547,9 +612,9 @@ an email or a calendar event, is a draft that waits for your **Allow** (or your
 connected apps at once. The Pip never sees your credentials, the Composio connection
 or the sign-in link: DGC makes those calls, and the editor opens the link.
 
-The Pip's **Settings** list its apps under **Apps**; **Disconnect** stops that Pip
-using the account, which stays connected in Composio. Without Composio in Settings,
-the card says to add it first.
+**Pips settings → Apps** (the gear on **Your Pips**) lists every account your Pips use
+and which Pips use it; **Remove** stops one Pip using the account, which stays connected
+in Composio. Without Composio in Settings, the card says to add it first.
 
 ### App reads
 

@@ -12,7 +12,7 @@ export function appLink(value, pip) {
   if (!/^applink_[a-f0-9]{32}$/.test(value.id) || value.pip_id !== pip || !/^[a-z0-9][a-z0-9_]{1,39}$/.test(value.toolkit)
     || !text(value.app, 80) || !value.app || !text(value.reason, 600) || !STATUSES.includes(value.status)
     || !(value.label === null || text(value.label, 320)) || !(value.error === null || text(value.error, 600))
-    || !Number.isFinite(Date.parse(value.updated_at))) fail();
+    || !Number.isFinite(Date.parse(value.updated_at)) || !(value.known_label === undefined || text(value.known_label, 320))) fail();
   if (value.status === 'connected' && (!/^[A-Za-z0-9_.-]{1,80}$/.test(value.server || '') || !/^(?:ca|coup)_[A-Za-z0-9_-]{1,120}$/.test(value.account || ''))) fail();
   return value;
 }
@@ -37,7 +37,7 @@ export function shownAppLinks(links, now = Date.now()) {
     || l.status === 'connected' && now - Date.parse(l.updated_at) < RECENT_MS);
 }
 
-export function appLinkMarkup(link, { esc, busy = false, composio = true, host = '' }) {
+export function appLinkMarkup(link, { esc, busy = false, composio = true, host = '', pipName = 'This Pip' }) {
   const id = esc(link.id), app = esc(link.app), off = busy ? ' disabled' : '';
   const mark = `<span class="app-link-mark" aria-hidden="true">${esc(link.app.slice(0, 1).toUpperCase())}</span>`;
   const head = (title, sub) => `<div class="app-link-head">${mark}<div class="app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
@@ -54,6 +54,10 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
       + `<p class="app-link-note">To connect apps, first turn on Composio in Settings → Plugins (once). Then choose Connect here.</p>`
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Settings</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Connect ${app}</button>${no}</div>`;
+  } else if (link.status === 'requested' && link.known_label !== undefined) {
+    // An account your other Pips already use: no sign-in, only your yes (Grok asks before a bot uses a connector).
+    body = head(`Let ${esc(pipName)} use your ${app}?`, `${link.known_label ? `${esc(link.known_label)} · ` : ''}already connected. ${esc(link.reason)}`)
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Allowing…' : 'Allow'}</button>${no}</div>`;
   } else if (link.status === 'failed') {
     body = head(`Couldn’t connect ${app}`, esc(link.error || 'Try again.'))
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>Try again</button>${no}</div>`;
@@ -61,7 +65,7 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
     body = head(`Connect ${app}`, esc(link.reason))
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : `Connect ${app}`}</button>${no}</div>`;
   }
-  return `<div class="app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : `Connect ${app}`}">${body}</div>`;
+  return `<div class="app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : link.known_label !== undefined && link.status === 'requested' ? `Use ${app}` : `Connect ${app}`}">${body}</div>`;
 }
 
 /** A Pip's email draft as Grok's Allow card: what it would send, and the user's Send / Always allow. */

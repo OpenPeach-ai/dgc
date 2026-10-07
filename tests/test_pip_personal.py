@@ -82,7 +82,7 @@ class PersonalTests(unittest.TestCase):
             def chat(client,messages,tools=None,**kwargs):
                 calls.append(messages)
                 self.assertEqual([t['function']['name'] for t in (tools or [])],
-                                 ['draft_pip_change', 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action', 'offer_choices', 'skill'] if chatting
+                                 ['draft_pip_change', 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action', 'offer_choices', 'add_routine', 'skill'] if chatting
                                  else ['draft_email', 'draft_calendar_event', 'skill'])   # a task may only draft or load a skill's instructions (no connector grant here)
                 self.assertIn('UNTRUSTED_REFERENCE_SENTINEL',json.dumps(messages))
                 return ChatResult(content='Here is a suggested plan. No messages were sent.')

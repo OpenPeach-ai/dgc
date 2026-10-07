@@ -8,7 +8,9 @@ import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup} from './pipAppLinks.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames} from './pipsModel.js';
+import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup} from './pipRoutines.js';
+import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -77,10 +79,10 @@ const canLifecycle=()=>S.apiVersion>=16&&lifecycleRevision(S.pip)!==null&&lifecy
 const scope = () => `${S.epoch}:${S.workspace?.id || ''}:${S.selected}:${selectionGeneration}`;
 const date = value => value && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleString() : 'Time unavailable';
 const button = (id,text,disabled=false,kind='') => `<button type="button" id="${id}" class="${kind}"${disabled?' disabled':''}>${esc(text)}</button>`;
-function avatar(state='idle',type={id:'rook',character_index:4,name:'Rook'},key='welcome') {
+function avatar(state='idle',type={id:'rook',character_index:4,name:'Rook'},key='welcome',tint='') {
   if(!avatarIds.has(key))avatarIds.set(key,++avatarSequence);
   const id=`editor-pip-${avatarIds.get(key)}`;
-  return `<span class="avatar" data-avatar-key="${esc(key)}" data-character="${esc(type?.id||'unsupported')}" data-pose="${esc(state)}" aria-hidden="true">${type?window.PipConcepts.plush.markup({index:type.character_index,name:type.name},state,id,{includeStyles:false}):'<span class="unknown-avatar">?</span>'}</span>`;
+  return `<span class="avatar" data-avatar-key="${esc(key)}" data-character="${esc(type?.id||'unsupported')}" data-pose="${esc(state)}"${tint?` data-tint="${esc(tint)}"`:''} aria-hidden="true">${type?window.PipConcepts.plush.markup({index:type.character_index,name:type.name},state,id,{includeStyles:false}):'<span class="unknown-avatar">?</span>'}</span>`;
 }
 function observeAvatars() {
   characterCleanup?.();
@@ -259,13 +261,13 @@ function chatMarkup(){
   const shown=S.messages.filter(m=>!(m.role==='user'&&m.intro===true));
   // While it answers, the Pip itself is in the chat, at work, with its name: the reply replaces it.
   const simple=simpleMode(),typing=busy&&(simple||S.messages.some(m=>m.role==='user'&&m.intro===true&&m.run_id===S.chatActiveRun?.id))&&!S.stream?.text
-   ?(simple?`<div class="pip-working" role="status">${avatar('working',type||characterType(S.pip.pip_type),`working-${S.pip.id}`)}<span>${esc(S.pip.name)} ${!S.runner?.online?'will answer when your Pips are running':S.chatActiveRun?.status==='queued'?'is getting ready':'is working'}</span></div>`
+   ?(simple?`<div class="pip-working" role="status">${pipAvatar(S.pip,'working',`working-${S.pip.id}`,type||characterType(S.pip.pip_type))}<span>${esc(S.pip.name)} ${!S.runner?.online?'will answer when your Pips are running':S.chatActiveRun?.status==='queued'?'is getting ready':'is working'}</span></div>`
     :`<article class="pip-message assistant typing" aria-label="${esc(S.pip.name)} is writing"><span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></article>`):'';
   let last=null;
   const timed=m=>{const at=Date.parse(m.created_at),mark=simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return mark;};
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
   const messages=shown.map(m=>timed(m)+messageMarkup(m,{imageSrc:messageImageSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt:S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null})).join('');
-  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span><p class="message-status">Still writing…</p>${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${needsYouCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span><p class="message-status">Still writing…</p>${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${routineCards()}${needsYouCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 async function toggleChatActivity(runId){
   if(!S.messages.some(m=>m.run_id===runId)||!usable())return;
@@ -276,7 +278,7 @@ async function toggleChatActivity(runId){
   finally{if(token===scope()&&chatActivities.get(runId)===value){value.loading=false;render();}}
 }
 async function loadMessages(more=false){
- if(!more){void loadEmailDrafts();void loadAppLinks();void refreshComputer();}
+ if(!more){void loadEmailDrafts();void loadAppLinks();void loadRoutines();void refreshComputer();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
   const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
@@ -762,7 +764,7 @@ function jobSettingsMarkup(){
 function chooseType(id){const type=S.types.find(t=>t.id===id);if(!S.create||!type?.available||S.busy||!usable())return;rememberCreationDraft();S.createType=id;Object.assign(draft,creationDrafts.get(id)||{name:type.default_name,goal:type.default_goal,source_ref:'HEAD',createModel:'default'});S.createStep='configure';S.error='';render();$('name')?.focus();}
 function jobMarkup(p) {
   const type=pipType(p,S.types),pose=presentation(p,[],usable(),S.runner),reviews=pendingReviews(p);
-  return `<button type="button" class="job" data-character="${esc(type?.id||'core')}" data-state="${esc(pose.state)}" data-job="${esc(p.id)}" title="${esc(p.name)} · ${esc(pose.label)}" aria-label="${esc(p.name)} · ${esc(pose.label)}" aria-current="${S.selected===p.id&&!S.create}">${avatar(pose.state,type,`row-${p.id}`)}<span class="job-copy"><strong>${esc(p.name)}</strong><span class="job-role">${type?`${esc(type.name)} · ${personalPip(p)?'Personal helper':esc(type.role)}`:'Unsupported Pip type'}</span><span class="job-goal">${esc(p.goal||type?.description||'')}</span><small class="job-status"><i aria-hidden="true"></i>${esc(pose.label)}</small><span class="job-schedule">${esc(scheduleLabel(p.schedule))}</span>${reviews?`<span class="review-count">${reviews} waiting for you</span>`:''}</span></button>`;
+  return `<button type="button" class="job" data-character="${esc(type?.id||'core')}" data-state="${esc(pose.state)}" data-job="${esc(p.id)}" title="${esc(p.name)} · ${esc(pose.label)}" aria-label="${esc(p.name)} · ${esc(pose.label)}" aria-current="${S.selected===p.id&&!S.create}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="job-copy"><strong>${esc(p.name)}</strong><span class="job-role">${type?`${esc(type.name)} · ${personalPip(p)?'Personal helper':esc(type.role)}`:'Unsupported Pip type'}</span><span class="job-goal">${esc(p.goal||type?.description||'')}</span><small class="job-status"><i aria-hidden="true"></i>${esc(pose.label)}</small><span class="job-schedule">${esc(scheduleLabel(p.schedule))}</span>${reviews?`<span class="review-count">${reviews} waiting for you</span>`:''}</span></button>`;
 }
 function executionMarkup(run) {
   const e=execution(run);
@@ -1318,7 +1320,7 @@ function detailMarkup() {
   if(!S.selected) return `<div class="empty">${avatar()}<h2>${S.jobs.length?'Choose a conversation':'Create your first Pip'}</h2><p class="muted">${S.jobs.length?'Select a Pip from your list to continue its saved conversation, or create another Pip.':S.apiVersion>=23?'Describe a job to DGC, then review its project, schedule and permissions in one setup card.':'Choose a character and a job for the committed code in this workspace. Execution permissions are reviewed separately.'}</p>${button('create-first',S.apiVersion>=23?'Describe a job':'Choose a Pip',!usable()||!S.types.length,'primary')}</div>`;
   if(!S.pip) return '<p role="status">Loading Pip…</p>';
   const p=S.pip, pose=presentation(p,S.runs,usable(),S.runner),type=pipType(p,S.types),reviews=pendingReviews(p);
-  return `<div class="hero">${avatar(pose.state,type,`detail-${p.id}`)}<div class="copy"><h2>${esc(p.name)}</h2><p class="type-role">${type?`${esc(type.name)} · ${personalPip(p)?'Personal helper':esc(type.role)}`:'Unsupported Pip type'}</p><p class="muted">${esc(pose.label)} · ${executionPip(p)&&!pulsePip(p)?'runs on approved handoffs':esc(p.event_trigger?'runs on events':p.schedule?scheduleLabel(p.schedule):'runs when you ask')}</p>${reviews?`<span class="review-count">${reviews} waiting for you</span>`:''}</div></div>${archived()?'<p class="notice">Archived · Conversation and evidence are retained. Restore from Job before changing this Pip or starting new work.</p>':''}${!type?'<p class="notice error">This Pip type is not supported by this editor. Existing reports remain readable; update the lab before starting new work.</p>':''}${S.tab==='chat'?'':waitingMarkup()}${S.tab==='chat'?chatMarkup():S.tab==='job'?jobSettingsMarkup():S.tab==='revisions'?revisionsMarkup():S.tab==='schedule'?scheduleMarkup():runsMarkup()}`;
+  return `<div class="hero">${pipAvatar(p,pose.state,`detail-${p.id}`,type)}<div class="copy"><h2>${esc(p.name)}</h2><p class="type-role">${type?`${esc(type.name)} · ${personalPip(p)?'Personal helper':esc(type.role)}`:'Unsupported Pip type'}</p><p class="muted">${esc(pose.label)} · ${executionPip(p)&&!pulsePip(p)?'runs on approved handoffs':esc(p.event_trigger?'runs on events':p.schedule?scheduleLabel(p.schedule):'runs when you ask')}</p>${reviews?`<span class="review-count">${reviews} waiting for you</span>`:''}</div></div>${archived()?'<p class="notice">Archived · Conversation and evidence are retained. Restore from Job before changing this Pip or starting new work.</p>':''}${!type?'<p class="notice error">This Pip type is not supported by this editor. Existing reports remain readable; update the lab before starting new work.</p>':''}${S.tab==='chat'?'':waitingMarkup()}${S.tab==='chat'?chatMarkup():S.tab==='job'?jobSettingsMarkup():S.tab==='revisions'?revisionsMarkup():S.tab==='schedule'?scheduleMarkup():runsMarkup()}`;
 }
 // ---------------------------------------------------------------- Simple Pips (API 43)
 // Personal Pips the way people meet them: Core is your Primary Pip, a new Pip is a character
@@ -1333,7 +1335,7 @@ function chatTime(at){
  return days===0?`Today ${time}`:days===1?`Yesterday ${time}`:`${when.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'})}, ${time}`;
 }
 function characterType(id){const i=SIMPLE_CHARACTERS.indexOf(id);return S.types.find(t=>t.id===id)||{id,name:id?id[0].toUpperCase()+id.slice(1):'Pip',character_index:i<0?4:i};}
-const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',plus:'<path d="M8 3v10M3 8h10"/>'}[name]}</svg>`;
+const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',gear:'<circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>',plus:'<path d="M8 3v10M3 8h10"/>'}[name]}</svg>`;
 function meetCoreMarkup(){
  return `<section class="meet-core" aria-label="Meet Core">${avatar('idle',characterType('core'),'meet-core')}<h2>Meet Core</h2><p>Core is your Primary Pip. It is your go-to for everyday tasks, looks after your other Pips, and checks in when it needs your help.</p>${button('create-core',S.busy?'Creating…':'Create Core',S.busy||!usable(),'primary pill')}</section>`;
 }
@@ -1342,8 +1344,8 @@ function simpleHomeMarkup(){
  if(!live.length&&!S.jobs.length)return meetCoreMarkup();
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
  const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p);
-  return `<button type="button" class="pip-row" data-job="${esc(p.id)}">${avatar(pose.state,type,`row-${p.id}`)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip" aria-label="Primary Pip">★</span>':''}</strong><small>${p.status==='archived'?'Archived':waiting?`${waiting} waiting for you`:esc(pose.label)}</small></span></button>`;};
- return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2>${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</div>${live.some(p=>p.pip_type==='core')?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
+  return `<button type="button" class="pip-row" data-job="${esc(p.id)}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip" aria-label="Primary Pip">★</span>':''}</strong><small>${p.status==='archived'?'Archived':waiting?`${waiting} waiting for you`:esc(pose.label)}</small></span></button>`;};
+ return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers and apps"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${live.some(p=>p.pip_type==='core')?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
 function newPipBody(){
  return `<div class="character-grid" role="radiogroup" aria-label="Character">${SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>{const t=characterType(id);return `<button type="button" class="character-choice" role="radio" aria-checked="${draft.newPipCharacter===id}" data-new-character="${id}">${avatar('idle',t,`new-${id}`)}<span>${esc(t.name)}</span></button>`;}).join('')}</div><label for="newPipName">Name<input id="newPipName" data-draft="newPipName" maxlength="60" autocomplete="off" placeholder="Like Gmail, Travel or Money" value="${esc(draft.newPipName)}"></label><p class="muted">It says hello and sets itself up in its chat. No job form.</p>`;
@@ -1381,7 +1383,9 @@ async function createSimplePip(type,name,review=null){
  }catch(error){if(token===scope()){if(review&&S.review===review){review.error=errorText(error);renderReview();}else setError(error);}}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }
+function pageView(){return S.tab==='job'&&!!S.pip&&personalPip()&&S.apiVersion>=43&&!remoteHost;}
 function simpleTabContent(){
+ if(pageView())return pipPageMarkup();
  if(S.tab==='memory')return memoriesMarkup()+statementsMarkup();
  if(S.tab==='notifications')return notificationsMarkup();
  if(S.tab==='context')return contextMarkup();
@@ -1395,12 +1399,18 @@ function simplePipHeader(){
  const computer=!(S.apiVersion>=42&&personalPip())?'':settingUpComputer()
   ?`<span class="topbar-setup" role="status" title="Getting its computer ready. This happens once."><span class="topbar-spinner" aria-hidden="true"></span>Setting up your Pip…</span>`
   :`<button type="button" id="pip-computer-open" class="topbar-icon" aria-label="Computer" title="${computerState.pip===S.selected&&computerState.value?.granted?'Open its computer':'Its computer'}"${S.busy||!usable()||archived()?' disabled':''}>${simpleIcon('computer')}</button>`;
- return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${avatar(pose.state,type,`pill-${p.id}`)}<span>${esc(p.name)}</span>${onChat?'':`<small>${esc(sections.length&&{runs:'Results',job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div></header>`;
+ if(pageView()){
+  // Its page (Grok's bot settings): back, its name, then Share and a small menu.
+  const sub=['instructions','character'].includes(S.pipPage),share=S.apiVersion>=41&&['scout','lens','rook','lock','quill'].includes(p.pip_type)&&!archived();
+  return `<header class="pip-topbar"><button type="button" id="${sub?'pip-page-back':'simple-to-chat'}" class="topbar-icon" aria-label="${sub?'Back':'Back to the chat'}" title="${sub?'Back':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${sub?(S.pipPage==='character'?'Face':'Instructions'):'Settings'}</small></div><div class="topbar-actions">${share?`<button type="button" class="topbar-icon" data-pip-share aria-label="Share as template" title="Share as template"${S.busy||!usable()?' disabled':''}>${simpleIcon('share')}</button>`:''}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu">${pipPageMenu()}</div></details></div></header>`;
+ }
+ return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span>${onChat?'':`<small>${esc(sections.length&&{runs:'Results',job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div></header>`;
 }
 function simpleMarkup(){
  const picker=S.workspaces.length>1?`<label class="simple-scope"><span class="sr-only">Pips in</span><select id="pip-workspace" aria-label="Which Pips"${S.busy?' disabled':''}>${S.workspaces.map(w=>`<option value="${esc(w.id)}"${w.id===S.workspace?.id?' selected':''}>${esc(w.kind==='personal'?'Your Pips':'Project · '+w.name)}</option>`).join('')}</select></label>`:'';
  const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${picker}${runnerMarkup()}</header>`;
  const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}`;
+ if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
  if(!S.selected||S.overview||S.create)return `${bar}${notes}${setupRows.length?setupsMarkup():''}<div class="simple-content">${simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}<p role="status" class="muted simple-note">Loading…</p>`;
  return `${simplePipHeader()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
@@ -1423,7 +1433,7 @@ function render() {
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
   avatarObserver?.disconnect();
   $('app').innerHTML=markup;
-  for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose)node.replaceWith(old);}
+  for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose&&(old.dataset.tint||'')===(node.dataset.tint||''))node.replaceWith(old);}
   observeAvatars();fitChatInput();hydrateMessageImages();
   const newLog=document.querySelector('.conversation-log');if(newLog){const first=newLog.querySelector('[data-message]')?.dataset.message;newLog.scrollTop=atEnd?newLog.scrollHeight:first!==oldFirst?oldScroll+newLog.scrollHeight-oldHeight:oldScroll;}
   for(const el of document.querySelectorAll('details[data-details]')) if(opened.has(el.dataset.details)) el.open=true;
@@ -1484,10 +1494,137 @@ async function loadAppLinks(){
 }
 function appLinkCards(){
  if(remoteHost||S.apiVersion<43||!personalPip())return '';
- const cards=shownAppLinks(S.appLinks).map(link=>appLinkMarkup(link,{esc,busy:appLinkBusy===link.id||S.busy||archived(),composio:S.composio!==false,host:appLinkHosts.get(link.id)||''}));
+ const cards=shownAppLinks(S.appLinks).map(link=>appLinkMarkup(link,{esc,busy:appLinkBusy===link.id||S.busy||archived(),composio:S.composio!==false,host:appLinkHosts.get(link.id)||'',pipName:S.pip?.name||'This Pip'}));
  return cards.join('')+(S.appLinksError?`<p class="app-link-note" role="alert">${esc(S.appLinksError)}</p>`:'');
 }
 function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==link.id&&l.toolkit!==link.toolkit)];}
+// ---- A Personal Pip's page, as on Grok's bots: face, name and title, then Info (Instructions,
+// Routines, Notifications, Share as template), Links, Media and Files. And its routines' cards.
+S.pipPage='info';S.routines=null;S.routinesError='';
+let routineSeq=0,routineEditing='',routineBusy='',routineError='',pageNameDirty=false,lookDirty=false,profileBusy=false;
+const shared={pip:'',kind:'',items:null,error:'',loading:false,seq:0,desk:null};
+const pipsSettings={view:'',computers:null,computersError:'',apps:null,appsError:'',confirmReset:'',seq:0,busy:false};
+Object.assign(draft,{pipPageName:'',pipPageTitle:'',pipInstructions:'',lookBody:'',lookColor:''},routineDraft(null,defaultZone));
+const tintStyle=document.createElement('style');tintStyle.textContent=tintStyles;document.head.append(tintStyle);
+// A Personal Pip's chosen face and colour; any other Pip keeps the face its type gives it.
+function pipAvatar(p,state,key,type){const look=profile(p?.profile),own=personalPip(p);return avatar(state,own&&look.body?characterType(look.body):type,key,own?look.color||'':'');}
+function sameJson(a,b){const norm=v=>Array.isArray(v)?v.map(norm):record(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,norm(v[k])])):v;return JSON.stringify(norm(a))===JSON.stringify(norm(b));}
+async function loadRoutines(){
+ if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
+ const token=scope(),sequence=++routineSeq,pip=S.selected;
+ try{const list=routinesPage(await send('list_pip_routines',{pip_id:pip}),pip);if(token!==scope()||sequence!==routineSeq)return;S.routines=list;S.routinesError='';render();}
+ catch(error){if(token===scope()&&sequence===routineSeq){S.routinesError=errorText(error);render();}}
+}
+function routineCards(){
+ if(remoteHost||S.apiVersion<43||!personalPip()||!S.routines)return '';
+ return shownRoutineCards(S.routines).map(r=>routineCardMarkup(r,{esc,busy:routineBusy===r.id||S.busy||archived()||!usable(),formatDate:date})).join('');
+}
+async function routineCall(command,args,id,notice){
+ if(S.busy||!usable()||routineBusy)return null;const token=scope(),pip=S.selected;routineBusy=id||'form';routineError='';render();
+ try{const result=await send(command,{pip_id:pip,...args});if(token!==scope())return null;if(notice)S.notice=notice;await loadRoutines();return result||{};}
+ catch(error){if(token===scope()){routineError=errorText(error);if(!routineEditing)S.error=routineError;}return null;}
+ finally{if(token===scope()){routineBusy='';render();}}
+}
+function editRoutine(id){
+ const r=(S.routines||[]).find(x=>x.id===id);if(id!=='new'&&!r)return;
+ routineEditing=id;routineError='';Object.assign(draft,routineDraft(id==='new'?null:r,defaultZone));render();$('routineTitle')?.focus();
+}
+async function saveRoutine(){
+ const isNew=routineEditing==='new',current=(S.routines||[]).find(x=>x.id===routineEditing);
+ let value;try{value=routineFromDraft(draft.routineKind==='custom'?{...draft,routineKind:'daily'}:draft);}catch(error){routineError=errorText(error);render();return;}
+ if(isNew){if(await routineCall('add_pip_routine',value,'form','Routine added. It runs on its own now.'))routineEditing='';render();return;}
+ if(!current)return;
+ const changes={title:value.title,prompt:value.prompt};if(draft.routineKind!=='custom'&&!sameJson(value.trigger,current.trigger))changes.trigger=value.trigger;
+ if(await routineCall('update_pip_routine',{routine_id:current.id,changes},'form','Saved.'))routineEditing='';render();
+}
+function routinesSectionMarkup(){
+ if(S.routinesError&&!S.routines)return errorMarkup(S.routinesError);
+ if(!S.routines)return '<p class="muted" role="status">Loading…</p>';
+ const links=S.appLinks||[],busy=!!routineBusy||S.busy||!usable();
+ const form=routineEditing?routineFormMarkup(draft,{esc,busy,error:routineError,isNew:routineEditing==='new',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar')}):'';
+ return routinesMarkup(S.routines,{esc,busy,editing:routineEditing,form,formatDate:date,pipName:S.pip.name,schedule:S.pip.schedule?scheduleLabel(S.pip.schedule):''})+(S.legacyOpen&&S.pip.schedule?`<div class="routine-legacy-edit">${quickScheduleMarkup()}</div>`:'');
+}
+function openPipPage(view='info'){
+ const p=S.pip;if(!p)return;
+ S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;lookDirty=false;routineEditing='';routineError='';
+ void loadRoutines();void loadAppLinks();
+}
+function putProfile(pipId,value){
+ const p=profile(value);if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
+}
+async function setProfile(changes,notice){
+ if(S.busy||!usable()||!S.pip||profileBusy)return false;const pip=S.pip.id,token=scope();profileBusy=true;S.busy=true;S.error='';render();
+ try{const result=await send('set_pip_profile',{pip_id:pip,changes});if(token!==scope())return false;
+  if(!record(result)||result.pip_id!==pip)throw Error('DGC answered about another Pip. Refresh.');putProfile(pip,result.profile);if(notice)S.notice=notice;return true;}
+ catch(error){if(token===scope())S.error=errorText(error);return false;}
+ finally{profileBusy=false;if(token===scope()){S.busy=false;render();}}
+}
+async function saveNameAndTitle(){
+ const p=S.pip,name=draft.pipPageName.trim(),title=draft.pipPageTitle.trim();
+ if(!name){setError('Give it a name.');return;}
+ if(title!==profile(p.profile).title&&!await setProfile({title}))return;
+ if(name!==p.name&&!await applyOwnChange({name},d=>d.name===name,'Saved.'))return;
+ if(name===p.name)S.notice='Saved.';
+ pageNameDirty=false;draft.pipPageName=S.pip?.name||name;draft.pipPageTitle=profile(S.pip?.profile).title;render();
+}
+async function loadShared(kind){
+ if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
+ const token=scope(),sequence=++shared.seq,pip=S.selected;
+ if(shared.pip!==pip||shared.kind!==kind){shared.items=null;shared.desk=null;}
+ shared.pip=pip;shared.kind=kind;shared.loading=true;shared.error='';render();
+ try{const items=sharedPage(await send('list_pip_shared',{pip_id:pip,kind}),pip,kind);if(token!==scope()||sequence!==shared.seq)return;shared.items=items;
+  if(kind==='files'&&computerState.pip===pip&&computerState.value?.granted){try{shared.desk=pipComputerFiles(await send('list_pip_computer_files',{pip_id:pip,path:''}),'').entries;}catch{shared.desk=null;}}}
+ catch(error){if(token===scope()&&sequence===shared.seq)shared.error=errorText(error);}
+ finally{if(token===scope()&&sequence===shared.seq){shared.loading=false;render();}}
+}
+function pipPageMarkup(){
+ const p=S.pip,off=S.busy||!usable(),look=profile(p.profile);
+ if(archived())return `<section class="pip-page-group"><p class="goal">${esc(p.goal)}</p><p class="muted">Archived. Its chat and results are saved. Restore it to use it again.</p>${lifecycleMarkup()}</section>`;
+ if(S.pipPage==='instructions')return instructionsMarkup({esc,goal:draft.pipInstructions,busy:off,pipName:p.name});
+ if(S.pipPage==='character'){
+  const own=SIMPLE_CHARACTERS.includes(p.pip_type)?p.pip_type:'core',body=draft.lookBody||own;
+  return characterMarkup({esc,body,color:draft.lookColor,busy:off,changed:lookDirty,avatarFor:(id,color,key,state='idle')=>avatar(state,characterType(id||own),`${key}-${p.id}`,color||'')});
+ }
+ const head=headMarkup({esc,avatar:pipAvatar(p,'idle',`page-${p.id}`,pipType(p,S.types)||characterType(p.pip_type)),name:p.name,title:look.title,nameDraft:draft.pipPageName,titleDraft:draft.pipPageTitle,busy:off,dirty:pageNameDirty});
+ const tab=['links','media','files'].includes(S.pipPage)?S.pipPage:'info';
+ if(tab!=='info'&&(shared.pip!==S.selected||shared.kind!==tab)&&!shared.loading)void loadShared(tab);
+ const mine=shared.pip===S.selected&&shared.kind===tab,items=mine?shared.items:null,error=mine?shared.error:'',loading=!mine||shared.loading;
+ const body=tab==='links'?linksMarkup(items,{esc,formatDate:date,loading,error})
+  :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
+  :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:date,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
+  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name});
+ return `<div class="pip-page">${head}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
+}
+function pipPageMenu(){
+ const p=S.pip,off=S.busy||!usable();
+ return `<button type="button" data-tab="runs">Results</button>${S.apiVersion>=14?'<button type="button" data-tab="memory">Memory</button>':''}<hr>`
+  +'<button type="button" data-copy-pip-id>Copy ID</button>'
+  +(archived()?'':`<button type="button" id="toggle-pip"${off||S.apiVersion>=16&&!canLifecycle()?' disabled':''}>${p.status==='paused'?'Resume':'Pause'}</button>`)
+  +(S.apiVersion>=16&&canLifecycle()?(archived()?`<button type="button" id="restore-pip"${off?' disabled':''}>Restore…</button>`:`<button type="button" id="archive-pip" class="danger-text"${off?' disabled':''}>Archive…</button>`):'');
+}
+// Settings for all your Pips (from the Pips home): their computers, and the apps they use.
+async function loadPipsSettings(){
+ if(remoteHost||S.apiVersion<43||!usable())return;
+ const token=S.epoch,sequence=++pipsSettings.seq,view=pipsSettings.view;
+ try{if(view==='apps'){const apps=appsPage(await send('list_pip_apps'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.apps=apps;pipsSettings.appsError='';}
+  else{const value=computersPage(await send('get_pip_computers'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.computers=value;pipsSettings.computersError='';
+   if(value.setup.state==='running'||value.computers.some(c=>c.resetting))window.setTimeout(()=>{if(pipsSettings.view==='computer'&&!disposed)void loadPipsSettings();},3000);}}
+ catch(error){if(token===S.epoch&&sequence===pipsSettings.seq){if(view==='apps')pipsSettings.appsError=errorText(error);else pipsSettings.computersError=errorText(error);}}
+ finally{if(token===S.epoch)render();}
+}
+async function pipsSettingsCall(command,args,notice){
+ if(pipsSettings.busy||!usable())return;const token=S.epoch;pipsSettings.busy=true;render();
+ try{const result=await send(command,args);if(token!==S.epoch)return;S.notice=typeof notice==='function'?notice(result):notice;pipsSettings.confirmReset='';await loadPipsSettings();}
+ catch(error){if(token===S.epoch){if(pipsSettings.view==='apps')pipsSettings.appsError=errorText(error);else pipsSettings.computersError=errorText(error);}}
+ finally{pipsSettings.busy=false;if(token===S.epoch)render();}
+}
+function pipsSettingsMarkup(){
+ const view=pipsSettings.view==='apps'?'apps':'computer',busy=pipsSettings.busy||S.busy||!usable();
+ const tabs=`<nav class="pip-page-tabs" aria-label="Pips settings">${[['computer','Computer'],['apps','Apps']].map(([k,l])=>`<button type="button" data-pips-settings="${k}" aria-pressed="${view===k}">${l}</button>`).join('')}</nav>`;
+ const body=view==='apps'?appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError})+(skillsMarkup()?`<section class="pip-page-group pip-skills">${skillsMarkup()}</section>`:'')
+  :computersMarkup(pipsSettings.computers,{esc,busy,error:pipsSettings.computersError,formatDate:date,confirming:pipsSettings.confirmReset});
+ return `<header class="pip-topbar"><button type="button" id="pips-settings-close" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Pips settings</span></div><span></span></header><div class="simple-content"><div class="pip-page">${tabs}<div class="pip-page-body">${body}</div></div></div>`;
+}
 async function appLinkAction(type,id,quiet=false){
  if(!usable()||!personalPip()||(appLinkBusy&&!quiet))return;
  const token=scope(),pip=S.selected;if(!quiet){appLinkBusy=id;render();}
@@ -1718,7 +1855,7 @@ function renderReview() {
   }
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
 }
-function clearSelection() { S.appLinks=[];S.appLinksError='';window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.appLinks=[];S.appLinksError='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 async function loadRun(id) {
   if(id!==S.runId){activitySeq++;S.activity=null;S.activityLoading=false;S.activityError='';}
   S.runId=id;const sequence=++detailSeq;const token=scope();render();
@@ -1872,6 +2009,8 @@ function updateDraft(event) {
   if(key==='chatText'&&S.selected){chatDrafts.set(S.selected,draft.chatText);rememberView();fitChatInput();}if(key==='chatModelSearch')render();
   if(key==='sourceMode'||key==='sourceReason')S.sourceDirty=true;
   if(key==='pipModel')S.modelDirty=true;
+  if((key==='pipPageName'||key==='pipPageTitle')&&!pageNameDirty){pageNameDirty=true;render();}
+  if(key==='routineKind'&&event.type==='change')render();
   if(key.startsWith('schedule')||key.startsWith('trigger')||key==='verificationEnabled')S.scheduleDirty=true;
   if((key==='triggerPaths'||key==='triggerCommit')&&event.type==='change')render();
   if(key==='verificationEnabled'&&event.type==='change'){if(!draft.verificationEnabled)draft.scheduleType='manual';render();}
@@ -1883,11 +2022,11 @@ document.addEventListener('input',updateDraft);
 document.addEventListener('paste',event=>{if(event.target?.id!=='chatText'||!canAttachImages())return;const files=[...(event.clipboardData?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
 document.addEventListener('dragover',event=>{if(canAttachImages()&&event.target?.closest?.('#chat-form')&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
 document.addEventListener('drop',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='computer-go'){event.preventDefault();const url=$('computer-url').value.trim();if(url)void computerView('go',{url:/^https?:\/\//i.test(url)?url:'https://'+url});return;}
   if(event.target.id==='computer-type'){event.preventDefault();const input=$('computer-text'),text=input.value;if(text){input.value='';void computerView('type',{text});}return;}
-  const id=event.target.id;if(!['create-form','revision-form','context-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','outcome-form','pip-statement-form','web-reads-form','notify-form','github-form','quick-schedule-form'].includes(id))return;event.preventDefault();
+  const id=event.target.id;if(!['create-form','revision-form','context-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','outcome-form','pip-statement-form','web-reads-form','notify-form','github-form','quick-schedule-form','pip-name-form','pip-instructions-form','routine-form'].includes(id))return;event.preventDefault();
   if(!usable()||S.busy||!S.workspace)return;if(archived()&&['revision-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','pip-statement-form','web-reads-form','quick-schedule-form'].includes(id)){setError(`${S.pip?.name||'This Pip'} is archived. Restore it in Settings first.`);return;}
   if(id==='pip-statement-form'){void reviewStatement();return;}
   if(id==='quick-schedule-form'){
@@ -1957,6 +2096,12 @@ document.addEventListener('submit',event=>{
     if(executionPip(selectedType)&&S.workspace?.kind!=='personal'){
       openReview({title:'Create '+selectedType.name+' with reviewed execution?',description:selectedType.id==='pulse'?'This creates a saved read-only conversation with no standing command plan. Review a handoff or, on API 21, a command plan separately before execution.':'This creates a saved read-only conversation. It grants no standing file-write or test permission. Each execution needs a separate reviewed handoff.',body:`<h3>${esc(request.name)}</h3><p class="goal">${esc(request.goal)}</p><dl class="meta"><dt>Source ref</dt><dd>${esc(request.source_ref)}</dd><dt>Model</dt><dd>${esc(modelLabel(choice))}</dd><dt>Execution policy</dt><dd>Review required for each handoff</dd></dl><p class="muted">${selectedType.id==='patch'?'Patch can change only the exact file paths approved for a private copy.':'Pulse can run only the exact test argument arrays approved for a private copy.'} Network is disabled. The user working tree is never changed. ${selectedType.id==='pulse'?'A standing plan and calendar can be separately reviewed on API 21 after creation.':'There are no automatic schedules for this type.'}</p><p class="muted">${seatbeltRunner()?'Each approved test is bounded to 60 seconds wall time, 30 seconds CPU per process and 64 KiB output. On this macOS runner, 512 MiB of memory across all processes, 32 processes and 64 MiB of private scratch are sampled rather than hard-capped. Source is read-only to tests.':'Each approved test is bounded to 60 seconds wall time, 30 seconds CPU and 512 MiB address space per process, 64 KiB output, and 32 processes. Source is read-only to tests, with 64 MiB private scratch. Aggregate memory is sampled rather than hard-capped.'} These limits are reviewed again with each exact command.</p>`,confirm:'Create Pip',request});
     }else void mutate(request,finishCreate);
+  }else if(id==='pip-name-form'){void saveNameAndTitle();
+  }else if(id==='pip-instructions-form'){
+    const goal=draft.pipInstructions.trim();if(!goal){setError('Say what it is for.');return;}
+    if(goal===S.pip?.goal){S.pipPage='info';render();return;}
+    void applyOwnChange({goal},d=>d.goal===goal,'Saved. It works from these instructions now.').then(ok=>{if(ok){S.pipPage='info';render();}});
+  }else if(id==='routine-form'){void saveRoutine();
   }else if(id==='revision-form'){
     const goal=draft.revisionGoal.trim();if(!goal){setError('Say what this Pip should do.');return;}
     void applyOwnChange({goal},d=>d.goal===goal,'Saved. Its next run works on this.').then(ok=>{if(ok){draft.revisionGoal='';S.editingGoal=false;}});
@@ -2027,12 +2172,38 @@ document.addEventListener('click',event=>{
   if(target.dataset.starter){openStarter(target.dataset.starter);return;}
   if(target.dataset.computerAction){void openComputerAction(target.dataset.computerAction);return;}
   if(target.dataset.revokeGrant){revokeGrant(target.dataset.revokeGrant);return;}
+  if(target.dataset.routineAdd){const id=target.dataset.routineAdd;void routineCall('decide_pip_routine',{routine_id:id,add:true},id,'Routine added. It runs on its own now.');return;}
+  if(target.dataset.routineDecline){const id=target.dataset.routineDecline;void routineCall('decide_pip_routine',{routine_id:id,add:false},id,'');return;}
+  if(target.dataset.routineEdit){editRoutine(target.dataset.routineEdit);return;}
+  if(target.dataset.routineNew!==undefined){editRoutine('new');return;}
+  if(target.dataset.routineCancel!==undefined){routineEditing='';routineError='';render();return;}
+  if(target.dataset.routineDelete){const id=target.dataset.routineDelete;void routineCall('delete_pip_routine',{routine_id:id},id,'Routine deleted.').then(r=>{if(r){routineEditing='';render();}});return;}
+  if(target.dataset.routineLegacy!==undefined){S.legacyOpen=!S.legacyOpen;render();return;}
+  if(target.dataset.pipPage){const v=target.dataset.pipPage;if(v==='instructions')draft.pipInstructions=S.pip?.goal||'';if(v==='character'){const look=profile(S.pip?.profile);draft.lookBody=look.body||'';draft.lookColor=look.color||'';lookDirty=false;}S.pipPage=v;render();if(v==='instructions')$('pipInstructions')?.focus();if(v==='info')void loadRoutines();return;}
+  if(target.dataset.pipPageTab){S.pipPage=target.dataset.pipPageTab;routineEditing='';render();if(S.pipPage==='info')void loadRoutines();else void loadShared(S.pipPage);return;}
+  if(target.dataset.pipShare!==undefined){document.querySelectorAll('details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));void exportPipFile();return;}
+  if(target.dataset.pipBody){if(BODIES.includes(target.dataset.pipBody)){draft.lookBody=target.dataset.pipBody;lookDirty=true;render();}return;}
+  if(target.dataset.pipColor!==undefined){const c=target.dataset.pipColor;if(c===''||COLORS.some(x=>x[0]===c)){draft.lookColor=c;lookDirty=true;render();}return;}
+  if(target.dataset.pipCharacterReset!==undefined){draft.lookBody='';draft.lookColor='';lookDirty=true;render();return;}
+  if(target.dataset.pipCharacterSave!==undefined){const own=S.pip?.pip_type,body=draft.lookBody&&draft.lookBody!==own?draft.lookBody:null;void setProfile({body,color:draft.lookColor||null},'Saved. That’s its face now.').then(ok=>{if(ok){lookDirty=false;S.pipPage='info';render();}});return;}
+  if(target.dataset.pipNameCancel!==undefined){draft.pipPageName=S.pip?.name||'';draft.pipPageTitle=profile(S.pip?.profile).title;pageNameDirty=false;render();return;}
+  if(target.dataset.openLink){vscode.postMessage({type:'openExternal',url:target.dataset.openLink});return;}
+  if(target.dataset.openComputerFiles!==undefined){if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();return;}
+  if(target.dataset.setupChat!==undefined){S.tab='chat';draft.chatText='Change your instructions: ';chatDrafts.set(S.selected,draft.chatText);rememberView();render();void loadMessages();$('chatText')?.focus();return;}
+  if(target.dataset.copyPipId!==undefined){document.querySelectorAll('details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));vscode.postMessage({type:'copy',text:S.selected});S.notice='Copied its ID.';render();return;}
+  if(target.dataset.pipsSettings){pipsSettings.view=target.dataset.pipsSettings;render();void loadPipsSettings();return;}
+  if(target.dataset.computersUpdate!==undefined){void pipsSettingsCall('update_pip_computers',{},r=>r?.started?'Checking for updates. This can take a few minutes.':'Already checking for updates.');return;}
+  if(target.dataset.computerResetAsk){pipsSettings.confirmReset=target.dataset.computerResetAsk;render();return;}
+  if(target.dataset.computerResetCancel!==undefined){pipsSettings.confirmReset='';render();return;}
+  if(target.dataset.computerReset){void pipsSettingsCall('reset_pip_computer',{pip_id:target.dataset.computerReset},r=>r?.reset?'Its computer is fresh: signed out, no history. Its Files are still there.':'Resetting its computer: it is fresh the next time it opens. Its Files stay.');return;}
+  if(target.dataset.appRemove){void pipsSettingsCall('disconnect_pip_app_link',{pip_id:target.dataset.appRemovePip,link_id:target.dataset.appRemove},'Removed. That Pip no longer uses the account.');return;}
+  if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
   if(target.dataset.chatRun){S.tab='runs';S.overview=false;render();void loadRun(target.dataset.chatRun);return;}
   if(target.dataset.run){void loadRun(target.dataset.run);return;}
   if(target.dataset.readNotification){void markNotification(target.dataset.readNotification);return;}
   if(target.dataset.openNotification){void openNotification(target.dataset.openNotification);return;}
-  if(target.dataset.tab){document.querySelectorAll('details[data-details="tabs-more"],details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));S.tab=target.dataset.tab;S.create=false;S.overview=false;rememberView();render();if(S.tab==='memory'){void loadMemories();if(S.apiVersion>=19)void loadStatements();}else if(S.tab==='notifications')void loadNotifications();else if(S.tab==='chat')void loadMessages();else if(S.tab==='runs')void loadSelected(true);else if(S.tab==='job')void loadModels();else if(S.tab==='context'&&S.apiVersion>=12){if(!outcomeSessionsLoaded)void loadOutcomeSessions();if(!outcomeLoaded)void loadOutcomes();}else if(S.tab==='handoffs'&&!S.handoffsLoaded)void loadHandoffs();return;}
+  if(target.dataset.tab){document.querySelectorAll('details[data-details="tabs-more"],details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));S.tab=target.dataset.tab;S.create=false;S.overview=false;if(S.tab==='job'&&personalPip())openPipPage();rememberView();render();if(S.tab==='memory'){void loadMemories();if(S.apiVersion>=19)void loadStatements();}else if(S.tab==='notifications')void loadNotifications();else if(S.tab==='chat')void loadMessages();else if(S.tab==='runs')void loadSelected(true);else if(S.tab==='job')void loadModels();else if(S.tab==='context'&&S.apiVersion>=12){if(!outcomeSessionsLoaded)void loadOutcomeSessions();if(!outcomeLoaded)void loadOutcomes();}else if(S.tab==='handoffs'&&!S.handoffsLoaded)void loadHandoffs();return;}
   if(target.dataset.recordException!==undefined){void reviewException(Number(target.dataset.recordException));return;}
   if(target.dataset.revokeStatement){revokeStatementReview(target.dataset.revokeStatement);return;}
   if(target.dataset.revokeMemory){revokeMemoryReview(target.dataset.revokeMemory);return;}
@@ -2239,6 +2410,9 @@ document.addEventListener('click',event=>{
     case 'simple-new':openNewPip();break;
     case 'create-core':void createSimplePip('core','Core');break;
     case 'simple-back':chatDrafts.set(S.selected,draft.chatText);S.overview=true;rememberView();render();break;
+    case 'pips-settings-open':pipsSettings.view=pipsSettings.view||'computer';pipsSettings.confirmReset='';render();void loadPipsSettings();break;
+    case 'pips-settings-close':pipsSettings.view='';render();break;
+    case 'pip-page-back':S.pipPage='info';lookDirty=false;render();void loadRoutines();break;
     case 'simple-to-chat':S.tab='chat';rememberView();render();void loadMessages();break;
     case 'pip-computer-open':{
       // The Pip's computer, one tap from its chat: open its screen, or offer it one.

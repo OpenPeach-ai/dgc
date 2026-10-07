@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_pip_routines", "list_pip_shared", "get_pip_computers", "list_pip_apps",
     "list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pip_message_image", "get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames",
     "list_pip_action_grants", "list_pip_feedback", "export_pip", "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
@@ -48,6 +49,10 @@ PipReadCommand = Literal[
     'get_workspace_context',
     'list_pip_approvals',
     'list_pip_app_links',
+    'list_pip_routines',
+    'list_pip_shared',
+    'list_pip_apps',
+    'get_pip_computers',
     'list_pip_checkpoints',
     'list_pip_handoffs',
     'list_pip_messages',
@@ -61,6 +66,8 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "set_pip_profile", "update_pip_computers", "reset_pip_computer",
+    "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
     "start_pip_app_link", "check_pip_app_link", "decline_pip_app_link", "disconnect_pip_app_link", "finish_pip_computer_check",
     "add_pip_computer_file", "remove_pip_computer_file", "run_pip_computer_command",
     "always_allow_pip_computer_action", "decide_pip_computer_action", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
@@ -186,9 +193,27 @@ API43_MUTATIONS |= {'add_pip_computer_file', 'remove_pip_computer_file', 'run_pi
 # API 43: a Personal Pip's own apps, connected from its chat, and a robot check finished on its computer.
 API43_READS |= {'list_pip_app_links'}
 API43_MUTATIONS |= {'start_pip_app_link', 'check_pip_app_link', 'decline_pip_app_link', 'disconnect_pip_app_link', 'finish_pip_computer_check'}
+# API 43: a Personal Pip's routines: timed, or on new email or an upcoming calendar event; local only.
+API43_READS |= {'list_pip_routines'}
+API43_MUTATIONS |= {'add_pip_routine', 'update_pip_routine', 'delete_pip_routine', 'decide_pip_routine'}
+# API 43: a Personal Pip's page (look, title, notifications; what its chat shared), its computer's
+# settings, and every app your Pips use; local only.
+API43_READS |= {'list_pip_shared', 'get_pip_computers', 'list_pip_apps'}
+API43_MUTATIONS |= {'set_pip_profile', 'update_pip_computers', 'reset_pip_computer'}
 READ_COMMANDS |= API43_READS
 MUTATION_COMMANDS |= API43_MUTATIONS
 COMMAND_FIELDS = {
+    'set_pip_profile': frozenset({'pip_id', 'changes'}),
+    'list_pip_shared': frozenset({'pip_id', 'kind'}),
+    'get_pip_computers': frozenset(),
+    'update_pip_computers': frozenset(),
+    'reset_pip_computer': frozenset({'pip_id'}),
+    'list_pip_apps': frozenset(),
+    'list_pip_routines': frozenset({'pip_id'}),
+    'add_pip_routine': frozenset({'pip_id', 'title', 'prompt', 'trigger'}),
+    'update_pip_routine': frozenset({'pip_id', 'routine_id', 'changes'}),
+    'delete_pip_routine': frozenset({'pip_id', 'routine_id'}),
+    'decide_pip_routine': frozenset({'pip_id', 'routine_id', 'add'}),
     'list_pip_app_links': frozenset({'pip_id'}),
     'start_pip_app_link': frozenset({'pip_id', 'link_id'}),
     'check_pip_app_link': frozenset({'pip_id', 'link_id'}),

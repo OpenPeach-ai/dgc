@@ -303,3 +303,100 @@ button.pill{border-radius:999px;padding:6px 16px}
 .allow-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;margin:0;font-size:12px}
 .allow-meta dt{color:var(--vscode-descriptionForeground)}.allow-meta dd{margin:0;overflow-wrap:anywhere}
 .allow-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;max-height:13.5em;overflow:auto;padding:8px 10px;border-radius:8px;background:var(--vscode-textCodeBlock-background,color-mix(in srgb,var(--vscode-foreground) 6%,transparent))}
+/* A Personal Pip's page, as on Grok's bots: its face and name, then Info · Links · Media · Files. */
+.simple-home-actions{display:inline-flex;align-items:center;gap:8px}
+.pip-page{display:flex;flex-direction:column;gap:14px;max-width:560px;margin:0 auto;width:100%}
+.pip-page-head{position:relative;display:flex;justify-content:center;padding:6px 0 0}
+.pip-page-head .avatar{width:112px;height:108px}
+.pip-face-edit{position:absolute;left:calc(50% + 34px);bottom:2px;display:inline-flex;align-items:center;gap:4px;min-height:26px;padding:2px 10px;border-radius:999px;border:1px solid var(--pip-edge);background:var(--vscode-editor-background);color:var(--vscode-foreground);font-size:11px}
+.pip-face-edit:hover{background:var(--pip-wash)}
+.pip-name-form{display:grid;gap:4px;justify-items:center;text-align:center}
+.pip-name-form input{border:1px solid transparent;background:transparent;text-align:center;border-radius:10px;padding:4px 10px;max-width:360px}
+.pip-name-form input:hover{border-color:var(--pip-edge)}
+.pip-name-form input:focus{border-color:var(--vscode-focusBorder);background:var(--vscode-input-background)}
+#pipPageName{font-size:18px;font-weight:600}
+#pipPageTitle{font-size:12px;color:var(--muted)}
+.pip-name-actions{display:flex;gap:6px;margin-top:4px}
+.pip-page-tabs{display:flex;gap:4px;padding:3px;border-radius:999px;background:var(--pip-wash);align-self:center}
+.pip-page-tabs button{border:0;border-radius:999px;padding:5px 14px;min-height:28px;background:transparent;color:var(--muted);font-size:12px}
+.pip-page-tabs button[aria-pressed=true]{background:var(--vscode-editor-background);color:var(--vscode-foreground);box-shadow:0 1px 3px #0003}
+.pip-page-body{display:flex;flex-direction:column;gap:12px}
+.pip-page-group{display:flex;flex-direction:column;border:1px solid var(--pip-edge);border-radius:14px;overflow:hidden}
+.pip-page-group>p.muted,.pip-page-group>.pip-page-empty{margin:0;padding:10px 14px}
+.pip-page-label{margin:0;padding:10px 14px 2px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.pip-page-row{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:10px 14px;border:0;border-radius:0;background:transparent;color:var(--vscode-foreground);text-align:left}
+button.pip-page-row:hover{background:var(--pip-wash)}
+.pip-page-group>.pip-page-row+.pip-page-row,.pip-page-list>li+li{border-top:1px solid var(--pip-edge)}
+.pip-page-row.sub{min-height:40px;padding:6px 14px 6px 56px}
+.row-words{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.row-words strong{font-weight:600}
+.row-words small{color:var(--muted);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.row-preview{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row-chevron{flex:none;color:var(--muted)}
+.row-confirm{display:inline-flex;gap:6px}
+.pip-page-list{list-style:none;margin:0;padding:0}
+.pip-page-empty{color:var(--muted);font-size:12px;line-height:1.5;margin:0}
+.switch{position:relative;display:inline-block;flex:none;width:36px;height:21px;margin:0;cursor:pointer}
+.switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:1}
+.switch span{position:absolute;inset:0;border-radius:999px;background:color-mix(in srgb,var(--vscode-foreground) 22%,transparent);transition:background .15s}
+.switch span::after{content:"";position:absolute;width:17px;height:17px;left:2px;top:2px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004;transition:transform .15s}
+.switch input:checked+span{background:var(--pip-accent)}
+.switch input:checked+span::after{transform:translateX(15px)}
+.switch input:focus-visible+span{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}
+.switch input:disabled+span{opacity:.5}
+@media(prefers-reduced-motion:reduce){.switch span,.switch span::after{transition:none}}
+/* Routines: one row each, an on/off switch, then Add routine. */
+.routine-list{list-style:none;margin:0;padding:0}
+.routine-list>li+li{border-top:1px solid var(--pip-edge)}
+.routine-row{display:flex;align-items:center;gap:10px;padding:0 14px 0 0}
+.routine-row[data-state=off] .routine-words strong{color:var(--muted)}
+.routine-open{display:flex;align-items:center;gap:12px;flex:1;min-width:0;min-height:52px;padding:10px 0 10px 14px;border:0;border-radius:0;background:transparent;color:var(--vscode-foreground);text-align:left}
+.routine-open.static{cursor:default}
+button.routine-open:hover .routine-words strong{text-decoration:underline}
+.routine-mark{width:28px;height:28px;border-radius:9px;flex:none}
+.routine-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+.routine-words small{color:var(--muted);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.routine-words .routine-error{color:var(--vscode-errorForeground)}
+.routine-empty{margin:0;padding:10px 14px;color:var(--muted);font-size:12px;line-height:1.5}
+.routine-add{align-self:flex-start;margin:4px 10px 10px;border:0;background:transparent;color:var(--pip-ink);border-radius:999px;padding:4px 10px}
+.routine-add:hover{background:var(--pip-wash)}
+.routine-form-row{padding:4px 14px 12px}
+.routine-form label{margin:10px 0 4px}
+.routine-when{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.routine-when select{width:auto;flex:1 1 160px}
+.routine-when input[type=time],.routine-when input[type=number]{width:auto}
+.routine-when input[type=number]{max-width:80px}
+.routine-when .inline{display:inline-flex;align-items:center;gap:6px;margin:0;white-space:nowrap}
+.routine-when #routineQuery,.routine-when #routineAt{flex:1 1 200px;width:auto}
+.routine-legacy-edit{padding:4px 14px 12px}
+.routine-card .routine-prompt{margin:0;font-size:12px;line-height:1.5;color:var(--vscode-foreground);white-space:pre-wrap;overflow-wrap:anywhere;max-height:7.5em;overflow:auto}
+/* Its face: the eight Pips and a colour. */
+.pip-character{display:flex;flex-direction:column;gap:8px}
+.pip-character-preview{display:flex;justify-content:center;padding:6px 0}
+.pip-character-preview .avatar{width:132px;height:128px}
+.character-grid.compact{grid-template-columns:repeat(4,minmax(0,1fr));margin:0}
+.character-grid.compact .character-choice{padding:6px 2px}
+.swatches{display:flex;flex-wrap:wrap;gap:10px;padding:2px 0 6px}
+.swatch{width:32px;height:32px;min-height:32px;padding:3px;border-radius:50%;border:2px solid transparent;background:transparent}
+.swatch span{display:block;width:100%;height:100%;border-radius:50%}
+.swatch .swatch-own{background:conic-gradient(#F2A07B,#E58BA8,#A98BE8,#79B4E8,#7CCFA8,#EBC85A,#F2A07B)}
+.swatch[aria-checked=true]{border-color:var(--pip-accent)}
+.pip-character .actions,.pip-instructions .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
+.pip-instructions{display:flex;flex-direction:column;gap:8px}
+.pip-instructions h2{margin:0}
+.pip-instructions textarea{min-height:220px;border-radius:12px;padding:10px 12px;line-height:1.55}
+/* Links, Media and Files from its chat. */
+.pip-shared{list-style:none;margin:0;padding:0;border:1px solid var(--pip-edge);border-radius:14px;overflow:hidden}
+.pip-shared>li+li{border-top:1px solid var(--pip-edge)}
+.pip-shared-row{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:8px 14px;border:0;border-radius:0;background:transparent;color:var(--vscode-foreground);text-align:left}
+button.pip-shared-row:hover{background:var(--pip-wash)}
+.pip-shared-row .row-words small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shared-mark{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--pip-wash);font-weight:600;font-size:13px}
+.shared-when{flex:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.pip-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px}
+.pip-media{margin:0;aspect-ratio:1;border-radius:10px;overflow:hidden;border:1px solid var(--pip-edge);background:var(--pip-wash);max-width:100%}
+.pip-media img{width:100%;height:100%;object-fit:cover;display:block}
+.tabs-menu hr{border:0;border-top:1px solid var(--pip-edge);margin:4px 2px}
+.tabs-menu .danger-text{color:var(--vscode-errorForeground)}
+.settings-pill{padding:6px 16px}
+@container(max-width:420px){.pip-face-edit{left:calc(50% + 26px)}.pip-page-head .avatar{width:96px;height:92px}.shared-when{display:none}}

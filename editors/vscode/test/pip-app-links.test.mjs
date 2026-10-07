@@ -111,15 +111,15 @@ test('the host opens the sign-in page from the backend reply, and the webview ne
  assert.deepEqual(opened,['https://connect.composio.dev/link/ln_abc']);
 });
 
-test("a Pip's Settings list its connected apps, and Disconnect stops it using one",async()=>{
- const x=setup({links:[link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done',updated_at:'2026-10-01T09:00:00.000Z'})]});await openChat(x);
- assert.equal(x.d.querySelector('[data-app-link]'),null,'an old connection is not a card in the chat');
- x.click('.pip-menu [data-tab="job"]');await x.drain();
- const apps=x.d.querySelector('[aria-label="Apps"]');assert.ok(apps);assert.match(apps.textContent,/Gmail me@example\.com.*Disconnect/);
- x.click(`[data-app-link-disconnect="${LINK}"]`);
- const off=x.requests('disconnect_pip_app_link')[0];assert.equal(off.request.link_id,LINK);
- x.setLinks([link({status:'declined'})]);x.answer(off,{link:link({status:'declined'})});await x.drain();
- assert.match(x.d.querySelector('[aria-label="Apps"]').textContent,/Nothing connected\. Ask Gmail in its chat to connect an app/);
+test('an account your other Pips use: the card asks to let this one use it, with no sign-in',async()=>{
+ const x=setup({links:[link({known_label:'me@example.com'})]});await openChat(x);
+ const card=x.d.querySelector(`[data-app-link="${LINK}"]`);
+ assert.match(card.textContent,/Let Gmail use your Gmail\?.*me@example\.com · already connected\. To read your new mail each morning\./);
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Allow','Not now']);
+ x.click(`[data-app-link-start="${LINK}"]`);
+ assert.equal(x.requests('start_pip_app_link').length,1,'Allow reuses the account (the backend finds it; no sign-in page)');
+ const old=setup({links:[link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done',updated_at:'2026-10-01T09:00:00.000Z'})]});await openChat(old);
+ assert.equal(old.d.querySelector('[data-app-link]'),null,'an old connection is not a card in the chat');
 });
 
 const message=(id,role,text,extra={})=>({id,pip_id:PIP,workspace_id:PW,role,text,run_id:'run_'+id.padEnd(32,'0').slice(0,32),status:'succeeded',model:'m',created_at:'2026-10-07T09:00:00.000Z',...extra});

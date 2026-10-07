@@ -8,6 +8,29 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- **Routines (app triggers).** A Personal Pip does things on its own, as Grok's bots do: each
+  routine has a name, what to do, and when (a time, a new email matching a Gmail search, or a set
+  time before each calendar event). You add them on its page, or the Pip suggests one with a new
+  `add_routine` tool and you choose **Add routine** on the card under its reply. A due routine is a
+  turn DGC writes in the Pip's chat; an email routine's first look only notes what is there, then
+  each new email starts one run and is never handled twice, and emails and events reach the model
+  as untrusted data. At most ten per Pip; a busy Pip makes a routine wait, a paused or capped one
+  skips it. New control commands `list_pip_routines`, `add_pip_routine`, `update_pip_routine`,
+  `delete_pip_routine` and `decide_pip_routine` (local only); registry schema 40.
+- **A Personal Pip's page.** Its look (one of the eight faces and a colour), a short title, and a
+  Notifications switch are kept per Pip (`set_pip_profile`, schema 41); `get_pip` and `list_pips`
+  include `profile`. `list_pip_shared` lists the links, images and files shared in its chat.
+- **Notifications** say when a Personal Pip finished a routine on its own ("Ava: Good morning!…")
+  or needs you (a routine or an app to say yes to, a robot check on its computer), unless that
+  Pip's switch is off.
+- **Pips settings.** `get_pip_computers` (whether the computers' programs are up to date, the disk
+  each computer and the shared programs use, the free space), `update_pip_computers` (check for
+  newer Chrome and desktop programs now) and `reset_pip_computer` (a fresh computer: signed out, no
+  history, its Files kept; done by the runner after it closes that browser, at once when the runner
+  is off; refused while the Pip works). `list_pip_apps` lists every app account your Pips use and
+  which Pips use it.
+- An app card for an account another of your Pips already uses says so (`known_label`): the user
+  is asked to let this Pip use it, and Connect reuses it without a sign-in.
 - A Pip computer given while DGC was still fetching Chrome gets its browser: the box looks for Chrome
   when the browser starts, not once when the computer was made. Before, its browser never started
   until DGC restarted (the dock's Browser icon did nothing, and the Pip fell back on curl). A browser

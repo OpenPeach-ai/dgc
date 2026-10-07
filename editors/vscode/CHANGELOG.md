@@ -48,6 +48,25 @@
 
 ### Pips
 
+- **A Personal Pip's page, like a Grok bot's.** Its Settings are one clean page: its face, name and
+  an optional title at the top, then **Info**, **Links**, **Media** and **Files**. Info has its
+  **Instructions** (a full page to edit them), its **Routines**, a **Notifications** switch and
+  **Share as template**. Links, Media and Files list what was shared in its chat (and its
+  computer's Files). **Edit** under its face picks one of the eight Pip faces and a colour, with
+  **Reset to default**; the face shows everywhere the Pip does. Share, **Copy ID**, **Pause** and
+  **Archive** sit in the top bar. Model, usage, permissions and schedule forms are gone from the
+  page: the model is chosen by the message box, and apps are in Pips settings.
+- **Routines.** **+ Add routine** takes a name, what to do, and when: every day, weekdays, every
+  week, every few hours, once, when an email matching a Gmail search arrives, or before calendar
+  events. Each routine has an on/off switch; tap one to edit or delete it. When a Pip suggests a
+  routine in its chat, the card under its reply says what and when, with **Add routine** and
+  **Not now**.
+- **Pips settings** (the gear on Your Pips): **Computer** has **Update computer** (check now),
+  **Reset** for each Pip's computer (asks first; its Files stay) and **Disk space**; **Apps** lists
+  every account your Pips use and which Pips use it, with **Remove**, and the skills they use.
+- When another of your Pips already uses an account, a Pip's app card asks **Let Ava use your
+  Gmail?** with **Allow**, instead of a new sign-in.
+
 - **Plain words across Pips.** The runner bar says "Pips running", "Pips not running" or "Pips
   stopped", with **Start Pips**, **Resume Pips…** and **Turn off Pips…**; a Personal Pip's work is
   "Working", "Done" or "Waiting to start", never "Auditing source" or "Report ready". The shield in the

@@ -112,14 +112,18 @@ class Notifier:
             return None
         self.last = now
         alerts, headline = self._alerts(registry)
-        reviews = self._reviews(registry)
+        quiet = self._quiet(registry)
+        reviews = self._reviews(registry, quiet)
         from .pip_action_grants import ran_on_their_own
         ran = ran_on_their_own(registry)
+        finished, asking = self._personal(registry, quiet)
         seen = self._seen(registry)
         new_alerts = [i for i in alerts if i not in seen["alerts"]]
         new_reviews = [i for i in reviews if i not in seen["reviews"]]
         new_ran = [(i, said) for i, said in ran if i not in seen["ran"]]
-        if not new_alerts and not new_reviews and not new_ran:
+        new_finished = [(i, said) for i, said in finished if i not in seen["finished"]]
+        new_asking = [(i, said) for i, said in asking if i not in seen["asking"]]
+        if not new_alerts and not new_reviews and not new_ran and not new_finished and not new_asking:
             return None
         shown, body = False, None
         # While off, what arrives is still marked seen, so turning it on later announces only
@@ -130,6 +134,11 @@ class Notifier:
             elif new_ran:
                 # Something a Pip did on its own: say what, so it is never a surprise.
                 body = new_ran[0][1] + (f" And {len(new_ran) - 1} more." if len(new_ran) > 1 else "")
+            elif new_finished:
+                # A routine it ran by itself is done: what it said, as Grok's bots do.
+                body = new_finished[0][1] + (f" And {len(new_finished) - 1} more." if len(new_finished) > 1 else "")
+            elif new_asking:
+                body = new_asking[0][1] + (f" And {len(new_asking) - 1} more." if len(new_asking) > 1 else "")
             else:
                 count = len(reviews)
                 body = f"{count} review{'' if count == 1 else 's'} waiting for you. Open the Pips view to decide."
@@ -138,6 +147,8 @@ class Notifier:
         seen["alerts"] = (seen["alerts"] + new_alerts)[-MAX_SEEN:]
         seen["reviews"] = (seen["reviews"] + new_reviews)[-MAX_SEEN:]
         seen["ran"] = (seen["ran"] + [i for i, _ in new_ran])[-MAX_SEEN:]
+        seen["finished"] = (seen["finished"] + [i for i, _ in new_finished])[-MAX_SEEN:]
+        seen["asking"] = (seen["asking"] + [i for i, _ in new_asking])[-MAX_SEEN:]
         with registry.transaction():
             registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (SEEN_KEY, json.dumps(seen)))
             if body is not None:
@@ -156,7 +167,55 @@ class Notifier:
                for f in item["new_findings"]]
         return ids, digest["headline"]
 
-    def _reviews(self, registry):
+    def _quiet(self, registry) -> set:
+        """Pips whose page says not to notify you."""
+        try:
+            return {row[0] for row in registry.db.execute("SELECT pip_id FROM pip_profiles WHERE notify=0")}
+        except Exception:
+            return set()
+
+    def _personal(self, registry, quiet):
+        """A Personal Pip finished a routine on its own, or needs you (a routine or an app to say yes to,
+        a robot check on its computer): [(id, sentence)] each, newest first."""
+        def name(definition):
+            try:
+                return str(json.loads(definition).get("name") or "Your Pip")[:60]
+            except ValueError:
+                return "Your Pip"
+        finished, asking = [], []
+        try:
+            for message_id, pip_id, text, definition in registry.db.execute(
+                    "SELECT a.id,a.pip_id,a.text,v.definition FROM pip_chat_messages a "
+                    "JOIN pip_chat_messages u ON u.run_id=a.run_id AND u.role='user' "
+                    "JOIN pips p ON p.id=a.pip_id JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
+                    "WHERE a.role='assistant' AND u.request_key LIKE 'routine\\_%' ESCAPE '\\' ORDER BY a.seq DESC LIMIT 20"):
+                if pip_id not in quiet:
+                    finished.append(("chat:" + message_id, f"{name(definition)}: {_plain(text, 160)}"))
+            for routine_id, pip_id, title, definition in registry.db.execute(
+                    "SELECT r.id,r.pip_id,r.title,v.definition FROM pip_routines r JOIN pips p ON p.id=r.pip_id "
+                    "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
+                    "WHERE r.status='suggested' ORDER BY r.created_at DESC LIMIT 20"):
+                if pip_id not in quiet:
+                    asking.append(("routine:" + routine_id, f"{name(definition)} suggests a routine: {_plain(title, 80)}. Add it in its chat."))
+            for link_id, pip_id, toolkit, definition in registry.db.execute(
+                    "SELECT l.id,l.pip_id,l.toolkit,v.definition FROM pip_app_links l JOIN pips p ON p.id=l.pip_id "
+                    "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
+                    "WHERE l.status='requested' ORDER BY l.created_at DESC LIMIT 20"):
+                if pip_id not in quiet:
+                    from .pip_app_links import app_name
+                    asking.append(("app:" + link_id, f"{name(definition)} asks to use {app_name(toolkit)}. Answer in its chat."))
+            for key, value in registry.db.execute("SELECT key,value FROM metadata WHERE key LIKE 'computer_needs_you:%'"):
+                pip_id = key.split(":", 1)[1]
+                row = registry.db.execute("SELECT v.definition FROM pips p JOIN pip_versions v ON v.pip_id=p.id "
+                                          "AND v.version=p.current_version WHERE p.id=?", (pip_id,)).fetchone()
+                if row is not None and pip_id not in quiet:
+                    asking.append(("check:" + pip_id + ":" + _plain(value, 80),
+                                   f"{name(row[0])} needs you on its computer: a check that it can't do for you."))
+        except Exception:
+            pass                          # a registry from before these tables
+        return finished, asking
+
+    def _reviews(self, registry, quiet=frozenset()):
         from .pip_overview import pending_reviews
         from .pip_schedules import timestamp
         from datetime import datetime, timezone
@@ -167,8 +226,8 @@ class Notifier:
             (now,)).fetchall()]
         for table in ("pip_message_drafts", "pip_calendar_drafts", "pip_connector_drafts"):
             ids += ["draft:" + row[0] for row in registry.db.execute(
-                f"SELECT id FROM {table} WHERE status='pending' AND expires_at>? AND actor LIKE 'pip-%' "
-                "ORDER BY created_at DESC LIMIT 20", (now,)).fetchall()]
+                f"SELECT id,pip_id FROM {table} WHERE status='pending' AND expires_at>? AND actor LIKE 'pip-%' "
+                "ORDER BY created_at DESC LIMIT 20", (now,)).fetchall() if row[1] not in quiet]
         return ids
 
     def _seen(self, registry):
@@ -179,4 +238,6 @@ class Notifier:
             value = {}
         return {"alerts": [i for i in value.get("alerts", []) if isinstance(i, str)],
                 "reviews": [i for i in value.get("reviews", []) if isinstance(i, str)],
-                "ran": [i for i in value.get("ran", []) if isinstance(i, str)]}
+                "ran": [i for i in value.get("ran", []) if isinstance(i, str)],
+                "finished": [i for i in value.get("finished", []) if isinstance(i, str)],
+                "asking": [i for i in value.get("asking", []) if isinstance(i, str)]}
