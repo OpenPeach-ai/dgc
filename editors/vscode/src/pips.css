@@ -405,3 +405,30 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .pip-menu .tabs-menu button{border:0;border-radius:5px;padding:7px 10px;text-align:left;background:transparent;color:var(--vscode-foreground);min-height:30px}
 .pip-menu .tabs-menu button:hover:not(:disabled){background:var(--pip-wash)}
 .pip-menu .tabs-menu button.danger-text{color:var(--vscode-errorForeground)}
+/* The prompt box's menus, as DGC's own: the reasoning card (model row, effort slider, a short note
+   with Show more; the model list one click deeper) and the context meter. */
+.composer-reasoning{padding:4px}
+.composer-model-summary{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);font-size:12px;text-align:left}
+.composer-model-summary:hover{background:var(--vscode-list-hoverBackground)}
+.composer-model-summary svg{flex:none}
+.composer-model-summary svg:first-child{color:#7c5cff}
+.composer-summary-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.composer-summary-label .muted{font-size:11px}
+.composer-note{margin:10px 4px 4px;color:var(--muted);font-size:11px;line-height:1.5}
+.composer-note.clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.composer-more{display:block;align-self:flex-start;margin:0 4px 6px;padding:0;min-height:0!important;border:0;background:none;color:var(--vscode-textLink-foreground,#a78bfa);font-size:11px;cursor:pointer}
+.composer-more:hover{text-decoration:underline;background:none}
+.composer-model-list{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
+.composer-model-list>input{font-size:12px;flex:none;margin:4px 0}
+.composer-model-list>#chat-refresh-models{flex:none;margin-top:4px;font-size:11px;align-self:flex-start;background:transparent}
+.composer-context-menu{left:0;right:auto;padding:12px}
+.ctx-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.ctx-head>div{min-width:0;display:grid;gap:4px}
+.ctx-kicker{color:var(--muted);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.ctx-head strong{font:600 12px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
+.ctx-pct{color:#a78bfa;font:700 18px/1 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
+.ctx-track{height:4px;margin-top:12px;overflow:hidden;border-radius:999px;background:var(--line)}
+.ctx-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7c5cff,#a78bfa)}
+.ctx-split{display:flex;justify-content:space-between;gap:8px;margin:4px 0 10px;color:var(--muted);font:500 10px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
+.composer-chip.with-text{width:auto;padding:0 6px}
+.composer-ctx-pct{font-size:11px;font-variant-numeric:tabular-nums}

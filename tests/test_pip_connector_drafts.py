@@ -119,3 +119,26 @@ class MainConnectorDraftTests(unittest.TestCase):
         from dgc.permissions import PermissionEngine,ASK,DENY
         self.assertEqual(PermissionEngine('default',{},self.root).decide('draft_pip_connector_action',{})[0],ASK)
         self.assertEqual(PermissionEngine('auto',{'allow':['*'],'deny':['PipsConnectorDraft']},self.root).decide('draft_pip_connector_action',{})[0],DENY)
+
+
+class SnapshotCacheTests(unittest.TestCase):
+    """Each message no longer waits for every workflow connector to list its tools (2026-10-07)."""
+
+    def test_the_same_saved_connectors_are_discovered_once_for_a_few_minutes(self):
+        from types import SimpleNamespace
+        from dgc import pip_connector_drafts as drafts
+        drafts._CACHE.clear()
+        calls = []
+        def fake(config, name, **kw):
+            calls.append(name)
+            return {'server': name, 'connection_digest': 'a' * 64, 'tools': []}
+        config = SimpleNamespace(get=lambda key, default=None: {'mcp_servers': {'make': {'url': 'https://hook.make.com/x'}}}.get(key, default))
+        with patch.object(drafts.connector, 'inspect', fake), patch.object(drafts.connector, 'supported', lambda n, s: n == 'make'):
+            first = drafts.snapshot(config)
+            again = drafts.snapshot(config)
+            self.assertEqual(first, again)
+            self.assertEqual(calls, ['make'], 'listed once')
+            config.get = lambda key, default=None: {'mcp_servers': {'make': {'url': 'https://hook.make.com/y'}}}.get(key, default)
+            drafts.snapshot(config)
+            self.assertEqual(calls, ['make', 'make'], 'a changed connector is listed again')
+        drafts._CACHE.clear()

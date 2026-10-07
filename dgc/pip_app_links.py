@@ -343,12 +343,14 @@ def schemas(apps_now) -> list[dict]:
     reads = ", ".join(sorted(f"{t} ({app_name(k)})" for t, k in READ_TOOLKITS.items()))
     return [
         {"type": "function", "function": {"name": "connect_app", "description": (
-            "Ask the user to connect one of their apps to you, like Gmail, Google Calendar, Google Drive, Notion or Slack. "
-            "This shows a Connect card in your chat; the user signs in there, and you are told when it is connected. "
-            "Use it when a task needs an app you do not have. Never paste sign-in links or describe OAuth steps. "
-            + connected_line),
+            "Ask the user to connect one of their apps to you. Apps connect through the user's Composio, so any app "
+            "Composio supports works: Gmail, Google Calendar, Google Drive, Notion, Slack, Figma, GitHub, Linear and "
+            "many more. This shows a Connect card in your chat; the user signs in there (or just allows an account they "
+            "already connected), and you are told when it is connected. Use it whenever the user asks whether you can "
+            "use an app, or asks about Composio, and the app is not connected to you yet: call it rather than saying "
+            "you have no tools. Never paste sign-in links or describe OAuth steps. " + connected_line),
             "parameters": {"type": "object", "properties": {
-                "app": {"type": "string", "description": "The app's toolkit name: gmail, googlecalendar, googledrive, notion, slack, github, outlook, ..."},
+                "app": {"type": "string", "description": "The app's Composio toolkit name: gmail, googlecalendar, googledrive, notion, slack, figma, github, linear, outlook, ..."},
                 "why": {"type": "string", "description": "One short sentence the card shows: what you will do with it."}},
                 "required": ["app", "why"], "additionalProperties": False}}},
         {"type": "function", "function": {"name": "read_app", "description": (

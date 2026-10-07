@@ -8,7 +8,9 @@ to DGC, and `list_pip_plugins` (`pip_id`) reads its cards and the plugins it cou
 `decline_pip_plugin` also takes an allowed plugin back. `list_pip_plugin_uses` lists the plugins
 your Pips may use, and which Pips. A plugin action a Pip prepares is a connector draft whose
 `server` is the plugin's server; a payment plugin's actions refuse `always_allow_pip_app_action`.
-All four are refused before sending to a runtime below API 44.
+`get_pip_chat_context` (`pip_id`, optional `context_size`) estimates how much of the context window a
+Personal Pip's chat takes in its next reply (`used_tokens`, `brief_tokens`, `recent_messages`,
+`summarized_messages`). All five are refused before sending to a runtime below API 44.
 
 Simple Pips (Pips API 43): `introduce_pip` queues a new Personal Pip's first message once. A
 Personal Pip can be created with an empty `goal`, and with `pip_type` `core` (the Primary Pip).

@@ -4622,3 +4622,27 @@ test("an answer offers Make this a Pip only when Pips can take it, and only draf
   assert.equal(posted.slice(before).filter((m) => m.type === "prompt").length, 0, "nothing is sent until you send it");
   assert.deepEqual(errors, []);
 });
+
+test("the model menu's note is three lines with Show more, and Show more opens it in place", () => {
+  // The founder (2026-10-07): Ollama's note ("Off turns thinking off. Low, Medium and High are sent as
+  // Ollama's thinking levels…") took over the model selector.
+  const { dom, errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", provider_capabilities: { reasoning_control: "ollama-levels" } } });
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud" });
+  const menu = doc.getElementById("modelmenu"), note = menu.querySelector(".reasoning-note"), more = menu.querySelector(".reasoning-more");
+  assert.equal(menu.hidden, false);
+  assert.match(note.textContent, /^Off turns thinking off\./);
+  assert.ok(note.classList.contains("clamped"), "three lines at first");
+  assert.equal(more.hidden, false);
+  assert.equal(more.textContent, "Show more");
+  more.click();
+  assert.equal(note.classList.contains("clamped"), false, "the whole note, in place");
+  assert.equal(more.textContent, "Show less");
+  assert.equal(more.getAttribute("aria-expanded"), "true");
+  assert.equal(menu.hidden, false, "the menu stays open");
+  more.click();
+  assert.ok(note.classList.contains("clamped"));
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});

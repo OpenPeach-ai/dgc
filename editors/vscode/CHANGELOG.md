@@ -46,6 +46,11 @@
   of "Thought · raw" rows: a sub-agent's hidden steps and thoughts no longer close it, and a thought
   still streaming always continues in its own row.
 
+### Chat
+
+- The model menu's note is three lines at most, with **Show more** to read the rest in place: Ollama's
+  note about thinking levels took over the menu.
+
 ### Plugins
 
 - Typing in the plugin search boxes keeps every letter in order. Each key rebuilt the list and put
@@ -53,6 +58,14 @@
 
 ### Pips
 
+- **A Pip's prompt box works like DGC's.** The model chip names the model and its thinking level
+  ("deepseek-v4.1-flash:cloud Off", not "Same as DGC off"). Its menu is DGC's: the model row, the
+  thinking slider and a short note with **Show more**; the model list opens from the model row, and
+  a Personal Pip switches model at once (a project Pip's change is still reviewed). The context chip
+  shows how full the window is ("22%"), and its menu has DGC's meter: used and free tokens, recent
+  messages and those in the chat's brief, and the window size. Clicking elsewhere closes either menu.
+- What you send is in the chat at once, and the box clears: it no longer sits in the box until the
+  reply is queued. A choice you tap under a Pip's reply goes straight into the chat the same way.
 - A Pip's face and name at the top of its chat have no outline around them: the face's movement touched it.
 - **Plugins in Pips: each Pip asks first.** When a Pip needs one of the plugins you added to DGC,
   its chat shows "Let Ava use Airtable?" with **Allow** and **Not now**; no second sign-in. What it

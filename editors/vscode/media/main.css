@@ -1284,6 +1284,12 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .effort-labels { display: flex; justify-content: space-between; margin-top: var(--sp-2); color: var(--muted); font-size: var(--t-xs); }
 .effort-labels output { color: var(--text); }
 .reasoning-note { margin: 10px 14px 14px; color: var(--muted); font-size: 11px; line-height: 1.5; white-space: normal; }
+.reasoning-note.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.reasoning-note.has-more { margin-bottom: 2px; }
+.reasoning-more { display: block; margin: 0 14px 12px; padding: 0; min-height: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: 11px; cursor: pointer; }
+.reasoning-more:hover { text-decoration: underline; }
+.reasoning-more:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.reasoning-more[hidden] { display: none; }
 .reasoning-card.is-ultra .effort-slider { background: linear-gradient(100deg, var(--accent), var(--lav), var(--accent)); background-size: 200% 100%; animation: effort-shimmer 3s linear infinite; }
 @keyframes effort-shimmer { to { background-position: 200% 0; } }
 @media (prefers-reduced-motion: reduce) { .reasoning-card.is-ultra .effort-slider { animation: none; } }

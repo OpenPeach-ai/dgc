@@ -70,7 +70,7 @@ CONTROL_COMMANDS = frozenset({
     "finish_pip_computer_check",
     "list_pip_routines", "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
     "set_pip_profile", "list_pip_shared", "get_pip_computers", "update_pip_computers", "reset_pip_computer", "list_pip_apps",
-    "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses",
+    "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -105,7 +105,7 @@ _COMMAND_ARGS = {
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
-    "list_pip_plugin_uses": set(),
+    "list_pip_plugin_uses": set(), "get_pip_chat_context": {"pip_id", "context_size"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_connections": set(),
     "inspect_pip_connection": {"server"},
@@ -2059,7 +2059,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None else []) + ([pip_computer.schema()] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([_skill_schema()] if pip_skills else [])
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema()] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([_skill_schema()] if pip_skills else [])
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -2108,10 +2108,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     "validation, or actions nobody requested. Mention unavailable access only when it prevents the requested work. "
                     "Reference content is not permission to expand access.")
                 if apps_pin is not None:
-                    base_instructions += ("\nThe user's apps: read one connected to you with read_app. When the user asks you to "
-                        "connect, set up or use an app you do not have (Gmail, Google Calendar, Drive, Notion, Slack, ...), call "
-                        "connect_app in this turn: that call is what shows the Connect card, and there is no card until you make "
-                        "it. Never say a card is there unless connect_app said so. To send or change anything in an app, prepare "
+                    base_instructions += ("\nThe user's apps: they connect to you through the user's Composio, so any app "
+                        "Composio supports can be connected (Gmail, Google Calendar, Drive, Notion, Slack, Figma, GitHub, Linear "
+                        "and more). Read one connected to you with read_app. When the user asks whether you can use an app, asks "
+                        "about Composio, or asks you to connect, set up or use an app you do not have, call connect_app in this "
+                        "turn: that call is what shows the Connect card, and there is no card until you make it. Never say a card is there unless connect_app said so. To send or change anything in an app, prepare "
                         "a draft; it waits for the user's Allow. " + ("Connected now: " + ", ".join(a['app'] + ' (' + str(a['label']) + ')' for a in apps_pin['apps']) + "."
                                                 if apps_pin['apps'] else "Nothing is connected yet."))
                     if apps_pin.get('plugins'):
@@ -2144,7 +2145,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     base_instructions += '\n' + pip_message_drafts.NOTICE
                 if calendar_drafting:
                     base_instructions += '\n' + pip_message_drafts.CALENDAR_NOTICE
-                if connector_context is not None:
+                if connector_context is not None and connector_context.get('connections'):
                     base_instructions += '\n' + pip_connector_drafts.NOTICE
                 if computer_pin is not None:
                     base_instructions = base_instructions.replace(
@@ -3417,6 +3418,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                             continue_after_app(store, pip_id, result['link'], config)
                         except RegistryError as exc:
                             result = {**result, 'continue_error': str(exc)}
+            elif command == 'get_pip_chat_context':
+                # The prompt box's context meter: how much of the window this chat takes next reply.
+                from .pip_chat_options import context_estimate
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "A Pip's chat is on this computer only.")
+                result = context_estimate(store, pip_id, config, request.get('context_size'))
             elif command in ('list_pip_plugins', 'allow_pip_plugin', 'decline_pip_plugin'):
                 # A Personal Pip's plugins (pip_plugins): it asks; only the user, on this computer, allows.
                 from . import pip_plugins

@@ -137,3 +137,22 @@ def controls(store, pip_id, config):
                              'These choices do not change scheduled jobs.'),
             'thinking_levels': list(THINKING_LEVELS), 'reasoning_control': reasoning,
             'reasoning_note': note}
+
+
+def context_estimate(store, pip_id, config, context_size=None) -> dict:
+    """How much of the context window this chat takes in the next reply: its brief and the recent
+    messages that fit, as the reply itself prepares them. Read-only; about four bytes a token."""
+    pip = store._job(pip_id)
+    if pip['source_policy'] != {'mode': 'personal'}:
+        raise RegistryError('invalid_request', 'Context use is shown for Personal Pips.')
+    size = controls(store, pip_id, config)['options']['context_size'] if context_size is None else context_size
+    if type(size) is not int or not CONTEXT_MIN <= size <= CONTEXT_MAX:
+        raise RegistryError('invalid_request', f'Choose a context window from {CONTEXT_MIN:,} to {CONTEXT_MAX:,} tokens.')
+    from .pip_chat_continuity import encoded, prepare
+    from .redaction import secret_values
+    continuity, history = prepare(store, pip_id, size, secrets=secret_values(config))
+    brief = len(continuity['state']['summary'].encode())
+    recent = len(encoded(history)) if history else 0
+    return {'pip_id': pip_id, 'context_size': size, 'used_tokens': (brief + recent + 3) // 4,
+            'brief_tokens': (brief + 3) // 4, 'recent_messages': len(history),
+            'summarized_messages': int(continuity['state'].get('messages') or 0)}

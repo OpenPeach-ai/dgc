@@ -893,10 +893,31 @@
     const profiles = [...levels, "ultra"];
     const selected = curUltra ? "ultra" : curThink;
     const index = Math.max(0, profiles.indexOf(selected));
-    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p></section>`;
+    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`;
+  }
+  // The note under the slider is three lines at most, with Show more when there is more to read: a
+  // long one (Ollama's levels) took over the menu. Measured once the menu is on screen.
+  function bindNote(card) {
+    const note = card.querySelector(".reasoning-note"), more = card.querySelector(".reasoning-more");
+    if (!note || !more) return;
+    const measure = () => {
+      if (!note.classList.contains("clamped")) return;
+      const laidOut = note.clientHeight > 0;
+      more.hidden = laidOut ? note.scrollHeight <= note.clientHeight + 1 : note.textContent.length <= 160;
+      note.classList.toggle("has-more", !more.hidden);
+    };
+    more.onclick = (e) => {
+      e.stopPropagation();
+      const open = note.classList.toggle("clamped") === false;
+      more.textContent = open ? "Show less" : "Show more";
+      more.setAttribute("aria-expanded", String(open));
+    };
+    measure();
+    requestAnimationFrame(measure);
   }
   function bindProfiles(mm) {
     const card = mm.querySelector(".reasoning-card"), slider = mm.querySelector(".effort-slider");
+    bindNote(card);
     const options = el("div", "model-options"); options.hidden = true;
     [...mm.children].filter(node => node !== card).forEach(node => options.appendChild(node));
     mm.appendChild(options);

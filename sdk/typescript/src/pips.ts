@@ -20,6 +20,7 @@ export type PipReadParams = {
   list_pip_apps: Record<string, never>;
   list_pip_plugins: { pip_id: string };
   list_pip_plugin_uses: Record<string, never>;
+  get_pip_chat_context: { pip_id: string; context_size?: number };
   list_pip_routines: { pip_id: string };
   list_pip_app_links: { pip_id: string };
   list_pip_computer_files: { pip_id: string; path?: string };
@@ -183,6 +184,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   allow_pip_plugin: ["pip_id", "grant_id"],
   decline_pip_plugin: ["pip_id", "grant_id"],
   list_pip_plugin_uses: [],
+  get_pip_chat_context: ["pip_id", "context_size"],
   list_pip_routines: ["pip_id"],
   add_pip_routine: ["pip_id", "title", "prompt", "trigger"],
   update_pip_routine: ["pip_id", "routine_id", "changes"],
@@ -529,7 +531,7 @@ for (const command of ["set_pip_profile", "update_pip_computers", "reset_pip_com
 for (const command of API43_READS) READS.add(command);
 for (const command of API43_MUTATIONS) MUTATIONS.add(command);
 // API 44: a Personal Pip's plugins. It asks to use one; you allow it, or not, on its card; local only.
-const API44_READS = new Set(["list_pip_plugins", "list_pip_plugin_uses"]);
+const API44_READS = new Set(["list_pip_plugins", "list_pip_plugin_uses", "get_pip_chat_context"]);
 const API44_MUTATIONS = new Set(["allow_pip_plugin", "decline_pip_plugin"]);
 for (const command of API44_READS) READS.add(command);
 for (const command of API44_MUTATIONS) MUTATIONS.add(command);

@@ -38,6 +38,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **Asked about an app or Composio, a Pip offers to connect it.** Asked "can you use Figma tools?"
+  and then about Composio, a Personal Pip said it had no tools and that Composio was out of reach.
+  It is now told that its apps connect through your Composio (any app Composio supports, Figma
+  included) and to show the Connect card. The workflow-connector tools (Zapier, Arcade, Make, n8n)
+  are offered only when one of those is set up: offered with none, they misled it.
+- Sending a message to a Personal Pip no longer waits for every workflow connector to list its
+  tools: the list is kept for five minutes (one after a connector did not answer), and an action
+  still checks its tool before it runs.
+- `get_pip_chat_context` (Pips API 44) estimates how much of the context window a Personal Pip's
+  chat takes in its next reply, for the prompt box's meter.
 - **Plugins in Pips: each Pip asks first.** A Personal Pip can use the plugins you added to DGC,
   as Grok's bots use connectors: when it needs one it asks (`use_plugin`), and its chat shows
   "Let Ava use Airtable?". **Allow** lets that one Pip use it, with no second sign-in; the plugin's
