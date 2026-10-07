@@ -609,8 +609,26 @@ class PipStore:
 
     def list(self, workspace_id, *, limit=100, offset=0, query="", order="created"):
         """A page of a workspace's Pips: oldest first (the default, as before) or most recently
-        changed first, optionally only those whose name or title contains `query`."""
+        changed first, optionally only those that `query` finds: in the name, the title, the
+        instructions, or the chat (pip_search). A Pip found by its instructions or chat says where."""
         self.registry.get(workspace_id)
+        if query:
+            from .pip_search import chat_matches, snippet
+            chats = chat_matches(self.db, workspace_id, query)
+            rows = self.db.execute(*self._page_sql(workspace_id, limit, offset, query, order, chats=chats)).fetchall()
+            found = []
+            for row in rows:
+                item = self.get(row[0])
+                lowered = query.casefold()
+                if lowered not in item["name"].casefold():
+                    title = (self.db.execute("SELECT title FROM pip_profiles WHERE pip_id=?", (item["id"],)).fetchone() or [""])[0] or ""
+                    if lowered not in title.casefold():
+                        if lowered in item["goal"].casefold():
+                            item["match"] = {"in": "instructions", "text": snippet(item["goal"], query)}
+                        elif item["id"] in chats:
+                            item["match"] = {"in": "chat", "text": snippet(chats[item["id"]], query)}
+                found.append(item)
+            return found
         # get() may expire a review. Never retain the SELECT cursor's implicit
         # read snapshot across that write: a concurrent runner commit otherwise
         # makes SQLite reject the upgrade with SQLITE_BUSY_SNAPSHOT. The bounded
@@ -618,7 +636,7 @@ class PipStore:
         rows = self.db.execute(*self._page_sql(workspace_id, limit, offset, query, order)).fetchall()
         return [self.get(row[0]) for row in rows]
 
-    def _page_sql(self, workspace_id, limit, offset, query, order, *, count=False):
+    def _page_sql(self, workspace_id, limit, offset, query, order, *, count=False, chats=None):
         sql = ("SELECT " + ("count(*)" if count else "p.id") + " FROM pips p JOIN pip_versions v "
                "ON v.pip_id=p.id AND v.version=p.current_version LEFT JOIN pip_profiles f ON f.pip_id=p.id "
                "WHERE p.workspace_id=?")
@@ -627,8 +645,10 @@ class PipStore:
             # Name or title, any case. The pattern's own % and _ are literal.
             pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
             sql += (" AND (json_extract(v.definition,'$.name') LIKE ? ESCAPE '\\'"
-                    " OR coalesce(f.title,'') LIKE ? ESCAPE '\\')")
-            params += [pattern, pattern]
+                    " OR coalesce(f.title,'') LIKE ? ESCAPE '\\'"
+                    " OR json_extract(v.definition,'$.goal') LIKE ? ESCAPE '\\'"
+                    " OR p.id IN (SELECT value FROM json_each(?)))")
+            params += [pattern, pattern, pattern, json.dumps(sorted(chats or {}))]
         if count:
             return sql, params
         # Most recent first keeps the Primary Pip (Core) at the top, as the Pips home shows it.
@@ -637,7 +657,11 @@ class PipStore:
         return sql + " LIMIT ? OFFSET ?", params + [limit, offset]
 
     def count(self, workspace_id, query=""):
-        return self.db.execute(*self._page_sql(workspace_id, 0, 0, query, "created", count=True)).fetchone()[0]
+        chats = None
+        if query:
+            from .pip_search import chat_matches
+            chats = chat_matches(self.db, workspace_id, query)
+        return self.db.execute(*self._page_sql(workspace_id, 0, 0, query, "created", count=True, chats=chats)).fetchone()[0]
 
     def create(self, workspace_id, name, goal, actor, source_ref="HEAD", pip_type="rook", model_choice={"mode": "default"}):
         workspace = self.registry.get(workspace_id)

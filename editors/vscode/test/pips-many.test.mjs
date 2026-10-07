@@ -42,7 +42,7 @@ function setup({plugins=[],drafts=[],apiVersion=44,messages=[],activeRun=null,ac
  const runner={runner_id:'runner',status:'running',online:true,paused:false,counts:{queued:0,running:0,cancelling:0}};
  const summary=d=>({id:d.id,pip_id:d.pip_id,workspace_id:d.workspace_id,status:d.status,expired:d.expired,subject:d.payload.action.call.tool,digest:d.digest,source_run_id:d.source_run_id,expires_at:d.expires_at,action_id:d.action_id});
  const defaults=r=>({list_workspaces:()=>({workspaces:[{id:PW,name:'Personal',kind:'personal'}],current_workspace_id:PW}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),
-  list_pips:()=>{const q=(r.query||'').toLowerCase(),all=crowd.filter(p=>!q||p.name.toLowerCase().includes(q)),o=r.offset||0,l=r.limit||100,page=all.slice(o,o+l);return {pips:page,total:all.length,next_offset:o+page.length<all.length?o+page.length:null};},get_pips_limit:()=>limitState,set_pips_limit:()=>({...limitState,max_pips:r.max_pips}),list_pip_apps:()=>({apps:[]}),get_pip:()=>({pip:crowd.find(p=>p.id===r.pip_id)||pipRow}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),
+  list_pips:()=>{const q=(r.query||'').toLowerCase(),all=q==='mortgage'?[{...crowd[5],match:{in:'chat',text:'What is a fair mortgage rate this year?'}}]:crowd.filter(p=>!q||p.name.toLowerCase().includes(q)),o=r.offset||0,l=r.limit||100,page=all.slice(o,o+l);return {pips:page,total:all.length,next_offset:o+page.length<all.length?o+page.length:null};},get_pips_limit:()=>limitState,set_pips_limit:()=>({...limitState,max_pips:r.max_pips}),list_pip_apps:()=>({apps:[]}),get_pip:()=>({pip:crowd.find(p=>p.id===r.pip_id)||pipRow}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),
   get_workspace_context:()=>({context:{workspace_id:PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
   list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages,next_before_id:null,active_run:activeRun,history_context_omitted_count:0,chat_controls:controls}),
   get_pip_computer:()=>({computer:{pip_id:PIP,granted:false,available:true,reason:'',pending:0,actions:[]}}),
@@ -75,6 +75,13 @@ test('a thousand Pips: the most recent hundred, how many there are, Load more an
  assert.equal(x.d.querySelector('.core-offer'),null,'no "Meet Core" while searching');
  const again=x.d.getElementById('pip-search');again.value='nobody';again.dispatchEvent(new x.w.Event('input',{bubbles:true}));await new Promise(r=>setTimeout(r,300));await x.drain();
  assert.match(x.d.body.textContent,/No Pip is named “nobody”/);
+});
+test('a Pip found by its chat says so, with the words around it',async()=>{
+ const x=setup();await x.drain();
+ const box=x.d.getElementById('pip-search');box.value='mortgage';box.dispatchEvent(new x.w.Event('input',{bubbles:true}));
+ await new Promise(r=>setTimeout(r,300));await x.drain();
+ assert.equal(x.d.querySelectorAll('.pip-row').length,1);
+ assert.equal(x.d.querySelector('.pip-row .pip-match').textContent,'In its chat: What is a fair mortgage rate this year?');
 });
 test('the open Pip stays open when a refresh brings only the first page',async()=>{
  const x=setup();await x.drain();

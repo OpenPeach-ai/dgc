@@ -439,3 +439,4 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .pip-search{display:flex;align-items:center;gap:10px;margin:0 0 12px}
 .pip-search input{flex:1;min-width:0;height:30px;border-radius:8px;padding:0 10px;font-size:12px}
 .pip-search-count{flex:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.pip-match{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal}

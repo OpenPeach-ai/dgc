@@ -70,6 +70,29 @@ class PipLimitTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(RegistryError):
                 self.control("list_pips", workspace_id=ws, **bad)
 
+    def test_search_finds_a_pip_by_its_instructions_and_its_chat_and_says_where(self):
+        from dgc import pip_chat
+        ws = self.registry.personal()["id"]
+        baker = self.store.create(ws, "Weekend", "Help me bake sourdough every Saturday morning.", "local-console")
+        money = self.store.create(ws, "Money", "Keep my budget", "local-console")
+        self.make(5)
+        run = pip_chat.send(self.store, money["id"], "What is a fair mortgage rate this year?", "first", "editor-user", self.cfg)["run"]
+        self.store.claim_next()
+        self.store.finish(run["id"], result={"text": "About 6.1% for a 30-year fixed."})
+        found, _ = self.control("list_pips", workspace_id=ws, query="sourdough", order="recent")
+        self.assertEqual([p["name"] for p in found["pips"]], ["Weekend"])
+        self.assertEqual(found["pips"][0]["match"]["in"], "instructions")
+        self.assertIn("sourdough", found["pips"][0]["match"]["text"])
+        found, _ = self.control("list_pips", workspace_id=ws, query="mortgage", order="recent")
+        self.assertEqual([p["name"] for p in found["pips"]], ["Money"])
+        self.assertEqual(found["pips"][0]["match"], {"in": "chat", "text": "What is a fair mortgage rate this year?"})
+        self.assertEqual(found["total"], 1)
+        found, _ = self.control("list_pips", workspace_id=ws, query="Weekend")
+        self.assertNotIn("match", found["pips"][0], "found by its name: nothing to explain")
+        hello = pip_chat.introduce(self.store, baker["id"], "editor-user", self.cfg)
+        found, _ = self.control("list_pips", workspace_id=ws, query="introduce yourself")
+        self.assertEqual(found["pips"], [], "DGC's own turns are not your chat")
+
     def test_the_pip_picker_reads_past_a_hundred(self):
         from dgc import pip_references
         pip_limits.set_limit(self.registry, 1000, "local-console")

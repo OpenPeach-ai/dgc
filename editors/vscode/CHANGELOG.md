@@ -61,7 +61,8 @@
 - **As many Pips as you want.** Pips settings has **How many Pips you can have**: 100 unless you
   choose another number, up to 100,000; archived Pips don't count. The Pips home shows your most
   recent hundred (Core first) with **Load more** and a **Search your Pips** box over names and
-  titles, and says how many there are ("Showing 100 of 5,000"). A Pip opened from elsewhere (the
+  titles, and says how many there are ("Showing 100 of 5,000"). The search also finds a Pip by its
+  instructions and by what was said in its chat, and shows the words around the match ("In its chat: …"). A Pip opened from elsewhere (the
   Sessions home, a notification) opens even when it is not in the pages read so far, and stays
   open as the list refreshes. A search that finds nothing no longer shows "Meet Core".
 - **A Pip's prompt box works like DGC's.** The model chip names the model and its thinking level

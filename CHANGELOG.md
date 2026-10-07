@@ -42,8 +42,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   with `set_pips_limit` (Pips settings); archived Pips no longer count. Every place that stopped at
   100 reads it: creating a Pip, accepting a setup card, and the @-Pip picker, which failed with
   "This workspace exceeds its 100-Pip bound." `list_pips` pages: `limit` (1–100), `offset`, `query`
-  (name or title, any case) and `order` (`recent` puts Core first, then the most recently changed);
+  (name, title, instructions or chat, any case; a Pip found by its instructions or chat carries `match`:
+  where, and the words around it) and `order` (`recent` puts Core first, then the most recently changed);
   it returns `total` and `next_offset`. Without them it returns the first 100, as before. Pips API 44.
+  The chat search uses a full-text index over every Pip's chat (registry schema 43; plain matching
+  where SQLite has no FTS5); DGC's own turns in a chat never match.
 - **Asked about an app or Composio, a Pip offers to connect it.** Asked "can you use Figma tools?"
   and then about Composio, a Personal Pip said it had no tools and that Composio was out of reach.
   It is now told that its apps connect through your Composio (any app Composio supports, Figma
