@@ -48,6 +48,10 @@
 
 ### Pips
 
+- **A Pip's choices.** A Pip can end its message with 2 to 4 choices, shown as buttons under it (A, B,
+  …); a tap answers it. A new Pip's hello offers its next steps this way. Choices under an older
+  message are gone once you have answered; with words already in the box, a tap adds the choice to
+  them instead of sending.
 - **Connect your apps from a Pip's chat.** Ask a Pip to set up Gmail and it puts a **Connect Gmail**
   card in its chat; **Connect Gmail** opens Composio's sign-in in your browser (or uses the account
   Composio already has), and the card turns into **Gmail connected** by itself. The Pip carries on;

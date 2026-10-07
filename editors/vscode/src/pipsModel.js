@@ -159,6 +159,8 @@ export function messagesPage(value,pip,workspace) {
   if(!record(value)||value.pip_id!==pip||value.workspace_id!==workspace||!Array.isArray(value.messages)||value.messages.length>50||!(value.next_before_id===null||typeof value.next_before_id==='string')||!Number.isSafeInteger(value.history_context_omitted_count)||value.history_context_omitted_count<0)throw new Error('Conversation response is invalid or belongs to another Pip.');
   const ids=new Set();
   for(const m of value.messages){if(!record(m)||m.pip_id!==pip||m.workspace_id!==workspace||typeof m.id!=='string'||!m.id||ids.has(m.id)||!['user','assistant'].includes(m.role)||typeof m.text!=='string'||typeof m.run_id!=='string'||typeof m.model!=='string'||typeof m.created_at!=='string'||!['queued','running','cancelling','succeeded','failed','cancelled'].includes(m.status))throw new Error('Conversation contains an invalid or unrelated message.');ids.add(m.id);}
+  // Choices a Pip offered under a reply: 2–4 short lines, never on the user's own message.
+  for(const m of value.messages)if(m.choices!==undefined&&(m.role!=='assistant'||!Array.isArray(m.choices)||m.choices.length<2||m.choices.length>4||m.choices.some(c=>typeof c!=='string'||!c||c.length>80)))throw new Error('Conversation choices are invalid.');
   if(value.next_before_id!==null&&value.next_before_id!==value.messages[0]?.id)throw new Error('Conversation history cursor is invalid.');
   if(value.active_run!==null&&(!record(value.active_run)||typeof value.active_run.id!=='string'||!active(value.active_run.status)))throw new Error('Conversation active run is invalid.');
   return value;

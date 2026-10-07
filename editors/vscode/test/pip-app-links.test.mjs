@@ -18,11 +18,12 @@ const PW='ws_'+'p'.repeat(32),PIP='pip_'+'g'.repeat(32),LINK='applink_'+'a'.repe
 const types=['core','scout','lens','patch','rook','pulse','lock','quill'].map((id,character_index)=>({id,character_index,name:id[0].toUpperCase()+id.slice(1),role:id,description:'Reads and reports',available:id!=='core',unavailable_reason:id==='core'?'Core is the main chat.':null,default_name:id,default_goal:'Review',engine:id==='core'?null:id==='patch'?'patch':id==='pulse'?'test':id==='quill'?'documentation_draft':'source_audit'}));
 const pip=(id,name,type,extra={})=>({id,workspace_id:PW,pip_type:type,name,goal:'Help with what I ask in this chat.',source_policy:{mode:'personal'},source_ref:'HEAD',status:'active',current_version:1,lifecycle_revision:0,policy:'read_only',trigger:'manual',schedule:null,proposals:[],pending_review_count:0,...extra});
 const pipRow=pip(PIP,'Gmail','scout');
+const controls={version:1,mode:'read_only',options:{context_size:8192,thinking:'off'},options_source:'last_message',inherited_context_size:1048576,effective_context_size:8192,context_min:2048,context_max:32768,thinking_levels:['off','low','medium','high','xhigh'],reasoning_control:'provider_dependent',reasoning_note:'n',context_note:'n'};
 const link=(extra={})=>({id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:'Gmail',reason:'To read your new mail each morning.',status:'requested',label:null,error:null,created_at:'2026-10-07T09:00:00.000Z',updated_at:new Date().toISOString(),...extra});
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 const viewModule=load(viewCode,name=>name==='vscode'?{}:require(name));
-function setup({links=[link()],composio=true}={}){
+function setup({links=[link()],composio=true,messages=[]}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set(),timers=[];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -37,7 +38,7 @@ function setup({links=[link()],composio=true}={}){
  const defaults=r=>({list_workspaces:()=>({workspaces:[{id:PW,name:'Personal',kind:'personal'},{id:'ws_'+'1'.repeat(32),name:'demo',kind:'project'}],current_workspace_id:'ws_'+'1'.repeat(32)}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),
   list_pips:()=>({pips:r.workspace_id===PW?[pipRow]:[]}),get_pip:()=>({pip:pipRow}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),
   get_workspace_context:()=>({context:{workspace_id:r.workspace_id||PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
-  list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0}),
+  list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages,next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),
   get_pip_computer:()=>({computer:{pip_id:PIP,granted:false,available:true,reason:'',pending:0,actions:[]}}),
   list_pip_app_links:()=>({pip_id:PIP,links,composio}),get_pip_digest:()=>undefined}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
@@ -119,4 +120,23 @@ test("a Pip's Settings list its connected apps, and Disconnect stops it using on
  const off=x.requests('disconnect_pip_app_link')[0];assert.equal(off.request.link_id,LINK);
  x.setLinks([link({status:'declined'})]);x.answer(off,{link:link({status:'declined'})});await x.drain();
  assert.match(x.d.querySelector('[aria-label="Apps"]').textContent,/Nothing connected\. Ask Gmail in its chat to connect an app/);
+});
+
+const message=(id,role,text,extra={})=>({id,pip_id:PIP,workspace_id:PW,role,text,run_id:'run_'+id.padEnd(32,'0').slice(0,32),status:'succeeded',model:'m',created_at:'2026-10-07T09:00:00.000Z',...extra});
+test("Grok's A/B card: the Pip's choices sit under its latest reply, and a tap answers with one",async()=>{
+ const x=setup({links:[],messages:[message('u1','user','Hi'),message('a1','assistant','Shall I connect Gmail?',{choices:['Yes, connect Gmail','Not yet']})]});await openChat(x);
+ const choices=[...x.d.querySelectorAll('.msg-choice')];
+ assert.deepEqual(choices.map(b=>b.textContent),['AYes, connect Gmail','BNot yet']);
+ assert.equal(x.d.querySelector('[data-message="a1"] .msg-choices')!==null,true,'under the reply');
+ choices[0].click();await flush();
+ const sent=x.requests('send_pip_message').at(-1);assert.ok(sent,'the tap is the reply');assert.equal(sent.request.text,'Yes, connect Gmail');
+});
+test('choices under an older reply are not offered, and words already typed are kept',async()=>{
+ const x=setup({links:[],messages:[message('u1','user','Hi'),message('a1','assistant','Shall I?',{choices:['Yes','No']}),message('u2','user','Yes')]});await openChat(x);
+ assert.equal(x.d.querySelector('.msg-choice'),null,'answered already');
+ const y=setup({links:[],messages:[message('u1','user','Hi'),message('a1','assistant','Which?',{choices:['Gmail','Calendar']})]});await openChat(y);
+ const box=y.d.getElementById('chatText');box.value='and also';box.dispatchEvent(new y.w.Event('input',{bubbles:true}));
+ y.d.querySelector('.msg-choice').click();await flush();
+ assert.equal(y.requests('send_pip_message').length,0,'not sent over your draft');
+ assert.equal(y.d.getElementById('chatText').value,'and also Gmail');
 });

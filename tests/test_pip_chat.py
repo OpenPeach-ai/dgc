@@ -34,6 +34,20 @@ class PipChatTests(unittest.TestCase):
     def raw(self, sent):
         return json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (sent["run"]["id"],)).fetchone()[0])
 
+    def test_a_reply_can_offer_choices_that_the_chat_lists_under_it(self):
+        # Grok's A/B card: the Pip offers "Yes, connect Gmail" / "Not yet"; the user's tap answers.
+        self.setup_job()
+        sent = self.send()
+        self.store.claim_next()
+        self.store.finish(sent["run"]["id"], result={"text": "Shall I connect Gmail?", "choices": ["Yes, connect Gmail", "  Not   yet "]})
+        reply = [m for m in pip_chat.list_messages(self.store, self.job["id"])["messages"] if m["role"] == "assistant"][0]
+        self.assertEqual(reply["choices"], ["Yes, connect Gmail", "Not yet"])
+        user = [m for m in pip_chat.list_messages(self.store, self.job["id"])["messages"] if m["role"] == "user"][0]
+        self.assertNotIn("choices", user)
+        for bad in (["Only one"], ["a", "b", "c", "d", "e"], ["Same", "same"], ["x" * 81, "y"], ["ok", 3], "Yes"):
+            with self.subTest(bad=bad), self.assertRaises(RegistryError):
+                pip_chat.validate_choices(bad)
+
     def test_persistent_history_idempotent_retry_and_key_conflict(self):
         self.setup_job()
         sent = self.send()

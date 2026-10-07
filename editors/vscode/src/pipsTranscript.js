@@ -26,7 +26,7 @@ export function replyParts(text) {
   return merged.length>8?[...merged.slice(0,7),merged.slice(7).join('\n\n')]:merged;
 }
 
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>''}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',choices=null}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   const pictures=user&&Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,4).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" alt="Image ${Number(i.index)+1}"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
   const size=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
@@ -34,11 +34,13 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
   const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`}`:split?`<div class="answer split">${replyParts(m.text).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(m.text)}</div></div>`;
+  // Grok's A/B card: the choices the Pip offered under its latest reply; a tap answers it.
+  const offered=!user&&Array.isArray(choices)&&choices.length?`<div class="msg-choices" role="group" aria-label="Answer ${esc(name)}">${choices.slice(0,4).map((c,i)=>`<button type="button" class="msg-choice" data-pip-choice="${esc(c)}"${canSend?'':' disabled'}><span class="msg-choice-key" aria-hidden="true">${'ABCD'[i]}</span><span>${esc(c)}</span></button>`).join('')}</div>`:'';
   const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${esc(m.status)}">${phase(m.status)}${m.status==='failed'||m.status==='cancelled'?' · No completed reply was recorded.':''}</p>`:'';
   const options=!user&&prompt?`${action('retry','Run this prompt again',m.id,!canSend)}${action('edit','Edit this prompt',m.id,false)}`:'';
   const details=`<details class="message-details" data-details="message-${esc(m.id)}"><summary title="${user?'Message details':'Response details'}" aria-label="${user?'Message details':'Response details'}">${transcriptIcon('info')}<span class="sr-only">${user?'Message details':'Response details'}</span></summary><div class="message-provenance"><dl><dt>${user?'Sent':'Saved'}</dt><dd>${esc(formatDate(m.created_at))}</dd>${!user&&m.model?`<dt>Model</dt><dd>${esc(m.model)}</dd>`:''}<dt>Status</dt><dd>${esc(m.status)}</dd></dl><button type="button" data-chat-run="${esc(m.run_id)}">${m.status==='failed'?'View error':'Run details'}</button></div></details>`;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading activity…':'Tool activity'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}" data-message="${esc(m.id)}"><span class="sr-only role">${esc(label)}</span>${activityRow}${body}${status}<div class="response-actions">${action('copy',user?'Copy message':'Copy response',m.id)}${options}${details}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}" data-message="${esc(m.id)}"><span class="sr-only role">${esc(label)}</span>${activityRow}${body}${offered}${status}<div class="response-actions">${action('copy',user?'Copy message':'Copy response',m.id)}${options}${details}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 export function activityMarkup(value,runId) {

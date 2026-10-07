@@ -94,6 +94,37 @@ CREATE TABLE IF NOT EXISTS pip_chat_files (
 """
 
 
+# Options a Pip offers under its reply, like Grok's A/B cards ("Yes, connect Gmail" / "Not yet"); the
+# user's tap sends one as their next message.
+CHOICES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_chat_choices (
+ message_id TEXT NOT NULL REFERENCES pip_chat_messages(id),
+ idx INTEGER NOT NULL CHECK(typeof(idx)='integer' AND idx BETWEEN 0 AND 3),
+ label TEXT NOT NULL CHECK(length(CAST(label AS BLOB)) BETWEEN 1 AND 240),
+ PRIMARY KEY(message_id, idx)
+);
+"""
+MAX_CHOICES = 4
+
+
+def validate_choices(value):
+    if (not isinstance(value, list) or not 2 <= len(value) <= MAX_CHOICES
+            or any(not isinstance(v, str) for v in value)):
+        raise RegistryError("invalid_choices", f"Offer 2 to {MAX_CHOICES} short choices.")
+    labels = [" ".join(v.split()) for v in value]
+    if any(not 1 <= len(v) <= 80 or not v.isprintable() for v in labels) or len(set(map(str.lower, labels))) != len(labels):
+        raise RegistryError("invalid_choices", "Each choice is a different short line, up to 80 characters.")
+    return labels
+
+
+def message_choices(db, message_id):
+    try:
+        rows = db.execute("SELECT label FROM pip_chat_choices WHERE message_id=? ORDER BY idx", (message_id,)).fetchall()
+    except Exception:
+        return []
+    return [r[0] for r in rows]
+
+
 def file_directory(directory, pip_id) -> Path:
     return image_directory(directory, pip_id).parent.parent / "chat_files" / pip_id
 
@@ -398,14 +429,16 @@ INTRO = ("This message is from DGC, not the user. The user has just created you 
          "named you \"{name}\". Write your first message to them. Say hello and who you are in one "
          "sentence. Guess from your name what they would like help with, then say what you can do for "
          "that now and what would need connecting or setting up first; do not claim a connection you "
-         "cannot see in your references. End with one short question that offers the next step. Keep it "
-         "warm and brief: two or three short paragraphs, no lists and no headings.")
+         "cannot see in your references. End with one short question that offers the next step, and offer "
+         "its two or three answers with offer_choices. Keep it warm and brief: two or three short paragraphs, "
+         "no lists and no headings.")
 CORE_INTRO = ("This message is from DGC, not the user. The user has just created you, Core, their Primary "
               "Pip. Write your first message to them. Say hello and that you are their Primary Pip: you "
               "help with everyday tasks, look after their other Pips and check in when you need them. Say "
               "what you can see from here (their other Pips or connected apps, if your references show "
               "any; otherwise say nothing is connected yet). End with one short question asking for the "
-              "one thing on their plate today. Two or three short paragraphs, no lists and no headings.")
+              "one thing on their plate today, and offer two or three likely answers with offer_choices. Two or "
+              "three short paragraphs, no lists and no headings.")
 
 
 def introduce(store, pip_id, actor, config):
@@ -647,7 +680,7 @@ def insert_user(store, pip, req, run_id, model, now):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "computer" in result:
         # A chat that used the Pip's computer: how many steps, and what it left waiting for the user.
@@ -676,9 +709,13 @@ def insert_reply(store, run, result, now):
     row = store.db.execute("SELECT workspace_id,pip_id FROM pip_chat_messages WHERE run_id=? AND role='user'", (run["id"],)).fetchone()
     if not row or (row["workspace_id"], row["pip_id"]) != (run["workspace_id"], run["pip_id"]):
         raise RegistryError("invalid_history", "The conversation run has no matching user message.")
+    choices = validate_choices(result["choices"]) if "choices" in result else []
+    reply_id = identifier("message")
     store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at) "
-                     "VALUES(?,?,?,?,?,?,?,?)", (identifier("message"), run["pip_id"], run["workspace_id"], run["id"],
+                     "VALUES(?,?,?,?,?,?,?,?)", (reply_id, run["pip_id"], run["workspace_id"], run["id"],
                      "assistant", text, run["manifest"]["model"], now))
+    for index, label in enumerate(choices):
+        store.db.execute("INSERT INTO pip_chat_choices VALUES(?,?,?)", (reply_id, index, label))
     from .pip_chat_continuity import commit
     commit(store, run, result, now)
 
@@ -725,6 +762,10 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             attached = message_files(store.db, row["id"])
             if attached:
                 message["files"] = attached
+        else:
+            offered = message_choices(store.db, row["id"])
+            if offered:
+                message["choices"] = offered
         amount = len(_json(message).encode())
         if size + amount > 96 * 1024:
             break

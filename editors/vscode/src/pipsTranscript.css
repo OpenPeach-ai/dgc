@@ -63,3 +63,10 @@
 /* Task-list markers are content, not the full-width inputs used by setup forms. */
 .message-body li.task-item{position:relative;list-style:none}
 .message-body li.task-item>input[type=checkbox]{position:absolute;left:-20px;top:3px;width:13px;height:13px;min-height:0;margin:0;padding:0;accent-color:var(--vscode-button-background,#7c5cff)}
+/* Grok's A/B card: the Pip's choices under its latest reply. */
+.msg-choices{display:flex;flex-direction:column;gap:6px;margin:8px 0 2px;max-width:420px}
+.msg-choice{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 12px;border:1px solid var(--pip-edge,var(--vscode-widget-border));border-radius:10px;background:transparent;color:var(--vscode-foreground);font:inherit;cursor:pointer}
+.msg-choice:hover:not(:disabled){border-color:var(--pip-accent,#6D49E8);background:color-mix(in srgb,var(--pip-accent,#6D49E8) 8%,transparent)}
+.msg-choice:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
+.msg-choice:disabled{opacity:.55;cursor:default}
+.msg-choice-key{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--pip-accent,#6D49E8);border:1px solid color-mix(in srgb,var(--pip-accent,#6D49E8) 45%,transparent)}

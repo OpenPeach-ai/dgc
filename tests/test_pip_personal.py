@@ -82,7 +82,7 @@ class PersonalTests(unittest.TestCase):
             def chat(client,messages,tools=None,**kwargs):
                 calls.append(messages)
                 self.assertEqual([t['function']['name'] for t in (tools or [])],
-                                 ['draft_pip_change', 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action', 'skill'] if chatting
+                                 ['draft_pip_change', 'draft_email', 'draft_calendar_event', 'list_connector_tools', 'draft_connector_action', 'offer_choices', 'skill'] if chatting
                                  else ['draft_email', 'draft_calendar_event', 'skill'])   # a task may only draft or load a skill's instructions (no connector grant here)
                 self.assertIn('UNTRUSTED_REFERENCE_SENTINEL',json.dumps(messages))
                 return ChatResult(content='Here is a suggested plan. No messages were sent.')
@@ -94,6 +94,22 @@ class PersonalTests(unittest.TestCase):
             self.assertTrue(calls)
             self.assertEqual(result['tools_called'],0)
             self.assertIn('No messages were sent',result['text'])
+
+    def test_a_chat_reply_is_all_the_pip_said_and_ends_at_its_choices(self):
+        # Filmed with a real model: the hello was written before offer_choices, then "Typo above —"
+        # after it; only the last text was saved. The reply is everything said before the choices.
+        from dgc.llm import LLMClient, ChatResult, ToolCall
+        job=self.make();run=pip_chat.send(self.store,job['id'],'Hi','hello','user',self.cfg)['run']
+        raw=json.loads(self.registry.db.execute('SELECT manifest FROM pip_runs WHERE id=?',(run['id'],)).fetchone()[0])
+        turns=iter([ChatResult(content='Hi, I am Gmail.',tool_calls=[ToolCall('c1','offer_choices',{'choices':['Yes, connect Gmail','Not yet']})]),
+                    ChatResult(content='Done, your choices are below.')])
+        with patch.dict(os.environ,{'DGC_SESSION_POLICY':pips._json(pips.native_policy(personal=True))}), \
+             patch.object(LLMClient,'chat',lambda *a,**k:next(turns)), patch('dgc.agent.discover_skills',return_value={}), \
+             patch('dgc.agent.load_memories',side_effect=AssertionError('No ambient memory')), \
+             patch('requests.sessions.Session.request',side_effect=AssertionError('No network')):
+            result=pips.execute_native(self.cfg,self.root,raw,lambda e:None)
+        self.assertEqual(result['text'],'Hi, I am Gmail.')
+        self.assertEqual(result['choices'],['Yes, connect Gmail','Not yet'])
 
     def test_native_personal_refuses_fabricated_tool_calls(self):
         from dgc.llm import LLMClient, ChatResult, ToolCall

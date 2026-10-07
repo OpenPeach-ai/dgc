@@ -653,6 +653,11 @@ created_at, created_by}`, returned as `{action, grant}`. `list_pip_action_grants
 in registry metadata (`pip_action_grant:<pip_id>:<grant_id>`, at most 20 per Pip), outside the
 job, and record `pip_action_granted` / `pip_action_grant_revoked`.
 
+**Choices** (API 43). A chat run offers `offer_choices {choices}` (2–4 distinct lines of up to 80
+characters); the reply keeps them in `pip_chat_choices` and `list_pip_messages` returns them as the
+assistant message's `choices`. The reply's text is everything the Pip said after the user's message,
+up to its `offer_choices` call.
+
 **A Pip's own apps** (API 43). A Personal Pip's chat and task runs offer `connect_app {app, why}`
 and `read_app {app, tool, arguments}`, which reach the controller over a per-run Unix socket
 (`pip_app_links.RunSocket`, token-checked, like the computer's). `connect_app` records a

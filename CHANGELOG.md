@@ -8,6 +8,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- A Pip's chat reply can offer 2 to 4 choices, like Grok's A/B cards ("Yes, connect Gmail" / "Not
+  yet"): the new `offer_choices` tool (chat runs only) saves them with the reply (registry schema 39,
+  `pip_chat_choices`), `list_pip_messages` returns them as the reply's `choices`, and a new Pip's
+  hello ends with its question's answers as choices. A chat reply is now everything the Pip said after
+  the user's message, in order (text before a tool call was lost: only the last text was saved), and
+  it ends where the Pip offered its choices.
 - A Personal Pip connects your apps from its own chat, like Grok's connectors. It asks with the new
   `connect_app` tool (the call records a card; registry schema 38 adds `pip_app_links`); the user's
   Connect makes DGC call Composio's `COMPOSIO_MANAGE_CONNECTIONS` over their Composio connection
