@@ -40,7 +40,7 @@ def _what(kind, payload) -> tuple[str, str]:
         return f"Send this email to {m.get('recipient_email', 'someone')}?", m.get("subject", "")
     if kind == "event":
         e = payload.get("event") or {}
-        return f"Add “{e.get('summary', 'an event')}” to your calendar?", e.get("start_datetime", "")
+        return f"Add “{e.get('summary', 'an event')}” to your calendar?", _when(e)
     a = payload.get("action") or payload
     call = a.get("call") or {}
     from .pip_plugins import owner
@@ -49,6 +49,17 @@ def _what(kind, payload) -> tuple[str, str]:
     except Exception:          # noqa: BLE001 - a name is all this reads
         found = None
     return f"Run {call.get('tool', 'an action')} in {found['display_name'] if found else a.get('server', 'an app')}?", ""
+
+
+def _when(event) -> str:
+    """'Sun 11 Oct, 1:00 PM' in the event's own time zone; the exact text when it won't read."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    try:
+        at = datetime.fromisoformat(str(event.get("start_datetime"))).astimezone(ZoneInfo(str(event.get("timezone"))))
+        return at.strftime("%a %d %b, %I:%M %p").replace(" 0", " ").lstrip("0")
+    except Exception:          # noqa: BLE001 - a label only
+        return str(event.get("start_datetime") or "")
 
 
 def _plugin_name(plugin) -> str:
