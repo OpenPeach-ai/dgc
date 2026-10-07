@@ -21,6 +21,14 @@ export function mountPips(options) {
   const embedded=root!==nativeDocument,owner=root.ownerDocument||nativeDocument,disposers=[];
   const remoteHost=options.host==='remote';
   let disposed=false,motionPaused=false;
+  // A notice says what just happened, then goes: longer ones stay long enough to read. Errors stay.
+  let noticeShown='',noticeTimer=0;
+  function noticeFades(){
+    if(!S.notice){noticeShown='';return;}
+    if(S.notice===noticeShown)return;
+    noticeShown=S.notice;window.clearTimeout(noticeTimer);
+    const shown=S.notice;noticeTimer=window.setTimeout(()=>{if(!disposed&&S.notice===shown){S.notice='';noticeShown='';render();}},Math.min(15000,4000+60*shown.length));
+  }
   if(embedded){
     const uri=options.stylesheetUri||root.host?.dataset.styleUri;
     if(options.stylesheetText){const style=owner.createElement('style');style.textContent=options.stylesheetText;root.append(style);disposers.push(()=>style.remove());}else if(uri){const link=owner.createElement('link');link.rel='stylesheet';link.href=uri;root.append(link);disposers.push(()=>link.remove());}
@@ -1361,6 +1369,7 @@ function simpleMarkup(){
 }
 function render() {
   if(disposed)return;
+  noticeFades();
   const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const selection=focus&&typeof focus.selectionStart==='number'?[focus.selectionStart,focus.selectionEnd]:null;
   const oldLog=document.querySelector('.conversation-log'),oldScroll=oldLog?.scrollTop||0,oldHeight=oldLog?.scrollHeight||0,atEnd=!oldLog||oldHeight-oldScroll-oldLog.clientHeight<32,oldFirst=oldLog?.querySelector('[data-message]')?.dataset.message;
   const opened=new Set([...document.querySelectorAll('details[open][data-details]')].map(e=>e.dataset.details));
@@ -1721,6 +1730,9 @@ function personalProposalBody(proposal){
 function proposalReview(id,reject=false) {
   const proposal=S.pip?.proposals?.find(p=>p.id===id);if(!proposal)return;
   const stale=proposal.expected_version!==S.pip.current_version;
+  // Two changes written for the same version: accepting one sets the other aside (the registry marks it
+  // superseded). Say so before, so the other one does not seem to have been approved with it.
+  const others=reject||stale?[]:(S.pip.proposals||[]).filter(p=>p.id!==proposal.id&&(p.approval_status||'pending')==='pending'&&p.expected_version===proposal.expected_version);
   let sourceUnsupported=false;try{sourceUnsupported=sourcePolicy(proposal.definition?.source_policy).mode==='current_tree'&&S.apiVersion<11;}catch{sourceUnsupported=true;}
   const pathTrigger=record(proposal.definition?.event_trigger)&&(Object.hasOwn(proposal.definition.event_trigger,'commit_paths')||proposal.definition.event_trigger.events?.includes('committed_paths_changed'));let pathUnsupported=pathTrigger&&S.apiVersion<22;try{if(pathTrigger)eventTrigger(proposal.definition.event_trigger);}catch{pathUnsupported=true;}
   const sessionTrigger=Array.isArray(proposal.definition?.event_trigger?.events)&&proposal.definition.event_trigger.events.includes('session_turn_completed'),sessionUnsupported=sessionTrigger&&S.apiVersion<18;
@@ -1732,6 +1744,7 @@ function proposalReview(id,reject=false) {
   // GitHub reads are shown whichever body variant reviewed the rest; a plan this view cannot read blocks acceptance.
   // A Personal Pip's computer is shown whenever the proposal keeps, gives or removes one.
   if(S.review&&personalPip()&&(S.pip?.computer_plan||proposal.definition?.computer_plan)){const label=v=>v?'Its own browser and files. Submits wait for your approval.':'None';S.review.body+=`<dl class="meta"><dt>Computer now</dt><dd>${label(S.pip.computer_plan)}</dd><dt>Computer after</dt><dd>${label(proposal.definition?.computer_plan)}</dd></dl>`;renderReview();}
+  if(S.review&&others.length){S.review.setsAside=others.length;S.review.body+=`<p class="notice">${others.length===1?'Another change for this Pip is waiting too. It was written for the same version, so accepting this one sets that one aside. It is not approved. Ask the Pip again if you still want it.':`${others.length} other changes for this Pip are waiting too. They were written for the same version, so accepting this one sets them aside. They are not approved. Ask the Pip again if you still want them.`}</p>`;renderReview();}
   if(S.review&&!personalPip()&&(S.pip?.github_plan||proposal.definition?.github_plan)){let section;try{if(proposal.definition?.github_plan)githubReadPlan(proposal.definition.github_plan);section=githubProposalMarkup(proposal);}catch{section='<p class="notice">These GitHub reads are not supported by this view. Update DGC before accepting.</p>';if(!reject)S.review.blocked=true;}S.review.body+=section;renderReview();}
 }
 function updateDraft(event) {
@@ -2166,7 +2179,8 @@ document.addEventListener('click',event=>{
         if(review.request.type==='record_workspace_context'){draft.contextTitle='';draft.contextContent='';}
         if(review.request.type==='accept_pip_update'){S.adaptationDirty=false;draft.adaptationReason='';S.scheduleDirty=false;S.modelDirty=false;draft.modelReason='';draft.scheduleReason='';}
         if(['accept_pip_update','reject_pip_update'].includes(review.request.type)&&S.approvalsLoaded)void loadApprovals();
-        S.notice=review.request.type==='review_pip_finding'?'Finding decision recorded. Workspace context was not changed.':review.request.type==='stop_pips'?'Global stop recorded. Runs are being cancelled.':review.request.type==='pips_enable'?'Local Pips disabled.':'Change recorded.';
+        const named=S.pip?.name||'This Pip',aside=review.setsAside?` ${review.setsAside===1?'The other waiting change was':`The ${review.setsAside} other waiting changes were`} set aside, not approved.`:'';
+        S.notice=review.request.type==='review_pip_finding'?'Finding decision recorded. Workspace context was not changed.':review.request.type==='stop_pips'?'Global stop recorded. Runs are being cancelled.':review.request.type==='pips_enable'?'Local Pips disabled.':review.request.type==='accept_pip_update'?`${named} is updated.${aside}`:review.request.type==='reject_pip_update'?`Dismissed. ${named} stays as it was.`:'Saved.';
       });break;
     }
   }
@@ -2209,7 +2223,7 @@ if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(fitChat
 // One bounded polling loop for the entire tab, paused while hidden; no timers per avatar or job.
 const pollingTimer=window.setInterval(()=>{broker.expire(Date.now());if(polling||!S.visible||document.hidden||!usable()||S.busy||S.review||S.create||!['runs','chat'].includes(S.tab))return;polling=true;void refresh(false).finally(()=>{polling=false;});},4000);
 motion();render();vscode.postMessage({type:'pipsReady'});
-return {async navigate(value){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;S.epoch++;broker.reset();window.clearInterval(pollingTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
+return {async navigate(value){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;window.clearTimeout(noticeTimer);S.epoch++;broker.reset();window.clearInterval(pollingTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
 
 }
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};

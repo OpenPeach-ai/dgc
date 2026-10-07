@@ -43,6 +43,12 @@
 
 ### Pips
 
+- Typing on a Pip computer's screen, such as a web address in its browser, no longer closes the screen.
+- Approving one of two waiting changes for the same Pip says first that the other will be set aside
+  (it was written for the same version, so it is not approved), and afterwards says what happened:
+  "India Market Brief is updated. The other waiting change was set aside, not approved." instead
+  of "Change recorded.". Notices in the Pips view go away after long enough to read them.
+- The faces in the quiet Pips row above your sessions have room between them.
 - Pips are characters you meet, not jobs you configure (Pips API 43). The first time, the
   Pips view introduces **Core**, your Primary Pip; **Create Core** opens its chat and Core says
   hello. **New Pip** is a character and a name; its chat opens on its own greeting, where it

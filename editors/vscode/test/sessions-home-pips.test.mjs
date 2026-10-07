@@ -106,9 +106,12 @@ test("when nothing is waiting, your Pips sit in a quiet row of faces; each opens
     const m = await page.evaluate(() => ({
       text: document.querySelector(".home-pips-quiet-text").textContent,
       faces: [...document.querySelectorAll(".home-pip-face-button")].map((b) => b.getAttribute("aria-label")),
+      boxes: [...document.querySelectorAll(".home-pip-face-button")].map((b) => b.getBoundingClientRect()).map((r) => [r.left, r.right]),
       rows: document.querySelectorAll(".home-pip-row").length }));
     assert.equal(m.text, "All quiet. Nothing is waiting for you.");
     assert.deepEqual(m.faces, ["Open Core", "Open Gmail"]);
+    // The founder: "the 3 pips faces are too close together and looks weird". Each face has room.
+    assert.ok(m.boxes[1][0] - m.boxes[0][1] >= 4, `faces apart, not overlapping: ${JSON.stringify(m.boxes)}`);
     assert.equal(m.rows, 0);
     assert.deepEqual(errors, []);
   } finally { await page.context().close(); }

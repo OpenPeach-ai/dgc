@@ -44,6 +44,80 @@ class ViewerInputTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.feed(b"\x63" + b"\x00" * 20)
 
+    def test_every_message_the_editors_novnc_sends_passes_whole(self):
+        """The founder typed a web address on a Pip's screen and it closed: noVNC sends keys as QEMU
+        extended key events (255) once Xtigervnc offers them, which the filter could not frame. These
+        bytes come from the noVNC the editor ships, so a new message there fails here, not live."""
+        import shutil
+        import subprocess
+        editor = Path(__file__).resolve().parents[1] / "editors" / "vscode"
+        node = shutil.which("node")
+        if not node or not (editor / "node_modules" / "@novnc" / "novnc" / "core" / "rfb.js").exists():
+            self.skipTest("needs node and the editor's node_modules (npm ci in editors/vscode)")
+        built = subprocess.run([node, "--input-type=module", "-e", NOVNC_MESSAGES], cwd=editor, stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, timeout=60, check=True).stdout
+        messages = [(name, bytes.fromhex(data)) for name, data in (line.split() for line in built.splitlines())]
+        self.assertEqual({name for name, _ in messages}, NOVNC_BUILDERS, "a noVNC message without a case here")
+        for name, message in messages:
+            with self.subTest(message=name):
+                seen = []
+                gate = pip_screen.ClientFilter(on_input=lambda: seen.append(1))
+                stream = HELLO + message + UPDATE
+                self.assertEqual(b"".join(gate.feed(stream[i:i + 5]) for i in range(0, len(stream), 5)), stream)
+                user_input = name.startswith(("key", "QEMU", "pointer", "extendedPointer", "clientCut", "extendedClipboard"))
+                self.assertEqual(len(seen), int(user_input), "keys, the mouse and the clipboard are the user's input")
+                watched = pip_screen.ClientFilter(watching=lambda: True)
+                self.assertEqual(watched.feed(stream), HELLO + (b"" if user_input else message) + UPDATE)
+
+    def test_a_qemu_message_other_than_keys_ends_the_stream(self):
+        gate = pip_screen.ClientFilter()
+        gate.feed(HELLO)
+        with self.assertRaises(ValueError):
+            gate.feed(b"\xff\x01" + b"\x00" * 10)
+
+
+# noVNC's own message builders (RFB.messages), each called once, printed as "name hex".
+NOVNC_BUILDERS = {"keyEvent", "QEMUExtendedKeyEvent", "pointerEvent", "extendedPointerEvent", "clientCutText",
+                  "clientCutTextExtended", "extendedClipboardProvide", "extendedClipboardNotify",
+                  "extendedClipboardRequest", "extendedClipboardCaps", "setDesktopSize", "clientFence",
+                  "enableContinuousUpdates", "pixelFormat", "clientEncodings", "fbUpdateRequest", "xvpOp"}
+NOVNC_MESSAGES = r"""
+import {JSDOM} from 'jsdom';
+const dom = new JSDOM('<!doctype html><body></body>');
+for (const k of ['window', 'document', 'navigator', 'HTMLElement', 'Image', 'KeyboardEvent', 'MutationObserver', 'Event', 'CustomEvent', 'EventTarget'])
+  Object.defineProperty(globalThis, k, {value: k === 'window' ? dom.window : dom.window[k], configurable: true});
+const {default: RFB} = await import(process.cwd() + '/node_modules/@novnc/novnc/core/rfb.js');
+const m = RFB.messages, text = new TextEncoder().encode('https://example.com');
+const calls = {
+  keyEvent: s => m.keyEvent(s, 0x61, 1),
+  QEMUExtendedKeyEvent: s => m.QEMUExtendedKeyEvent(s, 0x61, 1, 0x1e),
+  pointerEvent: s => m.pointerEvent(s, 40, 50, 1),
+  extendedPointerEvent: s => m.extendedPointerEvent(s, 40, 50, 1 << 7),
+  clientCutText: s => m.clientCutText(s, text),
+  clientCutTextExtended: s => m.clientCutText(s, text, true),
+  extendedClipboardProvide: s => m.extendedClipboardProvide(s, [1], ['https://example.com']),
+  extendedClipboardNotify: s => m.extendedClipboardNotify(s, [1]),
+  extendedClipboardRequest: s => m.extendedClipboardRequest(s, [1]),
+  extendedClipboardCaps: s => m.extendedClipboardCaps(s, [1, 2, 4, 8, 16], {1: 4096}),
+  setDesktopSize: s => m.setDesktopSize(s, 1280, 800, 0, 0),
+  clientFence: s => m.clientFence(s, 1 << 31, 'ab'),
+  enableContinuousUpdates: s => m.enableContinuousUpdates(s, true, 0, 0, 1280, 800),
+  pixelFormat: s => m.pixelFormat(s, 24, true),
+  clientEncodings: s => m.clientEncodings(s, [7, -258, -223, -316]),
+  fbUpdateRequest: s => m.fbUpdateRequest(s, true, 0, 0, 1280, 800),
+  xvpOp: s => m.xvpOp(s, 1, 2),
+};
+const extra = Object.keys(m).filter(k => !k.startsWith('_') && !(k in calls));
+if (extra.length) throw new Error('noVNC message without a case: ' + extra.join(' '));
+for (const [name, call] of Object.entries(calls)) {
+  const out = [];
+  const push = (v, n) => { for (let i = n - 1; i >= 0; i--) out.push((v >>> (8 * i)) & 255); };
+  call({sQpush8: v => push(v, 1), sQpush16: v => push(v, 2), sQpush32: v => push(v, 4),
+        sQpushBytes: b => out.push(...b), sQpushString: t => { for (const c of t) out.push(c.charCodeAt(0) & 255); }, flush() {}});
+  console.log(name, Buffer.from(out).toString('hex'));
+}
+"""
+
 
 class DesktopBoxTests(unittest.TestCase):
     def setUp(self):
@@ -226,6 +300,14 @@ class ServeRefusalTests(unittest.TestCase):
         self.assertEqual(events, [])
 
 
+def _drain(sock):
+    try:
+        while sock.recv(65536):
+            pass
+    except OSError:
+        pass
+
+
 def _desktop_ready():
     from dgc.pip_computer_box import capability
     return bool(os.environ.get("DGC_DESKTOP_PREFIX") or not pip_screen.components()["missing"]) \
@@ -297,6 +379,18 @@ class RealScreenTests(unittest.TestCase):
         while host.user_input_at == before and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertGreater(host.user_input_at, before, "the user's own input is noted")
+        # Typed as the editor's noVNC types once Xtigervnc offers it: QEMU extended key events. The
+        # screen stays open (it closed on the first key before) and the keys are the user's input.
+        before = host.user_input_at
+        for down in (1, 0):
+            viewer.sendall(struct.pack(">BBHII", 255, 0, down, 0x61, 0x1e))
+        deadline = time.monotonic() + 5
+        while host.user_input_at == before and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertGreater(host.user_input_at, before, "a typed key is the user's input")
+        viewer.sendall(struct.pack(">BBHHHH", 3, 0, 0, 0, pip_screen.WIDTH, pip_screen.HEIGHT))
+        self.assertNotEqual(viewer.recv(1), b"", "the screen is still open after typing")
+        threading.Thread(target=_drain, args=(viewer,), daemon=True).start()     # the rest of that frame
         # Closed by the user, the browser comes back from the dock's Browser icon, through DGC.
         with host.lock:
             host.browser.close()

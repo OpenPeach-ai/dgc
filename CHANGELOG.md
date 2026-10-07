@@ -8,6 +8,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Pips
 
+- Typing on a Pip computer's screen no longer closes it ("The computer's screen closed"). The editor's
+  viewer sends keys as QEMU extended key events once the desktop offers them, and DGC's input filter
+  did not know that message; it also knows noVNC's extended pointer event (mouse buttons 8 and up)
+  now, and had the xvp and SetDesktopSize message numbers the wrong way round.
 - When DGC is updated while the Pips runner is running, the runner starts itself again on the new
   version instead of stopping with "The local Pips controller stopped (RegistryError)". If it cannot
   (the database is newer than any DGC on disk), it stops and says DGC was updated, so you start it

@@ -303,7 +303,7 @@ class ClientFilter:
     user watches), and otherwise passed on and remembered, so a submit that follows the user's own
     input is theirs. Anything this filter cannot frame ends the connection rather than guess.
     """
-    INPUT = {4, 5, 6}                 # KeyEvent, PointerEvent, ClientCutText
+    INPUT = {4, 5, 6, 255}            # KeyEvent, PointerEvent, ClientCutText, QEMU extended KeyEvent
 
     def __init__(self, watching=lambda: False, on_input=lambda: None):
         self.watching, self.on_input = watching, on_input
@@ -313,9 +313,17 @@ class ClientFilter:
     def _length(self, data: bytes) -> int | None:
         """The full length of the message at the start of data, or None if more bytes are needed."""
         kind = data[0]
-        fixed = {0: 20, 3: 10, 4: 8, 5: 6, 150: 10, 251: 4}
+        fixed = {0: 20, 3: 10, 4: 8, 150: 10, 250: 4}
         if kind in fixed:
             return fixed[kind]
+        if kind == 5:                 # PointerEvent: 7 bytes when the mask's marker bit asks for buttons 8+
+            return None if len(data) < 2 else 7 if data[1] & 0x80 else 6
+        if kind == 255:               # QEMU client message: only the extended KeyEvent (noVNC's keys)
+            if len(data) < 2:
+                return None
+            if data[1] != 0:
+                raise ValueError(f"unknown QEMU viewer message {data[1]}")
+            return 12
         if kind == 2:                 # SetEncodings: count at 2..4, 4 bytes each
             return None if len(data) < 4 else 4 + 4 * int.from_bytes(data[2:4], "big")
         if kind == 6:                 # ClientCutText: length at 4..8 (negative means extended)
@@ -325,7 +333,7 @@ class ClientFilter:
             return 8 + abs(size)
         if kind == 248:               # ClientFence: payload length at 8
             return None if len(data) < 9 else 9 + data[8]
-        if kind == 252:               # SetDesktopSize: screens at 6, 16 bytes each
+        if kind == 251:               # SetDesktopSize: screens at 6, 16 bytes each
             return None if len(data) < 8 else 8 + 16 * data[6]
         raise ValueError(f"unknown viewer message {kind}")
 

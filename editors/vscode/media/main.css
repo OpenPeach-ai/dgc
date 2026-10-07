@@ -214,9 +214,8 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .home-pip-badge { flex:none; min-width:20px; height:20px; padding:0 6px; border-radius:10px; display:inline-flex; align-items:center;
   justify-content:center; background:var(--accent-fill); color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); font-variant-numeric:tabular-nums; }
 #sessions-host .home-pips-quiet { display:flex; align-items:center; gap:var(--sp-2); padding:0 var(--sp-1); min-width:0; }
-#sessions-host .home-pips-faces { display:inline-flex; flex:none; }
+#sessions-host .home-pips-faces { display:inline-flex; flex:none; gap:var(--sp-1); }
 #sessions-host .home-pip-face-button { display:inline-flex; padding:1px; border:0; border-radius:50%; background:transparent; cursor:pointer; }
-#sessions-host .home-pip-face-button + .home-pip-face-button { margin-left:-4px; }
 #sessions-host .home-pip-face-button:hover { transform:translateY(-1px); }
 #sessions-host .home-pips-quiet-text { min-width:0; color:var(--muted); font:var(--w-reg) var(--t-xs)/1.3 var(--sans); }
 @media (prefers-reduced-motion: reduce) { #sessions-host .home-pip-face-button:hover { transform:none; } }
