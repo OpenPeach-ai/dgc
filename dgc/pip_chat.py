@@ -429,12 +429,18 @@ CHECK_DONE = ("This message is from DGC, not the user. The user says they finish
 APP_CONNECTED = ("This message is from DGC, not the user. The user connected {app} to you ({label}). Read it with "
                  "read_app now if that helps with what they asked, then carry on in a short message. To send or change "
                  "anything there, prepare a draft; it waits for their Allow.")
-PLUGIN_RAN = ("This message is from DGC, not the user. The user allowed {tool} in {plugin}. {outcome}{answer}"
+PLUGIN_RAN = ("This message is from DGC, not the user. The user allowed {tool} in {plugin}. {outcome}"
               "Then carry on with what they asked, in a short message.")
-PLUGIN_DONE = "It ran. "
-PLUGIN_UNKNOWN = ("{plugin} did not confirm it, so it may or may not have happened. Do not run it again; if it changes "
-                  "anything, tell the user to check in {plugin}. ")
-PLUGIN_ANSWER = "Read what it answered with plugin_answer (that does not run it again). "
+PLUGIN_DONE = "It ran. Read what it answered with plugin_answer (that does not run it again). "
+# An answer {plugin} did not confirm is usually its own error (Aave: "needs a market name"): the Pip
+# may fix the inputs and try again. Told only "do not run it again", a Pip told the user it was no
+# longer allowed to use Aave.
+PLUGIN_ERROR = ("{plugin} did not confirm it. Read what it answered with plugin_answer (that does not run it again). "
+                "If it reported an error in the inputs, call it again with corrected inputs: {plugin} is still allowed "
+                "for you, and that shows a new Allow card. If it may have changed something, do not repeat it; tell "
+                "the user to check in {plugin}. ")
+PLUGIN_UNKNOWN = ("{plugin} did not answer, so it may or may not have happened. {plugin} is still allowed for you, but do "
+                  "not repeat it; if it changes anything, tell the user to check in {plugin}. ")
 PLUGIN_ALLOWED = ("This message is from DGC, not the user. The user allowed you to use {plugin}. See its tools with "
                   "plugin_tools, then call the one you need with call_plugin in this turn, and carry on with what they "
                   "asked in a short message. A [reads] tool answers at once; any other tool shows an Allow card under your "
@@ -493,8 +499,8 @@ def continue_after_plugin_action(store, pip_id, action_id, plugin, tool, config,
     """The chat's next turn once a plugin action the Pip prepared has run on the user's Allow."""
     key = PLUGINS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
     plugin, tool = str(plugin)[:80], str(tool)[:160]
-    text = PLUGIN_RAN.format(tool=tool, plugin=plugin, outcome=PLUGIN_DONE if confirmed else PLUGIN_UNKNOWN.format(plugin=plugin),
-                             answer=PLUGIN_ANSWER if answered else "")
+    outcome = (PLUGIN_DONE if confirmed and answered else PLUGIN_ERROR if answered else PLUGIN_UNKNOWN).format(plugin=plugin)
+    text = PLUGIN_RAN.format(tool=tool, plugin=plugin, outcome=outcome)
     return send(store, pip_id, text, key, "local-apps", config, _intro=True)
 
 

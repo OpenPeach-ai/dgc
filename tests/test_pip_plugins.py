@@ -320,6 +320,26 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         other = self.session.call(self.registry, "call_plugin", {"plugin": "airtable", "tool": "create_record", "arguments": {"table": "Other"}})
         self.assertIn("draft", other, "a different call asks again")
 
+    def test_an_error_it_answered_lets_the_pip_try_again_and_says_it_is_still_allowed(self):
+        # Take 6 (2026-10-07): Aave answered get_reserve_details with an error ("needs a market name").
+        # Told only "do not run it again", the Pip said Aave was no longer allowed for it.
+        from dgc import pip_chat
+        sent = []
+        with patch("dgc.pip_chat.send", lambda store, pip_id, text, key, *a, **kw: sent.append(text)):
+            pip_chat.continue_after_plugin_action(self.store, self.pip_id, "appaction_" + "1" * 32, "Aave", "get_reserve_details",
+                                                  self.cfg, confirmed=False, answered=True)
+            pip_chat.continue_after_plugin_action(self.store, self.pip_id, "appaction_" + "2" * 32, "Aave", "supply",
+                                                  self.cfg, confirmed=False, answered=False)
+            pip_chat.continue_after_plugin_action(self.store, self.pip_id, "appaction_" + "3" * 32, "Aave", "get_markets",
+                                                  self.cfg, confirmed=True, answered=True)
+        error, silent, done = sent
+        self.assertIn("call it again with corrected inputs: Aave is still allowed for you", error)
+        self.assertIn("plugin_answer", error)
+        self.assertIn("did not answer", silent)
+        self.assertIn("still allowed for you, but do not repeat it", silent)
+        self.assertNotIn("plugin_answer", silent, "nothing to read")
+        self.assertIn("It ran. Read what it answered with plugin_answer", done)
+
     def test_a_saved_credential_never_reaches_the_pip_but_a_coins_token_address_does(self):
         # The live run (2026-10-07): Aave's get_markets answer names each coin's "underlyingToken", the
         # name-based redaction rules read that as a credential, and DGC refused the whole answer.
