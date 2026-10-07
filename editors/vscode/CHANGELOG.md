@@ -83,6 +83,12 @@
   it read from your apps waits as "Let Ava put this on …?" with Allow once. Neither has Always allow.
 - **Pips settings → Plugins** shows which Pips use each plugin, with Remove for one, a count past 50,
   and the plugins added that no Pip uses.
+- **Your own OAuth app for a remote MCP server.** Settings → MCP servers → a remote server has **Your own
+  OAuth app**: its Client ID, Client secret and a fixed Callback port, for a service that doesn't let DGC
+  register itself (Asana, Zoom, Docusign, or a Google app of your own). The form shows the redirect URL
+  to add at the service (`http://localhost:<port>/oauth/callback`). The secret is kept in the editor's
+  secret storage and handed to the sign-in bridge in an owner-only file, never on its command line;
+  a blank secret keeps the saved one for the same client, and removing the server deletes the file.
 - The 41 vendor plugins and Context7 show their own logos in Settings → Plugins (bundled; sources in
   `media/plugin-logos/SOURCES.md`); Google Workspace shows Google's mark.
 - A search that finds no Pip says it looked in names, instructions and chats. Search snippets in

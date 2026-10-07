@@ -134,9 +134,16 @@ type ManagedMcpServer = {
   args: string[];
   envNames: string[];
   logLevel: string;
+  // Your own OAuth app at the vendor (Asana, Zoom, Docusign, a Google app of your own): its public
+  // client id and the fixed callback port registered there. The secret lives in SecretStorage.
+  oauth?: { clientId: string; port: number };
 };
 
-type ManagedMcpSecrets = { env?: Record<string, string>; token?: string };
+type ManagedMcpSecrets = { env?: Record<string, string>; token?: string; oauthSecret?: string };
+const OAUTH_CLIENT_ID = /^[A-Za-z0-9._:@\/+=-]{3,300}$/;
+const validOauth = (value: any): value is { clientId: string; port: number } => !!value && typeof value === "object"
+  && typeof value.clientId === "string" && OAUTH_CLIENT_ID.test(value.clientId)
+  && Number.isInteger(value.port) && value.port >= 1024 && value.port <= 65535;
 
 type ProviderSecretId = "apiKey" | "subagentApiKey" | "fallbackApiKey";
 type ProviderSecretMutation = {
@@ -279,6 +286,8 @@ function managedMcpIdentity(item: ManagedMcpServer): string {
     target: item.target,
     args: item.args,
     envNames: item.envNames,
+    // Only when set, so a server without its own app keeps the identity (and the secrets) it had.
+    ...(item.oauth ? { oauth: item.oauth } : {}),
   });
   return createHash("sha256").update(publicIdentity, "utf8").digest("hex");
 }
@@ -3118,7 +3127,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // was working, where it then outlived leaving the section.
     const settingsRejection = ev.type === "command_rejected" && SETTINGS_REJECTIONS.includes(String(ev.command || ""));
     if (this.settingsEditor && (settingsRejection || ["config", "usage_report", "pip_usage_report", "mcp_servers"].includes(ev.type))) {
-      this.settingsEditor.webview.postMessage({ type: "event", event: ev });
+      const managed = ev.type === "mcp_servers" ? new Map(this.managedMcpServers().map((m) => [m.name, m])) : null;
+      // The form shows a server's own OAuth app (its public client id and port); never its secret.
+      const event = managed && Array.isArray((ev as any).items) ? { ...ev, items: (ev as any).items.map((item: any) => {
+        const own = managed.get(item?.name)?.oauth;
+        return own ? { ...item, oauth_client_id: own.clientId, oauth_port: own.port } : item;
+      }) } : ev;
+      this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
       const row = (ev as any).items?.find((item: any) => item.name === this.pendingSignInServer);
@@ -4336,6 +4351,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         "emergency", "off"].includes(item.logLevel) ? item.logLevel : "warning";
       safe.push({ name: item.name, transport: item.transport, target,
                   args, envNames, logLevel,
+                  ...(item.transport === "remote" && validOauth(item.oauth) ? { oauth: { clientId: item.oauth.clientId, port: item.oauth.port } } : {}),
                   ...(item.connector && APP_CONNECTORS[item.connector] && item.name === item.connector
                     ? { connector: item.connector, connectorLicense: String(item.connectorLicense || "") } : {}) });
     }
@@ -4349,6 +4365,27 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       });
     }
     return safe;
+  }
+
+  // Your own OAuth app: mcp-remote reads its client id and secret from an owner-only file (never from
+  // argv, where other local users could see a secret) and listens for the sign-in on the fixed port the
+  // app registered: http://localhost:<port>/oauth/callback.
+  private oauthAppFile(name: string): string {
+    return join(homedir(), ".dgc", "mcp-oauth", `${name}.json`);
+  }
+
+  private oauthAppArgs(item: ManagedMcpServer, secrets: ManagedMcpSecrets): string[] {
+    if (item.transport !== "remote" || !validOauth(item.oauth)) return [];
+    const file = this.oauthAppFile(item.name);
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    const body = JSON.stringify({ client_id: item.oauth.clientId,
+      ...(secrets.oauthSecret ? { client_secret: secrets.oauthSecret } : {}),
+      redirect_uris: [`http://localhost:${item.oauth.port}/oauth/callback`] });
+    const temp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(temp, body, { mode: 0o600 });
+    fs.renameSync(temp, file);
+    fs.chmodSync(file, 0o600);
+    return [String(item.oauth.port), "--static-oauth-client-info", `@${file}`];
   }
 
   private mcpSecretKey(name: string): string {
@@ -4381,17 +4418,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const token = typeof value.token === "string" && value.token.length <= 16_384
       && !value.token.includes("\0") ? value.token : "";
-    return { env, token };
+    const oauthSecret = typeof value.oauth_secret === "string" && value.oauth_secret.length <= 1024
+      && !/[\s\0]/.test(value.oauth_secret) ? value.oauth_secret : "";
+    return { env, token, ...(oauthSecret ? { oauthSecret } : {}) };
   }
 
   private async storeMcpSecrets(item: ManagedMcpServer, value: ManagedMcpSecrets): Promise<void> {
     const env = value.env && typeof value.env === "object" ? value.env : {};
-    if (!Object.keys(env).length && !value.token) {
+    if (!Object.keys(env).length && !value.token && !value.oauthSecret) {
       await this.context.secrets.delete(this.mcpSecretKey(item.name));
       return;
     }
     await this.context.secrets.store(this.mcpSecretKey(item.name), JSON.stringify({
       identity: managedMcpIdentity(item), env, token: value.token || "",
+      ...(value.oauthSecret ? { oauth_secret: value.oauthSecret } : {}),
     }));
   }
 
@@ -4430,7 +4470,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // handshake would unnecessarily restart the process (and can duplicate a remote OAuth flow).
     if (setup && !hasStoredSecrets) { return true; }
     const baseArgs = item.transport === "remote"
-      ? ["-y", "mcp-remote", item.target]
+      ? ["-y", "mcp-remote", item.target, ...this.oauthAppArgs(item, secrets)]
       : item.args.slice(0, 128);
     const runtimeArgs = [...baseArgs];
     const envNames = item.envNames.slice(0, 64);
@@ -4595,6 +4635,27 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const secrets: ManagedMcpSecrets = {
       env, token: transport === "remote" ? (tokenInput || savedSecrets.token || "") : "",
     };
+    // Your own OAuth app (remote only): a client id and the fixed port registered at the vendor; the
+    // secret is optional (a public client), and blank keeps the saved one for the same client id.
+    let oauth: { clientId: string; port: number } | undefined;
+    const clientId = String(values.oauth_client_id || "").trim();
+    if (transport === "remote" && clientId) {
+      const port = Number(String(values.oauth_port || "").trim());
+      oauth = { clientId, port };
+      if (!validOauth(oauth)) {
+        void vscode.window.showErrorMessage(
+          "Your own OAuth app needs its client ID (letters, digits and . _ : @ / + = -) and a callback port from 1024 to 65535.");
+        return false;
+      }
+      const secretInput = String(values.oauth_client_secret || "").trim();
+      if (secretInput.length > 1024 || /[\s\0]/.test(secretInput)) {
+        void vscode.window.showErrorMessage("Paste the client secret as one line.");
+        return false;
+      }
+      const sameClient = previous?.oauth?.clientId === clientId;
+      const kept = sameClient && !clearSecrets ? originalSecrets.oauthSecret || "" : "";
+      if (secretInput || kept) secrets.oauthSecret = secretInput || kept;
+    }
     const declaredEnvNames = [...new Set([...referencedEnvNames, ...Object.keys(env)])].slice(0, 64);
     if (transport === "stdio") {
       secrets.env = Object.fromEntries(
@@ -4602,7 +4663,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const item: ManagedMcpServer = {
       name, transport, target, args: transport === "stdio" ? args : [],
-      envNames: declaredEnvNames, logLevel,
+      envNames: declaredEnvNames, logLevel, ...(oauth ? { oauth } : {}),
       ...(connector ? {connector: connector.id, connectorLicense: connector.license} : previous?.connector ? {connector: previous.connector, connectorLicense: previous.connectorLicense} : {}),
     };
     const be = this.ensureBackend();
@@ -4712,6 +4773,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.context.globalState.update("dgc.managedMcpServers.v1",
         existingManaged.filter((item) => item.name !== name));
       await this.context.secrets.delete(this.mcpSecretKey(name));
+      if (previous.oauth) fs.rmSync(this.oauthAppFile(name), { force: true });   // its own app's secret goes too
       this.settingsEditor?.webview.postMessage({ type: "mcpSaved", ok: true });
     } catch (err: any) {
       let restored = false;

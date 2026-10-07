@@ -42,3 +42,5 @@ body.vscode-high-contrast{--line:#888;--border-strong:#fff;--muted:#ddd}
 .connector-heading{display:flex;align-items:center;gap:14px}.connector-heading h3{margin:0}.connector-heading p{margin:5px 0 0;color:var(--muted);font-size:12px}.connector-panel .note{font-size:11px;line-height:1.6}.connector-panel .logo[alt=Composio]{background:#262626;border-radius:10px;padding:7px}
 .retired-plugins{border-top:1px solid var(--line);margin-top:28px;padding-top:18px}.retired-plugins>summary{cursor:pointer;color:var(--muted);font-size:12px}.plugin-connections{margin:28px 0}
 @media(max-width:660px){.connector-heading{flex-wrap:wrap}.connector-heading .actions{margin-left:0}.connector-panel{padding:14px}.connector-heading .copy{min-width:140px}}
+/* Your own OAuth app on a remote MCP server: client id, secret and the fixed callback port. */
+.oauth-app{display:grid;gap:12px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0}.oauth-app legend{padding:0 6px;font-weight:500}.oauth-app legend .note{display:block;font-weight:400;margin-top:2px}.oauth-app code{font-family:var(--mono);color:var(--text)}

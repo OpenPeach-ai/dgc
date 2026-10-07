@@ -1051,6 +1051,37 @@ test("managed MCP secrets replay only across an exact public identity", async ()
     "malformed SecretStorage records must be purged rather than repeatedly retained");
 });
 
+test("your own OAuth app: the client file is owner-only, the secret stays out of argv and settings, and blank keeps it", async () => {
+  const home = mkdtempSync(join(scratch, "oauth-home-")), priorHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const h = mcpTransactionHarness([]);
+    await h.provider.saveMcpServer({ name: "asana", transport: "remote", target: "https://mcp.asana.com/v2/mcp", log_level: "warning",
+      oauth_client_id: "1209876543210", oauth_client_secret: "s3cr3t-value", oauth_port: "3334" });
+    const file = join(home, ".dgc", "mcp-oauth", "asana.json");
+    const upsert = h.commands.find((c) => c.type === "upsert_mcp_server");
+    assert.deepEqual(upsert.persisted.args, ["-y", "mcp-remote", "https://mcp.asana.com/v2/mcp", "3334", "--static-oauth-client-info", "@" + file]);
+    assert.equal(JSON.stringify(upsert).includes("s3cr3t-value"), false, "the secret never travels in argv or the saved spec");
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { client_id: "1209876543210", client_secret: "s3cr3t-value",
+      redirect_uris: ["http://localhost:3334/oauth/callback"] });
+    assert.equal((await import("node:fs")).statSync(file).mode & 0o777, 0o600);
+    assert.deepEqual(h.catalog()[0].oauth, { clientId: "1209876543210", port: 3334 });
+    assert.equal(JSON.stringify(h.catalog()).includes("s3cr3t"), false, "settings keep the public client id only");
+    assert.match(h.rawSecrets.get("dgc.mcp.asana") || "", /s3cr3t-value/, "the secret is in SecretStorage");
+    await h.provider.saveMcpServer({ original_name: "asana", name: "asana", transport: "remote", target: "https://mcp.asana.com/v2/mcp",
+      log_level: "warning", oauth_client_id: "1209876543210", oauth_client_secret: "", oauth_port: "3334" });
+    assert.equal(JSON.parse(readFileSync(file, "utf8")).client_secret, "s3cr3t-value", "blank keeps the saved secret");
+    await h.provider.saveMcpServer({ original_name: "asana", name: "asana", transport: "remote", target: "https://mcp.asana.com/v2/mcp",
+      log_level: "warning", oauth_client_id: "999", oauth_client_secret: "", oauth_port: "3334" });
+    assert.equal("client_secret" in JSON.parse(readFileSync(file, "utf8")), false, "another app never inherits the secret");
+    await h.provider.saveMcpServer({ name: "bad", transport: "remote", target: "https://mcp.example.com/mcp", log_level: "warning",
+      oauth_client_id: "abc", oauth_port: "80" });
+    assert.match(notices.errors.at(-1) || "", /callback port from 1024 to 65535/);
+  } finally {
+    if (priorHome === undefined) delete process.env.HOME; else process.env.HOME = priorHome;
+  }
+});
+
 test("busy MCP removal leaves GlobalState and SecretStorage untouched", async () => {
   const item = stdioMcp("old", "/usr/bin/old-mcp", ["--safe"], ["TOKEN"]);
   const h = mcpTransactionHarness([item]);
