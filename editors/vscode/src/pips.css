@@ -432,3 +432,6 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .ctx-split{display:flex;justify-content:space-between;gap:8px;margin:4px 0 10px;color:var(--muted);font:500 10px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
 .composer-chip.with-text{width:auto;padding:0 6px}
 .composer-ctx-pct{font-size:11px;font-variant-numeric:tabular-nums}
+/* DGC's working row: (time · ↓ tokens) after what the Pip is doing; and what each reply took. */
+.pip-working-meta{margin-left:-4px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted)}
+.reply-stats{margin-left:6px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}

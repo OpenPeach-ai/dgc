@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
-    "list_pip_plugins", "list_pip_plugin_uses", "get_pip_chat_context",
+    "list_pip_plugins", "list_pip_plugin_uses", "get_pip_chat_context", "list_pip_reply_stats",
     "list_pip_routines", "list_pip_shared", "get_pip_computers", "list_pip_apps",
     "list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal", "get_pip_computer_desktop",
     "get_pip_message_image", "get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames",
@@ -205,7 +205,7 @@ API43_MUTATIONS |= {'set_pip_profile', 'update_pip_computers', 'reset_pip_comput
 READ_COMMANDS |= API43_READS
 MUTATION_COMMANDS |= API43_MUTATIONS
 # API 44: a Personal Pip's plugins. It asks to use one; you allow it, or not, on its card; local only.
-API44_READS = frozenset({'list_pip_plugins', 'list_pip_plugin_uses', 'get_pip_chat_context'})
+API44_READS = frozenset({'list_pip_plugins', 'list_pip_plugin_uses', 'get_pip_chat_context', 'list_pip_reply_stats'})
 API44_MUTATIONS = frozenset({'allow_pip_plugin', 'decline_pip_plugin'})
 READ_COMMANDS |= API44_READS
 MUTATION_COMMANDS |= API44_MUTATIONS
@@ -215,6 +215,7 @@ COMMAND_FIELDS = {
     'decline_pip_plugin': frozenset({'pip_id', 'grant_id'}),
     'list_pip_plugin_uses': frozenset(),
     'get_pip_chat_context': frozenset({'pip_id', 'context_size'}),
+    'list_pip_reply_stats': frozenset({'pip_id', 'run_ids'}),
     'set_pip_profile': frozenset({'pip_id', 'changes'}),
     'list_pip_shared': frozenset({'pip_id', 'kind'}),
     'get_pip_computers': frozenset(),

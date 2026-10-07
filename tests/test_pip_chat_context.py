@@ -45,3 +45,56 @@ class ChatContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReplyActivityTests(unittest.TestCase):
+    """A Pip's reply says what it is doing, as DGC's chat does, and reads as it is written."""
+
+    def ui(self):
+        from dgc.pips import _ConversationUI
+        events = []
+        cfg = type("Cfg", (), {"get": lambda self, key, default=None: default})()
+        return _ConversationUI(events.append, cfg), events
+
+    def test_thinking_writing_and_tools_each_said_once_per_change(self):
+        ui, events = self.ui()
+        ui.on_thinking("weighing it")
+        ui.on_thinking("still weighing")
+        ui.tool_call("read_app", {})
+        ui.on_text("Here")
+        ui.on_text(" it is.")
+        states = [(e["state"], e["message"]) for e in events if e["kind"] == "progress"]
+        self.assertEqual([s for s, _ in states], ["thinking", "tool", "responding"])
+        self.assertEqual(states[-1][1], "Writing")
+        self.assertTrue(states[1][1], "the tool has a verb")
+
+    def test_a_short_reply_streams_within_a_quarter_second(self):
+        ui, events = self.ui()
+        clock = [100.0]
+        with patch("dgc.pips.time.monotonic", lambda: clock[0]):
+            ui.stream_at = clock[0]
+            ui.on_text("Hello there")
+            self.assertEqual([e for e in events if e["kind"] == "text_delta"], [], "not yet")
+            clock[0] += 0.3
+            ui.on_text(", Ava")
+        deltas = "".join(e["text"] for e in events if e["kind"] == "text_delta")
+        self.assertTrue(deltas.startswith("Hello there"), deltas)
+
+
+class ReplyStatsTests(unittest.TestCase):
+    setUp = fixtures.LocalPipsTests.setUp
+
+    def test_each_reply_says_how_long_it_took_and_its_tokens(self):
+        from dgc.pip_chat import reply_stats
+        pip = self.store.create(self.registry.personal()["id"], "Ava", "Keep my plans", "local-console")
+        run = pip_chat.send(self.store, pip["id"], "Plan my week", "first", "editor-user", self.cfg)["run"]
+        self.store.claim_next()
+        self.store.finish(run["id"], result={"text": "Done.", "usage": {"input_tokens": 1200, "output_tokens": 340, "requests": 2,
+                                                                       "cached_input_tokens": 0, "reasoning_tokens": 0}})
+        [one] = reply_stats(self.store, pip["id"], [run["id"]])["stats"]
+        self.assertEqual((one["input_tokens"], one["output_tokens"], one["requests"], one["status"]), (1200, 340, 2, "succeeded"))
+        self.assertIsInstance(one["seconds"], float)
+        for bad in ([], ["run_x"], ["run_" + "a" * 32] * 51, "run_" + "a" * 32):
+            with self.subTest(bad=bad), self.assertRaises(RegistryError):
+                reply_stats(self.store, pip["id"], bad)
+        self.assertEqual(reply_stats(self.store, pip["id"], ["run_" + "f" * 32])["stats"], [], "another run is not this Pip's")

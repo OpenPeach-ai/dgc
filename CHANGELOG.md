@@ -46,6 +46,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - Sending a message to a Personal Pip no longer waits for every workflow connector to list its
   tools: the list is kept for five minutes (one after a connector did not answer), and an action
   still checks its tool before it runs.
+- A Personal Pip's reply reports what it is doing: thinking (DGC used to drop it), writing, and each tool
+  it uses, one event per change; its text is sent every quarter second instead of every 256
+  characters. `list_pip_reply_stats` (Pips API 44) says what each reply took: its time, tokens and
+  model requests.
 - `get_pip_chat_context` (Pips API 44) estimates how much of the context window a Personal Pip's
   chat takes in its next reply, for the prompt box's meter.
 - **Plugins in Pips: each Pip asks first.** A Personal Pip can use the plugins you added to DGC,

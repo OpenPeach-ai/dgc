@@ -84,7 +84,7 @@ test('the chat never shows DGC\'s introduction turn as yours, and shows the Pip 
  const x=setup({jobs:[gmail],messages:{[gmail.id]:[intro]},active:{pip:gmail.id}});await x.drain();
  x.click(`[data-job="${gmail.id}"]`);await x.drain();
  assert.doesNotMatch(x.d.querySelector('.conversation-log').textContent,/from DGC/);
- assert.match(x.d.querySelector('.pip-working')?.textContent||'',/Gmail is working/,'Gmail is writing its hello');
+ assert.match(x.d.querySelector('.pip-working')?.textContent||'',/Gmail · Working ?\(\d+s · ↓ \d+ tok\)/,'Gmail is writing its hello, with DGC’s working row');
  const later=setup({jobs:[gmail],messages:{[gmail.id]:[{...intro,status:'succeeded'},message('message_2','assistant','Hi! I am Gmail.',gmail.id)]}});await later.drain();
  later.click(`[data-job="${gmail.id}"]`);await later.drain();
  assert.match(later.d.querySelector('.conversation-log').textContent,/Hi! I am Gmail/);assert.doesNotMatch(later.d.querySelector('.conversation-log').textContent,/from DGC/);
@@ -97,7 +97,7 @@ test('while a Pip answers it is in the chat at work, with its name, and its repl
  const asked=message('message_1','user','Can you check my inbox?',gmail.id,{status:'running',created_at:'2026-10-06T10:00:00.000Z'});
  const x=setup({jobs:[gmail],messages:{[gmail.id]:[asked]},active:{pip:gmail.id}});await x.drain();
  x.click(`[data-job="${gmail.id}"]`);await x.drain();
- const working=x.d.querySelector('.pip-working');assert.ok(working,'not only for its hello');assert.match(working.textContent,/Gmail is working/);
+ const working=x.d.querySelector('.pip-working');assert.ok(working,'not only for its hello');assert.match(working.textContent,/Gmail · Working/);
  assert.equal(working.querySelector('.avatar').dataset.pose,'working');
  const done=setup({jobs:[gmail],messages:{[gmail.id]:[{...asked,status:'succeeded'},message('message_2','assistant','Hi!\n\nYour inbox has 3 new emails.\n\nWant a summary?',gmail.id,{created_at:'2026-10-06T10:00:05.000Z'})]}});await done.drain();
  done.click(`[data-job="${gmail.id}"]`);await done.drain();

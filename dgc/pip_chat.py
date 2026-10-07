@@ -953,3 +953,37 @@ def validate_context(value):
         if not valid:
             raise RegistryError("invalid_history", "The previous result reference has an invalid classification.")
     return value
+
+
+def _instant(text):
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def reply_stats(store, pip_id, run_ids) -> dict:
+    """What each reply took, for the line under it in the chat: its time and its tokens."""
+    if (not isinstance(run_ids, list) or not 1 <= len(run_ids) <= 50
+            or any(not isinstance(r, str) or not re.fullmatch(r"run_[a-f0-9]{32}", r) for r in run_ids)):
+        raise RegistryError("invalid_request", "Name 1–50 of this Pip's replies.")
+    store._job(pip_id)
+    marks = ",".join("?" * len(set(run_ids)))
+    rows = store.db.execute(
+        f"SELECT id,status,started_at,finished_at,CASE WHEN length(CAST(result AS BLOB))<=262144 THEN result END AS result "
+        f"FROM pip_runs WHERE pip_id=? AND id IN ({marks})", (pip_id, *sorted(set(run_ids)))).fetchall()
+    stats = []
+    for row in rows:
+        try:
+            usage = (json.loads(row["result"]) or {}).get("usage") if row["result"] else None
+        except (ValueError, AttributeError):
+            usage = None
+        usage = usage if isinstance(usage, dict) else {}
+        start, end = _instant(row["started_at"]), _instant(row["finished_at"])
+        count = lambda key: usage.get(key) if type(usage.get(key)) is int and usage.get(key) >= 0 else 0
+        stats.append({"run_id": row["id"], "status": row["status"],
+                      "seconds": round((end - start).total_seconds(), 1) if start and end and end >= start else None,
+                      "input_tokens": count("input_tokens"), "output_tokens": count("output_tokens"),
+                      "requests": count("requests")})
+    return {"pip_id": pip_id, "stats": stats}

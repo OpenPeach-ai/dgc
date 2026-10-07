@@ -64,6 +64,11 @@
   a Personal Pip switches model at once (a project Pip's change is still reviewed). The context chip
   shows how full the window is ("22%"), and its menu has DGC's meter: used and free tokens, recent
   messages and those in the chat's brief, and the window size. Clicking elsewhere closes either menu.
+- **A Pip's reply shows what it is doing, as DGC's chat does.** While it answers, its row says what it
+  is doing (loading the model, thinking, the tool it uses, writing) with the clock and tokens so
+  far, "(12s · ↓ 340 tok)"; the reply reads as it is written (its stream is read every 400 ms, not at
+  the chat's 4 s refresh) and shows the moment it is saved. Under each reply, what it took: "8.4s ·
+  1.5k tokens" (in, out and model requests on hover).
 - What you send is in the chat at once, and the box clears: it no longer sits in the box until the
   reply is queued. A choice you tap under a Pip's reply goes straight into the chat the same way.
 - A Pip's face and name at the top of its chat have no outline around them: the face's movement touched it.

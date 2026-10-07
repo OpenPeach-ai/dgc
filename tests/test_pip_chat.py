@@ -244,14 +244,16 @@ class PipChatTests(unittest.TestCase):
     def test_stream_fragmentation_does_not_change_answer_or_event_budget(self):
         text = "A useful reply. " * 100
         one, tiny = [], []
-        single = pips._ConversationUI(one.append, self.cfg)
-        fragmented = pips._ConversationUI(tiny.append, self.cfg)
-        single.on_text(text); single.end_stream()
-        for character in text:
-            fragmented.on_text(character)
-        fragmented.end_stream()
+        # The clock stands still: a quarter-second flush (the live stream) is about time, not fragments.
+        with patch.object(pips.time, "monotonic", lambda: 1000.0):
+            single = pips._ConversationUI(one.append, self.cfg)
+            fragmented = pips._ConversationUI(tiny.append, self.cfg)
+            single.on_text(text); single.end_stream()
+            for character in text:
+                fragmented.on_text(character)
+            fragmented.end_stream()
         self.assertEqual(one, tiny)
-        self.assertEqual("".join(e["text"] for e in tiny), text)
+        self.assertEqual("".join(e["text"] for e in tiny if e["kind"] == "text_delta"), text)
 
     def test_malformed_surrogate_request_is_safe_to_serialize_without_registry(self):
         for request in ({"type": "list_pip_models", "request_id": "\ud800"},

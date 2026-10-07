@@ -71,6 +71,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_routines", "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
     "set_pip_profile", "list_pip_shared", "get_pip_computers", "update_pip_computers", "reset_pip_computer", "list_pip_apps",
     "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
+    "list_pip_reply_stats",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -106,6 +107,7 @@ _COMMAND_ARGS = {
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
     "list_pip_plugin_uses": set(), "get_pip_chat_context": {"pip_id", "context_size"},
+    "list_pip_reply_stats": {"pip_id", "run_ids"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_connections": set(),
     "inspect_pip_connection": {"server"},
@@ -1855,9 +1857,37 @@ class _ConversationUI(_WorkerUI):
         self.stream_bytes = 0
         self.stream_events = 0
         self.stream_pending = ""
+        self.stream_at = time.monotonic()
+        self.activity = None
+
+    # What the chat's working row says, as DGC's own: loading the model, thinking, writing, using a
+    # tool. One event per change, never per chunk.
+    def turn_activity(self, state, label, detail=""):
+        key = (str(state)[:40], str(label)[:200])
+        if key != self.activity:
+            self.activity = key
+            super().turn_activity(state, label, detail)
+
+    def on_thinking(self, chunk, block=None):
+        if chunk:
+            self.turn_activity("thinking", "Thinking")
+
+    def tool_call(self, name, args, call_id=None):
+        from .ui import activity_verb
+        super().tool_call(name, args, call_id)
+        self.turn_activity("tool", activity_verb(name))
 
     def _stream(self, text, *, flush=False):
         self.stream_pending += text
+        if self.stream_pending.strip():
+            self.turn_activity("responding", "Writing")
+        # A quarter of a second's text at a time, so the reply reads as it is written; whole
+        # 256-character chunks made a short reply arrive all at once.
+        now = time.monotonic()
+        if not flush and self.stream_events < 384 and now - self.stream_at >= 0.25 and self.stream_pending:
+            flush = True
+        if flush:
+            self.stream_at = now
         size = len(self.stream_pending) if flush else len(self.stream_pending) // 256 * 256
         text, self.stream_pending = self.stream_pending[:size], self.stream_pending[size:]
         from .pip_chat import MAX_REPLY_BYTES
@@ -3418,6 +3448,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                             continue_after_app(store, pip_id, result['link'], config)
                         except RegistryError as exc:
                             result = {**result, 'continue_error': str(exc)}
+            elif command == 'list_pip_reply_stats':
+                # The line under each reply in a Pip's chat: how long it took and its tokens.
+                from .pip_chat import reply_stats
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "A Pip's chat is on this computer only.")
+                result = reply_stats(store, pip_id, request.get('run_ids'))
             elif command == 'get_pip_chat_context':
                 # The prompt box's context meter: how much of the window this chat takes next reply.
                 from .pip_chat_options import context_estimate

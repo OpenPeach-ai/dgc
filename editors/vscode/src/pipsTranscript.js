@@ -26,7 +26,7 @@ export function replyParts(text) {
   return merged.length>8?[...merged.slice(0,7),merged.slice(7).join('\n\n')]:merged;
 }
 
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',choices=null}) {
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',choices=null,stats=null}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   const pictures=user&&Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,4).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" alt="Image ${Number(i.index)+1}"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
   const size=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
@@ -40,7 +40,18 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const options=!user&&prompt?`${action('retry','Ask again',m.id,!canSend)}${action('edit','Edit message',m.id,false)}`:'';
   const details=`<details class="message-details" data-details="message-${esc(m.id)}"><summary title="${user?'Message details':'Response details'}" aria-label="${user?'Message details':'Response details'}">${transcriptIcon('info')}<span class="sr-only">${user?'Message details':'Response details'}</span></summary><div class="message-provenance"><dl><dt>${user?'Sent':'Saved'}</dt><dd>${esc(formatDate(m.created_at))}</dd>${!user&&m.model?`<dt>Model</dt><dd>${esc(m.model)}</dd>`:''}<dt>Status</dt><dd>${esc(({queued:'Waiting',running:'Working',cancelling:'Stopping',succeeded:'Done',failed:'Failed',cancelled:'Stopped'})[m.status]||m.status)}</dd></dl><button type="button" data-chat-run="${esc(m.run_id)}">${m.status==='failed'?'View error':'Details'}</button></div></details>`;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}" data-message="${esc(m.id)}"><span class="sr-only role">${esc(label)}</span>${activityRow}${body}${offered}${status}<div class="response-actions">${action('copy',user?'Copy message':'Copy response',m.id)}${options}${details}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}" data-message="${esc(m.id)}"><span class="sr-only role">${esc(label)}</span>${activityRow}${body}${offered}${status}<div class="response-actions">${action('copy',user?'Copy message':'Copy response',m.id)}${options}${details}${!user&&stats?replyStats(stats):''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+}
+
+// What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).
+function replyStats(s){
+  const parts=[];
+  if(Number.isFinite(s.seconds))parts.push(s.seconds<10?`${s.seconds.toFixed(1)}s`:`${Math.round(s.seconds)}s`);
+  const tokens=(s.input_tokens||0)+(s.output_tokens||0);
+  if(tokens)parts.push(`${tokens>=10000?Math.round(tokens/1000)+'k':tokens>=1000?(tokens/1000).toFixed(1)+'k':tokens} tokens`);
+  if(!parts.length)return '';
+  const title=`${(s.input_tokens||0).toLocaleString('en-US')} in · ${(s.output_tokens||0).toLocaleString('en-US')} out · ${s.requests||0} model request${s.requests===1?'':'s'}`;
+  return `<span class="reply-stats" title="${esc(title)}">${esc(parts.join(' · '))}</span>`;
 }
 
 export function activityMarkup(value,runId) {
