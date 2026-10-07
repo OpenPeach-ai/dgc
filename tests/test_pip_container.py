@@ -64,6 +64,10 @@ sys.exit(0)
 
 class FakeContainerTests(unittest.TestCase):
     def setUp(self):
+        # The setup runs on a module-level thread that can still be finishing after a test saw "ready":
+        # the next test's start_setup then saw a setup running (2026-10-08 gates, twice), and the old
+        # thread wrote into the next test's patched home. Each test starts and ends with none running.
+        self._join_setup()
         self.base = Path(tempfile.mkdtemp(prefix="pc"))
         self.addCleanup(__import__("shutil").rmtree, self.base, True)
         self.state = self.base / "state"
@@ -79,10 +83,17 @@ class FakeContainerTests(unittest.TestCase):
                        patch("platform.mac_ver", return_value=("26.5.1", ("", "", ""), "arm64"))):
             target.start()
             self.addCleanup(target.stop)
+        self.addCleanup(self._join_setup)   # last registered: runs first, while the patches still hold
 
     def calls(self):
         path = self.state / "calls.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    @staticmethod
+    def _join_setup():
+        thread = getattr(pip_container, "_THREAD", None)
+        if thread is not None and thread.is_alive():
+            thread.join(30)
 
     def wait_for_setup(self):
         end = time.monotonic() + 20
