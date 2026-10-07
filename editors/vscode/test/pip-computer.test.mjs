@@ -55,7 +55,7 @@ test('an older CLI shows no computer; on API 42 one plain dialog gives it, as a 
  x.click('#give-computer');
  const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog);
  assert.match(dialog.textContent,/Give Shopper a computer\?/);
- for(const rule of [/waits for your OK, with a screenshot/,/never sees your passwords/,/can’t reach this computer or your home network/,/cannot also read your connected apps/])assert.match(dialog.textContent,rule);
+ for(const rule of [/waits for your OK, with a screenshot/,/never sees your passwords/,/can’t reach this computer or your home network/,/can still read the apps you connected/,/its Terminal can reach them too/])assert.match(dialog.textContent,rule);
  assert.equal(x.requests('propose_pip_update').length,0,'opening the dialog changes nothing');
  x.click('#review-confirm');
  const proposed=x.requests('propose_pip_update')[0];

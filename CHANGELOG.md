@@ -13,6 +13,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   until DGC restarted (the dock's Browser icon did nothing, and the Pip fell back on curl). A browser
   that cannot start no longer keeps the computer's screen from opening: the Terminal and Files work,
   and the dock or the Pip's next browser step tries again.
+- A Personal Pip's setup card says what it can do in plain words ("It sees only what you share with it
+  and any reads listed here. You can give it a computer or connect apps later...", "It works while Pips
+  are running on this computer."), not "Personal scope. No project files, shell or browsing". A Pip
+  no longer tells you about "web reads the controller passes me", and at a robot check it asks you to
+  finish the check on its screen, not to "sign in".
 - A failed chat turn says why under the message (`list_pip_messages` adds `error`, one line, to a
   failed user message): "It stopped after 12 steps without finishing. Say “continue” and it carries
   on." instead of "No completed reply was recorded".

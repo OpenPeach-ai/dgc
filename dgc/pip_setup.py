@@ -355,11 +355,12 @@ def _projection(registry, row, body, receipt):
             **({'event_trigger': req['event_trigger']} if req.get('event_trigger') else {}),
             'receipt': receipt, 'permissions': body['definition']['policy'], 'source_policy': 'personal' if req.get('scope')=='personal' else 'committed_only',
             **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' else {}),
-            'scope_notice': ('Personal scope. No project files, shell or browsing. Only the reviewed app reads and web reads listed here, if any.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
+            'scope_notice': ('It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
             'runner_notice': (f"DGC checks {req['source_ref']} for new local commits only while the local Pips runner is enabled and running, and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Saving setup does not start or resume the runner."
-                              if req.get('event_trigger') else 'A schedule runs only while the local Pips runner is enabled and running. Saving setup does not start or resume the runner.'),
-            'run_now_policy': ("The immediate run counts as today's daily occurrence; the next scheduled run is on the following local date."
-                               if body['counts_for_date'] else 'Queue one run after approval, in addition to the displayed future schedule.' if req['run_now'] else None)}
+                              if req.get('event_trigger') else 'It works while Pips are running on this computer. Creating it doesn’t start Pips.' if req.get('scope')=='personal'
+                              else 'A schedule runs only while the local Pips runner is enabled and running. Saving setup does not start or resume the runner.'),
+            'run_now_policy': (("Its first task counts as today's; the next one is on its next scheduled day." if req.get('scope')=='personal' else "The immediate run counts as today's daily occurrence; the next scheduled run is on the following local date.")
+                               if body['counts_for_date'] else ('It also does its task once, right after you create it.' if req.get('scope')=='personal' else 'Queue one run after approval, in addition to the displayed future schedule.') if req['run_now'] else None)}
 
 
 def get(registry, setup_id, workspace_id):

@@ -365,7 +365,8 @@ class Host:
             host = urlsplit(str(data.get("url", ""))).hostname or "this site"
             return (f"{host} is asking a person to prove they are not a robot. Do not try to solve or get around "
                     "it, and do not keep opening pages. Stop now and tell the user in one sentence that the site wants "
-                    "them on your computer's screen to finish its check; you will carry on once they have.")
+                    "them to finish its check on your computer's screen (Open its computer); you carry on once they "
+                    "have. It is a check box or picture puzzle, not a sign-in.")
         return f"{_UNTRUSTED_PAGE}\nURL: {data.get('url', '')}\nTitle: {data.get('title', '')}\n{text}"
 
     def _check_for_human(self, data: dict, text: str) -> bool:
