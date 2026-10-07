@@ -356,14 +356,11 @@ test('Start in the chat brings Pips back, and Core, like any Pip, takes the mess
  assert.equal(x.requests('send_pip_message').length,1,'the chat sends again');
 });
 
-test('Run now shows only once a Pip has a task of its own',async()=>{
- // Founder, 2026-10-07: Run now on a Pip with only its chat gave a chat-style answer to nothing.
- const named='Help with what I ask in this chat. Your name says what I want you for; ask when it is unclear.';
+test('a Personal Pip has no Run now: you chat with it, or it works on its schedule',async()=>{
+ // Founder, 2026-10-07: "why do we need a manual Run Now button at all? grok bots don't have that".
  const results=async p=>{const x=setup({jobs:[p]});await x.drain();x.click(`[data-job="${p.id}"]`);await x.drain();x.click('.pip-menu [data-tab="runs"]');await x.drain();return x;};
- const idle=await results(pip('pip_'+'g'.repeat(32),'Gmail','scout',{goal:named}));
- assert.equal(idle.d.querySelector('#run'),null);assert.match(idle.d.body.textContent,/When Gmail has a task of its own/);
- const tasked=await results(pip('pip_'+'n'.repeat(32),'News','scout',{goal:'Every morning, send me the top tech news.'}));
- assert.ok(tasked.d.querySelector('#run'));assert.match(tasked.d.body.textContent,/What News made/);
- const scheduled=await results(pip('pip_'+'s'.repeat(32),'Daily','scout',{goal:named,schedule:{type:'daily',time:'08:00',timezone:'Asia/Kolkata'}}));
- assert.ok(scheduled.d.querySelector('#run'),'a schedule is a task');
+ const chat=await results(pip('pip_'+'g'.repeat(32),'Gmail','scout'));
+ assert.equal(chat.d.querySelector('#run'),null);assert.match(chat.d.body.textContent,/When Gmail works on its own, on a schedule/);
+ const daily=await results(pip('pip_'+'s'.repeat(32),'Daily','scout',{schedule:{type:'daily',time:'08:00',timezone:'Asia/Kolkata'}}));
+ assert.equal(daily.d.querySelector('#run'),null,'not even with a schedule');assert.match(daily.d.body.textContent,/What Daily made on its schedule/);
 });

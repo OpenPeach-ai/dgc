@@ -4,12 +4,6 @@ export const record = value => !!value && typeof value === 'object' && !Array.is
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const active = status => ['queued','running','cancelling'].includes(status);
 export const statusLabel = status => ({queued:'Waiting to start',running:'Auditing source',cancelling:'Cancelling',cancelled:'Cancelled',failed:'Failed',succeeded:'Report ready',active:'Ready',paused:'Paused'}[status] || 'Status unknown');
-// The goals DGC gives a Pip made from the Pips view (pips.NAMED_GOAL, pips.PRIMARY_GOAL; a test keeps them
-// equal): a Pip with one of these and no schedule has no task of its own yet, only its chat.
-export const DEFAULT_GOALS = ["Help with what I ask in this chat. Your name says what I want you for; ask when it is unclear.",
-  "Be my Primary Pip: help with everyday tasks, look after my other Pips, and check in when you need me."];
-export const hasTask = pip => !!(pip?.schedule || pip?.event_trigger
-  || typeof pip?.goal === 'string' && pip.goal.trim() && !DEFAULT_GOALS.includes(pip.goal.trim()));
 /** A Personal Pip's run, in its words: it works and is done; it does not audit or report. */
 export const personalStatusLabel = status => ({queued:'Waiting to start',running:'Working',cancelling:'Stopping',cancelled:'Stopped',failed:'Failed',succeeded:'Done',active:'Ready',paused:'Paused'}[status] || 'Status unknown');
 export const errorText = value => typeof value === 'string' ? value : record(value) && typeof value.message === 'string' ? value.message : 'Something went wrong. Refresh and try again.';

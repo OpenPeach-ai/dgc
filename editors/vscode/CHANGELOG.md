@@ -65,8 +65,8 @@
   for your OK); "the Job tab" (now Settings); "Connect an app once in DGC Settings" (Settings shows
   **Reads before each task** only for a Pip that has them; apps connect from the chat); "Online like
   Grok's bots" in the Terminal; "A completed Pip run never performs one automatically".
-- **Run now** shows on a Pip's Results only once it has a task of its own (a goal you gave it, or a
-  schedule). A Pip with only its chat says what will show there and how to give it a task.
+- A Personal Pip has no **Run now**, like Grok's bots: you chat with it, or it works on its schedule.
+  Its Results say what it made on its schedule, or how to give it one in its chat.
 - **You can message Core.** Core's chat never sent: the choices and the send button stayed grey and
   Enter did nothing, because DGC's type list marks Core "not available" as a background Pip and the
   chat required an available type. Core's hello worked (DGC sends it), so it went unnoticed.
