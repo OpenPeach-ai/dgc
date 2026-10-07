@@ -415,6 +415,12 @@ def source_revision(root, ref):
     return revision
 
 
+# Tool steps per run. A Pip with its own computer gets more: reading a few pages and clicking through a
+# form is many browser steps, and at 12 a Google search ran out (founder, 2026-10-07: raise it).
+STEPS = 12
+COMPUTER_STEPS = 30
+
+
 def _model_settings(config, model_choice=None, *, _prepared=None):
     from .pip_models import resolve_model_choice, validate_model_choice, validate_pinned_connection
     if config.get("subscription_engine", ""):
@@ -440,7 +446,7 @@ def _model_settings(config, model_choice=None, *, _prepared=None):
     settings = {"model": model, "base_url": base.rstrip("/"),
             "api_mode": config.get("api_mode", "auto"),
             "context_size": min(32768, max(2048, int(config.get("context_size", 32768)))),
-            "thinking": "off", "max_tokens": 4096, "max_turns": 12,
+            "thinking": "off", "max_tokens": 4096, "max_turns": STEPS,
             "turn_budget_s": MAX_WALL_SECONDS - 10}
     if _prepared is not None and settings != _prepared['settings']:
         raise RegistryError('conflict', 'The model settings changed after preparing this Pip setup. Review it again.')
@@ -985,6 +991,8 @@ class PipStore:
             if conversation_request is not None and 'chat_options' in conversation_request:
                 from .pip_chat_options import apply as apply_chat_options
                 model = apply_chat_options(model, conversation_request['chat_options'], frozen_config)
+            if personal and pip.get('computer_plan') is not None:
+                model = {**model, 'max_turns': COMPUTER_STEPS}
             from .pip_models import validate_pinned_connection
             validate_pinned_connection(config, model)
         connector_context = None

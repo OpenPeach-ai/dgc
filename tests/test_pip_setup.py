@@ -501,16 +501,18 @@ class PipSetupTests(unittest.TestCase):
         self.assertEqual(loose['setup']['status'], 'pending', "only the agent's True creates")
 
     def test_a_setup_that_needs_its_own_review_stays_a_card(self):
-        # Reading connected accounts or a Pulse with commands keeps a card in every mode.
-        self.assertTrue(pip_setup.needs_card({'app_plan': {'schema_version': 1}}))
+        # A project Pulse with commands keeps a card in every mode. Reading connected accounts does not
+        # (founder, 2026-10-07): auto mode creates that Pip like any other; its sends wait for Allow.
+        self.assertFalse(pip_setup.needs_card({'app_plan': {'schema_version': 1}}))
         self.assertTrue(pip_setup.needs_card({'pip_type': 'pulse'}))
+        self.assertFalse(pip_setup.needs_card({'pip_type': 'pulse', 'scope': 'personal'}))
         self.assertFalse(pip_setup.needs_card({'pip_type': 'lens', 'scope': 'personal', 'web_plan': {'reads': []}}))
         with patch.object(pip_setup, 'needs_card', return_value=True):
             result = self.tool({**self.request(), '_dgc_create_now': True})
         self.assertTrue(result['review_required'])
         self.assertFalse(result['job_changed_by_this_call'])
         self.assertEqual(result['setup']['status'], 'pending')
-        self.assertIn('connected accounts or runs commands', result['message'])
+        self.assertIn('runs commands on a schedule', result['message'])
         self.assertIn('card above the chat box', result['message'])
         self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pips').fetchone()[0], 0)
 

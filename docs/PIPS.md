@@ -747,8 +747,9 @@ else it would submit still waits for you.
   dependencies or picks its own commands.
 - **Approve themselves.** No Pip can accept a setup, proposal, handoff or external
   action. The main chat sets up and changes Pips only through tool calls your
-  permission mode decides; a Pip that reads connected accounts or runs commands, a
-  handoff and an external action still wait for you in the Pips view or the CLI.
+  permission mode decides (auto mode creates a Pip directly, including one that reads
+  connected accounts); a Pulse that runs commands, a handoff and an external action
+  still wait for you in the Pips view or the CLI.
   When the chat runs `dgc pips` in its own shell, the CLI only reads (and can make
   the emergency stop); anything that changes a Pip is refused there.
 - **Act outside their reviewed reads.** Project Pips read only their approved

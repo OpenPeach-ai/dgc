@@ -56,7 +56,7 @@ def validate_manifest(manifest):
             or set(settings['provider_capabilities']) - {'reasoning', 'max_output_tokens'}
             or any(type(v) is not bool for v in settings['provider_capabilities'].values())
             or settings.get('max_tokens') != OUTPUT_CAP
-            or settings.get('max_turns') != 12):
+            or settings.get('max_turns') not in (12, 30)):      # pips.STEPS, COMPUTER_STEPS
         raise RegistryError('invalid_chat_options', 'Saved reply options do not match the pinned conversation limits.')
     return options
 

@@ -305,3 +305,35 @@ class ComputerCommandLineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ComputerStepsTests(unittest.TestCase):
+    """A Pip with a computer gets more steps per run (founder, 2026-10-07): at 12, a Google search ran out."""
+    setUp_base = fixtures.LocalPipsTests.setUp
+
+    def setUp(self):
+        self.setUp_base()
+        self.cfg.data["pips_enabled"] = True
+        p = patch.object(box, "capability", lambda home=None: {"available": True, "reason": "", "chrome": "/opt/chrome/chrome"})
+        p.start(); self.addCleanup(p.stop)
+
+    def steps(self, run):
+        return json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])["model_settings"]["max_turns"]
+
+    def test_a_computer_gives_a_pip_thirty_steps_in_its_tasks_and_chats(self):
+        from dgc import pip_chat
+        from dgc.pip_chat_options import validate_manifest
+        pip = self.store.create(self.registry.personal()["id"], "Shopper", "Shop for me", "local-console")
+        before = self.store.enqueue(pip["id"], "before", "local-console", self.cfg)
+        self.assertEqual(self.steps(before), pips.STEPS)
+        self.store.cancel(before["id"], "local-console")
+        proposal = self.store.propose(pip["id"], 1, {"computer_plan": PLAN}, "local-console")
+        self.store.accept(pip["id"], proposal["id"], 1, "local-console")
+        after = self.store.enqueue(pip["id"], "after", "local-console", self.cfg)
+        self.assertEqual(self.steps(after), pips.COMPUTER_STEPS)
+        self.store.cancel(after["id"], "local-console")
+        sent = pip_chat.send(self.store, pip["id"], "Search Google for DGC Pips", "chat-1", "local-console", self.cfg,
+                             chat_options={"context_size": 8192, "thinking": "off"})
+        self.assertEqual(self.steps(sent["run"]), pips.COMPUTER_STEPS)
+        manifest = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (sent["run"]["id"],)).fetchone()[0])
+        self.assertEqual(validate_manifest(manifest), {"context_size": 8192, "thinking": "off"}, "a chat with reply options still validates")

@@ -110,13 +110,13 @@ def _integer(value, label, lower, upper):
 
 
 def needs_card(request) -> bool:
-    """A setup that keeps its own card whatever the permission mode: one that reads the user's
-    connected accounts (their mail, calendar, files) or runs commands on a schedule (Pulse).
-    Everything else is approved by the tool call's ordinary permission, like any other tool."""
+    """A setup that keeps its own card whatever the permission mode: a project Pulse that runs
+    commands on a schedule. Everything else, including a Pip that reads connected accounts, is
+    approved by the tool call's ordinary permission like any other tool, so auto mode creates it
+    (founder, 2026-10-07: reads are free, sends wait for Allow)."""
     if not isinstance(request, dict):
         return True
-    return (request.get("app_plan") is not None
-            or (request.get("pip_type") == "pulse" and request.get("scope") != "personal"))
+    return request.get("pip_type") == "pulse" and request.get("scope") != "personal"
 
 
 def validate_request(value):

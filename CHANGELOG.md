@@ -18,6 +18,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   are running on this computer."), not "Personal scope. No project files, shell or browsing". A Pip
   no longer tells you about "web reads the controller passes me", and at a robot check it asks you to
   finish the check on its screen, not to "sign in".
+- A Pip with its own computer gets 30 steps per task or message instead of 12 (`pips.COMPUTER_STEPS`;
+  a Google search through its browser ran out at 12).
+- In auto mode the main chat creates a Pip that reads connected accounts directly, like any other
+  Pip (its sends still wait for Allow); only a project Pulse that runs commands keeps its card.
 - A Pip can propose its own web reads and its own computer from its chat: `draft_pip_change` takes
   `web_plan` (up to four public pages or searches DGC reads before each run) and `computer_plan`
   `{schema_version: 1}`, saved as a change the user accepts like any other; it cannot remove a

@@ -1,7 +1,7 @@
 """The chat's Pip setup. In auto mode (or on an allow rule, or the user's Allow on an ask rule) it
 creates the Pip at once; otherwise it saves a card the editor docks above the chat box, where the
-user's Create Pip is the approval. A setup that reads connected accounts or runs commands on a
-schedule is always a card (pip_setup.needs_card)."""
+user's Create Pip is the approval. A project Pulse that runs commands on a schedule is always a
+card (pip_setup.needs_card)."""
 from __future__ import annotations
 
 import json
@@ -86,7 +86,7 @@ def propose(args, ctx) -> str:
                                   ensure_ascii=False, separators=(',', ':'))
             return json.dumps({'setup': setup, 'review_required': setup['status'] == 'pending',
                                'job_changed_by_this_call': False, 'execution_started': False,
-                               'message': ('This Pip reads the user\'s connected accounts or runs commands on a schedule, so it is shown '
+                               'message': ('This Pip runs commands on a schedule, so it is shown '
                                            'to the user as a card above the chat box, and it exists only once they choose Create Pip there. '
                                            'Mention the card; never claim it is on.')},
                               ensure_ascii=False, separators=(',', ':'))
