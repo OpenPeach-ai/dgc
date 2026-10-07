@@ -53,6 +53,7 @@
 
 ### Pips
 
+- A Pip's face and name at the top of its chat have no outline around them: the face's movement touched it.
 - **Plugins in Pips: each Pip asks first.** When a Pip needs one of the plugins you added to DGC,
   its chat shows "Let Ava use Airtable?" with **Allow** and **Not now**; no second sign-in. What it
   would then do in a plugin is an Allow card showing the tool and its inputs, with **Allow**,

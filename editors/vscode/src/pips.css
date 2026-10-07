@@ -215,7 +215,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .topbar-icon{width:34px;height:34px;min-height:34px;padding:0;border-radius:50%;border:1px solid var(--pip-edge);background:transparent;display:inline-flex;align-items:center;justify-content:center;color:var(--vscode-foreground);cursor:pointer;list-style:none}
 .topbar-icon:hover{background:var(--pip-wash)}
 .topbar-icon::-webkit-details-marker{display:none}
-.pip-pill{justify-self:center;display:inline-flex;align-items:center;gap:8px;padding:3px 14px 3px 5px;border:1px solid var(--pip-edge);border-radius:999px;max-width:100%;min-width:0;font-weight:600}
+.pip-pill{justify-self:center;display:inline-flex;align-items:center;gap:8px;padding:3px 14px 3px 5px;max-width:100%;min-width:0;font-weight:600}
 .pip-pill .avatar{width:28px;height:27px;flex:none}
 .pip-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pip-pill small{color:var(--muted);font-weight:400;white-space:nowrap}
