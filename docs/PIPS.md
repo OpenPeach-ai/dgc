@@ -541,7 +541,8 @@ its face, its name and an optional title at the top, then four tabs.
 **Edit** under its face changes its look: one of the eight Pip faces and a colour. **Reset to
 default** puts back the face its type gives it. A look never changes what a Pip can do. Its
 model is chosen in the chat (the model button by the message box). The **…** menu has **Copy ID**,
-**Pause** and **Archive**.
+**Pause** and **Archive**. When you have chosen **Always allow** for something the Pip does, Info
+also lists it under **Allowed without asking**, with **Stop allowing**.
 
 With **Notifications** on (the default), the runner tells you, as a desktop notification, when the
 Pip finishes a routine on its own or needs you: a routine or an app it asks you to say yes to, or a

@@ -177,7 +177,7 @@ test('Pips settings show the skills your Pips use, managed in DGC Settings',asyn
  const x=setup({jobs:[gmail]});await x.drain();
  x.click('#pips-settings-open');await x.drain();x.click('[data-pips-settings="apps"]');await x.drain();
  assert.match(x.d.body.textContent,/Skills.*deep research, charts and planning/s);
- assert.match(x.d.body.textContent,/never gives the Pip new access/);
+ assert.match(x.d.body.textContent,/never gives a Pip new access/);
  x.click('#manage-skills');
  assert.deepEqual(x.sent.filter(m=>m.type==='openSettings').map(m=>m.section),['plugins']);
 });

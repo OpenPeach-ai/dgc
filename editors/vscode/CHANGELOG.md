@@ -54,8 +54,9 @@
   **Share as template**. Links, Media and Files list what was shared in its chat (and its
   computer's Files). **Edit** under its face picks one of the eight Pip faces and a colour, with
   **Reset to default**; the face shows everywhere the Pip does. Share, **Copy ID**, **Pause** and
-  **Archive** sit in the top bar. Model, usage, permissions and schedule forms are gone from the
-  page: the model is chosen by the message box, and apps are in Pips settings.
+  **Archive** sit in the top bar. Model, usage and schedule forms are gone from the page: the model
+  is chosen by the message box, and apps are in Pips settings. An **Always allow** you gave is listed
+  on Info, with **Stop allowing**, only when there is one.
 - **Routines.** **+ Add routine** takes a name, what to do, and when: every day, weekdays, every
   week, every few hours, once, when an email matching a Gmail search arrives, or before calendar
   events. Each routine has an on/off switch; tap one to edit or delete it. When a Pip suggests a

@@ -23,7 +23,7 @@ const DAILY={kind:'schedule',schedule:{type:'daily',time:'08:00',timezone:'Asia/
 const routine=(extra={})=>({id:R1,pip_id:PIP,workspace_id:PW,title:'Morning brief',prompt:'Tell me what today looks like.',trigger:DAILY,label:'every day at 08:00',status:'on',created_by:'user',run_id:null,next_due_at:'2026-10-08T02:30:00Z',last_run_at:null,last_error:null,created_at:earlier,updated_at:earlier,...extra});
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
-function setup({row=pip(),list=[],shared={},computers=null,apps=[]}={}){
+function setup({row=pip(),list=[],shared={},computers=null,apps=[],grants=[]}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -42,7 +42,7 @@ function setup({row=pip(),list=[],shared={},computers=null,apps=[]}={}){
   list_pip_app_links:()=>({pip_id:PIP,links:[],composio:true}),list_pip_message_drafts:()=>({drafts:[],next_cursor:null}),list_pip_calendar_drafts:()=>({drafts:[],next_cursor:null}),list_pip_connector_drafts:()=>({drafts:[],next_cursor:null}),get_pip_digest:()=>undefined,
   list_pip_routines:()=>({pip_id:PIP,workspace_id:PW,routines:state.list}),
   list_pip_shared:()=>({pip_id:PIP,workspace_id:PW,kind:r.kind,items:shared[r.kind]||[]}),
-  get_pip_computers:()=>computers,list_pip_apps:()=>({apps})}[r.type]?.());
+  get_pip_computers:()=>computers,list_pip_apps:()=>({apps}),list_pip_action_grants:()=>({pip_id:PIP,grants})}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion:43,generation:1,connected:true,supported:true,enabled:true});
  const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
@@ -111,6 +111,16 @@ test('its face and colour: choose, Save, and Reset to default',async()=>{
  assert.equal(x.d.querySelector('.pip-pill .avatar').dataset.tint,'mint','its face changes everywhere');
  x.click('[data-pip-page="character"]');x.click('[data-pip-character-reset]');x.click('[data-pip-character-save]');await flush();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[1].request.changes)),{body:null,color:null});
+});
+
+test('an Always allow you gave is on its page, and Stop allowing takes it back',async()=>{
+ const grant={id:'grant_'+'e'.repeat(32),kind:'gmail_send',label:'Send emails from me@example.com',server:'composio',account:'ca_x',tool:'GMAIL_SEND_EMAIL',connection_digest:'a'.repeat(64),schema_digest:'b'.repeat(64),created_at:now,created_by:'editor-user'};
+ const none=setup();await openPage(none);
+ assert.doesNotMatch(none.d.body.textContent,/Allowed without asking/,'nothing to show, so nothing is shown');
+ const x=setup({grants:[grant]});await openPage(x);
+ assert.match(x.d.querySelector('[aria-label="Allowed without asking"]').textContent,/Send emails from me@example\.com.*Stop allowing/);
+ x.click(`[data-revoke-grant="${grant.id}"]`);await flush();
+ assert.equal(x.requests('revoke_pip_action_grant')[0].request.grant_id,grant.id);
 });
 
 test('notifications, name and title are saved from its page',async()=>{

@@ -1596,8 +1596,17 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name});
+  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+allowedMarkup();
  return `<div class="pip-page">${head}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
+}
+// What it may do without asking (an Always allow you gave): only shown when there is one, and each
+// can be taken back here, as its Allow card promises.
+function allowedMarkup(){
+ if(S.apiVersion<41)return '';
+ if(grantsState.pip!==S.selected){void loadGrants();return '';}
+ const grants=grantsState.value?.grants||[];if(!grants.length)return '';
+ const off=S.busy||!usable();
+ return `<section class="pip-page-group" aria-label="Allowed without asking"><h3 class="pip-page-label">Allowed without asking</h3><ul class="pip-page-list">${grants.map(x=>`<li class="pip-page-row static"><span class="row-words"><span>${esc(x.label)}</span><small>${x.account==='connection_managed'?'The account its connection uses':esc(x.account)}</small></span><button type="button" class="quiet pill" data-revoke-grant="${esc(x.id)}"${off?' disabled':''}>Stop allowing</button></li>`).join('')}</ul></section>`;
 }
 function pipPageMenu(){
  const p=S.pip,off=S.busy||!usable();
@@ -1625,7 +1634,7 @@ async function pipsSettingsCall(command,args,notice){
 function pipsSettingsMarkup(){
  const view=pipsSettings.view==='apps'?'apps':'computer',busy=pipsSettings.busy||S.busy||!usable();
  const tabs=`<nav class="pip-page-tabs" aria-label="Pips settings">${[['computer','Computer'],['apps','Apps']].map(([k,l])=>`<button type="button" class="seg" data-pips-settings="${k}" aria-pressed="${view===k}">${l}</button>`).join('')}</nav>`;
- const body=view==='apps'?appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError})+(skillsMarkup()?`<section class="pip-page-group pip-skills">${skillsMarkup()}</section>`:'')
+ const body=view==='apps'?appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError})+(S.apiVersion>=43&&!remoteHost?`<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Skills</strong><small>Your Pips use your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives a Pip new access.</small></span>${button('manage-skills','Manage skills…',false,'quiet pill')}</div></section>`:'')
   :computersMarkup(pipsSettings.computers,{esc,busy,error:pipsSettings.computersError,formatDate:shortDate,confirming:pipsSettings.confirmReset});
  return `<header class="pip-topbar"><button type="button" id="pips-settings-close" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Pips settings</span></div><span></span></header><div class="simple-content"><div class="pip-page">${tabs}<div class="pip-page-body">${body}</div></div></div>`;
 }
