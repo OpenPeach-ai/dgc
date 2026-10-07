@@ -9,7 +9,8 @@ Pip's Job tab or with `dgc pips allowed`.
 After each finished run of a Personal Pip, the runner prepares and runs every action the run drafted
 that a grant covers (`dispatch_for_run`), as that grant (actor `pip-grant:<id>`), and tells the user
 after. An action no grant covers waits for Send once, Always allow or Reject, as it always has.
-Money is not special: a trade or a payment through a connected app is an action like any other.
+A payment plugin (pip_plugins: 1inch, Aave, Airwallex) is the one exception: its actions never get
+Always allow, and ask every time.
 """
 from __future__ import annotations
 
@@ -46,6 +47,22 @@ def _local(actor):
         raise RegistryError("local_only", "Only you can allow a Pip to act without asking, on this computer.")
 
 
+def require_can_always(payload) -> None:
+    """Refuse Always allow for a payment plugin's action, before anything runs."""
+    money = _asks_every_time(payload)
+    if money:
+        raise RegistryError("asks_every_time", f"{money} can move money, so a Pip asks you every time. Choose Allow for this one.")
+
+
+def _asks_every_time(payload) -> str:
+    """A payment plugin's name when this action is one of its: those ask every time."""
+    if payload.get("kind") != "connector_call":
+        return ""
+    from .pip_plugins import owner
+    found = owner(payload.get("server"))
+    return found["display_name"] if found and found["money"] else ""
+
+
 def list_grants(registry, pip_id) -> list:
     start = f"{PREFIX}{pip_id}:"
     grants = []
@@ -71,6 +88,7 @@ def grant_from_action(store, action_id, expected_digest, actor) -> dict:
         raise RegistryError("action_conflict", "Review this exact saved action before allowing it.")
     payload = action["payload"]
     pip_id = payload["source"]["pip_id"]
+    require_can_always(payload)
     pins = _pins(payload)
     with store.registry.transaction():
         for existing in list_grants(store.registry, pip_id):
@@ -108,7 +126,7 @@ def check(store, actor, payload):
     grant_id = actor.split(":", 1)[1]
     pins = _pins(payload)
     grant = next((g for g in list_grants(store.registry, payload["source"]["pip_id"]) if g["id"] == grant_id), None)
-    if grant is None or any(grant[k] != v for k, v in pins.items()):
+    if grant is None or any(grant[k] != v for k, v in pins.items()) or _asks_every_time(payload):
         raise RegistryError("local_only", "This Pip is not allowed to run that action without asking.")
 
 
@@ -172,6 +190,8 @@ def dispatch_for_run(registry, config, run_id) -> list:
                                           grant["account"], grant["schema_digest"], message, actor, config, kind=draft_kind)
                 done = actions.accept(store, prepared["id"], prepared["digest"], actor, config)
                 outcomes.append({"action_id": done["id"], "status": done["status"], "grant_id": grant["id"]})
+                from .pip_plugins import after_action
+                after_action(store, config, done)   # a plugin action: the Pip reads its answer and carries on
             except Exception as exc:
                 outcomes.append({"draft_id": draft_id, "status": "waiting", "reason": str(exc)[:300]})
                 try:

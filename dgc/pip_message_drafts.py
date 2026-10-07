@@ -69,7 +69,13 @@ def validate_message(value,secrets=(),*,kind='email'):
         from .pip_calendar_actions import arguments
         arguments(value)
     else:sends.arguments(value)
-    if contains_secret(value,secrets):raise RegistryError('secret_detected','Do not include credentials in a draft.')
+    from .pip_connector_actions import PROVIDERS
+    if kind=='connector' and value['server'] not in PROVIDERS:
+        # A plugin's inputs name its own fields (Aave's "token" is a coin's address): only a saved
+        # credential, verbatim, is refused.
+        text=json.dumps(value,ensure_ascii=False)
+        if any(s in text for s in secrets if s):raise RegistryError('secret_detected','Do not include credentials in a draft.')
+    elif contains_secret(value,secrets):raise RegistryError('secret_detected','Do not include credentials in a draft.')
     return dict(value)
 
 
@@ -194,11 +200,14 @@ def _commit_reply(store,run_id,result,kind):
     run=store.run(run_id)
     if kind=='connector':
         from .pip_connector_drafts import pin,candidate
-        context=pin(run['manifest'])
-        if context is None:raise RegistryError('permission_denied','No connector drafting context.')
+        from .pip_plugins import offered
         value=result[field]
         validate_message(value,kind='connector')
-        if candidate({'server':value['server'],**value['call']},context)!=value:raise RegistryError('permission_denied','The connector draft does not match its pinned descriptors.')
+        # A plugin action is the one the controller built for this run (pip_plugins.offer).
+        if not offered(store.registry,run_id,value):
+            context=pin(run['manifest'])
+            if context is None:raise RegistryError('permission_denied','No connector drafting context.')
+            if candidate({'server':value['server'],**value['call']},context)!=value:raise RegistryError('permission_denied','The connector draft does not match its pinned descriptors.')
     elif not validate_pin(run['manifest'],kind=kind):raise RegistryError('permission_denied','This conversation did not support these drafts.')
     job=store._job(run['pip_id'])
     if run['manifest'].get('run_kind')=='personal_task':

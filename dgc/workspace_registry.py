@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 41
+SCHEMA_VERSION = 42
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -370,6 +370,10 @@ class WorkspaceRegistry:
             # A Personal Pip's own page: its face, colour, title and notifications (pip_profile.SCHEMA).
             from .pip_profile import SCHEMA as profile_schema
             _execute_schema(self.db, profile_schema)
+        if version < 42:
+            # The plugins each Personal Pip asked to use, and the actions a run was offered (pip_plugins.SCHEMA).
+            from .pip_plugins import SCHEMA as plugins_schema
+            _execute_schema(self.db, plugins_schema)
         # Schema33 admits explicit version3 bounded additional app-read grants.
         # Schema32 adds explicit guest and finite-series semantics to calendar drafts/actions.
         # Older readers must refuse the registry instead of rendering a partial review.

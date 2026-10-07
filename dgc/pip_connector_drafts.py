@@ -5,6 +5,7 @@ it cannot connect, execute tools, authenticate or choose new credentials.
 """
 from __future__ import annotations
 import json
+import re
 import time
 from . import pip_connector_actions as connector,pip_app_access as apps
 from .workspace_registry import RegistryError
@@ -25,7 +26,7 @@ NOTICE=('Use list_connector_tools to see the connector metadata pinned for this 
 def validate(value):
     apps.bounded(value,12000)
     if (not isinstance(value,dict) or set(value)!={'server','connection_digest','schema_digest','call'}
-            or not isinstance(value['server'],str) or value['server'] not in connector.PROVIDERS):
+            or not isinstance(value['server'],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',value['server'])):
         raise RegistryError('invalid_connector_draft','Choose one discovered connector tool.')
     from .pip_app_sends import HASH
     for field in ('connection_digest','schema_digest'):
@@ -44,7 +45,7 @@ def validate_snapshot(value):
         raise RegistryError('invalid_connector_context','Invalid connector metadata snapshot.')
     names=set()
     for row in value['connections']:
-        if not isinstance(row,dict) or set(row)!={'server','connection_digest','tools'} or not isinstance(row['server'],str) or row['server'] in names or not isinstance(row['tools'],list) or len(row['tools'])>100:
+        if not isinstance(row,dict) or set(row)!={'server','connection_digest','tools'} or row.get('server') not in connector.PROVIDERS or row['server'] in names or not isinstance(row['tools'],list) or len(row['tools'])>100:
             raise RegistryError('invalid_connector_context','Invalid connector metadata snapshot.')
         names.add(row['server']);tools=set()
         for tool in row['tools']:

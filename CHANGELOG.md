@@ -38,6 +38,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **Plugins in Pips: each Pip asks first.** A Personal Pip can use the plugins you added to DGC,
+  as Grok's bots use connectors: when it needs one it asks (`use_plugin`), and its chat shows
+  "Let Ava use Airtable?". **Allow** lets that one Pip use it, with no second sign-in; the plugin's
+  sign-in in Settings → Plugins is used. The Pip lists the plugin's tools (`plugin_tools`) and
+  calls one (`call_plugin`) through the Pips controller; the Pip's own process never connects to a
+  server. A tool its vendor marks read-only runs at once and comes back as untrusted data; any other
+  tool, including one the vendor left unmarked, becomes an Allow card and runs only on your
+  **Allow**, or on **Always allow** for that tool. After it runs, the Pip reads what the plugin
+  answered by making the same call again (which does not run it a second time) and carries on in
+  its chat. A plugin that can move money (1inch, Aave, Airwallex) never gets Always allow: it asks
+  every time. Only the vendor's hosted server, as the plugin registered it and turned on in DGC,
+  is used. The Pip's page lists its plugins, each with **Take back**. Pips API 44: `list_pip_plugins`,
+  `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`. Registry schema 42.
+- A plugin added in Settings while Pips are running reaches the Pips at once: they read the saved
+  settings, not the ones the runner started with.
 - **Routines (app triggers).** A Personal Pip does things on its own, as Grok's bots do: each
   routine has a name, what to do, and when (a time, a new email matching a Gmail search, or a set
   time before each calendar event). You add them on its page, or the Pip suggests one with a new

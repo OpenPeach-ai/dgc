@@ -18,6 +18,8 @@ export type PipReadParams = {
   list_pip_shared: { pip_id: string; kind: "links" | "media" | "files" };
   get_pip_computers: Record<string, never>;
   list_pip_apps: Record<string, never>;
+  list_pip_plugins: { pip_id: string };
+  list_pip_plugin_uses: Record<string, never>;
   list_pip_routines: { pip_id: string };
   list_pip_app_links: { pip_id: string };
   list_pip_computer_files: { pip_id: string; path?: string };
@@ -102,6 +104,8 @@ export type PipMutationParams = {
   decline_pip_app_link: { pip_id: string; link_id: string };
   disconnect_pip_app_link: { pip_id: string; link_id: string };
   finish_pip_computer_check: { pip_id: string };
+  allow_pip_plugin: { pip_id: string; grant_id: string };
+  decline_pip_plugin: { pip_id: string; grant_id: string };
   add_pip_computer_file: { pip_id: string; path?: string; name: string; data: string };
   remove_pip_computer_file: { pip_id: string; path: string };
   run_pip_computer_command: { pip_id: string; command: string };
@@ -175,6 +179,10 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   update_pip_computers: [],
   reset_pip_computer: ["pip_id"],
   list_pip_apps: [],
+  list_pip_plugins: ["pip_id"],
+  allow_pip_plugin: ["pip_id", "grant_id"],
+  decline_pip_plugin: ["pip_id", "grant_id"],
+  list_pip_plugin_uses: [],
   list_pip_routines: ["pip_id"],
   add_pip_routine: ["pip_id", "title", "prompt", "trigger"],
   update_pip_routine: ["pip_id", "routine_id", "changes"],
@@ -520,6 +528,11 @@ for (const command of ["list_pip_shared", "get_pip_computers", "list_pip_apps"])
 for (const command of ["set_pip_profile", "update_pip_computers", "reset_pip_computer"]) API43_MUTATIONS.add(command);
 for (const command of API43_READS) READS.add(command);
 for (const command of API43_MUTATIONS) MUTATIONS.add(command);
+// API 44: a Personal Pip's plugins. It asks to use one; you allow it, or not, on its card; local only.
+const API44_READS = new Set(["list_pip_plugins", "list_pip_plugin_uses"]);
+const API44_MUTATIONS = new Set(["allow_pip_plugin", "decline_pip_plugin"]);
+for (const command of API44_READS) READS.add(command);
+for (const command of API44_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -608,7 +621,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);

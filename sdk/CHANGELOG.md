@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+A Personal Pip's plugins (Pips API 44, local only): a Pip asks to use one of the plugins you added
+to DGC, and `list_pip_plugins` (`pip_id`) reads its cards and the plugins it could ask for;
+`allow_pip_plugin` and `decline_pip_plugin` (`pip_id`, `grant_id`) answer a card, and
+`decline_pip_plugin` also takes an allowed plugin back. `list_pip_plugin_uses` lists the plugins
+your Pips may use, and which Pips. A plugin action a Pip prepares is a connector draft whose
+`server` is the plugin's server; a payment plugin's actions refuse `always_allow_pip_app_action`.
+All four are refused before sending to a runtime below API 44.
+
 Simple Pips (Pips API 43): `introduce_pip` queues a new Personal Pip's first message once. A
 Personal Pip can be created with an empty `goal`, and with `pip_type` `core` (the Primary Pip).
 `send_pip_message` takes `images` (up to 4 image data URIs) and `files` (up to 4 `{name, data}`),

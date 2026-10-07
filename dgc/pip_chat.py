@@ -420,13 +420,25 @@ APPS_KEY = "apps_"
 # After the user finishes a site's robot check on the Pip's computer, DGC asks it to carry on, under this key.
 CHECK_KEY = "check_"
 ROUTINE_KEY = "routine_"          # a routine's turn (pip_routines): the Pip does it and replies here
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY)
+# After the user allows a plugin the Pip asked for (pip_plugins), DGC asks it to carry on, under this key.
+PLUGINS_KEY = "plugins_"
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY)
 CHECK_DONE = ("This message is from DGC, not the user. The user says they finished {host}'s check on your computer's "
               "screen. Read the page again and carry on with what they asked. If the site still asks for a check, "
               "stop and tell them in one sentence.")
 APP_CONNECTED = ("This message is from DGC, not the user. The user connected {app} to you ({label}). Read it with "
                  "read_app now if that helps with what they asked, then carry on in a short message. To send or change "
                  "anything there, prepare a draft; it waits for their Allow.")
+PLUGIN_RAN = ("This message is from DGC, not the user. The user allowed {tool} in {plugin}. {outcome}{answer}"
+              "Then carry on with what they asked, in a short message.")
+PLUGIN_DONE = "It ran. "
+PLUGIN_UNKNOWN = ("{plugin} did not confirm it, so it may or may not have happened. Do not run it again; if it changes "
+                  "anything, tell the user to check in {plugin}. ")
+PLUGIN_ANSWER = "Read what it answered with plugin_answer (that does not run it again). "
+PLUGIN_ALLOWED = ("This message is from DGC, not the user. The user allowed you to use {plugin}. See its tools with "
+                  "plugin_tools, then call the one you need with call_plugin in this turn, and carry on with what they "
+                  "asked in a short message. A [reads] tool answers at once; any other tool shows an Allow card under your "
+                  "reply only once you call it, so never say a card is there unless call_plugin said so.")
 COMPUTER_DONE = ("This message is from DGC, not the user. The user approved what your computer was holding, and "
                  "DGC sent it exactly as the page made it: {what}. Use your computer to read the page and see what "
                  "happened. Then tell the user in a short message, and carry on with what they asked if more is "
@@ -468,6 +480,21 @@ def continue_after_app(store, pip_id, link, config):
     """The chat's next turn once the user has connected an app this Pip asked for."""
     key = APPS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(link["id"]))[:100]
     text = APP_CONNECTED.format(app=str(link["app"])[:60], label=str(link.get("label") or "their account")[:160])
+    return send(store, pip_id, text, key, "local-apps", config, _intro=True)
+
+
+def continue_after_plugin(store, pip_id, card, config):
+    """The chat's next turn once the user has allowed a plugin this Pip asked for."""
+    key = PLUGINS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
+    return send(store, pip_id, PLUGIN_ALLOWED.format(plugin=str(card["name"])[:80]), key, "local-apps", config, _intro=True)
+
+
+def continue_after_plugin_action(store, pip_id, action_id, plugin, tool, config, *, confirmed, answered):
+    """The chat's next turn once a plugin action the Pip prepared has run on the user's Allow."""
+    key = PLUGINS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    plugin, tool = str(plugin)[:80], str(tool)[:160]
+    text = PLUGIN_RAN.format(tool=tool, plugin=plugin, outcome=PLUGIN_DONE if confirmed else PLUGIN_UNKNOWN.format(plugin=plugin),
+                             answer=PLUGIN_ANSWER if answered else "")
     return send(store, pip_id, text, key, "local-apps", config, _intro=True)
 
 
@@ -721,9 +748,13 @@ def insert_reply(store, run, result, now):
             raise RegistryError("invalid_reply", "This reply's computer summary is invalid.")
     if "connector_action_draft" in result:
         from .pip_connector_drafts import validate, pin, candidate
-        value=validate(result['connector_action_draft']);context=pin(run['manifest'])
-        if context is None or candidate({'server':value['server'],**value['call']},context)!=value:
-            raise RegistryError('permission_denied','Connector drafting does not match this conversation metadata.')
+        from .pip_plugins import offered
+        value=validate(result['connector_action_draft'])
+        # A plugin action is the one the controller built for this run (pip_plugins.offer).
+        if not offered(store.registry, run['id'], value):
+            context=pin(run['manifest'])
+            if context is None or candidate({'server':value['server'],**value['call']},context)!=value:
+                raise RegistryError('permission_denied','Connector drafting does not match this conversation metadata.')
     if "calendar_draft" in result:
         from .pip_message_drafts import validate_message, validate_pin
         validate_message(result["calendar_draft"],kind="calendar")

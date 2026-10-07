@@ -682,6 +682,30 @@ ACTIVE account; `decline_pip_app_link` and `disconnect_pip_app_link` set `declin
 turns `connected` queues the Pip's next chat turn under the reserved key `apps_<link id>`.
 Statuses: `requested`, `authorizing`, `connected`, `declined`, `failed` (with `error`).
 
+**A Pip's plugins** (API 44). The same socket serves `use_plugin {plugin, why}`, `plugin_tools
+{plugin, tool?}` and `call_plugin {plugin, tool, arguments}` (`pip_plugins.Session`). A plugin
+counts when it is installed and each of its servers is the vendor's hosted server through DGC's
+bridge (`transport: remote`, `npx -y mcp-remote <https url>`), saved exactly as the plugin
+registered it and not in `disabled_mcp_servers`; the saved settings file is read, so a plugin added
+while the runner runs counts at once. `use_plugin` records a `pip_plugin_grants` row (`requested`;
+one card per plugin). The user's `allow_pip_plugin` sets `allowed` and queues the Pip's next chat
+turn under `plugins_<grant id>`; `decline_pip_plugin` sets `declined` (Not now, or Take back).
+`plugin_tools` lists the tools of an allowed plugin's servers, each marked `[reads]` (MCP
+`readOnlyHint: true` and not `destructiveHint: true`) or `[asks]`; with `tool`, it returns that
+tool's description and input schema. `call_plugin` runs a `[reads]` tool in the controller and
+returns its answer as untrusted data (40,000 characters at most). Any other tool returns an Allow
+card: a connector draft `{server, connection_digest, schema_digest, call}` built by the controller
+from the discovered tool, recorded in `pip_plugin_offers` for that run, and saved after the reply
+only if it matches that record exactly. Allow prepares and accepts it as any connector action
+(`pip_app_actions`), after checking that the Pip may still use the plugin; then the plugin's answer
+(without any saved credential) is kept in `pip_plugin_answers` for 30 minutes and the Pip's chat
+continues under `plugins_<action id>`. The same call again within that time returns the kept
+answer and does not run again. A plugin whose catalog entry or installed record says `risk:
+money` never gets Always allow: `always_allow_pip_app_action` refuses it with `asks_every_time`
+before the action runs, and a grant never covers it. Local-only commands: `list_pip_plugins
+{pip_id}` → `{pip_id, plugins, installed}`; `allow_pip_plugin` and `decline_pip_plugin {pip_id,
+grant_id}` → `{plugin}`; `list_pip_plugin_uses` → `{plugins: [{plugin, name, installed, pips}]}`.
+
 A Personal task now pins `email_draft`, `calendar_draft`, `action_grants` (a summary) and, only
 when the Pip has a connector grant, a `connector_draft` snapshot; a handoff run pins none. Its
 worker may return `message_draft`, `calendar_draft` and `connector_action_draft`, which `finish`
@@ -1136,3 +1160,4 @@ Clients check it before using a newer control.
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
 | 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |
 | 43 | A Pip's own apps (`connect_app`, `read_app`; `list_pip_app_links`, `start_pip_app_link`, `check_pip_app_link`, `decline_pip_app_link`, `disconnect_pip_app_link`); Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images and files in a Personal Pip's chat (`send_pip_message` `images` and `files`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |
+| 44 | A Pip's plugins (`use_plugin`, `plugin_tools`, `call_plugin`; `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`); a plugin action is a connector draft on the plugin's server; payment plugins refuse Always allow |

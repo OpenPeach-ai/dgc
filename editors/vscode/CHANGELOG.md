@@ -53,6 +53,13 @@
 
 ### Pips
 
+- **Plugins in Pips: each Pip asks first.** When a Pip needs one of the plugins you added to DGC,
+  its chat shows "Let Ava use Airtable?" with **Allow** and **Not now**; no second sign-in. What it
+  would then do in a plugin is an Allow card showing the tool and its inputs, with **Allow**,
+  **Always allow** and **Don’t**. A plugin that can move money (1inch, Aave, Airwallex) has no
+  Always allow: it asks every time. After you allow an action the chat reloads and the Pip carries
+  on with what the plugin answered. Its page lists the plugins it may use, each with **Take back**.
+  Needs the DGC CLI with Pips API 44.
 - **A Personal Pip's page, like a Grok bot's.** Its Settings are one clean page: its face, name and
   an optional title at the top, then **Info**, **Links**, **Media** and **Files**. Info has its
   **Instructions** (a full page to edit them), its **Routines**, a **Notifications** switch and

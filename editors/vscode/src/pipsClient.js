@@ -8,6 +8,7 @@ import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup} from './pipAppLinks.js';
+import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup} from './pipPlugins.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles} from './pipsModel.js';
@@ -271,7 +272,7 @@ function chatMarkup(){
   const timed=m=>{const at=Date.parse(m.created_at),mark=simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return mark;};
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
   const messages=shown.map(m=>timed(m)+messageMarkup(m,{imageSrc:messageImageSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt:S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null})).join('');
-  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span><p class="message-status">Still writing…</p>${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${routineCards()}${needsYouCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span><p class="message-status">Still writing…</p>${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${routineCards()}${needsYouCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 async function toggleChatActivity(runId){
   if(!S.messages.some(m=>m.run_id===runId)||!usable())return;
@@ -282,7 +283,7 @@ async function toggleChatActivity(runId){
   finally{if(token===scope()&&chatActivities.get(runId)===value){value.loading=false;render();}}
 }
 async function loadMessages(more=false){
- if(!more){void loadEmailDrafts();void loadAppLinks();void loadRoutines();void refreshComputer();}
+ if(!more){void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadRoutines();void refreshComputer();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
   const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
@@ -1485,7 +1486,7 @@ function emailDraftCards(){
  const gmail=(S.appLinks||[]).find(l=>l.status==='connected'&&l.toolkit==='gmail')||null;
  const full=d=>S.apiVersion>=43?draftDetails.get(d.id+':'+d.digest):null;
  const allow=(S.emailDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&full(d)).map(d=>allowCardMarkup(full(d),{esc,link:gmail,busy:allowBusy===d.id||S.busy||archived(),pipName:S.pip?.name||'This Pip'})).join('');
- return allow+[...(S.emailDrafts||[]).filter(d=>!full(d)),...(S.apiVersion>=35?S.calendarDrafts||[]:[]),...(S.apiVersion>=37?S.connectorDrafts||[]:[])].filter(d=>d.status==='pending'&&!d.expired).map(d=>{const label=d.id.startsWith('conndraft_')?'App action for you to check':d.id.startsWith('caldraft_')?'Calendar event for you to check':'Email for you to check';return `<div class="chat-setup-review" aria-label="${label}"><span class="chat-setup-label">${label} <small>${esc(d.subject)}</small></span><button type="button" data-email-draft="${esc(d.id)}"${S.busy?' disabled':''}>Review</button></div>`;}).join('')+(S.emailDraftError?errorMarkup(S.emailDraftError):'')+(S.calendarDraftError?errorMarkup(S.calendarDraftError):'')+(S.connectorDraftError?errorMarkup(S.connectorDraftError):'');
+ return allow+[...(S.emailDrafts||[]).filter(d=>!full(d)),...(S.apiVersion>=35?S.calendarDrafts||[]:[]),...(S.apiVersion>=37?(S.connectorDrafts||[]).filter(d=>!pluginDraft(d)):[])].filter(d=>d.status==='pending'&&!d.expired).map(d=>{const label=d.id.startsWith('conndraft_')?'App action for you to check':d.id.startsWith('caldraft_')?'Calendar event for you to check':'Email for you to check';return `<div class="chat-setup-review" aria-label="${label}"><span class="chat-setup-label">${label} <small>${esc(d.subject)}</small></span><button type="button" data-email-draft="${esc(d.id)}"${S.busy?' disabled':''}>Review</button></div>`;}).join('')+(S.emailDraftError?errorMarkup(S.emailDraftError):'')+(S.calendarDraftError?errorMarkup(S.calendarDraftError):'')+(S.connectorDraftError?errorMarkup(S.connectorDraftError):'');
 }
 // A Personal Pip's own apps (pip_app_links): the Connect card it asks for with connect_app.
 let appLinkSeq=0,appLinkBusy='',appLinkTimer=0,appLinkUntil=0;const appLinkHosts=new Map();
@@ -1502,6 +1503,70 @@ function appLinkCards(){
  return cards.join('')+(S.appLinksError?`<p class="app-link-note" role="alert">${esc(S.appLinksError)}</p>`:'');
 }
 function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==link.id&&l.toolkit!==link.toolkit)];}
+// A Personal Pip's plugins (pip_plugins): it asks with use_plugin and you Allow it on its card. What it
+// would then do in a plugin is an Allow card here: Allow, Always allow (never for a plugin that can
+// move money) or Don't. The same reviewed steps as the connector dialogs, without them.
+S.plugins=[];S.pluginsError='';let pluginSeq=0,pluginBusy='';const pluginDrafts=new Map();
+async function loadPlugins(){
+ if(remoteHost||S.apiVersion<44||!personalPip()||!usable())return;
+ const token=scope(),sequence=++pluginSeq,pip=S.selected;
+ try{const page=pluginsPage(await send('list_pip_plugins',{pip_id:pip}),pip);if(token!==scope()||sequence!==pluginSeq||S.selected!==pip)return;
+  S.plugins=page.plugins;S.pluginsError='';render();void loadPluginDrafts();}
+ catch(error){if(token===scope()&&sequence===pluginSeq){S.pluginsError=errorText(error);render();}}
+}
+// The draft list carries summaries; a plugin's Allow card shows the whole call, read once per version.
+async function loadPluginDrafts(){
+ if(S.apiVersion<44||!personalPip()||!usable()||!(S.plugins||[]).some(c=>c.status==='allowed'))return;
+ const token=scope(),pip=S.selected;
+ for(const d of (S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&!pluginDrafts.has(d.id+':'+d.digest)).slice(0,5)){
+  try{const v=connectorDraft((await send('get_pip_connector_draft',{draft_id:d.id})).draft,pip,S.workspace.id);if(token!==scope()||S.selected!==pip)return;
+   if(v.id===d.id&&v.digest===d.digest){pluginDrafts.set(d.id+':'+d.digest,v);render();}}
+  catch{/* the Review row stays */}
+ }
+}
+function pluginDraft(d){const v=S.apiVersion>=44&&pluginDrafts.get(d.id+':'+d.digest),plugin=v&&pluginForServer(S.plugins,v.payload.action.server);return v&&plugin?{draft:v,plugin}:null;}
+function pluginCards(){
+ if(remoteHost||S.apiVersion<44||!personalPip())return '';
+ const pipName=S.pip?.name||'This Pip',off=archived()||S.busy;
+ const actions=(S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired).map(pluginDraft).filter(Boolean)
+  .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName}));
+ const lastReply=Math.max(0,...(S.messages||[]).filter(m=>m.role==='assistant').map(m=>Date.parse(m.created_at)||0));
+ const cards=shownPluginCards(S.plugins,Date.now(),lastReply).map(c=>pluginCardMarkup(c,{esc,busy:pluginBusy===c.id||off,pipName}));
+ return actions.join('')+cards.join('')+(S.pluginsError?`<p class="app-link-note" role="alert">${esc(S.pluginsError)}</p>`:'');
+}
+async function pluginAnswer(type,id,takeBack=false){
+ if(!usable()||!personalPip()||pluginBusy)return;
+ const token=scope(),pip=S.selected,pipName=S.pip?.name||'This Pip';pluginBusy=id;render();
+ try{const card=pluginResult(await send(type,{pip_id:pip,grant_id:id}),pip,id);if(token!==scope()||S.selected!==pip)return;
+  S.plugins=[card,...(S.plugins||[]).filter(c=>c.id!==id&&c.plugin!==card.plugin)];
+  S.notice=card.status==='allowed'?`${pipName} can use ${card.name} now.`:takeBack?`${pipName} no longer uses ${card.name}. It stays in DGC.`:'Not now.';
+  if(card.status==='allowed'){void loadMessages();void loadPluginDrafts();}
+ }catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){pluginBusy='';render();}}
+}
+async function pluginRun(id,always=false){
+ const d=(S.connectorDrafts||[]).find(x=>x.id===id),found=d&&pluginDraft(d);
+ if(!found||found.draft.status!=='pending'||found.draft.expired||!usable()||pluginBusy)return;
+ const {draft,plugin}=found,a=draft.payload.action,token=scope(),pip=S.selected,pipName=S.pip?.name||'This Pip';
+ always=always&&!plugin.money;pluginBusy=id;render();
+ try{
+  const call=connectorCall(a.call);
+  const expected={source_run_id:draft.source_run_id,server:a.server,connection_digest:a.connection_digest,schema_digest:a.schema_digest,call};
+  const action=messageReview((await send('prepare_pip_connector_draft',{draft_id:draft.id,expected_digest:draft.digest,call})).action,pip,S.workspace.id,expected);
+  if(token!==scope()||S.selected!==pip)return;
+  const done=await send(always?'always_allow_pip_app_action':'accept_pip_app_action',{action_id:action.id,expected_digest:action.digest});
+  if(token!==scope())return;
+  S.notice=done?.action?.status==='succeeded'
+   ?`Done: ${a.call.tool} ran in ${plugin.name}.`+(always?` ${pipName} may run it without asking now; take it back on its page.`:'')
+   :`${plugin.name} didn’t confirm ${a.call.tool}. Check it there before you try again.`;
+  void loadMessages();   // the Pip reads what it answered and carries on
+ }catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){pluginBusy='';render();}}
+}
+function pluginSkip(id){
+ const d=(S.connectorDrafts||[]).find(x=>x.id===id);if(!d||S.busy||!usable()||pluginBusy)return;
+ void mutate({type:'dismiss_pip_connector_draft',draft_id:d.id,expected_digest:d.digest},r=>{const v=connectorDraft(r.draft,S.selected,S.workspace.id);if(v.id!==d.id||v.status!=='dismissed')throw Error('The dismissal does not match this action.');S.notice='Not run.';void loadEmailDrafts();});
+}
 // ---- A Personal Pip's page, as on Grok's bots: face, name and title, then Info (Instructions,
 // Routines, Notifications, Share as template), Links, Media and Files. And its routines' cards.
 S.pipPage='info';S.routines=null;S.routinesError='';
@@ -1551,7 +1616,7 @@ function routinesSectionMarkup(){
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
  S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;lookDirty=false;routineEditing='';routineError='';
- void loadRoutines();void loadAppLinks();
+ void loadRoutines();void loadAppLinks();void loadPlugins();
 }
 function putProfile(pipId,value){
  const p=profile(value);if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
@@ -1596,7 +1661,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+allowedMarkup();
+  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -1742,7 +1807,7 @@ function showCalendarReview(a){
 }
 async function loadConnectorDrafts(){
  if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;const token=scope(),seq=++connectorDraftSeq;
- try{const result=connectorDraftsPage(await send('list_pip_connector_drafts',{pip_id:S.selected,limit:20}),S.selected);if(token!==scope()||seq!==connectorDraftSeq)return;S.connectorDrafts=result.drafts;S.connectorDraftError='';render();}catch(error){if(token===scope()&&seq===connectorDraftSeq){S.connectorDraftError=errorText(error);render();}}
+ try{const result=connectorDraftsPage(await send('list_pip_connector_drafts',{pip_id:S.selected,limit:20}),S.selected);if(token!==scope()||seq!==connectorDraftSeq)return;S.connectorDrafts=result.drafts;S.connectorDraftError='';render();void loadPluginDrafts();}catch(error){if(token===scope()&&seq===connectorDraftSeq){S.connectorDraftError=errorText(error);render();}}
 }
 async function openConnectorDraft(id){
  if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;
@@ -1868,7 +1933,7 @@ function renderReview() {
   }
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
 }
-function clearSelection() { S.appLinks=[];S.appLinksError='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 async function loadRun(id) {
   if(id!==S.runId){activitySeq++;S.activity=null;S.activityLoading=false;S.activityError='';}
   S.runId=id;const sequence=++detailSeq;const token=scope();render();
@@ -2272,6 +2337,13 @@ document.addEventListener('click',event=>{
   if(target.dataset.appLinkDecline){void appLinkAction('decline_pip_app_link',target.dataset.appLinkDecline);return;}
   if(target.dataset.appLinkDisconnect){void appLinkAction('disconnect_pip_app_link',target.dataset.appLinkDisconnect);return;}
   if(target.dataset.appLinkSettings){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
+  if(target.dataset.pluginAllow){void pluginAnswer('allow_pip_plugin',target.dataset.pluginAllow);return;}
+  if(target.dataset.pluginDecline){void pluginAnswer('decline_pip_plugin',target.dataset.pluginDecline);return;}
+  if(target.dataset.pluginRemove){void pluginAnswer('decline_pip_plugin',target.dataset.pluginRemove,true);return;}
+  if(target.dataset.pluginSettings){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
+  if(target.dataset.pluginRun){void pluginRun(target.dataset.pluginRun);return;}
+  if(target.dataset.pluginAlways){void pluginRun(target.dataset.pluginAlways,true);return;}
+  if(target.dataset.pluginSkip){pluginSkip(target.dataset.pluginSkip);return;}
   if(target.dataset.emailDraft){void openEmailDraft(target.dataset.emailDraft);return;}
   if(target.dataset.calendarDraftMore){void emailDraftHistory(target.dataset.calendarDraftMore,true);return;}
   if(target.dataset.emailDraftMore){void emailDraftHistory(target.dataset.emailDraftMore);return;}

@@ -70,6 +70,7 @@ CONTROL_COMMANDS = frozenset({
     "finish_pip_computer_check",
     "list_pip_routines", "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
     "set_pip_profile", "list_pip_shared", "get_pip_computers", "update_pip_computers", "reset_pip_computer", "list_pip_apps",
+    "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -103,6 +104,8 @@ _COMMAND_ARGS = {
     "decide_pip_routine": {"pip_id", "routine_id", "add"},
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
+    "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
+    "list_pip_plugin_uses": set(),
     "reject_pip_app_action": {"action_id", "expected_digest"},
     "list_pip_connections": set(),
     "inspect_pip_connection": {"server"},
@@ -2008,7 +2011,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_connector_drafts
     connector_context = pip_connector_drafts.pin(manifest)
     connector_candidate = None
-    from . import pip_computer, pip_app_links
+    from . import pip_computer, pip_app_links, pip_plugins
     # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
     computer_pin = manifest.get('computer_socket') if personal and kind in ('personal_task', 'conversation') else None
     apps_pin = manifest.get('app_socket') if personal and kind in ('personal_task', 'conversation') else None
@@ -2056,7 +2059,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None else []) + ([pip_computer.schema()] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([_skill_schema()] if pip_skills else [])
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None else []) + ([pip_computer.schema()] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([_skill_schema()] if pip_skills else [])
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -2111,6 +2114,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         "it. Never say a card is there unless connect_app said so. To send or change anything in an app, prepare "
                         "a draft; it waits for the user's Allow. " + ("Connected now: " + ", ".join(a['app'] + ' (' + str(a['label']) + ')' for a in apps_pin['apps']) + "."
                                                 if apps_pin['apps'] else "Nothing is connected yet."))
+                    if apps_pin.get('plugins'):
+                        base_instructions += pip_plugins.instructions(apps_pin['plugins'])
                 role_instructions = 'Your character is ' + selected_type.name + '. Your job is defined by the approved goal, not a coding preset.'
                 if conversation is not None:
                     # The chat shows each paragraph as its own bubble, like a messaging app.
@@ -2239,6 +2244,17 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if personal and apps_pin is not None and call.name in pip_app_links.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return pip_app_links.worker_call(apps_pin, call.name, arguments)
+            if personal and apps_pin is not None and apps_pin.get('plugins') and call.name in pip_plugins.TOOLS:
+                arguments = call.arguments if isinstance(call.arguments, dict) else {}
+                if call.name == 'call_plugin' and connector_candidate is not None:
+                    return ('One action is already waiting for the user under this reply. Finish your reply; '
+                            'ask for the next one after they decide.')
+                reply = pip_app_links.worker_reply(apps_pin, call.name, arguments)
+                if 'draft' in reply:
+                    # Built by the controller from the tool it found; the reply carries it as this
+                    # turn's Allow card, which the controller checks against its own record.
+                    connector_candidate = reply['draft']
+                return reply['text']
             if personal and computer_pin is not None and call.name == pip_computer.TOOL:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return pip_computer.worker_call(computer_pin, str(arguments.get('op', '')),
@@ -3353,11 +3369,16 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 elif command == 'always_allow_pip_app_action':
                     # Send/Run once, then let this Pip run the same kind of action, with the same
                     # connection, account and tool, without asking. No grant if this one cannot run.
-                    from .pip_action_grants import grant_from_action
+                    from .pip_action_grants import grant_from_action, require_can_always
+                    require_can_always(pip_app_actions.get(store,request.get('action_id'))['payload'])   # before it runs
                     done=pip_app_actions.accept(store,request.get('action_id'),request.get('expected_digest'),actor,config)
+                    from .pip_plugins import after_action
+                    after_action(store,config,done)         # a plugin action: the Pip reads its answer and carries on
                     result={'action':done,'grant':grant_from_action(store,done['id'],done['digest'],actor)}
                 else:
+                    from .pip_plugins import after_action
                     result={'action':pip_app_actions.accept(store,request.get('action_id'),request.get('expected_digest'),actor,config)}
+                    after_action(store,config,result['action'])
             elif command in ('list_pip_action_grants', 'revoke_pip_action_grant'):
                 from . import pip_action_grants
                 if actor not in ('editor-user', 'local-console'):
@@ -3396,6 +3417,33 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                             continue_after_app(store, pip_id, result['link'], config)
                         except RegistryError as exc:
                             result = {**result, 'continue_error': str(exc)}
+            elif command in ('list_pip_plugins', 'allow_pip_plugin', 'decline_pip_plugin'):
+                # A Personal Pip's plugins (pip_plugins): it asks; only the user, on this computer, allows.
+                from . import pip_plugins
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', 'Only you can let a Pip use your plugins, on this computer.')
+                pip = store._job(pip_id)
+                if pip['source_policy'] != {'mode': 'personal'}:
+                    raise RegistryError('invalid_request', 'Plugins are for Personal Pips.')
+                if command == 'list_pip_plugins':
+                    result = pip_plugins.listing(registry, pip_id, config)
+                elif command == 'allow_pip_plugin':
+                    was = pip_plugins._row(registry, request.get('grant_id'))['status']
+                    result = pip_plugins.allow(registry, config, request.get('grant_id'), pip_id, actor)
+                    if was == 'requested':
+                        # The Pip carries on with what the user asked, now that it may use the plugin.
+                        from .pip_chat import continue_after_plugin
+                        try:
+                            continue_after_plugin(store, pip_id, result['plugin'], config)
+                        except RegistryError as exc:
+                            result = {**result, 'continue_error': str(exc)}
+                else:
+                    result = pip_plugins.decline(registry, config, request.get('grant_id'), pip_id, actor)
+            elif command == 'list_pip_plugin_uses':
+                from . import pip_plugins
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "Your Pips' plugins are on this computer only.")
+                result = pip_plugins.overview(registry, config)
             elif command in ('set_pip_profile', 'list_pip_shared'):
                 # A Personal Pip's own page: its look, title and notifications, and what its chat shared.
                 from . import pip_profile

@@ -88,7 +88,9 @@ def validate(payload):
         if type(source[key]) is not int or not low<=source[key]<2**53:raise RegistryError('invalid_app_action','Invalid source revision.')
     for value in (source['result_digest'],payload['connection_digest'],payload['schema_digest']):
         if not isinstance(value,str) or not sends.HASH.fullmatch(value):raise RegistryError('invalid_app_action','Invalid review digest.')
-    account_valid = (payload['account']=='connection_managed' and isinstance(payload['server'],str) and payload['server'] in connector.PROVIDERS
+    # A connector call names a saved connector or a plugin's server; which one, and whether the Pip may
+    # use it, is checked against today's settings before anything runs (propose, _current).
+    account_valid = (payload['account']=='connection_managed' and isinstance(payload['server'],str)
                      if is_connector else isinstance(payload['account'],str) and sends.ACCOUNT.fullmatch(payload['account']))
     if (not isinstance(payload['server'],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',payload['server']) or not account_valid):
         raise RegistryError('invalid_app_action','Select the saved connection and the account binding supported by this action.')
@@ -116,6 +118,13 @@ def _source(store, run_id):
             'result_digest':apps.digest(run['result'])}
 
 
+def _plugin_allowed(store,payload,config):
+    # A plugin's server is this Pip's only while the user allows that plugin for it (pip_plugins).
+    if payload['kind']=='connector_call' and payload['server'] not in connector.PROVIDERS:
+        from .pip_plugins import require_server
+        require_server(store.registry,payload['source']['pip_id'],payload['server'],config)
+
+
 def _current(store,payload,config):
     from .pip_access import require_unrestricted
     from .pip_daemon import is_runtime_paused
@@ -126,6 +135,7 @@ def _current(store,payload,config):
         raise RegistryError('stale_source','The Pip, result or lifecycle changed after review. Prepare a new message review.')
     if store._job(payload['source']['pip_id'])['status']!='active':
         raise RegistryError('paused','This Pip is paused. No external action was performed.')
+    _plugin_allowed(store,payload,config)
 
 
 def _row(store, action_id):
@@ -145,7 +155,7 @@ def _row(store, action_id):
         raise RegistryError('invalid_app_action','Saved action identity does not match its immutable payload.')
     if result['status']=='succeeded':_adapter(result['payload']['kind']).validate_receipt(result['receipt'])
     if result['status']=='succeeded' and result['payload']['kind']=='connector_call':
-        if result['receipt']['provider']!=connector.PROVIDERS[result['payload']['server']] or result['receipt']['tool']!=result['payload']['call']['tool']:
+        if result['receipt']['provider']!=connector.provider(result['payload']['server']) or result['receipt']['tool']!=result['payload']['call']['tool']:
             raise RegistryError('invalid_connector_receipt','The receipt does not match this connector action.')
     if result['status']=='unknown' and (not isinstance(result['receipt'],dict) or set(result['receipt'])!={'meaning'}):
         raise RegistryError('invalid_send_receipt','The retained uncertain-delivery receipt is invalid.')
@@ -182,7 +192,12 @@ def propose(store,source_run_id,server,connection_digest,account,schema_digest,m
     if kind!='gmail_send':request['kind']=kind
     apps.bounded(request,MAX_PAYLOAD)
     from .redaction import contains_secret,secret_values
-    if contains_secret(request,secret_values(config)):raise RegistryError('secret_detected','Remove configured credentials from the reviewed action.')
+    if kind=='connector_call' and server not in connector.PROVIDERS:
+        # A plugin's inputs name its own fields (Aave's "token" is a coin's address): only a saved
+        # credential, verbatim, is refused (pip_plugins.saved_credential_in).
+        from .pip_plugins import saved_credential_in
+        if saved_credential_in(request,config):raise RegistryError('secret_detected','Remove configured credentials from the reviewed action.')
+    elif contains_secret(request,secret_values(config)):raise RegistryError('secret_detected','Remove configured credentials from the reviewed action.')
     request_digest=apps.digest(request)
     def prior():
         row=store.db.execute('SELECT id,request_digest FROM pip_app_actions WHERE requested_by=? AND request_key=?',(actor,request_key)).fetchone()
@@ -194,6 +209,7 @@ def propose(store,source_run_id,server,connection_digest,account,schema_digest,m
     payload=validate({'schema_version':3 if kind=='connector_call' else (4 if calendar.extended(message) else 2) if kind=='calendar_create' else 1,'kind':kind,'source':source,'server':server,
                       'connection_digest':connection_digest,'account':account,'schema_digest':schema_digest,content:message})
     _acting(actor,store,payload)
+    _plugin_allowed(store,payload,config)
     spec,fingerprint=apps.connection(config,server)
     if not (connector.supported(server,spec) if kind=='connector_call' else apps.supported(spec)) or fingerprint!=connection_digest:raise RegistryError('connection_changed','Inspect the selected connection again before reviewing an action.')
     with nullcontext() if store.db.in_transaction else store.registry.transaction():
