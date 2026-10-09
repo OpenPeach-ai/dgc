@@ -325,7 +325,12 @@
    "developer": "Upstash",
    "mcp_urls": {
     "context7": "https://mcp.context7.com/mcp"
-   }
+   },
+   "reviewed_reads": [
+    "query-docs",
+    "resolve-library-id"
+   ],
+   "reviewed_reads_note": "Context7 marks none of its tools read-only. DGC reviewed both on 2026-10-09: they only look up libraries and read their documentation, so a Pip runs them at once."
   },
   {
    "name": "supabase",
@@ -1792,7 +1797,13 @@
    "license_url": "https://opensource.org/license/mit",
    "risk": "money",
    "terms_url": "https://business.1inch.com/portal/terms-of-service",
-   "privacy_url": "https://business.1inch.com/portal/privacy-policy"
+   "privacy_url": "https://business.1inch.com/portal/privacy-policy",
+   "reviewed_reads": [
+    "get_example",
+    "list_examples",
+    "search"
+   ],
+   "reviewed_reads_note": "1inch marks none of its 10 tools read-only. DGC reviewed them on 2026-10-09: searching its docs and reading SDK examples only read and run at once. Quotes, swaps, orders and the API need a 1inch Business sign-in and always ask."
   },
   {
    "name": "aave",
