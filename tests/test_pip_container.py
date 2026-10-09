@@ -157,6 +157,7 @@ class SetupTests(FakeContainerTests):
         (self.state / "image-dgc-pip-computer_oldtag12345").touch()
         pip_container.start_setup()
         self.wait_for_setup()
+        self._join_setup()      # "ready" is said before the older images are pruned (1 in 13 runs looked too soon)
         self.assertFalse((self.state / "image-dgc-pip-computer_oldtag12345").exists())
         with patch.object(pip_container, "DOCKERFILE", pip_container.DOCKERFILE + "# changed\n"):
             self.assertEqual(pip_container.status()["state"], "none", "a changed image is set up again")

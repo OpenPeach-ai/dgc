@@ -245,28 +245,37 @@ def _setup() -> None:
     home().mkdir(parents=True, exist_ok=True)
     with open(home() / ".lock", "w") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        _write_status(state="running", step="Starting Apple's container service", done=0, total=0)
-        ensure_system()
-        context = home() / "build"
-        context.mkdir(exist_ok=True)
-        (context / "Dockerfile").write_text(DOCKERFILE, encoding="utf-8")
-        _write_status(state="running", step="Building its computer", done=0, total=0)
-        tool = cli()
-        tail: list[bytes] = []
-        with subprocess.Popen([tool, "build", "--progress", "plain", "-t", image(), str(context)],
-                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
-            for line in proc.stdout:
-                tail = (tail + [line])[-20:]
-                step = _STEP.match(line)
-                if step:
-                    _write_status(state="running", step="Building its computer", done=int(step.group(1)), total=int(step.group(2)))
-            code = proc.wait()
-        if code != 0 or not image_ready():
-            raise RegistryError("computer_unavailable", "Building its computer failed: " + _last_line(b"".join(tail)))
-        chrome = run("run", "--rm", "--network", "none", image(), CHROME, "--version", timeout=120)
-        version = re.search(rb"(\d+\.\d+\.\d+\.\d+)", chrome.stdout or b"")
-        _write_status(state="ready", step="", done=0, total=0, chrome=version.group(1).decode() if version else "")
-        _prune_old()
+        try:
+            _build()
+        except Exception as exc:             # noqa: BLE001 -- said in the status, never raised into a caller
+            # Said while the lock is still held: written after it, a status read in between saw a running
+            # setup that no one held and said it "stopped before it finished" instead of why it failed.
+            _write_status(state="failed", step="", done=0, total=0, error=str(exc)[:400] or type(exc).__name__)
+
+
+def _build() -> None:
+    _write_status(state="running", step="Starting Apple's container service", done=0, total=0)
+    ensure_system()
+    context = home() / "build"
+    context.mkdir(exist_ok=True)
+    (context / "Dockerfile").write_text(DOCKERFILE, encoding="utf-8")
+    _write_status(state="running", step="Building its computer", done=0, total=0)
+    tool = cli()
+    tail: list[bytes] = []
+    with subprocess.Popen([tool, "build", "--progress", "plain", "-t", image(), str(context)],
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
+        for line in proc.stdout:
+            tail = (tail + [line])[-20:]
+            step = _STEP.match(line)
+            if step:
+                _write_status(state="running", step="Building its computer", done=int(step.group(1)), total=int(step.group(2)))
+        code = proc.wait()
+    if code != 0 or not image_ready():
+        raise RegistryError("computer_unavailable", "Building its computer failed: " + _last_line(b"".join(tail)))
+    chrome = run("run", "--rm", "--network", "none", image(), CHROME, "--version", timeout=120)
+    version = re.search(rb"(\d+\.\d+\.\d+\.\d+)", chrome.stdout or b"")
+    _write_status(state="ready", step="", done=0, total=0, chrome=version.group(1).decode() if version else "")
+    _prune_old()
 
 
 def _prune_old() -> None:
