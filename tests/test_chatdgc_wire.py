@@ -181,7 +181,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual((activity["kind"], activity["text"]), ("searching", "paris weather"))
         reply = self.wire.of("chatdgc_message")[-1]["message"]
         self.assertEqual(activity["message_id"], reply["id"])
-        self.assertEqual((reply["text"], reply["sources"]), ("Let me check. Sunny [1].",
+        self.assertEqual((reply["text"], reply["sources"]), ("Let me check. \n\nSunny [1].",
                                                              [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris"}]))
         self.send(chat, "again", request_id="r2", search="always")
         self.assertIn("invalid command", self.wire.of("chatdgc_error")[-1]["message"])

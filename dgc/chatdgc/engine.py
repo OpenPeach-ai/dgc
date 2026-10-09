@@ -307,6 +307,10 @@ class ChatEngine:
                                      "content": self._web_search(call, sources, searches, on_activity)})
                 if len(searches) >= MAX_SEARCHES:
                     tools = None
+                if streamed and not "".join(streamed[-2:]).endswith("\n"):
+                    # What it said before searching ("Let me check.") ends there: the answer starts a new
+                    # paragraph, on screen and in the saved reply alike.
+                    text_part("\n\n")
             text = "".join(streamed) or str(getattr(result, "content", "") or "")
             thought_text = "".join(thought) or str(getattr(result, "thinking", "") or "")
             reason = str(getattr(result, "finish_reason", "stop") or "stop")

@@ -300,13 +300,13 @@ class ChatDGCTests(unittest.TestCase):
     def test_a_search_that_fails_says_so_to_the_model_and_the_reply_still_comes(self):
         chat = self.engine.open()
         self.results["x"] = SearchError("web search failed (brave): 401")
-        self.script += [{"calls": [("web_search", {"query": "x"}), ("read_file", {"path": "/etc/passwd"})]},
+        self.script += [{"parts": ["Let me look."], "calls": [("web_search", {"query": "x"}), ("read_file", {"path": "/etc/passwd"})]},
                         {"parts": ["I couldn't search just now."]}]
         reply = self.engine.send(chat["id"], "Look it up", search="auto")
         results = [m["content"] for m in self.clients[-1].calls[1]["messages"] if m["role"] == "tool"]
         self.assertEqual(results, ["error: web search failed (brave): 401",
                                    "error: the only tool here is web_search. Answer from what you have."])
-        self.assertEqual(reply["text"], "I couldn't search just now.")
+        self.assertEqual(reply["text"], "Let me look.\n\nI couldn't search just now.", "the answer starts its own paragraph")
         self.assertNotIn("sources", reply)
         with self.assertRaises(ChatEngineError):
             self.engine.send(chat["id"], "x", search="always")
