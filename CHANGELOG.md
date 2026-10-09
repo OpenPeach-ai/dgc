@@ -42,6 +42,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   then the main model, then a model installed on the same Ollama that says it sees. The look is one request,
   and the message keeps what it saw as `vision`. `chatdgc_activity` has a `looking` kind. `chatdgc_file` shows
   an image the chat keeps, as a `data:` URI up to 2.5 MB.
+- **Versions.** `chatdgc_edit` changes a message you sent, and `chatdgc_regenerate` tries a reply again,
+  optionally with another model or thinking level. Each makes a new version from that point, and the old
+  one is kept. `chatdgc_version` switches between them. A message with other versions carries `versions`.
 
 ### Models
 

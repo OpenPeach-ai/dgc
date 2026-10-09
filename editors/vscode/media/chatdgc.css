@@ -70,7 +70,19 @@ body.cd-blank .cd-fine { display: none; }
 
 .cd-actions { display: flex; align-items: center; gap: var(--sp-1); min-height: var(--control-sm); }
 .cd-user .cd-actions { opacity: 0; }
-.cd-user:hover .cd-actions, .cd-user:focus-within .cd-actions { opacity: 1; }
+.cd-user:hover .cd-actions, .cd-user:focus-within .cd-actions, .cd-user .cd-actions.cd-actions-shown { opacity: 1; }
+.cd-action:disabled { opacity: .45; cursor: default; background: transparent; }
+/* ‹ 2 / 3 ›: the version of the conversation from this point. */
+.cd-versions { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans);
+  font-variant-numeric: tabular-nums; }
+.cd-versions-count { min-width: 34px; text-align: center; }
+/* Editing a message you sent. */
+.cd-edit { display: flex; flex-direction: column; gap: var(--sp-2); width: min(85%, 640px); padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--accent); border-radius: var(--r-2xl); background: var(--surface2); }
+.cd-edit-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.cd-edit-cancel { padding: 2px var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-full); background: transparent;
+  color: var(--text); font: var(--w-semi) var(--t-xs)/1.6 var(--sans); cursor: pointer; }
+.cd-edit-cancel:hover { background: var(--surface); }
 .cd-action { display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm);
   padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .cd-action:hover { background: var(--surface2); color: var(--text); }

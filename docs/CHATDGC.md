@@ -57,6 +57,10 @@ voice come in later phases.
   Continue picks up in the same reply.
 - **Temporary chats.** Tick **Temporary** before your first message. A temporary chat is never saved or
   listed, and it disappears when DGC stops.
+- **Edit and try again.** **Edit** under a message you sent changes it; **Try again** under a reply asks
+  for another one, with whatever model and thinking level the box is set to. Either way, the old version
+  stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own
+  versions comes back as you left it. One point keeps up to 50 versions.
 - **Names.** A chat is named from its first line at once. After the first reply, your model gives it a
   short name, the way a chat app does. A name you give a chat yourself is never replaced.
 - **Rename, pin, archive, delete.** Use the **⋯** button at the top of a chat. You can also delete a chat
@@ -95,6 +99,9 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_earlier` | `request_id`, `conversation_id`, `before` (a message id) | `chatdgc_earlier` |
 | `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`off`, `auto`, `on`), `attachments?` | a turn (below) |
 | `chatdgc_continue` | `request_id`, `conversation_id`, `message_id` | a turn |
+| `chatdgc_edit` | `request_id`, `conversation_id`, `message_id` (yours), `text`, `model?`, `thinking?`, `search?` | `chatdgc_opened` (from the new version on), then a turn |
+| `chatdgc_regenerate` | `request_id`, `conversation_id`, `message_id` (a reply), `model?`, `thinking?`, `search?` | `chatdgc_opened`, then a turn |
+| `chatdgc_version` | `request_id`, `conversation_id`, `parent_id` (the message before the point, or `root`), `index` | `chatdgc_opened` |
 | `chatdgc_cancel` | `conversation_id`, `request_id?` | the turn ends `cancelled` |
 | `chatdgc_file` | `request_id`, `conversation_id`, `attachment_id` | `chatdgc_file` (`data`: an image as a `data:` URI up to 2.5 MB, or `error`) |
 | `chatdgc_update` | `request_id`, `conversation_id`, `title?`, `pinned?`, `archived?`, `delete?` | `chatdgc_changed` |
@@ -103,6 +110,9 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 frame never carries it), `{kind: "image", data}` for a pasted image as a `data:` URI, or `{kind: "text", text}`
 for a long paste. Each may also carry `name`. The user's message keeps `attachments` metadata: `id`, `kind`
 (`document`, `image` or `text`), `name`, `size`, and `chars` for text.
+
+A message that has other versions carries `versions: {parent, index, count}`: the point it belongs to, which
+version this is (counting from 0), and how many there are.
 
 A turn sends its events in this order:
 

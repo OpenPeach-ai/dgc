@@ -201,6 +201,17 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         return;
       case "chatdgc_opened": {
+        if (asker?.kind === "fork" || asker?.kind === "version") {
+          // A new version, or another one shown: every tab on this chat shows the conversation as it is now. A
+          // fork's request stays open: its turn is still to come.
+          if (asker.kind === "version") this.requests.delete(requestId);
+          const id = String(ev.conversation?.id || "");
+          for (const tab of showing(id)) {
+            this.post(tab, { type: "opened", conversation: ev.conversation, messages: ev.messages, earlier: ev.earlier,
+                             busy: ev.busy === true, replyId: typeof ev.reply_id === "string" ? ev.reply_id : "", keep: true });
+          }
+          return;
+        }
         if (!asker?.tab) return;
         this.requests.delete(requestId);
         const tab = asker.tab;
@@ -345,6 +356,32 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (!conversation || !MESSAGE_ID.test(String(message.messageId || ""))) return;
         this.ask({ tab, kind: "send" }, { type: "chatdgc_continue", conversation_id: conversation, message_id: message.messageId });
         return;
+      case "edit":
+      case "regenerate": {
+        if (!conversation || !MESSAGE_ID.test(String(message.messageId || ""))) return;
+        const model = typeof message.model === "string" && message.model.length <= 200 ? message.model : "";
+        const thinking = typeof message.thinking === "string" && THINKING.has(message.thinking) ? message.thinking : "";
+        const search = typeof message.search === "string" && SEARCH.has(message.search) ? message.search : "";
+        const chosen = { ...(model ? { model } : {}), ...(thinking ? { thinking } : {}), ...(search ? { search } : {}) };
+        if (message.type === "edit") {
+          const text = typeof message.text === "string" ? message.text : "";
+          if (text.length > MAX_TEXT) return;
+          this.ask({ tab, kind: "fork" }, { type: "chatdgc_edit", conversation_id: conversation, message_id: message.messageId,
+                                            text, ...chosen });
+        } else {
+          this.ask({ tab, kind: "fork" }, { type: "chatdgc_regenerate", conversation_id: conversation,
+                                            message_id: message.messageId, ...chosen });
+        }
+        return;
+      }
+      case "version": {
+        const parent = String(message.parent || "");
+        if (!conversation || !(parent === "root" || MESSAGE_ID.test(parent)) || !Number.isInteger(message.index)
+            || message.index < 0 || message.index > 1000) return;
+        this.ask({ tab, kind: "version" }, { type: "chatdgc_version", conversation_id: conversation, parent_id: parent,
+                                             index: message.index });
+        return;
+      }
       case "stop":
         if (conversation) this.deliver({ tab, kind: "stop" }, { type: "chatdgc_cancel", conversation_id: conversation });
         return;

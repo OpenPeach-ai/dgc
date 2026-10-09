@@ -122,7 +122,7 @@ test("a reply streams in as Markdown; your words and its words never become mark
     assert.equal(await s.page.locator(".cd-assistant .cd-meta").textContent(), "qwen3:32b", "which model answered");
     await s.page.locator(".cd-assistant .md-link").click();
     await s.page.locator(".cd-assistant pre.code .copy").click({ force: true });
-    await s.page.locator(".cd-assistant .cd-action").click();
+    await s.page.locator('.cd-assistant [aria-label="Copy"]').click();
     const asked = await s.posted();
     assert.deepEqual(asked.filter((m) => m.type === "openLink"), [{ type: "openLink", target: "https://example.com/paris" }]);
     assert.deepEqual(asked.filter((m) => m.type === "copy").map((m) => m.text), ["const x = 1;\n", "**Paris** is the capital.\n\n```js\nconst x = 1;\n```\n\nSee [the docs](https://example.com/paris)."]);
@@ -389,6 +389,48 @@ test("images you sent show as thumbnails, what a vision model saw is one click a
     await s.page.waitForFunction(() => document.querySelectorAll("#cd-chips .cd-chip").length === 1);
     assert.equal(await s.page.locator("#cd-chips .cd-chip-name").textContent(), "packing.md");
     assert.match(await s.page.locator("#cd-notice").textContent(), /Use the paperclip/);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("versions: edit a message, try a reply again, and step between versions", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const view = (extra = {}) => ({ type: "opened", conversation: conversation({ title: "Goa" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Plan Old Goa", versions: { parent: "root", index: 1, count: 2 } },
+      { id: M(2), role: "assistant", text: "Churches.", finish: "stop", versions: { parent: M(1), index: 0, count: 3 } }], ...extra });
+    await s.send(view());
+    const counts = await s.page.locator(".cd-versions-count").allTextContents();
+    assert.deepEqual(counts, ["2 / 2", "1 / 3"]);
+    const user = s.page.locator(".cd-user");
+    assert.equal(await user.locator('[aria-label="Next version"]').isDisabled(), true);
+    await user.locator('[aria-label="Previous version"]').click();
+    await s.page.locator(".cd-assistant [aria-label='Next version']").click();
+    assert.deepEqual(await s.posted("version"), [{ type: "version", parent: "root", index: 0 }, { type: "version", parent: M(1), index: 1 }]);
+    await user.hover();
+    await user.locator('[aria-label="Edit"]').click();
+    assert.equal(await s.page.locator(".cd-edit-input").inputValue(), "Plan Old Goa");
+    await s.page.keyboard.press("Escape");
+    assert.equal(await s.page.locator(".cd-edit").count(), 0, "Escape leaves it as it was");
+    assert.equal(await s.page.locator(".cd-user .cd-bubble").textContent(), "Plan Old Goa");
+    await user.hover();
+    await user.locator('[aria-label="Edit"]').click();
+    await s.page.locator(".cd-edit-input").fill("Plan Panjim");
+    await s.page.keyboard.press("Enter");
+    assert.deepEqual(await s.posted("edit"), [{ type: "edit", messageId: M(1), text: "Plan Panjim", model: "", thinking: "off", search: "auto" }]);
+    assert.equal(await s.page.locator("#cd-stop").isVisible(), true, "busy until the new reply ends");
+    assert.equal(await s.page.locator(".cd-assistant [aria-label='Try again']").isDisabled(), true, "nothing else while it answers");
+    await s.page.locator("#cd-input").fill("half-typed question");
+    await s.send(view({ messages: [{ id: M(3), role: "user", text: "Plan Panjim", versions: { parent: "root", index: 2, count: 3 } }],
+                        busy: true, replyId: M(4), keep: true }));
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "half-typed question", "what you were typing stays");
+    assert.deepEqual(await s.page.locator(".cd-msg").evaluateAll((n) => n.map((x) => x.dataset.id)), [M(3)], "cut back to the edit");
+    await s.send({ type: "message", message: { id: M(4), role: "assistant", text: "Panjim walk.", finish: "stop" } });
+    await s.send({ type: "turn", state: "ended", replyId: M(4) });
+    await s.frame();
+    await s.page.locator(".cd-assistant [aria-label='Try again']").click();
+    assert.deepEqual((await s.posted("regenerate")).map((m) => m.messageId), [M(4)]);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

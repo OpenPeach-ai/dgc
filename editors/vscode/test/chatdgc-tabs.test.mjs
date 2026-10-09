@@ -331,3 +331,26 @@ test("images the chat keeps are asked for by the tab showing them; dropped files
   await new Promise((r) => setTimeout(r, 0));
   assert.match(panel.last("error").message, /Use the paperclip/);
 });
+
+test("versions: edits, retries and switches go as their commands, and a new version reaches the tab with its draft kept", () => {
+  chat.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "x" });
+  panel.say({ type: "edit", messageId: MSG(1), text: "Again", thinking: "high", search: "on", model: "m".repeat(201) });
+  const edit = last("chatdgc_edit");
+  assert.deepEqual({ ...edit, request_id: "" }, { type: "chatdgc_edit", conversation_id: ID(7), message_id: MSG(1), text: "Again",
+                                                  thinking: "high", search: "on", request_id: "" });
+  chat.onEvent({ type: "chatdgc_opened", request_id: edit.request_id, conversation: { id: ID(7), title: "x" }, messages: [],
+                 earlier: 0, busy: true, reply_id: MSG(2) });
+  assert.deepEqual(panel.last("opened").keep, true);
+  chat.onEvent({ type: "chatdgc_error", request_id: edit.request_id, conversation_id: ID(7), message: "The model didn't answer." });
+  assert.equal(panel.last("error").message, "The model didn't answer.", "the edit's request was still open for its turn");
+  panel.say({ type: "regenerate", messageId: MSG(2), model: "qwen3:32b" });
+  assert.deepEqual([last("chatdgc_regenerate").message_id, last("chatdgc_regenerate").model], [MSG(2), "qwen3:32b"]);
+  panel.say({ type: "version", parent: "root", index: 0 });
+  panel.say({ type: "version", parent: MSG(1), index: 2 });
+  for (const bad of [{ parent: "../x", index: 0 }, { parent: "root", index: -1 }, { parent: "root", index: 1.5 }]) {
+    panel.say({ type: "version", ...bad });
+  }
+  assert.deepEqual(sent.filter((c) => c.type === "chatdgc_version").map((c) => [c.parent_id, c.index]), [["root", 0], [MSG(1), 2]]);
+});

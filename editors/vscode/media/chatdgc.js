@@ -12,7 +12,7 @@
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), searchPick = $("cd-search"), notice = $("cd-notice");
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
-                  model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [] };
+                  model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "" };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -153,6 +153,52 @@
     else if (!known) { images.set(item.id, "asked"); vscode.postMessage({ type: "image", id: item.id }); }
     return button;
   }
+  /** A button that starts or changes a turn: off while one runs (controls() keeps every such button in step). */
+  function idleOnly(button) {
+    button.dataset.whileIdle = "1";
+    button.disabled = state.busy || button.dataset.never === "1";
+    return button;
+  }
+  /** ‹ 2 / 3 ›: which version of the conversation from this point you're looking at. */
+  function versionsControl(message) {
+    const v = message.versions;
+    if (!v || !(Number(v.count) > 1)) return null;
+    const box = el("span", "cd-versions");
+    const step = (delta, icon, label) => {
+      const b = action(icon, label, () => vscode.postMessage({ type: "version", parent: v.parent, index: v.index + delta }));
+      if (v.index + delta < 0 || v.index + delta >= v.count) b.dataset.never = "1";
+      return idleOnly(b);
+    };
+    box.append(step(-1, "chevron-left", "Previous version"), el("span", "cd-versions-count", `${v.index + 1} / ${v.count}`),
+               step(1, "chevron-right", "Next version"));
+    return box;
+  }
+  /** Your message as a box to change: Send makes a new version from here; the old one stays a click away. */
+  function editor(message) {
+    const form = el("form", "cd-edit");
+    const box = el("textarea", "cd-input cd-edit-input"); box.value = message.text || ""; box.rows = 3;
+    box.setAttribute("aria-label", "Edit your message");
+    const row = el("div", "cd-edit-actions");
+    const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button";
+    const go = el("button", "cd-continue", "Send"); go.type = "submit";
+    row.append(cancel, go);
+    form.append(box, row);
+    const done = () => { state.editing = ""; render(); input.focus(); };
+    cancel.addEventListener("click", done);
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); }
+      else if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
+    });
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!box.value.trim() && !(message.attachments || []).length) return;
+      vscode.postMessage({ type: "edit", messageId: message.id, text: box.value, model: modelPick.value || "",
+                           thinking: thinkingPick.value || "", search: searchPick.value || "auto" });
+      state.editing = ""; state.busy = true; controls();
+    });
+    requestAnimationFrame(() => { box.focus(); box.setSelectionRange(box.value.length, box.value.length); });
+    return form;
+  }
   function messageNode(message) {
     const live = state.busy && message.id === state.replyId;
     const node = el("article", `cd-msg cd-${message.role === "user" ? "user" : "assistant"}`);
@@ -177,13 +223,20 @@
         seen.append(el("summary", "", `Seen by ${message.vision.model || "a vision model"}`), el("div", "cd-seen-text", message.vision.text));
         node.append(seen);
       }
-      if (message.text) {
+      if (state.editing === message.id) node.append(editor(message));
+      else if (message.text) {
         const bubble = el("div", "cd-bubble");
         bubble.textContent = message.text;
         node.append(bubble);
       }
       const actions = el("div", "cd-actions");
-      actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
+      const versions = versionsControl(message);
+      if (versions) actions.append(versions);
+      if (state.editing !== message.id) {
+        actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
+        actions.append(idleOnly(action("edit", "Edit", () => { state.editing = message.id; render(); })));
+      }
+      if (versions) actions.classList.add("cd-actions-shown");
       node.append(actions);
       return node;
     }
@@ -197,9 +250,17 @@
     if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
     const end = endNote(message);
     if (end) node.append(end);
-    if (!live && message.text) {
+    if (!live && (message.text || message.versions)) {
       const actions = el("div", "cd-actions");
+      const versions = versionsControl(message);
+      if (versions) actions.append(versions);
       actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
+      const again = action("refresh", "Try again", () => {
+        vscode.postMessage({ type: "regenerate", messageId: message.id, model: modelPick.value || "",
+                             thinking: thinkingPick.value || "", search: searchPick.value || "auto" });
+        state.busy = true; controls();
+      });
+      actions.append(idleOnly(again));
       if (message.model) actions.append(el("span", "cd-meta", String(message.model)));
       node.append(actions);
     }
@@ -241,6 +302,7 @@
 
   // ---- the composer
   function controls() {
+    for (const button of document.querySelectorAll("[data-while-idle]")) button.disabled = state.busy || button.dataset.never === "1";
     const text = input.value;
     send.hidden = state.busy;
     stop.hidden = !state.busy;
@@ -391,23 +453,27 @@
     const msg = event.data || {};
     switch (msg.type) {
       case "opened": {
+        // keep: the same chat shown again (a new version, or another one chosen): what you're typing and the
+        // model and thinking you picked stay, and so does where you were reading.
+        const keep = msg.keep === true && state.conversation?.id === msg.conversation?.id;
         state.conversation = msg.conversation || null;
         state.messages = Array.isArray(msg.messages) ? msg.messages : [];
         state.earlier = Number(msg.earlier) || 0;
         state.busy = msg.busy === true;
         state.replyId = msg.replyId || "";
         state.opened = true;
-        state.model = ""; state.thinking = "";
+        state.editing = "";
+        if (!keep) { state.model = ""; state.thinking = ""; }
         state.unavailable = "";
         $("cd-title").textContent = state.conversation?.title || "New chat";
         vscode.setState({ ...(vscode.getState() || {}), conversation: state.conversation?.id || "",
                           temporary: !!state.conversation?.temporary });
-        restoreDraft();
+        if (!keep) restoreDraft();
         hideNotice();
         fillModels();
-        pinned = true;
+        if (!keep) pinned = true;
         render();
-        input.focus();
+        if (!keep) input.focus();
         return;
       }
       case "earlier": {

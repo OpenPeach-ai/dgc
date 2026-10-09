@@ -22,6 +22,8 @@
 - **Drag files onto a chat**, from VS Code's Explorer or your file manager.
 - **Seen by:** when the chat's model can't see, another model looks at the image, and **Seen by** under your
   message shows which one and what it saw.
+- **Edit** a message you sent, or **Try again** on a reply. The old version stays: **‹ 2 / 3 ›** steps
+  between them.
 
 ### Questions
 
