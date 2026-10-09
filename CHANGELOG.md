@@ -38,6 +38,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   own bytes. The chat keeps its own copy, owner-only, deleted with the chat. The model reads each one in
   DGC's attachment frame, which no file can close, and sees the newest eight images as images. A model
   that can't see images is told so before anything is kept.
+- **A chat whose model can't see images gets one that can to look first.** ChatDGC tries the sub-agent model,
+  then the main model, then a model installed on the same Ollama that says it sees. The look is one request,
+  and the message keeps what it saw as `vision`. `chatdgc_activity` has a `looking` kind. `chatdgc_file` shows
+  an image the chat keeps, as a `data:` URI up to 2.5 MB.
 
 ### Models
 

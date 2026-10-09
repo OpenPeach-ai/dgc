@@ -229,6 +229,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_message":
         for (const tab of showing(conversation)) this.post(tab, { type: "message", message: ev.message });
         return;
+      case "chatdgc_file":
+        if (asker?.tab) {
+          this.requests.delete(requestId);
+          this.post(asker.tab, { type: "image", id: String(ev.attachment_id || ""),
+                                 ...(typeof ev.data === "string" ? { data: ev.data } : { error: String(ev.error || "") }) });
+        }
+        return;
       case "chatdgc_activity":
         for (const tab of showing(conversation)) {
           this.post(tab, { type: "activity", messageId: ev.message_id, kind: ev.kind, text: String(ev.text || "") });
@@ -291,6 +298,30 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           items.push({ kind: "file", path: uri.fsPath, name: uri.path.split("/").pop() || "file", size });
         }
         this.post(tab, { type: "attached", items });
+        return;
+      }
+      case "image":
+        if (conversation && /^att_[a-f0-9]{32}$/.test(String(message.id || ""))) {
+          this.ask({ tab, kind: "image" }, { type: "chatdgc_file", conversation_id: conversation, attachment_id: message.id });
+        }
+        return;
+      case "dropped": {
+        // Dropped from VS Code's Explorer or the system's file manager: as good as picked, with one guard a picker
+        // doesn't need. A drop names its files in the page, so a page could name any file; nothing inside a
+        // hidden folder (~/.ssh, ~/.dgc, a project's .git) goes by drop. The picker can still choose one.
+        const items = [];
+        for (const raw of (Array.isArray(message.uris) ? message.uris : []).slice(0, MAX_ATTACHMENTS)) {
+          let uri: vscode.Uri;
+          try { uri = vscode.Uri.parse(String(raw), true); } catch { continue; }
+          if (uri.scheme !== "file" || uri.path.split("/").some((part) => part.startsWith("."))) continue;
+          let stat: vscode.FileStat;
+          try { stat = await vscode.workspace.fs.stat(uri); } catch { continue; }
+          if (stat.type !== vscode.FileType.File) continue;
+          tab.picked.add(uri.fsPath);
+          items.push({ kind: "file", path: uri.fsPath, name: uri.path.split("/").pop() || "file", size: stat.size });
+        }
+        if (items.length) this.post(tab, { type: "attached", items });
+        else this.post(tab, { type: "error", message: "Those can't be attached here. Use the paperclip to choose a file." });
         return;
       }
       case "send": {

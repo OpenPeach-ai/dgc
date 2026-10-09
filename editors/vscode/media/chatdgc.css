@@ -95,6 +95,20 @@ body.cd-blank .cd-fine { display: none; }
   padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .cd-chip-remove:hover { background: var(--surface2); color: var(--text); }
 .cd-sent { justify-content: flex-end; }
+/* Images you sent, as thumbnails; a click shows one larger. */
+.cd-thumbs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); max-width: 85%; }
+.cd-thumb { padding: 0; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface2); overflow: hidden; cursor: zoom-in; }
+.cd-thumb img { display: block; max-width: 220px; max-height: 160px; object-fit: cover; }
+.cd-thumb-big { cursor: zoom-out; }
+.cd-thumb-big img { max-width: min(100%, 720px); max-height: 70vh; object-fit: contain; }
+.cd-thumb-missing { display: block; padding: var(--sp-3) var(--sp-4); color: var(--muted); font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
+/* What a vision model saw, for a chat whose own model can't see. */
+.cd-seen { max-width: 85%; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.cd-seen summary { cursor: pointer; text-align: right; }
+.cd-seen-text { margin-top: var(--sp-1); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--surface);
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; }
+/* Dragging files over the tab: the box says it takes them. */
+body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface2)); }
 .cd-sent .cd-chip { padding-right: var(--sp-2); }
 
 .cd-input { width: 100%; min-height: 24px; max-height: 40vh; resize: none; border: 0; outline: none; padding: 0 var(--sp-1);

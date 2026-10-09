@@ -139,16 +139,43 @@
     box.replaceChildren(...state.pending.map((item, i) => chip(item, () => { state.pending.splice(i, 1); chips(); controls(); input.focus(); })));
     box.hidden = !state.pending.length;
   }
+  // ---- images the chat keeps, shown as thumbnails (asked of the backend once each, then remembered)
+  const images = new Map();          // attachment id -> {data} | {error} | "asked"
+  function thumb(item) {
+    const button = el("button", "cd-thumb");
+    button.type = "button"; button.dataset.att = item.id; button.title = `${item.name || "Image"}: click to enlarge`;
+    const picture = el("img"); picture.alt = item.name || "Image"; picture.dataset.att = item.id;
+    button.append(picture);
+    button.addEventListener("click", () => button.classList.toggle("cd-thumb-big"));
+    const known = images.get(item.id);
+    if (known?.data) picture.src = known.data;
+    else if (known?.error) button.replaceChildren(el("span", "cd-thumb-missing", item.name || "Image"));
+    else if (!known) { images.set(item.id, "asked"); vscode.postMessage({ type: "image", id: item.id }); }
+    return button;
+  }
   function messageNode(message) {
     const live = state.busy && message.id === state.replyId;
     const node = el("article", `cd-msg cd-${message.role === "user" ? "user" : "assistant"}`);
     node.dataset.id = message.id || "";
     if (message.role === "user") {
-      if (Array.isArray(message.attachments) && message.attachments.length) {
+      const sent = Array.isArray(message.attachments) ? message.attachments : [];
+      const pictures = sent.filter((item) => item.kind === "image" && /^att_[a-f0-9]{32}$/.test(item.id || ""));
+      if (pictures.length) {
+        const row = el("div", "cd-thumbs");
+        for (const item of pictures) row.append(thumb(item));
+        node.append(row);
+      }
+      const others = sent.filter((item) => !pictures.includes(item));
+      if (others.length) {
         const list = el("ul", "cd-chips cd-sent");
         list.setAttribute("aria-label", "Attached");
-        list.append(...message.attachments.map((item) => chip(item)));
+        list.append(...others.map((item) => chip(item)));
         node.append(list);
+      }
+      if (message.vision?.text) {
+        const seen = el("details", "cd-seen");
+        seen.append(el("summary", "", `Seen by ${message.vision.model || "a vision model"}`), el("div", "cd-seen-text", message.vision.text));
+        node.append(seen);
       }
       if (message.text) {
         const bubble = el("div", "cd-bubble");
@@ -162,8 +189,9 @@
     }
     if (message.thinking) node.append(thinkingBlock(message, live));
     if (message.text || !live) node.append(body(message));
-    const looking = live && state.searching[message.id];
-    if (looking) node.append(el("div", "cd-working cd-activity", `Searching the web for “${looking}”…`));
+    const doing = live && state.searching[message.id];
+    if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
+      ? `Looking at the image with ${doing.text}…` : `Searching the web for “${doing.text}”…`));
     else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
     if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
@@ -278,6 +306,37 @@
       reader.readAsDataURL(file);
     });
   }
+  // ---- dropping files: from VS Code's Explorer they come as addresses (the extension checks and reads them);
+  // from the system's file manager as files, which the page can read only when they're images or text.
+  const TEXT_FILE = /\.(txt|md|markdown|csv|tsv|json|log|ya?ml|xml|html?|css|js|ts|py|sh|sql|toml|ini)$/i;
+  const carriesFiles = (e) => [...(e.dataTransfer?.types || [])].some((t) => t === "Files" || /uri-list/.test(t));
+  document.addEventListener("dragover", (e) => {
+    if (!carriesFiles(e) || state.unavailable) return;
+    e.preventDefault();
+    document.body.classList.add("cd-dropping");
+  });
+  document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("cd-dropping"); });
+  document.addEventListener("drop", async (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    document.body.classList.remove("cd-dropping");
+    const listed = e.dataTransfer.getData("application/vnd.code.uri-list") || e.dataTransfer.getData("text/uri-list") || "";
+    let uris = [];
+    try { uris = listed.trim().startsWith("[") ? JSON.parse(listed) : listed.split(/\r?\n/); } catch { uris = []; }
+    uris = uris.map((u) => String(u).trim()).filter((u) => u && !u.startsWith("#") && u.startsWith("file:"));
+    if (uris.length) { vscode.postMessage({ type: "dropped", uris }); return; }
+    let skipped = 0;
+    for (const file of [...(e.dataTransfer.files || [])].slice(0, 10 - state.pending.length)) {
+      if (/^image\/(png|jpeg|gif|webp)$/.test(file.type)) {
+        const data = await pastedImage(file);
+        if (data) state.pending.push({ kind: "image", name: file.name || "Image", data, size: Math.round(data.length * 0.75) });
+      } else if ((file.type.startsWith("text/") || TEXT_FILE.test(file.name)) && file.size <= 2 * 1024 * 1024) {
+        state.pending.push({ kind: "text", name: file.name, text: await file.text() });
+      } else skipped++;
+    }
+    if (skipped) showNotice("Use the paperclip to attach that kind of file.", "info");
+    chips(); controls(); input.focus();
+  });
   input.addEventListener("paste", async (e) => {
     const files = [...(e.clipboardData?.files || [])].filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type));
     const words = e.clipboardData?.getData("text/plain") || "";
@@ -378,8 +437,8 @@
         controls();
         return;
       case "activity":
-        if (msg.kind === "searching" && msg.messageId) {
-          state.searching[msg.messageId] = String(msg.text || "");
+        if ((msg.kind === "searching" || msg.kind === "looking") && msg.messageId) {
+          state.searching[msg.messageId] = { kind: msg.kind, text: String(msg.text || "") };
           if (!state.messages.some((m) => m.id === msg.messageId)) state.messages.push({ id: msg.messageId, role: "assistant", text: "", thinking: "" });
           update(msg.messageId);
         }
@@ -438,6 +497,17 @@
       case "copied":
         announce("Copied.");
         return;
+      case "image": {
+        if (!/^att_[a-f0-9]{32}$/.test(String(msg.id || ""))) return;
+        const ok = typeof msg.data === "string" && /^data:image\/(png|jpeg|gif|webp);base64,/.test(msg.data);
+        images.set(msg.id, ok ? { data: msg.data } : { error: String(msg.error || "") });
+        for (const picture of document.querySelectorAll(`img[data-att="${CSS.escape(msg.id)}"]`)) {
+          if (ok) picture.src = msg.data;
+          else picture.closest(".cd-thumb")?.replaceChildren(el("span", "cd-thumb-missing", picture.alt || "Image"));
+        }
+        while (images.size > 200) images.delete(images.keys().next().value);
+        return;
+      }
       case "attached":
         for (const item of Array.isArray(msg.items) ? msg.items : []) {
           if (state.pending.length >= 10) { showNotice("Attach up to 10 things to one message.", "info"); break; }

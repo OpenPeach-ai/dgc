@@ -18,6 +18,10 @@
 - **Attach files, paste images and long text** in ChatDGC: the paperclip opens VS Code's file picker; a
   pasted image is scaled to fit; a paste over 5,000 characters becomes an attachment. Chips show what
   goes with the message and stay on it once sent. Only files you picked can be sent.
+- **Thumbnails** for images you sent (click to enlarge).
+- **Drag files onto a chat**, from VS Code's Explorer or your file manager.
+- **Seen by:** when the chat's model can't see, another model looks at the image, and **Seen by** under your
+  message shows which one and what it saw.
 
 ### Questions
 

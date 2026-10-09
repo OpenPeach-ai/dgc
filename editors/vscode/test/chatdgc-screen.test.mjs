@@ -339,8 +339,56 @@ test("attachments: picked files and pastes become chips, go with the message, an
     await s.send({ type: "message", message: { id: M(1), role: "user", text: "", attachments: [
       { id: "att_" + "1".repeat(32), kind: "document", name: "trip.csv", size: 2400, chars: 1200 },
       { id: "att_" + "2".repeat(32), kind: "image", name: "Pasted image", size: 50_000 }] } });
-    assert.deepEqual(await s.page.locator(".cd-user .cd-sent .cd-chip").allInnerTexts(), ["trip.csv\n1,200 characters", "Pasted image\n49 KB"]);
+    assert.deepEqual(await s.page.locator(".cd-user .cd-sent .cd-chip").allInnerTexts(), ["trip.csv\n1,200 characters"]);
+    assert.equal(await s.page.locator(".cd-user .cd-thumb img").getAttribute("alt"), "Pasted image", "an image shows as itself");
     assert.equal(await s.page.locator(".cd-user .cd-bubble").count(), 0, "no empty bubble for a message of only files");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("images you sent show as thumbnails, what a vision model saw is one click away, and files can be dropped", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const att = (c) => "att_" + c.repeat(32);
+    await s.send({ type: "opened", conversation: conversation({ title: "Sign" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "What does it say?", attachments: [
+        { id: att("a"), kind: "image", name: "sign.png", size: 7000 }, { id: att("b"), kind: "image", name: "gone.png", size: 9 },
+        { id: att("c"), kind: "document", name: "notes.pdf", size: 100, chars: 50 }],
+        vision: { model: "qwen3-vl:8b", text: "A white sign reading PIPS 48 READY." } },
+      { id: M(2), role: "assistant", text: "It says PIPS 48 READY.", finish: "stop" }] });
+    assert.deepEqual((await s.posted("image")).map((m) => m.id), [att("a"), att("b")], "each image asked for once");
+    const png = await s.page.evaluate(() => { const c = document.createElement("canvas"); c.width = 400; c.height = 100;
+      c.getContext("2d").fillRect(0, 0, 400, 100); return c.toDataURL("image/png"); });
+    await s.send({ type: "image", id: att("a"), data: png });
+    await s.send({ type: "image", id: att("b"), error: "That image is no longer there." });
+    assert.equal(await s.page.locator('img[data-att="' + att("a") + '"]').evaluate((i) => i.src.startsWith("data:image/png")), true);
+    assert.equal(await s.page.locator(".cd-thumb-missing").textContent(), "gone.png");
+    assert.deepEqual(await s.page.locator(".cd-user .cd-sent .cd-chip-name").allTextContents(), ["notes.pdf"], "other files stay chips");
+    await s.page.locator(".cd-thumb").first().click();
+    assert.equal(await s.page.locator(".cd-thumb").first().evaluate((b) => b.classList.contains("cd-thumb-big")), true);
+    assert.equal(await s.page.locator(".cd-seen summary").textContent(), "Seen by qwen3-vl:8b");
+    await s.page.locator(".cd-seen summary").click();
+    assert.equal(await s.page.locator(".cd-seen-text").textContent(), "A white sign reading PIPS 48 READY.");
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "activity", messageId: M(4), kind: "looking", text: "qwen3-vl:8b" });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-activity").textContent(), "Looking at the image with qwen3-vl:8b…");
+    await s.send({ type: "turn", state: "ended", replyId: M(4) });
+    await s.page.evaluate(() => {
+      const data = new DataTransfer(); data.setData("text/uri-list", "file:///home/u/a.csv\r\n# comment\r\nfile:///home/u/b.md");
+      document.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+    });
+    assert.deepEqual((await s.posted("dropped")).map((m) => m.uris), [["file:///home/u/a.csv", "file:///home/u/b.md"]]);
+    await s.page.evaluate(async () => {
+      const data = new DataTransfer();
+      data.items.add(new File(["# Packing\n- sunscreen"], "packing.md", { type: "" }));
+      data.items.add(new File([new Uint8Array([80, 75, 3, 4])], "trip.zip", { type: "application/zip" }));
+      document.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+    });
+    await s.page.waitForFunction(() => document.querySelectorAll("#cd-chips .cd-chip").length === 1);
+    assert.equal(await s.page.locator("#cd-chips .cd-chip-name").textContent(), "packing.md");
+    assert.match(await s.page.locator("#cd-notice").textContent(), /Use the paperclip/);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

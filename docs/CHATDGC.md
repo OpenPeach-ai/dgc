@@ -26,6 +26,15 @@ voice come in later phases.
   - **What the chat keeps:** its own copy of each file, so a file moved later is still what the
     conversation was about. Files are capped at 25 MB (images at 8 MB). A pasted image is scaled so its
     longer side is at most 2,048 pixels.
+  - **Dragging files in:** you can also drag files onto the chat:
+    - from VS Code's Explorer: any file, except one inside a hidden folder such as `~/.ssh` (pick those
+      with the paperclip);
+    - from your system's file manager: images and text files.
+  - **Thumbnails:** images you sent show as thumbnails; click one to enlarge it.
+  - **Models that can't see:** if the chat's model can't see images, a model that can looks at them first.
+    ChatDGC tries your sub-agent model, then your main model, then a model installed on the same Ollama
+    that says it can see. **Seen by** under your message shows which model looked and what it saw, and the
+    chat's model reads that description in place of the pictures.
 - **Web search.** Pick **Web** in the box:
   - **auto** (the default): your model searches when the answer depends on something current, such as
     news, prices, weather or a fact it isn't sure of.
@@ -87,6 +96,7 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`off`, `auto`, `on`), `attachments?` | a turn (below) |
 | `chatdgc_continue` | `request_id`, `conversation_id`, `message_id` | a turn |
 | `chatdgc_cancel` | `conversation_id`, `request_id?` | the turn ends `cancelled` |
+| `chatdgc_file` | `request_id`, `conversation_id`, `attachment_id` | `chatdgc_file` (`data`: an image as a `data:` URI up to 2.5 MB, or `error`) |
 | `chatdgc_update` | `request_id`, `conversation_id`, `title?`, `pinned?`, `archived?`, `delete?` | `chatdgc_changed` |
 
 `attachments` holds up to 10 items: `{kind: "file", path}` for a file the user picked (the backend reads it, so a
@@ -99,7 +109,9 @@ A turn sends its events in this order:
 1. `chatdgc_turn` with `state: "started"` and the `reply_id`.
 2. Your message, as `chatdgc_message` (a continued reply has none).
 3. The reply's text and thinking, as `chatdgc_delta` parts, sent about every 50 ms. While it searches the web,
-   `chatdgc_activity` (`kind: "searching"`) carries the query.
+   `chatdgc_activity` (`kind: "searching"`) carries the query. While a vision model looks at images for a
+   model that can't see, `kind: "looking"` carries that model's name, and the user's message then keeps
+   `vision: {model, text}`.
 4. The finished reply, as `chatdgc_message` with `finish` set to `stop`, `length`, `cancelled` or `error`.
    A reply that searched also carries `searches` (its queries) and `sources` (`[{n, title, url}]`, the
    numbers it cites as [n]).

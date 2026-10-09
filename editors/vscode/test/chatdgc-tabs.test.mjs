@@ -40,7 +40,12 @@ function fakePanel(viewType, title) {
 }
 globalThis.__DGC_TEST_VSCODE = {
   Uri: { joinPath: (...parts) => ({ toString: () => parts.map((p) => String(p?.toString?.() ?? p)).join("/") }),
-    parse: (value) => ({ toString: () => value, value }) },
+    parse: (value) => {
+      const file = /^file:\/\/(\/.*)$/.exec(value);
+      return file ? { scheme: "file", path: file[1], fsPath: decodeURIComponent(file[1]), toString: () => value, value }
+                  : { scheme: value.split(":")[0], path: "", fsPath: "", toString: () => value, value };
+    } },
+  FileType: { File: 1, Directory: 2 },
   ViewColumn: { Active: -1 },
   env: { clipboard: { writeText: async (text) => { world.clipboard = text; } }, openExternal: async (uri) => { world.opened.push(uri.toString()); return true; } },
   window: {
@@ -51,7 +56,11 @@ globalThis.__DGC_TEST_VSCODE = {
     showInputBox: async () => world.input,
     showOpenDialog: async () => world.chosen,
   },
-  workspace: { fs: { stat: async (uri) => ({ size: world.sizes[uri.fsPath] ?? 1 }) } },
+  workspace: { fs: { stat: async (uri) => {
+    if (world.dirs?.includes(uri.fsPath)) return { size: 0, type: 2 };
+    if (world.missing?.includes(uri.fsPath)) throw new Error("ENOENT");
+    return { size: world.sizes[uri.fsPath] ?? 1, type: 1 };
+  } } },
 };
 
 const bundle = join(scratch, "chatdgc.cjs");
@@ -297,4 +306,28 @@ test("attachments: only files this tab's picker returned, real pasted images, an
   panel.say({ type: "send", text: "big", attachments: [{ kind: "image", data: "data:image/png;base64," + "A".repeat(3_000_100) }] });
   assert.equal(sent.length, before, "nothing is sent");
   assert.match(panel.last("error").message, /too large to send together/);
+});
+
+test("images the chat keeps are asked for by the tab showing them; dropped files are as good as picked, but not from hidden folders", async () => {
+  chat.open(ID(6));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(6), title: "x" });
+  const att = "att_" + "a".repeat(32);
+  panel.say({ type: "image", id: att });
+  panel.say({ type: "image", id: "../../etc/passwd" });
+  const ask = last("chatdgc_file");
+  assert.deepEqual({ ...ask, request_id: "" }, { type: "chatdgc_file", conversation_id: ID(6), attachment_id: att, request_id: "" });
+  chat.onEvent({ type: "chatdgc_file", request_id: ask.request_id, conversation_id: ID(6), attachment_id: att, data: "data:image/png;base64,AAAA" });
+  assert.deepEqual(panel.last("image"), { type: "image", id: att, data: "data:image/png;base64,AAAA" });
+  world.dirs = ["/home/u/photos"]; world.missing = ["/home/u/gone.txt"];
+  world.sizes = { "/home/u/trip notes.md": 300 };
+  panel.say({ type: "dropped", uris: ["file:///home/u/trip%20notes.md", "file:///home/u/.ssh/id_ed25519", "file:///home/u/project/.git/config",
+                                      "file:///home/u/photos", "file:///home/u/gone.txt", "https://example.com/x.pdf"] });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(panel.last("attached").items, [{ kind: "file", path: "/home/u/trip notes.md", name: "trip%20notes.md", size: 300 }]);
+  panel.say({ type: "send", text: "", attachments: [{ kind: "file", path: "/home/u/trip notes.md", name: "trip notes.md" }] });
+  assert.equal(last("chatdgc_send").attachments[0].path, "/home/u/trip notes.md", "a dropped file can be sent");
+  panel.say({ type: "dropped", uris: ["file:///home/u/.dgc/secrets.json"] });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.match(panel.last("error").message, /Use the paperclip/);
 });
