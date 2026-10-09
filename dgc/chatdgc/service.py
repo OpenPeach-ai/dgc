@@ -21,6 +21,7 @@ from .engine import ChatEngine, ChatEngineError
 from .store import ChatStoreError
 
 PAGE_BYTES = 3 * 1024 * 1024          # one frame's messages, encoded
+PREVIEW_BYTES = 2_500_000             # an image shown in the chat: its data: URI must fit one frame
 FLUSH_S = 0.05
 FLUSH_CHARS = 16_000
 CLOSE_GRACE_S = 5.0
@@ -137,7 +138,7 @@ class ChatService:
         try:
             {"chatdgc_list": self._list, "chatdgc_open": self._open, "chatdgc_earlier": self._earlier,
              "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
-             "chatdgc_update": self._update}[kind](cmd)
+             "chatdgc_update": self._update, "chatdgc_file": self._file}[kind](cmd)
         except (ChatEngineError, ChatStoreError) as exc:
             self._error(str(exc), request_id, conversation_id)
 
@@ -171,6 +172,15 @@ class ChatService:
         messages, earlier = page(chat["messages"], cmd["before"])
         self.emit("chatdgc_earlier", request_id=cmd["request_id"], conversation_id=chat["id"], messages=messages,
                   earlier=earlier)
+
+    def _file(self, cmd: dict) -> None:
+        fields = {"request_id": cmd["request_id"], "conversation_id": cmd["conversation_id"],
+                  "attachment_id": cmd["attachment_id"]}
+        try:
+            self.emit("chatdgc_file", data=self.engine.image(cmd["conversation_id"], cmd["attachment_id"],
+                                                              limit=PREVIEW_BYTES), **fields)
+        except (ChatEngineError, ChatStoreError) as exc:
+            self.emit("chatdgc_file", error=str(exc)[:300], **fields)
 
     # -- turns
 

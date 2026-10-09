@@ -45,6 +45,8 @@ class ChatEngine:
         self.store = store or ChatStore()
         self._client_factory = client_factory
         self._searcher = searcher or self._search
+        from .eyes import Eyes
+        self.eyes = Eyes(self)
         self._temporary: dict[str, dict] = {}      # temporary chats: never written, gone with the process
         self._drafts: dict[str, dict] = {}         # new chats: written with their first message
         self._temporary_files: dict[tuple[str, str], tuple[bytes, str | None]] = {}   # a temporary chat's attachments
@@ -52,18 +54,21 @@ class ChatEngine:
 
     # -- the model
 
-    def client(self, model: str | None):
+    def client(self, model: str | None, *, base_url: str | None = None, api_key: str | None = None,
+               api_mode: str | None = None):
+        """A client for ``model`` on the configured endpoint, or on another (the sub-agent route's) when named."""
         if self._client_factory is not None:
             return self._client_factory(model)
         from ..llm import LLMClient, normalize_usage, usage_reported
         from .. import usage_ledger
         config = self.config
-        client = LLMClient(config.base_url, config.api_key, model or config.model,
+        client = LLMClient(base_url or config.base_url, config.api_key if api_key is None else api_key,
+                           model or config.model,
                            read_timeout=int(config.get("request_timeout", 1800)),
                            think_budget_tokens=config.get("think_budget_tokens", "auto"),
                            max_tokens=0,               # no cap of ChatDGC's own: the model's limit, then Continue
                            ollama_keep_alive=str(config.get("ollama_keep_alive", "30m")),
-                           api_mode=str(config.get("api_mode", "auto")),
+                           api_mode=str(api_mode or config.get("api_mode", "auto")),
                            provider_capabilities=config.get("provider_capabilities", {}),
                            capability_cache_ttl_s=int(config.get("capability_cache_ttl_s", 300)),
                            prompt_cache=bool(config.get("prompt_cache", True)),
@@ -174,13 +179,15 @@ class ChatEngine:
             chat["model"] = str(model)[:200]
         if thinking is not None:
             chat["thinking"] = thinking
-        if any(item["meta"]["kind"] == "image" for item in prepared):
-            # Before anything is kept: a model that can't see would be sent words about a picture it never saw.
-            from ..vision import has_vision
-            client = self.client(chat.get("model") or None)
-            if not has_vision(client, cancel=cancel):
-                raise ChatEngineError(f"{getattr(client, 'model', 'This model')} can't see images. Choose a model "
-                                      "that can, or send this without the image.")
+        relay = None
+        if any(item["meta"]["kind"] == "image" for item in prepared) and not self._sees(chat, cancel, asking=True):
+            # Before anything is kept: a model that can't see would be sent words about a picture it never saw, so
+            # one that can looks first (eyes.py), or the user is told why it can't go.
+            chat_model = chat.get("model") or self.config.model
+            relay = self.eyes.route(chat_model, cancel)
+            if relay is None:
+                raise ChatEngineError(f"{chat_model} can't see images, and no model that can is set up. Choose a model "
+                                      "that can see (or install one, such as qwen3-vl), or send this without the image.")
         if not chat["messages"] and chat["title"] in ("New chat", "Temporary chat") and not chat.get("temporary"):
             chat["title"] = title_from(text or prepared[0]["meta"]["name"])
         for item in prepared:
@@ -193,8 +200,20 @@ class ChatEngine:
         reply_id = new_message_id()
         if on_start is not None:
             on_start(mine, reply_id)
-        return self._reply(chat, self._history(chat, search), None, reply_id, on_text, on_thinking,
-                           cancel, search=search, on_activity=on_activity)
+        if relay is not None:
+            if on_activity is not None:
+                on_activity("looking", relay["model"])
+            pictures = [(attached.image_part(item["meta"], item["raw"])["image_url"]["url"], item["meta"]["name"])
+                        for item in prepared if item["meta"]["kind"] == "image"]
+            try:
+                seen = self.eyes.look(relay, pictures, text, cancel)
+            except Exception as exc:              # noqa: BLE001 -- said in the chat; the message stays
+                raise ChatEngineError(f"{relay['model']} couldn't look at the image: "
+                                      f"{' '.join(str(exc).split())[:300] or type(exc).__name__}") from exc
+            chat["messages"][-1] = mine = {**mine, "vision": {"model": relay["model"], "text": seen}}
+            chat = self._save(chat)
+        return self._reply(chat, self._history(chat, search, sees=relay is None and self._sees(chat, cancel)), None,
+                           reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity)
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
                        cancel: threading.Event | None = None) -> dict:
@@ -207,7 +226,7 @@ class ChatEngine:
             raise ChatEngineError("Only the last reply can be continued.")
         if chat["messages"][index].get("finish") not in ("length", "cancelled"):
             raise ChatEngineError("That reply is already complete.")
-        history = self._history(chat) + [{"role": "user", "content": CONTINUE}]
+        history = self._history(chat, sees=self._sees(chat, cancel)) + [{"role": "user", "content": CONTINUE}]
         if on_start is not None:
             on_start(None, message_id)
         return self._reply(chat, history, chat["messages"][index], message_id, on_text, on_thinking, cancel)
@@ -250,7 +269,33 @@ class ChatEngine:
         except ChatStoreError:
             return None
 
-    def _history(self, chat: dict, search: str = "off") -> list[dict]:
+    def _sees(self, chat: dict, cancel=None, *, asking: bool = False) -> bool:
+        """Whether the chat's model can see images. Only asked when it matters: about new images (``asking``) or
+        a chat that has some; the answer is the model's metadata, cached by the client."""
+        if not asking and not any(meta.get("kind") == "image" for m in chat["messages"]
+                                  for meta in m.get("attachments") or []):
+            return True
+        from ..vision import has_vision
+        try:
+            return bool(has_vision(self.client(chat.get("model") or None), cancel))
+        except Exception:
+            return False
+
+    def image(self, chat_id: str, attachment_id: str, *, limit: int) -> str:
+        """An image this chat keeps, as a data: URI to show. Raises ChatEngineError when it isn't one, is gone, or
+        is larger than ``limit`` bytes."""
+        chat = self._chat(chat_id)
+        meta = next((a for m in chat["messages"] for a in m.get("attachments") or [] if a.get("id") == attachment_id), None)
+        if meta is None or meta.get("kind") != "image":
+            raise ChatEngineError("That image isn't in this chat.")
+        found = self._file(chat, attachment_id)
+        if found is None:
+            raise ChatEngineError("That image is no longer there.")
+        if len(found[0]) > limit:
+            raise ChatEngineError("That image is too large to preview here.")
+        return attached.image_part(meta, found[0])["image_url"]["url"]
+
+    def _history(self, chat: dict, search: str = "off", sees: bool = True) -> list[dict]:
         """What the model reads: ChatDGC's instructions and the conversation. Earlier thinking never goes back;
         an earlier reply's sources do, as a list under it, so a follow-up can ask about [2]. A message's files
         go with it every time: documents and pasted text in DGC's attachment frame, and the newest images as
@@ -261,12 +306,20 @@ class ChatEngine:
         built = []
         for m in reversed(chat["messages"]):
             content = m.get("text") or ""
-            pictures = []
+            pictures, described = [], False
             for meta in m.get("attachments") or []:
                 found = self._file(chat, meta.get("id", ""))
                 name = meta.get("name", "attachment")
                 if found is None:
                     content += f"\n\n[{name} was attached here; it is no longer available]"
+                elif meta.get("kind") == "image" and not sees:
+                    looked = m.get("vision") or {}
+                    if not looked.get("text"):
+                        content += f"\n\n[An image, {name}, was attached here; this model can't see it]"
+                    elif not described:             # one look covered every image in the message
+                        described = True
+                        content += (f"\n\n[The user attached images here. {looked.get('model', 'A vision model')} "
+                                    f"looked at them for you and saw:\n<<<\n{looked['text']}\n>>>]")
                 elif meta.get("kind") == "image":
                     if images_left > 0:
                         pictures.append(attached.image_part(meta, found[0]))

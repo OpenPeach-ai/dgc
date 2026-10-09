@@ -186,6 +186,30 @@ class ServiceTests(unittest.TestCase):
         self.send(chat, "again", request_id="r2", search="always")
         self.assertIn("invalid command", self.wire.of("chatdgc_error")[-1]["message"])
 
+    def test_an_image_the_chat_keeps_can_be_shown(self):
+        import base64
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+        uri = "data:image/png;base64," + base64.b64encode(png).decode()
+        chat = self.new()
+        self.model.script.append({"parts": ["ok"]})
+        with patch("dgc.vision.has_vision", return_value=True):
+            self.send(chat, "Look", attachments=[{"kind": "image", "data": uri, "name": "shot.png"},
+                                                 {"kind": "text", "text": "notes", "name": "Pasted text"}])
+            self.ended()
+        image, text = self.wire.of("chatdgc_message")[0]["message"]["attachments"]
+        ask = lambda att, rid: self.service.dispatch({"type": "chatdgc_file", "request_id": rid, "conversation_id": chat,
+                                                       "attachment_id": att})
+        ask(image["id"], "f1")
+        shown = self.wire.of("chatdgc_file")[-1]
+        self.assertEqual((shown["attachment_id"], shown["data"]), (image["id"], uri))
+        ask(text["id"], "f2")
+        self.assertEqual(self.wire.of("chatdgc_file")[-1]["error"], "That image isn't in this chat.")
+        ask("att_" + "0" * 32, "f3")
+        self.assertIn("error", self.wire.of("chatdgc_file")[-1])
+        with patch.object(service_module, "PREVIEW_BYTES", 10):
+            ask(image["id"], "f4")
+        self.assertEqual(self.wire.of("chatdgc_file")[-1]["error"], "That image is too large to preview here.")
+
     def test_one_turn_per_chat_and_two_chats_side_by_side(self):
         first, second = self.new(), self.new()
         self.model.gate.clear()

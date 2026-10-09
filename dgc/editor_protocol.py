@@ -809,6 +809,8 @@ COMMAND_FIELDS.update({
                      "attachments": _A(False)},
     "chatdgc_continue": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
     "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
+    # An image the chat keeps, to show (answered by `chatdgc_file`: a data: URI, or why not).
+    "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S()},
     # Rename, pin, archive or delete. Answered by `chatdgc_changed`.
     "chatdgc_update": {"request_id": _S(), "conversation_id": _S(), "title": _S(False),
                        "pinned": _B(False), "archived": _B(False), "delete": _B(False)},
@@ -825,11 +827,13 @@ EVENT_FIELDS.update({
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
     # What the reply is doing besides writing: `text` is the query while it searches the web.
     "chatdgc_activity": {"conversation_id": _S(), "message_id": _S(),
-                         "kind": _f("string", enum=("searching",)), "text": _S()},
+                         "kind": _f("string", enum=("searching", "looking")), "text": _S()},
     "chatdgc_message": {"conversation_id": _S(), "message": _O(), "request_id": _S(False)},
     # A conversation's list entry changed (a turn, a rename, a pin), or it was deleted (summary null).
     "chatdgc_changed": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
     "chatdgc_error": {"message": _S(), "request_id": _S(False), "conversation_id": _S(False)},
+    "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S(), "data": _S(False),
+                     "error": _S(False)},
 })
 
 # Names the envelope owns. A payload field with any of these names would overwrite it on the wire

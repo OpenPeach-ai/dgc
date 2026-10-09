@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from dgc.chatdgc.engine import CONTINUE, MAX_SEARCHES, NAME_PROMPT, SEARCH_TOOL, ChatEngine, ChatEngineError
+from dgc.chatdgc.eyes import LOOK_SYSTEM
 from dgc.llm import ToolCall
 from dgc.search import SearchError
 from dgc.chatdgc.store import ChatStore, ChatStoreError, title_from
@@ -26,6 +27,16 @@ class FakeClient:
     """The model: streams its parts, then finishes as told."""
 
     naming = '"Capital of France."'
+    seeing: set = set()          # models that can see images
+    installed: list = []         # what list_models reports
+    looks: list = []             # what a model that looked was shown
+
+    @property
+    def vision_supported(self):
+        return self.model in self.seeing
+
+    def list_models(self):
+        return list(self.installed)
 
     def __init__(self, model, script):
         self.model, self.script, self.calls = model, script, []
@@ -34,6 +45,11 @@ class FakeClient:
         self.calls.append({"messages": list(messages), "effort": reasoning_effort, "tools": tools})
         if messages[0]["content"] == NAME_PROMPT:
             return SimpleNamespace(content=self.naming, finish_reason="stop", usage={}, thinking="")
+        if messages[0]["content"] == LOOK_SYSTEM:
+            FakeClient.looks.append((self.model, messages[1]["content"]))
+            if self.model == "broken-vl":
+                raise RuntimeError("out of memory")
+            return SimpleNamespace(content="A white sign reading PIPS 48 READY.", finish_reason="stop", usage={}, thinking="")
         step = self.script.pop(0)
         for part in step.get("thinking", []):
             on_thinking(part)
@@ -352,6 +368,52 @@ class ChatDGCTests(unittest.TestCase):
         self.engine.delete(chat["id"])
         self.assertFalse(files.exists(), "deleting a chat deletes its files")
 
+    def _picture(self):
+        import base64
+        return "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 40).decode()
+
+    def test_a_model_that_cant_see_gets_an_installed_one_to_look_for_it(self):
+        self.addCleanup(setattr, FakeClient, "seeing", set())
+        self.addCleanup(setattr, FakeClient, "installed", [])
+        self.addCleanup(setattr, FakeClient, "looks", [])
+        FakeClient.seeing, FakeClient.installed, FakeClient.looks = {"qwen3-vl:8b"}, ["llama3:8b", "qwen3-vl:8b"], []
+        chat = self.engine.open()
+        seen = []
+        self.script.append({"parts": ["It says PIPS 48 READY."]})
+        reply = self.engine.send(chat["id"], "What does it say?", attachments=[{"kind": "image", "data": self._picture(), "name": "sign.png"}],
+                                 on_activity=lambda *a: seen.append(a))
+        self.assertEqual(seen, [("looking", "qwen3-vl:8b")], "a likely name is asked first")
+        looked_model, shown = FakeClient.looks[0]
+        self.assertEqual(looked_model, "qwen3-vl:8b")
+        self.assertIn("What does it say?", shown[0]["text"])
+        self.assertEqual(shown[2]["type"], "image_url")
+        sent = self.clients[-1].calls[0]["messages"][1]["content"]
+        self.assertIsInstance(sent, str, "the chat's own model gets words, not pixels it can't read")
+        self.assertIn("qwen3-vl:8b looked at them for you and saw:\n<<<\nA white sign reading PIPS 48 READY.\n>>>", sent)
+        self.assertEqual(reply["text"], "It says PIPS 48 READY.")
+        kept = self.store.get(chat["id"])["messages"][0]
+        self.assertEqual(kept["vision"], {"model": "qwen3-vl:8b", "text": "A white sign reading PIPS 48 READY."})
+        self.script.append({"parts": ["Yes."]})
+        self.engine.send(chat["id"], "Is it a sign?")
+        self.assertIn("PIPS 48 READY", self.clients[-1].calls[0]["messages"][1]["content"], "and on every later turn")
+
+    def test_the_sub_agent_route_looks_first_and_a_failed_look_says_so(self):
+        self.addCleanup(setattr, FakeClient, "seeing", set())
+        self.addCleanup(setattr, FakeClient, "installed", [])
+        self.addCleanup(setattr, FakeClient, "looks", [])
+        FakeClient.seeing, FakeClient.installed, FakeClient.looks = {"llava:13b", "qwen3-vl:8b", "broken-vl"}, ["qwen3-vl:8b"], []
+        self.engine.config["subagent_model"] = "llava:13b"
+        chat = self.engine.open()
+        self.script.append({"parts": ["ok"]})
+        self.engine.send(chat["id"], "Look", attachments=[{"kind": "image", "data": self._picture()}])
+        self.assertEqual(FakeClient.looks[0][0], "llava:13b", "Settings' sub-agent model first")
+        self.engine.config["subagent_model"] = "broken-vl"
+        self.engine.eyes._cache.clear()
+        with self.assertRaises(ChatEngineError) as failed:
+            self.engine.send(chat["id"], "Again", attachments=[{"kind": "image", "data": self._picture()}])
+        self.assertIn("broken-vl couldn't look at the image: out of memory", str(failed.exception))
+        self.assertEqual(self.store.get(chat["id"])["messages"][-1]["text"], "Again", "your message is kept")
+
     def test_an_image_needs_a_model_that_can_see_and_only_the_newest_go_again(self):
         import base64
         png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
@@ -361,8 +423,8 @@ class ChatDGCTests(unittest.TestCase):
             self.engine.send(chat["id"], "What is this?", attachments=[{"kind": "image", "data": uri}])
         self.assertIn("can't see images", str(refused.exception))
         self.assertEqual(self.store.listing()["total"], 0, "nothing was kept")
-        FakeClient.vision_supported = True
-        self.addCleanup(delattr, FakeClient, "vision_supported")
+        self.addCleanup(setattr, FakeClient, "seeing", set())
+        FakeClient.seeing = {FakeConfig.model}
         self.script += [{"parts": [f"Picture {i}."]} for i in range(10)]
         for i in range(10):
             self.engine.send(chat["id"], f"Look {i}", attachments=[{"kind": "image", "data": uri, "name": f"shot{i}.png"}])
