@@ -73,6 +73,7 @@ STATIC_MEMBERS = {
     "extension/media/plugin-logos/superpowers.png": "media/plugin-logos/superpowers.png",
     "extension/media/plugin-logos/vercel.png": "media/plugin-logos/vercel.png",
     "extension/media/plugin-logos/zapier.ico": "media/plugin-logos/zapier.ico",
+    "extension/media/plugin-logos/anthropic.png": "media/plugin-logos/anthropic.png",
     "extension/media/plugin-logos/1inch.png": "media/plugin-logos/1inch.png",
     "extension/media/plugin-logos/aave.png": "media/plugin-logos/aave.png",
     "extension/media/plugin-logos/activecampaign.png": "media/plugin-logos/activecampaign.png",

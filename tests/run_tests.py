@@ -10931,6 +10931,7 @@ def test_extension_vsix_guard():
         "extension/media/plugin-logos/supabase.png",
         "extension/media/plugin-logos/superpowers.png",
         "extension/media/plugin-logos/vercel.png", "extension/media/plugin-logos/zapier.ico",
+        "extension/media/plugin-logos/anthropic.png",
         "extension/media/plugin-logos/1inch.png",
         "extension/media/plugin-logos/aave.png",
         "extension/media/plugin-logos/activecampaign.png",
@@ -10998,7 +10999,7 @@ def test_extension_vsix_guard():
         "extension/licenses/LUCIDE-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 112)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 113)
     # The diagram renderer is the one member allowed past the general size ceiling, and the only
     # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
     # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real

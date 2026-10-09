@@ -5697,7 +5697,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
   }
 
-  private pluginLogo(item: { name?: string; icon?: string; logo_file?: string }, webview?: vscode.Webview): string {
+  private pluginLogo(item: { name?: string; icon?: string; logo_file?: string; developer?: string }, webview?: vscode.Webview): string {
     if (!webview) return "";
     if (item.logo_file) {
       try {
@@ -5717,6 +5717,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", shipped[item.name])
       : item.icon === "dgc" && item.name?.startsWith("dgc-")
       ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", "dgc.svg")
+      // Anthropic's own plugins declare no logo of their own: they show Anthropic's mark, as their developer.
+      : item.developer === "Anthropic"
+      ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", "anthropic.png")
       : undefined;
     const file = fs.existsSync(png.fsPath) ? png : mark && fs.existsSync(mark.fsPath) ? mark : undefined;
     return file ? webview.asWebviewUri(file).toString() : "";

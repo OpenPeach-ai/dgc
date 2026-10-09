@@ -97,7 +97,8 @@
    "auth": "none",
    "icon": "dgc",
    "audited_on": "2026-09-23",
-   "verification": "Package structure checked; model behaviour depends on its tool support."
+   "verification": "Package structure checked; model behaviour depends on its tool support.",
+   "developer": "Anthropic"
   },
   {
    "name": "feature-dev",
@@ -115,7 +116,8 @@
    "audited_on": "2026-09-23",
    "block_reason": "This package contains Claude commands and agents, which DGC does not import. It supplies no supported skills or MCP tools.",
    "compatibility_url": "",
-   "verification": "Unavailable in DGC"
+   "verification": "Unavailable in DGC",
+   "developer": "Anthropic"
   },
   {
    "name": "code-review",
@@ -133,7 +135,8 @@
    "audited_on": "2026-09-23",
    "block_reason": "This package contains Claude commands, which DGC does not import. It supplies no supported skills or MCP tools.",
    "compatibility_url": "",
-   "verification": "Unavailable in DGC"
+   "verification": "Unavailable in DGC",
+   "developer": "Anthropic"
   },
   {
    "name": "commit-commands",
@@ -151,7 +154,8 @@
    "audited_on": "2026-09-23",
    "block_reason": "This package contains Claude commands, which DGC does not import. It supplies no supported skills or MCP tools.",
    "compatibility_url": "",
-   "verification": "Unavailable in DGC"
+   "verification": "Unavailable in DGC",
+   "developer": "Anthropic"
   },
   {
    "name": "code-simplifier",
@@ -169,7 +173,8 @@
    "audited_on": "2026-09-23",
    "block_reason": "This package contains a Claude agent definition, which DGC does not import. It supplies no supported skills or MCP tools.",
    "compatibility_url": "",
-   "verification": "Unavailable in DGC"
+   "verification": "Unavailable in DGC",
+   "developer": "Anthropic"
   },
   {
    "name": "pr-review-toolkit",
@@ -187,7 +192,8 @@
    "audited_on": "2026-09-23",
    "block_reason": "This package contains Claude commands and agents, which DGC does not import. It supplies no supported skills or MCP tools.",
    "compatibility_url": "",
-   "verification": "Unavailable in DGC"
+   "verification": "Unavailable in DGC",
+   "developer": "Anthropic"
   },
   {
    "name": "superpowers",
@@ -316,7 +322,8 @@
    "audited_on": "2026-09-23",
    "block_reason": "This pinned package uses an unsupported optional authentication header. Its anonymous MCP endpoint works, but the package cannot currently be imported.",
    "compatibility_url": "https://context7.com/docs/resources/all-clients",
-   "verification": "Unavailable in DGC"
+   "verification": "Unavailable in DGC",
+   "developer": "Upstash"
   },
   {
    "name": "supabase",

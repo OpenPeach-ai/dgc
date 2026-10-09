@@ -71,3 +71,8 @@ site icon.
 - plain: https://framerusercontent.com/images/oPE9BwSE8LUYzrxvpHa5FCmXc.png
 - read-ai: https://cdn.prod.website-files.com/614e5e239ea0f25fe5b6a797/615f71de842b191ea061fda6_ReadLogomark_256x256.png
 - refero: https://raw.githubusercontent.com/referodesign/refero_skill/a9b54a3e62a6391f5f5ab7a20e4ddb32fb79a27d/assets/icon.png
+
+Anthropic's own plugins (frontend-design, feature-dev, code-review, commit-commands, code-simplifier,
+pr-review-toolkit) declare no logo; they show Anthropic's mark as their developer:
+
+- anthropic: https://cdn.prod.website-files.com/67ce28cfec624e2b733f8a52/67d31dd7aa394792257596c5_webclip.png
