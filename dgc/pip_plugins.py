@@ -100,6 +100,8 @@ def _info(record, catalog) -> dict:
     entry = catalog.get(record["name"], {})
     return {"name": record["name"],
             "display_name": _text(record.get("display_name") or entry.get("display_name") or record["name"], 80),
+            # What it is for, in a line, so a Pip asked "the best USDC rate on Aave" knows Aave is a plugin it can ask for.
+            "about": _text(entry.get("summary") or record.get("summary") or "", 160),
             # A payment plugin by its installed record or by today's catalog: either one is enough.
             "money": "money" in (record.get("risk"), entry.get("risk")),
             # Tools DGC reviewed as reads for a vendor that marks none (Aave): exact names, from DGC's catalog,
@@ -455,7 +457,8 @@ class Session:
     def pin(self, registry) -> list:
         """What the run is told: the plugins it may use and the ones it could ask for."""
         mine = allowed(registry, self.pip_id, self.config)
-        return [{"plugin": n, "name": i["display_name"], "allowed": n in mine} for n, i in sorted(installed(self.config).items())][:40]
+        return [{"plugin": n, "name": i["display_name"], "about": i.get("about", ""), "allowed": n in mine}
+                for n, i in sorted(installed(self.config).items())][:40]
 
     # -- connections
 
@@ -640,12 +643,14 @@ def schemas(plugins_now) -> list:
 
 
 def instructions(plugins_now) -> str:
-    mine = [p["name"] for p in plugins_now if p["allowed"]]
-    others = [p["name"] for p in plugins_now if not p["allowed"]]
-    return ("\nThe user's plugins: use one allowed for you with plugin_tools and call_plugin. When the user asks for something "
-            "a plugin they added does and it is not allowed for you yet, call use_plugin in this turn: that call is what shows "
-            "the Allow card, and there is no card until you make it. To use a tool, call call_plugin: a [reads] tool answers "
-            "at once, and any other tool shows an Allow card below your reply, so never say a card is there unless a call "
-            "said so. "
-            + ("Allowed for you: " + ", ".join(mine) + ". " if mine else "")
-            + ("You may ask for: " + ", ".join(others) + "." if others else ""))
+    def named(p):
+        return p["name"] + (f" ({p['about']})" if p.get("about") else "")
+    mine = [named(p) for p in plugins_now if p["allowed"]]
+    others = [named(p) for p in plugins_now if not p["allowed"]]
+    return ("\nThe user's plugins: use one allowed for you with plugin_tools and call_plugin. When the user names one of "
+            "these plugins, or asks for something one of them does, and it is not allowed for you yet, call use_plugin in "
+            "this turn instead of saying you can't reach it: that call is what shows the Allow card, and there is no card "
+            "until you make it. To use a tool, call call_plugin: a [reads] tool answers at once, and any other tool shows "
+            "an Allow card below your reply, so never say a card is there unless a call said so. "
+            + ("Allowed for you: " + "; ".join(mine) + ". " if mine else "")
+            + ("You may ask for: " + "; ".join(others) + "." if others else ""))

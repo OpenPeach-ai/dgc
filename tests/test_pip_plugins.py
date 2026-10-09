@@ -197,8 +197,8 @@ class PluginCardTests(PluginWorld, unittest.TestCase):
         server = links.RunSocket(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], run)
         self.addCleanup(server.close)
         pin = server.pin()
-        self.assertEqual(pin["plugins"], [{"plugin": "aave", "name": "Aave", "allowed": False},
-                                          {"plugin": "airtable", "name": "Airtable", "allowed": False}])
+        self.assertEqual(pin["plugins"], [{"plugin": "aave", "name": "Aave", "about": "", "allowed": False},
+                                          {"plugin": "airtable", "name": "Airtable", "about": "", "allowed": False}])
         self.assertIn("error: refused", links.worker_call({**pin, "token": "x"}, "use_plugin", {"plugin": "airtable", "why": "w"}))
         self.assertIn("card asking the user", links.worker_call(pin, "use_plugin", {"plugin": "airtable", "why": "To help."}))
         card = self.card()
@@ -421,4 +421,13 @@ class ReviewedReadsTests(unittest.TestCase):
             with self.subTest(record=record):
                 other = pip_plugins._info(record, {"aave": {"name": "aave", "upstream": "u", "sha": "s", "reviewed_reads": ["get_markets"]}})
                 self.assertFalse(pip_plugins.read_only({"name": "get_markets"}, other), "a package that only calls itself aave")
+
+
+class PluginInstructionsTests(unittest.TestCase):
+    def test_the_pip_is_told_what_each_plugin_is_for_and_to_ask_when_one_is_named(self):
+        said = pip_plugins.instructions([{"plugin": "aave", "name": "Aave", "about": "Live Aave lending and borrowing rates.", "allowed": False},
+                                         {"plugin": "1inch", "name": "1inch", "about": "", "allowed": True}])
+        self.assertIn("You may ask for: Aave (Live Aave lending and borrowing rates.)", said)
+        self.assertIn("Allowed for you: 1inch.", said)
+        self.assertIn("When the user names one of these plugins", said)
 
