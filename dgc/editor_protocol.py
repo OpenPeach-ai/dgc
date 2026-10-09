@@ -802,7 +802,11 @@ COMMAND_FIELDS.update({
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "before": _S()},
     "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
                      "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
-                     "search": _f("string", required=False, enum=CHATDGC_SEARCH)},
+                     "search": _f("string", required=False, enum=CHATDGC_SEARCH),
+                     # Up to 10: {kind: "file", path} (a file the user picked: the backend reads it, so a frame
+                     # never carries it), {kind: "image", data, name?} (a pasted image as a data: URI, small
+                     # enough for the frame) or {kind: "text", text, name?} (a long paste). The chat keeps a copy.
+                     "attachments": _A(False)},
     "chatdgc_continue": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
     "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
     # Rename, pin, archive or delete. Answered by `chatdgc_changed`.

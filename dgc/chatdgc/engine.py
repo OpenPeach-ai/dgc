@@ -12,6 +12,7 @@ import threading
 from typing import Callable
 
 from ..editor_protocol import CHATDGC_THINKING as THINKING
+from . import attachments as attached
 from .prompt import system_prompt
 from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_message_id, now,
                     title_from)
@@ -20,6 +21,7 @@ MAX_DRAFTS = 64
 SEARCH_MODES = ("off", "auto", "on")
 MAX_SEARCHES = 5              # queries in one reply; then the model answers from what it found
 MAX_SOURCES = 40
+MAX_HISTORY_IMAGES = 8        # images the model sees again, newest first; older ones are named, not resent
 SEARCH_TOOL = {"type": "function", "function": {
     "name": "web_search",
     "description": ("Search the web. Returns numbered results ([n] title, address, snippet) to cite as [n]. "
@@ -45,6 +47,7 @@ class ChatEngine:
         self._searcher = searcher or self._search
         self._temporary: dict[str, dict] = {}      # temporary chats: never written, gone with the process
         self._drafts: dict[str, dict] = {}         # new chats: written with their first message
+        self._temporary_files: dict[tuple[str, str], tuple[bytes, str | None]] = {}   # a temporary chat's attachments
         self._lock = threading.Lock()
 
     # -- the model
@@ -132,6 +135,8 @@ class ChatEngine:
 
     def delete(self, chat_id: str) -> None:
         with self._lock:
+            for key in [k for k in self._temporary_files if k[0] == chat_id]:
+                del self._temporary_files[key]
             if self._temporary.pop(chat_id, None) is not None or self._drafts.pop(chat_id, None) is not None:
                 return
         self.store.delete(chat_id)
@@ -145,14 +150,18 @@ class ChatEngine:
         return search.results(query, provider, api_key=key, url=url, n=6)
 
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
-             search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
-             cancel: threading.Event | None = None) -> dict:
+             search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
+             on_activity=None, cancel: threading.Event | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
         ``reply_id`` is the id the streamed parts and the finished reply will carry."""
         text = str(text or "")
-        if not text.strip():
+        try:
+            prepared = attached.prepare(attachments)
+        except attached.AttachmentError as exc:
+            raise ChatEngineError(str(exc)) from exc
+        if not text.strip() and not prepared:
             raise ChatEngineError("Type a message first.")
         if len(text) > MAX_TEXT:
             raise ChatEngineError("That message is too long to send.")
@@ -165,15 +174,26 @@ class ChatEngine:
             chat["model"] = str(model)[:200]
         if thinking is not None:
             chat["thinking"] = thinking
+        if any(item["meta"]["kind"] == "image" for item in prepared):
+            # Before anything is kept: a model that can't see would be sent words about a picture it never saw.
+            from ..vision import has_vision
+            client = self.client(chat.get("model") or None)
+            if not has_vision(client, cancel=cancel):
+                raise ChatEngineError(f"{getattr(client, 'model', 'This model')} can't see images. Choose a model "
+                                      "that can, or send this without the image.")
         if not chat["messages"] and chat["title"] in ("New chat", "Temporary chat") and not chat.get("temporary"):
-            chat["title"] = title_from(text)
+            chat["title"] = title_from(text or prepared[0]["meta"]["name"])
+        for item in prepared:
+            self._keep_file(chat, item)
         mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now()}
+        if prepared:
+            mine["attachments"] = [item["meta"] for item in prepared]
         chat["messages"].append(mine)
         chat = self._save(chat)
         reply_id = new_message_id()
         if on_start is not None:
             on_start(mine, reply_id)
-        return self._reply(chat, self._history(chat["messages"], search), None, reply_id, on_text, on_thinking,
+        return self._reply(chat, self._history(chat, search), None, reply_id, on_text, on_thinking,
                            cancel, search=search, on_activity=on_activity)
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
@@ -187,7 +207,7 @@ class ChatEngine:
             raise ChatEngineError("Only the last reply can be continued.")
         if chat["messages"][index].get("finish") not in ("length", "cancelled"):
             raise ChatEngineError("That reply is already complete.")
-        history = self._history(chat["messages"]) + [{"role": "user", "content": CONTINUE}]
+        history = self._history(chat) + [{"role": "user", "content": CONTINUE}]
         if on_start is not None:
             on_start(None, message_id)
         return self._reply(chat, history, chat["messages"][index], message_id, on_text, on_thinking, cancel)
@@ -213,19 +233,57 @@ class ChatEngine:
         # Only if it still has that name now: one renamed while the model thought keeps the user's.
         return self.store.update(chat_id, title=name[:60], expect_title=title_from(first.get("text", "")))
 
-    def _history(self, messages: list[dict], search: str = "off") -> list[dict]:
+    def _keep_file(self, chat: dict, item: dict) -> None:
+        meta = item["meta"]
+        if chat.get("temporary"):
+            with self._lock:
+                self._temporary_files[(chat["id"], meta["id"])] = (item["raw"], item["text"])
+            return
+        self.store.put_file(chat["id"], meta["id"], item["raw"], item["text"])
+
+    def _file(self, chat: dict, attachment_id: str) -> tuple[bytes, str | None] | None:
+        if chat.get("temporary"):
+            with self._lock:
+                return self._temporary_files.get((chat["id"], attachment_id))
+        try:
+            return self.store.get_file(chat["id"], attachment_id)
+        except ChatStoreError:
+            return None
+
+    def _history(self, chat: dict, search: str = "off") -> list[dict]:
         """What the model reads: ChatDGC's instructions and the conversation. Earlier thinking never goes back;
-        an earlier reply's sources do, as a list under it, so a follow-up can ask about [2]."""
+        an earlier reply's sources do, as a list under it, so a follow-up can ask about [2]. A message's files
+        go with it every time: documents and pasted text in DGC's attachment frame, and the newest images as
+        images (older ones by name, so a long chat doesn't resend every picture)."""
         zone = str(self.config.get("timezone", "") or "")
         out = [{"role": "system", "content": system_prompt(timezone_name=zone, search=search)}]
-        for m in messages:
-            if not m.get("text"):
+        images_left = MAX_HISTORY_IMAGES
+        built = []
+        for m in reversed(chat["messages"]):
+            content = m.get("text") or ""
+            pictures = []
+            for meta in m.get("attachments") or []:
+                found = self._file(chat, meta.get("id", ""))
+                name = meta.get("name", "attachment")
+                if found is None:
+                    content += f"\n\n[{name} was attached here; it is no longer available]"
+                elif meta.get("kind") == "image":
+                    if images_left > 0:
+                        pictures.append(attached.image_part(meta, found[0]))
+                        images_left -= 1
+                    else:
+                        content += f"\n\n[An image, {name}, was attached here earlier]"
+                else:
+                    content += "\n\n" + attached.frame(meta, found[0], found[1] or "")
+            if not content and not pictures:
                 continue
-            content = m["text"]
             if m["role"] == "assistant" and m.get("sources"):
                 content += "\n\nSources:\n" + "\n".join(f"[{x['n']}] {x['title']} {x['url']}" for x in m["sources"])
-            out.append({"role": m["role"], "content": content})
-        return out
+            if pictures:
+                built.append({"role": m["role"], "content": [{"type": "text", "text": content or "(image)"}, *reversed(pictures)]})
+            else:
+                built.append({"role": m["role"], "content": content})
+        return out + list(reversed(built))
 
     def _web_search(self, call, sources: list, searches: list, on_activity) -> str:
         """One web_search call: run it, number its results after the reply's earlier ones, say them as data."""

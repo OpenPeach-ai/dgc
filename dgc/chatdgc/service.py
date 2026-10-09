@@ -121,6 +121,7 @@ class ChatService:
         self.emit = emit
         self.engine = engine or ChatEngine(config)
         self._turns: dict[str, dict] = {}
+        self._naming: set[threading.Thread] = set()     # chats being named after their first reply
         self._lock = threading.Lock()
         self._closing = False
 
@@ -177,6 +178,7 @@ class ChatService:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.send(cmd["conversation_id"], cmd["text"], model=cmd.get("model"),
                                     thinking=cmd.get("thinking"), search=cmd.get("search", "off"),
+                                    attachments=cmd.get("attachments"),
                                     on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run)
 
@@ -250,14 +252,23 @@ class ChatService:
                           reply_id=turn["reply_id"], request_id=request_id)
 
     def _name_later(self, conversation_id: str) -> None:
-        """A chat's name from its first exchange, off the turn's thread: the reply has already ended."""
+        """A chat's name from its first exchange, off the turn's thread: the reply has already ended. close()
+        waits for it, so a name is never written after the process has let go of its chats."""
         def name():
             try:
-                if self.engine.name(conversation_id) is not None:
+                if not self._closing and self.engine.name(conversation_id) is not None:
                     self._changed(conversation_id, None)
             except Exception:                         # noqa: BLE001 -- a name is a nicety; its first line stays
                 pass
-        threading.Thread(target=name, daemon=True, name=f"dgc-chatdgc-name-{conversation_id[5:13]}").start()
+            finally:
+                with self._lock:
+                    self._naming.discard(threading.current_thread())
+        thread = threading.Thread(target=name, daemon=True, name=f"dgc-chatdgc-name-{conversation_id[5:13]}")
+        with self._lock:
+            if self._closing:
+                return
+            self._naming.add(thread)
+        thread.start()
 
     def _cancel(self, cmd: dict) -> None:
         with self._lock:
@@ -322,4 +333,9 @@ class ChatService:
         for turn in turns:
             thread = turn.get("thread")
             if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        with self._lock:
+            naming = list(self._naming)              # a reply that just ended may have started one
+        for thread in naming:
+            if thread is not threading.current_thread():
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))

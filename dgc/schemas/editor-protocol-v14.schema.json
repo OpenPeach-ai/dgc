@@ -8116,6 +8116,9 @@
                 "auto",
                 "on"
               ]
+            },
+            "attachments": {
+              "type": "array"
             }
           },
           "required": [

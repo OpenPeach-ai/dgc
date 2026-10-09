@@ -5886,6 +5886,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "auto",
         "on"
       ]
+    },
+    "attachments": {
+      "types": [
+        "array"
+      ],
+      "required": false
     }
   },
   "chatdgc_continue": {

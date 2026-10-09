@@ -14,6 +14,7 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import sqlite3
 import threading
 import uuid
@@ -71,6 +72,12 @@ class ChatStore:
     @property
     def chats_dir(self) -> Path:
         return self.root / "chats"
+
+    def files_dir(self, chat_id: str) -> Path:
+        """A chat's attachments: ``files/<chat>/<attachment>`` (its bytes) and ``<attachment>.txt`` (what the
+        model reads of a document or pasted text)."""
+        self._path(chat_id)
+        return self.root / "files" / chat_id
 
     def _ensure(self) -> None:
         self.chats_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -221,9 +228,48 @@ class ChatStore:
             self._write(chat)
         return chat
 
+    # -- attachments
+
+    def put_file(self, chat_id: str, attachment_id: str, raw: bytes, text: str | None = None) -> None:
+        from .attachments import ATTACHMENT_ID
+        if not isinstance(attachment_id, str) or not ATTACHMENT_ID.fullmatch(attachment_id):
+            raise ChatStoreError("That attachment doesn't exist.")
+        folder = self.files_dir(chat_id)
+        self._ensure()
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for path in (folder.parent, folder):
+            try:
+                os.chmod(path, 0o700)
+            except OSError:
+                pass
+        for target, data in ((folder / attachment_id, raw),
+                             *(((folder / f"{attachment_id}.txt", text.encode("utf-8")),) if text is not None else ())):
+            temp = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+            os.replace(temp, target)
+
+    def get_file(self, chat_id: str, attachment_id: str) -> tuple[bytes, str | None]:
+        """An attachment's bytes and, for a document or pasted text, what the model reads of it."""
+        from .attachments import ATTACHMENT_ID
+        if not isinstance(attachment_id, str) or not ATTACHMENT_ID.fullmatch(attachment_id):
+            raise ChatStoreError("That attachment doesn't exist.")
+        folder = self.files_dir(chat_id)
+        try:
+            raw = (folder / attachment_id).read_bytes()
+        except OSError:
+            raise ChatStoreError("That attachment is no longer there.") from None
+        try:
+            text = (folder / f"{attachment_id}.txt").read_text(encoding="utf-8")
+        except OSError:
+            text = None
+        return raw, text
+
     def delete(self, chat_id: str) -> None:
         path = self._path(chat_id)
         with self._locked():
+            shutil.rmtree(self.files_dir(chat_id), ignore_errors=True)
             try:
                 path.unlink()
             except FileNotFoundError:
@@ -245,6 +291,8 @@ def _check_chat(chat) -> None:
     if not isinstance(chat.get("messages"), list):
         raise ChatStoreError("This chat couldn't be saved.")
     for message in chat["messages"]:
+        if not isinstance(message, dict) or not isinstance(message.get("attachments", []), list):
+            raise ChatStoreError("This chat couldn't be saved.")
         if (not isinstance(message, dict) or message.get("role") not in ROLES
                 or not MESSAGE_ID.fullmatch(str(message.get("id", ""))) or not isinstance(message.get("text"), str)
                 or len(message["text"]) > MAX_TEXT):
