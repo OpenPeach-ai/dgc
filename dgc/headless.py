@@ -175,6 +175,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
+    "chatdgc_about", "chatdgc_style", "chatdgc_personality",
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes",
     "thinking_inline", "thinking_inline_max_chars",
@@ -262,7 +263,9 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 # receives and rejects a field it doesn't know, so these go only to a client whose get_config
 # listed them in `fields`.
 # search_url and search_api_key_set: the one web search Work, ChatDGC and Pips share, for Settings.
-_CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set"})
+# chatdgc_*: ChatDGC's custom instructions and personality, for Settings.
+_CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
+                                   "chatdgc_about", "chatdgc_style", "chatdgc_personality"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -283,6 +286,9 @@ _CONFIG_STRING_LIMITS = {
     # `dgc setup` keeps it, because the CLI and the Pips runner read it there too).
     "search_url": 4096,
     "search_api_key": 16_384,
+    # ChatDGC's custom instructions: what it should know about you, and how it should answer.
+    "chatdgc_about": 1500,
+    "chatdgc_style": 1500,
 }
 _CONFIG_ENUMS = {
     "api_mode": frozenset({"auto", "ollama", "anthropic", "chat_completions", "responses"}),
@@ -293,6 +299,7 @@ _CONFIG_ENUMS = {
     "provider_state": frozenset({"stateless", "server"}),
     "search_provider": frozenset({"duckduckgo", "brave", "tavily", "searxng"}),
     "tool_profile": frozenset({"standard", "adaptive", "full"}),
+    "chatdgc_personality": frozenset({"default", "concise", "warm", "candid", "nerdy"}),
     "thinking": frozenset({"off", "low", "medium", "high", "xhigh"}),
     "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
 }
@@ -3610,6 +3617,9 @@ class Backend:
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
         extra = {}
+        for key, fallback in (("chatdgc_about", ""), ("chatdgc_style", ""), ("chatdgc_personality", "default")):
+            if key in self._config_fields:
+                extra[key] = str(c.get(key, fallback) or fallback)
         if "search_url" in self._config_fields:
             extra["search_url"] = str(c.get("search_url", "") or "")
         if "search_api_key_set" in self._config_fields:

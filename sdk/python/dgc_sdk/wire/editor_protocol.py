@@ -300,6 +300,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "context_size": _I(False), "subagent_context_size": _I(False), "goal": _O(),
         # Opt-in (get_config `fields`): the shared web search's address, and whether its key is saved.
         "search_url": _S(False), "search_api_key_set": _B(False),
+        # Opt-in too: ChatDGC's custom instructions and personality.
+        "chatdgc_about": _S(False), "chatdgc_style": _S(False), "chatdgc_personality": _S(False),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
         "ultra_mode": _B(False),

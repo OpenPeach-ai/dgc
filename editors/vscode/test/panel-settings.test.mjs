@@ -2591,3 +2591,16 @@ test("the web search is saved only to a CLI that can take it, and a blank key ke
   await provider.saveSettings(settings({ search_provider: "google" }));
   assert.equal("search_provider" in commands.find((c) => c.type === "set_config").values, false, "only the four it knows");
 });
+
+test("ChatDGC's instructions and personality are saved only to a CLI that takes them", async () => {
+  const older = harness();
+  await older.provider.saveSettings(settings({ chatdgc_about: "x", chatdgc_personality: "warm" }));
+  assert.equal(Object.keys(older.commands.find((c) => c.type === "set_config").values).some((k) => k.startsWith("chatdgc")), false);
+  const { provider, commands } = harness();
+  provider.chatdgcSettable = true;
+  await provider.saveSettings(settings({ chatdgc_about: "a".repeat(1600), chatdgc_style: "", chatdgc_personality: "rude" }));
+  const values = commands.find((c) => c.type === "set_config").values;
+  assert.equal(values.chatdgc_about.length, 1500);
+  assert.equal(values.chatdgc_style, "", "cleared");
+  assert.equal("chatdgc_personality" in values, false, "only the five it knows");
+});

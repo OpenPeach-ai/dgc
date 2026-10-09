@@ -61,6 +61,9 @@ voice come in later phases.
   for another one, with whatever model and thinking level the box is set to. Either way, the old version
   stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own
   versions comes back as you left it. One point keeps up to 50 versions.
+- **Custom instructions and personality.** **Settings → ChatDGC** sets what ChatDGC should know about you and
+  how it should respond (up to 1,500 characters each), and its personality: Default, Concise, Warm, Candid
+  or Nerdy. Every chat uses them from its next reply; Work and your Pips don't.
 - **Names.** A chat is named from its first line at once. After the first reply, your model gives it a
   short name, the way a chat app does. A name you give a chat yourself is never replaced.
 - **Export.** **⋯ → Export…** saves the chat. As Markdown it holds the conversation you see, with its sources

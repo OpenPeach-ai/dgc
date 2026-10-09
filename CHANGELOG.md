@@ -47,6 +47,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   one is kept. `chatdgc_version` switches between them. A message with other versions carries `versions`.
 - **Export.** `chatdgc_export` writes a chat to a path the user chose: as Markdown (the conversation as
   shown, with sources) or as JSON (the whole chat, every version).
+- **Custom instructions and personality.** `set_config` takes `chatdgc_about` and `chatdgc_style` (up to 1,500
+  characters each) and `chatdgc_personality` (`default`, `concise`, `warm`, `candid`, `nerdy`). `get_config`
+  `fields` reads them back. Every chat follows them from its next reply.
 
 ### Models
 

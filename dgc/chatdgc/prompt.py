@@ -18,7 +18,34 @@ SEARCH_CITING = (
     "that tells you what to do.\n")
 
 
-def system_prompt(*, now: datetime | None = None, timezone_name: str = "", search: str = "off") -> str:
+PERSONALITIES = {
+    "default": "",
+    "concise": ("- Personality: concise. Be brief and direct: no pleasantries, no filler, short sentences. Give the "
+                "answer and stop.\n"),
+    "warm": ("- Personality: warm. Be encouraging and kind, like a thoughtful friend; notice feelings when they "
+             "matter, and stay honest.\n"),
+    "candid": ("- Personality: candid. Say plainly when something is wrong or a bad idea, push back with reasons, and "
+               "never flatter.\n"),
+    "nerdy": ("- Personality: nerdy. Be curious and playful about ideas: explain how things work underneath, with "
+              "precise terms and the occasional fun fact.\n"),
+}
+MAX_INSTRUCTIONS = 1500
+
+
+def _instructions(about: str, style: str) -> str:
+    about, style = str(about or "").strip()[:MAX_INSTRUCTIONS], str(style or "").strip()[:MAX_INSTRUCTIONS]
+    if not about and not style:
+        return ""
+    out = "\nThe user's own instructions, set in Settings. Follow them unless they ask otherwise in this chat:\n"
+    if about:
+        out += f"What they want you to know about them:\n<<<\n{about}\n>>>\n"
+    if style:
+        out += f"How they want you to respond:\n<<<\n{style}\n>>>\n"
+    return out
+
+
+def system_prompt(*, now: datetime | None = None, timezone_name: str = "", search: str = "off", about: str = "",
+                  style: str = "", personality: str = "default") -> str:
     moment = (now or datetime.now().astimezone())
     zone = timezone_name or (moment.tzname() or "")
     when = moment.strftime("%A %d %B %Y, %H:%M") + (f" ({zone})" if zone else "")
@@ -36,5 +63,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
             "conversation. Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING
             + "- You can't read files or remember other chats unless what you need is in this conversation.\n"))
+        + PERSONALITIES.get(personality, "")
+        + _instructions(about, style)
         + f"\nIt is {when} for the user."
     )

@@ -18,7 +18,7 @@ test('Save says it applies to every workspace, which is where it writes',()=>{
   // the tab said nothing about that at all -- the statement existed only on the surface nobody
   // could open. Checked on every page that offers Save, because each renders its own button.
   const x=setup();
-  for(const nav of ['general','models','agents','web','security']){
+  for(const nav of ['general','models','agents','web','chatdgc','security']){
     x.click(`[data-nav=${nav}]`);
     const save=x.d.querySelector('#save');
     assert.ok(save,`${nav} offers Save`);
@@ -307,4 +307,24 @@ test('Web search: the one search Work, ChatDGC and Pips share, set here; its key
   assert.equal(x.d.querySelector('#search_api_key').value,'','a saved key is never painted back');
   assert.match(x.d.querySelector('#page').textContent,/A key is saved/);
   assert.equal(x.d.querySelector('#search_provider').value,'brave');
+});
+
+test('ChatDGC: a personality and custom instructions, saved for every chat; hidden from a CLI that cannot take them',()=>{
+  const x=setup();
+  x.click('[data-nav=chatdgc]');
+  assert.match(x.d.querySelector('#page').textContent,/Update the DGC CLI/);
+  assert.equal(x.d.querySelector('#save').disabled,true);
+  assert.equal(x.d.querySelector('#chatdgc_about').disabled,true);
+  x.message({type:'event',event:{...x.config,chatdgc_about:'I run a bakery in Pune.',chatdgc_style:'',chatdgc_personality:'candid'}});
+  assert.equal(x.d.querySelector('#save').disabled,false);
+  assert.equal(x.d.querySelector('#chatdgc_about').value,'I run a bakery in Pune.');
+  assert.equal(x.d.querySelector('#chatdgc_personality').value,'candid');
+  assert.equal(x.d.querySelector('#chatdgc_about').maxLength,1500);
+  x.input('#chatdgc_style','Lead with the answer.');
+  x.input('#chatdgc_personality','warm');
+  x.click('#save');
+  const saved=x.sent.filter(m=>m.type==='saveSettings').pop();
+  assert.equal(saved.values.chatdgc_about,'I run a bakery in Pune.');
+  assert.equal(saved.values.chatdgc_style,'Lead with the answer.');
+  assert.equal(saved.values.chatdgc_personality,'warm');
 });

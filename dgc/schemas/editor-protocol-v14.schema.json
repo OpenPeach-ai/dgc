@@ -2316,6 +2316,15 @@
             "search_api_key_set": {
               "type": "boolean"
             },
+            "chatdgc_about": {
+              "type": "string"
+            },
+            "chatdgc_style": {
+              "type": "string"
+            },
+            "chatdgc_personality": {
+              "type": "string"
+            },
             "sandbox": {
               "type": "boolean"
             },

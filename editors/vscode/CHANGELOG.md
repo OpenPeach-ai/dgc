@@ -25,6 +25,7 @@
 - **Edit** a message you sent, or **Try again** on a reply. The old version stays: **‹ 2 / 3 ›** steps
   between them.
 - **⋯ → Export…** saves a chat as Markdown or JSON.
+- **Settings → ChatDGC:** what ChatDGC should know about you, how it should respond, and its personality.
 
 ### Questions
 

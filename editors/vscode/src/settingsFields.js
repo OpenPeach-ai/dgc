@@ -94,5 +94,16 @@ export function renderFields(section, main, config, providers, ui) {
         if (pick) { pick.addEventListener("change", show); show(); }
         if (!c.search_settable) main.querySelectorAll(".card input, .card select").forEach((el) => { el.disabled = true; });
     }
-    ({ general: renderGeneral, models: renderModels, agents: renderAgents, web: renderWeb, security: renderSecurity })[section](main);
+    function renderChatDGC(main) {
+        const c = config;
+        const area = ui.area;
+        main.innerHTML = '<h2>ChatDGC</h2><p class="sub">How ChatDGC answers you, in every chat from its next reply. Work and your Pips are not affected.</p>'
+            + (c.chatdgc_settable ? '' : '<p class="note" role="status">Update the DGC CLI to set these here.</p>')
+            + card("Personality", field("Personality", "Its manner. Your own words below still come first.", sel("chatdgc_personality", [["default", "Default"], ["concise", "Concise: brief and direct"], ["warm", "Warm: encouraging and kind"], ["candid", "Candid: says when you're wrong"], ["nerdy", "Nerdy: curious, explains how things work"]], c.chatdgc_personality || "default")))
+            + card("Custom instructions", field("What should ChatDGC know about you?", "Up to 1,500 characters.", area("chatdgc_about", c.chatdgc_about || "", "For example: I run a small bakery in Pune and prefer metric units."))
+                + field("How should ChatDGC respond?", "Up to 1,500 characters.", area("chatdgc_style", c.chatdgc_style || "", "For example: Lead with the answer, then the numbers. Use bullet points.")))
+            + '<button type="button" class="save" id="save" title="Save for every workspace on this computer"' + (c.chatdgc_settable ? '' : ' disabled') + '>Save</button>';
+        if (!c.chatdgc_settable) main.querySelectorAll(".card textarea, .card select").forEach((el) => { el.disabled = true; });
+    }
+    ({ general: renderGeneral, models: renderModels, agents: renderAgents, web: renderWeb, chatdgc: renderChatDGC, security: renderSecurity })[section](main);
 }

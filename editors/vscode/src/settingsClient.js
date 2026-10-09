@@ -23,7 +23,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const paths = { general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13' };
 const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${paths[name] || paths.plugins}"/></svg>`;
-const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
+const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
 let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null;
 let mcpError = "";
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
@@ -39,10 +39,11 @@ const ui = {
     field: (label, hint, control) => `<label class="field"><span><span class="name">${label}</span>${hint ? `<span class="hint">${hint}</span>` : ''}</span>${control}</label>`,
     sel: (id, options, value) => `<select id="${id}">${options.map(([v, label]) => `<option value="${esc(v)}"${String(value ?? '') === String(v) ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>`,
     inp: (id, value, type = 'text') => `<input id="${id}" type="${type}" value="${esc(value ?? '')}" autocomplete="off" spellcheck="false">`,
+    area: (id, value, placeholder = '', max = 1500) => `<textarea id="${id}" rows="4" maxlength="${max}" placeholder="${esc(placeholder)}" spellcheck="true">${esc(value ?? '')}</textarea>`,
     bool: (id, on) => switchHTML(on, id.replaceAll('_', ' '), `id="${id}" data-setting="${id}"`),
     card: (title, body) => `<div class="card"><h3>${title}</h3>${body}</div>`
 };
-const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '' };
+const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default' };
 function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus = 'Unsaved changes'; if ($('save-status'))
     $('save-status').textContent = saveStatus; }
 function applyConfig(ev) {
@@ -59,13 +60,14 @@ function applyConfig(ev) {
         draft.search_provider = ev.search || 'duckduckgo';
     draft.search_api_key_set = ev.search_api_key_set === true;
     draft.search_settable = 'search_api_key_set' in ev;
-    if (['general', 'models', 'agents', 'web', 'security'].includes(section) && !saving)
+    draft.chatdgc_settable = 'chatdgc_personality' in ev;
+    if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section) && !saving)
         render();
 }
 function snapshot() {
     if (!config)
         return;
-    document.querySelectorAll('#page input[id],#page select[id]').forEach(el => {
+    document.querySelectorAll('#page input[id],#page select[id],#page textarea[id]').forEach(el => {
         let key = el.id;
         if (!(key in defaults))
             return;
@@ -152,14 +154,14 @@ function render() {
     }
     renderFields(section, main, draft, providers, ui);
     const save = $('save');
-    save.disabled = saving || (section === 'web' && !draft.search_settable);
+    save.disabled = saving || (section === 'web' && !draft.search_settable) || (section === 'chatdgc' && !draft.chatdgc_settable);
     save.insertAdjacentHTML('afterend', ' <span class="save-status" id="save-status" role="status">' + esc(saveStatus) + '</span>');
     for (const [id, min, max, step] of [['context_size', 2048, null, 1024], ['max_parallel_tasks', 1, 8, 1], ['capability_cache_ttl_s', 1, null, 1]]) {
         const input = $(id);
         if (input) { input.min = String(min); input.step = String(step); if (max) input.max = String(max); }
     }
     save.onclick = () => { if ([...main.querySelectorAll('input')].some(input => !input.reportValidity())) return; snapshot(); saving = true; save.disabled = true; save.textContent = 'Saving…'; send({ type: 'saveSettings', values: { ...draft } }); };
-    main.querySelectorAll('input,select').forEach(el => el.addEventListener('input', () => { snapshot(); }));
+    main.querySelectorAll('input,select,textarea').forEach(el => el.addEventListener('input', () => { snapshot(); }));
     main.querySelectorAll('[data-setting]').forEach(b => b.onclick = () => { const on = b.getAttribute('aria-checked') !== 'true'; setDraft(b.dataset.setting, on); b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
     for (const [presetId, urlId] of [['provider', 'base_url'], ['subagent_provider', 'subagent_base_url']]) {
         const el = $(presetId);
@@ -607,14 +609,14 @@ window.addEventListener('message', event => {
             dirty.clear();
             draft.api_key = draft.subagent_api_key = draft.fallback_api_key = draft.search_api_key = '';
         }
-        if (['general', 'models', 'agents', 'web', 'security'].includes(section))
+        if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section))
             render();
     }
     else if (msg.type === 'settingsSaveFinished') {
         if (saving) {
             saving = false;
             saveStatus = 'Save cancelled. Your edits are still here.';
-            if (['general', 'models', 'agents', 'web', 'security'].includes(section))
+            if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section))
                 render();
         }
     }

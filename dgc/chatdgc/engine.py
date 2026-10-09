@@ -435,7 +435,11 @@ class ChatEngine:
         go with it every time: documents and pasted text in DGC's attachment frame, and the newest images as
         images (older ones by name, so a long chat doesn't resend every picture)."""
         zone = str(self.config.get("timezone", "") or "")
-        out = [{"role": "system", "content": system_prompt(timezone_name=zone, search=search)}]
+        config = self.config
+        out = [{"role": "system", "content": system_prompt(
+            timezone_name=zone, search=search, about=str(config.get("chatdgc_about", "") or ""),
+            style=str(config.get("chatdgc_style", "") or ""),
+            personality=str(config.get("chatdgc_personality", "default") or "default"))}]
         images_left = MAX_HISTORY_IMAGES
         built = []
         for m in reversed(chat["messages"]):

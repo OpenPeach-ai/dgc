@@ -1806,6 +1806,24 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "chatdgc_about": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "chatdgc_style": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "chatdgc_personality": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "sandbox": {
       "types": [
         "boolean"
