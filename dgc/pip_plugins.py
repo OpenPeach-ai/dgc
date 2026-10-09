@@ -284,8 +284,8 @@ def asks(plugin, info, row, *, unattended: bool) -> bool:
         return True
     if read_only(row, info):
         return False
-    if unattended or chosen == "any_changes":
-        return True
+    if unattended or chosen == "any_changes" or info.get("money"):
+        return True                     # a plugin that can move money asks before every change
     if chosen == "never_ask":
         return False
     return important(row)

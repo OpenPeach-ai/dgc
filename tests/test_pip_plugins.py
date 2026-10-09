@@ -211,6 +211,8 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertEqual(pip_plugins.level("aave", {"money": True}), "important", "read back as important")
         reply = self.use("call_plugin", plugin="aave", tool="create_record", arguments={})
         self.assertIn("draft", reply, "still asks")
+        quiet = self.use("call_plugin", plugin="aave", tool="add_label", arguments={})
+        self.assertIn("draft", quiet, "a change its vendor calls closed and harmless still asks when the plugin moves money")
 
     def test_a_plugin_that_is_not_signed_in_says_so(self):
         Vendor.signed_in = False
