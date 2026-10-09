@@ -237,6 +237,19 @@ class GuessedAddressTests(unittest.TestCase):
                          "its own reply is not where an address comes from")
         self.assertEqual(pips._guessed_addresses(["Priya@Bank.example", "sam@home.example", "ops@corp.example"], msgs, manifest), [])
 
+    def test_a_plugin_call_never_carries_a_wallet_address_the_pip_made_up(self):
+        # It put the zero address in a 1inch quote "as a placeholder", twice (battle test 2026-10-09).
+        mine, token = "0x" + "ab" * 20, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        msgs = [{"role": "user", "content": f"Quote 1 ETH from my wallet {mine}"},
+                {"role": "assistant", "content": "I'll use 0x0000000000000000000000000000000000000000 for now."},
+                {"role": "tool", "content": json.dumps({"underlyingToken": token})}]
+        zero = "0x" + "0" * 40
+        self.assertEqual(pips._guessed_wallets({"from": zero, "amount": "1"}, msgs, {}), [zero])
+        self.assertEqual(pips._guessed_wallets({"from": mine.upper().replace("0X", "0x"), "dst": token, "nested": [{"src": token}]}, msgs, {}), [],
+                         "from the user, in any case, or from a tool's answer")
+        self.assertEqual(pips._guessed_wallets({"query": "USDC rates", "chain": 1}, msgs, {}), [])
+        self.assertEqual(pips._guessed_wallets(None, msgs, {}), [])
+
 
 class CardClaimTests(unittest.TestCase):
     """A reply that sends the user to a card it never made gets one more try (battle test 2026-10-09)."""

@@ -458,7 +458,7 @@ INTRO = ("This message is from DGC, not the user. The user has just created you 
          "that now and what would need connecting or setting up first; do not claim a connection you "
          "cannot see in your references, or an ability your instructions don't give you. Make no card in this "
          "first message only (no connect_app or use_plugin) and never say a card is below: if connecting an app would "
-         "help, make it one of your choices. From the user's first reply on, make cards as your instructions say. End with one short question that offers the next step, and offer "
+         "help, make it one of your choices, and never mention this rule. From the user's first reply on, make cards as your instructions say. End with one short question that offers the next step, and offer "
          "its two or three answers with offer_choices. Keep it warm and brief: two or three short paragraphs, "
          "no lists and no headings.")
 CORE_INTRO = ("This message is from DGC, not the user. The user has just created you, Core, their Primary "

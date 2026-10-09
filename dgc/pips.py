@@ -2071,6 +2071,16 @@ def _guessed_addresses(addresses, messages, manifest) -> list:
     return [a for a in addresses if isinstance(a, str) and a.strip() and a.strip().casefold() not in seen]
 
 
+_WALLET = re.compile(r"\b0x[0-9a-fA-F]{40}\b")
+
+
+def _guessed_wallets(arguments, messages, manifest) -> list:
+    """Wallet addresses in a plugin call that the Pip didn't get from the user, its goal or a tool's answer. It
+    put the zero address in a 1inch quote "as a placeholder", twice, after being told never to (battle test,
+    2026-10-09); on a payment plugin the card's next address could be where money goes."""
+    return _guessed_addresses(_WALLET.findall(_json(arguments)), messages, manifest)
+
+
 def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=None) -> dict:
     """Run exactly one existing Agent turn; no independent model/tool loop."""
     from .pip_chat_options import validate_manifest as validate_chat_options
@@ -2441,6 +2451,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if call.name == 'call_plugin' and connector_candidate is not None:
                     return ('One action is already waiting for the user below this reply. Finish your reply; '
                             'ask for the next one after they decide.')
+                guessed = _guessed_wallets(arguments.get('arguments'), agent.messages, manifest) if call.name == 'call_plugin' else []
+                if guessed:
+                    return ('Not prepared, so there is no card below your reply: ' + guessed[0] + ' is not an address the '
+                            'user gave you or that a tool answered. Ask the user for the exact address; never use a '
+                            'placeholder or guess one.')
                 reply = pip_app_links.worker_reply(apps_pin, call.name, arguments)
                 if "below your reply" in str(reply.get('text', '')):
                     cards_shown.append(call.name)
