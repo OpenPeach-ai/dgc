@@ -808,6 +808,17 @@ COMMAND_FIELDS.update({
                      # enough for the frame) or {kind: "text", text, name?} (a long paste). The chat keeps a copy.
                      "attachments": _A(False)},
     "chatdgc_continue": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
+    # Versions. Edit a message you sent, or try a reply again (another model or thinking level if named): a new
+    # version from that point, answered by `chatdgc_opened` (the conversation from then on), then a turn. Switch
+    # to another version at a point (`parent_id`: the message before it, or "root"): answered by `chatdgc_opened`.
+    # A message with other versions carries `versions: {parent, index, count}`.
+    "chatdgc_edit": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "text": _S(),
+                     "model": _S(False), "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
+                     "search": _f("string", required=False, enum=CHATDGC_SEARCH)},
+    "chatdgc_regenerate": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "model": _S(False),
+                           "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
+                           "search": _f("string", required=False, enum=CHATDGC_SEARCH)},
+    "chatdgc_version": {"request_id": _S(), "conversation_id": _S(), "parent_id": _S(), "index": _I()},
     "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
     # An image the chat keeps, to show (answered by `chatdgc_file`: a data: URI, or why not).
     "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S()},

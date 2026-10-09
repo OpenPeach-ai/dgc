@@ -138,7 +138,8 @@ class ChatService:
         try:
             {"chatdgc_list": self._list, "chatdgc_open": self._open, "chatdgc_earlier": self._earlier,
              "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
-             "chatdgc_update": self._update, "chatdgc_file": self._file}[kind](cmd)
+             "chatdgc_update": self._update, "chatdgc_file": self._file, "chatdgc_edit": self._edit,
+             "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version}[kind](cmd)
         except (ChatEngineError, ChatStoreError) as exc:
             self._error(str(exc), request_id, conversation_id)
 
@@ -158,18 +159,36 @@ class ChatService:
         self.emit("chatdgc_chats", request_id=cmd["request_id"], chats=found["chats"], total=found["total"],
                   next_offset=found["next_offset"])
 
-    def _open(self, cmd: dict) -> None:
-        chat = self.engine.open(cmd.get("conversation_id") or None, temporary=bool(cmd.get("temporary")))
+    def _marked(self, chat: dict, messages: list[dict]) -> list[dict]:
+        """Messages as the screen shows them: each with other versions says which it is, of how many."""
+        versions = self.engine.versions(chat)
+        return [{**m, "versions": versions[m["id"]]} if m.get("id") in versions else m for m in messages]
+
+    def _opened(self, chat: dict, request_id: str) -> None:
         messages, earlier = page(chat["messages"])
         with self._lock:
             turn = self._turns.get(chat["id"])
         fields = {"reply_id": turn["reply_id"]} if turn and turn.get("reply_id") else {}
-        self.emit("chatdgc_opened", request_id=cmd["request_id"], conversation=summary(chat), messages=messages,
-                  earlier=earlier, busy=turn is not None, **fields)
+        self.emit("chatdgc_opened", request_id=request_id, conversation=summary(chat),
+                  messages=self._marked(chat, messages), earlier=earlier, busy=turn is not None, **fields)
+
+    def _open(self, cmd: dict) -> None:
+        chat = self.engine.open(cmd.get("conversation_id") or None, temporary=bool(cmd.get("temporary")))
+        self._opened(chat, cmd["request_id"])
+
+    def _version(self, cmd: dict) -> None:
+        conversation_id = cmd["conversation_id"]
+        with self._lock:
+            if conversation_id in self._turns:
+                raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
+        chat = self.engine.version(conversation_id, cmd["parent_id"], cmd["index"])
+        self._opened(chat, cmd["request_id"])
+        self._changed(conversation_id, None)
 
     def _earlier(self, cmd: dict) -> None:
         chat = self.engine.open(cmd["conversation_id"])
         messages, earlier = page(chat["messages"], cmd["before"])
+        messages = self._marked(chat, messages)
         self.emit("chatdgc_earlier", request_id=cmd["request_id"], conversation_id=chat["id"], messages=messages,
                   earlier=earlier)
 
@@ -192,13 +211,27 @@ class ChatService:
                                     on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run)
 
+    def _edit(self, cmd: dict) -> None:
+        def run(cancel, on_start, stream_for, activity):
+            return self.engine.edit(cmd["conversation_id"], cmd["message_id"], cmd["text"], model=cmd.get("model"),
+                                    thinking=cmd.get("thinking"), search=cmd.get("search", "off"),
+                                    on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
+        self._start(cmd, run, refresh=True)
+
+    def _regenerate(self, cmd: dict) -> None:
+        def run(cancel, on_start, stream_for, activity):
+            return self.engine.regenerate(cmd["conversation_id"], cmd["message_id"], model=cmd.get("model"),
+                                          thinking=cmd.get("thinking"), search=cmd.get("search", "off"),
+                                          on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
+        self._start(cmd, run, refresh=True)
+
     def _continue(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.continue_reply(cmd["conversation_id"], cmd["message_id"], on_start=on_start,
                                               cancel=cancel, **stream_for())
         self._start(cmd, run)
 
-    def _start(self, cmd: dict, run) -> None:
+    def _start(self, cmd: dict, run, *, refresh: bool = False) -> None:
         conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
         self.engine.open(conversation_id)            # an unknown chat is refused here, not on the thread
         cancel = threading.Event()
@@ -208,6 +241,7 @@ class ChatService:
             if conversation_id in self._turns:
                 raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
             turn = self._turns[conversation_id] = {"cancel": cancel, "reply_id": None, "thread": None}
+        turn["refresh"] = refresh
         thread = threading.Thread(target=self._turn, args=(conversation_id, request_id, cancel, run, turn),
                                   daemon=True, name=f"dgc-chatdgc-{conversation_id[5:13]}")
         turn["thread"] = thread
@@ -221,6 +255,9 @@ class ChatService:
             stream["value"] = _Stream(self.emit, conversation_id, reply_id)
             self.emit("chatdgc_turn", conversation_id=conversation_id, state="started", reply_id=reply_id,
                       request_id=request_id)
+            if turn.get("refresh"):
+                # A new version: the conversation from the fork point on is what it is now, on every screen.
+                self._opened(self.engine.open(conversation_id), request_id)
             if mine is not None:
                 self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(mine),
                           request_id=request_id)
@@ -240,7 +277,8 @@ class ChatService:
             reply = run(cancel, on_start, stream_for, activity)
             if stream["value"] is not None:
                 stream["value"].flush()
-            self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(reply), request_id=request_id)
+            marked = self._marked(self.engine.open(conversation_id), [reply])[0]
+            self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked), request_id=request_id)
             self._changed(conversation_id, request_id)
             if reply.get("finish") == "stop":
                 self._name_later(conversation_id)

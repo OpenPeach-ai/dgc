@@ -290,7 +290,24 @@ def _check_chat(chat) -> None:
         raise ChatStoreError("That chat doesn't exist.")
     if not isinstance(chat.get("messages"), list):
         raise ChatStoreError("This chat couldn't be saved.")
-    for message in chat["messages"]:
+    _check_messages(chat["messages"])
+    forks = chat.get("forks", {})
+    if not isinstance(forks, dict):
+        raise ChatStoreError("This chat couldn't be saved.")
+    for key, fork in forks.items():
+        tails = fork.get("tails") if isinstance(fork, dict) else None
+        if (not isinstance(key, str) or not isinstance(tails, list) or type(fork.get("active")) is not int
+                or not 0 <= fork["active"] < len(tails) or tails[fork["active"]] is not None):
+            raise ChatStoreError("This chat couldn't be saved.")
+        for tail in tails:
+            if tail is not None:
+                if not isinstance(tail, list):
+                    raise ChatStoreError("This chat couldn't be saved.")
+                _check_messages(tail)
+
+
+def _check_messages(messages: list) -> None:
+    for message in messages:
         if not isinstance(message, dict) or not isinstance(message.get("attachments", []), list):
             raise ChatStoreError("This chat couldn't be saved.")
         if (not isinstance(message, dict) or message.get("role") not in ROLES

@@ -21,6 +21,7 @@ MAX_DRAFTS = 64
 SEARCH_MODES = ("off", "auto", "on")
 MAX_SEARCHES = 5              # queries in one reply; then the model answers from what it found
 MAX_SOURCES = 40
+MAX_VERSIONS = 50             # versions kept at one point of a conversation
 MAX_HISTORY_IMAGES = 8        # images the model sees again, newest first; older ones are named, not resent
 SEARCH_TOOL = {"type": "function", "function": {
     "name": "web_search",
@@ -214,6 +215,112 @@ class ChatEngine:
             chat = self._save(chat)
         return self._reply(chat, self._history(chat, search, sees=relay is None and self._sees(chat, cancel)), None,
                            reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity)
+
+    # -- versions: edit a message you sent, or try a reply again; the old version is kept, a click away
+    #
+    # A chat's `forks` are keyed by the message before the point where versions differ ("root" before the first):
+    # each holds that point's versions as `tails` (every message from that point on) and which one is `active`.
+    # The active one is the conversation you see, inline in `messages`; its slot in `tails` is None. A fork inside
+    # an inactive version stays in `forks` under its own key and comes back when that version does.
+
+    def _choose(self, chat: dict, model, thinking, search) -> None:
+        if thinking is not None and thinking not in THINKING:
+            raise ChatEngineError("Choose off, low, medium, high or extra high thinking.")
+        if search not in SEARCH_MODES:
+            raise ChatEngineError("Web search is off, auto or on.")
+        if model:
+            chat["model"] = str(model)[:200]
+        if thinking is not None:
+            chat["thinking"] = thinking
+
+    @staticmethod
+    def _at(chat: dict, message_id: str, role: str) -> int:
+        index = next((i for i, m in enumerate(chat["messages"]) if m.get("id") == message_id), None)
+        if index is None or chat["messages"][index].get("role") != role:
+            raise ChatEngineError("That message isn't in this chat.")
+        return index
+
+    def _fork(self, chat: dict, index: int) -> None:
+        """A new version from ``index`` on: what is there now is kept as the version it was."""
+        key = chat["messages"][index - 1]["id"] if index else "root"
+        fork = chat.setdefault("forks", {}).setdefault(key, {"tails": [None], "active": 0})
+        if len(fork["tails"]) >= MAX_VERSIONS:
+            raise ChatEngineError("This message has as many versions as a chat keeps.")
+        fork["tails"][fork["active"]] = chat["messages"][index:]
+        fork["tails"].append(None)
+        fork["active"] = len(fork["tails"]) - 1
+        chat["messages"] = chat["messages"][:index]
+
+    def edit(self, chat_id: str, message_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
+             search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
+             cancel: threading.Event | None = None) -> dict:
+        """Change a message you sent: a new version of the conversation from there, with a new reply. What it
+        carried (files, and what a vision model saw in them) goes with it."""
+        text = str(text or "")
+        if len(text) > MAX_TEXT:
+            raise ChatEngineError("That message is too long to send.")
+        chat = self._chat(chat_id)
+        index = self._at(chat, message_id, "user")
+        old = chat["messages"][index]
+        if not text.strip() and not old.get("attachments"):
+            raise ChatEngineError("Type a message first.")
+        self._choose(chat, model, thinking, search)
+        self._fork(chat, index)
+        mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now(),
+                **{key: old[key] for key in ("attachments", "vision") if old.get(key)}}
+        chat["messages"].append(mine)
+        chat = self._save(chat)
+        reply_id = new_message_id()
+        if on_start is not None:
+            on_start(mine, reply_id)
+        return self._reply(chat, self._history(chat, search, sees=self._sees(chat, cancel)), None, reply_id, on_text,
+                           on_thinking, cancel, search=search, on_activity=on_activity)
+
+    def regenerate(self, chat_id: str, message_id: str, *, model: str | None = None, thinking: str | None = None,
+                   search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
+                   cancel: threading.Event | None = None) -> dict:
+        """Try a reply again (with another model or thinking level, if chosen): a new version from that reply on."""
+        chat = self._chat(chat_id)
+        index = self._at(chat, message_id, "assistant")
+        if index == 0 or chat["messages"][index - 1].get("role") != "user":
+            raise ChatEngineError("That reply can't be tried again.")
+        self._choose(chat, model, thinking, search)
+        self._fork(chat, index)
+        chat = self._save(chat)
+        reply_id = new_message_id()
+        if on_start is not None:
+            on_start(None, reply_id)
+        return self._reply(chat, self._history(chat, search, sees=self._sees(chat, cancel)), None, reply_id, on_text,
+                           on_thinking, cancel, search=search, on_activity=on_activity)
+
+    def version(self, chat_id: str, parent_id: str, index: int) -> dict:
+        """Show another version at a point of the conversation (``parent_id``: the message before it, or "root")."""
+        chat = self._chat(chat_id)
+        fork = (chat.get("forks") or {}).get(parent_id)
+        if not fork or type(index) is not int or not 0 <= index < len(fork["tails"]):
+            raise ChatEngineError("That version isn't in this chat.")
+        if index == fork["active"]:
+            return chat
+        position = 0 if parent_id == "root" else next(
+            (i + 1 for i, m in enumerate(chat["messages"]) if m.get("id") == parent_id), None)
+        if position is None:
+            raise ChatEngineError("That version isn't in this chat.")
+        fork["tails"][fork["active"]] = chat["messages"][position:]
+        chat["messages"] = chat["messages"][:position] + list(fork["tails"][index] or [])
+        fork["tails"][index] = None
+        fork["active"] = index
+        return self._save(chat)
+
+    @staticmethod
+    def versions(chat: dict) -> dict[str, dict]:
+        """For each message you see that has other versions: the point (``parent``), which one it is, of how many."""
+        out, forks, before = {}, chat.get("forks") or {}, "root"
+        for message in chat["messages"]:
+            fork = forks.get(before)
+            if fork and len(fork["tails"]) > 1:
+                out[message["id"]] = {"parent": before, "index": fork["active"], "count": len(fork["tails"])}
+            before = message["id"]
+        return out
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
                        cancel: threading.Event | None = None) -> dict:

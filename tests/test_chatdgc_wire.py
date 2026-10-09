@@ -210,6 +210,36 @@ class ServiceTests(unittest.TestCase):
             ask(image["id"], "f4")
         self.assertEqual(self.wire.of("chatdgc_file")[-1]["error"], "That image is too large to preview here.")
 
+    def test_versions_on_the_wire(self):
+        chat = self.new()
+        self.model.script += [{"parts": ["Beaches."]}, {"parts": ["Churches."]}, {"parts": ["Forts."]}]
+        self.send(chat, "Plan Goa")
+        self.ended()
+        first = [f["message"] for f in self.wire.of("chatdgc_message")]
+        self.service.dispatch({"type": "chatdgc_edit", "request_id": "e1", "conversation_id": chat,
+                               "message_id": first[0]["id"], "text": "Plan Old Goa"})
+        self.ended("e1")
+        refreshed = self.wire.wait(lambda f: f["type"] == "chatdgc_opened" and f["request_id"] == "e1")
+        self.assertTrue(refreshed["busy"])
+        self.assertEqual([m["text"] for m in refreshed["messages"]], ["Plan Old Goa"], "cut back to the edit")
+        self.assertEqual(refreshed["messages"][0]["versions"], {"parent": "root", "index": 1, "count": 2})
+        order = [f["type"] for f in self.wire.frames if f.get("request_id") == "e1"]
+        self.assertLess(order.index("chatdgc_opened"), order.index("chatdgc_message"))
+        self.assertEqual(self.wire.of("chatdgc_message")[-1]["message"]["text"], "Churches.")
+        self.service.dispatch({"type": "chatdgc_version", "request_id": "v0", "conversation_id": chat,
+                               "parent_id": "root", "index": 0})
+        back = self.wire.of("chatdgc_opened")[-1]
+        self.assertEqual(([m["text"] for m in back["messages"]], back["messages"][0]["versions"]["index"]),
+                         (["Plan Goa", "Beaches."], 0))
+        self.service.dispatch({"type": "chatdgc_regenerate", "request_id": "g1", "conversation_id": chat,
+                               "message_id": back["messages"][1]["id"], "thinking": "low"})
+        self.ended("g1")
+        retried = self.wire.of("chatdgc_message")[-1]["message"]
+        self.assertEqual((retried["text"], retried["versions"]["count"]), ("Forts.", 2))
+        self.service.dispatch({"type": "chatdgc_version", "request_id": "bad", "conversation_id": chat,
+                               "parent_id": "root", "index": 7})
+        self.assertIn("isn't in this chat", self.wire.of("chatdgc_error")[-1]["message"])
+
     def test_one_turn_per_chat_and_two_chats_side_by_side(self):
         first, second = self.new(), self.new()
         self.model.gate.clear()

@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from dgc.chatdgc.engine import CONTINUE, MAX_SEARCHES, NAME_PROMPT, SEARCH_TOOL, ChatEngine, ChatEngineError
@@ -440,6 +441,74 @@ class ChatDGCTests(unittest.TestCase):
         self.engine.send(temp["id"], "", attachments=[{"kind": "image", "data": uri}])
         self.assertFalse((self.root / "files" / temp["id"]).exists(), "a temporary chat's files are never written")
         self.assertIsInstance(self.clients[-1].calls[0]["messages"][-1]["content"], list)
+
+    def _exchange(self, chat, words, reply):
+        self.script.append({"parts": [reply]})
+        return self.engine.send(chat["id"], words)
+
+    def test_editing_a_message_makes_a_new_version_and_the_old_one_stays(self):
+        chat = self.engine.open()
+        self._exchange(chat, "Plan a day in Goa", "Beaches.")
+        self._exchange(chat, "And dinner?", "Fish thali.")
+        first = self.store.get(chat["id"])["messages"]
+        self.script.append({"parts": ["Old Goa churches."]})
+        new = self.engine.edit(chat["id"], first[0]["id"], "Plan a day in Old Goa", model="qwen3:32b")
+        now_ = self.store.get(chat["id"])
+        self.assertEqual([m["text"] for m in now_["messages"]], ["Plan a day in Old Goa", "Old Goa churches."])
+        self.assertEqual(new["text"], "Old Goa churches.")
+        self.assertEqual(self.clients[-1].calls[0]["messages"][1:], [{"role": "user", "content": "Plan a day in Old Goa"}],
+                         "the model reads the new version only")
+        self.assertEqual(self.clients[-1].model, "qwen3:32b")
+        mark = ChatEngine.versions(now_)
+        self.assertEqual(mark, {now_["messages"][0]["id"]: {"parent": "root", "index": 1, "count": 2}})
+        back = self.engine.version(chat["id"], "root", 0)
+        self.assertEqual([m["text"] for m in back["messages"]], [m["text"] for m in first], "the old version, whole")
+        self.assertEqual(ChatEngine.versions(self.store.get(chat["id"]))[first[0]["id"]]["index"], 0)
+        again = self.engine.version(chat["id"], "root", 1)
+        self.assertEqual([m["text"] for m in again["messages"]], ["Plan a day in Old Goa", "Old Goa churches."])
+        for bad in (("root", 2), ("root", -1), ("msg_" + "0" * 32, 0), ("root", "1")):
+            with self.subTest(bad=bad), self.assertRaises(ChatEngineError):
+                self.engine.version(chat["id"], *bad)
+
+    def test_trying_a_reply_again_and_a_version_inside_a_version(self):
+        chat = self.engine.open()
+        self._exchange(chat, "One", "A1")
+        self._exchange(chat, "Two", "B1")
+        path = self.store.get(chat["id"])["messages"]
+        self.script.append({"parts": ["B2"]})
+        retried = self.engine.regenerate(chat["id"], path[3]["id"], thinking="high")
+        self.assertEqual(retried["text"], "B2")
+        sent = self.clients[-1].calls[0]
+        self.assertEqual([m["content"] for m in sent["messages"][1:]], ["One", "A1", "Two"], "the old reply isn't shown to it")
+        self.assertEqual(sent["effort"], "high")
+        here = self.store.get(chat["id"])
+        self.assertEqual(ChatEngine.versions(here)[retried["id"]], {"parent": path[2]["id"], "index": 1, "count": 2})
+        self.script.append({"parts": ["A2"]})
+        self.engine.regenerate(chat["id"], path[1]["id"])
+        self.assertEqual([m["text"] for m in self.store.get(chat["id"])["messages"]], ["One", "A2"])
+        restored = self.engine.version(chat["id"], path[0]["id"], 0)
+        self.assertEqual([m["text"] for m in restored["messages"]], ["One", "A1", "Two", "B2"],
+                         "the version inside it came back as it was left")
+        self.assertEqual(ChatEngine.versions(restored)[retried["id"]]["count"], 2)
+        with self.assertRaises(ChatEngineError):
+            self.engine.regenerate(chat["id"], path[0]["id"])
+
+    def test_an_edit_keeps_what_the_message_carried_and_versions_are_bounded(self):
+        from dgc.chatdgc import engine as engine_module
+        chat = self.engine.open()
+        self.script.append({"parts": ["ok"]})
+        self.engine.send(chat["id"], "Sum it", attachments=[{"kind": "text", "text": "1,2,3", "name": "Pasted text"}])
+        message = self.store.get(chat["id"])["messages"][0]
+        self.script.append({"parts": ["6"]})
+        self.engine.edit(chat["id"], message["id"], "Add these up")
+        edited = self.store.get(chat["id"])["messages"][0]
+        self.assertEqual(edited["attachments"], message["attachments"])
+        self.assertIn("1,2,3", self.clients[-1].calls[0]["messages"][1]["content"])
+        with self.assertRaises(ChatEngineError):
+            self.engine.edit(chat["id"], self.store.get(chat["id"])["messages"][1]["id"], "not mine")
+        with patch.object(engine_module, "MAX_VERSIONS", 2), self.assertRaises(ChatEngineError) as full:
+            self.engine.edit(chat["id"], edited["id"], "third")
+        self.assertIn("as many versions", str(full.exception))
 
     def test_titles(self):
         self.assertEqual(title_from("\n\n  Plan   my week  \nmore"), "Plan my week")
