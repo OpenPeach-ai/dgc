@@ -2033,8 +2033,15 @@ class Backend:
                           "image_spool": True, "image_spool_dir": str(self._image_spool()),
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
                           "session_policy": self._session_policy_capability(),
-                          **self._chats_capability()},
+                          **self._chats_capability(), **self._chatdgc_capability()},
             **self._chat_fields())
+
+    def _chatdgc_capability(self) -> dict:
+        """ready.capabilities.chatdgc: the Host answers chatdgc_* itself (dgc/chatdgc), so only a Host
+        offers it. Chats belong to no project, so a pinned process offers it too."""
+        if getattr(self, "_host", None) is None:
+            return {}
+        return {"chatdgc": {"version": 1}}
 
     def _chats_capability(self) -> dict:
         """ready.capabilities.chats: offered only by a Host, and never when DGC_PROJECT_ROOT pins the
@@ -6821,6 +6828,7 @@ class Host:
         self.command_failed = None           # serve() logs a command that raised: (cmd, exc)
         self._editor_liveness = None
         self._finalizer_wait = ""
+        self._chatdgc = None                 # ChatDGC's service, made on its first command
         self.default = self.add_chat(config)
 
     def add_chat(self, config: Config, chat_id: str = "") -> "Backend":
@@ -7053,6 +7061,15 @@ class Host:
     def _sanitize(self, event):
         return redact_value(event, self._secret_values())
 
+    def chatdgc(self):
+        """ChatDGC's service: its own engine and store (~/.dgc/chat), on the user's model settings.
+        Its events go straight to the wire, so none carries a session's chat_id."""
+        with self._chats_lock:
+            if self._chatdgc is None:
+                from .chatdgc.service import ChatService
+                self._chatdgc = ChatService(self.core.emit, self.default.config)
+            return self._chatdgc
+
     def start(self) -> None:
         self.default.start()
 
@@ -7069,6 +7086,9 @@ class Host:
             if problem:
                 return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
             return self._open_chat(cmd) if kind == "open_chat" else self._close_chat(cmd)
+        if isinstance(kind, str) and kind.startswith("chatdgc_"):
+            # The process's, never a session's: a chat is the same whatever folder is open.
+            return self.chatdgc().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
         if "chat_id" not in cmd:
             return self._deliver(self.default, cmd)
         chat_id = cmd.get("chat_id")
@@ -7175,8 +7195,14 @@ class Host:
         with self._chats_lock:
             self._shutting_down = True        # a chat still being built closes itself
             chats = list(self.chats.values())
+            chatdgc = self._chatdgc
             queues, self._queues = list(self._queues.values()), {}
             drains, self._drains = list(self._drains.values()), {}
+        chat_closer = None
+        if chatdgc is not None:
+            # A ChatDGC reply stops and saves what it wrote, alongside the sessions' own closes.
+            chat_closer = threading.Thread(target=chatdgc.close, daemon=True, name="dgc-chatdgc-close")
+            chat_closer.start()
         for commands in queues:
             # What has not started never will: queued behind the None, it started during shutdown.
             while True:
@@ -7207,6 +7233,8 @@ class Host:
                 worker.start()
             for worker in workers:
                 worker.join()
+        if chat_closer is not None:
+            chat_closer.join(timeout=6.0)
         try:
             from . import peers as _peers
             _peers.withdraw()           # a clean exit leaves no note; a crash leaves one to expire

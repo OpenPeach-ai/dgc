@@ -172,19 +172,31 @@ class ChatStore:
                        (chat["id"], chat["title"], chat["created_at"], chat["updated_at"], int(chat.get("pinned", False)),
                         int(chat.get("archived", False)), preview, len(chat["messages"])))
 
-    def create(self, *, model: str | None = None, thinking: str | None = None, title: str = "New chat") -> dict:
+    def create(self, *, model: str | None = None, thinking: str | None = None, title: str = "New chat",
+               chat_id: str | None = None) -> dict:
         stamp = now()
-        chat = {"id": new_chat_id(), "title": _title(title), "created_at": stamp, "updated_at": stamp,
+        chat_id = chat_id or new_chat_id()
+        self._path(chat_id)
+        chat = {"id": chat_id, "title": _title(title), "created_at": stamp, "updated_at": stamp,
                 "model": model, "thinking": thinking, "pinned": False, "archived": False, "messages": []}
         with self._locked():
             self._write(chat)
         return chat
 
     def save(self, chat: dict) -> dict:
-        """Write a chat the engine changed (its messages, model, thinking), stamping it now."""
+        """Write a chat the engine changed (its messages, model, thinking), stamping it now.
+
+        A reply can take minutes, and the list's own changes land meanwhile: what the file says now
+        about its name, pin and archive wins over the copy the turn started with (the engine names a
+        chat only while it is still "New chat"). A chat deleted mid-reply stays deleted."""
         _check_chat(chat)
-        chat = {**chat, "updated_at": now()}
         with self._locked():
+            if not self._path(chat["id"]).exists():
+                raise ChatStoreError("This chat was deleted.")
+            current = self.get(chat["id"])
+            chat = {**chat, "updated_at": now(), "pinned": current.get("pinned", False),
+                    "archived": current.get("archived", False),
+                    "title": chat["title"] if current.get("title") == "New chat" else current["title"]}
             self._write(chat)
         return chat
 

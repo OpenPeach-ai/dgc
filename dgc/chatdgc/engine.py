@@ -10,11 +10,12 @@ from __future__ import annotations
 import threading
 from typing import Callable
 
+from ..editor_protocol import CHATDGC_THINKING as THINKING
 from .prompt import system_prompt
 from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_message_id, now,
                     title_from)
 
-THINKING = ("off", "low", "medium", "high", "xhigh")
+MAX_DRAFTS = 64
 CONTINUE = ("Continue exactly where your last reply stopped. Don't repeat anything you already wrote, and don't "
             "add an introduction: start with the next word.")
 
@@ -29,6 +30,7 @@ class ChatEngine:
         self.store = store or ChatStore()
         self._client_factory = client_factory
         self._temporary: dict[str, dict] = {}      # temporary chats: never written, gone with the process
+        self._drafts: dict[str, dict] = {}         # new chats: written with their first message
         self._lock = threading.Lock()
 
     # -- the model
@@ -75,38 +77,59 @@ class ChatEngine:
     # -- chats
 
     def open(self, chat_id: str | None = None, *, temporary: bool = False) -> dict:
-        """An existing chat, or a new one (temporary: kept in memory only, never in the list)."""
+        """An existing chat, or a new one. A new chat is written with its first message (an empty one is
+        never in the list); a temporary one is kept in memory only, never written or listed."""
         if chat_id:
             return self._chat(chat_id)
-        if temporary:
-            stamp = now()
-            chat = {"id": new_chat_id(), "title": "Temporary chat", "created_at": stamp, "updated_at": stamp,
-                    "model": None, "thinking": None, "pinned": False, "archived": False, "messages": [],
-                    "temporary": True}
-            with self._lock:
-                self._temporary[chat["id"]] = chat
-            return chat
-        return self.store.create()
+        stamp = now()
+        chat = {"id": new_chat_id(), "title": "Temporary chat" if temporary else "New chat", "created_at": stamp,
+                "updated_at": stamp, "model": None, "thinking": None, "pinned": False, "archived": False,
+                "messages": []}
+        chat["temporary" if temporary else "draft"] = True
+        with self._lock:
+            held = self._temporary if temporary else self._drafts
+            held[chat["id"]] = chat
+            while len(self._drafts) > MAX_DRAFTS:          # opened and left: the oldest goes
+                self._drafts.pop(next(iter(self._drafts)))
+        return dict(chat)
 
     def _chat(self, chat_id: str) -> dict:
         with self._lock:
-            if chat_id in self._temporary:
-                return self._temporary[chat_id]
+            held = self._temporary.get(chat_id) or self._drafts.get(chat_id)
+            if held is not None:
+                return {**held, "messages": list(held["messages"])}
         return self.store.get(chat_id)
 
     def _save(self, chat: dict) -> dict:
         if chat.get("temporary"):
-            chat["updated_at"] = now()
+            chat = {**chat, "updated_at": now()}
             with self._lock:
+                if chat["id"] not in self._temporary:
+                    raise ChatStoreError("This chat was deleted.")
                 self._temporary[chat["id"]] = chat
             return chat
+        if chat.get("draft"):
+            with self._lock:
+                draft = self._drafts.pop(chat["id"], None)
+            chat = {key: value for key, value in chat.items() if key != "draft"}
+            if draft is not None:
+                self.store.create(chat_id=chat["id"])
         return self.store.save(chat)
+
+    def delete(self, chat_id: str) -> None:
+        with self._lock:
+            if self._temporary.pop(chat_id, None) is not None or self._drafts.pop(chat_id, None) is not None:
+                return
+        self.store.delete(chat_id)
 
     # -- a turn
 
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
-             on_text=None, on_thinking=None, cancel: threading.Event | None = None) -> dict:
-        """Add the user's message and stream the reply. Returns the reply message (also saved)."""
+             on_start=None, on_text=None, on_thinking=None, cancel: threading.Event | None = None) -> dict:
+        """Add the user's message and stream the reply. Returns the reply message (also saved).
+
+        ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
+        ``reply_id`` is the id the streamed parts and the finished reply will carry."""
         text = str(text or "")
         if not text.strip():
             raise ChatEngineError("Type a message first.")
@@ -121,11 +144,15 @@ class ChatEngine:
             chat["thinking"] = thinking
         if not chat["messages"] and chat["title"] in ("New chat", "Temporary chat") and not chat.get("temporary"):
             chat["title"] = title_from(text)
-        chat["messages"].append({"id": new_message_id(), "role": "user", "text": text, "created_at": now()})
+        mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now()}
+        chat["messages"].append(mine)
         chat = self._save(chat)
-        return self._reply(chat, self._history(chat["messages"]), None, on_text, on_thinking, cancel)
+        reply_id = new_message_id()
+        if on_start is not None:
+            on_start(mine, reply_id)
+        return self._reply(chat, self._history(chat["messages"]), None, reply_id, on_text, on_thinking, cancel)
 
-    def continue_reply(self, chat_id: str, message_id: str, *, on_text=None, on_thinking=None,
+    def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
                        cancel: threading.Event | None = None) -> dict:
         """Carry on a reply the model stopped at its limit (or one that was stopped), in the same message."""
         chat = self._chat(chat_id)
@@ -137,7 +164,9 @@ class ChatEngine:
         if chat["messages"][index].get("finish") not in ("length", "cancelled"):
             raise ChatEngineError("That reply is already complete.")
         history = self._history(chat["messages"]) + [{"role": "user", "content": CONTINUE}]
-        return self._reply(chat, history, chat["messages"][index], on_text, on_thinking, cancel)
+        if on_start is not None:
+            on_start(None, message_id)
+        return self._reply(chat, history, chat["messages"][index], message_id, on_text, on_thinking, cancel)
 
     def _history(self, messages: list[dict]) -> list[dict]:
         """What the model reads: ChatDGC's instructions and the conversation. Earlier thinking never goes back."""
@@ -145,7 +174,7 @@ class ChatEngine:
         return ([{"role": "system", "content": system_prompt(timezone_name=zone)}]
                 + [{"role": m["role"], "content": m["text"]} for m in messages if m.get("text")])
 
-    def _reply(self, chat, history, existing, on_text, on_thinking, cancel) -> dict:
+    def _reply(self, chat, history, existing, reply_id, on_text, on_thinking, cancel) -> dict:
         model = chat.get("model") or None
         thinking = chat.get("thinking") or str(self.config.get("thinking", "off") or "off")
         streamed, thought = [], []
@@ -187,7 +216,7 @@ class ChatEngine:
                        "usage": _add_usage(existing.get("usage") or {}, usage)}
             chat["messages"][-1] = message
         else:
-            message = {"id": new_message_id(), "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
+            message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
                        "created_at": now(), "model": getattr(client, "model", model) or model, "finish": finish,
                        "usage": usage}
             if failure is not None:

@@ -143,8 +143,36 @@ class ChatDGCTests(unittest.TestCase):
         self.assertFalse((self.root / "chats" / f"{chat['id']}.json").exists())
         self.assertEqual(len(self.engine.open(chat["id"])["messages"]), 2, "it lives while DGC runs")
 
+    def test_a_new_chat_is_listed_only_once_it_has_a_message(self):
+        chat = self.engine.open()
+        self.assertEqual(self.store.listing()["total"], 0, "an empty chat is never in the list")
+        self.assertFalse((self.root / "chats" / f"{chat['id']}.json").exists())
+        self.assertEqual(self.engine.open(chat["id"])["title"], "New chat", "it opens again while DGC runs")
+        self.script.append({"parts": ["Hi!"]})
+        self.engine.send(chat["id"], "Hello there")
+        self.assertEqual([c["title"] for c in self.store.listing()["chats"]], ["Hello there"])
+        self.assertNotIn("draft", self.store.get(chat["id"]))
+        left = self.engine.open()
+        self.engine.delete(left["id"])
+        with self.assertRaises(ChatStoreError):
+            self.engine.open(left["id"])
+
+    def test_a_rename_pin_or_delete_made_mid_reply_is_kept(self):
+        chat = self.store.create()
+        def mid(part):
+            self.store.update(chat["id"], title="Renamed", pinned=True)
+        self.script.append({"parts": ["Working on it."]})
+        self.engine.send(chat["id"], "First question", on_text=mid)
+        saved = self.store.get(chat["id"])
+        self.assertEqual((saved["title"], saved["pinned"], len(saved["messages"])), ("Renamed", True, 2))
+        gone = self.store.create()
+        self.script.append({"parts": ["Too late."]})
+        with self.assertRaises(ChatStoreError):
+            self.engine.send(gone["id"], "Hello", on_text=lambda part: self.store.delete(gone["id"]))
+        self.assertFalse((self.root / "chats" / f"{gone['id']}.json").exists(), "deleted stays deleted")
+
     def test_rename_pin_archive_and_delete(self):
-        first, second = self.engine.open(), self.engine.open()
+        first, second = self.store.create(), self.store.create()
         self.store.update(second["id"], pinned=True)
         self.assertEqual([c["id"] for c in self.store.listing()["chats"]], [second["id"], first["id"]], "pinned first")
         self.store.update(first["id"], title="  Goa   trip  ")
@@ -164,7 +192,7 @@ class ChatDGCTests(unittest.TestCase):
                 self.store.get(bad)
 
     def test_chats_never_depend_on_the_folder_dgc_runs_in(self):
-        chat = self.engine.open()
+        chat = self.store.create()
         here = os.getcwd()
         self.addCleanup(os.chdir, here)
         os.chdir(tempfile.mkdtemp())

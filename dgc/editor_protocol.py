@@ -773,6 +773,53 @@ EVENT_FIELDS["chat_opened"] = {"request_id": _S(), **{
 EVENT_FIELDS["chat_closed"] = {"request_id": _S(False),
                                 "reason": _f("string", enum=("closed", "handed_over"))}
 
+# ---- ChatDGC: chats of their own, the same in every folder ----------------------------------------
+# The process's, never a session's: the router answers every chatdgc_* command itself and none of
+# their events carries the envelope's chat_id (that name is the session router's), so a conversation
+# is named by `conversation_id` ("chat_" + 32 hex). Advertised as ready.capabilities.chatdgc =
+# {version: 1}.
+#
+# A turn is chatdgc_send (or chatdgc_continue, for a reply the model stopped at its limit or that was
+# stopped): `chatdgc_turn` started, the user's message as `chatdgc_message`, the reply streamed as
+# `chatdgc_delta` parts, the finished reply as `chatdgc_message`, then `chatdgc_turn` ended -- always,
+# even when the model never answered (a `chatdgc_error` says why). One turn per conversation at a
+# time; turns in different conversations run side by side. `message` objects are the store's own
+# (id, role, text, thinking, created_at, model, finish, usage, error); a client reads the keys it
+# knows.
+CHATDGC_THINKING = ("off", "low", "medium", "high", "xhigh")
+CHATDGC_FINISHES = ("stop", "length", "cancelled", "error")
+COMMAND_FIELDS.update({
+    # The Chat list: pinned first, then the newest. Answered by `chatdgc_chats`.
+    "chatdgc_list": {"request_id": _S(), "query": _S(False), "archived": _B(False),
+                     "limit": _I(False), "offset": _I(False)},
+    # One conversation, or a new one when conversation_id is left out (temporary: never written or
+    # listed). Answered by `chatdgc_opened` with its latest messages; `chatdgc_earlier` pages back.
+    "chatdgc_open": {"request_id": _S(), "conversation_id": _S(False), "temporary": _B(False)},
+    "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "before": _S()},
+    "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
+                     "thinking": _f("string", required=False, enum=CHATDGC_THINKING)},
+    "chatdgc_continue": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
+    "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
+    # Rename, pin, archive or delete. Answered by `chatdgc_changed`.
+    "chatdgc_update": {"request_id": _S(), "conversation_id": _S(), "title": _S(False),
+                       "pinned": _B(False), "archived": _B(False), "delete": _B(False)},
+})
+EVENT_FIELDS.update({
+    "chatdgc_chats": {"request_id": _S(), "chats": _A(), "total": _I(), "next_offset": _f("integer", "null")},
+    # `earlier` counts the messages before the first one sent (0: this is the whole conversation);
+    # `busy` is true while a turn runs in it, from this or another client of this process.
+    "chatdgc_opened": {"request_id": _S(), "conversation": _O(), "messages": _A(), "earlier": _I(),
+                       "busy": _B(), "reply_id": _S(False)},
+    "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "messages": _A(), "earlier": _I()},
+    "chatdgc_turn": {"conversation_id": _S(), "state": _f("string", enum=("started", "ended")),
+                     "reply_id": _S(), "request_id": _S(False)},
+    "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
+    "chatdgc_message": {"conversation_id": _S(), "message": _O(), "request_id": _S(False)},
+    # A conversation's list entry changed (a turn, a rename, a pin), or it was deleted (summary null).
+    "chatdgc_changed": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
+    "chatdgc_error": {"message": _S(), "request_id": _S(False), "conversation_id": _S(False)},
+})
+
 # Names the envelope owns. A payload field with any of these names would overwrite it on the wire
 # (Emitter.emit builds {"type", "seq"} and then applies the fields), so none may be declared.
 RESERVED_FIELD_NAMES = frozenset({"type", "seq", "chat_id"})
