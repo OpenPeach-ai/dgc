@@ -237,3 +237,46 @@ class GuessedAddressTests(unittest.TestCase):
                          "its own reply is not where an address comes from")
         self.assertEqual(pips._guessed_addresses(["Priya@Bank.example", "sam@home.example", "ops@corp.example"], msgs, manifest), [])
 
+
+class CardClaimTests(unittest.TestCase):
+    """A reply that sends the user to a card it never made gets one more try (battle test 2026-10-09)."""
+
+    def test_a_claimed_card_is_found_and_plain_words_are_not(self):
+        for said in ("Tap Connect on the Google Calendar card below.", "The card below is how you add that.",
+                     "There's an Allow card just below.", "Choose Allow and I'll read it."):
+            with self.subTest(said=said):
+                self.assertTrue(pips._claims_a_card(said))
+        for said in ("Here are three ideas for dinner.", "I can connect your calendar if you like.", "See the list below."):
+            with self.subTest(said=said):
+                self.assertFalse(pips._claims_a_card(said))
+
+    def test_only_the_words_after_the_last_user_message_count(self):
+        msgs = [{"role": "assistant", "content": "Tap Connect on the card below."}, {"role": "user", "content": "thanks"},
+                {"role": "assistant", "content": "You're welcome."}]
+        self.assertEqual(pips._turn_text(msgs), "You're welcome.")
+
+    def test_the_worker_asks_once_to_make_the_card_or_say_it_without_one(self):
+        from dgc.llm import ChatResult, LLMClient
+        fixture = PersonalTests()
+        fixture.setUp = fixtures.LocalPipsTests.setUp.__get__(fixture)
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        job = fixture.make()
+        run = pip_chat.send(fixture.store, job["id"], "Can you see my calendar?", "c1", "user", fixture.cfg)["run"]
+        raw = json.loads(fixture.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run["id"],)).fetchone()[0])
+        replies = iter([ChatResult(content="Not yet: tap Connect on the Google Calendar card below."),
+                        ChatResult(content="Not yet: I can't see your calendar until it's connected.")])
+        asked = []
+
+        def chat(client, messages, tools=None, **kwargs):
+            asked.append(json.dumps(messages))
+            return next(replies)
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True))}), \
+             patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
+             patch("dgc.agent.load_memories", side_effect=AssertionError("No ambient memory")), \
+             patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
+            result = pips.execute_native(fixture.cfg, fixture.root, raw, lambda e: None)
+        self.assertEqual(len(asked), 2, "one more try, no more")
+        self.assertIn("you made no card in this turn", asked[1])
+        self.assertEqual(result["text"], "Not yet: I can't see your calendar until it's connected.")
+

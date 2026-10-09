@@ -2038,6 +2038,24 @@ def _attached_files(config, manifest: dict, files, has_computer: bool) -> str:
     return note
 
 
+CARD_CLAIM_REPAIR = ("This message is from DGC, not the user. Your reply tells the user about a card below it, but you made no "
+                     "card in this turn, so they see none. If they need to connect an app or allow a plugin, call connect_app "
+                     "or use_plugin now; otherwise say your reply again without mentioning a card.")
+_CARD_CLAIM = re.compile(r"\bcard\b[^.\n]{0,40}\b(?:below|under)\b|\b(?:below|under)\b[^.\n]{0,30}\bcard\b|"
+                         r"\b(?:tap|choose|press|click)\s+(?:allow|connect|add routine|send)\b", re.IGNORECASE)
+
+
+def _claims_a_card(text) -> bool:
+    return bool(_CARD_CLAIM.search(str(text or "")))
+
+
+def _turn_text(messages) -> str:
+    """What the Pip said after the last user message: the reply the user will read."""
+    turn = next((i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "user"), -1)
+    return "\n".join(m.get("content") for m in messages[turn + 1:]
+                     if m.get("role") == "assistant" and isinstance(m.get("content"), str))
+
+
 def _guessed_addresses(addresses, messages, manifest) -> list:
     """Addresses a draft would go to that the Pip didn't get from the user (their messages, its goal) or from
     their apps (tool results, app references). Its own replies don't count: a Pip wrote "rohan@acme.com as a
@@ -2112,6 +2130,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     choices_candidate = None
     routine_candidates = []            # routines it suggests in a chat reply (pip_routines.add_routine)
     note_candidates = []               # notes it keeps about the user in a chat reply (pip_notes.remember)
+    cards_shown = []                   # Connect and plugin cards its tools put below this reply
     choices_cut = None                 # the reply ends where the Pip offered its choices
     from . import pip_message_drafts
     email_drafting = pip_message_drafts.validate_pin(manifest)
@@ -2407,13 +2426,18 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 return 'These choices appear as buttons below your reply; the user taps one to answer. Your message is complete.'
             if personal and apps_pin is not None and call.name in pip_app_links.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
-                return pip_app_links.worker_call(apps_pin, call.name, arguments)
+                said = pip_app_links.worker_call(apps_pin, call.name, arguments)
+                if isinstance(said, str) and "below your reply" in said and not said.startswith("error"):
+                    cards_shown.append(call.name)
+                return said
             if personal and apps_pin is not None and apps_pin.get('plugins') and call.name in pip_plugins.TOOLS:
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 if call.name == 'call_plugin' and connector_candidate is not None:
                     return ('One action is already waiting for the user below this reply. Finish your reply; '
                             'ask for the next one after they decide.')
                 reply = pip_app_links.worker_reply(apps_pin, call.name, arguments)
+                if "below your reply" in str(reply.get('text', '')):
+                    cards_shown.append(call.name)
                 if 'draft' in reply:
                     # Built by the controller from the tool it found; the reply carries it as this
                     # turn's Allow card, which the controller checks against its own record.
@@ -2642,6 +2666,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         prompt += _attached_files(config, manifest, conversation['files'], computer_pin is not None)
     try:
         ok = agent.run_turn(prompt)
+        if (ok and personal and conversation is not None and not agent.cancelled.is_set()
+                and _claims_a_card(_turn_text(agent.messages))
+                and not (cards_shown or routine_candidates or choices_candidate is not None
+                         or any(c is not None for c in (setup_candidate, email_candidate, calendar_candidate, connector_candidate)))):
+            # It told the user to tap a card it never made ("the card below is how you add that", battle test
+            # 2026-10-09): once, ask it to make the card or say it again without one.
+            ok = agent.run_turn(CARD_CLAIM_REPAIR)
         # A model that made a card (a routine, a change, a draft) and then had no words is not a failed
         # turn: the card is its answer (a default line says so below).
         wordless = (ok is False and conversation is not None and not agent.cancelled.is_set()
