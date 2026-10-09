@@ -294,13 +294,19 @@ def _error_body(response, limit: int = 600) -> str:
         _close_response(response)
 
 
-def _bounded_body_text(response, maximum: int, label: str, *, on_chunk=None) -> str | None:
+class _ReadStopped(Exception):
+    """An ``on_line`` reader stopping the read on purpose (a Stop, or reasoning past its budget)."""
+
+
+def _bounded_body_text(response, maximum: int, label: str, *, on_chunk=None, on_line=None) -> str | None:
     """Read one bounded response body as text, without deciding what shape it is.
 
     Returns None when the response exposes no body to read (an injected double with only
     ``json()``), so the caller can take the object path instead. Every path that consumes or
     rejects the response releases it, exactly as the JSON reader does. ``on_chunk`` is told about
     each received chunk: a buffered body carries no keep-alive noise, so bytes are progress.
+    ``on_line`` is handed each complete line (bytes, without its newline) the moment it arrives,
+    for as long as it returns True; it may raise to stop reading. The whole body is still returned.
     """
     raw_length = str((getattr(response, "headers", {}) or {}).get("Content-Length") or "")
     if raw_length:
@@ -316,18 +322,34 @@ def _bounded_body_text(response, maximum: int, label: str, *, on_chunk=None) -> 
     if callable(iterator):
         try:
             body = bytearray()
+            line_from = 0
             # Through the watcher guard: this is the path Ollama's cloud takes (it serves a
             # newline-delimited stream under `application/json`), and a stall-watcher close during
             # an in-flight read surfaces from http.client as AttributeError rather than EOF. That
             # is the watcher doing its job, and it must not bury the stall message it raised.
-            for chunk in _until_watcher_closes(iterator(chunk_size=65_536), response):
+            raw = getattr(response, "raw", None)
+            if (on_line is not None and callable(getattr(raw, "read1", None))
+                    and getattr(raw, "chunked", None) is False):
+                chunks = _raw_chunks(raw, response)     # lines as they arrive, not 64 KiB at a time
+            else:
+                chunks = _until_watcher_closes(iterator(chunk_size=65_536), response)
+            for chunk in chunks:
                 if not chunk:
                     continue
                 if on_chunk is not None:
                     on_chunk()
+                start = len(body)
                 body.extend(chunk)
                 if len(body) > maximum:
                     raise LLMError(f"{label} exceeded {maximum} bytes")
+                # Scan only the new bytes for line ends; `line_from` is where the next line begins.
+                cut = body.find(b"\n", start) if on_line is not None else -1
+                while cut >= 0:
+                    line, line_from = bytes(body[line_from:cut]), cut + 1
+                    if not on_line(line):
+                        on_line = None
+                        break
+                    cut = body.find(b"\n", line_from)
             try:
                 return bytes(body).decode("utf-8")
             except UnicodeDecodeError as exc:
@@ -3200,36 +3222,81 @@ class LLMClient:
                 # stream as `application/json` -- the identical header it uses for a single
                 # object -- so trusting the header parsed every cloud turn as one object and
                 # failed with "malformed JSON". This request always asks for `stream: true`, so
-                # read the body once and let its shape decide.
+                # let the body's shape decide. Its first line does: one that parses alone is a
+                # stream, and each later frame is used the moment its line arrives (read whole,
+                # a cloud reply reached the screen all at once when it ended). A first line that
+                # does not parse alone is one object over several lines, read whole and parsed once.
                 chunk_seen = watch.progress if watch is not None else None
-                text = _bounded_body_text(r, _MAX_OLLAMA_JSON_BYTES, "Ollama response",
-                                          on_chunk=chunk_seen)
+                shape = {"stream": None}
+
+                def line_arrived(raw: bytes) -> bool:
+                    if cancel is not None and cancel.is_set():
+                        raise _ReadStopped()          # as the labelled stream does: before the line
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line:
+                        return True
+                    try:
+                        obj = json.loads(line)
+                    except (ValueError, RecursionError) as exc:
+                        if shape["stream"] is None:
+                            shape["stream"] = False
+                            return False
+                        raise LLMError("Ollama emitted malformed JSON") from exc
+                    if shape["stream"] is None:
+                        if not isinstance(obj, dict):
+                            shape["stream"] = False
+                            return False
+                        shape["stream"] = True
+                    if not isinstance(obj, dict):
+                        raise LLMError("Ollama emitted a non-object JSON response")
+                    consume(obj)
+                    if cancel is not None and cancel.is_set():
+                        raise _ReadStopped()
+                    if think_budget and not produced and len(result.thinking) > think_budget:
+                        result.finish_reason = "overthink"
+                        raise _ReadStopped()
+                    return True
+
+                try:
+                    text = _bounded_body_text(r, _MAX_OLLAMA_JSON_BYTES, "Ollama response",
+                                              on_chunk=chunk_seen, on_line=line_arrived)
+                except _ReadStopped:
+                    text, shape["stream"] = "", True     # what arrived before the stop stands
                 frames: list = []          # bound before any branch: an empty body reaches the
                                            # `text == ""` case below, and used to read unbound
-                if text is None:
-                    frames = [_bounded_json_response(
-                        r, _MAX_OLLAMA_JSON_BYTES, "Ollama response", on_chunk=chunk_seen)]
-                    text = ""
-                try:
-                    frames = frames if text == "" else [json.loads(text)]
-                except (ValueError, RecursionError):
-                    frames = []
-                    for line in text.splitlines():
-                        line = line.strip()
-                        if not line:
-                            continue
+                if shape["stream"]:
+                    # Every complete line was used as it arrived; the last frame may lack a newline.
+                    tail = text[text.rfind("\n") + 1:]
+                    if tail.strip():
                         try:
-                            frames.append(json.loads(line))
-                        except (ValueError, RecursionError) as exc:
-                            raise LLMError("Ollama emitted malformed JSON") from exc
-                    if not frames:
-                        raise LLMError("Ollama emitted malformed JSON")
-                for frame in frames:
-                    if not isinstance(frame, dict):
-                        raise LLMError("Ollama emitted a non-object JSON response")
-                    consume(frame)
-                    if cancel is not None and cancel.is_set():
-                        break
+                            line_arrived(tail.encode("utf-8"))
+                        except _ReadStopped:
+                            pass
+                else:
+                    if text is None:
+                        frames = [_bounded_json_response(
+                            r, _MAX_OLLAMA_JSON_BYTES, "Ollama response", on_chunk=chunk_seen)]
+                        text = ""
+                    try:
+                        frames = frames if text == "" else [json.loads(text)]
+                    except (ValueError, RecursionError):
+                        frames = []
+                        for line in text.splitlines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                frames.append(json.loads(line))
+                            except (ValueError, RecursionError) as exc:
+                                raise LLMError("Ollama emitted malformed JSON") from exc
+                        if not frames:
+                            raise LLMError("Ollama emitted malformed JSON")
+                    for frame in frames:
+                        if not isinstance(frame, dict):
+                            raise LLMError("Ollama emitted a non-object JSON response")
+                        consume(frame)
+                        if cancel is not None and cancel.is_set():
+                            break
             else:
                 r.encoding = "utf-8"
                 lines = iter(_bounded_stream_lines(
