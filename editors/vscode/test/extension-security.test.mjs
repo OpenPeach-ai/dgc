@@ -81,6 +81,7 @@ await build({
           restart(reason) { globalThis.__DGC_PANEL_CALLS.push("restart:" + reason); }
           applyNativeSettings() { globalThis.__DGC_PANEL_CALLS.push("applyNativeSettings"); }
           useSessionsHome() {}
+          useChatDGC() {}
         };`,
         loader: "js",
       }));
