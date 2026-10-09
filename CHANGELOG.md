@@ -6,6 +6,24 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+### ChatDGC
+
+- **A chat app inside DGC.** `dgc serve` answers a new `chatdgc_*` family of commands. Your chats have
+  their own engine and store (`~/.dgc/chat/`), separate from Work sessions and Pips, and they are the
+  same whatever folder DGC runs in. A reply is as long as your model allows; one cut at the model's limit,
+  or stopped, carries on with **Continue** in the same message. Each chat keeps its model and thinking
+  level (off to extra high; no ultra). A new chat is written only with its first message, and after its
+  first reply your model names it. Temporary chats are never written. Rename, pin, archive and delete
+  are kept even when done mid-reply. Advertised as `ready.capabilities.chatdgc = {version: 1}`; see
+  [docs/CHATDGC.md](docs/CHATDGC.md).
+
+### Models
+
+- **Ollama cloud replies stream.** Ollama's cloud labels its line-by-line stream `application/json`, and
+  DGC read that body whole, so a `:cloud` model's reply reached the screen all at once when it ended, in
+  Work, in Pips and in ChatDGC. Each part now arrives as the model writes it. A reply that really is one
+  object is still read whole.
+
 ### Sessions
 
 - **The Sessions list holds thousands and searches them.** Listing read every session file in full on

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+The ChatDGC events (`chatdgc_chats`, `chatdgc_opened`, `chatdgc_earlier`, `chatdgc_turn`,
+`chatdgc_delta`, `chatdgc_message`, `chatdgc_changed`, `chatdgc_error`) are part of the vendored
+protocol and the TypeScript SDK's known events, so neither SDK drops them. `DGC.chat()` comes in a
+later release.
+
 More Pips API 44, all local only and refused before sending to a runtime below API 44:
 `list_pip_attention` (`limit`) reads everything your Personal Pips wait on you for; `list_pip_notes`
 (`pip_id`), `add_pip_note` (`pip_id`, `text`) and `forget_pip_note` (`pip_id`, `note_id` or `all`) read

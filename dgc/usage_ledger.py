@@ -35,7 +35,7 @@ RETENTION_DAYS = 400
 RANGES = ("today", "7d", "30d", "month", "all")
 RANGE_LABELS = {"today": "Today", "7d": "Last 7 days", "30d": "Last 30 days",
                 "month": "This month", "all": "All time"}
-SOURCES = ("main", "subagent", "fallback", "compaction", "pip", "other")
+SOURCES = ("main", "subagent", "fallback", "compaction", "pip", "chatdgc", "other")
 _RANGE_ALIASES = {
     "": "7d", "today": "today", "day": "today", "1d": "today",
     "7d": "7d", "7": "7d", "week": "7d", "7days": "7d",

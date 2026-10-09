@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### ChatDGC
+
+- **Chat, above Work.** The side bar lists your chats above this project's sessions (now **Work**), with
+  one search over both. **New chat** (or **DGC: New Chat (ChatDGC)**) opens a chat in an editor tab of
+  its own. Replies stream as Markdown, with code, tables and links that open only when you click them.
+  You pick the model and how much it thinks; **Thought** shows what it thought. **Stop** keeps what was
+  written, and **Continue** carries on. **Temporary** chats are never saved. The **⋯** menu renames,
+  pins, archives or deletes a chat. Chats come back in their tabs after a window reload. Needs the DGC
+  CLI with this release; with an older CLI the home shows no Chat list.
+
 ### Questions
 
 - The Questions card's free-text hint fits its field: beside Skip and Continue in a side bar it says

@@ -226,6 +226,17 @@ class ChatDGCTests(unittest.TestCase):
         self.engine.send(temp["id"], "Hello")
         self.assertIsNone(self.engine.name(temp["id"]), "a temporary chat keeps its name")
 
+    def test_its_requests_count_in_usage_as_chatdgc(self):
+        from unittest.mock import patch
+        from dgc import usage_ledger
+        self.assertIn("chatdgc", usage_ledger.SOURCES, "kept as its own source, not 'other'")
+        client = ChatEngine(FakeConfig(), self.store).client("qwen3:32b")
+        self.assertEqual((client.model, client.max_tokens), ("qwen3:32b", 0), "no reply cap of its own")
+        with patch.object(usage_ledger, "record") as record:
+            client.usage_sink(client, SimpleNamespace(usage={"input_tokens": 12, "output_tokens": 7}))
+        self.assertEqual((record.call_args.kwargs["source"], record.call_args.kwargs["input_tokens"],
+                          record.call_args.kwargs["output_tokens"]), ("chatdgc", 12, 7))
+
     def test_titles(self):
         self.assertEqual(title_from("\n\n  Plan   my week  \nmore"), "Plan my week")
         self.assertEqual(title_from(""), "New chat")
