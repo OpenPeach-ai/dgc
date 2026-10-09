@@ -2232,10 +2232,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             role_instructions = selected_type.instructions
             if personal:
                 # What it can reach, said plainly: a Pip without a computer claimed it could "pull public rate
-                # pages and searches" (battle test, 2026-10-09).
+                # pages and searches", another offered a restaurant's phone number and hours (battle tests, 2026-10-09).
                 reach = ("You have your own computer (a browser, a Terminal and files): use it when a task needs the live web. "
                          if computer_pin is not None else
-                         "You have no computer: you cannot open web pages or search the web. When a task needs the live web, "
+                         "You have no computer: you cannot open web pages or search the web, so never offer to look something "
+                         "up (a phone number, opening hours, a price, a booking link). When a task needs the live web, "
                          "say so in one sentence and that the user can give you a computer on your page. ")
                 base_instructions = ("You are a personal DGC Pip. Help with the approved goal using the supplied conversation and reference data. "
                     + reach +
