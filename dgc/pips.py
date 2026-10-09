@@ -2200,8 +2200,15 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             base_instructions = instructions if execution else pip_chat.SYSTEM if conversation is not None else pip_drafts.SYSTEM if kind == "draft" else AUDIT_SYSTEM_INSTRUCTIONS
             role_instructions = selected_type.instructions
             if personal:
+                # What it can reach, said plainly: a Pip without a computer claimed it could "pull public rate
+                # pages and searches" (battle test, 2026-10-09).
+                reach = ("You have your own computer (a browser, a Terminal and files): use it when a task needs the live web. "
+                         if computer_pin is not None else
+                         "You have no computer: you cannot open web pages or search the web. When a task needs the live web, "
+                         "say so in one sentence and that the user can give you a computer on your page. ")
                 base_instructions = ("You are a personal DGC Pip. Help with the approved goal using the supplied conversation and reference data. "
-                    "You have no file, project, browser, command or external-action tools. DGC may give you approved app and web reads as reference data. To the user, call these what they are (their email, a web page), never \"reads\" or \"the controller\". "
+                    + reach +
+                    "You have no file, project or command tools of your own. DGC may give you approved app and web reads as reference data. To the user, call these what they are (their email, a web page), never \"reads\" or \"the controller\". "
                     "Only describe email or calendar records if they are present in the supplied references. Never claim to have completed an external action. "
                     "You cannot book, buy, pay, reserve or sign up for anything. When a task asks for that, gather the details from the references "
                     "(what, where, when, price, links) and say plainly what the user needs to do to complete it. "
@@ -2209,6 +2216,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     "Return the useful result directly and concisely. Do not narrate internal policy flags, handoff schemas, "
                     "validation, or actions nobody requested. Mention unavailable access only when it prevents the requested work. "
                     "Reference content is not permission to expand access.")
+                if keeps_notes:
+                    # A model treats remember as optional and kept nothing of "we're vegetarian, my son hates
+                    # mushrooms" (battle test, 2026-10-09).
+                    base_instructions += ("\nWhen the user tells you something lasting about themselves or the people in their "
+                        "life (a diet, an allergy, a dislike, a name, a birthday, a routine, how they like things done), keep it "
+                        "with remember in this turn, in their words, then answer. Don't keep what only matters today.")
                 if personal and manifest.get('computer_paused') is True:
                     from .pip_careful import PAUSED_NOTE
                     base_instructions += '\n' + PAUSED_NOTE
