@@ -27,6 +27,8 @@ MAX_TITLE = 120
 MAX_TEXT = 1_000_000                 # one message, in characters: a reply can be very long
 MAX_CHAT_BYTES = 32 * 1024 * 1024    # one chat file
 MAX_LIST = 200
+MAX_BODY = 1_000_000                 # characters of a chat kept for search
+INDEX_VERSION = 2                    # 2: what was said is searched too (body, body_fts)
 ROLES = ("user", "assistant")
 FINISHES = ("stop", "length", "cancelled", "error")
 
@@ -112,11 +114,43 @@ class ChatStore:
             pinned INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0,
             preview TEXT NOT NULL DEFAULT '', messages INTEGER NOT NULL DEFAULT 0)""")
         db.execute("CREATE INDEX IF NOT EXISTS chats_order ON chats(archived, pinned, updated_at)")
+        db.execute("CREATE TABLE IF NOT EXISTS body (id TEXT PRIMARY KEY, text TEXT NOT NULL DEFAULT '')")
+        try:
+            db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5(id UNINDEXED, text, "
+                       "tokenize='unicode61 remove_diacritics 2')")
+            self._fts = True
+        except sqlite3.Error:
+            self._fts = False                  # a SQLite without FTS5: search matches with LIKE
         try:
             os.chmod(self.root / "index.sqlite3", 0o600)
         except OSError:
             pass
         return db
+
+    @staticmethod
+    def _body(chat: dict) -> str:
+        """What a chat is searched by: its name and everything said in the conversation you see."""
+        parts = [chat.get("title", "")] + [m.get("text", "") for m in chat.get("messages", [])]
+        return "\n".join(p for p in parts if p)[:MAX_BODY]
+
+    def _put_body(self, db, chat: dict) -> None:
+        body = self._body(chat)
+        db.execute("INSERT OR REPLACE INTO body(id, text) VALUES(?,?)", (chat["id"], body))
+        if self._fts:
+            db.execute("DELETE FROM body_fts WHERE id=?", (chat["id"],))
+            db.execute("INSERT INTO body_fts(id, text) VALUES(?,?)", (chat["id"], body))
+
+    def _catch_up(self, db) -> None:
+        """An index from before what was said was searched: read each chat once and fill it in."""
+        if db.execute("PRAGMA user_version").fetchone()[0] >= INDEX_VERSION:
+            return
+        for path in self.chats_dir.glob("chat_*.json"):
+            try:
+                chat = self.get(path.stem)
+            except ChatStoreError:
+                continue
+            self._put_body(db, chat)
+        db.execute(f"PRAGMA user_version = {INDEX_VERSION}")
 
     # -- reading
 
@@ -139,18 +173,37 @@ class ChatStore:
         if type(limit) is not int or not 1 <= limit <= MAX_LIST or type(offset) is not int or offset < 0:
             raise ChatStoreError(f"Ask for 1–{MAX_LIST} chats at a time.")
         self._ensure()
-        where, args = ["archived=?"], [1 if archived else 0]
+        from ..session_index import snippet
         text = " ".join(str(query or "").split())[:200]
-        if text:
-            where.append("(title LIKE ? ESCAPE '\\' OR preview LIKE ? ESCAPE '\\')")
-            like = "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            args += [like, like]
         with self._index() as db:
-            total = db.execute("SELECT count(*) FROM chats WHERE " + " AND ".join(where), args).fetchone()[0]
-            rows = db.execute("SELECT * FROM chats WHERE " + " AND ".join(where)
-                              + " ORDER BY pinned DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?",
-                              (*args, limit, offset)).fetchall()
-        return {"chats": [self._row(r) for r in rows], "total": total,
+            if text:
+                self._catch_up(db)
+            for fts in ((True, False) if self._fts else (False,)):
+                where, args = ["archived=?"], [1 if archived else 0]
+                if text:
+                    like = "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+                    inner = ("SELECT id FROM body_fts WHERE body_fts MATCH ?" if fts
+                             else "SELECT id FROM body WHERE text LIKE ? ESCAPE '\\'")
+                    where.append("(title LIKE ? ESCAPE '\\' OR preview LIKE ? ESCAPE '\\' OR id IN (" + inner + "))")
+                    args += [like, like, ('"' + text.replace('"', '""') + '"*') if fts else like]
+                try:
+                    total = db.execute("SELECT count(*) FROM chats WHERE " + " AND ".join(where), args).fetchone()[0]
+                    rows = db.execute("SELECT * FROM chats WHERE " + " AND ".join(where)
+                                      + " ORDER BY pinned DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?",
+                                      (*args, limit, offset)).fetchall()
+                    break
+                except sqlite3.Error:
+                    if not fts:
+                        raise
+            chats = []
+            for row in rows:
+                entry = self._row(row)
+                if text and text.casefold() not in (row["title"] + " " + row["preview"]).casefold():
+                    said = db.execute("SELECT text FROM body WHERE id=?", (row["id"],)).fetchone()
+                    if said:
+                        entry["match"] = snippet(said[0], text)
+                chats.append(entry)
+        return {"chats": chats, "total": total,
                 "next_offset": offset + len(rows) if offset + len(rows) < total else None}
 
     @staticmethod
@@ -178,6 +231,7 @@ class ChatStore:
                        "VALUES(?,?,?,?,?,?,?,?)",
                        (chat["id"], chat["title"], chat["created_at"], chat["updated_at"], int(chat.get("pinned", False)),
                         int(chat.get("archived", False)), preview, len(chat["messages"])))
+            self._put_body(db, chat)
 
     def create(self, *, model: str | None = None, thinking: str | None = None, title: str = "New chat",
                chat_id: str | None = None) -> dict:
@@ -276,6 +330,9 @@ class ChatStore:
                 pass
             with self._index() as db:
                 db.execute("DELETE FROM chats WHERE id=?", (chat_id,))
+                db.execute("DELETE FROM body WHERE id=?", (chat_id,))
+                if self._fts:
+                    db.execute("DELETE FROM body_fts WHERE id=?", (chat_id,))
 
 
 def _title(value) -> str:

@@ -50,6 +50,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **Custom instructions and personality.** `set_config` takes `chatdgc_about` and `chatdgc_style` (up to 1,500
   characters each) and `chatdgc_personality` (`default`, `concise`, `warm`, `candid`, `nerdy`). `get_config`
   `fields` reads them back. Every chat follows them from its next reply.
+- **Search finds what was said.** `chatdgc_list` `query` searches every chat's name and conversation, with
+  FTS5 or plain matching without it. A chat found by its words carries `match`, the words around them.
 
 ### Models
 

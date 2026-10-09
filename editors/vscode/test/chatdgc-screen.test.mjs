@@ -227,7 +227,10 @@ test("the home: your chats above this project's sessions, one search over both",
     const now = new Date().toISOString();
     await send({ type: "chatdgc_list", available: true, total: 2, more: true, open: [ID], items: [
       { id: ID, title: '<img src=x onerror="window.__owned=1">', updated_at: now, pinned: true, preview: "**Paris** is the capital. | Sight | Why go | | --- | --- | See [the docs](https://x.example)" },
-      { id: `chat_${"b".repeat(32)}`, title: "Goa trip", updated_at: "2026-01-02T10:00:00.000Z", preview: "" }] });
+      { id: `chat_${"b".repeat(32)}`, title: "Goa trip", updated_at: "2026-01-02T10:00:00.000Z", preview: "Enjoy.",
+        match: "…then the **Dudhsagar** falls on day three." }] });
+    assert.equal(await page.locator("#chats-list .chat-preview").nth(1).textContent(), "…then the Dudhsagar falls on day three.",
+      "found by something said in it: the words around that");
     assert.equal(await shown(page, "#chats-home"), true);
     assert.equal(await page.locator("#sessions-title").textContent(), "Work");
     assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#chats-list .session-name")].map((n) => n.textContent)),

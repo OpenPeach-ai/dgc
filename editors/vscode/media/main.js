@@ -778,7 +778,8 @@
       if (when) { const span = el("span"); span.textContent = when; meta.append(span); }
       if (open.has(item.id)) { const tab = el("span", "session-tab"); tab.textContent = "Open in a tab"; meta.append(tab); }
       main.append(name, meta);
-      const words = plainPreview(item.preview);
+      // Found by something said in it: the words around that, rather than its last message.
+      const words = plainPreview(typeof item.match === "string" && item.match ? item.match : item.preview);
       if (words) { const preview = el("span", "session-match chat-preview"); preview.textContent = words; main.append(preview); }
       const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
       remove.title = "Delete this chat";

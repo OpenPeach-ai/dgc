@@ -26,6 +26,7 @@
   between them.
 - **⋯ → Export…** saves a chat as Markdown or JSON.
 - **Settings → ChatDGC:** what ChatDGC should know about you, how it should respond, and its personality.
+- **Search finds a chat by anything said in it**, and shows the words around what it found.
 
 ### Questions
 

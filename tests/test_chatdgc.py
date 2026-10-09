@@ -510,6 +510,41 @@ class ChatDGCTests(unittest.TestCase):
             self.engine.edit(chat["id"], edited["id"], "third")
         self.assertIn("as many versions", str(full.exception))
 
+    def test_search_finds_a_chat_by_anything_said_in_it(self):
+        chat = self.engine.open()
+        self._exchange(chat, "Plan a trip", "Start in Calangute, then the Dudhsagar falls on day three.")
+        self._exchange(chat, "Thanks", "You're welcome.")         # the falls are no longer in the preview
+        other = self.engine.open()
+        self._exchange(other, "Bread recipe", "Knead for ten minutes.")
+        found = self.store.listing(query="dudhsagar")
+        self.assertEqual([c["id"] for c in found["chats"]], [chat["id"]])
+        self.assertIn("Dudhsagar falls", found["chats"][0]["match"], "the words around it")
+        self.assertNotIn("match", self.store.listing(query="Bread")["chats"][0], "a title match needs no words")
+        for odd in ('"falls', "falls OR knead", "fal*", "a:b", "(", "'"):
+            with self.subTest(odd=odd):
+                self.store.listing(query=odd)          # never an error
+        self.engine.delete(chat["id"])
+        self.assertEqual(self.store.listing(query="dudhsagar")["total"], 0)
+
+    def test_search_without_fts_and_an_index_from_before(self):
+        chat = self.engine.open()
+        self._exchange(chat, "Trip", "The Dudhsagar falls are best in monsoon.")
+        self._exchange(chat, "Thanks", "Enjoy.")
+        import sqlite3
+        db = sqlite3.connect(self.root / "index.sqlite3")
+        db.execute("DELETE FROM body"); db.execute("DELETE FROM body_fts"); db.execute("PRAGMA user_version = 0")
+        db.commit(); db.close()
+        self.assertEqual(self.store.listing(query="monsoon")["total"], 1, "filled in on the first search")
+
+        class NoFTS(ChatStore):
+            def _index(self):
+                db = super()._index()
+                self._fts = False
+                return db
+        plain = NoFTS(self.root)
+        found = plain.listing(query="monsoon")
+        self.assertEqual((found["total"], "monsoon" in found["chats"][0]["match"]), (1, True))
+
     def test_titles(self):
         self.assertEqual(title_from("\n\n  Plan   my week  \nmore"), "Plan my week")
         self.assertEqual(title_from(""), "New chat")

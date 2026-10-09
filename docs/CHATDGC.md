@@ -12,7 +12,7 @@ voice come in later phases.
 
 - **Open it.** In the DGC side bar, **Chat** sits above **Work**. **New chat** opens a chat in an editor
   tab. You can also run **DGC: New Chat (ChatDGC)** from the Command Palette. One search box searches both
-  lists.
+  lists. It finds a chat by its name or anything said in it, and shows the words around what it found.
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
@@ -77,7 +77,7 @@ Chats are stored in `~/.dgc/chat/`:
 
 - each chat is one file, `chats/<id>.json`, holding its title, times, model, thinking level, pinned and
   archived state, and messages;
-- `index.sqlite3` keeps the list and search fast.
+- `index.sqlite3` keeps the list fast and holds what each chat says for search (with SQLite's FTS5 where available).
 
 Every file is owner-only and written atomically. A lock file keeps two windows from writing a chat at
 once.
