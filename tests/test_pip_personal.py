@@ -223,3 +223,17 @@ with patch.object(LLMClient,'chat',chat), patch('requests.sessions.Session.reque
         self.assertEqual(list((self.registry.directory/'runs'/run['id']/'source').iterdir()),[])
 
 if __name__=='__main__':unittest.main()
+
+
+class GuessedAddressTests(unittest.TestCase):
+    """A draft never goes to an address the Pip made up (battle test 2026-10-09: "rohan@acme.com as a placeholder")."""
+
+    def test_only_addresses_from_the_user_its_job_or_their_apps(self):
+        msgs = [{"role": "user", "content": "Follow up with Rohan from Acme about pricing."},
+                {"role": "assistant", "content": "I'll write to rohan@acme.com."},
+                {"role": "tool", "content": "From: Priya <priya@bank.example>"}]
+        manifest = {"job": {"goal": "Write to sam@home.example every Friday."}, "app_references": [{"text": "cc: ops@corp.example"}]}
+        self.assertEqual(pips._guessed_addresses(["rohan@acme.com"], msgs, manifest), ["rohan@acme.com"],
+                         "its own reply is not where an address comes from")
+        self.assertEqual(pips._guessed_addresses(["Priya@Bank.example", "sam@home.example", "ops@corp.example"], msgs, manifest), [])
+

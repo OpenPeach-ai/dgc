@@ -2038,6 +2038,18 @@ def _attached_files(config, manifest: dict, files, has_computer: bool) -> str:
     return note
 
 
+def _guessed_addresses(addresses, messages, manifest) -> list:
+    """Addresses a draft would go to that the Pip didn't get from the user (their messages, its goal) or from
+    their apps (tool results, app references). Its own replies don't count: a Pip wrote "rohan@acme.com as a
+    placeholder" and put it on a card anyone could Send (battle test, 2026-10-09)."""
+    seen = " ".join(json.dumps(m.get("content"), ensure_ascii=False, default=str) for m in messages
+                    if isinstance(m, dict) and m.get("role") in ("user", "tool"))
+    seen += _json(manifest.get("app_references") or []) + str((manifest.get("job") or {}).get("goal", ""))
+    seen += _json((manifest.get("conversation") or {}).get("text", "")) if isinstance(manifest.get("conversation"), dict) else ""
+    seen = seen.casefold()
+    return [a for a in addresses if isinstance(a, str) and a.strip() and a.strip().casefold() not in seen]
+
+
 def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=None) -> dict:
     """Run exactly one existing Agent turn; no independent model/tool loop."""
     from .pip_chat_options import validate_manifest as validate_chat_options
@@ -2325,6 +2337,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 try:
                     from .redaction import secret_values
                     candidate = pip_message_drafts.validate_message(call.arguments,secret_values(config),kind='calendar')
+                    guessed = _guessed_addresses(candidate.get('attendees') or [], agent.messages, manifest)
+                    if guessed:
+                        return ('Not drafted: ' + ', '.join(guessed) + ' is not an address the user gave you or that you read in '
+                                'their apps. Ask the user for the exact address; never guess one.')
                     if calendar_candidate is not None and candidate != calendar_candidate:
                         return "One calendar draft is already prepared. Ask for another reply to change it."
                     calendar_candidate = candidate
@@ -2336,6 +2352,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 try:
                     from .redaction import secret_values
                     candidate = pip_message_drafts.validate_message(call.arguments, secret_values(config))
+                    guessed = _guessed_addresses([candidate.get('recipient_email')], agent.messages, manifest)
+                    if guessed:
+                        return ('Not drafted: ' + guessed[0] + ' is not an address the user gave you or that you read in '
+                                'their apps. Ask the user for the exact address (you can write the text in your reply '
+                                'meanwhile); never guess one.')
                     if email_candidate is not None and candidate != email_candidate:
                         return "One email draft is already prepared. Ask for another reply to change it."
                     email_candidate = candidate

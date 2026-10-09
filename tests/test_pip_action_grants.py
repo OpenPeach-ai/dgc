@@ -135,7 +135,10 @@ class ActionGrantTests(unittest.TestCase):
         with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy(personal=True))}), \
                 patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
                 patch("requests.sessions.Session.request", side_effect=AssertionError("no network")):
-            result = pips.execute_native(self.cfg, self.root, run["manifest"], lambda event: None)
+            # Its job names the address, as a real one would ("email it to …"): a guessed one is never drafted.
+            manifest = {**run["manifest"], "job": {**run["manifest"]["job"],
+                                                   "goal": run["manifest"]["job"]["goal"] + " Email it to review@example.invalid."}}
+            result = pips.execute_native(self.cfg, self.root, manifest, lambda event: None)
         self.assertIn("runs a matching draft without asking", seen[0], "the run is told what it may do")
         self.assertEqual(result["message_draft"]["subject"], "Morning brief")
         self.assertEqual(result["tools_called"], 0, "drafting is not an executed tool")
