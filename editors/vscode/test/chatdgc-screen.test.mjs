@@ -225,7 +225,7 @@ test("the home: your chats above this project's sessions, one search over both",
     assert.equal(await page.locator("#sessions-title").textContent(), "Sessions");
     const now = new Date().toISOString();
     await send({ type: "chatdgc_list", available: true, total: 2, more: true, open: [ID], items: [
-      { id: ID, title: '<img src=x onerror="window.__owned=1">', updated_at: now, pinned: true, preview: "Paris is the capital." },
+      { id: ID, title: '<img src=x onerror="window.__owned=1">', updated_at: now, pinned: true, preview: "**Paris** is the capital. | Sight | Why go | | --- | --- | See [the docs](https://x.example)" },
       { id: `chat_${"b".repeat(32)}`, title: "Goa trip", updated_at: "2026-01-02T10:00:00.000Z", preview: "" }] });
     assert.equal(await shown(page, "#chats-home"), true);
     assert.equal(await page.locator("#sessions-title").textContent(), "Work");
@@ -234,6 +234,8 @@ test("the home: your chats above this project's sessions, one search over both",
     assert.equal(await page.evaluate(() => document.querySelectorAll("#chats-list img").length + (window.__owned || 0)), 0);
     const meta = await page.locator("#chats-list .chat-row").first().locator(".session-meta").textContent();
     assert.match(meta, /Pinned/); assert.match(meta, /Just now/); assert.match(meta, /Open in a tab/);
+    assert.equal(await page.locator("#chats-list .chat-preview").first().textContent(), "Paris is the capital. Sight Why go See the docs",
+      "its words, not its Markdown");
     const box = (s) => page.locator(s).boundingBox();
     assert.ok((await box("#chats-home")).y < (await box("#sessions-title")).y, "Chat above Work");
     assert.ok((await box("#sessions-search")).y < (await box("#chats-home")).y, "the search sits over both");

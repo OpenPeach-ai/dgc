@@ -16,6 +16,8 @@ from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_messag
                     title_from)
 
 MAX_DRAFTS = 64
+NAME_PROMPT = ("Name this conversation in three to six words, the way a chat app titles it. Reply with the name "
+               "only: no quotes, no full stop.")
 CONTINUE = ("Continue exactly where your last reply stopped. Don't repeat anything you already wrote, and don't "
             "add an introduction: start with the next word.")
 
@@ -167,6 +169,27 @@ class ChatEngine:
         if on_start is not None:
             on_start(None, message_id)
         return self._reply(chat, history, chat["messages"][index], message_id, on_text, on_thinking, cancel)
+
+    def name(self, chat_id: str) -> dict | None:
+        """Give a new chat a short name from its first exchange, as a chat app does. Only while it still has
+        the name its first line gave it: a name the user chose is never replaced. Returns the chat if renamed."""
+        chat = self._chat(chat_id)
+        if chat.get("temporary") or len(chat["messages"]) < 2:
+            return None
+        first, reply = chat["messages"][0], chat["messages"][1]
+        if first.get("role") != "user" or reply.get("role") != "assistant" or not reply.get("text"):
+            return None
+        if chat.get("title") != title_from(first.get("text", "")):
+            return None
+        client = self.client(chat.get("model") or None)
+        result = client.chat([{"role": "system", "content": NAME_PROMPT},
+                              {"role": "user", "content": f"User: {first['text'][:2000]}\n\nAssistant: {reply['text'][:2000]}"}],
+                             tools=None, reasoning_effort="off")
+        name = " ".join(str(getattr(result, "content", "") or "").split()).strip(" \"'`*#.")
+        if not name or len(name) > 80:
+            return None
+        # Only if it still has that name now: one renamed while the model thought keeps the user's.
+        return self.store.update(chat_id, title=name[:60], expect_title=title_from(first.get("text", "")))
 
     def _history(self, messages: list[dict]) -> list[dict]:
         """What the model reads: ChatDGC's instructions and the conversation. Earlier thinking never goes back."""

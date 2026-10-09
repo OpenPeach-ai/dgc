@@ -738,6 +738,11 @@
     if (days < 7) return `${days} days ago`;
     return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: new Date(at).getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
   }
+  /** The last message's words without its Markdown: a table's pipes, emphasis marks and link targets. */
+  function plainPreview(text) {
+    return String(text || "").replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_#>|~]+|-{3,}/g, " ")
+      .replace(/\s+/g, " ").trim();
+  }
   function renderChats(msg) {
     const section = $("chats-home"), list = $("chats-list"), status = $("chats-status"), more = $("chats-more");
     if (!section || !list) return;
@@ -773,7 +778,8 @@
       if (when) { const span = el("span"); span.textContent = when; meta.append(span); }
       if (open.has(item.id)) { const tab = el("span", "session-tab"); tab.textContent = "Open in a tab"; meta.append(tab); }
       main.append(name, meta);
-      if (item.preview) { const preview = el("span", "session-match chat-preview"); preview.textContent = String(item.preview); main.append(preview); }
+      const words = plainPreview(item.preview);
+      if (words) { const preview = el("span", "session-match chat-preview"); preview.textContent = words; main.append(preview); }
       const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
       remove.title = "Delete this chat";
       remove.setAttribute("aria-label", `Delete chat: ${title}`);

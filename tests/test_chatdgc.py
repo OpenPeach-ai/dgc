@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from dgc.chatdgc.engine import CONTINUE, ChatEngine, ChatEngineError
+from dgc.chatdgc.engine import CONTINUE, NAME_PROMPT, ChatEngine, ChatEngineError
 from dgc.chatdgc.store import ChatStore, ChatStoreError, title_from
 
 
@@ -23,18 +23,23 @@ class FakeConfig(dict):
 class FakeClient:
     """The model: streams its parts, then finishes as told."""
 
+    naming = '"Capital of France."'
+
     def __init__(self, model, script):
         self.model, self.script, self.calls = model, script, []
 
     def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
         self.calls.append({"messages": messages, "effort": reasoning_effort, "tools": tools})
+        if messages[0]["content"] == NAME_PROMPT:
+            return SimpleNamespace(content=self.naming, finish_reason="stop", usage={}, thinking="")
         step = self.script.pop(0)
         for part in step.get("thinking", []):
             on_thinking(part)
         for part in step.get("parts", []):
             if cancel is not None and cancel.is_set():
                 break
-            on_text(part)
+            if on_text:
+                on_text(part)
             if step.get("cancel_after") == part:
                 cancel.set()
         if step.get("raise"):
@@ -198,6 +203,28 @@ class ChatDGCTests(unittest.TestCase):
         os.chdir(tempfile.mkdtemp())
         self.assertEqual(ChatStore(self.root).get(chat["id"])["id"], chat["id"])
         self.assertTrue(str(ChatStore().root).endswith(os.path.join(".dgc", "chat")), "one place in your profile")
+
+    def test_a_new_chat_is_named_from_its_first_exchange_unless_you_named_it(self):
+        chat = self.engine.open()
+        self.script.append({"parts": ["Paris."]})
+        self.engine.send(chat["id"], "What's the capital of France? Also tell me about it")
+        named = self.engine.name(chat["id"])
+        self.assertEqual(named["title"], "Capital of France", "quotes and the full stop go")
+        asked = self.clients[-1].calls[-1]
+        self.assertEqual((asked["effort"], asked["tools"]), ("off", None))
+        self.assertIn("Paris.", asked["messages"][1]["content"])
+        self.assertIsNone(self.engine.name(chat["id"]), "named once")
+        mine = self.engine.open()
+        self.script.append({"parts": ["Sure."]})
+        self.engine.send(mine["id"], "Plan a trip")
+        self.store.update(mine["id"], title="Goa")
+        self.assertIsNone(self.engine.name(mine["id"]))
+        self.assertEqual(self.store.get(mine["id"])["title"], "Goa", "a name you gave is never replaced")
+        self.assertIsNone(self.store.update(mine["id"], title="x", expect_title="Plan a trip"))
+        temp = self.engine.open(temporary=True)
+        self.script.append({"parts": ["Hi."]})
+        self.engine.send(temp["id"], "Hello")
+        self.assertIsNone(self.engine.name(temp["id"]), "a temporary chat keeps its name")
 
     def test_titles(self):
         self.assertEqual(title_from("\n\n  Plan   my week  \nmore"), "Plan my week")

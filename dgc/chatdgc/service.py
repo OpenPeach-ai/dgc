@@ -224,6 +224,8 @@ class ChatService:
                 stream["value"].flush()
             self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(reply), request_id=request_id)
             self._changed(conversation_id, request_id)
+            if reply.get("finish") == "stop":
+                self._name_later(conversation_id)
         except (ChatEngineError, ChatStoreError) as exc:
             if stream["value"] is not None:
                 stream["value"].flush()
@@ -240,6 +242,16 @@ class ChatService:
             if turn.get("reply_id"):
                 self.emit("chatdgc_turn", conversation_id=conversation_id, state="ended",
                           reply_id=turn["reply_id"], request_id=request_id)
+
+    def _name_later(self, conversation_id: str) -> None:
+        """A chat's name from its first exchange, off the turn's thread: the reply has already ended."""
+        def name():
+            try:
+                if self.engine.name(conversation_id) is not None:
+                    self._changed(conversation_id, None)
+            except Exception:                         # noqa: BLE001 -- a name is a nicety; its first line stays
+                pass
+        threading.Thread(target=name, daemon=True, name=f"dgc-chatdgc-name-{conversation_id[5:13]}").start()
 
     def _cancel(self, cmd: dict) -> None:
         with self._lock:

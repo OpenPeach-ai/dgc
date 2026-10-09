@@ -200,10 +200,13 @@ class ChatStore:
             self._write(chat)
         return chat
 
-    def update(self, chat_id: str, *, title=None, pinned=None, archived=None) -> dict:
-        """Rename, pin or archive a chat: the list's own changes, never its messages."""
+    def update(self, chat_id: str, *, title=None, pinned=None, archived=None, expect_title=None) -> dict | None:
+        """Rename, pin or archive a chat: the list's own changes, never its messages. With ``expect_title``,
+        only if the chat still has that title (None if it doesn't)."""
         with self._locked():
             chat = self.get(chat_id)
+            if expect_title is not None and chat.get("title") != expect_title:
+                return None
             if title is not None:
                 chat["title"] = _title(title)
             if pinned is not None:

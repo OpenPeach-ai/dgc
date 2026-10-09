@@ -38,7 +38,7 @@ else:
 from dgc import config as config_module  # noqa: E402
 from dgc import headless, sessions  # noqa: E402
 from dgc.chatdgc import service as service_module  # noqa: E402
-from dgc.chatdgc.engine import ChatEngine  # noqa: E402
+from dgc.chatdgc.engine import NAME_PROMPT, ChatEngine  # noqa: E402
 from dgc.chatdgc.service import ChatService, fit, page  # noqa: E402
 from dgc.chatdgc.store import ChatStore  # noqa: E402
 from dgc.config import Config  # noqa: E402
@@ -49,7 +49,7 @@ class Model:
     """A model the test drives: `gate` holds it mid-reply until released."""
 
     def __init__(self):
-        self.script, self.gate, self.reached = [], threading.Event(), threading.Event()
+        self.script, self.gate, self.reached, self.named = [], threading.Event(), threading.Event(), threading.Event()
         self.gate.set()
 
     def factory(self, model):
@@ -60,6 +60,9 @@ class Model:
                 self.model = model or "fixture"
 
             def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
+                if messages[0]["content"] == NAME_PROMPT:          # naming a new chat, off the turn
+                    outer.named.set()
+                    return SimpleNamespace(content="Named by the model", finish_reason="stop", usage={}, thinking="")
                 step = outer.script.pop(0)
                 for part in step.get("thinking", []):
                     on_thinking(part)
@@ -135,7 +138,8 @@ class ServiceTests(unittest.TestCase):
         self.model.script.append({"thinking": ["Let me think."], "parts": ["Paris ", "is ", "the capital."]})
         self.send(chat, "Capital of France?", thinking="high")
         self.ended()
-        kinds = [f["type"] for f in self.wire.frames if f["type"].startswith("chatdgc_") and f["type"] != "chatdgc_opened"]
+        ours = [f for f in self.wire.frames if f.get("request_id") == "r1"]       # the turn's own frames
+        kinds = [f["type"] for f in ours]
         self.assertEqual(kinds[0], "chatdgc_turn")
         self.assertEqual(kinds[1], "chatdgc_message", "your message first")
         self.assertEqual(kinds[-3:], ["chatdgc_message", "chatdgc_changed", "chatdgc_turn"])
@@ -147,10 +151,19 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual("".join(d.get("text", "") for d in deltas), "Paris is the capital.")
         self.assertEqual("".join(d.get("thinking", "") for d in deltas), "Let me think.")
         self.assertTrue(all(d["message_id"] == reply["id"] for d in deltas))
-        self.assertEqual(self.wire.of("chatdgc_changed")[-1]["summary"]["title"], "Capital of France?")
+        self.assertEqual([f for f in ours if f["type"] == "chatdgc_changed"][0]["summary"]["title"], "Capital of France?",
+                         "named by its first line at once; the model's name follows")
         self.service.dispatch({"type": "chatdgc_list", "request_id": "l"})
         listed = self.wire.of("chatdgc_chats")[-1]
         self.assertEqual(([c["id"] for c in listed["chats"]], listed["total"], listed["next_offset"]), ([chat], 1, None))
+
+    def test_a_new_chat_gets_its_name_after_its_first_reply(self):
+        chat = self.new()
+        self.model.script.append({"parts": ["Paris."]})
+        self.send(chat, "Capital of France?")
+        self.ended()
+        named = self.wire.wait(lambda f: f["type"] == "chatdgc_changed" and (f["summary"] or {}).get("title") == "Named by the model")
+        self.assertNotIn("request_id", named, "nobody asked: it arrives on its own")
 
     def test_one_turn_per_chat_and_two_chats_side_by_side(self):
         first, second = self.new(), self.new()
