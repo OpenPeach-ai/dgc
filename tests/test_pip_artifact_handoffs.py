@@ -287,11 +287,12 @@ with patch.object(LLMClient,'chat',chat), patch('requests.sessions.Session.reque
                 original(registry)
                 raise RuntimeError("Fixture migration failure")
             with patch.object(handoffs, "migrate_v7", side_effect=fail), self.assertRaises(RuntimeError):
-                WorkspaceRegistry(directory)
+                WorkspaceRegistry(directory, clock=lambda: self.now)
             with sqlite3.connect(directory / "registry.sqlite3") as db:
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
                 self.assertEqual(db.execute("SELECT id FROM pip_handoffs").fetchone()[0], proposed["id"])
-            with WorkspaceRegistry(directory) as upgraded:
+            # The fixture's clock, not today's: on the real clock the handoff's seven-day window had closed by 2026-10-08.
+            with WorkspaceRegistry(directory, clock=lambda: self.now) as upgraded:
                 self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
                 self.assertEqual(handoffs.get(pips.PipStore(upgraded), proposed["id"]), proposed)
 
