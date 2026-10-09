@@ -309,21 +309,23 @@
   {
    "name": "context7",
    "display_name": "Context7",
-   "summary": "Documentation lookup. The pinned plugin needs an importer compatibility update.",
+   "summary": "Up-to-date documentation and code examples for libraries, from Context7's hosted server. No account needed.",
    "source_kind": "claude",
    "upstream": "https://github.com/anthropics/claude-plugins-official",
    "sha": "c447c3207a425bc4e2a0d068435f64b0477ae981",
    "path": "external_plugins/context7",
    "license": "Apache-2.0",
    "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
-   "install": "block",
+   "install": "allow",
    "auth": "anonymous",
    "license_note": "The marketplace manifest lives in the Apache-2.0 claude-plugins-official tree. Using the service is Context7's own terms.",
-   "audited_on": "2026-09-23",
-   "block_reason": "This pinned package uses an unsupported optional authentication header. Its anonymous MCP endpoint works, but the package cannot currently be imported.",
+   "audited_on": "2026-10-09",
    "compatibility_url": "https://context7.com/docs/resources/all-clients",
-   "verification": "Unavailable in DGC",
-   "developer": "Upstash"
+   "verification": "Connects anonymously to Context7's hosted server (an optional API key raises rate limits). DGC uses the plain server address, not the one that names Claude Code as the client. Checked 2026-10-09: lists its tools and answers a docs lookup with no account.",
+   "developer": "Upstash",
+   "mcp_urls": {
+    "context7": "https://mcp.context7.com/mcp"
+   }
   },
   {
    "name": "supabase",

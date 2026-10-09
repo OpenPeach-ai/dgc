@@ -768,9 +768,16 @@ def _read_server_specs(source: Path | None, entry: dict) -> dict:
             if headers:
                 auth = headers.get('Authorization') if isinstance(headers,dict) else None
                 match = re.fullmatch(r'Bearer \$\{([A-Za-z_][A-Za-z0-9_]{0,127})\}', str(auth or ''))
-                if not match or len(headers) != 1: raise PluginError('Inline MCP headers are not imported. Use an environment reference for a bearer token.')
-                bearer = match.group(1)
-            spec = mcp_spec(raw['url'], bearer, oauth_scope=raw.get('oauth_scope', ''))
+                # An optional key (`${NAME:-}`, empty when unset): the server works without one, as
+                # Context7's does; DGC connects anonymously and never sends an empty credential.
+                optional = re.fullmatch(r'(?:Bearer )?\$\{[A-Za-z_][A-Za-z0-9_]{0,127}:-\}', str(auth or ''))
+                if len(headers) != 1 or not (match or optional):
+                    raise PluginError('Inline MCP headers are not imported. Use an environment reference for a bearer token.')
+                bearer = match.group(1) if match else ''
+            # DGC's catalog may pin a server's plain address: a vendor URL that names another client
+            # (?client=claude-code-plugin) would present DGC as that client.
+            url = (entry.get('mcp_urls') or {}).get(name) or raw['url']
+            spec = mcp_spec(url, bearer, oauth_scope=raw.get('oauth_scope', ''))
             spec['env_names'] = list(dict.fromkeys(spec['env_names'] + names))
         elif raw.get('command'):
             command, args = raw['command'], raw.get('args', [])

@@ -17,7 +17,7 @@ class CuratedCompatibilityTests(unittest.TestCase):
 
     def test_blocked_packages_are_absent_from_recommendations_and_editor_catalog(self):
         blocked = {e['name'] for e in self.entries if e['install'] == 'block'}
-        self.assertTrue({'figma','canva','vercel','dropbox','google-workspace','context7',
+        self.assertTrue({'figma','canva','vercel','dropbox','google-workspace',
                          'feature-dev','code-review','commit-commands','code-simplifier',
                          'pr-review-toolkit'} <= blocked)
         self.assertFalse(blocked & {r['name'] for r in plugins.search()})
@@ -91,3 +91,33 @@ class CurrentPresetCopyTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class OptionalKeyHeaderTests(unittest.TestCase):
+    """A package whose server takes an optional key (`${NAME:-}`, Context7's) imports and connects anonymously."""
+
+    def package(self, header, url="https://mcp.context7.com/mcp?client=claude-code-plugin"):
+        import json, tempfile
+        from pathlib import Path
+        root = Path(tempfile.mkdtemp())
+        (root / ".mcp.json").write_text(json.dumps({"mcpServers": {"context7": {"type": "http", "url": url,
+                                                                                "headers": {"Authorization": header}}}}))
+        return root
+
+    def test_an_optional_key_connects_anonymously_and_never_sends_an_empty_credential(self):
+        for header in ("${CONTEXT7_API_KEY:-}", "Bearer ${CONTEXT7_API_KEY:-}"):
+            with self.subTest(header=header):
+                specs = plugins._read_server_specs(self.package(header), {"name": "context7"})
+                spec = specs["context7"]
+                self.assertNotIn("auth_env", spec)
+                self.assertFalse(any("Authorization" in a for a in spec["args"]))
+        with self.assertRaises(plugins.PluginError):
+            plugins._read_server_specs(self.package("Bearer sk-literal-key"), {"name": "context7"})
+
+    def test_dgcs_catalog_pins_the_plain_address_instead_of_one_that_names_another_client(self):
+        entry = next(e for e in plugins.load_catalog()["plugins"] if e["name"] == "context7")
+        self.assertEqual(entry["install"], "allow")
+        spec = plugins._read_server_specs(self.package("${CONTEXT7_API_KEY:-}"), entry)["context7"]
+        self.assertEqual(spec["url"], "https://mcp.context7.com/mcp")
+        self.assertFalse(any("claude-code" in a for a in spec["args"]))
+
