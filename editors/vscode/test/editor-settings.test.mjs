@@ -94,6 +94,15 @@ test('the chat has no Plugins surface of its own',()=>{
 test('skill acknowledgements preserve keyboard focus on the switch',async()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.d.querySelector('[data-plugin=fixture]').focus();x.click('[data-plugin=fixture]');x.message({type:'plugins',items:[{...plugin,skills:plugin.skills.map(s=>({...s,enabled:true}))}]});await Promise.resolve();assert.equal(x.d.activeElement.dataset.plugin,'fixture');});
 
 test('directory search and marketplace filter use runtime catalog rows',()=>{const x=setup();x.message({type:'plugins',items:[plugin,{name:'second',display_name:'Second plugin',summary:'Searchable text',marketplace:'team',installed:false}]});x.click('[data-nav=plugins]');assert.equal(x.d.querySelectorAll('#plugin-list .row').length,1);x.click('#browse-directory');assert.equal(x.d.querySelectorAll('.directory-card').length,2);x.input('#directory-search','searchable');assert.equal(x.d.querySelectorAll('.directory-card').length,1);assert.match(x.d.querySelector('.directory-card').textContent,/Second plugin/);});
+test('one-colour logos sit on their own plate, others on none',()=>{
+ // Superpowers' black mark vanished on the dark theme, Composio's white one on the light (battle test 2026-10-09).
+ const x=setup();const logoUrl='data:image/png;base64,iVBORw0KGgo=';
+ x.message({type:'plugins',items:[{...plugin,logo:logoUrl},{name:'superpowers',display_name:'Superpowers',summary:'Skills',logo:logoUrl,installed:false},{name:'composio',display_name:'Composio',apps:[],skills:[],installed:false}]});
+ x.click('[data-nav=plugins]');x.click('#browse-directory');
+ const img=name=>[...x.d.querySelectorAll('.directory-card')].find(c=>c.textContent.includes(name))?.querySelector('img.logo');
+ assert.ok(img('Superpowers').classList.contains('plate-light'));assert.ok(img('Composio').classList.contains('plate-dark'));
+ assert.ok(img(plugin.display_name));assert.ok(![...img(plugin.display_name).classList].some(c=>c.startsWith('plate-')));
+});
 test('unavailable plugins are absent from browsing and old installs have removal controls only',()=>{
  const x=setup();const blocked={...plugin,name:'figma',display_name:'Figma',installed:false,install:'block',block_reason:'DGC approval is required'};
  x.message({type:'plugins',items:[plugin,blocked]});x.click('[data-nav=plugins]');x.click('#browse-directory');

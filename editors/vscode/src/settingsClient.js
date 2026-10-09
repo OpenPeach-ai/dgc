@@ -165,7 +165,10 @@ function render() {
     }
 }
 function appLogo(row, app) { return row.name === 'google-workspace' && serviceLogos[app.id] ? logo({name:app.id, display_name:app.name, logo:serviceLogos[app.id]}) : logo(row); }
-function logo(row, big = false) { if (connectorLogos[row.name]) row = {...row, logo:connectorLogos[row.name]}; if (row.name === 'composio') row = {...row, logo:composioLogo}; if (row.name === 'google-workspace') row = {...row, logo:googleLogo}; return row.logo ? `<img class="logo" width="${big ? 72 : 40}" height="${big ? 72 : 40}" alt="${esc(row.display_name || row.name)}" src="${esc(row.logo)}">` : `<span class="mark" aria-hidden="true">${icon('plugins')}</span>`; }
+// One-colour marks drawn for one background vanish on the other theme (Superpowers' black mark on dark,
+// Composio's white one on light), so each sits on the plate its maker draws it on.
+const logoPlates = {composio: 'dark', arcade: 'light', superpowers: 'light'};
+function logo(row, big = false) { if (connectorLogos[row.name]) row = {...row, logo:connectorLogos[row.name]}; if (row.name === 'composio') row = {...row, logo:composioLogo}; if (row.name === 'google-workspace') row = {...row, logo:googleLogo}; const plate = logoPlates[row.name]; return row.logo ? `<img class="logo${plate ? ' plate-' + plate : ''}" width="${big ? 72 : 40}" height="${big ? 72 : 40}" alt="${esc(row.display_name || row.name)}" src="${esc(row.logo)}">` : `<span class="mark" aria-hidden="true">${icon('plugins')}</span>`; }
 function banner(row) { if (!signin || row && signin.server !== row.name && !(row.server_names || []).includes(signin.server))
     return ''; return `<div class="banner" role="status"><p>Finish connecting ${esc(signin.title)} in your browser</p><div class="actions"><button class="secondary" data-browser>Open browser</button><button class="secondary" data-cancel-connect>Cancel</button></div></div>`; }
 function issue(row) { const message = errors.get(row.name) || row.connection_error; return message ? `<div class="banner error" role="alert"><p>${esc(message)}</p></div>` : ''; }
@@ -286,7 +289,7 @@ function browserPlugin(row) {
 function connectionArt(row) {
     const name = row.display_name || row.name;
     const src = connectorLogos[row.name] || (row.name === 'composio' ? composioLogo : row.name === 'google-workspace' ? googleLogo : row.logo || items.find(r => r.name === row.name)?.logo || (row.name === 'figma' ? figmaLogo : ''));
-    return `<div class="connection-art" aria-label="DGC and ${esc(name)}"><span class="connection-tile"><img src="${esc(dgcLogo)}" width="56" height="56" alt="DGC"></span><span class="connection-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="connection-tile">${src ? `<img src="${esc(src)}" width="56" height="56" alt="${esc(name)}">` : `<span class="status">Plugin</span>`}</span></div>`;
+    return `<div class="connection-art" aria-label="DGC and ${esc(name)}"><span class="connection-tile"><img src="${esc(dgcLogo)}" width="56" height="56" alt="DGC"></span><span class="connection-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="connection-tile">${src ? `<img${logoPlates[row.name] ? ` class="plate-${logoPlates[row.name]}"` : ''} src="${esc(src)}" width="56" height="56" alt="${esc(name)}">` : `<span class="status">Plugin</span>`}</span></div>`;
 }
 function connectionRequirement(row) {
     if (row.connected) return '';
