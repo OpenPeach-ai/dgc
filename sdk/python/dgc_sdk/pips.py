@@ -67,6 +67,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "set_plugin_permission",
     "allow_pip_plugin", "decline_pip_plugin", "set_pips_limit", "add_pip_note", "forget_pip_note", "set_pip_careful", "forget_pip_site",
     "set_pip_profile", "update_pip_computers", "reset_pip_computer",
     "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
@@ -209,6 +210,9 @@ API44_READS = frozenset({'list_pip_plugins', 'list_pip_plugin_uses', 'list_pip_a
 API44_MUTATIONS = frozenset({'allow_pip_plugin', 'decline_pip_plugin', 'set_pips_limit', 'add_pip_note', 'forget_pip_note', 'set_pip_careful', 'forget_pip_site'})
 READ_COMMANDS |= API44_READS
 MUTATION_COMMANDS |= API44_MUTATIONS
+# API 45: what each plugin may do without asking (ChatGPT's four levels), for every Pip; local only.
+API45_MUTATIONS = frozenset({'set_plugin_permission'})
+MUTATION_COMMANDS |= API45_MUTATIONS
 COMMAND_FIELDS = {
     'list_pip_plugins': frozenset({'pip_id'}),
     'allow_pip_plugin': frozenset({'pip_id', 'grant_id'}),
@@ -220,6 +224,7 @@ COMMAND_FIELDS = {
     'forget_pip_note': frozenset({'pip_id', 'note_id', 'all'}),
     'list_pip_sites': frozenset({'pip_id'}),
     'set_pip_careful': frozenset({'pip_id', 'on'}),
+    'set_plugin_permission': frozenset({'level', 'plugin'}),
     'forget_pip_site': frozenset({'pip_id', 'site'}),
     'get_pip_chat_context': frozenset({'pip_id', 'context_size'}),
     'list_pip_reply_stats': frozenset({'pip_id', 'run_ids'}),
@@ -467,7 +472,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API44_MUTATIONS | API44_READS:
+        if command in API45_MUTATIONS:
+            minimum = 45
+        elif command in API44_MUTATIONS | API44_READS:
             minimum = 44
         elif command in API43_MUTATIONS | API43_READS:
             minimum = 43

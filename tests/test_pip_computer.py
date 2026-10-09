@@ -23,7 +23,7 @@ from dgc.pips import _worker_main
 URL = %r
 def chat(self, messages, tools=None, on_text=None, **kwargs):
     names = [t["function"]["name"] for t in (tools or [])]
-    assert names == ["computer", "connect_app", "read_app", "skill"], names   # its computer, its apps (Grok-style), its skills
+    assert names == ["computer", "connect_app", "web_search", "read_app", "skill"], names   # its computer, its apps (Grok-style), web search, its skills
     tool_results = [m for m in messages if m.get("role") == "tool"]
     if not tool_results:
         return ChatResult(tool_calls=[ToolCall("c1", "computer", {"op": "open", "url": URL})])
@@ -39,7 +39,7 @@ with patch.object(LLMClient, "chat", chat):
 
 
 # The same model in the Pip's chat: it has the computer there too, among the chat's own tools.
-CHAT_WORKER = WORKER.replace('assert names == ["computer", "connect_app", "read_app", "skill"], names', 'assert "computer" in names, names')
+CHAT_WORKER = WORKER.replace('assert names == ["computer", "connect_app", "web_search", "read_app", "skill"], names', 'assert "computer" in names, names')
 
 
 @unittest.skipUnless(REAL_CHROME and box.capability().get("available"), "needs Linux, bubblewrap and a Chromium build")

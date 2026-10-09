@@ -73,6 +73,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
     "list_pip_reply_stats", "get_pips_limit", "set_pips_limit", "list_pip_attention",
     "list_pip_notes", "add_pip_note", "forget_pip_note", "list_pip_sites", "set_pip_careful", "forget_pip_site",
+    "set_plugin_permission",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -109,6 +110,7 @@ _COMMAND_ARGS = {
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
     "list_pip_plugin_uses": set(), "list_pip_attention": {"limit"}, "list_pip_notes": {"pip_id"}, "add_pip_note": {"pip_id", "text"},
     "forget_pip_note": {"pip_id", "note_id", "all"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
+    "set_plugin_permission": {"plugin", "level"},
     "forget_pip_site": {"pip_id", "site"}, "get_pip_chat_context": {"pip_id", "context_size"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
     "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
@@ -2061,8 +2063,8 @@ def _attached_files(config, manifest: dict, files, has_computer: bool) -> str:
 
 
 CARD_CLAIM_REPAIR = ("This message is from DGC, not the user. Your reply tells the user about a card or draft below it, but you "
-                     "made none in this turn, so they see none. If they need to connect an app or allow a plugin, call connect_app "
-                     "or use_plugin now. If a draft was not made, say why in one sentence and ask for what is missing (such as "
+                     "made none in this turn, so they see none. If they need to connect an app, call connect_app now; for a "
+                     "plugin action, call call_plugin. If a draft was not made, say why in one sentence and ask for what is missing (such as "
                      "the exact address), with its text in your reply. Otherwise say your reply again without mentioning a "
                      "card or draft.")
 _CARD_CLAIM = re.compile(r"\bcard\b[^.\n]{0,40}\b(?:below|under)\b|\b(?:below|under)\b[^.\n]{0,30}\bcard\b|"
@@ -2268,8 +2270,16 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if personal:
                 # What it can reach, said plainly: a Pip without a computer claimed it could "pull public rate
                 # pages and searches", another offered a restaurant's phone number and hours (battle tests, 2026-10-09).
-                reach = ("You have your own computer (a browser, a Terminal and files): use it when a task needs the live web. "
+                searching = apps_pin is not None          # web_search rides the run's app socket (2026-10-09)
+                reach = (("You have your own computer (a browser, a Terminal and files): use it when a task needs the live web. "
+                          + ("Find things with web_search first, and open a page on your computer when you need the page itself. "
+                             if searching else ""))
                          if computer_pin is not None else
+                         ("You have no computer, but you can search the web with web_search: you get titles, links and snippets, "
+                          "never a page itself, so never claim to have read a page or checked a live price on it. A page also "
+                          "reaches you as a read the user set up for your runs, listed in your references. When a task needs a "
+                          "page itself, say so in one sentence and that the user can give you a computer on your page. ")
+                         if searching else
                          "You have no computer: you cannot open web pages or search the web, so never offer to look something "
                          "up (a phone number, opening hours, a price, a booking link). A web page reaches you only as a read "
                          "the user set up for your runs, listed in your references; with none listed you have none. When a task needs the live web, "
@@ -3128,7 +3138,7 @@ def _execute_run(registry, row, config):
         from . import pip_notes
         from .redaction import secret_values as saved_secrets
         manifest = pip_notes.runtime(registry, row, manifest, saved_secrets(config))
-    computer_socket = computer_host = taint = None
+    computer_socket = computer_host = taint = lane = None
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # Careful mode remembers what every run of this Pip read from apps, with or without its computer:
         # a routine's run reads mail now, and the user's next run could carry it to a page.
@@ -3156,13 +3166,22 @@ def _execute_run(registry, row, config):
             computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said,
                                 sites=pip_careful.known(registry, row['pip_id']) if careful else ())
             computer_socket = pip_computer.RunSocket(computer_host, row['id'])
+            if careful and row['requested_by'] in pip_careful.UNATTENDED:
+                lane = pip_careful.Lane()         # nobody watching: its computer or the user's plugins, not both
+                computer_socket.lane = lane
             manifest = {**manifest, 'computer_socket': computer_socket.pin()}
     app_socket = None
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # The Pip's own apps (connect_app, read_app): the controller holds the Composio connection;
         # the worker reaches it through a socket only this run's token opens.
         from . import pip_app_links
-        app_socket = pip_app_links.RunSocket(registry.directory, config, row['pip_id'], row['workspace_id'], row['id'])
+        from .pip_careful import UNATTENDED
+        app_socket = pip_app_links.RunSocket(registry.directory, config, row['pip_id'], row['workspace_id'], row['id'],
+                                             unattended=row['requested_by'] in UNATTENDED)
+        app_socket.lane = lane
+        app_socket.taint = taint
+        if isinstance(manifest.get('conversation'), dict) and manifest.get('user_turn') is True:
+            app_socket.said = str(manifest['conversation'].get('text') or '')
         if taint is not None:
             app_socket.on_read = taint.add                     # what it reads from apps, for careful mode
         manifest = {**manifest, 'app_socket': app_socket.pin()}
@@ -3761,6 +3780,10 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "Your Pips' plugins are on this computer only.")
                 result = pip_plugins.overview(registry, config)
+            elif command == 'set_plugin_permission':
+                # What one plugin may do without asking, for every Pip (Pips API 45).
+                from . import pip_plugins
+                result = pip_plugins.set_level(config, request.get('plugin'), request.get('level'), actor)
             elif command in ('set_pip_profile', 'list_pip_shared'):
                 # A Personal Pip's own page: its look, title and notifications, and what its chat shared.
                 from . import pip_profile

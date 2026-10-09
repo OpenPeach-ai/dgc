@@ -2,6 +2,7 @@
 to a website. New sites ask, typed app data is held, unattended app-reading runs get no computer."""
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from dgc import pip_careful as careful, pip_chat, pip_computer, pips
@@ -126,6 +127,38 @@ class CarefulStoreTests(unittest.TestCase):
             self.assertTrue(careful.computer_paused(self.registry, self.cfg, pip["id"], "local-routine", {}))
         careful.set_on(self.registry, pip["id"], False, "editor-user")
         self.assertFalse(careful.computer_paused(self.registry, self.cfg, pip["id"], "local-scheduler", {"app_plan": {}}), "you turned it off")
+
+    def test_plugins_no_longer_take_a_routines_computer(self):
+        # Every plugin turned on is every Pip's since 2026-10-09: counting them here would take the computer from
+        # every routine of every Pip. Lane decides in the run instead.
+        pip = self.make()
+        with patch("dgc.pip_plugins.installed", return_value={"aave": {"display_name": "Aave", "money": True, "servers": {}}}):
+            self.assertFalse(careful.computer_paused(self.registry, self.cfg, pip["id"], "local-routine", {}))
+
+    def test_nobody_watching_a_run_gets_its_computer_or_the_plugins_whichever_comes_first(self):
+        lane = careful.Lane()
+        self.assertIsNone(lane("computer"))
+        self.assertIsNone(lane("computer"), "the same again is fine")
+        self.assertEqual(lane("plugins"), careful.Lane.PLUGINS_OFF)
+        lane = careful.Lane()
+        self.assertIsNone(lane("plugins"))
+        self.assertEqual(lane("computer"), careful.Lane.COMPUTER_OFF)
+
+    def test_both_run_sockets_keep_to_the_lane(self):
+        from dgc import pip_app_links as links, pip_computer
+        pip = self.make()
+        lane = careful.Lane()
+        apps = links.RunSocket(self.registry.directory, self.cfg, pip["id"], pip["workspace_id"], "run_" + "e" * 32, unattended=True)
+        self.addCleanup(apps.close)
+        apps.lane = lane
+        host = SimpleNamespace(call=lambda op, args: "the page")
+        computer = pip_computer.RunSocket(host, "run_" + "f" * 32)
+        self.addCleanup(computer.close)
+        computer.lane = lane
+        self.assertEqual(pip_computer.worker_call(computer.pin(), "open", {"url": "https://example.com"}), "the page")
+        said = links.worker_call(apps.pin(), "call_plugin", {"plugin": "aave", "tool": "get_markets", "arguments": {}})
+        self.assertEqual(said, careful.Lane.PLUGINS_OFF, "the computer came first in this run")
+        self.assertIn("No answer is waiting", links.worker_call(apps.pin(), "plugin_answer", {}), "reading a past answer is not a use")
 
     def test_always_allow_is_refused_for_a_site_or_app_data(self):
         pip = self.make()

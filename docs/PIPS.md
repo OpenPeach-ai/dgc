@@ -586,11 +586,31 @@ The gear on **Your Pips** opens settings for all of them:
 - **Apps**: every app account your Pips use, and which Pips use each one. **Remove** stops one Pip
   using it; the account stays connected for the others. Accounts themselves are signed in and out
   in DGC **Settings → Plugins**, and so are the skills your Pips use.
+- **Plugins**: every plugin you turned on in DGC **Settings → Plugins**. Each one is every Pip's to
+  use; turning it on is your consent, so a Pip never asks "use this plugin?". For each plugin, choose
+  what it may do without asking you (the same four choices as ChatGPT):
+  - **Always ask**: it asks before it reads or changes anything.
+  - **Ask before any change**: it reads at once, and asks before it changes anything.
+  - **Ask before important actions** (the default): it reads at once, and asks before it sends,
+    creates, edits, deletes, shares or pays.
+  - **Never ask**: it reads and acts without asking. A plugin that can move money (Aave, 1inch,
+    Airwallex) can't be set to this; it always asks before a change.
+
+  In a run you aren't watching (a routine or a schedule), a Pip always asks before it changes
+  anything, whatever you chose.
 
 Each Pip still has its own computer: a separate home, browser profile and sign-ins, so one Pip's
 sites never see another's. Settings are shared; computers are not.
 
 ## Personal Pips: apps and the web
+
+### Searching the web
+
+Every Personal Pip can search the web with the search you set in DGC **Settings** (the same one
+your main chat uses). It gets titles, links and snippets; to read a page itself, it uses its own
+computer. A search never carries what the Pip read from your apps (careful mode): a Pip that read
+your parcel number in an email can't send that number to a search engine unless you said it
+yourself.
 
 ### Connecting an app from a Pip's chat
 

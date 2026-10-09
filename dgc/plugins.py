@@ -914,6 +914,39 @@ def uninstall(name: str, *, config, manager=None) -> dict:
         return {'name':name, 'retained_servers':retained, 'removed_servers':removed}
 
 
+# What a plugin may do without asking, ChatGPT's four levels (OpenAI, "Managing app permissions in ChatGPT"):
+# always_ask asks even before it reads; any_changes reads at once and asks before any change; important (the
+# default) reads at once and asks before an important action (sending, creating, editing, deleting, sharing,
+# paying); never_ask asks nothing, and is never offered for a plugin that can move money. Turning a plugin on
+# in Settings is the consent to use it at all (founder, 2026-10-09): no "use this plugin?" card anywhere.
+PERMISSIONS = ('always_ask', 'any_changes', 'important', 'never_ask')
+DEFAULT_PERMISSION = 'important'
+
+
+def permission(name: str) -> str:
+    levels = _state().get('permissions')
+    level = levels.get(name) if isinstance(levels, dict) else None
+    return level if level in PERMISSIONS else DEFAULT_PERMISSION
+
+
+def set_permission(name: str, level: str, *, money: bool) -> str:
+    """Save one plugin's level. A payment plugin can never be set to never_ask."""
+    if not isinstance(name, str) or not sources.NAME.fullmatch(name):
+        raise PluginError('Name an installed plugin.')
+    if level not in PERMISSIONS:
+        raise PluginError('Choose always_ask, any_changes, important or never_ask.')
+    if level == 'never_ask' and money:
+        raise PluginError('This plugin can move money, so it always asks before it does anything that changes something.')
+    with _registry_lock():
+        if not any(r.get('name') == name for r in _installed()):
+            raise PluginError(f'{name} is not installed.')
+        state = _state()
+        levels = state.get('permissions') if isinstance(state.get('permissions'), dict) else {}
+        state['permissions'] = {**{k: v for k, v in levels.items() if v in PERMISSIONS}, name: level}
+        sources.write_json(STATE_PATH, state)
+    return level
+
+
 @contextmanager
 def _registry_lock():
     lock = named_process_lock('plugin-registry', str(PLUGIN_HOME))

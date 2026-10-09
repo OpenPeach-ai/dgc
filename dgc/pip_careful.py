@@ -301,21 +301,44 @@ def preview(text, limit=200) -> str:
 # --------------------------------------------------------------------------- unattended runs
 
 def computer_paused(registry, config, pip_id, requested_by, manifest) -> bool:
-    """A routine, schedule or event run that can read the user's apps gets no computer while careful is on."""
+    """A routine, schedule or event run that reads the user's apps gets no computer while careful is on: apps it
+    reads before the run (its reads, its references) or apps connected to it. Plugins are every Pip's since
+    2026-10-09, so they don't decide it here: Lane does, in the run, whichever the Pip reaches for first."""
     if requested_by not in UNATTENDED or not is_on(registry, pip_id):
         return False
     if manifest.get("app_plan") is not None or manifest.get("app_references"):
         return True
-    from . import pip_app_links, pip_plugins
+    from . import pip_app_links
     try:
-        if pip_app_links.connected(registry, pip_id):
-            return True
+        return bool(pip_app_links.connected(registry, pip_id))
     except Exception:
         return True
-    try:
-        return bool(pip_plugins.allowed(registry, pip_id, config))
-    except Exception:
-        return True
+
+
+class Lane:
+    """In a run nobody is watching, careful mode lets a Pip use its computer or the user's plugins, not both:
+    whichever it reaches for first, the other stays off for the run. With every plugin every Pip's, deciding it
+    before the run (as connected apps still do) would take the computer from every routine of every Pip."""
+
+    COMPUTER_OFF = ("Careful mode: nobody is watching this run and you have used the user's plugins in it, so your "
+                    "computer stays off until they're here. Do what you can without it; if the task needs the computer, "
+                    "say so in one sentence, and the user can run it from your chat.")
+    PLUGINS_OFF = ("Careful mode: nobody is watching this run and you have used your computer in it, so the user's "
+                   "plugins stay off in this run. Do what you can without them; if the task needs a plugin, say so in "
+                   "one sentence, and the user can run it from your chat.")
+
+    def __init__(self):
+        self._first = None
+        self._lock = threading.Lock()
+
+    def __call__(self, kind: str):
+        """None when ``kind`` ("computer" or "plugins") may be used in this run, else what to tell the Pip."""
+        with self._lock:
+            if self._first is None:
+                self._first = kind
+            if self._first == kind:
+                return None
+        return self.COMPUTER_OFF if kind == "computer" else self.PLUGINS_OFF
 
 
 PAUSED_NOTE = ("Careful mode: your computer is off in this run. Nobody is watching it and you can read the user's "

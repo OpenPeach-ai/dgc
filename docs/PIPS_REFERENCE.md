@@ -682,31 +682,48 @@ ACTIVE account; `decline_pip_app_link` and `disconnect_pip_app_link` set `declin
 turns `connected` queues the Pip's next chat turn under the reserved key `apps_<link id>`.
 Statuses: `requested`, `authorizing`, `connected`, `declined`, `failed` (with `error`).
 
-**A Pip's plugins** (API 44). The same socket serves `use_plugin {plugin, why}`, `plugin_tools
-{plugin, tool?}` and `call_plugin {plugin, tool, arguments}` (`pip_plugins.Session`). A plugin
-counts when it is installed and each of its servers is the vendor's hosted server through DGC's
-bridge (`transport: remote`, `npx -y mcp-remote <https url>`), saved exactly as the plugin
-registered it and not in `disabled_mcp_servers`; the saved settings file is read, so a plugin added
-while the runner runs counts at once. `use_plugin` records a `pip_plugin_grants` row (`requested`;
-one card per plugin). The user's `allow_pip_plugin` sets `allowed` and queues the Pip's next chat
-turn under `plugins_<grant id>`; `decline_pip_plugin` sets `declined` (Not now, or Take back).
-`plugin_tools` lists the tools of an allowed plugin's servers, each marked `[reads]` (MCP
-`readOnlyHint: true` and not `destructiveHint: true`) or `[asks]`; with `tool`, it returns that
-tool's description and input schema. `call_plugin` runs a `[reads]` tool in the controller and
-returns its answer as untrusted data (40,000 characters at most). Any other tool returns an Allow
-card: a connector draft `{server, connection_digest, schema_digest, call}` built by the controller
-from the discovered tool, recorded in `pip_plugin_offers` for that run, and saved after the reply
-only if it matches that record exactly. Allow prepares and accepts it as any connector action
-(`pip_app_actions`), after checking that the Pip may still use the plugin; then the plugin's answer
-(without any saved credential) is kept in `pip_plugin_answers` for 30 minutes and the Pip's chat
-continues under `plugins_<action id>`. The same call again within that time returns the kept
-answer and does not run again. A plugin whose catalog entry or installed record says `risk:
-money` never gets Always allow: `always_allow_pip_app_action` refuses it with `asks_every_time`
-before the action runs, and a grant never covers it. Local-only commands: `list_pip_plugins
-{pip_id}` → `{pip_id, plugins, installed}`; `allow_pip_plugin` and `decline_pip_plugin {pip_id,
-grant_id}` → `{plugin}`; `list_pip_plugin_uses` → `{plugins: [{plugin, name, installed, money, count,
-pips}], installed: [{plugin, name, money}]}` (the newest card per Pip and plugin decides; 50 Pips named per
-plugin, by name; `count` covers the rest).
+**A Pip's plugins** (API 44; API 45 since 2026-10-09). The same socket serves `plugin_tools {plugin,
+tool?}`, `call_plugin {plugin, tool, arguments}` and `plugin_answer {}` (`pip_plugins.Session`). A plugin
+counts when it is installed and each of its servers is the vendor's hosted server through DGC's bridge
+(`transport: remote`, `npx -y mcp-remote <https url>`), saved exactly as the plugin registered it and not
+in `disabled_mcp_servers`; the saved settings file is read, so a plugin added while the runner runs counts at
+once. **Every plugin that counts is every Personal Pip's**: turning it on in Settings is the consent, and
+there is no `use_plugin` or per-Pip card (API 44's `pip_plugin_grants` rows are kept but no longer
+consulted, and Needs attention no longer lists them).
+
+What runs at once is the plugin's level, `plugins.permission(name)`, kept in
+`~/.dgc/plugins/installed.json` under `permissions` (ChatGPT's four; default `important`):
+`always_ask` (every call is an Allow card, a read too), `any_changes` (reads run, every change asks),
+`important` (reads run, and a change runs at once only when its vendor marks it `destructiveHint: false`
+and `openWorldHint: false`; every other change asks) and `never_ask` (everything runs). A read is MCP
+`readOnlyHint: true` and not `destructiveHint: true`, or one of DGC's reviewed reads for the package DGC
+reviewed. A plugin with `risk: money` is never `never_ask` (refused when set, read back as `important`). In
+a routine, schedule or event run every change asks, whatever the level. `plugin_tools` marks each tool
+`[runs]` or `[asks]` accordingly; with `tool`, it returns that tool's description and input schema.
+
+`call_plugin` runs a `[runs]` tool in the controller and returns its answer as untrusted data (40,000
+characters at most); a change that ran says so. An `[asks]` tool returns an Allow card: a connector draft
+`{server, connection_digest, schema_digest, call}` built by the controller from the discovered tool,
+recorded in `pip_plugin_offers` for that run, and saved after the reply only if it matches that record
+exactly. Allow prepares and accepts it as any connector action (`pip_app_actions`), after checking that the
+plugin is still installed and turned on; then the plugin's answer (without any saved credential) is kept in
+`pip_plugin_answers` for 30 minutes and the Pip's chat continues under `plugins_<action id>`. The same call
+again within that time returns the kept answer and does not run again. A payment plugin never gets Always
+allow: `always_allow_pip_app_action` refuses it with `asks_every_time` before the action runs, and a grant
+never covers it.
+
+Local-only commands: `list_pip_plugins {pip_id}` → `{pip_id, plugins: [], installed}`;
+`list_pip_plugin_uses` → `{plugins: [{plugin, name, about, money, permission}], levels, installed}`;
+`set_plugin_permission {plugin, level}` (API 45) → the same, after saving the level (refused for a device,
+for an unknown level, and `never_ask` for a payment plugin). `allow_pip_plugin` and `decline_pip_plugin`
+stay for API 44 callers.
+
+**Web search** (API 45). The app socket also serves `web_search {query}`: 1–400 characters, run in the
+controller with the one search set in Settings (`search_provider`, `search_api_key`, `search_url`, read
+fresh from `~/.dgc/config.json` and `secrets.json`), results returned as untrusted data. Careful mode
+refuses a query that carries what the Pip read from apps and the user didn't say this turn
+(`Taint.carried`), before anything reaches a search engine. It returns results only; a page itself needs
+the Pip's computer.
 
 **Needs attention** (`pip_attention`, local only): `list_pip_attention {limit?}` (1–100, default 100) →
 `{as_of, total, counts, by_pip, items, truncated}` over every Personal Pip that is not archived. `items`
@@ -756,8 +773,11 @@ pause nothing in the browser (`request_ref` `careful:<id>`) and outlive a closed
 site adds it to the Pip's sites, approving text allows exactly that text once for 30 minutes, and the
 continuation tells the Pip to do it now.
 `always_allow_pip_computer_action` refuses them (`asks_once`, `asks_every_time`). A routine, schedule or
-event run (`local-routine`, `local-scheduler`, `local-event-trigger`) of a Pip with an `app_plan`, a
-connected app or an allowed plugin gets no computer socket and `computer_paused: true`. Local-only
+event run (`local-routine`, `local-scheduler`, `local-event-trigger`) of a Pip with an `app_plan` or a
+connected app gets no computer socket and `computer_paused: true`. Plugins are every Pip's since API 45, so
+they don't decide it before the run: in such a run with a computer, `pip_careful.Lane` lets the Pip use its
+computer or the user's plugins, whichever it reaches for first, and refuses the other for the rest of the
+run. Local-only
 commands: `list_pip_sites {pip_id}` → `{pip_id, careful, sites: [{site, at, by}]}`; `set_pip_careful
 {pip_id, on}` and `forget_pip_site {pip_id, site}` return the same.
 
@@ -1216,3 +1236,4 @@ Clients check it before using a newer control.
 | 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |
 | 43 | A Pip's own apps (`connect_app`, `read_app`; `list_pip_app_links`, `start_pip_app_link`, `check_pip_app_link`, `decline_pip_app_link`, `disconnect_pip_app_link`); Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images and files in a Personal Pip's chat (`send_pip_message` `images` and `files`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |
 | 44 | A Pip's plugins (`use_plugin`, `plugin_tools`, `call_plugin`; `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`); a plugin action is a connector draft on the plugin's server; payment plugins refuse Always allow; Needs attention (`list_pip_attention`); what a Pip remembers (`remember`; `list_pip_notes`, `add_pip_note`, `forget_pip_note`; schema 44); careful mode (`list_pip_sites`, `set_pip_careful`, `forget_pip_site`) |
+| 45 | Every plugin turned on is every Pip's (no `use_plugin`, no card); `set_plugin_permission` and each plugin's level (`always_ask`, `any_changes`, `important`, `never_ask`); `web_search` on the app socket; careful mode's `Lane` for unattended runs |

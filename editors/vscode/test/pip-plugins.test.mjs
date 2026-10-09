@@ -179,6 +179,27 @@ test('Pips settings → Plugins: which Pips use each plugin, Remove for one, and
  assert.ok(x.sent.some(m=>m.type==='openSettings'&&m.section==='plugins'));
 });
 
+test('Pips settings → Plugins (Pips API 45): every plugin is every Pip\'s, with what it may do without asking',async()=>{
+ // Founder, 2026-10-09: a plugin turned on in Settings is consent; ChatGPT's four levels decide what asks.
+ const levels=['always_ask','any_changes','important','never_ask'];
+ const uses={plugins:[{plugin:'aave',name:'Aave',money:true,about:'Live markets',permission:'important'},
+  {plugin:'airtable',name:'Airtable',money:false,about:'',permission:'any_changes'}],levels,installed};
+ const x=setup({uses,apiVersion:45});await x.drain();
+ x.click('#pips-settings-open');await x.drain();x.click('[data-pips-settings="plugins"]');await x.drain();
+ const text=x.d.body.textContent;
+ assert.match(text,/Every Pip can use these.*In a run you aren’t watching, a Pip always asks before it changes anything/);
+ assert.equal(x.d.querySelector('[data-plugin-use-remove]'),null,'nothing to take back per Pip');
+ const aave=x.d.querySelector('#plugin-level-aave'),airtable=x.d.querySelector('#plugin-level-airtable');
+ assert.equal(aave.value,'important');assert.equal(airtable.value,'any_changes');
+ assert.ok(aave.querySelector('option[value="never_ask"]').disabled,'never ask is not for a plugin that moves money');
+ assert.ok(!airtable.querySelector('option[value="never_ask"]').disabled);
+ assert.match(text,/Aave.*It can move money, so it always asks before a change/);
+ airtable.value='never_ask';airtable.dispatchEvent(new x.w.Event('change',{bubbles:true}));await flush();
+ assert.deepEqual(clean(x.requests('set_plugin_permission')[0].request),{type:'set_plugin_permission',plugin:'airtable',level:'never_ask'});
+ x.answer(x.requests('set_plugin_permission')[0],{...uses,plugins:[uses.plugins[0],{...uses.plugins[1],permission:'never_ask'}]});await x.drain();
+ assert.match(x.d.body.textContent,/Saved\. Airtable: never ask\./);
+});
+
 test('Pips settings → Plugins with none in use says how a Pip asks; an older CLI has no Plugins tab',async()=>{
  const x=setup();await x.drain();
  x.click('#pips-settings-open');await x.drain();x.click('[data-pips-settings="plugins"]');await x.drain();

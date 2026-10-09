@@ -158,10 +158,27 @@ export function pluginsPageMarkup(cards, { esc, busy = false, pipName = 'This Pi
 
 // Pips settings → Plugins (list_pip_plugin_uses): which Pips use each plugin, with Remove per Pip,
 // and the plugins added to DGC that a Pip could ask for.
+// What each plugin may do without asking (Pips API 45): ChatGPT's four levels, for every Pip.
+export const PLUGIN_LEVELS = [
+  ['always_ask', 'Always ask', 'Asks before it reads or changes anything'],
+  ['any_changes', 'Ask before any change', 'Reads at once, asks before it changes anything'],
+  ['important', 'Ask before important actions', 'Reads at once, asks before it sends, creates, edits, deletes, shares or pays'],
+  ['never_ask', 'Never ask', 'Reads and acts without asking'],
+];
+
 export function pluginUsesPage(value) {
   const fail = () => { throw new Error('Your Pips’ plugins didn’t load. Refresh to try again.'); };
   if (!value || !Array.isArray(value.plugins) || value.plugins.length > 80 || !Array.isArray(value.installed) || value.installed.length > 80) fail();
   const plugin = p => p && /^[a-z0-9][a-z0-9-]{0,63}$/.test(p.plugin) && text(p.name, 80) && p.name && typeof p.money === 'boolean';
+  if (Array.isArray(value.levels)) {
+    // Pips API 45: every plugin turned on is every Pip's, with its level.
+    const known = PLUGIN_LEVELS.map(l => l[0]);
+    const plugins = value.plugins.map(p => {
+      if (!plugin(p) || !known.includes(p.permission) || (p.about !== undefined && !text(p.about, 160))) fail();
+      return { plugin: p.plugin, name: p.name, money: p.money, about: p.about || '', permission: p.permission };
+    });
+    return { levels: true, plugins, installed: plugins.map(p => ({ plugin: p.plugin, name: p.name, money: p.money })) };
+  }
   const plugins = value.plugins.map(p => {
     if (!plugin(p) || typeof p.installed !== 'boolean' || !Number.isSafeInteger(p.count) || p.count < 1 || !Array.isArray(p.pips)
       || !p.pips.length || p.pips.length > Math.min(50, p.count)) fail();
@@ -174,10 +191,28 @@ export function pluginUsesPage(value) {
   return { plugins, installed };
 }
 
+function levelsMarkup(uses, { esc, busy, error }) {
+  const off = busy ? ' disabled' : '';
+  const intro = `<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Every Pip can use these</strong><small>A plugin you turn on in DGC Settings → Plugins is yours to use in every Pip. Choose what each may do without asking you. In a run you aren’t watching, a Pip always asks before it changes anything.</small></span><button type="button" class="quiet pill" data-open-plugins${off}>Open Plugins</button></div></section>`;
+  if (!uses.plugins.length) return intro + `<section class="pip-page-group"><p class="pip-page-empty">No plugins yet. Add one in DGC Settings → Plugins, and every Pip can use it.</p></section>${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}`;
+  const rows = uses.plugins.map(p => {
+    const id = `plugin-level-${p.plugin}`;
+    const options = PLUGIN_LEVELS.map(([value, label]) => {
+      const blocked = value === 'never_ask' && p.money;
+      return `<option value="${value}"${p.permission === value ? ' selected' : ''}${blocked ? ' disabled' : ''}>${esc(label)}${blocked ? ' (not for plugins that move money)' : ''}</option>`;
+    }).join('');
+    const now = PLUGIN_LEVELS.find(l => l[0] === p.permission)?.[2] || '';
+    return `<div class="pip-page-row static"><span class="app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${esc(p.money ? 'It can move money, so it always asks before a change. ' + now : now)}</small></span>`
+      + `<label class="sr-only" for="${id}">What ${esc(p.name)} may do without asking</label><select id="${id}" data-plugin-level="${esc(p.plugin)}" data-plugin-name="${esc(p.name)}"${off}>${options}</select></div>`;
+  }).join('');
+  return intro + `<section class="pip-page-group" aria-label="Your plugins">${rows}</section>${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}`;
+}
+
 export function pluginUsesMarkup(uses, { esc, busy = false, error = '' }) {
   const off = busy ? ' disabled' : '';
   if (error && !uses) return `<p class="error" role="alert">${esc(error)}</p>`;
   if (!uses) return '<p class="muted" role="status">Loading…</p>';
+  if (uses.levels) return levelsMarkup(uses, { esc, busy, error });
   const asks = p => p.money ? 'Asks before every action: it can move money' : 'Asks before anything its maker doesn’t mark read-only';
   const used = uses.plugins.map(p => `<section class="pip-page-group"><div class="pip-page-row static"><span class="app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${p.installed ? asks(p) : 'Not added in DGC now, so no Pip can use it'} · ${p.count === 1 ? '1 Pip' : `${p.count.toLocaleString('en-US')} Pips`}</small></span></div>`
     + `<ul class="pip-page-list">${p.pips.map(x => `<li class="pip-page-row static sub"><span class="row-words"><span>${esc(x.name)} can use it</span></span><button type="button" class="quiet pill" data-plugin-use-remove="${esc(x.grant_id)}" data-plugin-use-pip="${esc(x.pip_id)}" aria-label="Stop ${esc(x.name)} using ${esc(p.name)}"${off}>Remove</button></li>`).join('')}</ul>`

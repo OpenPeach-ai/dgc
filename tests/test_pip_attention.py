@@ -32,7 +32,8 @@ class AttentionTests(unittest.TestCase):
         self.now = "2026-10-04T06:01:00.000Z"
         link = links.request(self.registry, pip, workspace, "gmail", "To read your new mail.", self.run["id"])
         self.now = "2026-10-04T06:02:00.000Z"
-        grant = pip_plugins.request(self.registry, self.target["id"], workspace, "airtable", "To keep your plan in a table.")
+        # A "use this plugin?" card from before 2026-10-09: every enabled plugin is every Pip's now, so it waits on no one.
+        pip_plugins.request(self.registry, self.target["id"], workspace, "airtable", "To keep your plan in a table.")
         self.now = "2026-10-04T06:03:00.000Z"
         with self.registry.transaction():
             self.registry.db.execute("INSERT INTO metadata VALUES(?,?)", ("computer_needs_you:" + pip,
@@ -41,17 +42,16 @@ class AttentionTests(unittest.TestCase):
         pip_attention.collect(self.registry, self.now)
         self.assertEqual(self.registry.db.total_changes, before, "reading the list writes nothing")
         found = self.control("list_pip_attention")
-        self.assertEqual(sorted(i["kind"] for i in found["items"]), ["app_link", "computer_check", "email", "plugin"])
+        self.assertEqual(sorted(i["kind"] for i in found["items"]), ["app_link", "computer_check", "email"], "no plugin card")
         stamps = [i["created_at"] for i in found["items"]]
         self.assertEqual(stamps, sorted(stamps, reverse=True), "newest first")
-        self.assertEqual(found["total"], 4)
-        self.assertEqual({k: v for k, v in found["counts"].items() if v}, {"email": 1, "app_link": 1, "plugin": 1, "computer_check": 1})
-        self.assertEqual(found["by_pip"], {pip: 3, self.target["id"]: 1})
+        self.assertEqual(found["total"], 3)
+        self.assertEqual({k: v for k, v in found["counts"].items() if v}, {"email": 1, "app_link": 1, "computer_check": 1})
+        self.assertEqual(found["by_pip"], {pip: 3})
         item = {i["kind"]: i for i in found["items"]}
         self.assertEqual((item["email"]["card"], item["email"]["pip_name"], item["email"]["title"], item["email"]["detail"]),
                          (email["id"], "Morning planner", "Send this email to review@example.invalid?", "Weekend plan"))
         self.assertEqual((item["app_link"]["card"], item["app_link"]["title"]), (link["id"], "Connect Gmail?"))
-        self.assertEqual((item["plugin"]["card"], item["plugin"]["pip_name"]), (grant["id"], "Writing helper"))
         self.assertEqual(item["computer_check"]["title"], "Prove you’re human on www.google.com")
         self.assertTrue(all(i["workspace_id"] == workspace for i in found["items"]))
 

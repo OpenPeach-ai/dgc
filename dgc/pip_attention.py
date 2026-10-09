@@ -62,13 +62,6 @@ def _when(event) -> str:
         return str(event.get("start_datetime") or "")
 
 
-def _plugin_name(plugin) -> str:
-    """A plugin's own name (Aave), from DGC's catalog; its id when the catalog doesn't know it."""
-    from .pip_plugins import _catalog
-    try:
-        return str(_catalog().get(plugin, {}).get("display_name") or plugin)[:80]
-    except Exception:          # noqa: BLE001
-        return str(plugin)
 
 
 def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
@@ -116,10 +109,8 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
             add("app_link", row["id"], row["pip_id"], row["created_at"], None,
                 f"Couldn’t connect {app}" if row["status"] == "failed" else f"Connect {app}?",
                 row["error"] if row["status"] == "failed" else row["reason"])
-        for row in rows("SELECT id,pip_id,plugin,reason,created_at FROM (SELECT *,ROW_NUMBER() OVER "
-                        "(PARTITION BY pip_id,plugin ORDER BY updated_at DESC, id DESC) AS n FROM pip_plugin_grants WHERE " + mine + ") "
-                        "WHERE n=1 AND status='requested' ORDER BY updated_at DESC", ids):
-            add("plugin", row["id"], row["pip_id"], row["created_at"], None, f"Use {_plugin_name(row['plugin'])}?", row["reason"])
+        # No "Use Aave?" rows since 2026-10-09: a plugin turned on in Settings is every Pip's, so a card a Pip
+        # asked for before then is no longer waiting on anyone.
         for row in rows("SELECT id,pip_id,summary,created_at,expires_at FROM pip_computer_actions WHERE status='pending' "
                         f"AND expires_at>? AND {mine} ORDER BY created_at DESC", now, ids):
             summary = _json(row["summary"])

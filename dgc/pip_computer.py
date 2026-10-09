@@ -651,6 +651,7 @@ class RunSocket:
         os.chmod(self.path, 0o600)
         self.server.listen(4)
         self.calls = 0
+        self.lane = None             # careful mode (pip_careful.Lane): in a run nobody watches, computer or plugins
         self._stopped = threading.Event()
         threading.Thread(target=self._serve, name="pip-computer-run", daemon=True).start()
 
@@ -677,7 +678,8 @@ class RunSocket:
                         reply = {"text": "error: refused"}
                     else:
                         self.calls += 1
-                        reply = {"text": self.host.call(str(request.get("op", "")), request.get("args") or {})}
+                        refused = self.lane("computer") if self.lane is not None else None
+                        reply = {"text": refused or self.host.call(str(request.get("op", "")), request.get("args") or {})}
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
                 except (OSError, ValueError):
                     continue

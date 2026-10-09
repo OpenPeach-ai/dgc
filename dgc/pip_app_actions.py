@@ -119,7 +119,7 @@ def _source(store, run_id):
 
 
 def _plugin_allowed(store,payload,config):
-    # A plugin's server is this Pip's only while the user allows that plugin for it (pip_plugins).
+    # A plugin's server is a Pip's while the plugin is installed and turned on in Settings → Plugins (pip_plugins).
     if payload['kind']=='connector_call' and payload['server'] not in connector.PROVIDERS:
         from .pip_plugins import require_server
         require_server(store.registry,payload['source']['pip_id'],payload['server'],config)
