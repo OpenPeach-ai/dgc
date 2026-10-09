@@ -122,7 +122,7 @@ def needs_card(request) -> bool:
 def validate_request(value):
     _encode(value)
     if (type(value) is not dict or not _REQUIRED <= set(value)
-            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger'})
+            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger', 'computer'})
             or (set(value) & _PINS and not _PINS <= set(value))):
         _fail('Supply the complete source-only setup; an existing Pip needs pip_id, expected_version and expected_lifecycle_revision together.')
     request = dict(value)
@@ -142,6 +142,13 @@ def validate_request(value):
         from .pip_web_reads import validate as validate_web
         request['web_plan'] = validate_web(value['web_plan'])
         if not personal:_fail('Web reads currently require personal scope.')
+    if 'computer' in value:
+        # Its own computer (pip_computer), asked for in the chat: "a Pip with its own computer that checks
+        # iPhone prices" made one without (battle test, 2026-10-09).
+        if type(value['computer']) is not bool:
+            _fail('computer is true or false.')
+        if value['computer'] and not personal:
+            _fail('A computer is for a Personal Pip.', 'unsupported_computer_plan')
     pulse = value['pip_type'] == 'pulse' and not personal
     if type(value['pip_type']) is not str or value['pip_type'] not in _AUDIT | {'quill', 'pulse'}:
         _fail('Conversational setup supports source reviewers, Quill and reviewed Pulse plans.')
@@ -233,6 +240,7 @@ def _definition(store, request, workspace_id):
     extra = {'source_policy': {'mode':'personal'}} if personal else {}
     if 'app_plan' in request:extra['app_plan']=request['app_plan']
     if 'web_plan' in request:extra['web_plan']=request['web_plan']
+    if request.get('computer') is True:extra['computer_plan']={'schema_version': 1}
     if 'pip_id' in request:
         from .pip_adaptation import can_propose
         from .pip_archive import require_live
@@ -251,7 +259,7 @@ def _definition(store, request, workspace_id):
             _fail('This Pip uses event triggers or current-tree source. Review those separately before using conversational calendar setup.', 'unsupported_setup')
         extra = {**extra, **{key: pip[key] for key in ('model_choice', 'adaptation_policy', 'source_policy')}, 'app_plan': request.get('app_plan',pip.get('app_plan')),
                  'web_plan': request.get('web_plan',pip.get('web_plan')), 'github_plan': pip.get('github_plan'),
-                 'computer_plan': pip.get('computer_plan')}
+                 'computer_plan': {'schema_version': 1} if request.get('computer') is True else pip.get('computer_plan')}
     if 'model_choice' in request:
         extra['model_choice'] = request['model_choice']
     if 'verification_plan' in request:
@@ -352,10 +360,12 @@ def _projection(registry, row, body, receipt):
             'model_choice': body['definition']['model_choice'],
             **({'app_plan': body['definition']['app_plan']} if body['definition'].get('app_plan') else {}),
             **({'web_plan': body['definition']['web_plan']} if body['definition'].get('web_plan') else {}),
+            **({'computer': True} if body['definition'].get('computer_plan') else {}),
             **({'event_trigger': req['event_trigger']} if req.get('event_trigger') else {}),
             'receipt': receipt, 'permissions': body['definition']['policy'], 'source_policy': 'personal' if req.get('scope')=='personal' else 'committed_only',
             **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' else {}),
-            'scope_notice': ('It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
+            'scope_notice': ('It has its own computer (a browser, a Terminal and files), separate from yours, and sees only what you share with it. Anything it would send or change waits for your OK.' if req.get('scope')=='personal' and body['definition'].get('computer_plan')
+                             else 'It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
             'runner_notice': (f"DGC checks {req['source_ref']} for new local commits only while the local Pips runner is enabled and running, and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Saving setup does not start or resume the runner."
                               if req.get('event_trigger') else 'It works while Pips are running on this computer. Creating it doesn’t start Pips.' if req.get('scope')=='personal'
                               else 'A schedule runs only while the local Pips runner is enabled and running. Saving setup does not start or resume the runner.'),

@@ -44,6 +44,19 @@ class PersonalSetupTests(unittest.TestCase):
         draft=self.draft()
         self.assertEqual(self.store.list(draft['workspace_id']),[])
         self.assertEqual(draft['status'],'pending')
+    def test_a_personal_setup_can_give_the_pip_its_own_computer(self):
+        # "A Pip with its own computer that checks iPhone prices" (battle test 2026-10-09) made one without.
+        draft = self.draft(computer=True, request_key='computer1')
+        self.assertTrue(draft['computer'])
+        self.assertIn('It has its own computer', draft['scope_notice'])
+        with patch.object(pips, 'source_revision', side_effect=AssertionError('No Git')):
+            result = self.review(draft)
+        self.assertEqual(self.store.get(result['receipt']['pip_id'])['computer_plan'], {'schema_version': 1})
+        self.assertNotIn('computer', self.draft(request_key='plain1'), 'only when asked')
+        for bad in ({'computer': 'yes', 'request_key': 'bad1'},
+                    {'computer': True, 'scope': 'project', 'work_kind': 'source_review', 'pip_type': 'lens', 'request_key': 'bad2'}):
+            with self.subTest(bad=bad), self.assertRaises(RegistryError):
+                self.draft(**bad)
     def test_profile_workspace_safe_inside_transaction(self):
         with self.registry.transaction():first=self.registry.personal()
         with self.registry.transaction():self.assertEqual(first,self.registry.personal())
