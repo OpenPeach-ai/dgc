@@ -243,10 +243,12 @@ class CardClaimTests(unittest.TestCase):
 
     def test_a_claimed_card_is_found_and_plain_words_are_not(self):
         for said in ("Tap Connect on the Google Calendar card below.", "The card below is how you add that.",
-                     "There's an Allow card just below.", "Choose Allow and I'll read it."):
+                     "There's an Allow card just below.", "Choose Allow and I'll read it.",
+                     "Here's a short follow-up for Rohan — it's in the draft below, ready to review."):
             with self.subTest(said=said):
                 self.assertTrue(pips._claims_a_card(said))
-        for said in ("Here are three ideas for dinner.", "I can connect your calendar if you like.", "See the list below."):
+        for said in ("Here are three ideas for dinner.", "I can connect your calendar if you like.", "See the list below.",
+                     "Here's a draft below:", "Below is a draft you can paste."):
             with self.subTest(said=said):
                 self.assertFalse(pips._claims_a_card(said))
 
@@ -277,6 +279,6 @@ class CardClaimTests(unittest.TestCase):
              patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
             result = pips.execute_native(fixture.cfg, fixture.root, raw, lambda e: None)
         self.assertEqual(len(asked), 2, "one more try, no more")
-        self.assertIn("you made no card in this turn", asked[1])
+        self.assertIn("you made none in this turn", asked[1])
         self.assertEqual(result["text"], "Not yet: I can't see your calendar until it's connected.")
 

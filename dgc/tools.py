@@ -225,8 +225,9 @@ TOOL_SCHEMAS = [
         "Confirm the actual local URLs. This only checks status, not browser rendering or authenticated journeys. "
         "For an existing Pip read its definition first and provide all three identity/version fields. "
         "When the request is clear, set it up with sensible defaults instead of asking, then say what you chose and that it "
-        "can be changed; ask first only when the job or its scope is unclear. Defaults: the schedule the user named, and none "
-        "when they named none (a Pip they chat with works when they ask); a computer only as its field says. Daily schedules require an explicit IANA timezone. With run_now=true the immediate run counts for today "
+        "can be changed; ask first only when the job or its scope is unclear. Defaults: the schedule the user named; when they "
+        "named none, none for a Pip they chat with (it works when they ask) and once a day at 09:00 in their timezone for "
+        "a Pip that checks or watches something on its own; a computer only as its field says. Daily schedules require an explicit IANA timezone. With run_now=true the immediate run counts for today "
         "and the next daily occurrence is tomorrow. Report what the result says: created, or a card waiting for review. "
         "Retry the same draft with the same request_key; changed content needs a new key.",
         {"target_root": {"type": "string", "maxLength": 4096},

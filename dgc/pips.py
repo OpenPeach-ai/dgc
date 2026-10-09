@@ -2038,10 +2038,13 @@ def _attached_files(config, manifest: dict, files, has_computer: bool) -> str:
     return note
 
 
-CARD_CLAIM_REPAIR = ("This message is from DGC, not the user. Your reply tells the user about a card below it, but you made no "
-                     "card in this turn, so they see none. If they need to connect an app or allow a plugin, call connect_app "
-                     "or use_plugin now; otherwise say your reply again without mentioning a card.")
+CARD_CLAIM_REPAIR = ("This message is from DGC, not the user. Your reply tells the user about a card or draft below it, but you "
+                     "made none in this turn, so they see none. If they need to connect an app or allow a plugin, call connect_app "
+                     "or use_plugin now. If a draft was not made, say why in one sentence and ask for what is missing (such as "
+                     "the exact address), with its text in your reply. Otherwise say your reply again without mentioning a "
+                     "card or draft.")
 _CARD_CLAIM = re.compile(r"\bcard\b[^.\n]{0,40}\b(?:below|under)\b|\b(?:below|under)\b[^.\n]{0,30}\bcard\b|"
+                         r"\bdraft\b[^.:\n]{0,40}\b(?:below|under)\b(?!\s*:)|"
                          r"\b(?:tap|choose|press|click)\s+(?:allow|connect|add routine|send)\b", re.IGNORECASE)
 
 
@@ -2375,9 +2378,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     candidate = pip_message_drafts.validate_message(call.arguments, secret_values(config))
                     guessed = _guessed_addresses([candidate.get('recipient_email')], agent.messages, manifest)
                     if guessed:
-                        return ('Not drafted: ' + guessed[0] + ' is not an address the user gave you or that you read in '
-                                'their apps. Ask the user for the exact address (you can write the text in your reply '
-                                'meanwhile); never guess one.')
+                        # It still told the user "it's in the draft below" (battle test 2026-10-09).
+                        return ('Not drafted, so there is no draft below your reply: ' + guessed[0] + ' is not an address '
+                                'the user gave you or that you read in their apps. Write the email text in your reply and '
+                                'ask the user for the exact address; never guess one.')
                     if email_candidate is not None and candidate != email_candidate:
                         return "One email draft is already prepared. Ask for another reply to change it."
                     email_candidate = candidate
