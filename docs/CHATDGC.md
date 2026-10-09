@@ -68,6 +68,13 @@ voice come in later phases.
   short name, the way a chat app does. A name you give a chat yourself is never replaced.
 - **Export.** **⋯ → Export…** saves the chat. As Markdown it holds the conversation you see, with its sources
   and the names of attached files; as JSON it holds the whole chat, every version included.
+- **Keyboard shortcuts** (Ctrl on Windows and Linux, ⌘ on a Mac):
+  - new chat: Ctrl+Shift+O;
+  - copy the last reply: Ctrl+Shift+C;
+  - copy the last code block: Ctrl+Shift+;;
+  - focus the message box: Shift+Esc;
+  - stop: Esc;
+  - this list: Ctrl+/ (or the keyboard button at the top).
 - **Rename, pin, archive, delete.** Use the **⋯** button at the top of a chat. You can also delete a chat
   from the list. Pinned chats come first.
 

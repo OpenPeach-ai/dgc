@@ -27,6 +27,12 @@
 - **⋯ → Export…** saves a chat as Markdown or JSON.
 - **Settings → ChatDGC:** what ChatDGC should know about you, how it should respond, and its personality.
 - **Search finds a chat by anything said in it**, and shows the words around what it found.
+- **Keyboard shortcuts**, as ChatGPT has them:
+  - new chat: Ctrl/⌘+Shift+O;
+  - copy the last reply: Ctrl/⌘+Shift+C;
+  - copy the last code block: Ctrl/⌘+Shift+;;
+  - focus the box: Shift+Esc;
+  - the list of shortcuts: Ctrl/⌘+/.
 
 ### Questions
 

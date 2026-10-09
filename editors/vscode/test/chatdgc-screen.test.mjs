@@ -437,3 +437,32 @@ test("versions: edit a message, try a reply again, and step between versions", a
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("keyboard shortcuts, as ChatGPT has them, and the list of them", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation({ title: "Code" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Two snippets" },
+      { id: M(2), role: "assistant", finish: "stop", text: "First:\n\n```js\nconst a = 1;\n```\n\nSecond:\n\n```py\nb = 2\n```" }] });
+    await s.page.locator("#cd-title").click();
+    await s.page.keyboard.press("Control+Shift+KeyC");
+    await s.page.keyboard.press("Control+Shift+Semicolon");
+    assert.deepEqual((await s.posted("copy")).map((m) => m.text), ["First:\n\n```js\nconst a = 1;\n```\n\nSecond:\n\n```py\nb = 2\n```", "b = 2\n"]);
+    await s.page.keyboard.press("Shift+Escape");
+    assert.equal(await s.page.evaluate(() => document.activeElement.id), "cd-input");
+    await s.page.keyboard.press("Control+Shift+KeyO");
+    assert.equal((await s.posted("newChat")).length, 1);
+    await s.page.keyboard.press("Control+Slash");
+    assert.equal(await s.page.locator("#cd-keys").evaluate((d) => d.open), true);
+    assert.deepEqual(await s.page.locator("#cd-keys dd").allTextContents(), ["New chat", "Copy the last reply", "Copy the last code block",
+      "Focus the message box", "Stop the reply", "Show these shortcuts"]);
+    assert.match(await s.page.locator("#cd-keys dt").first().innerText(), /Ctrl\s+Shift\s+O/);
+    await s.page.keyboard.press("Escape");
+    assert.equal(await s.page.locator("#cd-keys").evaluate((d) => d.open), false);
+    await s.page.locator("#cd-keys-open").click();
+    assert.equal(await s.page.locator("#cd-keys").evaluate((d) => d.open), true, "and from its button");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-keys.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

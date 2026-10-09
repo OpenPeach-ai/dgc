@@ -196,7 +196,6 @@
                            thinking: thinkingPick.value || "", search: searchPick.value || "auto" });
       state.editing = ""; state.busy = true; controls();
     });
-    requestAnimationFrame(() => { box.focus(); box.setSelectionRange(box.value.length, box.value.length); });
     return form;
   }
   function messageNode(message) {
@@ -234,7 +233,7 @@
       if (versions) actions.append(versions);
       if (state.editing !== message.id) {
         actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
-        actions.append(idleOnly(action("edit", "Edit", () => { state.editing = message.id; render(); })));
+        actions.append(idleOnly(action("edit", "Edit", () => { state.editing = message.id; state.editingFresh = true; render(); })));
       }
       if (versions) actions.classList.add("cd-actions-shown");
       node.append(actions);
@@ -269,6 +268,13 @@
   function render() {
     const nodes = state.messages.map(messageNode);
     log.replaceChildren(...nodes);
+    if (state.editingFresh) {
+      // Just opened: the box takes the keys now, with the caret at the end. Doing it a frame later moved the
+      // caret under whatever was typed in that frame, so a select-all-and-type appended instead of replacing.
+      state.editingFresh = false;
+      const box = log.querySelector(".cd-edit-input");
+      if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    }
     $("cd-earlier").hidden = !(state.earlier > 0);
     document.body.classList.toggle("cd-blank", state.opened && !state.messages.length && !state.earlier);
     $("cd-empty").hidden = !(state.opened && !state.messages.length && !state.earlier);
@@ -588,6 +594,44 @@
   function draftKey() { return `draft:${state.conversation?.id || "new"}`; }
   function saveDraft() { try { vscode.setState({ ...(vscode.getState() || {}), [draftKey()]: input.value.slice(0, 100000) }); } catch {} }
   function restoreDraft() { const saved = (vscode.getState() || {})[draftKey()]; input.value = typeof saved === "string" ? saved : ""; grow(); }
+
+  // ---- keyboard shortcuts (ChatGPT's): Ctrl on Windows and Linux, Cmd on a Mac
+  const MAC = /Mac/i.test(navigator.platform || navigator.userAgent || "");
+  const MOD = MAC ? "⌘" : "Ctrl";
+  const SHORTCUTS = [
+    [[MOD, "Shift", "O"], "New chat"],
+    [[MOD, "Shift", "C"], "Copy the last reply"],
+    [[MOD, "Shift", ";"], "Copy the last code block"],
+    [["Shift", "Esc"], "Focus the message box"],
+    [["Esc"], "Stop the reply"],
+    [[MOD, "/"], "Show these shortcuts"],
+  ];
+  const keysDialog = $("cd-keys");
+  $("cd-keys-list").replaceChildren(...SHORTCUTS.flatMap(([keys, what]) => {
+    const term = el("dt");
+    keys.forEach((k, i) => { if (i) term.append(" "); term.append(el("kbd", "", k)); });
+    return [term, el("dd", "", what)];
+  }));
+  const toggleKeys = () => { if (keysDialog.open) keysDialog.close(); else keysDialog.showModal(); };
+  $("cd-keys-open").addEventListener("click", toggleKeys);
+  $("cd-keys-close").addEventListener("click", () => keysDialog.close());
+  const lastReply = () => [...state.messages].reverse().find((m) => m.role === "assistant" && m.text);
+  document.addEventListener("keydown", (e) => {
+    const mod = MAC ? e.metaKey : e.ctrlKey;
+    let handled = true;
+    if (mod && e.shiftKey && e.code === "KeyO") vscode.postMessage({ type: "newChat" });
+    else if (mod && e.shiftKey && e.code === "KeyC") {
+      const reply = lastReply();
+      if (reply) vscode.postMessage({ type: "copy", text: reply.text });
+    } else if (mod && e.shiftKey && e.code === "Semicolon") {
+      const blocks = [...log.querySelectorAll(".cd-assistant pre.code .copy[data-c]")];
+      const last = blocks[blocks.length - 1];
+      if (last) vscode.postMessage({ type: "copy", text: decodeURIComponent(last.dataset.c || "") });
+    } else if (e.shiftKey && e.key === "Escape") input.focus();
+    else if (mod && !e.shiftKey && (e.code === "Slash" || e.key === "/")) toggleKeys();
+    else handled = false;
+    if (handled) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
 
   for (const [value, label] of Object.entries(LABEL)) { const option = thinkingPick.querySelector(`option[value="${value}"]`); if (option) option.textContent = label; }
   controls();

@@ -152,3 +152,14 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
   .cd-bubble, .cd-box, .cd-select { border: 1px solid CanvasText; }
   .cd-send, .cd-continue { forced-color-adjust: none; background: Highlight; color: HighlightText; }
 }
+
+/* Keyboard shortcuts. */
+.cd-keys { width: min(420px, calc(100vw - 32px)); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border-strong);
+  border-radius: var(--r-xl); background: var(--surface); color: var(--text); box-shadow: var(--shadow-2); }
+.cd-keys::backdrop { background: rgba(0, 0, 0, .45); }
+.cd-keys h2 { margin: 0 0 var(--sp-3); color: var(--text-strong); font: var(--w-semi) var(--t-lg)/1.3 var(--sans); }
+.cd-keys dl { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-2) var(--sp-4); margin: 0 0 var(--sp-4); align-items: center; }
+.cd-keys dt { white-space: nowrap; }
+.cd-keys dd { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
+.cd-keys kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px solid var(--border-strong); border-bottom-width: 2px;
+  border-radius: var(--r-sm); background: var(--surface2); color: var(--text); font: var(--w-med) var(--t-xs)/1.5 var(--sans); text-align: center; }

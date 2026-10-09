@@ -63,7 +63,8 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
 <title>ChatDGC</title></head><body class="cd-blank">
 <header class="cd-head"><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
-<button type="button" id="cd-menu" class="cd-icon" title="Rename, pin, archive or delete" aria-label="Chat options" hidden><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>
+<button type="button" id="cd-keys-open" class="cd-icon" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts"><span class="codicon codicon-keyboard" aria-hidden="true"></span></button>
+<button type="button" id="cd-menu" class="cd-icon" title="Rename, pin, archive, export or delete" aria-label="Chat options" hidden><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>
 <button type="button" id="cd-new" class="cd-icon" title="New chat" aria-label="New chat"><span class="codicon codicon-edit" aria-hidden="true"></span></button></header>
 <main id="cd-scroll" class="cd-scroll"><div class="cd-column">
 <button type="button" id="cd-earlier" class="cd-earlier" hidden>Show earlier messages</button>
@@ -89,6 +90,8 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <p class="cd-fine">ChatDGC answers with your own model. Check what matters.</p>
 </div></footer>
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
+<dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
+<button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
 <script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
