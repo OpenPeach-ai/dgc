@@ -3180,6 +3180,10 @@ def _execute_run(registry, row, config):
                                              unattended=row['requested_by'] in UNATTENDED)
         app_socket.lane = lane
         app_socket.taint = taint
+        if taint is not None:
+            from . import pip_careful
+            if pip_careful.is_on(registry, row['pip_id']):
+                app_socket.plugins.carries = lambda text: bool(taint.carried(text, app_socket.said))
         if isinstance(manifest.get('conversation'), dict) and manifest.get('user_turn') is True:
             app_socket.said = str(manifest['conversation'].get('text') or '')
         if taint is not None:

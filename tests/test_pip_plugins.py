@@ -192,6 +192,17 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertFalse(runs("clear_table", self.session_for(unattended=True)), "nobody watching: every change waits")
         self.assertTrue(runs("list_records", self.session_for(unattended=True)), "a read still runs")
 
+    def test_careful_mode_holds_a_change_that_carries_what_it_read_from_your_apps(self):
+        # Never ask lets a change through; careful mode still shows one carrying app data before it goes.
+        plugins.set_permission("airtable", "never_ask", money=False)
+        self.session.carries = lambda text: "4829137755" in text
+        held = self.use("call_plugin", plugin="airtable", tool="create_record", arguments={"table": "T", "fields": {"Ref": "4829137755"}})
+        self.assertIn("draft", held, "it asks")
+        ran = self.use("call_plugin", plugin="airtable", tool="create_record", arguments={"table": "T", "fields": {"Ref": "mine"}})
+        self.assertIsInstance(ran, str, "its own words run")
+        self.assertIsInstance(self.use("call_plugin", plugin="airtable", tool="list_records", arguments={"q": "4829137755"}), str,
+                              "a read is not a send")
+
     def test_a_payment_plugin_is_never_never_ask(self):
         with self.assertRaises(plugins.PluginError):
             plugins.set_permission("aave", "never_ask", money=True)

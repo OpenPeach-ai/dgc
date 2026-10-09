@@ -493,6 +493,7 @@ class Session:
     def __init__(self, directory, config, pip_id, workspace_id, run_id, *, unattended=False):
         self.directory, self.config, self.pip_id, self.workspace_id, self.run_id = directory, config, pip_id, workspace_id, run_id
         self.unattended = bool(unattended)          # a routine, schedule or event run: every change waits
+        self.carries = None          # careful mode: text -> whether it carries what the Pip read from apps (RunSocket)
         self.calls, self.reads, self.asked = 0, 0, []
         self._managers = {}
 
@@ -606,7 +607,13 @@ class Session:
         if saved_credential_in(arguments, self.config):
             return "error: remove credentials from the inputs."
         server, row, entry, manager = tools[tool]
-        if not asks(info["plugin"], info, row, unattended=self.unattended):
+        waits = asks(info["plugin"], info, row, unattended=self.unattended)
+        if (not waits and not read_only(row, info) and self.carries is not None
+                and self.carries(json.dumps(arguments, ensure_ascii=False))):
+            # Careful mode: a change the level would let through still asks when it carries what the Pip read from
+            # the user's apps (and the user didn't say themselves); the card shows it before it goes.
+            waits = True
+        if not waits:
             # A read, or a change the plugin's level lets through while the user is here: it runs now.
             changed = not read_only(row, info)
             self.reads += 0 if changed else 1
