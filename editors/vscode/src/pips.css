@@ -455,3 +455,8 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .memory-kept{display:flex;flex-direction:column;gap:2px;margin:-10px 0 14px;font-size:11px;color:var(--vscode-descriptionForeground)}.memory-kept-item{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.memory-kept button.link{min-height:0;padding:0 4px;font-size:11px}
 /* Careful mode (#9): its switch and the sites it may visit, on the page of a Pip with a computer. */
 .pip-page-group[aria-label="Careful mode"] .pip-page-label{margin-top:10px}
+/* A plugin's level (Pips API 45): its choice sits on its own line under the name, so a long option never squeezes the words to one letter a line (seen in VS Code, 2026-10-09). */
+.pip-page-row.plugin-level{flex-wrap:wrap}
+.pip-page-row.plugin-level .row-words{flex:1 1 200px}
+.pip-page-row.plugin-level .row-words small{white-space:normal;overflow:visible}
+.pip-page-row.plugin-level select{flex:1 1 100%;max-width:100%;margin-left:42px}

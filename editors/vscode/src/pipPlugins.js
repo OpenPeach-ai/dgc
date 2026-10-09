@@ -199,10 +199,10 @@ function levelsMarkup(uses, { esc, busy, error }) {
     const id = `plugin-level-${p.plugin}`;
     const options = PLUGIN_LEVELS.map(([value, label]) => {
       const blocked = value === 'never_ask' && p.money;
-      return `<option value="${value}"${p.permission === value ? ' selected' : ''}${blocked ? ' disabled' : ''}>${esc(label)}${blocked ? ' (not for plugins that move money)' : ''}</option>`;
+      return `<option value="${value}"${p.permission === value ? ' selected' : ''}${blocked ? ' disabled' : ''}>${esc(label)}${blocked ? ' (not for money)' : ''}</option>`;
     }).join('');
     const now = PLUGIN_LEVELS.find(l => l[0] === p.permission)?.[2] || '';
-    return `<div class="pip-page-row static"><span class="app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${esc(p.money ? 'It can move money, so it always asks before a change. ' + now : now)}</small></span>`
+    return `<div class="pip-page-row static plugin-level"><span class="app-link-mark" aria-hidden="true">${esc(p.name.slice(0, 1))}</span><span class="row-words"><strong>${esc(p.name)}</strong><small>${esc(p.money ? 'It can move money, so it always asks before a change. ' + now : now)}</small></span>`
       + `<label class="sr-only" for="${id}">What ${esc(p.name)} may do without asking</label><select id="${id}" data-plugin-level="${esc(p.plugin)}" data-plugin-name="${esc(p.name)}"${off}>${options}</select></div>`;
   }).join('');
   return intro + `<section class="pip-page-group" aria-label="Your plugins">${rows}</section>${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}`;
