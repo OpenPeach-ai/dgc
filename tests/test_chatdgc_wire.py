@@ -147,7 +147,10 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(kinds[1], "chatdgc_message", "your message first")
         self.assertEqual(kinds[-3:], ["chatdgc_message", "chatdgc_changed", "chatdgc_turn"])
         started = self.wire.of("chatdgc_turn")[0]
-        user, reply = (f["message"] for f in self.wire.of("chatdgc_message"))
+        echoes = [f["message"] for f in self.wire.of("chatdgc_message")]
+        user, reply = echoes[0], echoes[-1]
+        self.assertEqual([m["role"] for m in echoes], ["user", "user", "assistant"],
+                         "your message as sent, again as it ended up, then the reply")
         self.assertEqual((user["role"], user["text"]), ("user", "Capital of France?"))
         self.assertEqual((reply["id"], reply["text"], reply["finish"]), (started["reply_id"], "Paris is the capital.", "stop"))
         deltas = self.wire.of("chatdgc_delta")
@@ -185,6 +188,23 @@ class ServiceTests(unittest.TestCase):
                                                              [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris"}]))
         self.send(chat, "again", request_id="r2", search="always")
         self.assertIn("invalid command", self.wire.of("chatdgc_error")[-1]["message"])
+
+    def test_what_a_vision_model_saw_reaches_the_screen(self):
+        import base64
+        uri = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64).decode()
+        chat = self.new()
+        self.model.script.append({"parts": ["It says PIPS."]})
+        route = {"model": "qwen3-vl:8b", "base_url": "", "api_key": "", "api_mode": "auto", "origin": "installed model"}
+        with patch("dgc.vision.has_vision", return_value=False), \
+                patch.object(self.engine.eyes, "route", return_value=route), \
+                patch.object(self.engine.eyes, "look", return_value="A sign reading PIPS."):
+            self.send(chat, "What does it say?", attachments=[{"kind": "image", "data": uri}])
+            self.ended()
+        looking = self.wire.of("chatdgc_activity")[-1]
+        self.assertEqual((looking["kind"], looking["text"]), ("looking", "qwen3-vl:8b"))
+        last_user = [f["message"] for f in self.wire.of("chatdgc_message") if f["message"]["role"] == "user"][-1]
+        self.assertEqual(last_user.get("vision"), {"model": "qwen3-vl:8b", "text": "A sign reading PIPS."},
+                         "the screen hears what it saw (seen live: Seen by never appeared)")
 
     def test_an_image_the_chat_keeps_can_be_shown(self):
         import base64
@@ -225,6 +245,10 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(refreshed["messages"][0]["versions"], {"parent": "root", "index": 1, "count": 2})
         order = [f["type"] for f in self.wire.frames if f.get("request_id") == "e1"]
         self.assertLess(order.index("chatdgc_opened"), order.index("chatdgc_message"))
+        echoes = [f["message"] for f in self.wire.frames if f.get("request_id") == "e1" and f["type"] == "chatdgc_message"
+                  and f["message"]["role"] == "user"]
+        self.assertTrue(echoes and all(m.get("versions", {}).get("count") == 2 for m in echoes),
+                        "every echo of the edited message keeps its ‹ 2 / 2 › (seen live: a bare echo wiped it)")
         self.assertEqual(self.wire.of("chatdgc_message")[-1]["message"]["text"], "Churches.")
         self.service.dispatch({"type": "chatdgc_version", "request_id": "v0", "conversation_id": chat,
                                "parent_id": "root", "index": 0})

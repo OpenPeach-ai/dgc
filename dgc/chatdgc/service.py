@@ -277,7 +277,10 @@ class ChatService:
                 # A new version: the conversation from the fork point on is what it is now, on every screen.
                 self._opened(self.engine.open(conversation_id), request_id)
             if mine is not None:
-                self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(mine),
+                # Marked as the screen shows it: an edited message carries its ‹ n / m ›. (Sent bare, this echo
+                # replaced the marked one the refreshed view had just drawn.)
+                marked = self._marked(self.engine.open(conversation_id), [mine])[0]
+                self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked),
                           request_id=request_id)
 
         def activity(kind, text):
@@ -295,7 +298,14 @@ class ChatService:
             reply = run(cancel, on_start, stream_for, activity)
             if stream["value"] is not None:
                 stream["value"].flush()
-            marked = self._marked(self.engine.open(conversation_id), [reply])[0]
+            now_ = self.engine.open(conversation_id)
+            # The message the reply answers, as it ended up: a vision model may have added what it saw after the
+            # first echo went out.
+            at = next((i for i, m in enumerate(now_["messages"]) if m.get("id") == reply.get("id")), None)
+            if at and now_["messages"][at - 1].get("role") == "user":
+                asked = self._marked(now_, [now_["messages"][at - 1]])[0]
+                self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(asked), request_id=request_id)
+            marked = self._marked(now_, [reply])[0]
             self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked), request_id=request_id)
             self._changed(conversation_id, request_id)
             if reply.get("finish") == "stop":
