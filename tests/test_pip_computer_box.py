@@ -20,6 +20,12 @@ BUSY = b"""<!doctype html><title>Shop</title><script>
 navigator.sendBeacon('/beacon', 'seen=1'); fetch('/background', {method: 'POST', body: 'load=1'});
 </script><button id="add" onclick="fetch('/cart/add', {method: 'POST', body: 'item=7'})">Add to cart</button>
 <a id="next" href="/busy">Next</a>"""
+# A shop's ad pixel posting a large event the way Facebook's does: a hidden form into a hidden frame, by itself.
+PIXEL = b"""<!doctype html><title>Vinyl shop</title><iframe name="px" style="display:none"></iframe>
+<form id="px" method="post" action="/tr/" target="px" style="display:none"><input name="ev" value="PageView"></form>
+<script>document.getElementById('px').submit()</script><p>Records</p>
+<iframe name="sub" style="display:none"></iframe><form id="join" method="post" action="/subscribe" target="sub">
+<input name="email" value="ada@example.com"><button id="signup" type="submit">Join</button></form>"""
 POPUP = b"""<!doctype html><form id="f" method="post" action="/from-popup"><input name="x" value="1"></form>
 <script>document.getElementById('f').submit()</script>"""
 
@@ -42,7 +48,7 @@ def serve():
                 self.send_header("Content-Disposition", 'attachment; filename="report.txt"')
                 self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
                 return
-            body = POPUP if self.path == "/popup" else BUSY if self.path == "/busy" else FORM
+            body = POPUP if self.path == "/popup" else BUSY if self.path == "/busy" else PIXEL if self.path == "/pixel" else FORM
             self.send_response(200); self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
@@ -201,6 +207,18 @@ class RealBoxTests(unittest.TestCase):
         self.browser.click(self.browser.evaluate_json("(() => { document.getElementById('next').setAttribute('data-dgc-ref','e902'); return 'e902'; })()"))
         self.assertTrue(self.wait_for(lambda: posted() == ["/background", "/beacon"]), posted())
         self.assertEqual(len(self.held), 1)
+
+    def test_a_pages_own_hidden_form_post_goes_out_without_asking(self):
+        # Battle test (2026-10-09): opening a record shop held Facebook's pixel ("Let Gift Ideas send to
+        # facebook.com?") and paused the Pip mid-search. Nothing the Pip did; the page's own traffic.
+        self.assertEqual(self.browser.navigate(self.base + "/pixel"), "loaded")
+        self.assertTrue(self.wait_for(lambda: any(path == "/tr/" for path, _ in self.received)), self.received)
+        self.assertEqual(self.held, [], "the page's own pixel waits for no one")
+        # The same kind of request the Pip causes, a form it submits into a frame, still waits.
+        self.browser.click(self.browser.evaluate_json("(() => { document.getElementById('signup').setAttribute('data-dgc-ref','e903'); return 'e903'; })()"))
+        self.assertTrue(self.wait_for(lambda: self.held), "the Pip's submit waits")
+        self.assertEqual((self.held[0].method, self.held[0].summary()["path"]), ("POST", "/subscribe"))
+        self.assertNotIn("/subscribe", [path for path, _ in self.received])
 
     def test_pages_do_not_see_an_automated_browser(self):
         # Like Chrome on Grok's bots (founder, 2026-10-07): with navigator.webdriver true, Google's

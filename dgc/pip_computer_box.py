@@ -624,6 +624,7 @@ class BoxedBrowser(BrowserSession):
         self._box: Box | None = None
         self._pipe: _Pipe | None = None
         self._attached: dict[str, str] = {}      # targetId -> its first (gated) session
+        self._pages: set[str] = set()             # the targets that are tabs (their main frame's id)
         # Careful mode (pip_careful), during a run: url -> True when its site may load. A page on any
         # other site waits, like a submit, until the user allows the site.
         self.site_gate = None
@@ -739,6 +740,8 @@ class BoxedBrowser(BrowserSession):
             info = params.get("targetInfo", {}) or {}
             if child:
                 self._attached.setdefault(str(info.get("targetId", "")), child)
+                if info.get("type") == "page":
+                    self._pages.add(str(info.get("targetId", "")))
                 self._guard(child)
                 self._fire("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}, child)
                 self._fire("Runtime.runIfWaitingForDebugger", {}, child)
@@ -787,10 +790,13 @@ class BoxedBrowser(BrowserSession):
             if self.on_write is not None:
                 self.on_write(held)
             return
+        inner_form = kind == "Document" and str(params.get("frameId", "")) not in self._pages
         if (verb in READ_METHODS or kind in TELEMETRY_KINDS
-                or kind in BACKGROUND_KINDS and not self.acting()):
+                or (kind in BACKGROUND_KINDS or inner_form) and not self.acting()):
             # A read, telemetry, or the page's own background traffic: nothing the Pip did. Holding it
             # made every page with analytics ask for approval (and kept Google's own checks from running).
+            # That includes a form a page posts into a hidden frame by itself, as Facebook's pixel does with a
+            # large event: held, it stopped the page loading and paused the Pip (battle test, 2026-10-09).
             self._fire("Fetch.continueRequest", {"requestId": request_id}, session)
             return
         post = str(request.get("postData", "") or "")
