@@ -2568,3 +2568,26 @@ test('a first goal can steer an ordinary active turn on a capable native backend
  assert.equal(notices.warnings.length,0);assert.equal(commands.some(v=>v.type==='cancel'),false);
  assert.ok(posted.some(v=>v.type==='goal_start_state'&&v.state==='submitted'));
 });
+
+test("the web search is saved only to a CLI that can take it, and a blank key keeps the saved one", async () => {
+  // A CLI that never answered search_api_key_set would refuse the whole save on an unknown key.
+  const older = harness();
+  await older.provider.saveSettings(settings({ search_provider: "brave", search_api_key: "brave-key-1", search_url: "" }));
+  const first = older.commands.find((c) => c.type === "set_config");
+  assert.ok(first, "the rest of the settings still save");
+  assert.deepEqual(Object.keys(first.values).filter((k) => k.startsWith("search")), [], "no search keys to an older CLI");
+
+  const { provider, commands, secretValues } = harness();
+  provider.searchSettable = true;
+  await provider.saveSettings(settings({ search_provider: "brave", search_api_key: "  brave-key-1  ", search_url: " " }));
+  const saved = commands.find((c) => c.type === "set_config").values;
+  assert.deepEqual([saved.search_provider, saved.search_api_key, saved.search_url], ["brave", "brave-key-1", ""]);
+  assert.equal([...secretValues.keys()].some((k) => /search/i.test(k)), false,
+    "kept by the CLI in its own secrets.json, where its Pips read it, not in the editor's SecretStorage");
+  commands.length = 0;
+  await provider.saveSettings(settings({ search_provider: "tavily", search_api_key: "", search_url: "" }));
+  assert.equal("search_api_key" in commands.find((c) => c.type === "set_config").values, false, "blank keeps it");
+  commands.length = 0;
+  await provider.saveSettings(settings({ search_provider: "google" }));
+  assert.equal("search_provider" in commands.find((c) => c.type === "set_config").values, false, "only the four it knows");
+});

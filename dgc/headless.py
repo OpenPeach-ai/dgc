@@ -174,7 +174,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "context_size", "subagent_context_size", "show_reasoning", "preserve_thinking", "suggest", "plan_artifact",
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
-    "capability_cache_ttl_s", "search_provider", "search_url",
+    "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes",
     "thinking_inline", "thinking_inline_max_chars",
@@ -261,7 +261,8 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 # Config fields added to protocol v14 after it first shipped. An editor validates every event it
 # receives and rejects a field it doesn't know, so these go only to a client whose get_config
 # listed them in `fields`.
-_CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size"})
+# search_url and search_api_key_set: the one web search Work, ChatDGC and Pips share, for Settings.
+_CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -278,6 +279,10 @@ _CONFIG_STRING_LIMITS = {
     "fallback_api_key": 16_384,
     "autonomous_gate": 512,
     "subscription_model": 256,
+    # The shared web search: a SearXNG address, or a Brave or Tavily key (kept in secrets.json, as
+    # `dgc setup` keeps it, because the CLI and the Pips runner read it there too).
+    "search_url": 4096,
+    "search_api_key": 16_384,
 }
 _CONFIG_ENUMS = {
     "api_mode": frozenset({"auto", "ollama", "anthropic", "chat_completions", "responses"}),
@@ -329,10 +334,13 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
                 or any(ord(char) < 32 and not (key == "autonomous_gate" and char == "\t")
                        for char in value)):
             return None, f"{key} must be a bounded plain string"
-    for key in ("subagent_base_url", "fallback_base_url"):
+    for key in ("subagent_base_url", "fallback_base_url", "search_url"):
         value = values.get(key)
         if value and (any(char.isspace() for char in value) or mcp_url_has_credentials(value)):
             return None, f"{key} cannot contain whitespace or URL credentials"
+    search_url = values.get("search_url")
+    if search_url and not re.match(r"https?://[^/?#]+", search_url, re.IGNORECASE):
+        return None, "search_url must be an http:// or https:// address"
     # Tabs are useful in a shell gate and were accepted by the prior contract; other controls are
     # neither executable text nor safe durable configuration.
     gate = values.get("autonomous_gate")
@@ -3602,6 +3610,10 @@ class Backend:
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
         extra = {}
+        if "search_url" in self._config_fields:
+            extra["search_url"] = str(c.get("search_url", "") or "")
+        if "search_api_key_set" in self._config_fields:
+            extra["search_api_key_set"] = bool(c.get("search_api_key", ""))
         if "subagent_context_size" in self._config_fields:
             try:
                 extra["subagent_context_size"] = max(0, int(c.get("subagent_context_size", 0) or 0))

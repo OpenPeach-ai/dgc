@@ -13,6 +13,7 @@ export const CHATDGC_EDITOR = "dgc.chatdgcEditor";
 const CONVERSATION_ID = /^chat_[a-f0-9]{32}$/;
 const MESSAGE_ID = /^msg_[a-f0-9]{32}$/;
 const THINKING = new Set(["off", "low", "medium", "high", "xhigh"]);
+const SEARCH = new Set(["off", "auto", "on"]);
 const MAX_TEXT = 1_000_000;
 const TITLE_CHARS = 40;
 const HOME_FIRST = 6;          // the home shows a few chats; "Show more" pages on
@@ -69,6 +70,8 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <label class="sr-only" for="cd-model">Model</label><select id="cd-model" class="cd-select" title="Model"></select>
 <label class="sr-only" for="cd-thinking">Thinking</label><select id="cd-thinking" class="cd-select" title="How much the model thinks first">
 <option value="off">Thinking off</option><option value="low">Think: low</option><option value="medium">Think: medium</option><option value="high">Think: high</option><option value="xhigh">Think: extra high</option></select>
+<label class="sr-only" for="cd-search">Web search</label><select id="cd-search" class="cd-select" title="Web search: Auto lets the model decide; Always searches before it answers">
+<option value="auto">Web: auto</option><option value="on">Web: always</option><option value="off">Web: off</option></select>
 <label id="cd-temp-toggle" class="cd-toggle" title="A temporary chat isn't saved or listed"><input type="checkbox" id="cd-temporary"> Temporary</label>
 <span class="cd-spacer"></span>
 <button type="submit" id="cd-send" class="cd-send" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
@@ -218,6 +221,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_message":
         for (const tab of showing(conversation)) this.post(tab, { type: "message", message: ev.message });
         return;
+      case "chatdgc_activity":
+        for (const tab of showing(conversation)) {
+          this.post(tab, { type: "activity", messageId: ev.message_id, kind: ev.kind, text: String(ev.text || "") });
+        }
+        return;
       case "chatdgc_changed":
         for (const tab of showing(conversation)) {
           if (ev.summary) { tab.summary = { ...tab.summary, ...ev.summary }; tab.panel.title = chatTitle(ev.summary.title); }
@@ -267,8 +275,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (!conversation || !text.trim() || text.length > MAX_TEXT) return;
         const model = typeof message.model === "string" && message.model.length <= 200 ? message.model : "";
         const thinking = typeof message.thinking === "string" && THINKING.has(message.thinking) ? message.thinking : "";
+        const search = typeof message.search === "string" && SEARCH.has(message.search) ? message.search : "";
         this.ask({ tab, kind: "send" }, { type: "chatdgc_send", conversation_id: conversation, text,
-                                          ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) });
+                                          ...(model ? { model } : {}), ...(thinking ? { thinking } : {}),
+                                          ...(search ? { search } : {}) });
         return;
       }
       case "continue":

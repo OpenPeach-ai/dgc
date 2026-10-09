@@ -10,9 +10,9 @@
   window.DgcMarkdown?.setFavicons?.(false);      // no image ever loads from a link's site
 
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
-  const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), notice = $("cd-notice");
+  const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), searchPick = $("cd-search"), notice = $("cd-notice");
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
-                  model: "", thinking: "", opened: false, unavailable: "" };
+                  model: "", thinking: "", opened: false, unavailable: "", searching: {} };
   const LABEL = { off: "Thinking off", low: "Think: low", medium: "Think: medium", high: "Think: high", xhigh: "Think: extra high" };
 
   // ---- scrolling: follow the reply while the reader is at the bottom
@@ -21,11 +21,59 @@
   const follow = () => { if (pinned) scroller.scrollTop = scroller.scrollHeight; };
 
   // ---- messages
+  const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
+  /** [n] in a reply that names one of its sources becomes a small mark that opens that page. Text nodes only,
+   *  outside code: a model's "[1]" in a code block is code. */
+  function cite(node, sources) {
+    if (!Array.isArray(sources) || !sources.length) return;
+    const byN = new Map(sources.map((x) => [String(x.n), x]));
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, { acceptNode: (t) =>
+      t.parentElement?.closest("pre, code, .md-link") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+    const texts = [];
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) if (/\[\d{1,2}\]/.test(t.nodeValue)) texts.push(t);
+    for (const t of texts) {
+      const parts = t.nodeValue.split(/(\[\d{1,2}\])/);
+      const frag = document.createDocumentFragment();
+      for (const part of parts) {
+        const source = /^\[(\d{1,2})\]$/.test(part) ? byN.get(part.slice(1, -1)) : null;
+        if (!source) { if (part) frag.append(part); continue; }
+        const mark = el("button", "cd-cite", String(source.n));
+        mark.type = "button"; mark.dataset.url = source.url;
+        mark.title = `${source.title} (${hostOf(source.url)})`;
+        mark.setAttribute("aria-label", `Source ${source.n}: ${source.title}`);
+        frag.append(mark);
+      }
+      t.replaceWith(frag);
+    }
+  }
   function body(message) {
     const node = el("div", "text cd-body");
     const html = md(message.text);
     if (html === null) node.textContent = message.text || ""; else node.innerHTML = html;
+    cite(node, message.sources);
     return node;
+  }
+  /** What a reply looked up: the queries, and the pages it may cite, numbered as it cites them. */
+  function sourcesBlock(message) {
+    const sources = Array.isArray(message.sources) ? message.sources : [];
+    const searches = Array.isArray(message.searches) ? message.searches : [];
+    if (!sources.length && !searches.length) return null;
+    const box = el("details", "cd-sources");
+    const label = sources.length ? `Sources · ${sources.length}` : `Searched the web`;
+    box.append(el("summary", "cd-sources-label", label));
+    if (searches.length) box.append(el("p", "cd-searched", `Searched for ${searches.map((q) => `“${q}”`).join(", ")}`));
+    const list = el("ol", "cd-source-list");
+    for (const source of sources) {
+      const item = el("li", "cd-source");
+      item.value = Number(source.n) || 0;
+      const open = el("button", "cd-source-open");
+      open.type = "button"; open.dataset.url = source.url; open.title = source.url;
+      open.append(el("span", "cd-source-title", source.title || source.url), el("span", "cd-source-host", hostOf(source.url)));
+      item.append(open);
+      list.append(item);
+    }
+    if (sources.length) box.append(list);
+    return box;
   }
   function thinkingBlock(message, live) {
     const box = el("details", "cd-thinking");
@@ -76,8 +124,11 @@
     }
     if (message.thinking) node.append(thinkingBlock(message, live));
     if (message.text || !live) node.append(body(message));
-    if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
+    const looking = live && state.searching[message.id];
+    if (looking) node.append(el("div", "cd-working cd-activity", `Searching the web for “${looking}”…`));
+    else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
+    if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
     const end = endNote(message);
     if (end) node.append(end);
     if (!live && message.text) {
@@ -149,7 +200,8 @@
   function submit() {
     const text = input.value;
     if (!text.trim() || state.busy || !state.conversation || state.unavailable) return;
-    vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "" });
+    vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "",
+                         search: searchPick.value || "auto" });
     input.value = ""; grow(); saveDraft();
     state.busy = true;        // until the turn says otherwise: no second send in the meantime
     hideNotice();
@@ -157,6 +209,9 @@
   }
   modelPick.addEventListener("change", () => { state.model = modelPick.value; });
   thinkingPick.addEventListener("change", () => { state.thinking = thinkingPick.value; });
+  // Web search is the user's standing choice in this tab, not a chat's: it stays as set across chats.
+  searchPick.value = ["auto", "on", "off"].includes((vscode.getState() || {}).search) ? vscode.getState().search : "auto";
+  searchPick.addEventListener("change", () => { try { vscode.setState({ ...(vscode.getState() || {}), search: searchPick.value }); } catch {} });
   $("cd-temporary").addEventListener("change", (e) => vscode.postMessage({ type: "newChat", temporary: e.target.checked }));
   $("cd-new").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
   $("cd-menu").addEventListener("click", () => vscode.postMessage({ type: "menu" }));
@@ -179,6 +234,8 @@
   log.addEventListener("click", (e) => {
     const copy = e.target.closest?.(".copy[data-c]");
     if (copy) { vscode.postMessage({ type: "copy", text: decodeURIComponent(copy.dataset.c || "") }); return; }
+    const source = e.target.closest?.(".cd-cite[data-url], .cd-source-open[data-url]");
+    if (source) { vscode.postMessage({ type: "openLink", target: source.dataset.url || "" }); return; }
     const link = e.target.closest?.(".md-link[data-target]");
     if (link) { e.preventDefault(); vscode.postMessage({ type: "openLink", target: link.dataset.target || "" }); }
   });
@@ -232,14 +289,23 @@
           }
         } else {
           state.busy = false;
+          state.searching = {};
           announce("Reply finished.");
           render();
         }
         controls();
         return;
+      case "activity":
+        if (msg.kind === "searching" && msg.messageId) {
+          state.searching[msg.messageId] = String(msg.text || "");
+          if (!state.messages.some((m) => m.id === msg.messageId)) state.messages.push({ id: msg.messageId, role: "assistant", text: "", thinking: "" });
+          update(msg.messageId);
+        }
+        return;
       case "message": {
         const message = msg.message;
         if (!message?.id) return;
+        delete state.searching[message.id];
         const at = state.messages.findIndex((m) => m.id === message.id);
         if (at >= 0) state.messages[at] = message; else state.messages.push(message);
         if (message.role === "user") { pinned = true; render(); } else update(message.id);
@@ -252,6 +318,7 @@
           state.messages.push(message);
         }
         if (message.finish && message.finish !== "stop") message.finish = undefined;   // continuing it
+        if (msg.text) delete state.searching[message.id];           // it is writing again
         message.text = (message.text || "") + (msg.text || "");
         message.thinking = (message.thinking || "") + (msg.thinking || "");
         update(message.id);

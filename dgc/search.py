@@ -194,6 +194,25 @@ def search(query: str, provider: str, api_key: str = "", url: str = "", n: int =
     return _fmt(results, query)
 
 
+def shared_settings(config) -> tuple[str, str, str]:
+    """The one web search set in Settings (founder, 2026-10-09: Work, ChatDGC and Pips share it): provider, key
+    and address, read fresh from the files Settings and `dgc setup` write (a process started before a change has
+    not seen it), else this process's config."""
+    import json
+    from .config import USER_CONFIG, USER_SECRETS
+    found = {"search_provider": config.get("search_provider", "duckduckgo"), "search_url": config.get("search_url", ""),
+             "search_api_key": config.get("search_api_key", "")}
+    for path, names in ((USER_CONFIG, ("search_provider", "search_url")), (USER_SECRETS, ("search_api_key",))):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8")) if path.stat().st_size <= 2 * 1024 * 1024 else None
+        except (OSError, ValueError):
+            continue
+        for name in names:
+            if isinstance(raw, dict) and isinstance(raw.get(name), str):
+                found[name] = raw[name]
+    return str(found["search_provider"] or "duckduckgo"), str(found["search_api_key"] or ""), str(found["search_url"] or "")
+
+
 def results(query: str, provider: str, api_key: str = "", url: str = "", n: int = 6) -> list[dict]:
     """The same search as data, for a reply that cites its sources: [{"title", "url", "snippet"}].
     Raises SearchError saying why when it fails."""

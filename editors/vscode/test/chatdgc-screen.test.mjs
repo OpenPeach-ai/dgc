@@ -86,7 +86,8 @@ test("a new chat: the question and the box together, and a message goes out with
     await s.page.locator("#cd-model").selectOption("qwen3:32b");
     await s.page.locator("#cd-input").fill("What's the capital of France?");
     await s.page.keyboard.press("Enter");
-    assert.deepEqual(await s.posted("send"), [{ type: "send", text: "What's the capital of France?", model: "qwen3:32b", thinking: "high" }]);
+    assert.deepEqual(await s.posted("send"), [{ type: "send", text: "What's the capital of France?", model: "qwen3:32b", thinking: "high",
+                                                search: "auto" }], "web search is auto unless you choose");
     assert.equal(await s.page.locator("#cd-input").inputValue(), "");
     assert.equal(await shown(s.page, "#cd-stop"), true, "Stop while it answers");
     assert.equal(await shown(s.page, "#cd-send"), false);
@@ -253,4 +254,44 @@ test("the home: your chats above this project's sessions, one search over both",
     assert.equal(await shown(page, "#chats-home"), false, "an older CLI: no Chat section");
     assert.equal(await page.locator("#sessions-title").textContent(), "Sessions");
   } finally { await page.close(); }
+});
+
+test("a reply that searches: what it looks for while it looks, citation marks, and its sources", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ state: { search: "on" } });
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    assert.equal(await s.page.locator("#cd-search").inputValue(), "on", "the tab keeps the choice");
+    await s.page.locator("#cd-search").selectOption("auto");
+    await s.page.locator("#cd-input").fill("Weather in Paris?");
+    await s.page.keyboard.press("Enter");
+    assert.equal((await s.posted("send"))[0].search, "auto");
+    assert.equal(await s.page.evaluate(() => window.__state.search), "auto");
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "activity", messageId: M(2), kind: "searching", text: "paris weather" });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-activity").textContent(), "Searching the web for “paris weather”…");
+    await s.send({ type: "delta", messageId: M(2), text: "Sunny [1]" });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-activity").count(), 0, "writing again");
+    const sources = [{ n: 1, title: "Paris forecast", url: "https://www.weather.example/paris" },
+                     { n: 2, title: "Météo", url: "https://meteo.example/p" }];
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", finish: "stop", sources, searches: ["paris weather"],
+      text: "Sunny and 21°C [1], dry week [2][9].\n\n```\nlist[1]\n```" } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.frame();
+    assert.deepEqual(await s.page.locator(".cd-cite").allTextContents(), ["1", "2"], "only numbers it was given; [9] stays text");
+    assert.match(await s.page.locator(".cd-body").first().textContent(), /\[9\]/);
+    assert.equal(await s.page.locator("pre.code code").textContent(), "list[1]\n", "code is code");
+    assert.equal(await s.page.locator(".cd-cite").first().getAttribute("title"), "Paris forecast (weather.example)");
+    await s.page.locator(".cd-cite").first().click();
+    await s.page.locator(".cd-sources summary").click();
+    assert.equal(await s.page.locator(".cd-sources-label").textContent(), "Sources · 2");
+    assert.equal(await s.page.locator(".cd-searched").textContent(), "Searched for “paris weather”");
+    assert.deepEqual(await s.page.locator(".cd-source").allInnerTexts(), ["Paris forecast\nweather.example", "Météo\nmeteo.example"]);
+    await s.page.locator(".cd-source-open").nth(1).click();
+    assert.deepEqual((await s.posted("openLink")).map((m) => m.target), ["https://www.weather.example/paris", "https://meteo.example/p"]);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-sources.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
 });

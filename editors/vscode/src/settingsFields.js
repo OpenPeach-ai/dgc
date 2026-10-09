@@ -79,5 +79,20 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Artifacts in plan mode", "Broadens the read-only plan surface.", bool("artifact_in_plan", c.artifact_in_plan === true)))
             + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
     }
-    ({ general: renderGeneral, models: renderModels, agents: renderAgents, security: renderSecurity })[section](main);
+    function renderWeb(main) {
+        const c = config;
+        const provider = c.search_provider || "duckduckgo";
+        const keyHint = c.search_api_key_set ? "A key is saved. Leave blank to keep it." : "Brave and Tavily need one.";
+        main.innerHTML = '<h2>Web search</h2><p class="sub">One search for Work, ChatDGC and your Pips. DuckDuckGo needs nothing; Brave and Tavily need a key; SearXNG is a server you run.</p>'
+            + (c.search_settable ? '' : '<p class="note" role="status">Update the DGC CLI to choose the web search here.</p>')
+            + card("Search", field("Provider", "", sel("search_provider", [["duckduckgo", "DuckDuckGo (no key)"], ["brave", "Brave Search"], ["tavily", "Tavily"], ["searxng", "SearXNG (your server)"]], provider))
+                + '<div data-search-for="brave tavily">' + field("API key", keyHint, inp("search_api_key", "", "password")) + '</div>'
+                + '<div data-search-for="searxng">' + field("Server address", "For example http://127.0.0.1:8888", inp("search_url", c.search_url || "", "url")) + '</div>')
+            + '<button type="button" class="save" id="save" title="Save the web search for every workspace on this computer"' + (c.search_settable ? '' : ' disabled') + '>Save</button>';
+        const pick = document.getElementById("search_provider");
+        const show = () => main.querySelectorAll("[data-search-for]").forEach((row) => { row.hidden = !row.dataset.searchFor.split(" ").includes(pick.value); });
+        if (pick) { pick.addEventListener("change", show); show(); }
+        if (!c.search_settable) main.querySelectorAll(".card input, .card select").forEach((el) => { el.disabled = true; });
+    }
+    ({ general: renderGeneral, models: renderModels, agents: renderAgents, web: renderWeb, security: renderSecurity })[section](main);
 }

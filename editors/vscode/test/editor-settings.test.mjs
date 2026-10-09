@@ -18,7 +18,7 @@ test('Save says it applies to every workspace, which is where it writes',()=>{
   // the tab said nothing about that at all -- the statement existed only on the surface nobody
   // could open. Checked on every page that offers Save, because each renders its own button.
   const x=setup();
-  for(const nav of ['general','models','agents','security']){
+  for(const nav of ['general','models','agents','web','security']){
     x.click(`[data-nav=${nav}]`);
     const save=x.d.querySelector('#save');
     assert.ok(save,`${nav} offers Save`);
@@ -279,4 +279,32 @@ test('typing a search key by key keeps every letter in order',()=>{
   }
   assert.equal(x.d.querySelectorAll('.directory-card').length,1);assert.match(x.d.querySelector('.directory-card').textContent,/Granola/);
  }
+});
+
+test('Web search: the one search Work, ChatDGC and Pips share, set here; its key is never shown back',()=>{
+  const x=setup();
+  x.click('[data-nav=web]');
+  // A CLI that can't take the search from here never answers search_api_key_set.
+  assert.match(x.d.querySelector('#page').textContent,/Update the DGC CLI/);
+  assert.equal(x.d.querySelector('#save').disabled,true,'nothing to save into');
+  assert.equal(x.d.querySelector('#search_provider').disabled,true);
+  x.message({type:'event',event:{...x.config,search:'duckduckgo',search_url:'',search_api_key_set:false}});
+  const shown=()=>[...x.d.querySelectorAll('[data-search-for]')].filter(r=>!r.hidden).map(r=>r.querySelector('input').id);
+  assert.equal(x.d.querySelector('#save').disabled,false);
+  assert.deepEqual(shown(),[],'DuckDuckGo needs nothing');
+  const pick=x.d.querySelector('#search_provider');
+  pick.value='searxng';pick.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.deepEqual(shown(),['search_url'],'SearXNG: its address');
+  pick.value='brave';pick.dispatchEvent(new x.w.Event('change',{bubbles:true}));pick.dispatchEvent(new x.w.Event('input',{bubbles:true}));
+  assert.deepEqual(shown(),['search_api_key'],'Brave: its key');
+  x.input('#search_api_key','brave-key-123');
+  x.click('#save');
+  const saved=x.sent.filter(m=>m.type==='saveSettings').pop();
+  assert.equal(saved.values.search_provider,'brave');
+  assert.equal(saved.values.search_api_key,'brave-key-123');
+  x.message({type:'settingsSaved',ok:true});
+  x.message({type:'event',event:{...x.config,search:'brave',search_url:'',search_api_key_set:true,search_api_key:'brave-key-123'}});
+  assert.equal(x.d.querySelector('#search_api_key').value,'','a saved key is never painted back');
+  assert.match(x.d.querySelector('#page').textContent,/A key is saved/);
+  assert.equal(x.d.querySelector('#search_provider').value,'brave');
 });

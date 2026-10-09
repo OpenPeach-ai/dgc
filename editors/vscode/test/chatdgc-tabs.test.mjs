@@ -253,3 +253,17 @@ test("rename, pin and archive from the tab's menu", async () => {
   assert.equal(last("chatdgc_update").archived, true);
   assert.equal(panel.disposedCount, 1);
 });
+
+test("web search: the tab's choice goes with the message, and what it looks for reaches its tabs", () => {
+  chat.open(ID(3)); chat.open(ID(4));
+  const [a, b] = world.panels;
+  a.say({ type: "ready" }); opened(a, { id: ID(3), title: "A" });
+  b.say({ type: "ready" }); opened(b, { id: ID(4), title: "B" });
+  a.say({ type: "send", text: "Weather?", search: "on" });
+  assert.equal(last("chatdgc_send").search, "on");
+  a.say({ type: "send", text: "Weather?", search: "always" });
+  assert.equal("search" in last("chatdgc_send"), false, "only off, auto or on");
+  chat.onEvent({ type: "chatdgc_activity", conversation_id: ID(3), message_id: MSG(1), kind: "searching", text: "paris" });
+  assert.deepEqual(a.last("activity"), { type: "activity", messageId: MSG(1), kind: "searching", text: "paris" });
+  assert.equal(b.last("activity"), undefined);
+});

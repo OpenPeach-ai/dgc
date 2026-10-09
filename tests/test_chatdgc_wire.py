@@ -43,6 +43,7 @@ from dgc.chatdgc.service import ChatService, fit, page  # noqa: E402
 from dgc.chatdgc.store import ChatStore  # noqa: E402
 from dgc.config import Config  # noqa: E402
 from dgc.editor_protocol import event_error  # noqa: E402
+from dgc.llm import ToolCall  # noqa: E402
 
 
 class Model:
@@ -76,8 +77,9 @@ class Model:
                     on_text(part)
                 if step.get("raise"):
                     raise RuntimeError(step["raise"])
+                calls = [ToolCall(f"c{i}", name, args) for i, (name, args) in enumerate(step.get("calls", []))]
                 return SimpleNamespace(content="".join(parts), finish_reason=step.get("finish", "stop"),
-                                       usage={"input_tokens": 3, "output_tokens": 2}, thinking="")
+                                       usage={"input_tokens": 3, "output_tokens": 2}, thinking="", tool_calls=calls)
         return Client()
 
 
@@ -117,7 +119,8 @@ class ServiceTests(unittest.TestCase):
         self.root = Path(temp.name) / "chat"
         self.model, self.wire = Model(), Wire()
         config = SimpleNamespace(base_url="", api_key="", model="fixture", get=lambda key, default=None: default)
-        self.engine = ChatEngine(config, ChatStore(self.root), client_factory=self.model.factory)
+        self.engine = ChatEngine(config, ChatStore(self.root), client_factory=self.model.factory,
+                                 searcher=lambda query: [{"title": "Forecast", "url": "https://weather.example/paris", "snippet": "Sunny"}])
         self.service = ChatService(self.wire.emit, config, engine=self.engine)
         self.addCleanup(self.service.close, 2.0)
 
@@ -164,6 +167,24 @@ class ServiceTests(unittest.TestCase):
         self.ended()
         named = self.wire.wait(lambda f: f["type"] == "chatdgc_changed" and (f["summary"] or {}).get("title") == "Named by the model")
         self.assertNotIn("request_id", named, "nobody asked: it arrives on its own")
+
+    def test_a_reply_that_searches_says_so_and_carries_its_sources(self):
+        chat = self.new()
+        self.model.script += [{"parts": ["Let me check. "], "calls": [("web_search", {"query": "paris weather"})]},
+                              {"parts": ["Sunny [1]."]}]
+        self.send(chat, "Weather in Paris?", search="auto")
+        self.ended()
+        kinds = [f["type"] for f in self.wire.frames if f["type"] in ("chatdgc_delta", "chatdgc_activity", "chatdgc_message")]
+        first_search = kinds.index("chatdgc_activity")
+        self.assertIn("chatdgc_delta", kinds[:first_search], "what it wrote before searching shows first")
+        activity = self.wire.of("chatdgc_activity")[0]
+        self.assertEqual((activity["kind"], activity["text"]), ("searching", "paris weather"))
+        reply = self.wire.of("chatdgc_message")[-1]["message"]
+        self.assertEqual(activity["message_id"], reply["id"])
+        self.assertEqual((reply["text"], reply["sources"]), ("Let me check. Sunny [1].",
+                                                             [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris"}]))
+        self.send(chat, "again", request_id="r2", search="always")
+        self.assertIn("invalid command", self.wire.of("chatdgc_error")[-1]["message"])
 
     def test_one_turn_per_chat_and_two_chats_side_by_side(self):
         first, second = self.new(), self.new()

@@ -174,14 +174,14 @@ class ChatService:
     # -- turns
 
     def _send(self, cmd: dict) -> None:
-        def run(cancel, on_start, stream_for):
+        def run(cancel, on_start, stream_for, activity):
             return self.engine.send(cmd["conversation_id"], cmd["text"], model=cmd.get("model"),
-                                    thinking=cmd.get("thinking"), on_start=on_start, cancel=cancel,
-                                    **stream_for())
+                                    thinking=cmd.get("thinking"), search=cmd.get("search", "off"),
+                                    on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run)
 
     def _continue(self, cmd: dict) -> None:
-        def run(cancel, on_start, stream_for):
+        def run(cancel, on_start, stream_for, activity):
             return self.engine.continue_reply(cmd["conversation_id"], cmd["message_id"], on_start=on_start,
                                               cancel=cancel, **stream_for())
         self._start(cmd, run)
@@ -213,13 +213,19 @@ class ChatService:
                 self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(mine),
                           request_id=request_id)
 
+        def activity(kind, text):
+            if stream["value"] is not None:
+                stream["value"].flush()               # what it wrote so far reaches the screen first
+            self.emit("chatdgc_activity", conversation_id=conversation_id, message_id=turn["reply_id"], kind=kind,
+                      text=str(text)[:400])
+
         def stream_for():
             # The stream exists once on_start ran; the engine calls on_text only after that.
             return {"on_text": lambda part: stream["value"].text(part),
                     "on_thinking": lambda part: stream["value"].thinking(part)}
 
         try:
-            reply = run(cancel, on_start, stream_for)
+            reply = run(cancel, on_start, stream_for, activity)
             if stream["value"] is not None:
                 stream["value"].flush()
             self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(reply), request_id=request_id)

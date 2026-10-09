@@ -16,6 +16,19 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   first reply your model names it. Temporary chats are never written. Rename, pin, archive and delete
   are kept even when done mid-reply. Advertised as `ready.capabilities.chatdgc = {version: 1}`; see
   [docs/CHATDGC.md](docs/CHATDGC.md).
+- **ChatDGC searches the web.** `chatdgc_send` takes `search`:
+  - `off`;
+  - `auto`: the model decides;
+  - `on`: it searches before it answers.
+
+  A reply makes up to five searches with the one search set in Settings. Its pages are numbered across its
+  searches and cited as [n], and the reply keeps `sources` and `searches`. `chatdgc_activity` says what it
+  is searching for.
+- **Settings sets the shared web search.**
+  - `set_config` takes `search_url` (http or https only) and `search_api_key`. The key is kept in
+    `secrets.json`, where the CLI and the Pips runner read it.
+  - `get_config` `fields` can ask for `search_url` and `search_api_key_set`. The key itself never crosses
+    the wire.
 
 ### Models
 

@@ -339,21 +339,9 @@ MAX_QUERY = 400
 
 
 def _search_settings(config) -> tuple[str, str, str]:
-    """The one web search set in Settings (founder, 2026-10-09: Work, ChatDGC and Pips share it): provider, key and
-    address, read fresh from the files the editor writes (a runner started before a change has not seen it), else
-    this process's."""
-    from .config import USER_CONFIG, USER_SECRETS
-    found = {"search_provider": config.get("search_provider", "duckduckgo"), "search_url": config.get("search_url", ""),
-             "search_api_key": config.get("search_api_key", "")}
-    for path, names in ((USER_CONFIG, ("search_provider", "search_url")), (USER_SECRETS, ("search_api_key",))):
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8")) if path.stat().st_size <= 2 * 1024 * 1024 else None
-        except (OSError, ValueError):
-            continue
-        for name in names:
-            if isinstance(raw, dict) and isinstance(raw.get(name), str):
-                found[name] = raw[name]
-    return str(found["search_provider"] or "duckduckgo"), str(found["search_api_key"] or ""), str(found["search_url"] or "")
+    """The one web search set in Settings, read fresh (dgc.search.shared_settings: ChatDGC reads it the same way)."""
+    from .search import shared_settings
+    return shared_settings(config)
 
 
 def schemas(apps_now) -> list[dict]:

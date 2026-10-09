@@ -4,9 +4,9 @@ ChatDGC is a chat app inside DGC. You ask a question and your own model answers.
 the folder you have open, so every window lists the same chats. It runs on its own engine and keeps its
 own store, separate from Work (the coding sessions) and from Pips.
 
-This page covers Phase 1: chats, streaming replies, the model and thinking picker, Stop and Continue,
-and temporary chats. Attachments, web search, editing and regenerating, memory, Deep Research and voice
-come in later phases.
+Today ChatDGC has chats, streaming replies, the model and thinking picker, web search with cited sources,
+Stop and Continue, and temporary chats. Attachments, editing and regenerating, memory, Deep Research and
+voice come in later phases.
 
 ## Using it
 
@@ -16,6 +16,20 @@ come in later phases.
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
+- **Web search.** Pick **Web** in the box:
+  - **auto** (the default): your model searches when the answer depends on something current, such as
+    news, prices, weather or a fact it isn't sure of.
+  - **always**: it searches before it answers.
+  - **off**: it never searches.
+
+  While it searches, the reply says what it is looking for. A reply that used the web cites its pages with
+  small numbered marks; click one to open the page. **Sources** under the reply lists every page and what
+  it searched for. One reply makes at most five searches. The search itself is the one set in
+  **Settings → Web search**, shared with Work and your Pips:
+  - DuckDuckGo needs nothing.
+  - Brave and Tavily need a key, which is kept in `~/.dgc/secrets.json` (owner-only), where `dgc setup`
+    keeps it too.
+  - SearXNG is a server you run.
 - **Model and thinking.** Each chat keeps the model and thinking level you choose, and gets them back
   when you reopen it. The levels are off, low, medium, high and extra high; chats have no ultra mode. If
   the model thought before answering, **Thought** above the reply opens what it thought.
@@ -60,7 +74,7 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_list` | `request_id`, `query?`, `archived?`, `limit?` (1–200), `offset?` | `chatdgc_chats` |
 | `chatdgc_open` | `request_id`, `conversation_id?` (omit for a new chat), `temporary?` | `chatdgc_opened` |
 | `chatdgc_earlier` | `request_id`, `conversation_id`, `before` (a message id) | `chatdgc_earlier` |
-| `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?` | a turn (below) |
+| `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`off`, `auto`, `on`) | a turn (below) |
 | `chatdgc_continue` | `request_id`, `conversation_id`, `message_id` | a turn |
 | `chatdgc_cancel` | `conversation_id`, `request_id?` | the turn ends `cancelled` |
 | `chatdgc_update` | `request_id`, `conversation_id`, `title?`, `pinned?`, `archived?`, `delete?` | `chatdgc_changed` |
@@ -69,8 +83,11 @@ A turn sends its events in this order:
 
 1. `chatdgc_turn` with `state: "started"` and the `reply_id`.
 2. Your message, as `chatdgc_message` (a continued reply has none).
-3. The reply's text and thinking, as `chatdgc_delta` parts, sent about every 50 ms.
+3. The reply's text and thinking, as `chatdgc_delta` parts, sent about every 50 ms. While it searches the web,
+   `chatdgc_activity` (`kind: "searching"`) carries the query.
 4. The finished reply, as `chatdgc_message` with `finish` set to `stop`, `length`, `cancelled` or `error`.
+   A reply that searched also carries `searches` (its queries) and `sources` (`[{n, title, url}]`, the
+   numbers it cites as [n]).
 5. `chatdgc_changed`, the chat's new list entry.
 6. `chatdgc_turn` with `state: "ended"`.
 

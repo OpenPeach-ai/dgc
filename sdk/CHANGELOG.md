@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-The ChatDGC events (`chatdgc_chats`, `chatdgc_opened`, `chatdgc_earlier`, `chatdgc_turn`,
+The ChatDGC events (`chatdgc_chats`, `chatdgc_opened`, `chatdgc_earlier`, `chatdgc_turn`, `chatdgc_activity`,
 `chatdgc_delta`, `chatdgc_message`, `chatdgc_changed`, `chatdgc_error`) are part of the vendored
 protocol and the TypeScript SDK's known events, so neither SDK drops them. `DGC.chat()` comes in a
 later release.

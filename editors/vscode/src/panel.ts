@@ -446,6 +446,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private behaviorState = { showReasoning: true, thinkingInline: true, preserveThinking: false, codeAction: false };
   private mcpUrls = new Map<string, McpBrowserRequest>();
   private settingsEditor?: vscode.WebviewPanel;
+  /** The CLI takes the web search's address and key from Settings (its config said whether a key is saved). */
+  private searchSettable = false;
   private pipsEditor?: PipsEditor;
   private pipsDocumentId = randomBytes(16).toString("hex");
   private pendingSignIn?: McpBrowserRequest;
@@ -2979,6 +2981,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.postState();
         break;
       case "config":
+        if ("search_api_key_set" in ev) { this.searchSettable = true; }
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
         this.routeState.subscriptionEngine = String(ev.subscription_engine || "");
@@ -5729,7 +5732,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
     this.settingsEditor?.webview.postMessage({ type: "providers", providers });
     const be = this.ensureBackend();
-    be.send({ type: "get_config", request_id: this.nextRequestId("config-read") });
+    // The web search's address and whether its key is saved are opt-in fields (an older editor never
+    // sees them); every supported CLI takes `fields` and ignores names it doesn't know.
+    be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
+              fields: ["search_url", "search_api_key_set"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -6093,6 +6099,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       };
       if (subagentKey !== undefined) { values.subagent_api_key = subagentKey; }
       if (fallbackKey !== undefined) { values.fallback_api_key = fallbackKey; }
+      // The one web search Work, ChatDGC and Pips share. Only to a CLI that takes all three (its config
+      // answered search_api_key_set): one that cannot would refuse the whole save. A blank key keeps
+      // the saved one; the key is saved by the CLI in its own secrets.json, where its Pips read it.
+      if (this.searchSettable) {
+        const provider = String(v.search_provider || "");
+        if (["duckduckgo", "brave", "tavily", "searxng"].includes(provider)) { values.search_provider = provider; }
+        if (typeof v.search_url === "string") { values.search_url = v.search_url.trim(); }
+        if (typeof v.search_api_key === "string" && v.search_api_key.trim()) { values.search_api_key = v.search_api_key.trim(); }
+      }
       if (v.context_size) { values.context_size = Number(v.context_size); }
       if (v.subagent_context_size !== undefined && v.subagent_context_size !== "") {
         values.subagent_context_size = Math.max(0, Math.floor(Number(v.subagent_context_size) || 0));

@@ -11,6 +11,10 @@
   written, and **Continue** carries on. **Temporary** chats are never saved. The **⋯** menu renames,
   pins, archives or deletes a chat. Chats come back in their tabs after a window reload. Needs the DGC
   CLI with this release; with an older CLI the home shows no Chat list.
+- **Web search in ChatDGC**, with numbered citations that open their page and a **Sources** list under the
+  reply. Choose **Web: auto, always or off** in the box.
+- **Settings → Web search** picks the one search Work, ChatDGC and your Pips share: DuckDuckGo, Brave,
+  Tavily or your own SearXNG. A saved key is never shown back.
 
 ### Questions
 

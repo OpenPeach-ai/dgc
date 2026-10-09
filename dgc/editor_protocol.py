@@ -298,6 +298,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "fallback_model": _S(False), "fallback_base_url": _S(False),
         "fallback_api_mode": _S(False), "fallback_api_key_set": _B(False),
         "context_size": _I(False), "subagent_context_size": _I(False), "goal": _O(),
+        # Opt-in (get_config `fields`): the shared web search's address, and whether its key is saved.
+        "search_url": _S(False), "search_api_key_set": _B(False),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
         "ultra_mode": _B(False),
@@ -788,6 +790,8 @@ EVENT_FIELDS["chat_closed"] = {"request_id": _S(False),
 # knows.
 CHATDGC_THINKING = ("off", "low", "medium", "high", "xhigh")
 CHATDGC_FINISHES = ("stop", "length", "cancelled", "error")
+# Web search in a reply: off; auto (the model decides); on (the user asked for it).
+CHATDGC_SEARCH = ("off", "auto", "on")
 COMMAND_FIELDS.update({
     # The Chat list: pinned first, then the newest. Answered by `chatdgc_chats`.
     "chatdgc_list": {"request_id": _S(), "query": _S(False), "archived": _B(False),
@@ -797,7 +801,8 @@ COMMAND_FIELDS.update({
     "chatdgc_open": {"request_id": _S(), "conversation_id": _S(False), "temporary": _B(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "before": _S()},
     "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
-                     "thinking": _f("string", required=False, enum=CHATDGC_THINKING)},
+                     "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
+                     "search": _f("string", required=False, enum=CHATDGC_SEARCH)},
     "chatdgc_continue": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
     "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
     # Rename, pin, archive or delete. Answered by `chatdgc_changed`.
@@ -814,6 +819,9 @@ EVENT_FIELDS.update({
     "chatdgc_turn": {"conversation_id": _S(), "state": _f("string", enum=("started", "ended")),
                      "reply_id": _S(), "request_id": _S(False)},
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
+    # What the reply is doing besides writing: `text` is the query while it searches the web.
+    "chatdgc_activity": {"conversation_id": _S(), "message_id": _S(),
+                         "kind": _f("string", enum=("searching",)), "text": _S()},
     "chatdgc_message": {"conversation_id": _S(), "message": _O(), "request_id": _S(False)},
     # A conversation's list entry changed (a turn, a rename, a pin), or it was deleted (summary null).
     "chatdgc_changed": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
