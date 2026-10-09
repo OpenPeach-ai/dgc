@@ -340,7 +340,7 @@ COMMAND_FIELDS = {
     'accept_pip_update': frozenset(['expected_version', 'pip_id', 'proposal_id']),
     'archive_workspace_context': frozenset(['entry_id', 'expected_revision', 'workspace_id']),
     'cancel_pip_run': frozenset(['run_id']),
-    'create_pip': frozenset(['goal', 'model_choice', 'name', 'pip_type', 'source_ref', 'workspace_id']),
+    'create_pip': frozenset(['computer', 'goal', 'model_choice', 'name', 'pip_type', 'source_ref', 'workspace_id']),
     'get_pip': frozenset(['pip_id']),
     'get_pip_execution': frozenset([]),
     'get_pip_handoff': frozenset(['handoff_id']),

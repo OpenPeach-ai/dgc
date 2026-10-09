@@ -336,6 +336,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
     "pip_id"
   ],
   "create_pip": [
+    "computer",
     "goal",
     "model_choice",
     "name",
