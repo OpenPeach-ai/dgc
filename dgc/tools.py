@@ -224,7 +224,8 @@ TOOL_SCHEMAS = [
         "network=loopback_http_v1 and tests=[{argv:[dgc-http-check,http://127.0.0.1:PORT/path,200],cwd:.}]. "
         "Confirm the actual local URLs. This only checks status, not browser rendering or authenticated journeys. "
         "For an existing Pip read its definition first and provide all three identity/version fields. "
-        "Daily schedules require an explicit IANA timezone. With run_now=true the immediate run counts for today "
+        "When the request is clear, choose sensible defaults and set it up, then say what you chose and that it can be changed; "
+        "ask first only when the job or its scope is unclear. Daily schedules require an explicit IANA timezone. With run_now=true the immediate run counts for today "
         "and the next daily occurrence is tomorrow. Report what the result says: created, or a card waiting for review. "
         "Retry the same draft with the same request_key; changed content needs a new key.",
         {"target_root": {"type": "string", "maxLength": 4096},
@@ -234,7 +235,7 @@ TOOL_SCHEMAS = [
          "scope": {"type": "string", "enum": ["project", "personal"], "description": "Personal Pips persist across directories and receive no project files. Omitted means project."},
          "app_plan": {"type":"object", "description":"Optional exact read grant obtained from inspected app tools, with connection/schema digests and connected account IDs. Never invent these values."},
          "web_plan": {"type":"object", "description":"Personal only, optional: {schema_version:1, reads:[{kind:'page', url:'https://...'} | {kind:'search', query:'...'}]}, 1-4 reads the user named. DGC reads exactly these before each run; the Pip cannot browse elsewhere."},
-         "computer": {"type": "boolean", "description": "Personal only, optional: give it its own computer (a browser, a Terminal and files, separate from the user's) when its job needs the live web or filling in web pages. Anything it would submit waits for the user's OK."},
+         "computer": {"type": "boolean", "description": "Personal only, optional: give it its own computer (a browser, a Terminal and files, separate from the user's). Set it whenever the user asks for a Pip with a computer or a browser (a web_plan does not replace it), or when its job needs the live web and the user named no pages. Anything it would submit waits for the user's OK."},
          "work_kind": {"type": "string", "enum": ["personal_task", "source_review", "documentation_draft", "command_verification", "app_smoke_test"]},
          "verification_plan": {"type": "object", "additionalProperties": False,
              "description": "Required for Pulse only. Exact human-reviewed commands or reserved local HTTP probes. No model runs during verification. Limits are fixed by DGC; omit limits to use defaults.",
