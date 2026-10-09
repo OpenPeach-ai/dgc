@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { homedir } from "os";
 
 /**
  * ChatDGC in the editor: a chat tab of its own (one conversation each) and the home's Chat list.
@@ -247,6 +248,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                  ...(typeof ev.data === "string" ? { data: ev.data } : { error: String(ev.error || "") }) });
         }
         return;
+      case "chatdgc_exported":
+        if (asker) {
+          this.requests.delete(requestId);
+          const where = String(ev.path || "");
+          void vscode.window.showInformationMessage(`Exported to ${where.split(/[\\/]/).pop()}.`, "Open").then((open) => {
+            if (open) void vscode.window.showTextDocument(vscode.Uri.file(where));
+          });
+        }
+        return;
       case "chatdgc_activity":
         for (const tab of showing(conversation)) {
           this.post(tab, { type: "activity", messageId: ev.message_id, kind: ev.kind, text: String(ev.text || "") });
@@ -452,6 +462,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       { label: "$(edit) Rename", id: "rename" },
       { label: pinned ? "$(pinned) Unpin" : "$(pin) Pin", id: "pin" },
       { label: "$(archive) Archive", id: "archive" },
+      { label: "$(export) Export…", id: "export" },
       { label: "$(trash) Delete", id: "delete" },
     ];
     const choice = await vscode.window.showQuickPick(picks, { placeHolder: chatTitle(tab.summary?.title) });
@@ -463,6 +474,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       this.ask({ tab, kind: "update" }, { type: "chatdgc_update", conversation_id: conversation, title: title.slice(0, 120) });
     } else if (choice.id === "pin") {
       this.ask({ tab, kind: "update" }, { type: "chatdgc_update", conversation_id: conversation, pinned: !pinned });
+    } else if (choice.id === "export") {
+      const name = chatTitle(tab.summary?.title).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "chat";
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+      const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, `${name}.md`),
+        filters: { Markdown: ["md"], JSON: ["json"] }, saveLabel: "Export", title: "Export this chat" });
+      if (!target || target.scheme !== "file") return;
+      this.ask({ tab, kind: "export" }, { type: "chatdgc_export", conversation_id: conversation, path: target.fsPath,
+                                          format: /\.json$/i.test(target.fsPath) ? "json" : "markdown" });
     } else if (choice.id === "archive") {
       this.ask({ tab, kind: "update" }, { type: "chatdgc_update", conversation_id: conversation, archived: true });
       tab.panel.dispose();

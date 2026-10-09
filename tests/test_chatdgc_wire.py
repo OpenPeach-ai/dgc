@@ -240,6 +240,42 @@ class ServiceTests(unittest.TestCase):
                                "parent_id": "root", "index": 7})
         self.assertIn("isn't in this chat", self.wire.of("chatdgc_error")[-1]["message"])
 
+    def test_export_as_markdown_or_json(self):
+        chat = self.new()
+        self.model.script += [{"parts": ["Let me check. "], "calls": [("web_search", {"query": "paris weather"})]},
+                              {"parts": ["Sunny [1]."]}, {"parts": ["Rainy."]}]
+        self.send(chat, "Weather in Paris?", search="auto",
+                  attachments=[{"kind": "text", "text": "notes", "name": "Pasted text"}])
+        self.ended()
+        reply = self.wire.of("chatdgc_message")[-1]["message"]
+        self.service.dispatch({"type": "chatdgc_regenerate", "request_id": "g", "conversation_id": chat, "message_id": reply["id"]})
+        self.ended("g")
+        folder = Path(tempfile.mkdtemp())
+        self.service.dispatch({"type": "chatdgc_export", "request_id": "x1", "conversation_id": chat,
+                               "path": str(folder / "paris.md"), "format": "markdown"})
+        done = self.wire.of("chatdgc_exported")[-1]
+        text = (folder / "paris.md").read_text()
+        self.assertEqual((done["path"], done["bytes"]), (str(folder / "paris.md"), len(text.encode())))
+        self.assertRegex(text.splitlines()[0], r"^# (Weather in Paris\?|Named by the model)$", "its name, as the list shows it")
+        self.assertIn("## You\n\nWeather in Paris?\n\n*Attached: Pasted text*", text)
+        self.assertIn("Rainy.", text, "the version you see")
+        self.assertNotIn("Sunny", text)
+        self.service.dispatch({"type": "chatdgc_version", "request_id": "v", "conversation_id": chat,
+                               "parent_id": self.wire.of("chatdgc_message")[0]["message"]["id"], "index": 0})
+        self.service.dispatch({"type": "chatdgc_export", "request_id": "x2", "conversation_id": chat,
+                               "path": str(folder / "paris.md"), "format": "markdown"})
+        self.assertIn("**Sources**\n\n1. [Forecast](https://weather.example/paris)", (folder / "paris.md").read_text())
+        self.service.dispatch({"type": "chatdgc_export", "request_id": "x3", "conversation_id": chat,
+                               "path": str(folder / "paris.json"), "format": "json"})
+        whole = json.loads((folder / "paris.json").read_text())
+        self.assertEqual(whole["format"], "chatdgc-chat")
+        self.assertEqual(len(whole["chat"]["forks"]), 1, "every version")
+        for bad in ("relative.md", str(folder), str(folder / "missing" / "x.md")):
+            with self.subTest(bad=bad):
+                self.service.dispatch({"type": "chatdgc_export", "request_id": "bad", "conversation_id": chat,
+                                       "path": bad, "format": "markdown"})
+                self.assertEqual(self.wire.of("chatdgc_error")[-1]["message"], "Choose where to save the export.")
+
     def test_one_turn_per_chat_and_two_chats_side_by_side(self):
         first, second = self.new(), self.new()
         self.model.gate.clear()

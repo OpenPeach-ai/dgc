@@ -24,6 +24,7 @@
   message shows which one and what it saw.
 - **Edit** a message you sent, or **Try again** on a reply. The old version stays: **‹ 2 / 3 ›** steps
   between them.
+- **⋯ → Export…** saves a chat as Markdown or JSON.
 
 ### Questions
 

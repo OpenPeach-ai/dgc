@@ -45,6 +45,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **Versions.** `chatdgc_edit` changes a message you sent, and `chatdgc_regenerate` tries a reply again,
   optionally with another model or thinking level. Each makes a new version from that point, and the old
   one is kept. `chatdgc_version` switches between them. A message with other versions carries `versions`.
+- **Export.** `chatdgc_export` writes a chat to a path the user chose: as Markdown (the conversation as
+  shown, with sources) or as JSON (the whole chat, every version).
 
 ### Models
 

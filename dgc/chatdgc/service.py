@@ -139,7 +139,8 @@ class ChatService:
             {"chatdgc_list": self._list, "chatdgc_open": self._open, "chatdgc_earlier": self._earlier,
              "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
              "chatdgc_update": self._update, "chatdgc_file": self._file, "chatdgc_edit": self._edit,
-             "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version}[kind](cmd)
+             "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version,
+             "chatdgc_export": self._export}[kind](cmd)
         except (ChatEngineError, ChatStoreError) as exc:
             self._error(str(exc), request_id, conversation_id)
 
@@ -200,6 +201,23 @@ class ChatService:
                                                               limit=PREVIEW_BYTES), **fields)
         except (ChatEngineError, ChatStoreError) as exc:
             self.emit("chatdgc_file", error=str(exc)[:300], **fields)
+
+    def _export(self, cmd: dict) -> None:
+        import os
+        from pathlib import Path
+        target = Path(cmd["path"])
+        if not target.is_absolute() or target.is_dir() or not target.parent.is_dir():
+            raise ChatEngineError("Choose where to save the export.")
+        data = self.engine.export(cmd["conversation_id"], cmd["format"]).encode("utf-8")
+        temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        try:
+            temp.write_bytes(data)
+            os.replace(temp, target)
+        except OSError as exc:
+            temp.unlink(missing_ok=True)
+            raise ChatEngineError(f"The export couldn't be saved: {exc.strerror or exc}.") from exc
+        self.emit("chatdgc_exported", request_id=cmd["request_id"], conversation_id=cmd["conversation_id"],
+                  path=str(target), bytes=len(data))
 
     # -- turns
 

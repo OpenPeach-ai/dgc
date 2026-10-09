@@ -63,6 +63,8 @@ voice come in later phases.
   versions comes back as you left it. One point keeps up to 50 versions.
 - **Names.** A chat is named from its first line at once. After the first reply, your model gives it a
   short name, the way a chat app does. A name you give a chat yourself is never replaced.
+- **Export.** **⋯ → Export…** saves the chat. As Markdown it holds the conversation you see, with its sources
+  and the names of attached files; as JSON it holds the whole chat, every version included.
 - **Rename, pin, archive, delete.** Use the **⋯** button at the top of a chat. You can also delete a chat
   from the list. Pinned chats come first.
 
@@ -102,6 +104,7 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_edit` | `request_id`, `conversation_id`, `message_id` (yours), `text`, `model?`, `thinking?`, `search?` | `chatdgc_opened` (from the new version on), then a turn |
 | `chatdgc_regenerate` | `request_id`, `conversation_id`, `message_id` (a reply), `model?`, `thinking?`, `search?` | `chatdgc_opened`, then a turn |
 | `chatdgc_version` | `request_id`, `conversation_id`, `parent_id` (the message before the point, or `root`), `index` | `chatdgc_opened` |
+| `chatdgc_export` | `request_id`, `conversation_id`, `path` (absolute, chosen by the user), `format` (`markdown`, `json`) | `chatdgc_exported` (`path`, `bytes`) |
 | `chatdgc_cancel` | `conversation_id`, `request_id?` | the turn ends `cancelled` |
 | `chatdgc_file` | `request_id`, `conversation_id`, `attachment_id` | `chatdgc_file` (`data`: an image as a `data:` URI up to 2.5 MB, or `error`) |
 | `chatdgc_update` | `request_id`, `conversation_id`, `title?`, `pinned?`, `archived?`, `delete?` | `chatdgc_changed` |

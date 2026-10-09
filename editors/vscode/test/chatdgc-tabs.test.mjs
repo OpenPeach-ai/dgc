@@ -21,7 +21,7 @@ class Emitter {
 }
 
 const world = { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
-                chosen: undefined, sizes: {} };
+                chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined };
 function fakePanel(viewType, title) {
   const disposed = new Emitter(), received = new Emitter();
   const panel = {
@@ -40,6 +40,7 @@ function fakePanel(viewType, title) {
 }
 globalThis.__DGC_TEST_VSCODE = {
   Uri: { joinPath: (...parts) => ({ toString: () => parts.map((p) => String(p?.toString?.() ?? p)).join("/") }),
+    file: (p) => ({ scheme: "file", fsPath: p, path: p, toString: () => `file://${p}` }),
     parse: (value) => {
       const file = /^file:\/\/(\/.*)$/.exec(value);
       return file ? { scheme: "file", path: file[1], fsPath: decodeURIComponent(file[1]), toString: () => value, value }
@@ -55,6 +56,9 @@ globalThis.__DGC_TEST_VSCODE = {
     showQuickPick: async (items) => { world.picks.push(items.map((i) => i.id)); return items.find((i) => i.id === world.pick); },
     showInputBox: async () => world.input,
     showOpenDialog: async () => world.chosen,
+    showSaveDialog: async (options) => { world.saveAsked = options; return world.saveTo; },
+    showInformationMessage: async (message) => { world.infos.push(String(message)); return undefined; },
+    showTextDocument: async () => undefined,
   },
   workspace: { fs: { stat: async (uri) => {
     if (world.dirs?.includes(uri.fsPath)) return { size: 0, type: 2 };
@@ -80,7 +84,7 @@ const MSG = (n) => `msg_${String(n).repeat(32).slice(0, 32)}`;
 let chat, host, sent;
 beforeEach(() => {
   Object.assign(world, { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
-                         chosen: undefined, sizes: {} });
+                         chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined });
   sent = [];
   host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" },
     chatdgcSend(cmd) { if (this.outcome === "sent") sent.push(cmd); return this.outcome; },
@@ -353,4 +357,24 @@ test("versions: edits, retries and switches go as their commands, and a new vers
     panel.say({ type: "version", ...bad });
   }
   assert.deepEqual(sent.filter((c) => c.type === "chatdgc_version").map((c) => [c.parent_id, c.index]), [["root", 0], [MSG(1), 2]]);
+});
+
+test("export: the save dialog's choice says where and in which format, and the result is announced", async () => {
+  chat.open(ID(8));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(8), title: "Goa: trip/plan" });
+  world.pick = "export"; world.saveTo = { scheme: "file", fsPath: "/home/u/Goa trip.json", path: "/home/u/Goa trip.json" };
+  panel.say({ type: "menu" });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.match(world.saveAsked.defaultUri.toString(), /Goa trip plan\.md$/, "named after the chat, without path characters");
+  const ask = last("chatdgc_export");
+  assert.deepEqual([ask.path, ask.format], ["/home/u/Goa trip.json", "json"]);
+  chat.onEvent({ type: "chatdgc_exported", request_id: ask.request_id, conversation_id: ID(8), path: "/home/u/Goa trip.json", bytes: 900 });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(world.infos, ["Exported to Goa trip.json."]);
+  world.saveTo = undefined;
+  const before = sent.length;
+  panel.say({ type: "menu" });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(sent.length, before, "cancelled: nothing written");
 });

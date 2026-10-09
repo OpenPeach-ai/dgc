@@ -819,6 +819,10 @@ COMMAND_FIELDS.update({
                            "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
                            "search": _f("string", required=False, enum=CHATDGC_SEARCH)},
     "chatdgc_version": {"request_id": _S(), "conversation_id": _S(), "parent_id": _S(), "index": _I()},
+    # Write the chat to `path` (an absolute path the user chose): Markdown, the conversation as shown; or JSON, the
+    # whole chat. Answered by `chatdgc_exported`.
+    "chatdgc_export": {"request_id": _S(), "conversation_id": _S(), "path": _S(),
+                       "format": _f("string", enum=("markdown", "json"))},
     "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
     # An image the chat keeps, to show (answered by `chatdgc_file`: a data: URI, or why not).
     "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S()},
@@ -845,6 +849,7 @@ EVENT_FIELDS.update({
     "chatdgc_error": {"message": _S(), "request_id": _S(False), "conversation_id": _S(False)},
     "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S(), "data": _S(False),
                      "error": _S(False)},
+    "chatdgc_exported": {"request_id": _S(), "conversation_id": _S(), "path": _S(), "bytes": _I()},
 })
 
 # Names the envelope owns. A payload field with any of these names would overwrite it on the wire

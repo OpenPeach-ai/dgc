@@ -311,6 +311,33 @@ class ChatEngine:
         fork["active"] = index
         return self._save(chat)
 
+    def export(self, chat_id: str, fmt: str) -> str:
+        """The chat as a file: Markdown (the conversation you see, with its sources and what was attached) or JSON
+        (the whole chat, every version, as ChatDGC keeps it; files by name, not their bytes)."""
+        import json as _json
+        chat = self._chat(chat_id)
+        if fmt == "json":
+            return _json.dumps({"exported_at": now(), "format": "chatdgc-chat", "version": 1, "chat": chat},
+                               ensure_ascii=False, indent=2) + "\n"
+        if fmt != "markdown":
+            raise ChatEngineError("Export as Markdown or JSON.")
+        lines = [f"# {chat.get('title') or 'Chat'}", "",
+                 f"*ChatDGC chat, exported {now()[:10]}*" + (f" · {chat['model']}" if chat.get("model") else ""), ""]
+        for m in chat["messages"]:
+            if m["role"] == "user":
+                lines += ["## You", ""]
+                if m.get("text"):
+                    lines += [m["text"], ""]
+                names = [a.get("name", "attachment") for a in m.get("attachments") or []]
+                if names:
+                    lines += ["*Attached: " + ", ".join(names) + "*", ""]
+            else:
+                lines += ["## ChatDGC" + (f" ({m['model']})" if m.get("model") else ""), ""]
+                lines += [m.get("text") or "*(no reply)*", ""]
+                if m.get("sources"):
+                    lines += ["**Sources**", ""] + [f"{x['n']}. [{x['title']}]({x['url']})" for x in m["sources"]] + [""]
+        return "\n".join(lines).rstrip() + "\n"
+
     @staticmethod
     def versions(chat: dict) -> dict[str, dict]:
         """For each message you see that has other versions: the point (``parent``), which one it is, of how many."""
