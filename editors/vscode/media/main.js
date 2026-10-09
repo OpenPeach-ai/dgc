@@ -651,9 +651,13 @@
     return button;
   }
   let sessionsSearchTimer = 0;
+  // One search over both lists: your chats and this project's sessions.
   $("sessions-search")?.addEventListener("input", (e) => {
     clearTimeout(sessionsSearchTimer);
-    sessionsSearchTimer = setTimeout(() => vscode.postMessage({ type: "sessionsSearch", query: e.target.value }), 250);
+    sessionsSearchTimer = setTimeout(() => {
+      vscode.postMessage({ type: "sessionsSearch", query: e.target.value });
+      if (chatsAvailable) vscode.postMessage({ type: "chatdgcSearch", query: e.target.value });
+    }, 250);
   });
   $("sessions-more")?.addEventListener("click", (e) => {
     e.currentTarget.disabled = true; e.currentTarget.textContent = "Loading…";
@@ -668,7 +672,8 @@
     list.replaceChildren();
     // Thousands of sessions: a search over names, first messages and everything said, and Load more.
     const search = $("sessions-search"), more = $("sessions-more"), query = String(msg.query || "");
-    if (search) { search.hidden = msg.searchable !== true; if (document.activeElement !== search) search.value = query; }
+    sessionsSearchable = msg.searchable === true;
+    if (search) { search.hidden = !sessionsSearchable && !chatsAvailable; if (document.activeElement !== search) search.value = query; }
     if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Load more"; }
     status.textContent = msg.error ? String(msg.error)
       : items.length ? "" : query ? `No session mentions “${query}”.`
@@ -716,6 +721,84 @@
       if (item.id === focused) row.focus();
     }
   }
+  // ---- ChatDGC: your chats, the same in every folder, above this project's sessions (Work) ----
+  // A chat opens in an editor tab of its own (src/chatdgc.ts). Titles and previews are the user's and
+  // the model's words: text nodes only. The section stays hidden with a CLI that has no ChatDGC.
+  let chatsAvailable = false, sessionsSearchable = false;
+  function chatWhen(stamp) {
+    const at = Date.parse(String(stamp || ""));
+    if (!Number.isFinite(at)) return "";
+    const minutes = Math.round((Date.now() - at) / 60000);
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} h ago`;
+    const days = Math.round(hours / 24);
+    if (days === 1) return "Yesterday";
+    if (days < 7) return `${days} days ago`;
+    return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: new Date(at).getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+  }
+  function renderChats(msg) {
+    const section = $("chats-home"), list = $("chats-list"), status = $("chats-status"), more = $("chats-more");
+    if (!section || !list) return;
+    chatsAvailable = msg.available === true;
+    section.hidden = !chatsAvailable;
+    $("sessions-title").textContent = chatsAvailable ? "Work" : "Sessions";
+    const search = $("sessions-search");
+    if (search) {
+      search.hidden = !sessionsSearchable && !chatsAvailable;
+      search.placeholder = chatsAvailable ? "Search chats and sessions" : "Search sessions";
+      search.setAttribute("aria-label", chatsAvailable ? "Search your chats and this project's sessions" : "Search sessions: names and everything said");
+    }
+    if (!chatsAvailable) return;
+    const items = Array.isArray(msg.items) ? msg.items : [];
+    const open = new Set(Array.isArray(msg.open) ? msg.open : []);
+    const query = String(msg.query || "");
+    status.textContent = msg.error ? String(msg.error) : items.length ? "" : query ? `No chat mentions “${query}”.`
+      : "No chats yet. Start one with New chat: it's the same in every folder.";
+    if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
+    status.hidden = !status.textContent;
+    if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Show more"; }
+    const focused = document.activeElement?.closest?.(".chat-row")?.dataset.id;
+    list.replaceChildren();
+    for (const item of items) {
+      const title = String(item.title || "New chat");
+      const row = el("li", "session-row chat-row");
+      row.tabIndex = 0; row.dataset.id = String(item.id || "");
+      const main = el("div", "session-main");
+      const name = el("span", "session-name"); name.textContent = title; name.title = title;
+      const meta = el("span", "session-meta");
+      if (item.pinned) { const pin = el("span", "chat-pinned"); pin.textContent = "Pinned"; meta.append(pin); }
+      const when = chatWhen(item.updated_at);
+      if (when) { const span = el("span"); span.textContent = when; meta.append(span); }
+      if (open.has(item.id)) { const tab = el("span", "session-tab"); tab.textContent = "Open in a tab"; meta.append(tab); }
+      main.append(name, meta);
+      if (item.preview) { const preview = el("span", "session-match chat-preview"); preview.textContent = String(item.preview); main.append(preview); }
+      const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
+      remove.title = "Delete this chat";
+      remove.setAttribute("aria-label", `Delete chat: ${title}`);
+      row.append(main, remove);
+      const openIt = () => vscode.postMessage({ type: "chatdgcOpen", id: item.id });
+      row.onclick = openIt;
+      row.onkeydown = (e) => {
+        if (e.target !== row) return;
+        if (e.key === "Enter") { e.preventDefault(); openIt(); }
+        else if (e.key === "Delete") { e.preventDefault(); remove.click(); }
+        else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
+          next?.focus();
+        }
+      };
+      list.append(row);
+      if (item.id === focused) row.focus();
+    }
+  }
+  $("chats-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcNew" }));
+  $("chats-more")?.addEventListener("click", (e) => {
+    e.currentTarget.disabled = true; e.currentTarget.textContent = "Loading…";
+    vscode.postMessage({ type: "chatdgcMore" });
+  });
   function rememberTab(session) {
     if (chatPlace !== "tab") return;
     const key = document.documentElement.dataset.tabKey || "";
@@ -6903,6 +6986,7 @@
     const msg = e.data;
     if (msg.type === "pipsOpen") { showPips(); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
+    if (msg.type === "chatdgc_list") { if (chatPlace === "home") renderChats(msg); return; }
     if (msg.type === "sessions_show") { showSessions(); return; }
     if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {

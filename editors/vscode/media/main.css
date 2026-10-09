@@ -190,6 +190,12 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .session-delete { flex:none; display:inline-flex; align-items:center; justify-content:center; width:var(--control-sm); height:var(--control-sm);
   padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--faint); cursor:pointer; }
 #sessions-host .session-delete:hover { color:var(--err-text); background:var(--surface); }
+/* ChatDGC: your chats above this project's sessions. A chat opens with one click (a session needs
+   Open in Editor: opening one starts a backend in its folder), so its row says so with the pointer. */
+#sessions-host .home-chats { display:flex; flex-direction:column; gap:var(--sp-2); }
+#sessions-host .chat-row { cursor:pointer; }
+#sessions-host .chat-preview { -webkit-line-clamp:1; }
+#sessions-host .chat-pinned { color:var(--accent-text, var(--accent)); }
 /* Your Pips, above your sessions: the ones that need you, each with its face waiting, or a quiet row
    of faces. A soft violet panel, the one tinted thing on the home, so it reads as news. */
 #sessions-host .home-pips { display:flex; flex-direction:column; gap:var(--sp-1); padding:var(--sp-2);

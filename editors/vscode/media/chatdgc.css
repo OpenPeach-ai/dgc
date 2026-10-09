@@ -1,0 +1,97 @@
+/* ChatDGC's screen. It loads main.css for DGC's tokens and its Markdown, code and link styles (.text,
+   pre.code, .md-link, .md-table, hljs); everything laid out here is cd- prefixed, so no rule of the
+   coding chat's reaches it and none of these reaches that one. */
+body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760px;
+  display: flex; flex-direction: column; height: 100%; background: var(--bg); }
+
+.cd-head { flex: none; display: flex; align-items: center; gap: var(--sp-2); min-height: 40px;
+  padding: var(--sp-1) var(--sp-3); border-bottom: 1px solid var(--border); }
+.cd-title { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-strong); font: var(--w-semi) var(--t-base)/1.3 var(--sans); }
+.cd-badge { flex: none; padding: 2px var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-full);
+  color: var(--muted); font: var(--w-med) var(--t-xs)/1.3 var(--sans); }
+.cd-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--control); height: var(--control);
+  padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.cd-icon:hover { background: var(--surface2); color: var(--text); }
+
+.cd-column { width: 100%; max-width: var(--cd-col); margin: 0 auto; padding: 0 var(--sp-4); }
+.cd-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-block: var(--sp-5); }
+.cd-log { display: flex; flex-direction: column; gap: var(--sp-4); }
+.cd-earlier { display: block; margin: 0 auto var(--sp-4); padding: var(--sp-1) var(--sp-3); border: 1px solid var(--border-strong);
+  border-radius: var(--r-full); background: transparent; color: var(--text); font: var(--w-med) var(--t-sm)/1.4 var(--sans); cursor: pointer; }
+.cd-earlier:hover { background: var(--surface2); }
+
+/* A new chat: the question and the box sit together near the middle, the way a chat app opens. */
+.cd-empty { text-align: center; }
+.cd-empty h2 { margin: 0; color: var(--text-strong); font: var(--w-semi) 24px/1.3 var(--sans); text-wrap: balance; }
+body.cd-blank .cd-scroll { display: flex; flex-direction: column; justify-content: flex-end; flex: 1 1 0; padding-bottom: var(--sp-6); }
+body.cd-blank .cd-foot { flex: 1 1 0; }
+body.cd-blank .cd-fine { display: none; }
+
+.cd-msg { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.cd-user { align-items: flex-end; gap: 2px; }
+.cd-bubble { max-width: min(85%, 640px); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-2xl);
+  background: var(--prompt-fill, color-mix(in srgb, var(--accent) 14%, var(--surface))); color: var(--text-strong);
+  font: var(--w-reg) var(--t-chat)/1.6 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cd-assistant .cd-body { font-size: calc(var(--t-chat) + 1px); }
+.cd-working { color: var(--muted); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); animation: pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .cd-working { animation: none; } }
+
+.cd-thinking { border-left: 2px solid var(--border-strong); padding-left: var(--sp-3); }
+.cd-thinking-label { cursor: pointer; color: var(--muted); font: var(--w-med) var(--t-sm)/1.5 var(--sans); }
+.cd-thinking-label:hover { color: var(--text); }
+.cd-thought { margin-top: var(--sp-1); max-height: 320px; overflow-y: auto; color: var(--muted); white-space: pre-wrap;
+  overflow-wrap: anywhere; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); }
+
+.cd-end { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0; color: var(--muted);
+  font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.cd-end-error { color: var(--err-text); }
+.cd-continue { padding: 2px var(--sp-3); border: 1px solid var(--accent-fill); border-radius: var(--r-full); background: var(--accent-fill);
+  color: #fff; font: var(--w-semi) var(--t-xs)/1.6 var(--sans); cursor: pointer; }
+.cd-continue:hover { background: var(--accent-hover); }
+.cd-continue:disabled { opacity: .6; cursor: default; }
+
+.cd-actions { display: flex; align-items: center; gap: var(--sp-1); min-height: var(--control-sm); }
+.cd-user .cd-actions { opacity: 0; }
+.cd-user:hover .cd-actions, .cd-user:focus-within .cd-actions { opacity: 1; }
+.cd-action { display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm);
+  padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.cd-action:hover { background: var(--surface2); color: var(--text); }
+.cd-meta { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); padding-left: var(--sp-1); }
+
+.cd-foot { flex: none; padding-bottom: var(--sp-2); }
+.cd-notice { margin: 0 0 var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--err); border-radius: var(--r-md);
+  background: var(--err-soft); color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.cd-notice[data-kind="info"] { border-color: var(--border-strong); background: var(--surface2); }
+.cd-box { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-2xl); background: var(--surface2); }
+.cd-box:focus-within { border-color: var(--accent); }
+.cd-input { width: 100%; min-height: 24px; max-height: 40vh; resize: none; border: 0; outline: none; padding: 0 var(--sp-1);
+  background: transparent; color: var(--text-strong); font: var(--w-reg) calc(var(--t-chat) + 1px)/1.55 var(--sans); }
+.cd-input:focus-visible { outline: none; }
+.cd-input::placeholder { color: var(--muted); }
+.cd-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.cd-select { max-width: 220px; height: var(--control); padding: 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-full);
+  background: var(--surface); color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; text-overflow: ellipsis; }
+.cd-select:hover { border-color: var(--border-strong); }
+.cd-toggle { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.cd-toggle input { margin: 0; accent-color: var(--accent); }
+.cd-spacer { flex: 1 1 auto; }
+/* margin-left:auto, not only the spacer: when a narrow box wraps the tools, Send still ends the row on the right. */
+.cd-send { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: var(--control); height: var(--control);
+  padding: 0; border: 0; border-radius: var(--r-full); background: var(--accent-fill); color: #fff; cursor: pointer; }
+.cd-send:hover { background: var(--accent-hover); }
+.cd-send:disabled { background: var(--border-strong); color: var(--faint); cursor: default; }
+.cd-stop { background: var(--text-strong); color: var(--bg); }
+.cd-stop:hover { background: var(--text); }
+.cd-fine { margin: var(--sp-2) 0 0; text-align: center; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+
+@media (max-width: 520px) {
+  .cd-column { padding: 0 var(--sp-3); }
+  .cd-bubble { max-width: 92%; }
+  .cd-select { max-width: 150px; }
+}
+@media (forced-colors: active) {
+  .cd-bubble, .cd-box, .cd-select { border: 1px solid CanvasText; }
+  .cd-send, .cd-continue { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+}

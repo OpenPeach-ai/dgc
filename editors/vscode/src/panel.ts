@@ -9,6 +9,7 @@ import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
+import type { ChatDGC, ChatDGCHost } from "./chatdgc";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
@@ -565,6 +566,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** Set on the side bar's provider once it is the Sessions home (useSessionsHome). */
   private places?: ChatPlaces;
   private home = false;
+  /** ChatDGC (chatdgc.ts): only the side bar's provider has it. */
+  private chatdgc?: ChatDGC;
   /** The side bar's tabs: their review documents and file events go through it. */
   private readonly tabProviders = new Set<DgcViewProvider>();
   /** The tab's title has been set from its session or its first prompt. */
@@ -622,6 +625,34 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       watcher.onDidDelete(changed);
       this.context.subscriptions.push(watcher);
     }
+  }
+
+  /** ChatDGC rides on this provider's dgc serve: the side bar's, whose handshake gave it the user's
+   *  model settings and keys. It hears every chatdgc_* event (routeEvent) and sends through here. */
+  useChatDGC(chat: ChatDGC): void {
+    this.chatdgc = chat;
+    const host: ChatDGCHost = {
+      chatdgcSend: (cmd) => this.chatdgcSend(cmd),
+      chatdgcModels: () => this.chatdgcModels(),
+      postHome: (message) => { if (this.home && this.webviewReady) this.post(message); },
+    };
+    chat.attach(host);
+  }
+
+  /** Never a cached backend: the one this provider holds now, started if it has none. A send to a
+   *  retired instance would start a child nobody watches. */
+  private chatdgcSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli" {
+    let be: ChatBackend;
+    try { be = this.ensureBackend(); } catch { return "starting"; }
+    if (!this.sessionReady || !this.lastReadyEvent || !be.ready) { return "starting"; }
+    const offered = (this.lastReadyEvent.capabilities as any)?.chatdgc;
+    if (!offered || typeof offered !== "object" || Number(offered.version) < 1) { return "old_cli"; }
+    return be.send(cmd as any) ? "sent" : "starting";
+  }
+
+  private async chatdgcModels(): Promise<{ ids: string[]; current: string }> {
+    const current = String(this.state.model || "");
+    try { return { ids: await this.fetchModels(), current }; } catch { return { ids: [], current }; }
   }
 
   /** The side bar becomes the Sessions home: its own chat starts empty rather than on the window's
@@ -1151,6 +1182,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  NOT painted, and nothing is buffered, because switching asks that backend for its own history
    *  snapshot -- which re-announces whatever decision it is blocked on, with the same request ids. */
   private routeEvent(slot: ChatSlot, ev: DgcEvent): void {
+    // ChatDGC's, never a session's: no transcript, chip or card of this chat is about a ChatDGC chat.
+    if (typeof ev.type === "string" && ev.type.startsWith("chatdgc_")) { this.chatdgc?.onEvent(ev); return; }
     if (slot.id === this.activeSlotId) { this.onEvent(ev); return; }
     this.backgroundEvent(slot, ev);
   }
@@ -1337,6 +1370,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.initializingBackend = undefined;
     this.nativeSettingsReady = false;
     be.completeHandshake();
+    this.chatdgc?.backendReady();
     // A new backend (first start, crash recovery) owns the truth about this chat's agents: its
     // snapshot replaces whatever the webview marked stopped when the old one exited.
     if (this.lastReadyEvent?.capabilities?.agents) {
@@ -2396,6 +2430,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const facts: ChildExitInfo = info || { uptimeMs: be.uptimeMs, framesWritten: 0 };
       const how = exitHow(code, signal);
       if (slot.id === this.activeSlotId) { this.mcpUrls.clear(); }
+      if (!host) { this.chatdgc?.backendLost(); }   // a ChatDGC reply on this process stopped with it
       if (facts.cause) { return; }             // our own teardown: already logged and handled
       // With no word from the backend, the exit status is the cause: "killed by SIGKILL", or
       // "exited with code 1". (`exited with ${how}` read "exited with killed by SIGKILL".)
@@ -3728,7 +3763,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       case "sessionsList":
-        if (this.home) { void this.postSessions(); }
+        if (this.home) { void this.postSessions(); this.chatdgc?.homeRefresh(); }
+        return;
+      case "chatdgcOpen": case "chatdgcNew": case "chatdgcSearch": case "chatdgcMore": case "chatdgcDelete":
+        if (this.home && this.chatdgc) { await this.chatdgc.homeMessage(msg); }
         return;
       case "openSessionInEditor":
         this.openSessionInEditor(String(msg.id ?? ""), String(msg.title ?? ""));
@@ -6645,7 +6683,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}">
 <header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to DGC chat" aria-label="Back to DGC chat" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Chat</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span><span class="pips-nav-core" aria-hidden="true"></span></button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
 <section id="pips-host" data-style-uri="${pipsStyle}" aria-label="DGC Pips" hidden></section>
-<section id="sessions-host" class="sessions-home" aria-labelledby="sessions-title" hidden><section id="sessions-pips" class="home-pips" aria-label="Your Pips" hidden></section><div class="sessions-head"><h2 id="sessions-title">Sessions</h2><button type="button" id="sessions-new" class="sessions-new" title="Start a new session in an editor tab"><span class="codicon codicon-add" aria-hidden="true"></span>New session</button></div><input id="sessions-search" class="sessions-search" type="search" placeholder="Search sessions" aria-label="Search sessions: names and everything said" autocomplete="off" maxlength="200" hidden><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section>
+<section id="sessions-host" class="sessions-home" aria-labelledby="sessions-title" hidden><section id="sessions-pips" class="home-pips" aria-label="Your Pips" hidden></section><input id="sessions-search" class="sessions-search" type="search" placeholder="Search sessions" aria-label="Search sessions: names and everything said" autocomplete="off" maxlength="200" hidden><section id="chats-home" class="home-chats" aria-labelledby="chats-title" hidden><div class="sessions-head"><h2 id="chats-title">Chat</h2><button type="button" id="chats-new" class="sessions-new" title="Start a new chat in an editor tab"><span class="codicon codicon-add" aria-hidden="true"></span>New chat</button></div><p id="chats-status" class="sessions-status" role="status" hidden></p><ul id="chats-list" class="sessions-list" aria-label="Your chats"></ul><button type="button" id="chats-more" class="sessions-more" title="Show more of your chats" hidden>Show more</button></section><div class="sessions-head"><h2 id="sessions-title">Sessions</h2><button type="button" id="sessions-new" class="sessions-new" title="Start a new session in an editor tab"><span class="codicon codicon-add" aria-hidden="true"></span>New session</button></div><p id="sessions-status" class="sessions-status" role="status">Loading this project's sessions…</p><ul id="sessions-list" class="sessions-list" aria-label="Sessions in this project"></ul><button type="button" id="sessions-more" class="sessions-more" title="Show 200 more sessions" hidden>Load more</button></section>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <section id="agent-page" hidden>

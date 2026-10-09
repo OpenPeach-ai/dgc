@@ -177,7 +177,7 @@ for (const [width, theme] of [[380, "dark-modern"], [260, "dark-modern"], [380, 
             .filter((n) => { const r = n.getBoundingClientRect(); return r.right > view.right + 0.5 || r.left < view.left - 0.5; }).length,
           clipped: [...document.querySelectorAll(".session-meta > span")].filter((n) => n.scrollWidth > n.clientWidth + 1).length,
           nameLines: rows.map((row) => { const n = row.querySelector(".session-name"); return Math.round(n.getBoundingClientRect().height / parseFloat(getComputedStyle(n).lineHeight)); }),
-          head: Math.round(document.querySelector("#sessions-host .sessions-head h2").getBoundingClientRect().left),
+          head: Math.round(document.getElementById("sessions-title").getBoundingClientRect().left),
           text: Math.round(rows[0].querySelector(".session-name").getBoundingClientRect().left),
           button: getComputedStyle(document.querySelector(".session-open-label")).display,
         };

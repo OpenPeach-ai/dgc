@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 import { SessionTabs } from "./sessionTabs";
+import { ChatDGC } from "./chatdgc";
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
 import { heldCliTerminalOptions, updateCliWithProgress } from "./cliupdate";
@@ -15,6 +16,9 @@ export function activate(context: vscode.ExtensionContext): void | object {
   // #3: the side bar is the Sessions home, and each session opens in an editor tab of its own.
   const tabs = new SessionTabs(context, provider, (init) => new DgcViewProvider(context, init));
   provider.useSessionsHome(tabs);
+  // ChatDGC: chats of their own, in editor tabs, on the side bar's dgc serve; the home lists them.
+  const chatdgc = new ChatDGC(context);
+  provider.useChatDGC(chatdgc);
   // The chat a palette command acts on: the tab you last worked in. `chat` opens a new session's tab
   // when none is open, for commands that put something in a chat; `current` falls back to the side
   // bar for the ones that only change a setting.
@@ -67,10 +71,13 @@ export function activate(context: vscode.ExtensionContext): void | object {
     }),
     tabs.register(),
     tabs,
+    chatdgc.register(),
+    chatdgc,
     provider,
     vscode.commands.registerCommand("dgc.focus", () => provider.focus()),
     vscode.commands.registerCommand("dgc.openCommandMenu", () => chat().openCommandMenu()),
     vscode.commands.registerCommand("dgc.newSession", () => { tabs.open(""); }),
+    vscode.commands.registerCommand("dgc.newChatDGC", () => chatdgc.open("")),
     vscode.commands.registerCommand("dgc.newParallelChat", () => { tabs.open(""); }),
     vscode.commands.registerCommand("dgc.newChatInFolder", () => chat().newChatInFolder()),
     vscode.commands.registerCommand("dgc.switchChat", () => chat().pickChat()),

@@ -80,7 +80,7 @@ test("the Pips that need you sit above your sessions, each with its face, what i
   try {
     await page.waitForSelector("#sessions-pips .home-pip-row");
     const m = await page.evaluate(() => {
-      const root = document.getElementById("sessions-pips"), head = document.querySelector("#sessions-host .sessions-head");
+      const root = document.getElementById("sessions-pips"), head = document.getElementById("sessions-title").closest(".sessions-head");
       return { rows: [...root.querySelectorAll(".home-pip-row")].map((r) => [r.querySelector("strong").textContent, r.querySelector("small").textContent,
         r.querySelector(".home-pip-badge")?.textContent || "", r.querySelector(".dgc-plush")?.dataset.character || "", r.querySelector(".dgc-plush")?.dataset.state || ""]),
         above: root.getBoundingClientRect().bottom <= head.getBoundingClientRect().top + 1,
