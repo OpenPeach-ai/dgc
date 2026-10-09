@@ -83,6 +83,20 @@ body.cd-blank .cd-fine { display: none; }
 .cd-box { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-2);
   border: 1px solid var(--border-strong); border-radius: var(--r-2xl); background: var(--surface2); }
 .cd-box:focus-within { border-color: var(--accent); }
+/* Attachments: chips in the box before sending, and on the message once sent. */
+.cd-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.cd-chip { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 100%; min-height: var(--control);
+  padding: 0 var(--sp-1) 0 var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface);
+  color: var(--text); font: var(--w-med) var(--t-xs)/1.3 var(--sans); }
+.cd-chip .codicon { color: var(--muted); }
+.cd-chip-name { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-chip-about { color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cd-chip-remove { display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm);
+  padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.cd-chip-remove:hover { background: var(--surface2); color: var(--text); }
+.cd-sent { justify-content: flex-end; }
+.cd-sent .cd-chip { padding-right: var(--sp-2); }
+
 .cd-input { width: 100%; min-height: 24px; max-height: 40vh; resize: none; border: 0; outline: none; padding: 0 var(--sp-1);
   background: transparent; color: var(--text-strong); font: var(--w-reg) calc(var(--t-chat) + 1px)/1.55 var(--sans); }
 .cd-input:focus-visible { outline: none; }

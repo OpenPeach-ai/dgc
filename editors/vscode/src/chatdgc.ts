@@ -19,6 +19,10 @@ const TITLE_CHARS = 40;
 const HOME_FIRST = 6;          // the home shows a few chats; "Show more" pages on
 const HOME_PAGE = 50;
 const MAX_REQUESTS = 512;
+const MAX_ATTACHMENTS = 10;
+/** What one send may carry inline (pasted images and text), under the 4 MiB command frame; a picked file
+ *  goes by its path and costs the frame nothing. */
+const MAX_INLINE_CHARS = 3_000_000;
 
 /** What ChatDGC needs of the side bar: its process, and its home's webview. */
 export interface ChatDGCHost {
@@ -37,6 +41,9 @@ interface Tab {
   /** Commands held while the process starts. */
   held: Record<string, unknown>[];
   opened: boolean;
+  /** Files this tab's picker returned: the only paths a send may name, so a page can never have the
+   *  backend read a file the user didn't choose. */
+  picked: Set<string>;
 }
 
 type Asker = { tab?: Tab; home?: boolean; kind: string };
@@ -64,9 +71,10 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 </div></main>
 <footer class="cd-foot"><div class="cd-column">
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>
-<form id="cd-box" class="cd-box"><label for="cd-input" class="sr-only">Message ChatDGC</label>
+<form id="cd-box" class="cd-box"><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul><label for="cd-input" class="sr-only">Message ChatDGC</label>
 <textarea id="cd-input" class="cd-input" rows="1" placeholder="Ask anything" maxlength="${MAX_TEXT}"></textarea>
 <div class="cd-tools">
+<button type="button" id="cd-attach" class="cd-icon" title="Attach files (or paste an image)" aria-label="Attach files"><span class="codicon codicon-attach" aria-hidden="true"></span></button>
 <label class="sr-only" for="cd-model">Model</label><select id="cd-model" class="cd-select" title="Model"></select>
 <label class="sr-only" for="cd-thinking">Thinking</label><select id="cd-thinking" class="cd-select" title="How much the model thinks first">
 <option value="off">Thinking off</option><option value="low">Think: low</option><option value="medium">Think: medium</option><option value="high">Think: high</option><option value="xhigh">Think: extra high</option></select>
@@ -126,7 +134,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean): void {
     panel.iconPath = { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-light.svg"),
                        dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-dark.svg") };
-    const tab: Tab = { panel, conversation, temporary, held: [], opened: false };
+    const tab: Tab = { panel, conversation, temporary, held: [], opened: false, picked: new Set() };
     this.tabs.add(tab);
     panel.onDidDispose(() => {
       this.tabs.delete(tab);
@@ -270,15 +278,36 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(tab.temporary ? { temporary: true } : {}) });
         this.homeChanged();
         return;
+      case "attach": {
+        const chosen = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: "Attach",
+          title: "Attach files to this chat" });
+        if (!chosen?.length) return;
+        const items = [];
+        for (const uri of chosen.slice(0, MAX_ATTACHMENTS)) {
+          if (uri.scheme !== "file") continue;
+          let size = 0;
+          try { size = (await vscode.workspace.fs.stat(uri)).size; } catch { continue; }
+          tab.picked.add(uri.fsPath);
+          items.push({ kind: "file", path: uri.fsPath, name: uri.path.split("/").pop() || "file", size });
+        }
+        this.post(tab, { type: "attached", items });
+        return;
+      }
       case "send": {
         const text = typeof message.text === "string" ? message.text : "";
-        if (!conversation || !text.trim() || text.length > MAX_TEXT) return;
+        const attachments = this.attachmentsFrom(tab, message.attachments);
+        if (attachments === undefined) {
+          this.post(tab, { type: "error", message: "Those attachments are too large to send together. Attach big images as files instead." });
+          return;
+        }
+        if (!conversation || (!text.trim() && !attachments.length) || text.length > MAX_TEXT) return;
         const model = typeof message.model === "string" && message.model.length <= 200 ? message.model : "";
         const thinking = typeof message.thinking === "string" && THINKING.has(message.thinking) ? message.thinking : "";
         const search = typeof message.search === "string" && SEARCH.has(message.search) ? message.search : "";
         this.ask({ tab, kind: "send" }, { type: "chatdgc_send", conversation_id: conversation, text,
                                           ...(model ? { model } : {}), ...(thinking ? { thinking } : {}),
-                                          ...(search ? { search } : {}) });
+                                          ...(search ? { search } : {}),
+                                          ...(attachments.length ? { attachments } : {}) });
         return;
       }
       case "continue":
@@ -313,6 +342,28 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       }
     }
+  }
+
+  /** What a send may carry: files this tab's picker returned (by path), pasted images (PNG, JPEG, GIF or WebP
+   *  data: URIs) and pasted text, together small enough for one frame. undefined: too large. */
+  private attachmentsFrom(tab: Tab, raw: unknown): Record<string, string>[] | undefined {
+    if (!Array.isArray(raw)) return [];
+    const out: Record<string, string>[] = [];
+    let inline = 0;
+    for (const item of raw.slice(0, MAX_ATTACHMENTS)) {
+      const name = typeof item?.name === "string" ? item.name.slice(0, 120) : "";
+      if (item?.kind === "file" && typeof item.path === "string" && tab.picked.has(item.path)) {
+        out.push({ kind: "file", path: item.path, ...(name ? { name } : {}) });
+      } else if (item?.kind === "image" && typeof item.data === "string"
+                 && /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(item.data)) {
+        inline += item.data.length;
+        out.push({ kind: "image", data: item.data, ...(name ? { name } : {}) });
+      } else if (item?.kind === "text" && typeof item.text === "string" && item.text.trim()) {
+        inline += item.text.length * 3;            // what it may weigh as UTF-8 in the frame
+        out.push({ kind: "text", text: item.text, ...(name ? { name } : {}) });
+      }
+    }
+    return inline > MAX_INLINE_CHARS ? undefined : out;
   }
 
   private async models(tab: Tab): Promise<void> {

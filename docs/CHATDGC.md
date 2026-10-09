@@ -4,8 +4,8 @@ ChatDGC is a chat app inside DGC. You ask a question and your own model answers.
 the folder you have open, so every window lists the same chats. It runs on its own engine and keeps its
 own store, separate from Work (the coding sessions) and from Pips.
 
-Today ChatDGC has chats, streaming replies, the model and thinking picker, web search with cited sources,
-Stop and Continue, and temporary chats. Attachments, editing and regenerating, memory, Deep Research and
+Today ChatDGC has chats, streaming replies, the model and thinking picker, files and images, web search with
+cited sources, Stop and Continue, and temporary chats. Editing and regenerating, memory, Deep Research and
 voice come in later phases.
 
 ## Using it
@@ -16,6 +16,16 @@ voice come in later phases.
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
+- **Files, images and long pastes.** Use the paperclip to attach up to ten files to a message, or paste an
+  image or a long piece of text (more than 5,000 characters) into the box. You can send a message with only
+  files.
+  - **Documents:** PDF, Word, PowerPoint, Excel, OpenDocument, RTF and CSV are read with DGC's document
+    reader. Any other file must be plain text.
+  - **Images:** PNG, JPEG, GIF or WebP, checked by their bytes rather than their name. They go to models
+    that can see images; with a model that can't, ChatDGC says so before anything is kept.
+  - **What the chat keeps:** its own copy of each file, so a file moved later is still what the
+    conversation was about. Files are capped at 25 MB (images at 8 MB). A pasted image is scaled so its
+    longer side is at most 2,048 pixels.
 - **Web search.** Pick **Web** in the box:
   - **auto** (the default): your model searches when the answer depends on something current, such as
     news, prices, weather or a fact it isn't sure of.
@@ -74,10 +84,15 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_list` | `request_id`, `query?`, `archived?`, `limit?` (1–200), `offset?` | `chatdgc_chats` |
 | `chatdgc_open` | `request_id`, `conversation_id?` (omit for a new chat), `temporary?` | `chatdgc_opened` |
 | `chatdgc_earlier` | `request_id`, `conversation_id`, `before` (a message id) | `chatdgc_earlier` |
-| `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`off`, `auto`, `on`) | a turn (below) |
+| `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`off`, `auto`, `on`), `attachments?` | a turn (below) |
 | `chatdgc_continue` | `request_id`, `conversation_id`, `message_id` | a turn |
 | `chatdgc_cancel` | `conversation_id`, `request_id?` | the turn ends `cancelled` |
 | `chatdgc_update` | `request_id`, `conversation_id`, `title?`, `pinned?`, `archived?`, `delete?` | `chatdgc_changed` |
+
+`attachments` holds up to 10 items: `{kind: "file", path}` for a file the user picked (the backend reads it, so a
+frame never carries it), `{kind: "image", data}` for a pasted image as a `data:` URI, or `{kind: "text", text}`
+for a long paste. Each may also carry `name`. The user's message keeps `attachments` metadata: `id`, `kind`
+(`document`, `image` or `text`), `name`, `size`, and `chars` for text.
 
 A turn sends its events in this order:
 

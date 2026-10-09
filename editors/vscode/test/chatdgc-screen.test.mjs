@@ -295,3 +295,52 @@ test("a reply that searches: what it looks for while it looks, citation marks, a
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("attachments: picked files and pastes become chips, go with the message, and show on it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.page.locator("#cd-attach").click();
+    assert.deepEqual((await s.posted("attach")).length, 1);
+    await s.send({ type: "attached", items: [{ kind: "file", path: "/home/u/trip.csv", name: "trip.csv", size: 2400 },
+                                             { kind: "file", path: "/home/u/old.pdf", name: "old.pdf", size: 3_400_000 }] });
+    assert.deepEqual(await s.page.locator("#cd-chips .cd-chip").allInnerTexts(), ["trip.csv\n2 KB", "old.pdf\n3.2 MB"]);
+    await s.page.locator('#cd-chips .cd-chip-remove[title="Remove old.pdf"]').click();
+    assert.equal(await s.page.locator("#cd-chips .cd-chip").count(), 1);
+    assert.equal(await s.page.locator("#cd-send").isDisabled(), false, "a file alone can be sent");
+    const long = "word ".repeat(1500);
+    await s.page.locator("#cd-input").focus();
+    await s.page.evaluate((text) => {
+      const data = new DataTransfer(); data.setData("text/plain", text);
+      document.getElementById("cd-input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, long);
+    await s.page.evaluate(async () => {
+      const canvas = document.createElement("canvas"); canvas.width = 4000; canvas.height = 1000;
+      canvas.getContext("2d").fillRect(0, 0, 4000, 1000);
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+      const data = new DataTransfer(); data.items.add(new File([blob], "image.png", { type: "image/png" }));
+      document.getElementById("cd-input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await s.page.waitForFunction(() => document.querySelectorAll("#cd-chips .cd-chip").length === 3);
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "", "the long paste went to a chip, not the box");
+    const names = await s.page.locator("#cd-chips .cd-chip-name").allTextContents();
+    assert.deepEqual(names, ["trip.csv", "Pasted text", "Pasted image"]);
+    assert.match(await s.page.locator("#cd-chips .cd-chip").nth(1).innerText(), /7,500 characters/);
+    await s.page.locator("#cd-send").click();
+    const [sent] = await s.posted("send");
+    assert.equal(sent.text, "");
+    assert.deepEqual(sent.attachments.slice(0, 2), [{ kind: "file", name: "trip.csv", path: "/home/u/trip.csv" },
+                                                    { kind: "text", name: "Pasted text", text: long }]);
+    const image = sent.attachments[2];
+    const side = await s.page.evaluate((uri) => new Promise((r) => { const i = new Image(); i.onload = () => r([i.naturalWidth, i.naturalHeight]); i.src = uri; }), image.data);
+    assert.deepEqual(side, [2048, 512], "scaled to fit one frame");
+    assert.equal(await s.page.locator("#cd-chips").isHidden(), true, "the box is clear again");
+    await s.send({ type: "message", message: { id: M(1), role: "user", text: "", attachments: [
+      { id: "att_" + "1".repeat(32), kind: "document", name: "trip.csv", size: 2400, chars: 1200 },
+      { id: "att_" + "2".repeat(32), kind: "image", name: "Pasted image", size: 50_000 }] } });
+    assert.deepEqual(await s.page.locator(".cd-user .cd-sent .cd-chip").allInnerTexts(), ["trip.csv\n1,200 characters", "Pasted image\n49 KB"]);
+    assert.equal(await s.page.locator(".cd-user .cd-bubble").count(), 0, "no empty bubble for a message of only files");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

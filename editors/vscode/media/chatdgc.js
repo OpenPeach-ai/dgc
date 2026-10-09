@@ -12,7 +12,10 @@
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), searchPick = $("cd-search"), notice = $("cd-notice");
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
-                  model: "", thinking: "", opened: false, unavailable: "", searching: {} };
+                  model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [] };
+  const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
+  const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
+  const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
   const LABEL = { off: "Thinking off", low: "Think: low", medium: "Think: medium", high: "Think: high", xhigh: "Think: extra high" };
 
   // ---- scrolling: follow the reply while the reader is at the bottom
@@ -109,14 +112,49 @@
     if (finish === "length") return el("p", "cd-end", "The model reached its length limit here.");
     return null;
   }
+  const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
+  /** One attachment as a chip: an icon for its kind, its name, and its size or length. */
+  function chip(item, onRemove) {
+    const node = el("li", "cd-chip");
+    const kind = item.kind === "file" ? (/\.(png|jpe?g|gif|webp)$/i.test(item.name || "") ? "image" : "file") : item.kind;
+    const glyph = el("span", `codicon codicon-${KIND_ICON[kind] || "file"}`); glyph.setAttribute("aria-hidden", "true");
+    const name = el("span", "cd-chip-name", item.name || "Attachment");
+    const about = item.kind === "text" && typeof item.text === "string" ? `${item.text.length.toLocaleString()} characters`
+      : Number(item.chars) && item.kind !== "image" ? `${Number(item.chars).toLocaleString()} characters`
+      : Number(item.size) ? sizeText(Number(item.size)) : "";
+    node.append(glyph, name);
+    if (about) node.append(el("span", "cd-chip-about", about));
+    node.title = item.name || "";
+    if (onRemove) {
+      const remove = el("button", "cd-chip-remove");
+      remove.type = "button"; remove.title = `Remove ${item.name || "attachment"}`; remove.setAttribute("aria-label", remove.title);
+      const x = el("span", "codicon codicon-close"); x.setAttribute("aria-hidden", "true");
+      remove.append(x); remove.addEventListener("click", onRemove);
+      node.append(remove);
+    }
+    return node;
+  }
+  function chips() {
+    const box = $("cd-chips");
+    box.replaceChildren(...state.pending.map((item, i) => chip(item, () => { state.pending.splice(i, 1); chips(); controls(); input.focus(); })));
+    box.hidden = !state.pending.length;
+  }
   function messageNode(message) {
     const live = state.busy && message.id === state.replyId;
     const node = el("article", `cd-msg cd-${message.role === "user" ? "user" : "assistant"}`);
     node.dataset.id = message.id || "";
     if (message.role === "user") {
-      const bubble = el("div", "cd-bubble");
-      bubble.textContent = message.text || "";
-      node.append(bubble);
+      if (Array.isArray(message.attachments) && message.attachments.length) {
+        const list = el("ul", "cd-chips cd-sent");
+        list.setAttribute("aria-label", "Attached");
+        list.append(...message.attachments.map((item) => chip(item)));
+        node.append(list);
+      }
+      if (message.text) {
+        const bubble = el("div", "cd-bubble");
+        bubble.textContent = message.text;
+        node.append(bubble);
+      }
       const actions = el("div", "cd-actions");
       actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
       node.append(actions);
@@ -178,7 +216,7 @@
     const text = input.value;
     send.hidden = state.busy;
     stop.hidden = !state.busy;
-    send.disabled = !text.trim() || !state.conversation || !!state.unavailable;
+    send.disabled = (!text.trim() && !state.pending.length) || !state.conversation || !!state.unavailable;
     input.disabled = !!state.unavailable;
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
     $("cd-temp-toggle").hidden = !fresh;
@@ -199,10 +237,13 @@
   stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
   function submit() {
     const text = input.value;
-    if (!text.trim() || state.busy || !state.conversation || state.unavailable) return;
+    if ((!text.trim() && !state.pending.length) || state.busy || !state.conversation || state.unavailable) return;
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "",
-                         search: searchPick.value || "auto" });
+                         search: searchPick.value || "auto",
+                         ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted }) =>
+                           ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}) })) } : {}) });
     input.value = ""; grow(); saveDraft();
+    state.pending = []; chips();
     state.busy = true;        // until the turn says otherwise: no second send in the meantime
     hideNotice();
     controls();
@@ -214,6 +255,47 @@
   searchPick.addEventListener("change", () => { try { vscode.setState({ ...(vscode.getState() || {}), search: searchPick.value }); } catch {} });
   $("cd-temporary").addEventListener("change", (e) => vscode.postMessage({ type: "newChat", temporary: e.target.checked }));
   $("cd-new").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
+  $("cd-attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
+  /** A pasted image, scaled so its longer side is at most IMAGE_SIDE; JPEG when that is smaller. */
+  function pastedImage(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const picture = new Image();
+        picture.onload = () => {
+          const scale = Math.min(1, IMAGE_SIDE / Math.max(picture.naturalWidth, picture.naturalHeight));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(picture.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(picture.naturalHeight * scale));
+          canvas.getContext("2d").drawImage(picture, 0, 0, canvas.width, canvas.height);
+          const png = canvas.toDataURL("image/png"), jpeg = canvas.toDataURL("image/jpeg", 0.88);
+          resolve(jpeg.length < png.length ? jpeg : png);
+        };
+        picture.onerror = () => resolve(null);
+        picture.src = String(reader.result || "");
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  }
+  input.addEventListener("paste", async (e) => {
+    const files = [...(e.clipboardData?.files || [])].filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type));
+    const words = e.clipboardData?.getData("text/plain") || "";
+    if (files.length) {
+      e.preventDefault();
+      for (const file of files.slice(0, 10 - state.pending.length)) {
+        const data = await pastedImage(file);
+        if (data) state.pending.push({ kind: "image", name: file.name && file.name !== "image.png" ? file.name : "Pasted image", data,
+                                       size: Math.round(data.length * 0.75) });
+        else showNotice("That image couldn't be read.");
+      }
+      chips(); controls();
+    } else if (words.length > PASTE_AS_FILE && state.pending.length < 10) {
+      e.preventDefault();
+      state.pending.push({ kind: "text", name: "Pasted text", text: words });
+      chips(); controls();
+    }
+  });
   $("cd-menu").addEventListener("click", () => vscode.postMessage({ type: "menu" }));
   $("cd-earlier").addEventListener("click", (e) => {
     const first = state.messages[0];
@@ -355,6 +437,13 @@
         return;
       case "copied":
         announce("Copied.");
+        return;
+      case "attached":
+        for (const item of Array.isArray(msg.items) ? msg.items : []) {
+          if (state.pending.length >= 10) { showNotice("Attach up to 10 things to one message.", "info"); break; }
+          if (!state.pending.some((p) => p.path && p.path === item.path)) state.pending.push(item);
+        }
+        chips(); controls(); input.focus();
         return;
     }
   });

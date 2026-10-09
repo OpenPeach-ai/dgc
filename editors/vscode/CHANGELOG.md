@@ -15,6 +15,9 @@
   reply. Choose **Web: auto, always or off** in the box.
 - **Settings → Web search** picks the one search Work, ChatDGC and your Pips share: DuckDuckGo, Brave,
   Tavily or your own SearXNG. A saved key is never shown back.
+- **Attach files, paste images and long text** in ChatDGC: the paperclip opens VS Code's file picker; a
+  pasted image is scaled to fit; a paste over 5,000 characters becomes an attachment. Chips show what
+  goes with the message and stay on it once sent. Only files you picked can be sent.
 
 ### Questions
 

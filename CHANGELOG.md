@@ -29,6 +29,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     `secrets.json`, where the CLI and the Pips runner read it.
   - `get_config` `fields` can ask for `search_url` and `search_api_key_set`. The key itself never crosses
     the wire.
+- **Files, images and long pastes in ChatDGC.** `chatdgc_send` takes `attachments`, up to 10:
+  - a picked file, by its `path`;
+  - a pasted image, as a `data:` URI;
+  - pasted text.
+
+  Documents are read with DGC's document reader, other files only as UTF-8 text, and images only by their
+  own bytes. The chat keeps its own copy, owner-only, deleted with the chat. The model reads each one in
+  DGC's attachment frame, which no file can close, and sees the newest eight images as images. A model
+  that can't see images is told so before anything is kept.
 
 ### Models
 

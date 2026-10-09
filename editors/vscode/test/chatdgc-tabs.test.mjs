@@ -20,7 +20,8 @@ class Emitter {
   fire(value) { for (const listener of [...this.listeners]) listener(value); }
 }
 
-const world = { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "" };
+const world = { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
+                chosen: undefined, sizes: {} };
 function fakePanel(viewType, title) {
   const disposed = new Emitter(), received = new Emitter();
   const panel = {
@@ -48,7 +49,9 @@ globalThis.__DGC_TEST_VSCODE = {
     showWarningMessage: async (message) => { world.warnings.push(String(message)); return world.answer; },
     showQuickPick: async (items) => { world.picks.push(items.map((i) => i.id)); return items.find((i) => i.id === world.pick); },
     showInputBox: async () => world.input,
+    showOpenDialog: async () => world.chosen,
   },
+  workspace: { fs: { stat: async (uri) => ({ size: world.sizes[uri.fsPath] ?? 1 }) } },
 };
 
 const bundle = join(scratch, "chatdgc.cjs");
@@ -67,7 +70,8 @@ const ID = (n) => `chat_${String(n).repeat(32).slice(0, 32)}`;
 const MSG = (n) => `msg_${String(n).repeat(32).slice(0, 32)}`;
 let chat, host, sent;
 beforeEach(() => {
-  Object.assign(world, { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "" });
+  Object.assign(world, { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
+                         chosen: undefined, sizes: {} });
   sent = [];
   host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" },
     chatdgcSend(cmd) { if (this.outcome === "sent") sent.push(cmd); return this.outcome; },
@@ -266,4 +270,31 @@ test("web search: the tab's choice goes with the message, and what it looks for 
   chat.onEvent({ type: "chatdgc_activity", conversation_id: ID(3), message_id: MSG(1), kind: "searching", text: "paris" });
   assert.deepEqual(a.last("activity"), { type: "activity", messageId: MSG(1), kind: "searching", text: "paris" });
   assert.equal(b.last("activity"), undefined);
+});
+
+test("attachments: only files this tab's picker returned, real pasted images, and nothing too large for one frame", async () => {
+  chat.open(ID(5));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(5), title: "x" });
+  const file = (p) => ({ scheme: "file", fsPath: p, path: p });
+  world.chosen = [file("/home/u/trip.csv"), { scheme: "untitled", fsPath: "x", path: "x" }, file("/home/u/photo.png")];
+  world.sizes = { "/home/u/trip.csv": 42, "/home/u/photo.png": 2048 };
+  panel.say({ type: "attach" });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(panel.last("attached").items, [{ kind: "file", path: "/home/u/trip.csv", name: "trip.csv", size: 42 },
+                                                   { kind: "file", path: "/home/u/photo.png", name: "photo.png", size: 2048 }]);
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  panel.say({ type: "send", text: "", attachments: [
+    { kind: "file", path: "/home/u/trip.csv", name: "trip.csv" },
+    { kind: "file", path: "/etc/shadow", name: "shadow" },
+    { kind: "image", data: png, name: "Pasted image" },
+    { kind: "image", data: "data:text/html;base64,PHNjcmlwdD4=" },
+    { kind: "text", text: "long paste", name: "Pasted text" }] });
+  assert.deepEqual(last("chatdgc_send").attachments, [{ kind: "file", path: "/home/u/trip.csv", name: "trip.csv" },
+    { kind: "image", data: png, name: "Pasted image" }, { kind: "text", text: "long paste", name: "Pasted text" }],
+    "a path the user never picked, and anything that isn't an image, never leave the tab");
+  const before = sent.length;
+  panel.say({ type: "send", text: "big", attachments: [{ kind: "image", data: "data:image/png;base64," + "A".repeat(3_000_100) }] });
+  assert.equal(sent.length, before, "nothing is sent");
+  assert.match(panel.last("error").message, /too large to send together/);
 });
