@@ -202,11 +202,18 @@ def prepared(config, payload, authorize, *, manager_factory=_manager,
         def invoke():
             check()
             target = route()
-            raw = manager.call(target, args, cancel=cancel, input_handler=lambda *a, **kw: {'action': 'cancel'})
+            declined = []
+            def decline(_server, method, *rest):
+                # No one is there to answer a plugin's own question (a sign-in page, a form) while a Pip's
+                # action runs, so DGC declines it. The plugin then said "cancelled by user", and the Pip told
+                # the user they had cancelled it (1inch's swap, battle test 2026-10-09).
+                declined.append(method)
+                return {'action': 'cancel'}
+            raw = manager.call(target, args, cancel=cancel, input_handler=decline)
             if name not in PROVIDERS:
                 # The Pip that prepared it reads the answer next (pip_plugins.after_action).
                 from .pip_plugins import remember
-                remember(name, payload['call'], raw, config)
+                remember(name, payload['call'], raw, config, declined=bool(declined))
             return result(raw, config, name, payload['call']['tool'])
         yield invoke
     finally:

@@ -2236,7 +2236,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 reach = ("You have your own computer (a browser, a Terminal and files): use it when a task needs the live web. "
                          if computer_pin is not None else
                          "You have no computer: you cannot open web pages or search the web, so never offer to look something "
-                         "up (a phone number, opening hours, a price, a booking link). When a task needs the live web, "
+                         "up (a phone number, opening hours, a price, a booking link). A web page reaches you only as a read "
+                         "the user set up for your runs, listed in your references; with none listed you have none. When a task needs the live web, "
                          "say so in one sentence and that the user can give you a computer on your page. ")
                 base_instructions = ("You are a personal DGC Pip. Help with the approved goal using the supplied conversation and reference data. "
                     + reach +

@@ -363,10 +363,20 @@ def _call_digest(server, call) -> str:
     return apps.digest({"server": server, "tool": call.get("tool"), "arguments": call.get("arguments")})
 
 
-def remember(server, call, raw, config) -> None:
+DECLINED = ("DGC note: while this ran, {name} asked for more input (a sign-in page or a form). A Pip's action can't "
+            "show that, so DGC declined it: a \"cancelled\" in what {name} answered means DGC declined, not that the "
+            "user cancelled. In the main chat, DGC can show what {name} asks.")
+
+
+def remember(server, call, raw, config, declined=False) -> None:
     """What a plugin answered to an action the user allowed (connector.prepared), cleaned as main chat
-    cleans a tool's answer. Kept for this thread until after_action takes it."""
+    cleans a tool's answer, after DGC's note when it declined the plugin's own question. Kept for this
+    thread until after_action takes it."""
     text = cleaned(raw, config) if isinstance(raw, str) and raw.strip() else None
+    if declined:
+        found = owner(server)
+        note = DECLINED.format(name=found["display_name"] if found else server)
+        text = note + ("\n\n" + text if text else "")
     _heard.value = (server, _call_digest(server, call), text[:MAX_TEXT] if text else None)
 
 

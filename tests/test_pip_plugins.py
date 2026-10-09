@@ -42,9 +42,12 @@ class Vendor:
                 self._routes[f"{name}__{tool['name']}"] = (name, tool["name"])
 
     answer = None
+    asks = None         # a question the vendor's server puts to DGC during the call (an elicitation)
 
     def call(self, route, args, **kw):
         self.calls.append((route, copy.deepcopy(args)))
+        if Vendor.asks and kw["input_handler"](route[0], "elicitation/create", Vendor.asks, None) == {"action": "cancel"}:
+            return "ERROR: MCP tool 'create_record' failed: cancelled by user"
         return Vendor.answer or json.dumps({"records": [{"id": "rec1", "Name": "Weekend plan"}]})
 
     def stop_all(self):
@@ -342,6 +345,23 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         self.assertEqual(len(self.vendor.calls), 1, "it ran once")
         other = self.session.call(self.registry, "call_plugin", {"plugin": "airtable", "tool": "create_record", "arguments": {"table": "Other"}})
         self.assertIn("draft", other, "a different call asks again")
+
+    def test_a_plugins_own_question_is_declined_and_the_pip_is_told_dgc_declined_it_not_the_user(self):
+        # Battle test (2026-10-09): 1inch's swap asked for more input mid-call, DGC declined it, 1inch said
+        # "cancelled by user", and the Pip told the user "you cancelled it".
+        _, draft = self.offer()
+        with patch.object(Vendor, "asks", {"mode": "url", "message": "Sign in", "url": "https://example.com/in", "elicitationId": "e1"}):
+            asked = self.accept(self.propose(draft))
+        pip_plugins.after_action(self.store, self.cfg, asked)
+        [kept] = [r[0] for r in self.registry.db.execute("SELECT text FROM pip_plugin_answers")]
+        self.assertTrue(kept.startswith("DGC note: while this ran, Airtable asked for more input"), kept)
+        self.assertIn("not that the user cancelled", kept)
+        self.assertIn("cancelled by user", kept, "the plugin's own words follow the note")
+        _, plain = self.offer(arguments={"table": "Other"})
+        pip_plugins.after_action(self.store, self.cfg, self.accept(self.propose(plain, key="two")))
+        texts = [r[0] for r in self.registry.db.execute("SELECT text FROM pip_plugin_answers")]
+        self.assertEqual(len(texts), 2)
+        self.assertEqual(sum("DGC note" in t for t in texts), 1, "no note when the plugin asked nothing")
 
     def test_an_error_it_answered_lets_the_pip_try_again_and_says_it_is_still_allowed(self):
         # Take 6 (2026-10-07): Aave answered get_reserve_details with an error ("needs a market name").
