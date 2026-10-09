@@ -650,10 +650,14 @@ reported, and the run continues.
 
 ### A computer of its own (Linux and macOS)
 
-A Personal Pip can have its own computer: a web browser and a home folder in a sandbox,
-separate from your browser and your files. Give it one with **Give this Pip a computer…** in
-its **Job** tab, or `dgc pips computer give PIP`. It is a job change like any other, and only
-you can make it: the main chat and the Pip itself can't.
+Every new Personal Pip gets its own computer: a web browser and a home folder in a sandbox,
+separate from your browser and your files. That holds wherever this machine can run one (Linux,
+and Macs with Apple silicon on macOS 26 or later). It starts the first time the Pip uses it and
+closes when it has been idle for 15 minutes. Remove it with **Remove computer…** in its **Job** tab,
+or `dgc pips computer remove PIP`. A Pip made before computers were
+the default gets one with **Give this Pip a computer…**, or `dgc pips computer give PIP`. Either is
+a job change like any other. Ask the main chat for a Pip without a computer and it makes one
+without.
 
 - **Reading is free.** During a run the Pip opens, reads, scrolls and clicks through public
   websites on its own.
@@ -831,7 +835,7 @@ else it would submit still waits for you.
   the emergency stop); anything that changes a Pip is refused there.
 - **Act outside their reviewed reads.** Project Pips read only their approved
   source. Personal Pips see only the app and web reads you approved, and the public
-  websites their own computer opens if you gave them one.
+  websites their own computer opens.
 - **Send, create or call without you.** Every email, event and connector call is a
   single attempt you approved on its exact content, or one you chose to **Always
   allow** for that Pip, connection, account and tool. So is every form a Pip's computer

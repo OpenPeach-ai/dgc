@@ -171,7 +171,7 @@ _COMMAND_ARGS = {
     "list_pip_messages": {"pip_id", "before_id", "limit"},
     "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files"}, "introduce_pip": {"pip_id"},
     "get_pip_message_image": {"pip_id", "message_id", "index"},
-    "create_pip": {"workspace_id", "name", "goal", "source_ref", "pip_type", "model_choice"}, "get_pip": {"pip_id"},
+    "create_pip": {"workspace_id", "name", "goal", "source_ref", "pip_type", "model_choice", "computer"}, "get_pip": {"pip_id"},
     "propose_pip_update": {"pip_id", "expected_version", "changes", "reason"},
     "accept_pip_update": {"pip_id", "proposal_id", "expected_version"},
     "pause_pip": {"pip_id", "expected_lifecycle_revision"}, "resume_pip": {"pip_id", "expected_lifecycle_revision"},
@@ -282,6 +282,26 @@ def _project_pulse_plan(job):
 NAMED_GOAL = "Help with what I ask in this chat. Your name says what I want you for; ask when it is unclear."
 PRIMARY_GOAL = ("Be my Primary Pip: help with everyday tasks, look after my other Pips, "
                 "and check in when you need me.")
+
+
+def computer_by_default() -> bool:
+    """A new Personal Pip gets its own computer wherever this machine can run one (founder, 2026-10-09: the battle
+    test's commonest Pip failure was wanting the web without one). It starts on first use and closes when idle;
+    its page can remove it."""
+    try:
+        from .pip_screen_setup import supported
+        return bool(supported()[0])
+    except Exception:                       # noqa: BLE001 -- no computer is the safe answer
+        return False
+
+
+def _new_computer(personal: bool, asked) -> dict | None:
+    """The computer a new Pip starts with: asked for (true/false), or the default for a Personal Pip."""
+    if asked is not None and type(asked) is not bool:
+        raise RegistryError('invalid_request', 'computer is true or false.')
+    if asked and not personal:
+        raise RegistryError('unsupported_computer_plan', 'A computer is for Personal Pips.')
+    return {'schema_version': 1} if personal and (computer_by_default() if asked is None else asked) else None
 
 
 def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", model_choice={"mode": "default"}, adaptation_policy="suggest_changes", event_trigger=None, source_policy="committed_only", verification_plan=None, app_plan=None, web_plan=None, github_plan=None, computer_plan=None):
@@ -666,13 +686,15 @@ class PipStore:
             chats = chat_matches(self.db, workspace_id, query)
         return self.db.execute(*self._page_sql(workspace_id, 0, 0, query, "created", count=True, chats=chats)).fetchone()[0]
 
-    def create(self, workspace_id, name, goal, actor, source_ref="HEAD", pip_type="rook", model_choice={"mode": "default"}):
+    def create(self, workspace_id, name, goal, actor, source_ref="HEAD", pip_type="rook", model_choice={"mode": "default"},
+               computer_plan=None):
         workspace = self.registry.get(workspace_id)
         if workspace['kind'] == 'personal' and (goal is None or (isinstance(goal, str) and not goal.strip())):
             # Named, then set up in its own chat: the name says what it is for until then.
             goal = PRIMARY_GOAL if pip_type == "core" else NAMED_GOAL
         definition = _definition(name, goal, source_ref, pip_type=pip_type, model_choice=model_choice,
-            source_policy={'mode': 'personal'} if workspace['kind'] == 'personal' else 'committed_only')
+            source_policy={'mode': 'personal'} if workspace['kind'] == 'personal' else 'committed_only',
+            computer_plan=computer_plan)
         with self.registry.transaction():
             self.registry.get(workspace_id)
             from .pip_limits import require_room
@@ -4022,9 +4044,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     item.pop("proposals", None)
                     item["profile"] = looks[item["id"]]
             elif command == "create_pip":
+                personal = registry.get(workspace_id)["kind"] == "personal"
                 result = {"pip": store.create(workspace_id, request.get("name"), request.get("goal"), actor,
                                              request.get("source_ref", "HEAD"), request.get("pip_type", "rook"),
-                                             request.get("model_choice", {"mode": "default"}))}
+                                             request.get("model_choice", {"mode": "default"}),
+                                             computer_plan=_new_computer(personal, request.get("computer")))}
             elif command == "get_pip":
                 from .pip_profile import get as profile
                 result = {"pip": store.get(pip_id)}

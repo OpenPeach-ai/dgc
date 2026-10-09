@@ -44,19 +44,45 @@ class PersonalSetupTests(unittest.TestCase):
         draft=self.draft()
         self.assertEqual(self.store.list(draft['workspace_id']),[])
         self.assertEqual(draft['status'],'pending')
-    def test_a_personal_setup_can_give_the_pip_its_own_computer(self):
-        # "A Pip with its own computer that checks iPhone prices" (battle test 2026-10-09) made one without.
-        draft = self.draft(computer=True, request_key='computer1')
-        self.assertTrue(draft['computer'])
-        self.assertIn('It has its own computer', draft['scope_notice'])
-        with patch.object(pips, 'source_revision', side_effect=AssertionError('No Git')):
-            result = self.review(draft)
-        self.assertEqual(self.store.get(result['receipt']['pip_id'])['computer_plan'], {'schema_version': 1})
-        self.assertNotIn('computer', self.draft(request_key='plain1'), 'only when asked')
+    def test_a_new_personal_pip_gets_its_own_computer_by_default(self):
+        # Founder, 2026-10-09: every new Personal Pip gets one where this machine can run it; false opts out.
+        with patch.object(pips, 'computer_by_default', return_value=True):
+            draft = self.draft(request_key='default1')
+            self.assertTrue(draft['computer'])
+            self.assertIn('It has its own computer', draft['scope_notice'])
+            with patch.object(pips, 'source_revision', side_effect=AssertionError('No Git')):
+                result = self.review(draft)
+            self.assertEqual(self.store.get(result['receipt']['pip_id'])['computer_plan'], {'schema_version': 1})
+            self.assertNotIn('computer', self.draft(computer=False, request_key='without1'), 'false makes it without one')
+        with patch.object(pips, 'computer_by_default', return_value=False):
+            self.assertNotIn('computer', self.draft(request_key='unsupported1'), 'none where this machine runs none')
+            self.assertTrue(self.draft(computer=True, request_key='asked1')['computer'], 'asked for, it is given')
         for bad in ({'computer': 'yes', 'request_key': 'bad1'},
                     {'computer': True, 'scope': 'project', 'work_kind': 'source_review', 'pip_type': 'lens', 'request_key': 'bad2'}):
             with self.subTest(bad=bad), self.assertRaises(RegistryError):
                 self.draft(**bad)
+        with patch.object(pips, 'computer_by_default', return_value=True):
+            project = self.draft(scope='project', work_kind='source_review', pip_type='lens', request_key='project1')
+            self.assertNotIn('computer', project, 'a project Pip never gets one by default')
+
+    def test_create_pip_gives_a_new_personal_pip_a_computer_and_a_project_pip_none(self):
+        personal = self.registry.personal()['id']
+        def create(workspace_id, key, **fields):
+            r = pips.handle_control(self.cfg, {'type': 'create_pip', 'request_id': key, 'workspace_id': workspace_id,
+                                               'name': 'Helper ' + key, 'goal': '', 'pip_type': 'scout', **fields}, 'editor-user', start_worker=False)
+            self.assertTrue(r['ok'], r.get('error'))
+            return r['result']['pip']
+        from dgc.workspace_registry import WorkspaceRegistry
+        with patch.object(pips, 'WorkspaceRegistry', lambda: WorkspaceRegistry(self.registry.directory)):
+            with patch.object(pips, 'computer_by_default', return_value=True):
+                self.assertEqual(create(personal, 'c1').get('computer_plan'), {'schema_version': 1})
+                self.assertIsNone(create(personal, 'c2', computer=False).get('computer_plan'))
+                self.assertIsNone(create(self.workspace['id'], 'c3', goal='Review the code', pip_type='lens').get('computer_plan'))
+            with patch.object(pips, 'computer_by_default', return_value=False):
+                self.assertIsNone(create(personal, 'c4').get('computer_plan'))
+            bad = pips.handle_control(self.cfg, {'type': 'create_pip', 'request_id': 'c5', 'workspace_id': personal,
+                                                 'name': 'Bad', 'goal': '', 'computer': 'yes'}, 'editor-user', start_worker=False)
+            self.assertFalse(bad['ok'])
     def test_profile_workspace_safe_inside_transaction(self):
         with self.registry.transaction():first=self.registry.personal()
         with self.registry.transaction():self.assertEqual(first,self.registry.personal())

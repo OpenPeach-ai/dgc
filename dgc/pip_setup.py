@@ -240,7 +240,10 @@ def _definition(store, request, workspace_id):
     extra = {'source_policy': {'mode':'personal'}} if personal else {}
     if 'app_plan' in request:extra['app_plan']=request['app_plan']
     if 'web_plan' in request:extra['web_plan']=request['web_plan']
-    if request.get('computer') is True:extra['computer_plan']={'schema_version': 1}
+    if personal and 'pip_id' not in request:
+        from .pips import _new_computer
+        computer = _new_computer(True, request.get('computer'))
+        if computer is not None: extra['computer_plan'] = computer
     if 'pip_id' in request:
         from .pip_adaptation import can_propose
         from .pip_archive import require_live
