@@ -65,6 +65,18 @@ test('a Pip with a computer shows Careful mode, on, with the sites it may visit;
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('forget_pip_site').at(-1).request)),{type:'forget_pip_site',pip_id:PIP,site:'shop3.example'});
 });
 
+test('its page says it has its own computer and keeps the switch to remove it; one without is offered one',async()=>{
+ // Every new Personal Pip has a computer (2026-10-09); Remove lived only on the old Job tab.
+ const x=setup({row:computerPip()});await openPage(x);
+ const row=x.d.querySelector('[aria-label="Computer"]');assert.ok(row,'on its page');
+ assert.match(row.textContent,/Its own computer.*A browser, a Terminal and files, separate from yours/);
+ x.click('#remove-computer');await flush();
+ assert.match(x.d.body.textContent,/Remove Ava's computer\?/);
+ const none=setup();await openPage(none);
+ assert.match(none.d.querySelector('[aria-label="Computer"]').textContent,/Give Ava its own computer/);
+ assert.ok(none.d.querySelector('#give-computer'));assert.equal(none.d.querySelector('#remove-computer'),null);
+});
+
 test('turning Careful mode off is yours alone, says what changes, and an older CLI or a Pip without a computer shows nothing',async()=>{
  const x=setup({row:computerPip()});await openPage(x);
  assert.match(x.d.querySelector('[aria-label="Careful mode"]').textContent,/None yet\. Sites you name in your chat, and ones you allow on its cards, show here\./);

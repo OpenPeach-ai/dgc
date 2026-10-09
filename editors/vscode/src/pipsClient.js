@@ -1464,6 +1464,14 @@ function memoryKept(){
  const last=[...(S.messages||[])].reverse().find(m=>m.role==='assistant'&&m.run_id);
  return last?keptMarkup(S.notes,last.run_id,{esc,busy:notesBusy||!usable()}):'';
 }
+// Every new Personal Pip has its own computer (2026-10-09): its page says so and keeps the switch to remove it,
+// which lived only on the old Job tab. Its header's computer button opens it.
+function computerRowMarkup(p,off){
+ if(S.apiVersion<42||remoteHost||!personalPip()||archived())return '';
+ return `<section class="pip-page-group" aria-label="Computer"><div class="pip-page-row static"><span class="row-words">${p.computer_plan
+  ?`<strong>Its own computer</strong><small>A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.</small></span>${button('remove-computer','Remove…',off,'quiet')}`
+  :`<strong>Computer</strong><small>Give ${esc(p.name)} its own computer, so it can look things up and fill in forms for you.</small></span>${button('give-computer','Give it a computer…',off,'quiet')}`}</div></section>`;
+}
 // Careful mode (#9): its switch and the sites it may visit, on the page of a Pip with a computer.
 const carefulState={pip:'',value:null,error:'',busy:false,seq:0};let sitesAll=false;
 async function loadCareful(){
@@ -1849,7 +1857,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+computerRowMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
