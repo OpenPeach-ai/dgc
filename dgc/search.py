@@ -170,22 +170,38 @@ def _searxng(query: str, n: int, base_url: str) -> list[tuple[str, str, str]]:
     return [(x.get("title", ""), x.get("url", ""), x.get("content", "")) for x in (r.json().get("results") or [])[:n]]
 
 
+def _run(query: str, provider: str, api_key: str, url: str, n: int) -> list[tuple[str, str, str]]:
+    if provider == "brave":
+        return _brave(query, n, api_key)
+    if provider == "tavily":
+        return _tavily(query, n, api_key)
+    if provider == "searxng":
+        return _searxng(query, n, url)
+    return _duckduckgo(query, n)  # duckduckgo — keyless default
+
+
 def search(query: str, provider: str, api_key: str = "", url: str = "", n: int = 6) -> str:
     """Run a web search with the configured provider; returns a formatted result string."""
     query = (query or "").strip()
     if not query:
         return "error: empty search query"
     try:
-        if provider == "brave":
-            results = _brave(query, n, api_key)
-        elif provider == "tavily":
-            results = _tavily(query, n, api_key)
-        elif provider == "searxng":
-            results = _searxng(query, n, url)
-        else:  # duckduckgo — keyless default
-            results = _duckduckgo(query, n)
+        results = _run(query, provider, api_key, url, n)
     except SearchError as e:
         return f"error: {e}"
     except requests.RequestException as e:
         return f"error: web search failed ({provider}): {e}"
     return _fmt(results, query)
+
+
+def results(query: str, provider: str, api_key: str = "", url: str = "", n: int = 6) -> list[dict]:
+    """The same search as data, for a reply that cites its sources: [{"title", "url", "snippet"}].
+    Raises SearchError saying why when it fails."""
+    query = (query or "").strip()
+    if not query:
+        raise SearchError("empty search query")
+    try:
+        found = _run(query, provider, api_key, url, n)
+    except requests.RequestException as e:
+        raise SearchError(f"web search failed ({provider}): {e}") from e
+    return [{"title": title, "url": link, "snippet": snippet} for title, link, snippet in found]

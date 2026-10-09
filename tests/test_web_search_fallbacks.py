@@ -168,5 +168,29 @@ class ToolProfileChoiceTest(unittest.TestCase):
             self.assertEqual(config_mod.Config(project).get("tool_profile"), "adaptive")
 
 
+class StructuredResultsTest(unittest.TestCase):
+    """ChatDGC cites its sources, so it needs the results as data; Work and Pips keep the text."""
+
+    def test_the_same_search_as_data_and_as_text(self):
+        found = [("Paris - Wikipedia", "https://en.wikipedia.org/wiki/Paris", "Capital of France"),
+                 ("Visit Paris", "https://parisjetaime.com", "")]
+        with patch.object(search_mod, "_brave", return_value=found) as brave:
+            data = search_mod.results("paris", "brave", api_key="k", n=2)
+            text = search_mod.search("paris", "brave", api_key="k", n=2)
+        self.assertEqual(data, [{"title": "Paris - Wikipedia", "url": "https://en.wikipedia.org/wiki/Paris", "snippet": "Capital of France"},
+                                {"title": "Visit Paris", "url": "https://parisjetaime.com", "snippet": ""}])
+        self.assertEqual(brave.call_args.args, ("paris", 2, "k"))
+        self.assertTrue(text.startswith('Web results for "paris":'))
+        self.assertIn("1. Paris - Wikipedia\n   https://en.wikipedia.org/wiki/Paris\n   Capital of France", text)
+
+    def test_a_failure_says_why(self):
+        with self.assertRaisesRegex(search_mod.SearchError, "empty search query"):
+            search_mod.results("   ", "duckduckgo")
+        with patch.object(search_mod, "_tavily", side_effect=search_mod.requests.ConnectionError("refused")):
+            with self.assertRaisesRegex(search_mod.SearchError, r"web search failed \(tavily\): refused"):
+                search_mod.results("x", "tavily", api_key="k")
+            self.assertEqual(search_mod.search("x", "tavily", api_key="k"), "error: web search failed (tavily): refused")
+
+
 if __name__ == "__main__":
     unittest.main()
