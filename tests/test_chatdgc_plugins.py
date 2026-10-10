@@ -208,6 +208,15 @@ class ReadsAndCards(PluginChat):
         self.assertEqual(self.world["calls"], [("mcp__aave__get_rates", {})], "the guess never reached Aave")
         self.assertEqual(chat_plugins.guessed_wallets({"x": [zero, mine]}, f"my wallet {mine}"), [zero])
 
+    def test_a_long_answer_says_where_it_was_cut_and_how_to_see_the_rest(self):
+        self.world["answers"]["get_rates"] = json.dumps({"reserves": [{"symbol": f"T{i}", "apy": "1.0"} for i in range(2000)]})
+        self.say("Aave's rates?", {"calls": [("call_plugin", {"plugin": "aave", "tool": "get_rates", "arguments": {}})]},
+                 {"parts": ["Here."]})
+        told = self.told(1)[0]
+        self.assertLessEqual(len(told), chat_plugins.MAX_ANSWER + 300)
+        self.assertRegex(told, r"\[Cut: the answer was [\d,]+ characters and you have read the first [\d,]+\. To see the rest, "
+                               r"ask the tool for less")
+
     def test_recurring_is_kept_and_no_plugins_means_no_plugin_tools(self):
         chat, reply = self.say("Every Monday, put a planning hour in my calendar.",
                                {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",
