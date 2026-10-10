@@ -416,6 +416,7 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         pip_plugins.after_action(self.store, self.cfg, done)
         [kept] = [r[0] for r in self.registry.db.execute("SELECT text FROM pip_plugin_answers")]
         self.assertIn('"supplyApyPct": "4.09"', kept)
+        self.assertIn('"underlyingToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"', kept, "the address itself, not [REDACTED]")
         with patch("dgc.redaction.secret_values", return_value=["saved-key-0123456789abcdef"]):
             Vendor.answer = json.dumps({"note": "your key is saved-key-0123456789abcdef"})
             leaked = self.accept(self.propose(draft, key="two"))
@@ -425,6 +426,17 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
                 self.propose({**draft, "call": {"tool": "create_record", "arguments": {"key": "saved-key-0123456789abcdef"}}}, key="three")
         texts = [r[0] for r in self.registry.db.execute("SELECT text FROM pip_plugin_answers")]
         self.assertFalse(any("saved-key-0123456789abcdef" in x for x in texts), "never kept for the Pip")
+
+    def test_only_a_public_address_is_spared_never_a_credential(self):
+        address, key = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "0x" + "ab" * 32
+        with patch("dgc.redaction.secret_values", return_value=["0x" + "5" * 40]):
+            text = pip_plugins.cleaned(json.dumps({"underlyingToken": address, "nextPageToken": "abc123def456",
+                                                   "password": "0x" + "7" * 40, "accessToken": "0x" + "8" * 40,
+                                                   "token": key, "aToken": "0x" + "5" * 40}), self.cfg)
+        self.assertIn(f'"underlyingToken": "{address}"', text, "a coin's contract is published by design")
+        for gone in ("abc123def456", "7" * 40, "8" * 40, "ab" * 32, "5" * 40):
+            self.assertNotIn(gone, text)
+        self.assertEqual(text.count("[REDACTED]"), 5, text)
 
     def test_always_allow_on_a_payment_plugin_is_refused_before_anything_runs(self):
         self.cfg.data["pips_enabled"] = True

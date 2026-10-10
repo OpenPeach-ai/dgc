@@ -173,11 +173,27 @@ def saved_credential_in(value, config) -> bool:
     return any(secret in text for secret in secret_values(config))
 
 
+_ADDRESS_PAIR = re.compile(r"""["']?([\w-]+)["']?\s*:\s*(["'])(0x[0-9a-fA-F]{40})\2""")
+_CREDENTIAL_KEY = re.compile(r"(?i)pass|secret|private|api[_-]?key|credential|access|auth|session|refresh")
+
+
 def cleaned(text, config) -> str:
     """A plugin's answer as DGC's main chat gives a tool's answer to its model: saved credentials and
-    credential-shaped text blanked, the rest as it came."""
+    credential-shaped text blanked, the rest as it came. A field holding a public chain address stays:
+    redaction blanks any key ending in "token", and Aave names each coin's contract `underlyingToken`,
+    so the model never saw USDC's address and the wallet guard refused the one it knew (live run,
+    2026-10-11). An address is published by design; a private key is 64 hex digits, not 40."""
     from .redaction import redact_text, secret_values
-    return redact_text(text, secret_values(config))
+    secrets, kept = secret_values(config), []
+
+    def hold(match) -> str:
+        if _CREDENTIAL_KEY.search(match.group(1)) or any(str(s) and str(s) in match.group(3) for s in secrets):
+            return match.group(0)       # a field named like a real credential, or a saved one: redacted as ever
+        kept.append(match.group(0))
+        return f"\x00DGC-ADDRESS-{len(kept) - 1}\x00"
+
+    text = redact_text(_ADDRESS_PAIR.sub(hold, str(text or "")), secrets)
+    return re.sub(r"\x00DGC-ADDRESS-(\d+)\x00", lambda match: kept[int(match.group(1))], text)
 
 
 def _plugin_name(value, available) -> str:

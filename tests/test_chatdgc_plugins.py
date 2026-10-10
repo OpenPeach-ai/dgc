@@ -191,17 +191,19 @@ class ReadsAndCards(PluginChat):
     def test_a_wallet_address_must_come_from_the_user_or_a_plugin_never_a_guess(self):
         # A Pip put the zero address in a quote "as a placeholder", twice: on a payment plugin it's where money goes.
         mine, zero = "0x" + "1" * 40, "0x" + "0" * 40
-        self.world["answers"]["get_rates"] = json.dumps({"pool": "0x" + "a" * 40})
+        # Aave names each coin's contract "underlyingToken": a key redaction reads as a credential (live run, 2026-10-11).
+        self.world["answers"]["get_rates"] = json.dumps({"reserves": [{"symbol": "USDC", "underlyingToken": "0x" + "a" * 40}]})
         chat, reply = self.say(f"Supply 10 USDC on Aave from my wallet {mine}.",
                                {"calls": [("call_plugin", {"plugin": "aave", "tool": "supply", "arguments": {"amount": 10, "to": zero}})]},
                                {"calls": [("call_plugin", {"plugin": "aave", "tool": "get_rates", "arguments": {}}),
                                           ("call_plugin", {"plugin": "aave", "tool": "supply",
                                                            "arguments": {"amount": 10, "from": mine.upper().replace("0X", "0x"),
-                                                                         "pool": "0x" + "a" * 40}})]},
+                                                                         "asset": "0x" + "a" * 40}})]},
                                {"parts": ["The supply is ready for you to send."]})
         refused = self.told(1)[0]
         self.assertIn(f"Not done, and there is no card: {zero} is not an address the user gave you", refused)
-        self.assertEqual([c["arguments"].get("pool") for c in reply["actions"]], ["0x" + "a" * 40],
+        self.assertIn('"underlyingToken": "0x' + "a" * 40, self.told(2)[1], "the coin's address reached the model")
+        self.assertEqual([c["arguments"].get("asset") for c in reply["actions"]], ["0x" + "a" * 40],
                          "theirs, and one a plugin answered with: a card")
         self.assertEqual(self.world["calls"], [("mcp__aave__get_rates", {})], "the guess never reached Aave")
         self.assertEqual(chat_plugins.guessed_wallets({"x": [zero, mine]}, f"my wallet {mine}"), [zero])

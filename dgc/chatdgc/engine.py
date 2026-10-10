@@ -1702,8 +1702,9 @@ class ChatEngine:
                                                                    _heard(chat, messages)) if call.name == "call_plugin" else []
                             if guessed:
                                 told, card = ("Not done, and there is no card: " + guessed[0] + " is not an address the user "
-                                              "gave you or that a plugin answered. Ask the user for the exact address; never "
-                                              "use a placeholder or guess one."), None
+                                              "gave you or that a plugin answered. If it is a coin's or a market's contract, "
+                                              "read it from the plugin first; if it is the user's wallet, ask them for it. "
+                                              "Never use a placeholder or guess one."), None
                             else:
                                 told, card = plugins.call(call.name, call.arguments)
                             if card is not None:
