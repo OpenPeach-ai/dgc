@@ -88,7 +88,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   turns it off everywhere. Pip notes now match a fact at the end of a sentence ("vegetarian." is
   "vegetarian"). The look-up check before a reply also lists, in `remember`, the lasting facts the user states
   about themselves; they're kept as the tool keeps them (deepseek-v4.1-flash, told to call the tool, missed 2 of
-  7; with the check 7 of 7, and nothing kept from 7 messages that state none, twice).
+  7; with the check 7 of 7, nothing kept from 7 messages that state none, and at most one or two from a question
+  that carries some of their life, on two runs: 16 and 17 of 17).
 - **Deep research.** `chatdgc_research` makes a plan; `chatdgc_research_start` runs it as edited (or writes from
   what a stopped run found); `chatdgc_research_steer` adds to it while it runs; `chatdgc_research` reports
   progress. Up to three rounds of searching and reading (about 20 pages, PDFs included), a note per useful

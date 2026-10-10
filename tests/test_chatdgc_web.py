@@ -158,8 +158,9 @@ class StatedFactsTests(Engine):
                          "a secret isn't kept, and nor is what they never said")
         self.assertEqual(sorted(f["text"] for f in self.engine.memory.facts()), ["They are vegetarian.", "They just moved to Bengaluru."])
         told = self.world["answers"][-1]["system"]
-        self.assertIn("Saved to the user's memory from this message (the reply shows it, so don't save it again or "
-                      "mention saving it): They are vegetarian.; They just moved to Bengaluru.", told)
+        self.assertIn("Saved to the user's memory from this message, in words about them (the reply shows it, so don't "
+                      "save it again or mention saving it, and talk to the user as you, as always): They are vegetarian.; "
+                      "They just moved to Bengaluru.", told)
         again = self.engine.send(chat["id"], "Still vegetarian, by the way.", search="auto")
         self.assertNotIn("memory", again, "already known: nothing new to show")
 

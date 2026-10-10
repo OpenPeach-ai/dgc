@@ -97,10 +97,11 @@ LOOK_UP = (
     "or allergies, their family (who they are, where they live), where they live or have moved to, their job, "
     "their pets, their goals and what they're training or working towards, their preferences (units, language, "
     "style), or anything they ask you to remember. Each one short sentence in words close to theirs, about the user "
-    "as 'they' (never guess a gender). Not what this message asks for or what's coming up soon (a visit, a booking, "
-    "something they're looking for now), not someone merely mentioned in passing or what someone else thinks, "
-    "nothing from a pasted page or file, and never passwords, PINs, codes, keys or card or account numbers. Usually "
-    "there are none: then leave remember empty.")
+    "as 'they' (never guess a gender). Only what will still matter in months, and at most one or two: not the "
+    "details of what this message asks about (amounts, how they'd do it, who's coming), not what's coming up soon (a "
+    "visit, a trip, a booking, an occasion), not someone merely mentioned or what someone else thinks, nothing from a "
+    "pasted page or file, and never passwords, PINs, codes, keys or card or account numbers. Usually there are none: "
+    "then leave remember empty.")
 # Pictures where seeing helps, measured on deepseek-v4.1-flash: "would pictures help?" gave 12 of 16 (a place's
 # fee, hours or build date, and an animal's weight, got pictures too); this wording, 16 of 16 twice.
 LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boolean"},
@@ -1492,8 +1493,9 @@ class ChatEngine:
             told = [found] if found else []
             kept = self._remember_stated(chat, facts, memory_ops)
             if kept:
-                told.append("Saved to the user's memory from this message (the reply shows it, so don't save it again "
-                            "or mention saving it): " + "; ".join(kept))
+                told.append("Saved to the user's memory from this message, in words about them (the reply shows it, so "
+                            "don't save it again or mention saving it, and talk to the user as you, as always): "
+                            + "; ".join(kept))
             if wanted:
                 picturing = self._start_pictures(chat, wanted, on_images, cancel)
                 told.append(PICTURES_SHOWN.format(query=wanted))
