@@ -89,6 +89,18 @@ class Documents(unittest.TestCase):
             self.assertIn(words, text)
         self.assertEqual(m.text, BRIEF, "the model reads back what it wrote")
 
+    def test_a_new_line_is_a_new_line_as_in_a_letter(self):
+        letter = "**To:** Mr Rao\nFlat 4B, Hill Road\n\nYours sincerely,\nAnya"
+        m = made.make({"name": "Notice", "format": "docx", "content": letter}, CONFIG)
+        self.assertIn("<w:r><w:br/></w:r>", _package(m.raw)["word/document.xml"].decode())
+        self.assertIn("Mr Rao\nFlat 4B, Hill Road", documents.extract_text(m.raw, m.name).text)
+        self.assertIn("Mr Rao<br>Flat 4B", made.page_html("Notice", made.parse(letter)))
+        from pypdf import PdfReader
+        raw, _, _ = made.plain_pdf("Notice", made.parse(letter))
+        lines = PdfReader(io.BytesIO(raw)).pages[0].extract_text().splitlines()
+        self.assertIn("Yours sincerely,", lines)
+        self.assertIn("Anya", lines)
+
     def test_without_a_heading_the_name_is_the_title(self):
         body = _package(made.make({"name": "Notes", "format": "docx", "content": "Just a line."}, CONFIG).raw)
         self.assertIn("Notes", body["word/document.xml"].decode())
@@ -117,8 +129,8 @@ class Spreadsheets(unittest.TestCase):
             {"name": "Costs: 2026/27", "rows": [["a"], ["b"]]}]}, CONFIG)
         parts = _package(m.raw)
         sheet = parts["xl/worksheets/sheet1.xml"].decode()
-        self.assertIn('<c r="B2"><v>450000</v></c>', sheet)
-        self.assertIn('<c r="B3"><v>12500</v></c>', sheet, "a number written with commas is still a number")
+        self.assertIn('<c r="B2" s="2"><v>450000</v></c>', sheet, "a big whole number shows its thousands: 450,000")
+        self.assertIn('<c r="B3" s="2"><v>12500</v></c>', sheet, "a number written with commas is still a number")
         self.assertIn("<t xml:space=\"preserve\">007</t>", sheet, "a code keeps its leading zero")
         self.assertIn("<f>SUM(B2:B3)</f>", sheet)
         self.assertIn('ySplit="1"', sheet, "the header row stays in view")

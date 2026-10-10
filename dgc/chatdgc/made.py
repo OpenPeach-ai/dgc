@@ -229,7 +229,8 @@ def _runs(token) -> list[Run]:
         elif kind == "code_inline":
             runs.append(Run(child.content, bold > 0, italic > 0, True, strike > 0, href[-1] if href else ""))
         elif kind in ("softbreak", "hardbreak"):
-            runs.append(Run("\n" if kind == "hardbreak" else " ", bold > 0, italic > 0))
+            # In a document a new line is meant (an address, a sign-off): Markdown would run them together.
+            runs.append(Run("\n", bold > 0, italic > 0))
         elif kind == "strong_open":
             bold += 1
         elif kind == "strong_close":
@@ -466,7 +467,8 @@ def _word_runs(runs: list[Run], links: list[str], *, bold_all=False) -> str:
                 ("<w:strike/>" if r.strike else "") + (_MONO + '<w:shd w:val="clear" w:color="auto" w:fill="F3F4F6"/>'
                                                        if r.code else "")
         pieces = r.text.split("\n")
-        body = '<w:br/>'.join(f'<w:t xml:space="preserve">{_x(p)}</w:t>' for p in pieces)
+        body = "".join(("<w:br/>" if n else "") + (f'<w:t xml:space="preserve">{_x(p)}</w:t>' if p else "")
+                       for n, p in enumerate(pieces))
         if r.href:
             links.append(r.href)
             out += (f'<w:hyperlink r:id="rIdL{len(links)}"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/>{props}</w:rPr>'
@@ -568,7 +570,9 @@ def _column(n: int) -> str:
 def _xlsx_cell(ref: str, value, style: int) -> str:
     s = f' s="{style}"' if style else ""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return f'<c r="{ref}"{s}><v>{repr(float(value)) if isinstance(value, float) else value}</v></c>'
+        thousands = not style and float(value).is_integer() and abs(value) >= 1000
+        return (f'<c r="{ref}"{" s=\"2\"" if thousands else s}><v>'
+                f'{int(value) if float(value).is_integer() else repr(float(value))}</v></c>')
     text = str(value)
     if not text:
         return f'<c r="{ref}"{s}/>' if style else ""
@@ -576,7 +580,7 @@ def _xlsx_cell(ref: str, value, style: int) -> str:
         return f'<c r="{ref}"{s}><f>{_x(text[1:])}</f></c>'
     plain = text.replace(",", "") if re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?", text) else text
     if _NUMBER.match(plain) and not (len(plain) > 1 and plain.lstrip("-").startswith("0") and "." not in plain[:3]):
-        return f'<c r="{ref}"{s}><v>{plain}</v></c>'
+        return _xlsx_cell(ref, float(plain) if any(c in plain for c in ".eE") else int(plain), style)
     return f'<c r="{ref}" t="inlineStr"{s}><is><t xml:space="preserve">{_x(text)}</t></is></c>'
 
 
@@ -630,8 +634,9 @@ def xlsx(sheets: list[dict]) -> bytes:
         '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
         '<border><left/><right/><top/><bottom style="thin"><color rgb="FFD1D5DB"/></bottom><diagonal/></border></borders>'
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-        '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/></cellXfs>'
+        '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>'
+        '<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
     return _zip({"[Content_Types].xml": _types(_BASE_TYPES, overrides),
                  "_rels/.rels": _RELS.replace("{main}", "xl/workbook.xml"),
@@ -1065,7 +1070,7 @@ def plain_pdf(title: str, blocks: list[Block]) -> tuple[bytes, int, int]:
             font = "F4" if r.code else "F2" if (r.bold or bold) else "F3" if r.italic else "F1"
             for piece in re.split(r"(\s+)", r.text):
                 if piece.isspace():
-                    words.append((" ", font))
+                    words.append(("\n" if "\n" in piece else " ", font))
                 elif piece:
                     while _width(piece, size, font) > limit - pad and len(piece) > 1:     # a long URL: split it
                         cut = len(piece) - 1
@@ -1076,6 +1081,11 @@ def plain_pdf(title: str, blocks: list[Block]) -> tuple[bytes, int, int]:
                     words.append((piece, font))
         current, used, has_text, first = ([(prefix, "F1")] if prefix else []), pad, False, True
         for word, font in words:
+            if word == "\n":
+                if has_text:
+                    line(current, size, indent if first else indent + pad, lead)
+                    current, used, has_text, first = [], pad, False, False
+                continue
             if word == " " and not has_text:
                 continue
             w = _width(word, size, font)
