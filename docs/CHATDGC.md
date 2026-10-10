@@ -89,7 +89,8 @@ voice come in later phases.
   divider shows the summary, and you can edit it. Every message stays in the chat for you. One file never
   takes more than 40% of the window; the model is told when it only got the first part.
 - **Memory.** ChatDGC remembers what you tell it about yourself: your name, the people you mention, what
-  you like, how you want things done, what you're working on. A reply that saved something says so
+  you like, how you want things done, what you're working on. The quick check before each reply picks out
+  what you state about yourself, so a fact doesn't depend on the model remembering to save it. A reply that saved something says so
   underneath, **Remembered: …**, with **Forget**. You can also say "remember that…" or "forget that…", or
   ask what it remembers. The same memory is read by your Work sessions and your Pips, and ChatDGC also
   knows your projects from your Work sessions (each folder, when you last worked there, what you asked

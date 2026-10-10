@@ -142,6 +142,42 @@ class WebTests(Engine):
             self.engine.research_plan(chat["id"], "Research this")
 
 
+class StatedFactsTests(Engine):
+    """The check before a reply also lists what the user states about themselves, and it's kept as the remember tool
+    keeps it. A model told to call the tool missed 2 of 7 (a move with two cats, a race they're training for);
+    with this, 7 of 7, and still nothing from a question, someone else's view or a pasted page (14 of 14, twice)."""
+
+    def test_what_the_user_states_about_themselves_is_kept_only_from_their_words_and_never_a_secret(self):
+        self.world["decide"] = {"needs_search": False, "query": "",
+                                "remember": ["They are vegetarian.", "They just moved to Bengaluru.", "Their PIN is 4471",
+                                             "They love cruises."]}
+        chat = self.engine.open()
+        reply = self.engine.send(chat["id"], "I'm vegetarian and we just moved to Bengaluru. My PIN is 4471. Dinner ideas?",
+                                 search="auto")
+        self.assertEqual([op["text"] for op in reply["memory"]], ["They are vegetarian.", "They just moved to Bengaluru."],
+                         "a secret isn't kept, and nor is what they never said")
+        self.assertEqual(sorted(f["text"] for f in self.engine.memory.facts()), ["They are vegetarian.", "They just moved to Bengaluru."])
+        told = self.world["answers"][-1]["system"]
+        self.assertIn("Saved to the user's memory from this message (the reply shows it, so don't save it again or "
+                      "mention saving it): They are vegetarian.; They just moved to Bengaluru.", told)
+        again = self.engine.send(chat["id"], "Still vegetarian, by the way.", search="auto")
+        self.assertNotIn("memory", again, "already known: nothing new to show")
+
+    def test_nothing_is_kept_with_memory_off_in_a_temporary_chat_or_past_three_a_reply(self):
+        self.world["decide"] = {"needs_search": False, "query": "", "remember": ["They are vegetarian."]}
+        self.config["memory"] = False
+        chat = self.engine.open()
+        self.assertNotIn("memory", self.engine.send(chat["id"], "I'm vegetarian.", search="auto"))
+        self.config["memory"] = True
+        temporary = self.engine.open(temporary=True)
+        self.assertNotIn("memory", self.engine.send(temporary["id"], "I'm vegetarian.", search="auto"))
+        self.assertEqual(self.engine.memory.facts(), [])
+        self.world["decide"] = {"needs_search": False, "query": "",
+                                "remember": ["Their name is Priya.", "They are a nurse.", "They live in Leeds.", "They have a cat."]}
+        reply = self.engine.send(chat["id"], "I'm Priya, a nurse in Leeds, and I have a cat.", search="auto")
+        self.assertEqual(len(reply["memory"]), 3, "at most three a reply, as the tool")
+
+
 class PictureTests(Engine):
     def test_pictures_where_seeing_helps_are_kept_with_the_reply_and_shown_as_it_streams(self):
         self.world["decide"] = {"needs_search": False, "query": "", "images": "Hagia Sophia interior"}

@@ -86,7 +86,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   a reply. Your projects come from your Work sessions' index. `memory_list`, `memory_add`, `memory_edit`,
   `memory_forget`, `memory_clear` and `memory_project` are answered by `memory_state`; the config key `memory`
   turns it off everywhere. Pip notes now match a fact at the end of a sentence ("vegetarian." is
-  "vegetarian").
+  "vegetarian"). The look-up check before a reply also lists, in `remember`, the lasting facts the user states
+  about themselves; they're kept as the tool keeps them (deepseek-v4.1-flash, told to call the tool, missed 2 of
+  7; with the check 7 of 7, and nothing kept from 7 messages that state none, twice).
 - **Deep research.** `chatdgc_research` makes a plan; `chatdgc_research_start` runs it as edited (or writes from
   what a stopped run found); `chatdgc_research_steer` adds to it while it runs; `chatdgc_research` reports
   progress. Up to three rounds of searching and reading (about 20 pages, PDFs included), a note per useful

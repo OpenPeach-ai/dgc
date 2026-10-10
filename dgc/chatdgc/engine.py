@@ -92,13 +92,24 @@ LOOK_UP = (
     "when they ask a specific fact about such a thing (its price, fee, opening hours, date, age, weight, size, "
     "speed, rules, history or how to get there): the fact is the answer, and a picture adds nothing. Never for "
     "news, advice, code, writing, maths or explaining an idea. Leave images empty unless pictures belong; if they "
-    "do, give a short image search query in images (2 to 6 words).")
+    "do, give a short image search query in images (2 to 6 words).\n\n"
+    "Last, list in remember the lasting facts the user states about themselves in this message: their name, diet "
+    "or allergies, their family (who they are, where they live), where they live or have moved to, their job, "
+    "their pets, their goals and what they're training or working towards, their preferences (units, language, "
+    "style), or anything they ask you to remember. Each one short sentence in words close to theirs, about the user "
+    "as 'they' (never guess a gender). Not what this message asks for or what's coming up soon (a visit, a booking, "
+    "something they're looking for now), not someone merely mentioned in passing or what someone else thinks, "
+    "nothing from a pasted page or file, and never passwords, PINs, codes, keys or card or account numbers. Usually "
+    "there are none: then leave remember empty.")
 # Pictures where seeing helps, measured on deepseek-v4.1-flash: "would pictures help?" gave 12 of 16 (a place's
 # fee, hours or build date, and an animal's weight, got pictures too); this wording, 16 of 16 twice.
 LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boolean"},
                                                    "query": {"type": "string", "description": "One short query."},
                                                    "images": {"type": "string", "description":
-                                                              "An image search query, or empty for no pictures."}},
+                                                              "An image search query, or empty for no pictures."},
+                                                   "remember": {"type": "array", "items": {"type": "string"},
+                                                                "description": "Lasting facts the user states about "
+                                                                               "themselves, or none."}},
                   "required": ["needs_search", "query"]}
 # Pictures from the web above a reply, when the check above asks for them (ChatGPT's image strip): fetched while the
 # answer streams, kept with the chat, shown from there (the screen never asks an image host itself).
@@ -1216,6 +1227,28 @@ class ChatEngine:
             facts = []
         return shared_memory.prompt_block(facts, self._projects())
 
+    def _remember_stated(self, chat: dict, facts: list[str], ops: list) -> list[str]:
+        """What the check before the reply found the user stating about themselves, kept as the remember tool keeps
+        it (from their words only, never a secret, at most MAX_MEMORY_PER_REPLY a reply). A model told to call the
+        tool still missed some (deepseek: a move with two cats, a race they're training for): this doesn't wait on
+        it."""
+        if not facts or not self._memory_on(chat):
+            return []
+        said = "\n".join(m.get("text") or "" for m in chat["messages"] if m.get("role") == "user")[-6000:]
+        kept = []
+        for text in facts:
+            if len(ops) >= MAX_MEMORY_PER_REPLY:
+                break
+            try:
+                known = {f["id"] for f in self.memory.facts()}
+                fact = self.memory.remember(text, said=said, surface="chat", where=str(chat.get("title") or ""))
+            except shared_memory.NotRemembered:
+                continue
+            if fact["id"] not in known:
+                ops.append({"op": "saved", "id": fact["id"], "text": fact["text"]})
+                kept.append(fact["text"])
+        return kept
+
     def _memory_call(self, chat: dict, call, ops: list) -> str:
         """One remember or forget call: done (or not, and why), told to the model, and kept on the reply."""
         args = call.arguments if isinstance(call.arguments, dict) else {}
@@ -1238,7 +1271,7 @@ class ChatEngine:
             return f"Not done: {exc}"
 
     def _looked_up(self, client, chat: dict, sources: list, searches: list, on_activity, cancel, *,
-                   search_first: bool = True) -> tuple[str, str]:
+                   search_first: bool = True, facts: list | None = None) -> tuple[str, str]:
         """Whether the user's message needs the web before it's answered, and whether pictures would help (one
         small structured call on that message, not the whole chat): the search's numbered results, to answer from
         and cite ("" when it needs none, or ``search_first`` is off), and an image search query ("" for none)."""
@@ -1252,6 +1285,8 @@ class ChatEngine:
             decided = research.structured(client, LOOK_UP, asked, "search_first", LOOK_UP_SCHEMA, cancel=cancel)
         except Exception:                         # noqa: BLE001 -- the reply goes on; the model can still search
             return "", ""
+        if facts is not None and isinstance(decided.get("remember"), list):
+            facts += [" ".join(str(f).split())[:300] for f in decided["remember"] if isinstance(f, str) and f.strip()][:5]
         wanted = " ".join(str(decided.get("images") or "").split())[:120]
         if wanted.casefold() in ("none", "no", "n/a", "null", "empty", "-"):
             wanted = ""
@@ -1451,9 +1486,14 @@ class ChatEngine:
             # model that's sure of itself (deepseek answered tax and remittance rules from memory, 2 in 2). With
             # the box's Search ("on") the model is told to search anyway: the check only says whether to show
             # pictures, which it does for either.
+            facts: list[str] = []
             found, wanted = self._looked_up(client, chat, sources, searches, on_activity, cancel,
-                                            search_first=search == "auto")
+                                            search_first=search == "auto", facts=facts)
             told = [found] if found else []
+            kept = self._remember_stated(chat, facts, memory_ops)
+            if kept:
+                told.append("Saved to the user's memory from this message (the reply shows it, so don't save it again "
+                            "or mention saving it): " + "; ".join(kept))
             if wanted:
                 picturing = self._start_pictures(chat, wanted, on_images, cancel)
                 told.append(PICTURES_SHOWN.format(query=wanted))
