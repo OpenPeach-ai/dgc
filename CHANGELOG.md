@@ -57,6 +57,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **Web search is always there in ChatDGC.** `search` defaults to `auto`, and an `auto` reply first asks the
   model (one small structured call on the message) whether it needs the web; if so it searches and answers from
   the numbered results. The config key `chatdgc_web` (Settings → Web search) turns it off everywhere.
+- **Follow-ups in ChatDGC.** After a reply ends, one small structured call suggests up to three next messages
+  (`FOLLOW_UP`), kept on the reply as `followups` and sent as `chatdgc_followups`; none after a question card, a
+  waiting card, research, or when the model sees nothing natural (a greeting, thanks). Config `chatdgc_followups`
+  (Settings → ChatDGC) turns them off. With deepseek-v4.1-flash: relevant ones for 4 real questions, none after
+  "Hi" or "thanks, that's all", and none after a reply that asked the user something.
 - **Branch in new chat.** `chatdgc_branch` {conversation_id, message_id} makes a new chat from a reply: the
   visible conversation up to it, its files copied, its summary when all of what was summarized came along,
   and `branched` {from, title, at, created_at} on the new chat's conversation; answered by its `chatdgc_opened`.

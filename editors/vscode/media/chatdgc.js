@@ -833,6 +833,7 @@
     if (!live) { const kept = memoryNote(message); if (kept) node.append(kept); }
     const end = endNote(message);
     if (end) node.append(end);
+    const next = !live ? followupsNode(message) : null;
     if (!live && (message.text || message.versions)) {
       const actions = el("div", "cd-actions");
       const versions = versionsControl(message);
@@ -849,6 +850,7 @@
       if (message.model) actions.append(el("span", "cd-meta", String(message.model)));
       node.append(actions);
     }
+    if (next) node.append(next);
     return node;
   }
   // ---- projects (ChatGPT's): chats, files and instructions together. A chat in one says so in its header; a new
@@ -1132,6 +1134,31 @@
       }
     }
     return box;
+  }
+  /** Follow-ups (ChatGPT's): a few next messages under the chat's last reply; one click sends it. Not under an older
+   *  reply (the conversation moved on), and not while a reply is being written. */
+  function followupsNode(message) {
+    const list = Array.isArray(message.followups) ? message.followups.filter((f) => typeof f === "string" && f.trim()) : [];
+    if (!list.length || state.messages[state.messages.length - 1] !== message || state.busy) return null;
+    const box = el("div", "cd-followups");
+    box.setAttribute("role", "group"); box.setAttribute("aria-label", "Suggested follow-ups");
+    for (const text of list.slice(0, 3)) {
+      const button = el("button", "cd-followup");
+      button.type = "button"; button.title = "Send this";
+      button.append(icon("arrow-right"), el("span", "", text));
+      button.addEventListener("click", () => sendText(text));
+      box.append(button);
+    }
+    return box;
+  }
+  /** Send words that aren't in the box (a follow-up): the box keeps whatever you were typing. */
+  function sendText(text) {
+    if (!text.trim() || state.busy || !state.conversation || state.unavailable) return;
+    vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode() });
+    state.lastSent = { text, research: false, pending: [], searchFirst: state.searchFirst, followup: true };
+    searchFirst(false);
+    state.busy = true;
+    hideNotice(); controls();
   }
   /** Branch in new chat (ChatGPT's): this conversation up to here, in a new chat of its own, opened in a tab. */
   function branchAction(message) {
@@ -1623,6 +1650,13 @@
         if (card.status !== "waiting") delete state.cardEdit[card.id];
         update(message.id);
         if (card.status === "done") announce(`Sent: ${card.tool} in ${card.plugin_name}.`);
+        return;
+      }
+      case "followups": {
+        const message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message || !Array.isArray(msg.followups)) return;
+        message.followups = msg.followups.filter((f) => typeof f === "string").slice(0, 3);
+        update(message.id);
         return;
       }
       case "actionIdle":

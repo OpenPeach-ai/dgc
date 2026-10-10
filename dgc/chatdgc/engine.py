@@ -126,6 +126,16 @@ PROJECTS_FRESH = 300          # seconds a list of the user's projects is reused
 PROJECT_SHARE = 0.25          # of the window, at most, for a ChatDGC project's files (each chat in it reads them)
 PROJECT_FILE_CHARS = 200_000  # the same, when the window isn't known
 OTHER_CHATS = 8               # a project chat is told what this many of the project's other chats are about
+# Suggested next messages under a reply (ChatGPT's follow-ups): one small structured call after the reply ends.
+FOLLOW_UP = ("Suggest up to three follow-ups the user might want to send next in this conversation, written the way the "
+             "user would type them to you: first person, plain words, at most 12 words each. Each one should go somewhere "
+             "the last reply opened up: a next step, a deeper detail, a related choice, or applying it to the user's own "
+             "situation. Nothing the reply already answered and no small talk. When nothing natural follows (a greeting, "
+             "thanks, a task that's done, or a reply that asked the user something), give none.")
+FOLLOW_UP_SCHEMA = {"type": "object", "properties": {"followups": {"type": "array", "items": {"type": "string"},
+                                                                   "maxItems": 3}},
+                    "required": ["followups"]}
+MAX_FOLLOW_UP_CHARS = 140
 NAME_PROMPT = ("Name this conversation in three to six words, the way a chat app titles it. Reply with the name "
                "only: no quotes, no full stop.")
 CONTINUE = ("Continue exactly where your last reply stopped. Don't repeat anything you already wrote, and don't "
@@ -867,6 +877,39 @@ class ChatEngine:
             return None
         # Only if it still has that name now: one renamed while the model thought keeps the user's.
         return self.store.update(chat_id, title=name[:60], expect_title=title_from(first.get("text", "")))
+
+    def followups(self, chat_id: str, message_id: str, cancel=None) -> list[str] | None:
+        """Up to three suggested next messages for the chat's last reply, kept on it (ChatGPT's follow-ups). None when
+        they're turned off, the reply isn't one that leaves a next step (it asked a question, waits on a card, is a
+        research report, or didn't finish), the model suggests none, or the conversation moved on meanwhile."""
+        if self.config.get("chatdgc_followups", True) is False:
+            return None
+        chat = self._chat(chat_id)
+        last = chat["messages"][-1] if chat["messages"] else {}
+        if (last.get("id") != message_id or last.get("role") != "assistant" or last.get("finish") != "stop"
+                or not last.get("text") or last.get("questions") or last.get("research")
+                or any(a.get("status") == "waiting" for a in last.get("actions") or [])):
+            return None
+        mine = next((m.get("text") or "" for m in reversed(chat["messages"]) if m.get("role") == "user"), "")
+        client = self.client(chat.get("model") or None)
+        asked = f"The user's message:\n<<<\n{mine[-2000:]}\n>>>\n\nYour reply:\n<<<\n{last['text'][-4000:]}\n>>>"
+        decided = research.structured(client, FOLLOW_UP, asked, "suggest", FOLLOW_UP_SCHEMA, cancel=cancel)
+        out: list[str] = []
+        for item in decided.get("followups") or [] if isinstance(decided.get("followups"), list) else []:
+            text = re.sub(r"^\s*(?:\d+[.)]|[-*•])\s*", "", " ".join(str(item).split())).strip(" \"'`")
+            if (3 <= len(text) <= MAX_FOLLOW_UP_CHARS and text.casefold() != mine.strip().casefold()
+                    and text.casefold() not in {o.casefold() for o in out}):
+                out.append(text)
+        if not out:
+            return None
+        with self._card_lock:
+            chat = self._chat(chat_id)
+            last = chat["messages"][-1] if chat["messages"] else {}
+            if last.get("id") != message_id:
+                return None                        # something was sent meanwhile: these would be stale
+            last["followups"] = out[:3]
+            self._save(chat)
+        return out[:3]
 
     def _keep_file(self, chat: dict, item: dict) -> None:
         meta = item["meta"]

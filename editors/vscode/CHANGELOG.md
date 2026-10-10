@@ -37,6 +37,8 @@
   and name; point at it for the page's title and what it says. **Sources** under the reply opens every page it
   cited, and the other results it found, in a panel beside the chat. A site's icon sits on a white disc, so
   a dark logo still shows on a dark theme.
+- **Follow-ups.** Under the latest reply, a few next messages you might send; click one to send it.
+  **Settings → ChatDGC → Suggest follow-ups** turns them off.
 - **Branch in new chat.** The branch button under a reply opens a new chat with the conversation up to there,
   in a tab of its own, marked where it branched (with a link back). The original stays as it was.
 - **Projects**, as ChatGPT has them: chats, files and instructions together. They sit above your chats in the

@@ -442,6 +442,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_images":
         for (const tab of showing(conversation)) this.post(tab, { type: "images", messageId: ev.message_id, images: ev.images });
         return;
+      case "chatdgc_followups":
+        if (Array.isArray(ev.followups)) {
+          const followups = ev.followups.filter((f: unknown) => typeof f === "string").slice(0, 3);
+          for (const tab of showing(conversation)) this.post(tab, { type: "followups", messageId: ev.message_id, followups });
+        }
+        return;
       case "chatdgc_action":
         // A plugin's card under a reply, as it's put there or decided: every tab on the chat shows it.
         if (asker) this.requests.delete(requestId);

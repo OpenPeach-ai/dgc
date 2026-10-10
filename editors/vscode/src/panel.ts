@@ -5741,7 +5741,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // sees them); every supported CLI takes `fields` and ignores names it doesn't know.
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
               fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
-                       "chatdgc_window", "memory", "chatdgc_web"] });
+                       "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -6152,6 +6152,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (["8k", "32k", "128k", "max"].includes(String(v.chatdgc_window || ""))) {
           values.chatdgc_window = v.chatdgc_window;
         }
+        if (typeof v.chatdgc_followups === "boolean") { values.chatdgc_followups = v.chatdgc_followups; }
       }
       if (v.context_size) { values.context_size = Number(v.context_size); }
       if (v.subagent_context_size !== undefined && v.subagent_context_size !== "") {

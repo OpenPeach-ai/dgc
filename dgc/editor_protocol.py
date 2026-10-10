@@ -305,7 +305,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "chatdgc_window": _S(False),
         # Opt-in too: whether DGC keeps one memory about the user (Settings -> Memory), and whether ChatDGC may
         # search the web at all (Settings -> Web search; on, it searches when an answer depends on it).
-        "memory": _B(False), "chatdgc_web": _B(False),
+        "memory": _B(False), "chatdgc_web": _B(False), "chatdgc_followups": _B(False),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
         "ultra_mode": _B(False),
@@ -912,6 +912,9 @@ EVENT_FIELDS.update({
     # and after each choice. The finished reply carries them in `actions`.
     "chatdgc_action": {"conversation_id": _S(), "message_id": _S(), "action": _O(), "request_id": _S(False)},
     "chatdgc_pips": {"request_id": _S(), "pips": _A(), "error": _S(False)},
+    # Suggested next messages under a reply (ChatGPT's follow-ups), after it ended; the reply carries them in
+    # `followups` too. Only the chat's last reply has any worth showing.
+    "chatdgc_followups": {"conversation_id": _S(), "message_id": _S(), "followups": _A()},
     "chatdgc_library_file": {"request_id": _S(), "op": _S(), "path": _S(False), "bytes": _I(False)},
     "chatdgc_project": {"request_id": _S(), "project": _f("object", "null"), "deleted": _A(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "messages": _A(), "earlier": _I()},

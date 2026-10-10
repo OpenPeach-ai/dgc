@@ -776,6 +776,34 @@ test("plugins in chat: a card for each change, Send it now as edited, Hand it to
   } finally { await s.page.close(); }
 });
 
+test("follow-ups: a few next messages under the last reply; one click sends it, and the box keeps what you were typing", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const next = ["How do I bake my first loaf with this starter?", "What can I make with the <b>discard</b>?"];
+    await s.send({ type: "opened", conversation: conversation({ title: "Sourdough" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Starter?" }, { id: M(2), role: "assistant", text: "Mix flour and water.", finish: "stop", followups: ["Old one"] },
+      { id: M(3), role: "user", text: "More detail" }, { id: M(4), role: "assistant", text: "Feed it daily.", finish: "stop" }] });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-followups").count(), 0, "an earlier reply's are stale: the conversation moved on");
+    await s.send({ type: "followups", messageId: M(4), followups: next });
+    await s.frame();
+    const box = s.page.locator(".cd-assistant").last().locator(".cd-followups");
+    assert.equal(await box.getAttribute("aria-label"), "Suggested follow-ups");
+    assert.deepEqual(await box.locator(".cd-followup").allTextContents(), next, "words, never markup");
+    assert.equal(await box.locator("b").count(), 0);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-followups.png") });
+    await s.page.locator("#cd-input").fill("half-typed thought");
+    await box.locator(".cd-followup").first().click();
+    const sent = (await s.posted("send")).at(-1);
+    assert.deepEqual([sent.text, typeof sent.model, sent.search], [next[0], "string", "auto"]);
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "half-typed thought", "the box keeps what you were typing");
+    await box.locator(".cd-followup").nth(1).click();
+    assert.equal((await s.posted("send")).length, 1, "one at a time: a reply is on its way");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("attachments: picked files and pastes become chips, go with the message, and show on it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

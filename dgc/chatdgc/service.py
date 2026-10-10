@@ -665,6 +665,7 @@ class ChatService:
                 self._memory_state()                  # Settings -> Memory, if it's open, shows what changed
             if reply.get("finish") == "stop":
                 self._name_later(conversation_id)
+                self._followups_later(conversation_id, reply["id"])
         except (ChatEngineError, ChatStoreError) as exc:
             if stream["value"] is not None:
                 stream["value"].flush()
@@ -695,6 +696,26 @@ class ChatService:
                 with self._lock:
                     self._naming.discard(threading.current_thread())
         thread = threading.Thread(target=name, daemon=True, name=f"dgc-chatdgc-name-{conversation_id[5:13]}")
+        with self._lock:
+            if self._closing:
+                return
+            self._naming.add(thread)
+        thread.start()
+
+    def _followups_later(self, conversation_id: str, message_id: str) -> None:
+        """Suggested next messages for a reply that just ended, off its turn's thread (the reply is already on screen).
+        close() waits for it, as for a name."""
+        def suggest():
+            try:
+                found = None if self._closing else self.engine.followups(conversation_id, message_id)
+                if found:
+                    self.emit("chatdgc_followups", conversation_id=conversation_id, message_id=message_id, followups=found)
+            except Exception:                         # noqa: BLE001 -- suggestions are a nicety: none, then
+                pass
+            finally:
+                with self._lock:
+                    self._naming.discard(threading.current_thread())
+        thread = threading.Thread(target=suggest, daemon=True, name=f"dgc-chatdgc-next-{conversation_id[5:13]}")
         with self._lock:
             if self._closing:
                 return

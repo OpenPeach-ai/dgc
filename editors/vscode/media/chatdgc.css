@@ -495,3 +495,14 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .cd-card-answer summary { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); cursor: pointer; }
 .cd-card-answer pre { max-height: 200px; overflow: auto; margin: var(--sp-1) 0 0; padding: var(--sp-2); border-radius: var(--r-md);
   background: var(--bg); color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--mono, ui-monospace, monospace); white-space: pre-wrap; }
+
+/* Follow-ups (ChatGPT's): a few next messages under the last reply, each a row that sends itself. */
+.cd-followups { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: var(--sp-2);
+  padding-top: var(--sp-2); border-top: 1px solid var(--border); }
+.cd-followup { display: inline-flex; align-items: center; gap: var(--sp-2); max-width: 100%; padding: 5px var(--sp-2);
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--text); font: var(--w-reg) var(--t-sm)/1.4 var(--sans);
+  text-align: left; cursor: pointer; }
+.cd-followup .codicon { flex: none; color: var(--muted); font-size: 13px; }
+.cd-followup:hover { background: var(--surface2); }
+.cd-followup:hover .codicon { color: var(--accent-text, var(--accent)); }
+.cd-followup:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 0; }

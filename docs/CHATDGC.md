@@ -119,6 +119,10 @@ voice come in later phases.
   for another one, with whatever model and thinking level the box is set to. Either way, the old version
   stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own
   versions comes back as you left it. One point keeps up to 50 versions.
+- **Follow-ups**, as ChatGPT shows them: under the latest reply, up to three next messages you might send (a
+  next step, a deeper detail, applying it to you). Click one and it's sent; what you were typing stays in the
+  box. None after a greeting or thanks, a finished task, a reply that asked you something or waits on a card,
+  or research. **Settings → ChatDGC → Suggest follow-ups** turns them off.
 - **Branch in new chat**, as ChatGPT has it: the branch button under a reply starts a new chat holding the
   conversation up to that reply (the versions you see), with its files. It opens in a tab of its own, named
   "Branch · …", and a line after that reply says where it branched from, with a link back. The original

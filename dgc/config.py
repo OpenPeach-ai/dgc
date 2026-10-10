@@ -447,6 +447,7 @@ DEFAULTS: dict = {
     "notes": True,                              # keep a searchable per-project trace of what was learned
     "memory": True,                             # one memory about you, shared by ChatDGC, Work and Pips
     "chatdgc_web": True,                        # ChatDGC searches the web when an answer depends on it
+    "chatdgc_followups": True,                  # ChatDGC suggests next messages under a reply
     "notes_max_rows": 5000,                     # oldest notes are pruned past this, per project
     "mouse": "capture",                         # capture (wheel scrolls DGC, rows clickable) | off (terminal selection)
     "session_redaction": True,                  # strip credentials from durable transcript/plan history;

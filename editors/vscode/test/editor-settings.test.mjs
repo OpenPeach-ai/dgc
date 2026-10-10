@@ -390,3 +390,21 @@ test('Web search: ChatDGC searches on its own unless this switch turns it off, s
   assert.equal(x.sent.at(-1).type, 'saveSettings');
   assert.equal(x.sent.at(-1).values.chatdgc_web, false);
 });
+
+test('ChatDGC: follow-ups under a reply, on unless this switch turns them off, saved with the page', () => {
+  const x = setup();
+  x.message({ type: 'event', event: { ...x.config, chatdgc_settable: true, chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_followups: true } });
+  x.click('[data-nav=chatdgc]');
+  const on = x.d.querySelector('#chatdgc_followups');
+  assert.ok(on, 'the switch is on the ChatDGC page');
+  assert.equal(on.getAttribute('aria-checked'), 'true');
+  assert.match(x.d.body.textContent, /A few next questions under a reply, as ChatGPT shows them\. Click one to send it\./);
+  x.click('#chatdgc_followups');
+  x.click('#save');
+  assert.equal(x.sent.at(-1).type, 'saveSettings');
+  assert.equal(x.sent.at(-1).values.chatdgc_followups, false);
+  const y = setup();
+  y.message({ type: 'event', event: { ...y.config, chatdgc_settable: false } });
+  y.click('[data-nav=chatdgc]');
+  assert.equal(y.d.querySelector('#chatdgc_followups').disabled, true, 'an older CLI: shown, not changeable');
+});
