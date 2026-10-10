@@ -35,7 +35,8 @@
   - the list of shortcuts: Ctrl/⌘+/.
 - **A context meter** in the box (amber at 70%, red at 85%), with **Compact now** and **Continue in a new chat**.
   Near the limit, older messages are summarized. You see when it happens, the summary sits behind an
-  **Earlier messages summarized** divider, and you can edit it.
+  **Earlier messages summarized** divider, and you can read it (as formatted text) and edit it. When
+  everything before your last exchange is already summarized, the meter's details say so.
 - **Settings → ChatDGC → Window:** 8k, 32k, 128k, or the model's maximum.
 
 ### Questions

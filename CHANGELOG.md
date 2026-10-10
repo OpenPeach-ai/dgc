@@ -57,11 +57,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     and sends it with every request.
   - Before a reply would fill more than 75% of the window, the older turns become a rolling summary and the
     recent ones stay word for word. This is reported with `chatdgc_activity` `compacting`, then
-    `chatdgc_compacted`. If the summary can't be written, the reply still goes.
+    `chatdgc_compacted`. If the summary can't be written, the reply still goes. Each new summary carries
+    over everything the last one said, and one far past its length is shortened before it's kept.
   - `chatdgc_compact` compacts now, `chatdgc_summary` edits the summary, and `chatdgc_carry` continues in a
     new chat with a summary.
   - One attachment takes at most 40% of the window.
-  - `chatdgc_context` reports what a chat takes after every turn and when it opens.
+  - `chatdgc_context` reports what a chat takes after every turn and when it opens: the model's count of
+    the reply's last request, or an estimate before any reply and after Compact now or an edited summary.
+    `compactable` says whether Compact now has more than the last exchange to summarize.
 
 ### Models
 
