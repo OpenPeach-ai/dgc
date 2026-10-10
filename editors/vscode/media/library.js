@@ -143,6 +143,8 @@
       state.origins = msg.origins && typeof msg.origins === "object" ? msg.origins : {};
       state.loading = false;
       render();
+    } else if (msg.type === "refresh") {
+      ask();                                        // the list stays on screen until the new one comes
     } else if (msg.type === "image") {
       const ok = typeof msg.data === "string" && /^data:image\/(png|jpeg|gif|webp);base64,/.test(msg.data);
       images.set(msg.id, ok ? { data: msg.data } : { error: true });

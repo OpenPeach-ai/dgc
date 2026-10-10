@@ -583,6 +583,7 @@ test("the Library: its own tab, its files asked for, and each file's actions thr
   chat.openLibrary();
   assert.equal(world.panels.length, 1, "one Library");
   const [lib] = world.panels;
+  assert.deepEqual(lib.last("refresh"), { type: "refresh" }, "shown again, it asks again: a file made since is there");
   assert.equal(lib.viewType, CHATDGC_LIBRARY);
   assert.match(lib.webview.html, /media\/library\.js/);
   assert.match(lib.webview.html, /img-src[^;]*data:;/, "its images come from DGC, never a site");

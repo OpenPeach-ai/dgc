@@ -161,7 +161,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   /** The Library, in a tab of its own (one at a time). */
   openLibrary(): void {
-    if (this.library) { this.library.reveal(); return; }
+    // Shown again, it asks again: a file attached or made since is there (it keeps its filters).
+    if (this.library) { this.library.reveal(); void this.library.webview.postMessage({ type: "refresh" }); return; }
     const panel = vscode.window.createWebviewPanel(CHATDGC_LIBRARY, "Library", vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] });
     panel.iconPath = { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-light.svg"),

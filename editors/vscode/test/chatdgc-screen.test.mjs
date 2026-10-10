@@ -1315,6 +1315,10 @@ test("the Library: once ChatDGC has made a file, show what you uploaded or what 
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "", origin: "made", offset: 0 });
     await send({ type: "library", files: [made], total: 1, next: null, counts: { document: 1 }, origins: { made: 1, uploaded: 2 } });
     assert.equal(await page.locator("#lib-origins .lib-kind[aria-pressed=true]").innerText(), "Made by ChatDGC\n1");
+    await send({ type: "refresh" });
+    assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "", origin: "made", offset: 0 },
+                     "shown again: asked again, with the filter kept");
+    assert.equal(await page.locator(".lib-name").count(), 1, "what it showed stays until the new list comes");
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
