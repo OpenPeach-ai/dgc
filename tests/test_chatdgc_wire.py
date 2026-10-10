@@ -38,7 +38,7 @@ else:
 from dgc import config as config_module  # noqa: E402
 from dgc import headless, sessions  # noqa: E402
 from dgc.chatdgc import service as service_module  # noqa: E402
-from dgc.chatdgc.engine import NAME_PROMPT, ChatEngine  # noqa: E402
+from dgc.chatdgc.engine import FOLLOW_UP, NAME_PROMPT, ChatEngine  # noqa: E402
 from dgc.chatdgc.service import ChatService, fit, page  # noqa: E402
 from dgc.chatdgc.store import ChatStore  # noqa: E402
 from dgc.shared_memory import SharedMemory  # noqa: E402
@@ -80,6 +80,9 @@ class Model:
                 if messages[0]["content"] == NAME_PROMPT:          # naming a new chat, off the turn
                     outer.named.set()
                     return SimpleNamespace(content="Named by the model", finish_reason="stop", usage={}, thinking="")
+                if str(messages[0]["content"]).startswith(FOLLOW_UP[:60]):   # suggesting next messages, off the turn
+                    return SimpleNamespace(content="", tool_calls=[ToolCall("f", "suggest", {"followups": []})],
+                                           finish_reason="stop", usage={}, thinking="")
                 step = outer.script.pop(0)
                 for part in step.get("thinking", []):
                     on_thinking(part)
