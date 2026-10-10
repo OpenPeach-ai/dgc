@@ -179,8 +179,10 @@ class ResearchTests(unittest.TestCase):
         check = state["check"]
         self.assertEqual((check["claims"], check["checked"], check["supported"], check["invalid"]), (5, 5, 4, 1))
         self.assertEqual([c["cites"] for c in check["unsupported"]], [[2]])
-        self.assertEqual(done["sources"], [{"n": 1, "title": "LRS", "url": "https://rbi.org.in/lrs"},
-                                           {"n": 2, "title": "SDLT", "url": "https://gov.uk/sdlt"}],
+        self.assertEqual(done["sources"], [{"n": 1, "title": "LRS", "url": "https://rbi.org.in/lrs",
+                                            "snippet": "LRS allows a resident to remit up to USD 250,000 a financial year."},
+                                           {"n": 2, "title": "SDLT", "url": "https://gov.uk/sdlt",
+                                            "snippet": "Non-UK residents pay a 2% SDLT surcharge on residential property in England."}],
                          "a note keeps the address the page was read at")
         kinds = [a["kind"] for a in state["activity"]]
         for kind in ("round", "search", "read", "note", "skip", "write", "check", "checked"):

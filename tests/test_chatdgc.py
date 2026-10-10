@@ -300,9 +300,9 @@ class ChatDGCTests(unittest.TestCase):
         seen = []
         reply = self.engine.send(chat["id"], "Weather in Paris?", search="auto", on_activity=lambda *a: seen.append(a))
         self.assertEqual(reply["text"], "Sunny and 21°C [1], with a dry week ahead [1][3].")
-        self.assertEqual(reply["sources"], [{"n": 1, "title": "Paris forecast", "url": "https://weather.example/paris"},
-                                            {"n": 2, "title": "Météo Paris", "url": "https://meteo.example/paris"},
-                                            {"n": 3, "title": "Rain radar", "url": "https://radar.example"}],
+        self.assertEqual(reply["sources"], [{"n": 1, "title": "Paris forecast", "url": "https://weather.example/paris", "snippet": "Sunny, 21°C"},
+                                            {"n": 2, "title": "Météo Paris", "url": "https://meteo.example/paris", "snippet": "Ensoleillé"},
+                                            {"n": 3, "title": "Rain radar", "url": "https://radar.example"}],  # no snippet: none to keep
                          "numbered across searches, one number per page, only web addresses")
         self.assertEqual(reply["searches"], ["paris weather today", "paris rain this week"])
         self.assertEqual(seen, [("searching", "paris weather today"), ("searching", "paris rain this week")])

@@ -33,6 +33,9 @@
   - copy the last code block: Ctrl/⌘+Shift+;;
   - focus the box: Shift+Esc;
   - the list of shortcuts: Ctrl/⌘+/.
+- **Sources, as ChatGPT shows them.** A fact a reply took from the web carries a pill with the site's favicon
+  and name; point at it for the page's title and what it says. **Sources** under the reply opens every page it
+  cited, and the other results it found, in a panel beside the chat.
 - **Web search is always on in ChatDGC**, as in ChatGPT: a question about facts that could be wrong or out
   of date (rules, rates, prices, news, people) is looked up before it's answered, with sources. The box's
   **Web** picker is gone; **Search** makes it search first for one message, and **Settings → Web search** can

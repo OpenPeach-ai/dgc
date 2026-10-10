@@ -419,7 +419,8 @@ class ChatEngine:
             cited = {int(n) for n in research.CITE.findall(report)}
             state.update(status="done", finished_at=now())
             message.update(text=report[:MAX_TEXT], finish="stop",
-                           sources=[{"n": n["n"], "title": n["title"], "url": n["url"]}
+                           sources=[{"n": n["n"], "title": n["title"], "url": n["url"],
+                                     "snippet": research.note_line(n["note"])}
                                     for n in state.get("notes") or [] if n["n"] in cited])
             if not message["sources"]:
                 message.pop("sources")
@@ -1043,13 +1044,15 @@ class ChatEngine:
             url, title = str(item.get("url") or ""), " ".join(str(item.get("title") or "").split())[:200]
             if not url.startswith(("http://", "https://")):
                 continue
+            snippet = " ".join(str(item.get("snippet") or "").split())[:500]
             known = next((x for x in sources if x["url"] == url), None)
             if known is None:
                 if len(sources) >= MAX_SOURCES:
                     continue
-                known = {"n": len(sources) + 1, "title": title or url, "url": url[:2000]}
+                # The snippet goes with it, for the reply's source cards (ChatGPT's hover card and Sources panel).
+                known = {"n": len(sources) + 1, "title": title or url, "url": url[:2000]} | (
+                    {"snippet": snippet[:300]} if snippet else {})
                 sources.append(known)
-            snippet = " ".join(str(item.get("snippet") or "").split())[:500]
             lines.append(f"[{known['n']}] {title}\n{url}" + (f"\n{snippet}" if snippet else ""))
         if len(lines) == 1:
             lines.append("No results.")

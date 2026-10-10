@@ -52,6 +52,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   `fields` reads them back. Every chat follows them from its next reply.
 - **Search finds what was said.** `chatdgc_list` `query` searches every chat's name and conversation, with
   FTS5 or plain matching without it. A chat found by its words carries `match`, the words around them.
+- **ChatDGC sources carry a snippet** (`sources[].snippet`): a search result's own words, or a research note's
+  first point, for the reply's source cards.
 - **Web search is always there in ChatDGC.** `search` defaults to `auto`, and an `auto` reply first asks the
   model (one small structured call on the message) whether it needs the web; if so it searches and answers from
   the numbered results. The config key `chatdgc_web` (Settings → Web search) turns it off everywhere.

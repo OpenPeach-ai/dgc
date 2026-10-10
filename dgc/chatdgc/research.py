@@ -518,3 +518,13 @@ def report_file(message: dict) -> str:
                   f"{len(state.get('notes') or [])} noted. Citations checked: {check['supported']} of "
                   f"{check['checked']} cited claims hold up against their sources.*"]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def note_line(note: str) -> str:
+    """A note's first point, as a source's snippet on the report's source cards."""
+    for line in str(note or "").splitlines():
+        line = MARKER.sub("", line.strip()).strip()
+        if line:
+            return line[:300]
+    return ""
+

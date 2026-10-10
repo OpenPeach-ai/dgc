@@ -61,7 +61,7 @@ const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "
 
 export function chatdgcDocument(asset: (name: string) => string, cspSource: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
 <title>ChatDGC</title></head><body class="cd-blank">
 <header class="cd-head"><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
@@ -327,6 +327,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(conversation ? { conversation_id: conversation } : {}),
                                           ...(!conversation && tab.temporary ? { temporary: true } : {}) });
         void this.models(tab);
+        // A source's favicon, as Work's panel shows one: Google's icon service, asked about the origin only.
+        // dgc.linkFavicons off: no request leaves for an icon.
+        let favicons = true;
+        try { favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) !== false; } catch { /* default */ }
+        this.post(tab, { type: "favicons", on: favicons });
         return;
       }
       case "reopenNew":                      // the chat it held is gone (a temporary one after a restart)

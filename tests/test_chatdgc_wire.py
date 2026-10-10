@@ -203,7 +203,7 @@ class ServiceTests(unittest.TestCase):
         reply = self.wire.of("chatdgc_message")[-1]["message"]
         self.assertEqual(activity["message_id"], reply["id"])
         self.assertEqual((reply["text"], reply["sources"]), ("Let me check. \n\nSunny [1].",
-                                                             [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris"}]))
+                                                             [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris", "snippet": "Sunny"}]))
         self.send(chat, "again", request_id="r2", search="always")
         self.assertIn("invalid command", self.wire.of("chatdgc_error")[-1]["message"])
 
@@ -261,7 +261,8 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(started["reply_id"], planned["id"], "the plan's reply becomes the report")
         done = self.wire.of("chatdgc_message")[-1]["message"]
         self.assertEqual((done["id"], done["text"], done["research"]["status"]), (planned["id"], "# Paris\n\nSunny today [1].", "done"))
-        self.assertEqual(done["sources"], [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris"}])
+        self.assertEqual(done["sources"], [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris",
+                                           "snippet": "Sunny, 24 degrees"}], "a report's source card: its note's first point")
         statuses = [f["research"]["status"] for f in self.wire.of("chatdgc_research")]
         for status in ("running", "writing", "checking", "done"):
             self.assertIn(status, statuses)

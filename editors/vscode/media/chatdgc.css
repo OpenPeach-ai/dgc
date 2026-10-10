@@ -78,22 +78,53 @@ body.cd-blank .cd-fine { display: none; }
 .cd-question-go { justify-self: stretch; padding: var(--sp-1) var(--sp-3); font-size: var(--t-sm); }
 .cd-question-note { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 
-/* Citations and sources: a numbered mark after a claim opens its page; the list sits under the reply. */
-.cd-cite { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; margin: 0 1px;
-  padding: 0 4px; vertical-align: 2px; border: 0; border-radius: var(--r-full); background: var(--surface2);
-  color: var(--link); font: var(--w-semi) 10px/1 var(--sans); font-variant-numeric: tabular-nums; cursor: pointer; }
-.cd-cite:hover { background: color-mix(in srgb, var(--accent) 22%, var(--surface2)); }
-.cd-sources { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-1) var(--sp-3); }
-.cd-sources-label { cursor: pointer; color: var(--muted); font: var(--w-med) var(--t-sm)/1.8 var(--sans); }
-.cd-sources-label:hover { color: var(--text); }
+/* Sources, as ChatGPT shows them: a pill with the site where a fact is cited (its card on hover), a Sources
+   button under the reply with the sites' favicons, and a panel beside the conversation listing them all. */
+.cd-fav { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px;
+  border-radius: 50%; overflow: hidden; background: var(--surface); color: var(--muted); }
+.cd-fav img { width: 16px; height: 16px; display: block; }
+.cd-fav .codicon { font-size: 11px; }
+.cd-cite { display: inline-flex; align-items: center; gap: 4px; max-width: 16em; height: 20px; margin: 0 2px; padding: 0 7px 0 2px;
+  vertical-align: 1px; border: 0; border-radius: var(--r-full); background: var(--surface2); color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.cd-cite .cd-fav { width: 14px; height: 14px; }
+.cd-cite .cd-fav img { width: 14px; height: 14px; }
+.cd-cite-site { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-cite-more { color: var(--faint); font-variant-numeric: tabular-nums; }
+.cd-cite:hover, .cd-cite:focus-visible { background: color-mix(in srgb, var(--accent) 22%, var(--surface2)); color: var(--text); }
+.cd-cite:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-cite-card { position: fixed; z-index: 40; max-height: 60vh; overflow-y: auto; padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--bg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .28); }
+.cd-card-list, .cd-source-cards { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.cd-source { display: grid; gap: 2px; min-width: 0; }
+.cd-source-cards .cd-source { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+.cd-source-cards .cd-source:last-child { border-bottom: 0; }
+.cd-source-site { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-source-site > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-source-open { padding: 0; border: 0; background: transparent; text-align: left; color: var(--link);
+  font: var(--w-med) var(--t-sm)/1.4 var(--sans); overflow-wrap: anywhere; cursor: pointer; }
+.cd-source-open:hover { text-decoration: underline; }
+.cd-source-open:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.cd-source-snippet { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .cd-searched { margin: var(--sp-1) 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); overflow-wrap: anywhere; }
-.cd-source-list { margin: var(--sp-1) 0 var(--sp-2); padding-left: var(--sp-5); display: flex; flex-direction: column; gap: 2px;
-  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); font-variant-numeric: tabular-nums; }
-.cd-source-open { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--sp-2); width: 100%; padding: 2px 0; border: 0;
-  background: transparent; text-align: left; cursor: pointer; }
-.cd-source-title { color: var(--link); font: var(--w-med) var(--t-sm)/1.45 var(--sans); overflow-wrap: anywhere; }
-.cd-source-open:hover .cd-source-title { text-decoration: underline; }
-.cd-source-host { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.cd-sources-button { display: inline-flex; align-items: center; gap: var(--sp-2); align-self: flex-start; height: var(--control);
+  padding: 0 var(--sp-3) 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface);
+  color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.cd-sources-button:hover { border-color: var(--border-strong); }
+.cd-sources-button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.cd-fav-stack { display: inline-flex; }
+.cd-fav-stack .cd-fav { box-shadow: 0 0 0 2px var(--surface); }
+.cd-fav-stack .cd-fav + .cd-fav { margin-left: -5px; }
+.cd-panel { position: fixed; z-index: 35; top: 0; right: 0; bottom: 0; width: min(380px, 92vw); display: flex; flex-direction: column;
+  border-left: 1px solid var(--border-strong); background: var(--bg); box-shadow: -8px 0 28px rgba(0, 0, 0, .22); }
+.cd-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border); }
+.cd-panel-title { margin: 0; color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.4 var(--sans); }
+.cd-panel .cd-sources-list { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-2) var(--sp-4) var(--sp-4); }
+.cd-sources-heading { margin: var(--sp-3) 0 0; color: var(--muted); font: var(--w-semi) var(--t-xs)/1.4 var(--sans); letter-spacing: .02em; }
 
 .cd-actions { display: flex; align-items: center; gap: var(--sp-1); min-height: var(--control-sm); }
 .cd-user .cd-actions { opacity: 0; }

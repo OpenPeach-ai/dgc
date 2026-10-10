@@ -44,9 +44,13 @@ voice come in later phases.
   the box to make it search first for one message. **Settings → Web search → Search in ChatDGC** turns it off
   entirely; then ChatDGC never goes online (and Deep research says it needs the web).
 
-  While it searches, the reply says what it is looking for. A reply that used the web cites its pages with
-  small numbered marks; click one to open the page. **Sources** under the reply lists every page and what
-  it searched for. One reply makes at most five searches. The search itself is the one set in
+  While it searches, the reply says what it is looking for. A reply that used the web cites each fact with a
+  small pill naming the site (with its favicon; "+1" when two sources say it). Point at a pill for a card with
+  the page's title and what it says; click it to open the page. **Sources** under the reply, with the sites'
+  favicons, opens a panel beside the chat: what it searched for, the pages it cited, and the other results it
+  found, each with its site, title and a few words from it. Favicons come from Google's icon service, asked
+  about a site's address only (never the page), as Work's links do; `dgc.linkFavicons` off turns them all
+  into a globe. One reply makes at most five searches. The search itself is the one set in
   **Settings → Web search**, shared with Work and your Pips:
   - DuckDuckGo needs nothing.
   - Brave and Tavily need a key, which is kept in `~/.dgc/secrets.json` (owner-only), where `dgc setup`

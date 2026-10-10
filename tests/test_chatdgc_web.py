@@ -70,7 +70,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("[1] LRS FAQ\nhttps://rbi.org.in/lrs\nUp to USD 250,000 a year.", answer["system"])
         self.assertIn("web_search", answer["tools"], "it can still search again")
         self.assertEqual((reply["searches"], reply["sources"]),
-                         (["LRS property abroad limit"], [{"n": 1, "title": "LRS FAQ", "url": "https://rbi.org.in/lrs"}]))
+                         (["LRS property abroad limit"], [{"n": 1, "title": "LRS FAQ", "url": "https://rbi.org.in/lrs", "snippet": "Up to USD 250,000 a year."}]))
         self.assertIn("Can I use the LRS", self.world["looked"][0], "the check reads the message")
 
     def test_what_needs_no_web_isnt_searched_and_a_failed_check_never_stops_the_reply(self):

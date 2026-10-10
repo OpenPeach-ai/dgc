@@ -32,6 +32,22 @@
   const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
   /** [n] in a reply that names one of its sources becomes a small mark that opens that page. Text nodes only,
    *  outside code: a model's "[1]" in a code block is code. */
+  // ---- sources, as ChatGPT shows them: a pill with the site where a fact is cited, a card on hover, and a
+  // Sources button that opens them all. A favicon comes from Google's icon service, asked about the origin only,
+  // as Work's panel does; with dgc.linkFavicons off (or when one fails) it's a globe, and nothing is asked.
+  let favicons = false;
+  const siteOf = (url) => hostOf(url).replace(/^www\./, "");
+  function faviconNode(url) {
+    const box = el("span", "cd-fav");
+    const src = favicons ? window.DgcMarkdown?.faviconUrl?.(url) : "";
+    if (!src) { box.append(icon("globe")); return box; }
+    const img = el("img");
+    img.alt = ""; img.width = img.height = 16; img.decoding = "async"; img.referrerPolicy = "no-referrer"; img.src = src;
+    img.addEventListener("error", () => img.replaceWith(icon("globe")));
+    box.append(img);
+    return box;
+  }
+  /** [3][4] in a reply becomes one pill: the first source's site, and how many more. */
   function cite(node, sources) {
     if (!Array.isArray(sources) || !sources.length) return;
     const byN = new Map(sources.map((x) => [String(x.n), x]));
@@ -40,20 +56,75 @@
     const texts = [];
     for (let t = walker.nextNode(); t; t = walker.nextNode()) if (/\[\d{1,2}\]/.test(t.nodeValue)) texts.push(t);
     for (const t of texts) {
-      const parts = t.nodeValue.split(/(\[\d{1,2}\])/);
+      const parts = t.nodeValue.split(/(\[\d{1,2}\](?:\s*\[\d{1,2}\])*)/);
       const frag = document.createDocumentFragment();
       for (const part of parts) {
-        const source = /^\[(\d{1,2})\]$/.test(part) ? byN.get(part.slice(1, -1)) : null;
-        if (!source) { if (part) frag.append(part); continue; }
-        const mark = el("button", "cd-cite", String(source.n));
-        mark.type = "button"; mark.dataset.url = source.url;
-        mark.title = `${source.title} (${hostOf(source.url)})`;
-        mark.setAttribute("aria-label", `Source ${source.n}: ${source.title}`);
-        frag.append(mark);
+        const numbers = /^\[\d{1,2}\]/.test(part) ? [...new Set(part.match(/\d{1,2}/g))] : [];
+        const group = numbers.map((n) => byN.get(n)).filter(Boolean);
+        if (!group.length) { if (part) frag.append(part); continue; }
+        // A number the reply wasn't given stays as text after the pill: the model's mistake, not hidden.
+        const stray = numbers.filter((n) => !byN.has(n)).map((n) => `[${n}]`).join("");
+        const pill = el("button", "cd-cite");
+        pill.type = "button"; pill.dataset.url = group[0].url; pill.dataset.cites = group.map((x) => x.n).join(",");
+        pill.append(faviconNode(group[0].url), el("span", "cd-cite-site", siteOf(group[0].url)));
+        if (group.length > 1) pill.append(el("span", "cd-cite-more", `+${group.length - 1}`));
+        pill.setAttribute("aria-label", `Source${group.length > 1 ? "s" : ""}: ${group.map((x) => `${x.title} (${siteOf(x.url)})`).join("; ")}`);
+        frag.append(pill);
+        if (stray) frag.append(stray);
       }
       t.replaceWith(frag);
     }
   }
+  /** One source as a card row: its favicon and site, its title (opens the page), and what the page says. */
+  function sourceRow(source, tag = "li") {
+    const row = el(tag, "cd-source");
+    const top = el("div", "cd-source-site");
+    top.append(faviconNode(source.url), el("span", "", siteOf(source.url)));
+    const open = el("button", "cd-source-open", source.title || source.url);
+    open.type = "button"; open.dataset.url = source.url; open.title = source.url;
+    row.append(top, open);
+    if (source.snippet) row.append(el("p", "cd-source-snippet", source.snippet));
+    return row;
+  }
+  // The card a pill shows on hover or focus; it stays while the pointer is on it, so its links can be used.
+  const citeCard = el("div", "cd-cite-card");
+  citeCard.hidden = true; citeCard.setAttribute("role", "dialog"); citeCard.setAttribute("aria-label", "Source");
+  document.body.append(citeCard);
+  let cardTimer = 0;
+  function showCard(pill) {
+    clearTimeout(cardTimer);
+    const message = state.messages.find((m) => m.id === pill.closest(".cd-msg")?.dataset.id) || readerMessage;
+    const byN = new Map((message?.sources || []).map((x) => [String(x.n), x]));
+    const group = String(pill.dataset.cites || "").split(",").map((n) => byN.get(n)).filter(Boolean);
+    if (!group.length) return;
+    const list = el("ul", "cd-card-list");
+    for (const source of group) list.append(sourceRow(source));
+    citeCard.replaceChildren(list);
+    citeCard.hidden = false;
+    const at = pill.getBoundingClientRect(), width = Math.min(340, window.innerWidth - 24);
+    citeCard.style.width = `${width}px`;
+    citeCard.style.left = `${Math.max(12, Math.min(at.left, window.innerWidth - width - 12))}px`;
+    const below = at.bottom + 6, height = citeCard.offsetHeight;
+    citeCard.style.top = `${below + height > window.innerHeight - 8 ? Math.max(8, at.top - height - 6) : below}px`;
+  }
+  const hideCard = (soon = true) => { clearTimeout(cardTimer); cardTimer = setTimeout(() => { citeCard.hidden = true; }, soon ? 180 : 0); };
+  document.addEventListener("mouseover", (e) => {
+    const pill = e.target.closest?.(".cd-cite");
+    if (pill) showCard(pill);
+    else if (e.target.closest?.(".cd-cite-card")) clearTimeout(cardTimer);
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (e.target.closest?.(".cd-cite, .cd-cite-card") && !e.relatedTarget?.closest?.(".cd-cite, .cd-cite-card")) hideCard();
+  });
+  document.addEventListener("focusin", (e) => { const pill = e.target.closest?.(".cd-cite"); if (pill) showCard(pill); });
+  document.addEventListener("focusout", (e) => { if (e.target.closest?.(".cd-cite") && !e.relatedTarget?.closest?.(".cd-cite-card")) hideCard(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !citeCard.hidden) { citeCard.hidden = true; } });
+  // Links in the card, the Sources panel and the reader: they live outside the conversation.
+  document.addEventListener("click", (e) => {
+    const open = e.target.closest?.(".cd-cite-card [data-url], .cd-panel [data-url], .cd-reader [data-url]");
+    if (open) vscode.postMessage({ type: "openLink", target: open.dataset.url || "" });
+  });
+  let readerMessage = null;
   function body(message) {
     const node = el("div", "text cd-body");
     const html = md(message.text);
@@ -177,26 +248,61 @@
     return node;
   }
   /** What a reply looked up: the queries, and the pages it may cite, numbered as it cites them. */
+  /** The numbers a reply's words cite. */
+  const citedIn = (message) => new Set(String(message.text || "").match(/\[(\d{1,2})\]/g)?.map((m) => m.slice(1, -1)) || []);
+  /** Every source of a reply: what it searched for, the ones it cited, then the rest it found. */
+  function sourcesList(message) {
+    const sources = Array.isArray(message.sources) ? message.sources : [];
+    const searches = Array.isArray(message.searches) ? message.searches : [];
+    const cited = citedIn(message);
+    const box = el("div", "cd-sources-list");
+    if (searches.length) box.append(el("p", "cd-searched", `Searched for ${searches.map((q) => `“${q}”`).join(", ")}`));
+    const used = sources.filter((x) => cited.has(String(x.n))), more = sources.filter((x) => !cited.has(String(x.n)));
+    for (const [label, group] of [["Cited", used], ["More results", more]]) {
+      if (!group.length) continue;
+      box.append(el("h3", "cd-sources-heading", `${label} · ${group.length}`));
+      const list = el("ul", "cd-source-cards");
+      for (const source of group) list.append(sourceRow(source));
+      box.append(list);
+    }
+    return box;
+  }
+  /** Under a reply that used the web: its sources' favicons and a count, opening them all beside the chat. */
   function sourcesBlock(message) {
     const sources = Array.isArray(message.sources) ? message.sources : [];
     const searches = Array.isArray(message.searches) ? message.searches : [];
     if (!sources.length && !searches.length) return null;
-    const box = el("details", "cd-sources");
-    const label = sources.length ? `Sources · ${sources.length}` : `Searched the web`;
-    box.append(el("summary", "cd-sources-label", label));
-    if (searches.length) box.append(el("p", "cd-searched", `Searched for ${searches.map((q) => `“${q}”`).join(", ")}`));
-    const list = el("ol", "cd-source-list");
-    for (const source of sources) {
-      const item = el("li", "cd-source");
-      item.value = Number(source.n) || 0;
-      const open = el("button", "cd-source-open");
-      open.type = "button"; open.dataset.url = source.url; open.title = source.url;
-      open.append(el("span", "cd-source-title", source.title || source.url), el("span", "cd-source-host", hostOf(source.url)));
-      item.append(open);
-      list.append(item);
+    const button = el("button", "cd-sources-button");
+    button.type = "button";
+    const cited = citedIn(message);
+    const shown = [...sources.filter((x) => cited.has(String(x.n))), ...sources.filter((x) => !cited.has(String(x.n)))];
+    const stack = el("span", "cd-fav-stack");
+    const hosts = new Set();
+    for (const source of shown) {
+      if (hosts.size >= 3) break;
+      if (hosts.has(siteOf(source.url))) continue;
+      hosts.add(siteOf(source.url)); stack.append(faviconNode(source.url));
     }
-    if (sources.length) box.append(list);
-    return box;
+    if (hosts.size) button.append(stack);
+    button.append(el("span", "", sources.length ? `Sources · ${sources.length}` : "Searched the web"));
+    button.setAttribute("aria-haspopup", "dialog");
+    button.addEventListener("click", () => openSources(message));
+    return button;
+  }
+  /** The Sources panel, beside the conversation, as ChatGPT opens it. */
+  function openSources(message) {
+    $("cd-sources-panel")?.remove();
+    citeCard.hidden = true;
+    const panel = el("aside", "cd-panel");
+    panel.id = "cd-sources-panel";
+    panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Sources");
+    const top = el("header", "cd-panel-head");
+    const close = action("close", "Close", () => { panel.remove(); input.focus(); });
+    top.append(el("h2", "cd-panel-title", "Sources"), close);
+    panel.append(top, sourcesList(message));
+    panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); panel.remove(); input.focus(); } });
+    document.body.append(panel);
+    close.focus();
   }
   function thinkingBlock(message, live) {
     const box = el("details", "cd-thinking");
@@ -557,8 +663,8 @@
       toc.append(link);
     });
     const side = el("aside", "cd-reader-sources");
-    const found = sourcesBlock(message);
-    if (found) { found.open = true; side.append(found); }
+    if ((message.sources || []).length) side.append(el("p", "cd-reader-label", "Sources"), sourcesList(message));
+    readerMessage = message;
     const page = el("div", "cd-reader-body");
     page.append(toc, article, side);
     shell.append(top, page);
@@ -952,7 +1058,7 @@
   log.addEventListener("click", (e) => {
     const copy = e.target.closest?.(".copy[data-c]");
     if (copy) { vscode.postMessage({ type: "copy", text: decodeURIComponent(copy.dataset.c || "") }); return; }
-    const source = e.target.closest?.(".cd-cite[data-url], .cd-source-open[data-url]");
+    const source = e.target.closest?.(".cd-cite[data-url]");
     if (source) { vscode.postMessage({ type: "openLink", target: source.dataset.url || "" }); return; }
     const link = e.target.closest?.(".md-link[data-target]");
     if (link) { e.preventDefault(); vscode.postMessage({ type: "openLink", target: link.dataset.target || "" }); }
@@ -1126,6 +1232,10 @@
         state.models = Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string").slice(0, 500) : [];
         state.defaultModel = typeof msg.current === "string" ? msg.current : "";
         fillModels();
+        return;
+      case "favicons":
+        favicons = msg.on === true;
+        render();
         return;
       case "copied":
         announce("Copied.");

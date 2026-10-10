@@ -60,7 +60,8 @@ globalThis.__DGC_TEST_VSCODE = {
     showInformationMessage: async (message) => { world.infos.push(String(message)); return undefined; },
     showTextDocument: async () => undefined,
   },
-  workspace: { fs: { stat: async (uri) => {
+  workspace: { getConfiguration: () => ({ get: (key, fallback) => (key === "linkFavicons" && world.favicons !== undefined ? world.favicons : fallback) }),
+    fs: { stat: async (uri) => {
     if (world.dirs?.includes(uri.fsPath)) return { size: 0, type: 2 };
     if (world.missing?.includes(uri.fsPath)) throw new Error("ENOENT");
     return { size: world.sizes[uri.fsPath] ?? 1, type: 1 };

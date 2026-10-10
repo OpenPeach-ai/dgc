@@ -300,24 +300,47 @@ test("a reply that searches: what it looks for while it looks, citation marks, a
     await s.send({ type: "delta", messageId: M(2), text: "Sunny [1]" });
     await s.frame();
     assert.equal(await s.page.locator(".cd-activity").count(), 0, "writing again");
-    const sources = [{ n: 1, title: "Paris forecast", url: "https://www.weather.example/paris" },
-                     { n: 2, title: "Météo", url: "https://meteo.example/p" }];
+    const sources = [{ n: 1, title: "Paris forecast", url: "https://www.weather.example/paris", snippet: "Sunny, 21°C, light wind." },
+                     { n: 2, title: "Météo", url: "https://meteo.example/p" },
+                     { n: 3, title: "BBC Weather: Paris", url: "https://bbc.example/weather/paris", snippet: "A dry week ahead." },
+                     { n: 4, title: "Paris news", url: "https://news.example/paris" }];
     await s.send({ type: "message", message: { id: M(2), role: "assistant", finish: "stop", sources, searches: ["paris weather"],
-      text: "Sunny and 21°C [1], dry week [2][9].\n\n```\nlist[1]\n```" } });
+      text: "Sunny and 21°C [1], dry week [2][3][9].\n\n```\nlist[1]\n```" } });
     await s.send({ type: "turn", state: "ended", replyId: M(2) });
     await s.frame();
-    assert.deepEqual(await s.page.locator(".cd-cite").allTextContents(), ["1", "2"], "only numbers it was given; [9] stays text");
+    // A pill with the site where a fact is cited; [2][3] is one pill, "+1"; [9] was never given, so it stays text.
+    assert.deepEqual(await s.page.locator(".cd-cite").allTextContents(), ["weather.example", "meteo.example+1"]);
     assert.match(await s.page.locator(".cd-body").first().textContent(), /\[9\]/);
     assert.equal(await s.page.locator("pre.code code").textContent(), "list[1]\n", "code is code");
-    assert.equal(await s.page.locator(".cd-cite").first().getAttribute("title"), "Paris forecast (weather.example)");
+    assert.equal(await s.page.locator(".cd-cite").first().getAttribute("aria-label"), "Source: Paris forecast (weather.example)");
+    assert.equal(await s.page.locator(".cd-cite .cd-fav .codicon-globe").count(), 2, "favicons off: a globe, and nothing is asked");
+    await s.page.locator(".cd-cite").nth(1).hover();
+    const card = s.page.locator(".cd-cite-card");
+    await card.waitFor({ state: "visible" });
+    assert.deepEqual(await card.locator(".cd-source-open").allTextContents(), ["Météo", "BBC Weather: Paris"]);
+    assert.equal(await card.locator(".cd-source-snippet").textContent(), "A dry week ahead.");
+    await card.locator(".cd-source-open").nth(1).click();
     await s.page.locator(".cd-cite").first().click();
-    await s.page.locator(".cd-sources summary").click();
-    assert.equal(await s.page.locator(".cd-sources-label").textContent(), "Sources · 2");
-    assert.equal(await s.page.locator(".cd-searched").textContent(), "Searched for “paris weather”");
-    assert.deepEqual(await s.page.locator(".cd-source").allInnerTexts(), ["Paris forecast\nweather.example", "Météo\nmeteo.example"]);
-    await s.page.locator(".cd-source-open").nth(1).click();
-    assert.deepEqual((await s.posted("openLink")).map((m) => m.target), ["https://www.weather.example/paris", "https://meteo.example/p"]);
+    assert.deepEqual((await s.posted("openLink")).map((m) => m.target), ["https://bbc.example/weather/paris", "https://www.weather.example/paris"]);
+    await s.send({ type: "favicons", on: true });
+    await s.frame();
+    assert.match(await s.page.locator(".cd-cite .cd-fav img").first().getAttribute("src"),
+                 /^https:\/\/www\.google\.com\/s2\/favicons\?domain=https%3A%2F%2Fwww\.weather\.example&sz=32$/, "the origin only, never the page");
+    const button = s.page.locator(".cd-sources-button");
+    assert.equal(await button.innerText(), "Sources · 4");
+    assert.equal(await button.locator(".cd-fav").count(), 3, "the sites it cited first, three at most");
+    await button.click();
+    const panel = s.page.locator("#cd-sources-panel");
+    assert.equal(await panel.getAttribute("role"), "dialog");
+    assert.equal(await panel.locator(".cd-searched").textContent(), "Searched for “paris weather”");
+    assert.deepEqual(await panel.locator(".cd-sources-heading").allTextContents(), ["Cited · 3", "More results · 1"]);
+    assert.deepEqual(await panel.locator(".cd-source-open").allTextContents(), ["Paris forecast", "Météo", "BBC Weather: Paris", "Paris news"]);
+    assert.deepEqual(await panel.locator(".cd-source-site").allInnerTexts(), ["www.weather.example".replace("www.", ""), "meteo.example", "bbc.example", "news.example"]);
+    await panel.locator(".cd-source-open").nth(3).click();
+    assert.equal((await s.posted("openLink")).at(-1).target, "https://news.example/paris");
     if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-sources.png") });
+    await s.page.keyboard.press("Escape");
+    assert.equal(await panel.count(), 0);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
