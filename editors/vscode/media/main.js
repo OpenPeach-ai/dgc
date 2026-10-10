@@ -825,7 +825,7 @@
   }
   // ---- Projects (ChatGPT's): chats, files and instructions together. A project opens its page in a tab; its
   // chevron lists its chats here. While searching, the results say each chat's project instead.
-  let projects = [];
+  let projects = [], lastProjects = "";
   const projectChats = new Map();
   const projectsOpen = new Set((() => { try { return vscode.getState()?.projectsOpen || []; } catch { return []; } })());
   function dropTarget(node, accepts, onDrop) {
@@ -852,6 +852,11 @@
     $("chats-sub").hidden = box.hidden || !projects.length;
     if ($("chats-library")) $("chats-library").hidden = box.hidden;
     if (box.hidden) return;
+    // Drawn again only when something changed: the home refreshes after every turn, and a redraw replaces the
+    // buttons under a pointer, so a click that lands mid-redraw would be lost.
+    const drawn = JSON.stringify([projects, [...projectsOpen], [...projectChats], [...openChats]]);
+    if (drawn === lastProjects && list.childElementCount) return;
+    lastProjects = drawn;
     const focused = document.activeElement?.closest?.(".project-row, .chat-row-nested")?.dataset.id;
     list.replaceChildren();
     if (!projects.length) {
