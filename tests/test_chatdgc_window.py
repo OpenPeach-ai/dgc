@@ -43,7 +43,7 @@ class Model:
         reply = self.world["replies"].pop(0) if self.world["replies"] else "ok"
         if on_text:
             on_text(reply)
-        return SimpleNamespace(content=reply, finish_reason="stop", thinking="", tool_calls=[],
+        return SimpleNamespace(content=reply, finish_reason=self.world.get("finish", "stop"), thinking="", tool_calls=[],
                                usage=self.world.get("usage", {"input_tokens": 0, "output_tokens": 0}))
 
 
@@ -177,6 +177,28 @@ class WindowTests(unittest.TestCase):
         estimate = self.engine.context(fresh["id"])
         self.assertEqual(estimate["source"], "estimated")
         self.assertGreater(estimate["parts"]["instructions"], 100)
+
+    def test_the_meter_counts_the_last_request_and_a_summary_since_resets_it(self):
+        chat = self.engine.open()
+        Model.limit = 32768
+        self.world.update(usage={"input_tokens": 1500, "output_tokens": 300}, finish="length")
+        reply = self.talk(chat, "tell me a long story", "Once upon")
+        self.world.update(usage={"input_tokens": 1900, "output_tokens": 200}, finish="stop")
+        self.engine.continue_reply(chat["id"], reply["id"])
+        self.assertEqual(self.store.get(chat["id"])["messages"][-1]["usage"]["input_tokens"], 3400, "its cost: both calls")
+        self.assertEqual(self.engine.context(chat["id"])["used"], 2100, "what the window holds: the last request, not the sum")
+        for words in ("two", "three"):
+            self.talk(chat, words, words.upper())
+        self.assertEqual(self.engine.context(chat["id"])["source"], "reported")
+        self.engine.compact(chat["id"])
+        after = self.engine.context(chat["id"])
+        # The live run: the meter stayed at 60% after Compact now, the count of the request before the summary.
+        self.assertEqual(after["source"], "estimated", "Compact now changed the next request: that count no longer stands")
+        self.assertLess(after["used"], 2100)
+        self.talk(chat, "four")
+        self.assertEqual(self.engine.context(chat["id"])["source"], "reported", "the next reply is counted again")
+        self.engine.set_summary(chat["id"], "Edited.")
+        self.assertEqual(self.engine.context(chat["id"])["source"], "estimated", "so is an edited summary")
 
     def test_a_summary_belongs_to_its_version(self):
         chat = self.engine.open()

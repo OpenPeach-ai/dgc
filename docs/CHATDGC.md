@@ -158,8 +158,9 @@ A turn sends its events in this order:
 6. `chatdgc_turn` with `state: "ended"`.
 
 After every turn, and when a chat opens, `chatdgc_context` reports `used` tokens out of `window` (the
-model's own maximum is in `limit`), with `source` saying whether the model counted them (`reported`) or
-ChatDGC estimated them, `parts` giving the breakdown, and `compactable` saying whether Compact now has
+model's own maximum is in `limit`), with `source` saying whether the model counted them (`reported`: its
+last request, input and output) or ChatDGC estimated them (before any reply, and after Compact now or an
+edited summary until the next reply), `parts` giving the breakdown, and `compactable` saying whether Compact now has
 more than the last exchange to summarize. A reply that compacts first sends
 `chatdgc_activity` with `kind: "compacting"`, then `chatdgc_compacted`. An opened conversation carries its
 `summary` (`{upto, text, edited, …}`) and, for a chat continued from another, `carried`.

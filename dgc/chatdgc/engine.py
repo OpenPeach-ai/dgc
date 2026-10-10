@@ -489,7 +489,8 @@ class ChatEngine:
                 raise ChatEngineError("The model wrote no summary.")
         return summary[:fit_window.MAX_SUMMARY_CHARS]
 
-    def _compact(self, chat: dict, client, room: int, cancel=None, *, keep_messages: int | None = None) -> bool:
+    def _compact(self, chat: dict, client, room: int, cancel=None, *, keep_messages: int | None = None,
+                 between_replies: bool = False) -> bool:
         """Summarize the older turns of the conversation you see, keeping the recent ones word for word (by tokens:
         KEEP_RECENT of the window, at least the last message; or the last ``keep_messages``). False: nothing to."""
         messages, start = chat["messages"], self._summary_start(chat)
@@ -509,6 +510,8 @@ class ChatEngine:
                                messages[start:cut], room, cancel)
         chat["summary"] = {"upto": messages[cut - 1]["id"], "text": text, "model": getattr(client, "model", ""),
                            "created_at": now(), "covered": cut, "tokens_before": before, "edited": False}
+        if between_replies:                   # the last reply's count was of the request before this summary
+            chat["summary"]["written_at"] = messages[-1]["id"]
         self._save(chat)
         return True
 
@@ -526,7 +529,7 @@ class ChatEngine:
                                   "There's nothing to compact yet: Compact now keeps your last exchange word for word.")
         client = self.client(chat.get("model") or None)
         room, _ = fit_window.window(client, self._preset())
-        if not self._compact(chat, client, room, cancel, keep_messages=2):
+        if not self._compact(chat, client, room, cancel, keep_messages=2, between_replies=True):
             raise ChatEngineError("There's nothing to compact yet.")
         return chat["summary"]
 
@@ -540,7 +543,8 @@ class ChatEngine:
         chat = self._chat(chat_id)
         if not chat.get("summary"):
             raise ChatEngineError("This chat has no summary yet.")
-        chat["summary"] = {**chat["summary"], "text": text, "edited": True, "edited_at": now()}
+        chat["summary"] = {**chat["summary"], "text": text, "edited": True, "edited_at": now(),
+                           "written_at": chat["messages"][-1]["id"] if chat["messages"] else ""}
         self._save(chat)
         return chat["summary"]
 
@@ -560,7 +564,9 @@ class ChatEngine:
         return self.store.save(fresh)
 
     def context(self, chat_id: str) -> dict:
-        """What the chat takes of its window now: counted by the model where its last reply was, else estimated."""
+        """What the chat takes of its window now: counted by the model where its last reply was, else estimated.
+        A summary written or edited since that reply (Compact now) changed what the next request holds, so the
+        model's count no longer stands: it's estimated until the next reply is counted."""
         chat = self._chat(chat_id)
         client = self.client(chat.get("model") or None)
         room, limit = fit_window.window(client, self._preset())
@@ -576,8 +582,8 @@ class ChatEngine:
                  "summary": fit_window.tokens(remembered + carried), "files": min(files, estimated)}
         parts["conversation"] = max(0, estimated - sum(parts.values()))
         last = chat["messages"][-1] if chat["messages"] else {}
-        usage = last.get("usage") or {} if last.get("role") == "assistant" else {}
-        reported = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+        since = remembered and (chat.get("summary") or {}).get("written_at") == last.get("id")
+        reported = int(last.get("counted") or 0) if last.get("role") == "assistant" and not since else 0
         return {"window": room, "limit": limit, "preset": self._preset(), "parts": parts,
                 "used": reported or estimated, "source": "reported" if reported else "estimated",
                 "compactable": self._compactable(chat)}
@@ -714,7 +720,9 @@ class ChatEngine:
                 if cancel is not None and cancel.is_set():
                     raise
                 # The summary couldn't be written: the reply still goes, as it would have without one.
-        finish, usage, failure = "stop", {}, None
+        # usage: every model call of the reply, added up; counted: the last call's input and output, which is
+        # what the window held as the reply ended (a search turn's calls each resend the conversation).
+        finish, usage, counted, failure = "stop", {}, 0, None
         sources = [dict(x) for x in (existing or {}).get("sources") or []]
         searches = list((existing or {}).get("searches") or [])
         tools = [SEARCH_TOOL] if search != "off" else None
@@ -725,7 +733,9 @@ class ChatEngine:
             while True:
                 result = client.chat(messages, tools=tools, reasoning_effort=thinking, on_text=text_part,
                                      on_thinking=thought_part, cancel=cancel)
-                usage = _add_usage(usage, dict(getattr(result, "usage", {}) or {}))
+                spent = dict(getattr(result, "usage", {}) or {})
+                usage = _add_usage(usage, spent)
+                counted = int(spent.get("input_tokens") or 0) + int(spent.get("output_tokens") or 0)
                 calls = list(getattr(result, "tool_calls", None) or [])
                 if not calls or tools is None or (cancel is not None and cancel.is_set()):
                     break
@@ -766,6 +776,7 @@ class ChatEngine:
             message = {**existing, "text": joined[:MAX_TEXT], "finish": finish,
                        "thinking": (existing.get("thinking") or "") + thought_text,
                        "usage": _add_usage(existing.get("usage") or {}, usage)}
+            message.pop("counted", None)
             message.update(_found(sources, searches))
             chat["messages"][-1] = message
         else:
@@ -776,6 +787,10 @@ class ChatEngine:
                 message["error"] = _failure_text(failure)
             message.update(_found(sources, searches))
             chat["messages"].append(message)
+        if counted:
+            message["counted"] = counted
+        if chat.get("summary"):
+            chat["summary"].pop("written_at", None)     # this reply was counted with the summary as it is now
         self._save(chat)
         return message
 
