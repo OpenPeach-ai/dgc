@@ -15,6 +15,7 @@ program.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 
@@ -28,6 +29,17 @@ CALL_SECONDS = 45
 MAX_ANSWER = 12_000             # what the model reads of an answer
 MAX_KEPT = 2_000                # what a card keeps of what a sent action answered
 TOOLS = ("plugin_tools", "call_plugin")
+WALLET = re.compile(r"\b0x[0-9a-fA-F]{40}\b")
+
+
+def guessed_wallets(arguments, seen: str) -> list[str]:
+    """Wallet addresses in a plugin call that didn't come from the user or from a plugin's answer (``seen``: their
+    messages, this reply's tool answers, what sent cards answered; never the model's own words). A Pip put the zero
+    address in a 1inch quote "as a placeholder", twice, after being told never to (battle test, 2026-10-09): on a
+    payment plugin a card's address can be where the money goes, and on a read it's someone else's balance."""
+    text = json.dumps(arguments, ensure_ascii=False, default=str) if not isinstance(arguments, str) else arguments
+    known = seen.casefold()
+    return [a for a in dict.fromkeys(WALLET.findall(text)) if a.casefold() not in known]
 
 
 def _error_answer(raw) -> str:

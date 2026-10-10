@@ -1655,7 +1655,14 @@ class ChatEngine:
                         else:
                             if on_activity is not None:
                                 on_activity("plugin", str((call.arguments or {}).get("plugin") or "")[:80])
-                            told, card = plugins.call(call.name, call.arguments)
+                            guessed = chat_plugins.guessed_wallets((call.arguments or {}).get("arguments"),
+                                                                   _heard(chat, messages)) if call.name == "call_plugin" else []
+                            if guessed:
+                                told, card = ("Not done, and there is no card: " + guessed[0] + " is not an address the user "
+                                              "gave you or that a plugin answered. Ask the user for the exact address; never "
+                                              "use a placeholder or guess one."), None
+                            else:
+                                told, card = plugins.call(call.name, call.arguments)
                             if card is not None:
                                 card = {**card, "id": "act_" + uuid.uuid4().hex, "at": before + len("".join(streamed)),
                                         "created_at": now()}
@@ -1770,6 +1777,15 @@ def _asked(question: dict) -> str:
 def _exported(question: dict) -> str:
     return ("\n\n> **" + question.get("question", "") + "**\n>\n"
             + "\n".join(f"> - {o}" for o in question.get("options") or []) + "\n\n")
+
+
+def _heard(chat: dict, messages: list) -> str:
+    """What the user said and what plugins answered, in this chat: where an address in a plugin call may come from.
+    Never the model's own words (it wrote placeholders)."""
+    said = [str(m.get("text") or "") for m in chat["messages"] if m.get("role") == "user"]
+    said += [str(m.get("content") or "") for m in messages if isinstance(m, dict) and m.get("role") == "tool"]
+    said += [str(a.get("answer") or "") for m in chat["messages"] for a in m.get("actions") or []]
+    return "\n".join(said)
 
 
 def _card_note(card: dict) -> str:

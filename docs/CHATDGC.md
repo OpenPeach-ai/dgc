@@ -148,6 +148,8 @@ voice come in later phases.
     reply knows.
   - **How much asks** is each plugin's level in Settings → Pips → Plugins (Always ask, Any changes, Important
     actions, Never ask), shared with your Pips. A plugin that can move money always asks.
+  - **No made-up addresses:** a wallet address in a plugin call has to be one you gave or a plugin answered
+    with; a guess (the model once wrote the zero address "as a placeholder") is refused before any card.
   - **Your private data stays put:** what the chat read from your apps never goes into a web search, and a
     change that carries it always shows its card, whatever the level (the careful check Pips use). What you
     said yourself isn't held back.
