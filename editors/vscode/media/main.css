@@ -192,7 +192,23 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .session-delete:hover { color:var(--err-text); background:var(--surface); }
 /* ChatDGC: your chats above this project's sessions. A chat opens with one click (a session needs
    Open in Editor: opening one starts a backend in its folder), so its row says so with the pointer. */
-#sessions-host .home-chats { display:flex; flex-direction:column; gap:var(--sp-2); }
+#sessions-host .home-chats, #sessions-host .home-work { display:flex; flex-direction:column; gap:var(--sp-2); }
+#sessions-host :is(.home-chats, .home-work)[hidden] { display:none; }
+/* Chat | Work: a segmented pair under the search; the chosen one lifts. Each tab's own heading is the tab, so the
+   list's heading is kept for screen readers only and its New button sits at the end of the row. */
+#sessions-host .home-tabs { display:flex; gap:2px; padding:2px; border:1px solid var(--border); border-radius:var(--r-md); background:var(--surface); }
+#sessions-host .home-tabs[hidden] { display:none; }
+#sessions-host .home-tab { flex:1 1 0; display:inline-flex; align-items:center; justify-content:center; gap:var(--sp-1); min-height:var(--control-sm);
+  padding:0 var(--sp-2); border:1px solid transparent; border-radius:var(--r-sm); background:transparent; color:var(--muted);
+  font:var(--w-semi) var(--t-sm)/1 var(--sans); cursor:pointer; }
+#sessions-host .home-tab:hover { color:var(--text); }
+#sessions-host .home-tab[aria-selected="true"] { border-color:var(--border-strong); background:var(--surface2); color:var(--text-strong); }
+#sessions-host .home-tab:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:1px; }
+#sessions-host .home-tab-count { min-width:18px; padding:1px 5px; border-radius:var(--r-full); background:var(--surface);
+  color:var(--muted); font:var(--w-semi) var(--t-xs)/1.3 var(--sans); font-variant-numeric:tabular-nums; }
+#sessions-host .home-tab-count[hidden] { display:none; }
+#sessions-host.home-tabbed .sessions-head { justify-content:flex-end; }
+#sessions-host.home-tabbed .sessions-head h2 { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 #sessions-host .chat-row { cursor:pointer; }
 #sessions-host .chat-preview { -webkit-line-clamp:1; }
 #sessions-host .chat-pinned { color:var(--accent-text, var(--accent)); }

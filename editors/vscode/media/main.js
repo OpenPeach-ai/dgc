@@ -675,6 +675,7 @@
     sessionsSearchable = msg.searchable === true;
     if (search) { search.hidden = !sessionsSearchable && !chatsAvailable; if (document.activeElement !== search) search.value = query; }
     if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Load more"; }
+    homeCount("work", query ? items.length : null, msg.more === true);
     status.textContent = msg.error ? String(msg.error)
       : items.length ? "" : query ? `No session mentions “${query}”.`
       : "No sessions in this project yet. Start one with New session: it opens in an editor tab.";
@@ -747,7 +748,7 @@
     const section = $("chats-home"), list = $("chats-list"), status = $("chats-status"), more = $("chats-more");
     if (!section || !list) return;
     chatsAvailable = msg.available === true;
-    section.hidden = !chatsAvailable;
+    homeTabs();
     $("sessions-title").textContent = chatsAvailable ? "Work" : "Sessions";
     const search = $("sessions-search");
     if (search) {
@@ -759,6 +760,7 @@
     const items = Array.isArray(msg.items) ? msg.items : [];
     const open = new Set(Array.isArray(msg.open) ? msg.open : []);
     const query = String(msg.query || "");
+    homeCount("chat", query ? items.length : null, msg.more === true);
     status.textContent = msg.error ? String(msg.error) : items.length ? "" : query ? `No chat mentions “${query}”.`
       : "No chats yet. Start one with New chat: it's the same in every folder.";
     if (msg.error) status.dataset.kind = "error"; else delete status.dataset.kind;
@@ -800,6 +802,48 @@
       list.append(row);
       if (item.id === focused) row.focus();
     }
+  }
+  // Chat | Work: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
+  // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
+  // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.
+  let homeTab = (() => { try { return vscode.getState()?.homeTab === "work" ? "work" : "chat"; } catch { return "chat"; } })();
+  function homeTabs() {
+    const bar = $("home-tabs"), panels = { chat: $("chats-home"), work: $("work-home") };
+    if (!bar || !panels.chat || !panels.work) return;
+    const tabbed = chatsAvailable;
+    bar.hidden = !tabbed;
+    $("sessions-host")?.classList.toggle("home-tabbed", tabbed);
+    for (const name of ["chat", "work"]) {
+      const tab = $(`home-tab-${name}`), panel = panels[name], chosen = homeTab === name;
+      tab.setAttribute("aria-selected", String(tabbed && chosen));
+      tab.tabIndex = tabbed && chosen ? 0 : -1;
+      panel.hidden = tabbed ? !chosen : name === "chat";
+      if (tabbed) { panel.setAttribute("role", "tabpanel"); panel.setAttribute("aria-labelledby", `home-tab-${name}`); }
+      else { panel.removeAttribute("role"); panel.setAttribute("aria-labelledby", name === "chat" ? "chats-title" : "sessions-title"); }
+    }
+  }
+  function showHomeTab(name, focus = false) {
+    homeTab = name === "work" ? "work" : "chat";
+    try { vscode.setState({ ...(vscode.getState() || {}), homeTab }); } catch {}
+    homeTabs();
+    if (focus) $(`home-tab-${homeTab}`)?.focus();
+  }
+  /** While a search is on: how many each list found ("12+": more to load). */
+  function homeCount(name, found, more) {
+    const badge = $(`home-tab-${name}-count`);
+    if (!badge) return;
+    badge.hidden = found === null;
+    badge.textContent = found === null ? "" : `${found}${more ? "+" : ""}`;
+    $(`home-tab-${name}`)?.setAttribute("aria-label", found === null ? (name === "chat" ? "Chat" : "Work")
+      : `${name === "chat" ? "Chat" : "Work"}: ${found}${more ? " or more" : ""} found`);
+  }
+  for (const name of ["chat", "work"]) {
+    $(`home-tab-${name}`)?.addEventListener("click", () => showHomeTab(name));
+    $(`home-tab-${name}`)?.addEventListener("keydown", (e) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+      e.preventDefault();
+      showHomeTab(e.key === "Home" ? "chat" : e.key === "End" ? "work" : homeTab === "chat" ? "work" : "chat", true);
+    });
   }
   $("chats-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcNew" }));
   $("chats-more")?.addEventListener("click", (e) => {

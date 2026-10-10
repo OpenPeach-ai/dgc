@@ -10,9 +10,11 @@ voice come in later phases.
 
 ## Using it
 
-- **Open it.** In the DGC side bar, **Chat** sits above **Work**. **New chat** opens a chat in an editor
-  tab. You can also run **DGC: New Chat (ChatDGC)** from the Command Palette. One search box searches both
-  lists. It finds a chat by its name or anything said in it, and shows the words around what it found.
+- **Open it.** The DGC side bar has two tabs, **Chat** and **Work**, so a long list of either never hides the
+  other; it remembers the one you used last. **New chat** opens a chat in an editor tab. You can also run
+  **DGC: New Chat (ChatDGC)** from the Command Palette. One search box searches both tabs, and while you
+  search, each tab says how many it found. It finds a chat by its name or anything said in it, and shows the
+  words around what it found.
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.

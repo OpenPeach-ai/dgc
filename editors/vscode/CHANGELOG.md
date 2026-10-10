@@ -33,6 +33,8 @@
   - copy the last code block: Ctrl/⌘+Shift+;;
   - focus the box: Shift+Esc;
   - the list of shortcuts: Ctrl/⌘+/.
+- **Chat and Work are tabs** in the side bar, so a long list of chats no longer pushes your sessions out of
+  sight. The search covers both, and each tab shows what it found.
 - **Deep research**, as ChatGPT has it. Press **Deep research** in the box: a plan first (it starts in 15
   seconds unless you edit it), then its searching and reading as it happens, with a box to add to it, then a
   report whose every citation was checked against its source. **Open report** shows it full screen with
