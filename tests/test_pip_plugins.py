@@ -108,7 +108,12 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         for pip in (self.pip, other):
             with self.subTest(pip=pip["name"]):
                 self.assertEqual(sorted(pip_plugins.allowed(self.registry, pip["id"], self.cfg)), ["aave", "airtable"])
-        self.assertEqual(pip_plugins.listing(self.registry, self.pip["id"], self.cfg)["plugins"], [], "no cards to show")
+        listed = pip_plugins.listing(self.registry, self.pip["id"], self.cfg)
+        self.assertEqual(listed["plugins"], [], "no cards to show")
+        # Each with its servers: a plugin action's draft names only its server, and the chat finds its plugin by it
+        # (without them the Allow card never showed after the cards went).
+        self.assertEqual({p["plugin"]: (p["servers"], p["money"]) for p in listed["installed"]},
+                         {"aave": (["aave"], True), "airtable": (["airtable"], False)})
         self.assertEqual(pip_plugins.TOOLS, ("plugin_tools", "call_plugin", "plugin_answer"), "nothing to ask for")
         self.assertTrue(all(p["allowed"] for p in self.session.pin(self.registry)))
         self.assertIn("Untrusted data from the user's Airtable", self.use("call_plugin", plugin="Airtable", tool="list_records",

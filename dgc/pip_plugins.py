@@ -238,8 +238,11 @@ def listing(registry, pip_id, config) -> dict:
     """The plugins every Pip may use. There are no per-Pip cards since 2026-10-09: ``plugins`` stays, empty,
     for callers of Pips API 44."""
     available = installed(config)
+    # Each with its servers: a plugin action's draft names only its server, and the chat finds the plugin (its name,
+    # and whether it can move money) by it. Without them, after the cards went, its Allow card never showed.
     return {"pip_id": pip_id, "plugins": [],
-            "installed": [{"plugin": n, "name": i["display_name"], "money": i["money"]} for n, i in sorted(available.items())][:40]}
+            "installed": [{"plugin": n, "name": i["display_name"], "money": i["money"], "servers": sorted(i["servers"])[:8]}
+                          for n, i in sorted(available.items())][:40]}
 
 
 def allowed(registry, pip_id, config) -> dict:

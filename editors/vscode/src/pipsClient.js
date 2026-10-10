@@ -8,7 +8,7 @@ import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
 import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup,calendarCardMarkup} from './pipAppLinks.js';
-import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
+import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
 import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {carefulPage,carefulMarkup,carefulWords} from './pipCareful.js';
@@ -1699,17 +1699,18 @@ function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==
 // A Personal Pip's plugins (pip_plugins): it asks with use_plugin and you Allow it on its card. What it
 // would then do in a plugin is an Allow card here: Allow, Always allow (never for a plugin that can
 // move money) or Don't. The same reviewed steps as the connector dialogs, without them.
-S.plugins=[];S.pluginsError='';let pluginSeq=0,pluginBusy='';const pluginDrafts=new Map();
+S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';let pluginSeq=0,pluginBusy='';const pluginDrafts=new Map();
 async function loadPlugins(){
  if(remoteHost||S.apiVersion<44||!personalPip()||!usable())return;
  const token=scope(),sequence=++pluginSeq,pip=S.selected;
  try{const page=pluginsPage(await send('list_pip_plugins',{pip_id:pip}),pip);if(token!==scope()||sequence!==pluginSeq||S.selected!==pip)return;
-  S.plugins=page.plugins;S.pluginsError='';render();void loadPluginDrafts();}
+  S.plugins=page.plugins;S.pluginsInstalled=page.installed;S.pluginsError='';render();void loadPluginDrafts();}
  catch(error){if(token===scope()&&sequence===pluginSeq){S.pluginsError=errorText(error);render();}}
 }
 // The draft list carries summaries; a plugin's Allow card shows the whole call, read once per version.
 async function loadPluginDrafts(){
- if(S.apiVersion<44||!personalPip()||!usable()||!(S.plugins||[]).some(c=>c.status==='allowed'))return;
+ // API 45 on there are no cards to allow: every plugin turned on is every Pip's, so any installed one may have a draft.
+ if(S.apiVersion<44||!personalPip()||!usable()||!((S.plugins||[]).some(c=>c.status==='allowed')||S.apiVersion>=45&&(S.pluginsInstalled||[]).length))return;
  const token=scope(),pip=S.selected;
  for(const d of (S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&!pluginDrafts.has(d.id+':'+d.digest)).slice(0,5)){
   try{const v=connectorDraft((await send('get_pip_connector_draft',{draft_id:d.id})).draft,pip,S.workspace.id);if(token!==scope()||S.selected!==pip)return;
@@ -1717,7 +1718,8 @@ async function loadPluginDrafts(){
   catch{/* the Review row stays */}
  }
 }
-function pluginDraft(d){const v=S.apiVersion>=44&&pluginDrafts.get(d.id+':'+d.digest),plugin=v&&pluginForServer(S.plugins,v.payload.action.server);return v&&plugin?{draft:v,plugin}:null;}
+function pluginDraft(d){const v=S.apiVersion>=44&&pluginDrafts.get(d.id+':'+d.digest),server=v&&v.payload.action.server;
+ const plugin=v&&(pluginForServer(S.plugins,server)||S.apiVersion>=45&&installedForServer(S.pluginsInstalled,server));return v&&plugin?{draft:v,plugin}:null;}
 function pluginCards(){
  if(remoteHost||S.apiVersion<44||!personalPip())return '';
  const pipName=S.pip?.name||'This Pip',off=archived()||S.busy;
@@ -2184,7 +2186,7 @@ function renderReview() {
   }
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
 }
-function clearSelection() { S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 async function loadRun(id) {
   if(id!==S.runId){activitySeq++;S.activity=null;S.activityLoading=false;S.activityError='';}
   S.runId=id;const sequence=++detailSeq;const token=scope();render();

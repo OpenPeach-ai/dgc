@@ -27,10 +27,11 @@ export function pluginsPage(value, pip) {
     throw new Error('These cards didn’t load. Refresh to try again.');
   }
   const installed = value.installed.map(p => {
-    if (!p || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(p.plugin) || !text(p.name, 80) || typeof p.money !== 'boolean') {
+    if (!p || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(p.plugin) || !text(p.name, 80) || typeof p.money !== 'boolean'
+      || p.servers !== undefined && !(Array.isArray(p.servers) && p.servers.length <= 8 && p.servers.every(s => SERVER.test(s)))) {
       throw new Error('These cards didn’t load. Refresh to try again.');
     }
-    return { plugin: p.plugin, name: p.name, money: p.money };
+    return { plugin: p.plugin, name: p.name, money: p.money, ...(p.servers ? { servers: p.servers } : {}) };
   });
   return { plugins: value.plugins.map(card => pluginCard(card, pip)), installed };
 }
@@ -51,6 +52,17 @@ export function shownPluginCards(cards, now = Date.now(), lastReply = 0) {
 /** The allowed plugin a draft's server belongs to, if any. */
 export function pluginForServer(cards, server) {
   return (cards || []).find(c => c.status === 'allowed' && c.servers.includes(server)) || null;
+}
+
+/** Pips API 45 on (every plugin turned on is every Pip's, no cards): the installed plugin that owns a draft's
+ *  server. A listing that names no servers (a CLI from before they were listed) still gets a card for it, named by
+ *  the server and as careful as a plugin that can move money: it asks every time, with no Always allow. */
+export function installedForServer(installed, server) {
+  const listed = installed || [];
+  const owner = listed.find(p => Array.isArray(p.servers) && p.servers.includes(server));
+  if (owner) return { name: owner.name, money: owner.money };
+  if (listed.length && !listed.some(p => Array.isArray(p.servers))) return { name: server, money: true };
+  return null;
 }
 
 const mark = name => `<span class="app-link-mark" aria-hidden="true">${name.slice(0, 1).toUpperCase()}</span>`;

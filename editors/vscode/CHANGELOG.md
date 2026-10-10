@@ -105,6 +105,10 @@
 
 ### Fixed
 
+- **A Pip's plugin action shows its Allow card again.** Since every plugin turned on became every Pip's, what a
+  Pip wanted to do in a plugin showed only as an "App action for you to check" row: the chat no longer knew
+  which plugin the action's server belonged to. It finds it by the server now, with Allow, Always allow
+  (never for a plugin that can move money), Edit and Don't.
 - The Pips header no longer breaks when the runner reports an error: the error has its own row,
   and "Pips", "Start runner" and "Controls" keep their words on one line.
 - A Pip's computer sets its desktop up itself the first time you open it: DGC downloads the desktop

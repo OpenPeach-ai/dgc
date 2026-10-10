@@ -29,6 +29,7 @@ async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 const viewModule=load(viewCode,name=>name==='vscode'?{}:require(name));
 
 function setup({plugins=[card()],drafts=[],apiVersion=44,messages=[],uses={plugins:[],installed}}={}){
+ let listed=installed;
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -44,7 +45,7 @@ function setup({plugins=[card()],drafts=[],apiVersion=44,messages=[],uses={plugi
   get_workspace_context:()=>({context:{workspace_id:PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
   list_pip_messages:()=>({pip_id:PIP,workspace_id:PW,messages,next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),
   get_pip_computer:()=>({computer:{pip_id:PIP,granted:false,available:true,reason:'',pending:0,actions:[]}}),
-  list_pip_app_links:()=>({pip_id:PIP,links:[],composio:true}),list_pip_plugins:()=>({pip_id:PIP,plugins,installed}),
+  list_pip_app_links:()=>({pip_id:PIP,links:[],composio:true}),list_pip_plugins:()=>({pip_id:PIP,plugins,installed:listed}),
   list_pip_message_drafts:()=>({drafts:[],next_cursor:null}),list_pip_calendar_drafts:()=>({drafts:[],next_cursor:null}),
   list_pip_connector_drafts:()=>({drafts:drafts.map(summary),next_cursor:null}),get_pip_connector_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),
   list_pip_routines:()=>({pip_id:PIP,routines:[]}),list_pip_action_grants:()=>({pip_id:PIP,grants:[]}),get_pip_digest:()=>undefined,
@@ -53,7 +54,7 @@ function setup({plugins=[card()],drafts=[],apiVersion=44,messages=[],uses={plugi
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion,generation:1,connected:true,supported:true,enabled:true});
  const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
- return {w,d:w.document,sent,answer,requests,drain,click,setPlugins:v=>{plugins=v;},setDrafts:v=>{drafts=v;}};
+ return {w,d:w.document,sent,answer,requests,drain,click,setPlugins:v=>{plugins=v;},setDrafts:v=>{drafts=v;},setInstalled:v=>{listed=v;}};
 }
 async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();}
 const clean=v=>JSON.parse(JSON.stringify(v));
@@ -137,6 +138,29 @@ test('the allowed card goes once the Pip has replied after it',async()=>{
  assert.equal(y.d.querySelector(`[data-plugin-card="${CARD}"]`),null,'its reply follows; the card is gone');
  const z=setup({plugins:[aave({status:'allowed'})]});await openChat(z);
  assert.match(z.d.querySelector(`[data-plugin-card="${MONEY}"]`).textContent,/Aave can move money, so Ava asks you before every action\./);
+});
+
+// Pips API 45 took the per-Pip plugin cards away (every plugin turned on is every Pip's), and with them the only
+// way the chat knew which plugin a draft's server belongs to: its Allow card never loaded, leaving a Review row.
+// The listing names each installed plugin's servers now.
+test('Pips API 45: with no per-Pip cards, a plugin action is still its Allow card, found by the plugin that owns the server',async()=>{
+ const owned=[{plugin:'aave',name:'Aave',money:true,servers:['aave']},{plugin:'airtable',name:'Airtable',money:false,servers:['airtable']}];
+ const x=setup({apiVersion:45,plugins:[],drafts:[draft()],uses:{plugins:[],installed:owned}});
+ x.setInstalled(owned);await openChat(x);
+ const el=x.d.querySelector(`[data-plugin-action="${DRAFT}"]`);assert.ok(el,'inline in the chat, not a Review row');
+ assert.match(el.textContent,/Run create_record in Airtable\?Ava wants to do this in Airtable\./);
+ assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Always allow','Edit','Don’t']);
+ assert.equal(x.d.querySelector('.chat-setup-review'),null);
+ x.click(`[data-plugin-run="${DRAFT}"]`);await flush();
+ assert.equal(x.requests('prepare_pip_connector_draft').length,1,'Allow works as before');
+ const y=setup({apiVersion:45,plugins:[],drafts:[draft('aave')]});y.setInstalled(owned);await openChat(y);
+ assert.deepEqual([...y.d.querySelector(`[data-plugin-action="${DRAFT}"]`).querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t'],
+  'a money plugin: no Always allow');
+ // A listing from a CLI that doesn't name servers: still a card, as careful as a money plugin, named by its server.
+ const z=setup({apiVersion:45,plugins:[],drafts:[draft()]});z.setInstalled([{plugin:'airtable',name:'Airtable',money:false}]);await openChat(z);
+ const unknown=z.d.querySelector(`[data-plugin-action="${DRAFT}"]`);assert.ok(unknown);
+ assert.match(unknown.textContent,/Run create_record in airtable\?/);
+ assert.deepEqual([...unknown.querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t'],'not knowing, it asks every time');
 });
 
 test('a connector draft for a server no allowed plugin owns stays a Review row',async()=>{
