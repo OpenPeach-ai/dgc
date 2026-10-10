@@ -446,6 +446,125 @@ test("branch in new chat: on every reply, never in a temporary chat, and the bra
   } finally { await s.page.close(); }
 });
 
+test("projects in a chat's tab: the project's page, its settings, and the project a chat is in, in its header", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const P = `proj_${"c".repeat(32)}`, att = (c) => "att_" + c.repeat(32);
+    const project = { id: P, name: "Goa trip", color: "teal", instructions: "Budget traveller. Prices in rupees.", memory: "shared", chats: 2,
+      files: [{ id: att("a"), kind: "document", name: "itinerary.pdf", size: 52000, chars: 4000 }, { id: att("b"), kind: "text", name: "Hotel", size: 40, chars: 40 }] };
+    await s.send({ type: "opened", conversation: conversation({ project: P }), earlier: 0, busy: false, messages: [], project });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-project-name").textContent(), "Goa trip");
+    assert.equal(await s.page.locator("#cd-title").textContent(), "Goa trip", "the header names the project, not a chat yet");
+    assert.equal(await s.page.locator(".cd-project-head .project-icon").getAttribute("data-color"), "teal");
+    assert.equal(await s.page.locator(".cd-project-card").first().textContent(), "InstructionsBudget traveller. Prices in rupees.");
+    assert.deepEqual(await s.page.locator(".cd-project-chips .cd-chip-name").allTextContents(), ["itinerary.pdf", "Hotel"]);
+    assert.equal(await s.page.locator(".cd-project-memory").textContent(), "Memory: shared with your other chats, Work and Pips.");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "New chat in Goa trip");
+    assert.equal(await s.page.locator("#cd-temp-toggle").isHidden(), true, "a project's chat is kept: never temporary");
+    assert.equal(await s.page.locator("#cd-crumb").isHidden(), true, "on its own page, the page is the project");
+    assert.deepEqual(await s.posted("projectChats"), [{ type: "projectChats", id: P }], "its chats, asked for once");
+    await s.send({ type: "projectChats", project: P, items: [{ id: `chat_${"d".repeat(32)}`, title: "Where we stay", preview: "Casa Anjuna, ₹3,000 a night." }] });
+    await s.frame();
+    await s.page.locator(".cd-project-chat").click();
+    assert.deepEqual(await s.posted("openChat"), [{ type: "openChat", id: `chat_${"d".repeat(32)}` }]);
+    await s.page.locator(".cd-project-files button", { hasText: "Add files" }).click();
+    await s.page.locator('.cd-project-chips button[aria-label="Remove Hotel"]').click();
+    assert.deepEqual(await s.posted("projectAddFiles"), [{ type: "projectAddFiles", id: P }]);
+    assert.deepEqual(await s.posted("projectRemoveFile"), [{ type: "projectRemoveFile", id: P, fileId: att("b") }]);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-project-page.png") });
+    // Settings: name, colour, instructions, memory; Save, and a refused save can be fixed and saved again.
+    await s.page.locator('.cd-project-head button[aria-label="Project settings"]').click();
+    const panel = s.page.locator("#cd-project-panel");
+    assert.equal(await panel.getAttribute("aria-label"), "Project settings");
+    await panel.locator("#cd-project-name").fill("Goa, December");
+    await panel.locator('input[name="cd-project-color"][value="orange"]').check();
+    await panel.locator("#cd-project-instructions").fill("Vegetarian food only.");
+    await panel.locator('input[name="cd-project-memory"][value="project"]').check();
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-project-settings.png") });
+    await panel.locator("button", { hasText: "Save" }).click();
+    assert.deepEqual(await s.posted("projectSave"), [{ type: "projectSave", id: P, name: "Goa, December", color: "orange",
+                                                       instructions: "Vegetarian food only.", memory: "project" }]);
+    assert.equal(await panel.locator("button", { hasText: "Save" }).isDisabled(), true);
+    await s.send({ type: "error", message: "Give the project a name." });
+    assert.equal(await panel.locator("button", { hasText: "Save" }).isDisabled(), false, "refused: fix it and save again");
+    await panel.locator("button", { hasText: "Save" }).click();
+    await s.send({ type: "projectSaved", project: { ...project, name: "Goa, December", color: "orange", memory: "project" } });
+    await s.frame();
+    assert.equal(await panel.count(), 0, "saved: the panel closes");
+    assert.equal(await s.page.locator(".cd-project-name").textContent(), "Goa, December");
+    assert.match(await s.page.locator(".cd-project-memory").textContent(), /this project's only/);
+    await s.page.locator('.cd-project-head button[aria-label="Project settings"]').click();
+    await panel.locator("button", { hasText: "Delete project…" }).click();
+    assert.deepEqual(await s.posted("projectDelete"), [{ type: "projectDelete", id: P, name: "Goa, December", chats: 2 }]);
+    await s.page.keyboard.press("Escape");
+    // A chat in the project: its name in the header, which opens the project's page.
+    await s.send({ type: "opened", conversation: conversation({ title: "Where we stay", project: P }), earlier: 0, busy: false,
+      messages: [{ id: M(1), role: "user", text: "Where?" }, { id: M(2), role: "assistant", text: "Casa Anjuna.", finish: "stop" }] });
+    await s.frame();
+    assert.equal(await s.page.locator("#cd-crumb").isVisible(), true);
+    assert.equal(await s.page.locator("#cd-crumb .cd-crumb-name").textContent(), "Goa, December");
+    await s.page.locator("#cd-crumb").click();
+    assert.deepEqual(await s.posted("openProject"), [{ type: "openProject", id: P }]);
+    await s.send({ type: "projects", projects: [{ ...project, name: "Goa 2026" }] });
+    assert.equal(await s.page.locator("#cd-crumb .cd-crumb-name").textContent(), "Goa 2026", "renamed anywhere: shown here");
+    await s.send({ type: "changed", summary: { project: null } });
+    assert.equal(await s.page.locator("#cd-crumb").isHidden(), true, "moved out: no project");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("the home's projects: a New project, each project's chats under it, and a chat dragged into one", async (t) => {
+  if (skipOrFail(t)) return;
+  const { html, mainJs, markdownJs } = panelHtml();
+  const page = await browser.newPage({ viewport: { width: 380, height: 760 } });
+  try {
+    await page.setContent(html, { waitUntil: "load" });
+    await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
+    await page.evaluate(([mjs, mdjs]) => {
+      document.documentElement.dataset.chatPlace = "home";
+      window.__posted = []; window.__state = undefined;
+      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state,
+                                         setState(s) { window.__state = s; } });
+      window.DgcPips = { mount: () => ({ setVisible() {}, navigate() {} }) };
+      eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
+      eval(mjs);
+    }, [mainJs, markdownJs]);
+    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
+    const now = new Date().toISOString(), P = `proj_${"c".repeat(32)}`, C = `chat_${"b".repeat(32)}`;
+    await send({ type: "chatdgc_list", available: true, total: 1, items: [{ id: C, title: "Beach ideas", updated_at: now, preview: "Baga." }] });
+    await send({ type: "chatdgc_projects", projects: [] });
+    assert.equal(await page.locator("#projects-home").isVisible(), true);
+    assert.equal(await page.locator("#chats-sub").isHidden(), true, "no projects: no need to split your chats");
+    await page.locator(".project-start").click();
+    assert.deepEqual(await posted("chatdgcProjectNew"), [{ type: "chatdgcProjectNew" }]);
+    await send({ type: "chatdgc_projects", projects: [{ id: P, name: "<b>Goa</b> trip", color: "teal", chats: 2, files: [], memory: "shared" }] });
+    const row = page.locator(".project-row");
+    assert.equal(await row.locator(".project-name").textContent(), "<b>Goa</b> trip", "words, never markup");
+    assert.equal(await row.locator(".project-count").textContent(), "2");
+    assert.equal(await page.locator("#chats-sub").isVisible(), true);
+    await row.locator(".project-name").click();
+    assert.deepEqual(await posted("chatdgcProjectOpen"), [{ type: "chatdgcProjectOpen", id: P }], "its page");
+    await row.locator(".project-toggle").click();
+    assert.deepEqual(await posted("chatdgcProjectChats"), [{ type: "chatdgcProjectChats", id: P }]);
+    assert.equal(await page.locator(".project-chats .project-empty").textContent(), "Loading…");
+    await send({ type: "chatdgc_project_chats", project: P, items: [{ id: `chat_${"d".repeat(32)}`, title: "Where we stay", updated_at: now }] });
+    assert.deepEqual(await page.locator(".project-chats .session-name").allTextContents(), ["Where we stay"]);
+    assert.equal(await page.evaluate(() => window.__state?.projectsOpen?.length), 1, "kept open across a reload");
+    if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-home-projects.png") });
+    await page.locator("#chats-list .chat-row").dragTo(row);
+    assert.deepEqual(await posted("chatdgcMove"), [{ type: "chatdgcMove", id: C, project: P }], "dragged in");
+    await page.locator(".project-chats .chat-row").dragTo(page.locator("#chats-list"));
+    assert.deepEqual((await posted("chatdgcMove")).at(-1), { type: "chatdgcMove", id: `chat_${"d".repeat(32)}`, project: "" }, "and out");
+    await send({ type: "chatdgc_list", available: true, query: "where", items: [{ id: `chat_${"d".repeat(32)}`, title: "Where we stay", updated_at: now, project: P }] });
+    assert.equal(await page.locator("#projects-home").isHidden(), true, "searching: the results, each saying its project");
+    assert.match(await page.locator("#chats-list .chat-project").textContent(), /Goa/);
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll("#sessions-host button")].filter((b) => !b.title).length), 0);
+  } finally { await page.close(); }
+});
+
 test("attachments: picked files and pastes become chips, go with the message, and show on it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

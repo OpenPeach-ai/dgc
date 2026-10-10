@@ -373,3 +373,63 @@ textarea.cd-plan-input { resize: vertical; }
   font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .cd-branched-from:hover { text-decoration: underline; }
 .cd-branched-from:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+
+/* Projects (ChatGPT's): the project a chat is in, before its name; a project's page (a new chat in it): its name,
+   instructions and files as two cards, its memory, and its chats; the settings panel beside it. */
+.cd-crumb { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 40%; min-height: 24px; padding: 0 4px 0 6px;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; }
+.cd-crumb:hover { background: var(--surface2); color: var(--text); }
+.cd-crumb:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-crumb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-crumb .codicon-chevron-right { font-size: 12px; color: var(--faint); }
+body.cd-on-project .cd-empty { text-align: left; }
+.cd-project { display: flex; flex-direction: column; gap: var(--sp-4); padding-block: var(--sp-5) var(--sp-4); }
+.cd-project-head { display: flex; align-items: center; gap: var(--sp-2); }
+.cd-project-head .project-icon { font-size: 22px; }
+.cd-project-name { flex: 1 1 auto; min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text-strong); font: var(--w-semi) 22px/1.25 var(--sans); }
+.cd-project-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-3); }
+.cd-project-card { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-3); border: 1px solid var(--border);
+  border-radius: var(--r-lg); background: var(--surface); color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); text-align: left; }
+button.cd-project-card { cursor: pointer; }
+button.cd-project-card:hover { border-color: var(--border-strong); background: var(--surface2); }
+.cd-project-card:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-project-card-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.cd-project-card-title { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.3 var(--sans); }
+.cd-project-card-text { color: var(--muted); overflow-wrap: anywhere; }
+.cd-project-chips { margin: 0; }
+.cd-project-memory { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-project-chats h3 { margin: 0 0 var(--sp-2); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.3 var(--sans); }
+.cd-project-note { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.cd-project-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+.cd-project-list li { border-bottom: 1px solid var(--border); }
+.cd-project-chat { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: var(--sp-2) var(--sp-1); border: 0; background: transparent;
+  color: var(--text); text-align: left; cursor: pointer; }
+.cd-project-chat:hover { background: var(--surface2); }
+.cd-project-chat:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.cd-project-chat-title { font: var(--w-med) var(--t-sm)/1.35 var(--sans); overflow-wrap: anywhere; }
+.cd-project-chat-preview { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-project-form { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+.cd-field-label { color: var(--text-strong); font: var(--w-semi) var(--t-xs)/1.3 var(--sans); }
+.cd-field { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--bg); color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.cd-field:focus { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 0; }
+.cd-project-instructions { resize: vertical; min-height: 120px; }
+.cd-field-note { align-self: flex-end; color: var(--faint); font: var(--w-reg) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
+.cd-project-colors, .cd-project-memory-choice { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--sp-1) 0 0; padding: 0; border: 0; }
+.cd-project-colors legend, .cd-project-memory-choice legend { margin-bottom: var(--sp-1); padding: 0; }
+.cd-swatch { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 1px solid var(--border);
+  border-radius: var(--r-md); cursor: pointer; }
+.cd-swatch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.cd-swatch:has(input:checked) { border-color: var(--text); background: var(--surface2); }
+.cd-swatch:has(input:focus-visible) { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-swatch .project-icon { font-size: 16px; }
+.cd-project-memory-choice { flex-direction: column; }
+.cd-radio { display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-2); padding: var(--sp-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); cursor: pointer; }
+.cd-radio:has(input:checked) { border-color: var(--accent); }
+.cd-radio input { grid-row: span 2; margin: 2px 0 0; accent-color: var(--accent); }
+.cd-radio-label { color: var(--text); font: var(--w-med) var(--t-sm)/1.35 var(--sans); }
+.cd-radio-about { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-project-delete { align-self: flex-start; margin-top: var(--sp-3); padding: 4px 0; border: 0; background: transparent; color: var(--err-text, #f87171);
+  font: var(--w-med) var(--t-sm)/1.3 var(--sans); cursor: pointer; }
+.cd-project-delete:hover { text-decoration: underline; }

@@ -17,7 +17,8 @@
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
-                  research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), searchFirst: false, planEditing: "", steerDraft: "", open: new Set() };
+                  research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), searchFirst: false, planEditing: "", steerDraft: "", open: new Set(),
+                  projects: [], projectChats: null, projectChatsAsked: "" };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -844,6 +845,162 @@
     }
     return node;
   }
+  // ---- projects (ChatGPT's): chats, files and instructions together. A chat in one says so in its header; a new
+  // chat in one is the project's page (its instructions, files, memory and chats), and what's sent starts a chat.
+  function projectOf(conversation) {
+    const id = conversation?.project;
+    return id ? state.projects.find((p) => p.id === id) || null : null;
+  }
+  function upsertProject(project) {
+    if (!project?.id) return;
+    const at = state.projects.findIndex((p) => p.id === project.id);
+    if (at >= 0) state.projects[at] = { ...state.projects[at], ...project }; else state.projects.push(project);
+  }
+  function isProjectPage() {
+    return state.opened && !state.messages.length && !state.earlier && !!projectOf(state.conversation);
+  }
+  function folderIcon(project) {
+    const glyph = icon("folder"); glyph.classList.add("project-icon"); glyph.dataset.color = project.color || "purple";
+    return glyph;
+  }
+  function crumb() {
+    const button = $("cd-crumb"), project = projectOf(state.conversation);
+    button.hidden = !project || isProjectPage();
+    if (button.hidden) return;
+    button.replaceChildren(folderIcon(project), el("span", "cd-crumb-name", project.name), icon("chevron-right"));
+    button.title = `Open the project ${project.name}`;
+    button.setAttribute("aria-label", `Project: ${project.name}. Open its page`);
+  }
+  $("cd-crumb").addEventListener("click", () => {
+    const project = projectOf(state.conversation);
+    if (project) vscode.postMessage({ type: "openProject", id: project.id });
+  });
+  const firstWords = (text, n = 220) => { const flat = String(text || "").replace(/\s+/g, " ").trim(); return flat.length > n ? `${flat.slice(0, n - 1)}…` : flat; };
+  function projectPage() {
+    const project = projectOf(state.conversation);
+    const page = el("div", "cd-project");
+    const head = el("div", "cd-project-head");
+    head.append(folderIcon(project), el("h2", "cd-project-name", project.name),
+                action("settings-gear", "Project settings", () => openProjectPanel(project)));
+    const instructions = el("button", "cd-project-card");
+    instructions.type = "button";
+    instructions.append(el("span", "cd-project-card-title", "Instructions"),
+      el("span", "cd-project-card-text", project.instructions ? firstWords(project.instructions)
+        : "Tell ChatDGC how to answer in this project: a voice, a format, what to keep in mind."));
+    instructions.addEventListener("click", () => openProjectPanel(project, "instructions"));
+    const files = el("div", "cd-project-card cd-project-files");
+    const top = el("div", "cd-project-card-row");
+    const count = (project.files || []).length;
+    top.append(el("span", "cd-project-card-title", count ? `Files · ${count}` : "Files"));
+    const add = el("button", "cd-edit-cancel", "Add files");
+    add.type = "button";
+    add.addEventListener("click", () => vscode.postMessage({ type: "projectAddFiles", id: project.id }));
+    top.append(add);
+    files.append(top);
+    if (count) {
+      const list = el("ul", "cd-chips cd-project-chips");
+      list.setAttribute("aria-label", "The project's files");
+      for (const file of project.files) list.append(chip(file, () => vscode.postMessage({ type: "projectRemoveFile", id: project.id, fileId: file.id })));
+      files.append(list);
+    } else files.append(el("span", "cd-project-card-text", "Every chat in this project reads them."));
+    const cards = el("div", "cd-project-cards");
+    cards.append(instructions, files);
+    const memory = el("p", "cd-project-memory", project.memory === "project"
+      ? "Memory: this project's only. Its chats don't see your saved memories."
+      : "Memory: shared with your other chats, Work and Pips.");
+    const chats = el("section", "cd-project-chats");
+    chats.setAttribute("aria-label", "Chats in this project");
+    chats.append(el("h3", "", "Chats"));
+    const known = state.projectChats?.project === project.id ? state.projectChats.items : null;
+    if (!known) {
+      chats.append(el("p", "cd-project-note", "Loading…"));
+      if (state.projectChatsAsked !== project.id) {
+        state.projectChatsAsked = project.id;
+        vscode.postMessage({ type: "projectChats", id: project.id });
+      }
+    } else if (!known.length) chats.append(el("p", "cd-project-note", "No chats yet. Write below to start the first one."));
+    else {
+      const list = el("ul", "cd-project-list");
+      for (const chat of known) {
+        const row = el("li");
+        const open = el("button", "cd-project-chat");
+        open.type = "button";
+        open.append(el("span", "cd-project-chat-title", chat.title || "New chat"),
+                    el("span", "cd-project-chat-preview", firstWords(chat.preview, 140)));
+        open.addEventListener("click", () => vscode.postMessage({ type: "openChat", id: chat.id }));
+        row.append(open);
+        list.append(row);
+      }
+      chats.append(list);
+    }
+    page.append(head, cards, memory, chats);
+    return page;
+  }
+  const PROJECT_COLORS = ["purple", "blue", "teal", "green", "yellow", "orange", "red", "pink", "gray"];
+  /** Project settings, beside the page as the Sources panel is: name, colour, instructions, memory, Delete. */
+  function openProjectPanel(project, focus) {
+    $("cd-project-panel")?.remove();
+    const panel = el("aside", "cd-panel cd-project-panel");
+    panel.id = "cd-project-panel";
+    panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Project settings");
+    const back = document.activeElement;
+    const done = () => { panel.remove(); (back && back.isConnected ? back : input).focus(); };
+    const top = el("header", "cd-panel-head");
+    const close = action("close", "Close", done);
+    top.append(el("h2", "cd-panel-title", "Project settings"), close);
+    const form = el("form", "cd-project-form");
+    const nameLabel = el("label", "cd-field-label", "Name");
+    const name = el("input", "cd-field"); name.id = "cd-project-name"; name.value = project.name; name.maxLength = 80;
+    nameLabel.htmlFor = name.id;
+    const colors = el("fieldset", "cd-project-colors");
+    colors.append(el("legend", "cd-field-label", "Colour"));
+    for (const color of PROJECT_COLORS) {
+      const option = el("label", "cd-swatch");
+      const radio = el("input"); radio.type = "radio"; radio.name = "cd-project-color"; radio.value = color;
+      radio.checked = (project.color || "purple") === color;
+      radio.setAttribute("aria-label", color);
+      option.append(radio, folderIcon({ color }));
+      option.title = color[0].toUpperCase() + color.slice(1);
+      colors.append(option);
+    }
+    const instLabel = el("label", "cd-field-label", "Instructions");
+    const inst = el("textarea", "cd-field cd-project-instructions"); inst.id = "cd-project-instructions"; inst.rows = 8; inst.maxLength = 8000;
+    inst.value = project.instructions || ""; inst.placeholder = "How ChatDGC should answer in this project. Your own instructions still apply; these win where they differ.";
+    instLabel.htmlFor = inst.id;
+    const counter = el("span", "cd-field-note", "");
+    const tally = () => { counter.textContent = `${inst.value.length.toLocaleString()} / 8,000`; };
+    inst.addEventListener("input", tally); tally();
+    const memory = el("fieldset", "cd-project-memory-choice");
+    memory.append(el("legend", "cd-field-label", "Memory"));
+    for (const [value, label, about] of [
+      ["shared", "Shared", "Chats here use the memory you share with your other chats, Work and Pips."],
+      ["project", "Project-only", "Chats here don't see your saved memories, and nothing is saved to them. They know this project's other chats."]]) {
+      const option = el("label", "cd-radio");
+      const radio = el("input"); radio.type = "radio"; radio.name = "cd-project-memory"; radio.value = value;
+      radio.checked = (project.memory || "shared") === value;
+      option.append(radio, el("span", "cd-radio-label", label), el("span", "cd-radio-about", about));
+      memory.append(option);
+    }
+    const row = el("div", "cd-edit-actions");
+    const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button"; cancel.addEventListener("click", done);
+    const save = el("button", "cd-continue", "Save"); save.type = "submit";
+    row.append(cancel, save);
+    const remove = el("button", "cd-project-delete", "Delete project…"); remove.type = "button";
+    remove.addEventListener("click", () => vscode.postMessage({ type: "projectDelete", id: project.id, name: project.name, chats: Number(project.chats) || 0 }));
+    form.append(nameLabel, name, colors, instLabel, inst, counter, memory, row, remove);
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!name.value.trim()) { name.focus(); return; }
+      panel.dataset.saving = "1"; save.disabled = true;
+      vscode.postMessage({ type: "projectSave", id: project.id, name: name.value.trim(),
+        color: form.querySelector('input[name="cd-project-color"]:checked')?.value || project.color,
+        instructions: inst.value, memory: form.querySelector('input[name="cd-project-memory"]:checked')?.value || "shared" });
+    });
+    panel.append(top, form);
+    panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } });
+    document.body.append(panel);
+    (focus === "instructions" ? inst : name).focus();
+  }
   /** Branch in new chat (ChatGPT's): this conversation up to here, in a new chat of its own, opened in a tab. */
   function branchAction(message) {
     if (state.conversation?.temporary || !message.id) return null;
@@ -977,8 +1134,13 @@
       if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
     }
     $("cd-earlier").hidden = !(state.earlier > 0);
-    document.body.classList.toggle("cd-blank", state.opened && !state.messages.length && !state.earlier);
-    $("cd-empty").hidden = !(state.opened && !state.messages.length && !state.earlier);
+    const blank = state.opened && !state.messages.length && !state.earlier, page = blank && isProjectPage();
+    document.body.classList.toggle("cd-blank", blank && !page);
+    document.body.classList.toggle("cd-on-project", page);
+    $("cd-empty").hidden = !blank;
+    $("cd-empty").replaceChildren(page ? projectPage() : el("h2", "", "What can I help with?"));
+    $("cd-title").textContent = page ? projectOf(state.conversation).name : state.conversation?.title || "New chat";
+    crumb();
     controls();
     follow();
   }
@@ -1028,7 +1190,10 @@
     send.disabled = (!text.trim() && !state.pending.length) || !state.conversation || !!state.unavailable || state.compacting;
     input.disabled = !!state.unavailable;
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
-    $("cd-temp-toggle").hidden = !fresh || !!state.conversation?.carried;   // a chat carried over isn't thrown away
+    // A chat carried over isn't thrown away, and a project's chat is kept: neither can be temporary.
+    $("cd-temp-toggle").hidden = !fresh || !!state.conversation?.carried || !!state.conversation?.project;
+    const project = isProjectPage() ? projectOf(state.conversation) : null;
+    input.placeholder = project ? `New chat in ${project.name}` : "Ask anything";
     $("cd-temporary").checked = !!state.conversation?.temporary;
     $("cd-temp-badge").hidden = !state.conversation?.temporary;
     $("cd-menu").hidden = !state.conversation || !!state.conversation.temporary || fresh;
@@ -1213,6 +1378,7 @@
         if (!keep) { state.compacting = false; state.context = null; meter(); }
         if (!keep) { state.model = ""; state.thinking = ""; }
         state.unavailable = "";
+        if (msg.project && typeof msg.project === "object") upsertProject(msg.project);
         $("cd-title").textContent = state.conversation?.title || "New chat";
         vscode.setState({ ...(vscode.getState() || {}), conversation: state.conversation?.id || "",
                           temporary: !!state.conversation?.temporary });
@@ -1337,11 +1503,31 @@
         if (msg.summary && state.conversation) {
           state.conversation = { ...state.conversation, ...msg.summary };
           $("cd-title").textContent = state.conversation.title || "New chat";
+          if (state.messages.length) crumb(); else render();      // moved: its page, or no longer one
           controls();
         }
         return;
+      case "projects":
+        // Every change to any project (and how many chats each holds): the header, the page and its list follow.
+        state.projects = Array.isArray(msg.projects) ? msg.projects : [];
+        state.projectChats = null; state.projectChatsAsked = "";
+        if ($("cd-project-panel") && !projectOf(state.conversation)) $("cd-project-panel").remove();
+        if (isProjectPage() || (!state.messages.length && state.conversation?.project)) render(); else crumb();
+        return;
+      case "projectChats":
+        state.projectChats = { project: String(msg.project || ""), items: Array.isArray(msg.items) ? msg.items : [] };
+        if (isProjectPage()) render();
+        return;
+      case "projectSaved": {
+        const panel = $("cd-project-panel");
+        if (panel?.dataset.saving) panel.remove();
+        if (msg.project && typeof msg.project === "object") { upsertProject(msg.project); if (isProjectPage()) render(); else crumb(); }
+        return;
+      }
       case "error":
         if (state.compacting) { state.compacting = false; render(); }
+        { const panel = $("cd-project-panel");       // a save that was refused: the panel stays, to fix and save again
+          if (panel?.dataset.saving) { delete panel.dataset.saving; const save = panel.querySelector('button[type="submit"]'); if (save) save.disabled = false; } }
         if (msg.opening && /doesn't exist/i.test(msg.message || "")) {
           vscode.postMessage({ type: "reopenNew" });             // gone (a temporary chat after a restart)
           return;

@@ -118,6 +118,25 @@ voice come in later phases.
   for another one, with whatever model and thinking level the box is set to. Either way, the old version
   stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own
   versions comes back as you left it. One point keeps up to 50 versions.
+- **Branch in new chat**, as ChatGPT has it: the branch button under a reply starts a new chat holding the
+  conversation up to that reply (the versions you see), with its files. It opens in a tab of its own, named
+  "Branch · …", and a line after that reply says where it branched from, with a link back. The original
+  stays as it was. A temporary chat can't be branched.
+- **Projects**, as ChatGPT has them: chats, files and instructions kept together.
+  - **In the side bar**, Projects sit above your chats. Click one to open its page; its arrow lists its chats
+    there. Drag a chat onto a project to move it in, or back onto Chats to take it out. A chat's **⋯ →
+    Move to project…** does the same, and can make a new project.
+  - **A project's page** shows its instructions, its files, its memory setting and its chats. What you write
+    in its box starts a new chat in the project. A chat in a project shows the project's name in its header.
+  - **Instructions** (up to 8,000 characters) apply to every chat in it, on top of your own; where the two
+    differ, the project's win.
+  - **Files** (up to 40) are read by every chat in it, within a quarter of the context window; what doesn't
+    fit is said, not sent. Images go to models that can see.
+  - **Memory:** shared (the memory you share with your other chats, Work and Pips), or the project's only:
+    its chats then don't see your saved memories and nothing is saved to them. Either way, a chat in a
+    project knows what the project's other chats are about.
+  - **Deleting a project** deletes its files and instructions, and its chats too unless you keep them; kept
+    chats move back to your chats.
 - **Custom instructions and personality.** **Settings → ChatDGC** sets what ChatDGC should know about you and
   how it should respond (up to 1,500 characters each), and its personality: Default, Concise, Warm, Candid
   or Nerdy. Every chat uses them from its next reply; Work and your Pips don't.

@@ -13,6 +13,8 @@ import { homedir } from "os";
 export const CHATDGC_EDITOR = "dgc.chatdgcEditor";
 const CONVERSATION_ID = /^chat_[a-f0-9]{32}$/;
 const MESSAGE_ID = /^msg_[a-f0-9]{32}$/;
+const PROJECT_ID = /^proj_[a-f0-9]{32}$/;
+const PROJECT_COLORS = ["purple", "blue", "teal", "green", "yellow", "orange", "red", "pink", "gray"];
 const THINKING = new Set(["off", "low", "medium", "high", "xhigh"]);
 const SEARCH = new Set(["off", "auto", "on"]);
 const MAX_TEXT = 1_000_000;
@@ -44,12 +46,14 @@ interface Tab {
   /** Commands held while the process starts. */
   held: Record<string, unknown>[];
   opened: boolean;
+  /** A project's page (a new chat in that project, as ChatGPT's project page is), until it's sent. */
+  project?: string;
   /** Files this tab's picker returned: the only paths a send may name, so a page can never have the
    *  backend read a file the user didn't choose. */
   picked: Set<string>;
 }
 
-type Asker = { tab?: Tab; home?: boolean; kind: string };
+type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string };
 
 export function chatTitle(text: string): string {
   const flat = String(text || "").replace(/\s+/g, " ").trim();
@@ -64,7 +68,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
 <title>ChatDGC</title></head><body class="cd-blank">
-<header class="cd-head"><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
+<header class="cd-head"><button type="button" id="cd-crumb" class="cd-crumb" hidden></button><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
 <button type="button" id="cd-keys-open" class="cd-icon" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts"><span class="codicon codicon-keyboard" aria-hidden="true"></span></button>
 <button type="button" id="cd-menu" class="cd-icon" title="Rename, pin, archive, export or delete" aria-label="Chat options" hidden><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>
 <button type="button" id="cd-new" class="cd-icon" title="New chat" aria-label="New chat"><span class="codicon codicon-edit" aria-hidden="true"></span></button></header>
@@ -127,6 +131,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.adopt(panel, id, temporary);
   }
 
+  /** A project's page: its chats, files and instructions, and a box that starts a chat in it. */
+  openProject(project: string): void {
+    if (!PROJECT_ID.test(project)) return;
+    for (const tab of this.tabs) { if (tab.project === project) { tab.panel.reveal(); return; } }
+    const panel = vscode.window.createWebviewPanel(CHATDGC_EDITOR, "Project", vscode.ViewColumn.Active, this.options());
+    this.adopt(panel, "", false, project);
+  }
+
   /** A tab VS Code kept across a reload: its webview remembered which conversation it showed. */
   async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: any): Promise<void> {
     const id = CONVERSATION_ID.test(String(state?.conversation || "")) ? String(state.conversation) : "";
@@ -139,10 +151,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     return { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] };
   }
 
-  private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean): void {
+  private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean, project = ""): void {
     panel.iconPath = { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-light.svg"),
                        dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-dark.svg") };
-    const tab: Tab = { panel, conversation, temporary, held: [], opened: false, picked: new Set() };
+    const tab: Tab = { panel, conversation, temporary, held: [], opened: false, picked: new Set(), ...(project ? { project } : {}) };
     this.tabs.add(tab);
     panel.onDidDispose(() => {
       this.tabs.delete(tab);
@@ -199,6 +211,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const showing = (id: string) => [...this.tabs].filter((tab) => tab.conversation === id);
     switch (ev?.type) {
       case "chatdgc_chats":
+        if (asker?.kind === "projectChats") {
+          this.requests.delete(requestId);
+          const items = (Array.isArray(ev.chats) ? ev.chats : []).filter((chat: any) => CONVERSATION_ID.test(String(chat?.id || "")));
+          if (asker.home) this.host?.postHome({ type: "chatdgc_project_chats", project: asker.project, items, total: Number(ev.total) || 0 });
+          else if (asker.tab) this.post(asker.tab, { type: "projectChats", project: asker.project, items, total: Number(ev.total) || 0 });
+          return;
+        }
         if (asker?.home) {
           this.requests.delete(requestId);
           const chats = Array.isArray(ev.chats) ? ev.chats : [];
@@ -235,9 +254,38 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         tab.temporary = ev.conversation?.temporary === true;
         tab.summary = ev.conversation;
         tab.opened = true;
-        tab.panel.title = chatTitle(ev.conversation?.title);
+        const page = tab.project && !(Array.isArray(ev.messages) && ev.messages.length) && ev.project?.name;
+        tab.panel.title = page ? chatTitle(ev.project.name) : chatTitle(ev.conversation?.title);
         this.post(tab, { type: "opened", conversation: ev.conversation, messages: ev.messages, earlier: ev.earlier,
-                         busy: ev.busy === true, replyId: typeof ev.reply_id === "string" ? ev.reply_id : "" });
+                         busy: ev.busy === true, replyId: typeof ev.reply_id === "string" ? ev.reply_id : "",
+                         ...(ev.project && typeof ev.project === "object" ? { project: ev.project } : {}) });
+        this.homeChanged();
+        return;
+      }
+      case "chatdgc_projects": {
+        // Asked for, or broadcast after any change: the home's list and every tab (a project's page, a chat's
+        // header) show them as they are now.
+        if (asker) this.requests.delete(requestId);
+        const projects = (Array.isArray(ev.projects) ? ev.projects : []).filter((p: any) => PROJECT_ID.test(String(p?.id || "")));
+        if (asker?.kind === "projectsFor") { this.projectsWaiting.shift()?.(projects); return; }
+        if (!asker || asker.home) this.host?.postHome({ type: "chatdgc_projects", projects });
+        for (const tab of asker?.tab ? [asker.tab] : asker ? [] : [...this.tabs]) this.post(tab, { type: "projects", projects });
+        return;
+      }
+      case "chatdgc_project": {
+        if (asker) this.requests.delete(requestId);
+        const id = String(ev.project?.id || "");
+        const waiting = this.createWaiting.get(requestId);
+        if (waiting) { this.createWaiting.delete(requestId); waiting(PROJECT_ID.test(id) ? id : ""); return; }
+        if (asker?.kind === "projectCreate" && PROJECT_ID.test(id)) this.openProject(id);
+        if (asker?.tab) this.post(asker.tab, { type: "projectSaved", project: ev.project ?? null });
+        if (Array.isArray(ev.deleted) || ev.project === null) {
+          // A deleted project: its page closes, and so does every tab on a chat that went with it.
+          const gone = new Set((Array.isArray(ev.deleted) ? ev.deleted : []).map(String));
+          for (const tab of [...this.tabs]) {
+            if ((tab.project && tab.project === asker?.project) || gone.has(tab.conversation)) tab.panel.dispose();
+          }
+        }
         this.homeChanged();
         return;
       }
@@ -315,6 +363,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_error": {
         if (asker) this.requests.delete(requestId);
         const message = String(ev.message || "ChatDGC hit an error.");
+        const waiting = this.createWaiting.get(requestId);
+        if (waiting) { this.createWaiting.delete(requestId); waiting(""); }
+        if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
         if (asker?.tab) { this.post(asker.tab, { type: "error", message, opening: asker.kind === "open" }); return; }
         if (asker?.home) { this.host?.postHome({ type: "chatdgc_list", available: true, error: message, items: [], query: this.homeQuery }); return; }
         for (const tab of showing(conversation)) this.post(tab, { type: "error", message });
@@ -336,7 +387,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "ready": {
         // The webview (re)loaded: it shows what this tab holds, or a new chat.
         this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(conversation ? { conversation_id: conversation } : {}),
-                                          ...(!conversation && tab.temporary ? { temporary: true } : {}) });
+                                          ...(!conversation && tab.temporary ? { temporary: true } : {}),
+                                          ...(!conversation && tab.project ? { project: tab.project } : {}) });
+        this.ask({ tab, kind: "projects" }, { type: "chatdgc_projects" });
         void this.models(tab);
         // A source's favicon, as Work's panel shows one: Google's icon service, asked about the origin only.
         // dgc.linkFavicons off: no request leaves for an icon.
@@ -350,6 +403,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         tab.conversation = "";
         tab.summary = undefined;
         tab.temporary = message.temporary === true;
+        tab.project = undefined;
         tab.panel.title = "New chat";
         this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(tab.temporary ? { temporary: true } : {}) });
         this.homeChanged();
@@ -467,6 +521,50 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (CONVERSATION_ID.test(id)) this.open(id);
         return;
       }
+      case "openProject":
+        this.openProject(String(message.id || ""));
+        return;
+      case "projectChats": {
+        const project = String(message.id || "");
+        if (PROJECT_ID.test(project)) {
+          this.ask({ tab, kind: "projectChats", project }, { type: "chatdgc_list", project, limit: 50 });
+        }
+        return;
+      }
+      case "projectSave": {
+        const project = String(message.id || "");
+        if (!PROJECT_ID.test(project)) return;
+        const fields: Record<string, unknown> = {};
+        if (typeof message.name === "string") fields.name = message.name.slice(0, 200);
+        if (PROJECT_COLORS.includes(String(message.color))) fields.color = message.color;
+        if (typeof message.instructions === "string") fields.instructions = message.instructions.slice(0, 20_000);
+        if (message.memory === "shared" || message.memory === "project") fields.memory = message.memory;
+        this.ask({ tab, kind: "projectSave", project }, { type: "chatdgc_project", op: "update", project_id: project, ...fields });
+        return;
+      }
+      case "projectAddFiles": {
+        // Picked here, sent from here: a page never names a file for the backend to read.
+        const project = String(message.id || "");
+        if (!PROJECT_ID.test(project)) return;
+        const chosen = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: "Add to project",
+          title: "Add files to this project: every chat in it can read them" });
+        const items = (chosen || []).filter((uri) => uri.scheme === "file").slice(0, MAX_ATTACHMENTS)
+          .map((uri) => ({ kind: "file", path: uri.fsPath }));
+        if (items.length) {
+          this.ask({ tab, kind: "projectFiles", project }, { type: "chatdgc_project", op: "add_files", project_id: project, attachments: items });
+        }
+        return;
+      }
+      case "projectRemoveFile": {
+        const project = String(message.id || ""), file = String(message.fileId || "");
+        if (PROJECT_ID.test(project) && /^att_[a-f0-9]{32}$/.test(file)) {
+          this.ask({ tab, kind: "projectFiles", project }, { type: "chatdgc_project", op: "remove_file", project_id: project, file_id: file });
+        }
+        return;
+      }
+      case "projectDelete":
+        await this.deleteProject(String(message.id || ""), String(message.name || ""), Number(message.chats) || 0, tab);
+        return;
       case "version": {
         const parent = String(message.parent || "");
         if (!conversation || !(parent === "root" || MESSAGE_ID.test(parent)) || !Number.isInteger(message.index)
@@ -594,6 +692,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       { label: "$(edit) Rename", id: "rename" },
       { label: pinned ? "$(pinned) Unpin" : "$(pin) Pin", id: "pin" },
       { label: "$(archive) Archive", id: "archive" },
+      { label: "$(folder) Move to project…", id: "move" },
       { label: "$(export) Export…", id: "export" },
       { label: "$(trash) Delete", id: "delete" },
     ];
@@ -606,6 +705,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       this.ask({ tab, kind: "update" }, { type: "chatdgc_update", conversation_id: conversation, title: title.slice(0, 120) });
     } else if (choice.id === "pin") {
       this.ask({ tab, kind: "update" }, { type: "chatdgc_update", conversation_id: conversation, pinned: !pinned });
+    } else if (choice.id === "move") {
+      await this.moveToProject(conversation, String(tab.summary?.project || ""), tab);
     } else if (choice.id === "export") {
       const name = chatTitle(tab.summary?.title).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "chat";
       const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
@@ -625,6 +726,65 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     }
   }
 
+  /** Move to project…: a project, a new one, or out of the one it's in (ChatGPT's "Move to project"). */
+  private async moveToProject(conversation: string, current: string, tab?: Tab): Promise<void> {
+    const projects = await this.projectList();
+    const picks: (vscode.QuickPickItem & { id: string })[] = [
+      ...projects.filter((p) => p.id !== current).map((p) => ({ label: `$(folder) ${p.name}`, description: `${p.chats} chat${p.chats === 1 ? "" : "s"}`, id: p.id })),
+      { label: "$(new-folder) New project…", id: "new" },
+      ...(current ? [{ label: "$(close) Remove from project", description: projects.find((p) => p.id === current)?.name, id: "" }] : []),
+    ];
+    const choice = await vscode.window.showQuickPick(picks, { placeHolder: "Move this chat to a project" });
+    if (!choice) return;
+    let target = choice.id;
+    if (target === "new") {
+      const name = await vscode.window.showInputBox({ prompt: "Name the new project", placeHolder: "Goa trip",
+        validateInput: (value) => (value.trim() ? undefined : "Give the project a name.") });
+      if (!name) return;
+      target = (await this.createProject(name)) || "";
+      if (!target) return;
+    }
+    this.ask({ tab, kind: "move" }, { type: "chatdgc_move", conversation_id: conversation, project_id: target });
+  }
+
+  private projectsWaiting: ((projects: any[]) => void)[] = [];
+  private createWaiting = new Map<string, (id: string) => void>();
+
+  /** The projects as the backend has them now. */
+  private projectList(): Promise<{ id: string; name: string; chats: number }[]> {
+    return new Promise((resolve) => {
+      const requestId = this.nextId("projects");
+      this.requests.set(requestId, { kind: "projectsFor", home: false });
+      this.projectsWaiting.push(resolve);
+      this.deliver({ kind: "projectsFor" }, { type: "chatdgc_projects", request_id: requestId });
+      setTimeout(() => { const i = this.projectsWaiting.indexOf(resolve); if (i >= 0) { this.projectsWaiting.splice(i, 1); resolve([]); } }, 5000);
+    });
+  }
+
+  /** A new project, its id once the backend has made it ("" if it couldn't). */
+  private createProject(name: string): Promise<string> {
+    return new Promise((resolve) => {
+      const requestId = this.nextId("projectNew");
+      this.requests.set(requestId, { kind: "projectNew" });
+      this.createWaiting.set(requestId, resolve);
+      this.deliver({ kind: "projectNew" }, { type: "chatdgc_project", op: "create", name: name.trim().slice(0, 200), request_id: requestId });
+      setTimeout(() => { if (this.createWaiting.delete(requestId)) resolve(""); }, 5000);
+    });
+  }
+
+  /** Delete a project, as ChatGPT does (its chats with it), or keep its chats as your own. */
+  private async deleteProject(project: string, name: string, chats: number, tab?: Tab): Promise<void> {
+    if (!PROJECT_ID.test(project)) return;
+    const ALL = chats ? `Delete project and ${chats} chat${chats === 1 ? "" : "s"}` : "Delete project";
+    const KEEP = "Delete project, keep its chats";
+    const choice = await vscode.window.showWarningMessage(
+      `Delete the project “${chatTitle(name)}”? Its files and instructions go${chats ? `; its chats too, unless you keep them` : ""}. This can't be undone.`,
+      { modal: true }, ALL, ...(chats ? [KEEP] : []));
+    if (!choice) return;
+    this.ask({ tab, kind: "projectDelete", project }, { type: "chatdgc_project", op: "delete", project_id: project,
+                                                        keep_chats: choice === KEEP });
+  }
+
   private async confirmDelete(title: string): Promise<boolean> {
     const DELETE = "Delete";
     const choice = await vscode.window.showWarningMessage(`Delete the chat “${chatTitle(title)}”? This can't be undone.`,
@@ -636,6 +796,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   homeRefresh(): void {
     this.ask({ home: true, kind: "list" }, { type: "chatdgc_list", limit: this.homeShown, ...(this.homeQuery ? { query: this.homeQuery } : {}) });
+    this.ask({ home: true, kind: "projects" }, { type: "chatdgc_projects" });
   }
 
   private homeChanged(): void {
@@ -661,6 +822,30 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.homeShown = Math.min(200, this.homeShown + HOME_PAGE);
         this.homeRefresh();
         return true;
+      case "chatdgcProjectOpen":
+        this.openProject(String(message.id || ""));
+        return true;
+      case "chatdgcProjectNew": {
+        const name = await vscode.window.showInputBox({ prompt: "Name the new project: its chats, files and instructions stay together",
+          placeHolder: "Goa trip", validateInput: (value) => (value.trim() ? undefined : "Give the project a name.") });
+        if (!name) return true;
+        const id = await this.createProject(name);
+        if (id) this.openProject(id);
+        return true;
+      }
+      case "chatdgcProjectChats": {
+        const project = String(message.id || "");
+        if (PROJECT_ID.test(project)) this.ask({ home: true, kind: "projectChats", project }, { type: "chatdgc_list", project, limit: 20 });
+        return true;
+      }
+      case "chatdgcMove": {
+        // A chat dragged onto a project in the side bar ("" : dragged back to your chats).
+        const id = String(message.id || ""), project = String(message.project || "");
+        if (CONVERSATION_ID.test(id) && (!project || PROJECT_ID.test(project))) {
+          this.ask({ kind: "move" }, { type: "chatdgc_move", conversation_id: id, project_id: project });
+        }
+        return true;
+      }
       case "chatdgcDelete": {
         const id = String(message.id || "");
         if (!CONVERSATION_ID.test(id)) return true;

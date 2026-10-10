@@ -212,6 +212,44 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .chat-row { cursor:pointer; }
 #sessions-host .chat-preview { -webkit-line-clamp:1; }
 #sessions-host .chat-pinned { color:var(--accent-text, var(--accent)); }
+/* Projects (ChatGPT's): a small heading over the projects, then one over your chats; a project opens its page in a
+   tab, and its chevron lists its chats here, set in under it. A row a chat is dragged over says it takes it. */
+#sessions-host .home-projects { display:flex; flex-direction:column; gap:var(--sp-1); }
+#sessions-host .home-projects[hidden], #sessions-host .home-sub[hidden] { display:none; }
+#sessions-host .home-sub-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); padding:0 var(--sp-1) 0 var(--sp-3); }
+#sessions-host .home-sub { margin:0; color:var(--muted); font:var(--w-semi) var(--t-xs)/1.3 var(--sans); letter-spacing:.04em; text-transform:uppercase; }
+#sessions-host .home-sub-chats { padding:var(--sp-2) var(--sp-2) 0 var(--sp-3); }
+#sessions-host .home-sub-add { display:inline-flex; align-items:center; justify-content:center; width:var(--control-sm); height:var(--control-sm);
+  padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted); cursor:pointer; }
+#sessions-host .home-sub-add:hover { background:var(--surface2); color:var(--text); }
+#sessions-host .home-sub-add:focus-visible, #sessions-host .project-start:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:1px; }
+#sessions-host .projects-list, #sessions-host .project-chats { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+#sessions-host .project-chats { margin:2px 0 var(--sp-1) calc(var(--sp-3) + 10px); padding-left:var(--sp-2); border-left:1px solid var(--border); }
+#sessions-host .project-row { gap:var(--sp-1); padding:var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-1); cursor:pointer; }
+#sessions-host .project-toggle { flex:none; display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
+  padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted); cursor:pointer; }
+#sessions-host .project-toggle:hover { background:var(--surface); color:var(--text); }
+#sessions-host .project-icon { flex:none; font-size:15px; }
+#sessions-host .project-name { flex:1 1 auto; -webkit-line-clamp:1; }
+#sessions-host .project-count { flex:none; min-width:18px; color:var(--muted); font:var(--w-reg) var(--t-xs)/1 var(--sans);
+  font-variant-numeric:tabular-nums; text-align:right; }
+#sessions-host .project-empty { padding:var(--sp-1) var(--sp-2); color:var(--muted); font:var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+#sessions-host .chat-row-nested { padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
+#sessions-host .chat-row-nested .session-name { -webkit-line-clamp:1; font-weight:var(--w-reg); }
+#sessions-host .project-start { display:flex; align-items:center; gap:var(--sp-2); width:100%; padding:var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-3);
+  border:1px dashed var(--border-strong); border-radius:var(--r-md); background:transparent; color:var(--muted);
+  font:var(--w-med) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer; }
+#sessions-host .project-start:hover { border-color:var(--accent); color:var(--text); }
+#sessions-host .chat-project { padding:0 6px; border-radius:var(--r-full); background:var(--surface2); color:var(--text); }
+#sessions-host .drop-here { background:color-mix(in srgb, var(--accent) 16%, transparent); outline:1px dashed var(--accent); outline-offset:-1px; }
+/* A project's colour: its folder's, here and on its page (chatdgc.css). Mid tones that hold on both themes. */
+.project-icon[data-color="purple"] { color:#8B5CF6; } .project-icon[data-color="blue"] { color:#3B82F6; }
+.project-icon[data-color="teal"] { color:#14B8A6; } .project-icon[data-color="green"] { color:#22C55E; }
+.project-icon[data-color="yellow"] { color:#EAB308; } .project-icon[data-color="orange"] { color:#F97316; }
+.project-icon[data-color="red"] { color:#EF4444; } .project-icon[data-color="pink"] { color:#EC4899; }
+.project-icon[data-color="gray"] { color:#9CA3AF; }
+body.vscode-light .project-icon[data-color="yellow"] { color:#CA8A04; } body.vscode-light .project-icon[data-color="teal"] { color:#0D9488; }
+body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vscode-light .project-icon[data-color="gray"] { color:#6B7280; }
 /* Your Pips, above your sessions: the ones that need you, each with its face waiting, or a quiet row
    of faces. A soft violet panel, the one tinted thing on the home, so it reads as news. */
 #sessions-host .home-pips { display:flex; flex-direction:column; gap:var(--sp-1); padding:var(--sp-2);

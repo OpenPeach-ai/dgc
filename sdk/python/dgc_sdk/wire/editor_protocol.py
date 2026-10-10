@@ -801,10 +801,23 @@ CHATDGC_SEARCH = ("off", "auto", "on")
 COMMAND_FIELDS.update({
     # The Chat list: pinned first, then the newest. Answered by `chatdgc_chats`.
     "chatdgc_list": {"request_id": _S(), "query": _S(False), "archived": _B(False),
-                     "limit": _I(False), "offset": _I(False)},
+                     "limit": _I(False), "offset": _I(False), "project": _S(False)},
     # One conversation, or a new one when conversation_id is left out (temporary: never written or
     # listed). Answered by `chatdgc_opened` with its latest messages; `chatdgc_earlier` pages back.
-    "chatdgc_open": {"request_id": _S(), "conversation_id": _S(False), "temporary": _B(False)},
+    "chatdgc_open": {"request_id": _S(), "conversation_id": _S(False), "temporary": _B(False), "project": _S(False)},
+    # Projects, as ChatGPT has them: chats, files and instructions together. `chatdgc_projects` lists them (each
+    # {id, name, color, instructions, memory: shared|project, files: [{id, kind, name, size, ...}], chats,
+    # created_at, updated_at}); `chatdgc_project` creates, changes, deletes (its chats too unless keep_chats) or
+    # adds and removes a project's files (attachments as chatdgc_send's), answered by `chatdgc_project`, and
+    # every change is broadcast as `chatdgc_projects`. `chatdgc_move` puts a chat in a project ("" takes it out).
+    # A chat list with `project` is that project's chats; without, the chats in none (a search covers all).
+    "chatdgc_projects": {"request_id": _S()},
+    "chatdgc_project": {"request_id": _S(),
+                        "op": _f("string", enum=("create", "update", "delete", "add_files", "remove_file")),
+                        "project_id": _S(False), "name": _S(False), "color": _S(False), "instructions": _S(False),
+                        "memory": _f("string", required=False, enum=("shared", "project")), "keep_chats": _B(False),
+                        "attachments": _A(False), "file_id": _S(False)},
+    "chatdgc_move": {"request_id": _S(), "conversation_id": _S(), "project_id": _S()},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "before": _S()},
     "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
                      "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
@@ -875,7 +888,9 @@ EVENT_FIELDS.update({
     # `earlier` counts the messages before the first one sent (0: this is the whole conversation);
     # `busy` is true while a turn runs in it, from this or another client of this process.
     "chatdgc_opened": {"request_id": _S(), "conversation": _O(), "messages": _A(), "earlier": _I(),
-                       "busy": _B(), "reply_id": _S(False)},
+                       "busy": _B(), "reply_id": _S(False), "project": _O(False)},
+    "chatdgc_projects": {"request_id": _S(False), "projects": _A()},
+    "chatdgc_project": {"request_id": _S(), "project": _f("object", "null"), "deleted": _A(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "messages": _A(), "earlier": _I()},
     "chatdgc_turn": {"conversation_id": _S(), "state": _f("string", enum=("started", "ended")),
                      "reply_id": _S(), "request_id": _S(False)},

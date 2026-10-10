@@ -109,6 +109,9 @@ PICTURE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"}
 PICTURES_SHOWN = ("The user sees pictures from a web image search for \"{query}\" above your reply. You haven't "
                   "seen them, so don't describe them or point to them; answer as you would without them.")
 PROJECTS_FRESH = 300          # seconds a list of the user's projects is reused
+PROJECT_SHARE = 0.25          # of the window, at most, for a ChatDGC project's files (each chat in it reads them)
+PROJECT_FILE_CHARS = 200_000  # the same, when the window isn't known
+OTHER_CHATS = 8               # a project chat is told what this many of the project's other chats are about
 NAME_PROMPT = ("Name this conversation in three to six words, the way a chat app titles it. Reply with the name "
                "only: no quotes, no full stop.")
 CONTINUE = ("Continue exactly where your last reply stopped. Don't repeat anything you already wrote, and don't "
@@ -192,22 +195,35 @@ class ChatEngine:
 
     # -- chats
 
-    def open(self, chat_id: str | None = None, *, temporary: bool = False) -> dict:
+    def open(self, chat_id: str | None = None, *, temporary: bool = False, project: str | None = None) -> dict:
         """An existing chat, or a new one. A new chat is written with its first message (an empty one is
-        never in the list); a temporary one is kept in memory only, never written or listed."""
+        never in the list); a temporary one is kept in memory only, never written or listed. A new chat in a
+        ``project`` is what that project's page starts, as ChatGPT's does."""
         if chat_id:
             return self._chat(chat_id)
+        if project:
+            if temporary:
+                raise ChatEngineError("A temporary chat isn't kept, so it can't be in a project.")
+            self.store.project(project)
         stamp = now()
         chat = {"id": new_chat_id(), "title": "Temporary chat" if temporary else "New chat", "created_at": stamp,
                 "updated_at": stamp, "model": None, "thinking": None, "pinned": False, "archived": False,
                 "messages": []}
         chat["temporary" if temporary else "draft"] = True
+        if project:
+            chat["project"] = project
         with self._lock:
             held = self._temporary if temporary else self._drafts
             held[chat["id"]] = chat
             while len(self._drafts) > MAX_DRAFTS:          # opened and left: the oldest goes
                 self._drafts.pop(next(iter(self._drafts)))
         return dict(chat)
+
+    def _chat_or_none(self, chat_id: str) -> dict | None:
+        try:
+            return self._chat(chat_id)
+        except (ChatEngineError, ChatStoreError):
+            return None
 
     def _chat(self, chat_id: str) -> dict:
         with self._lock:
@@ -229,8 +245,104 @@ class ChatEngine:
                 draft = self._drafts.pop(chat["id"], None)
             chat = {key: value for key, value in chat.items() if key != "draft"}
             if draft is not None:
-                self.store.create(chat_id=chat["id"])
+                # In its project, unless the project was deleted before the first message: then in your chats.
+                self.store.create(chat_id=chat["id"], project=(self._project_of(draft) or {}).get("id"))
         return self.store.save(chat)
+
+    # -- projects (ChatGPT's): chats, files and instructions together; the store keeps them (store.py)
+
+    def move(self, chat_id: str, project_id: str) -> dict:
+        """Put a chat in a project, or ("") take it out of one. A new chat that isn't written yet moves too."""
+        if project_id:
+            self.store.project(project_id)
+        with self._lock:
+            held = self._drafts.get(chat_id)
+            if held is not None:
+                if project_id:
+                    held["project"] = project_id
+                else:
+                    held.pop("project", None)
+                return dict(held)
+            if chat_id in self._temporary:
+                raise ChatEngineError("A temporary chat isn't kept, so it can't be in a project.")
+        return self.store.move(chat_id, project_id)
+
+    def add_project_files(self, project_id: str, items) -> dict:
+        """Files for every chat in a project: read and kept as an attachment is, in the project's own folder."""
+        self.store.project(project_id)
+        try:
+            prepared = attached.prepare(items)
+        except attached.AttachmentError as exc:
+            raise ChatEngineError(str(exc)) from exc
+        if not prepared:
+            raise ChatEngineError("Choose a file to add.")
+        for item in prepared:
+            self.store.put_project_file(project_id, item["meta"], item["raw"], item["text"])
+        return self.store.project(project_id)
+
+    def _project_of(self, chat: dict) -> dict | None:
+        """The project a chat is in, or None (none, or it was deleted meanwhile)."""
+        ident = chat.get("project")
+        if not ident or chat.get("temporary"):
+            return None
+        try:
+            return self.store.project(ident)
+        except ChatStoreError:
+            return None
+
+    def _project_context(self, chat: dict, project: dict, room: int, sees: bool) -> tuple[str, int, list]:
+        """What a chat in a project is told of it: the project's instructions, its files (within PROJECT_SHARE of
+        the window; what doesn't fit is said, not sent), and what its other chats are about. Returns the words,
+        how many tokens its files took, and its pictures for a model that can see."""
+        name = project.get("name") or "a project"
+        out = [f"\n\nThis chat is in the user's project \u201c{name}\u201d."]
+        if project.get("instructions"):
+            out.append("The project's instructions, for every chat in it (where they and the user's general "
+                       f"instructions disagree, follow these):\n<<<\n{project['instructions']}\n>>>")
+        budget = int(room * PROJECT_SHARE) * fit_window.CHARS_PER_TOKEN if room else PROJECT_FILE_CHARS
+        files, used, pictures = [], 0, []
+        for meta in project.get("files") or []:
+            name_of = meta.get("name", "file")
+            try:
+                raw, text = self.store.get_project_file(project["id"], meta.get("id", ""))
+            except ChatStoreError:
+                files.append(f"[{name_of} is in the project's files; it is no longer available]")
+                continue
+            if meta.get("kind") == "image":
+                if sees and len(pictures) < MAX_HISTORY_IMAGES:
+                    pictures.append(attached.image_part(meta, raw))
+                    files.append(f"[{name_of}, an image, is shown to you with the user's first message here]")
+                else:
+                    files.append(f"[{name_of}, an image, is in the project's files; this model can't see it]")
+                continue
+            words = text or ""
+            left = budget - used
+            if left <= 0:
+                files.append(f"[{name_of} is in the project's files, but there's no room for it in this chat's "
+                             "context window: ask about it by name, or choose a larger window in Settings]")
+                continue
+            if len(words) > left:
+                files.append(attached.frame({**meta, "truncated": True}, raw, words[:left])
+                             + f"\n[Only the first part of {name_of} fits; ask about a later part and quote it.]")
+                used += left
+            else:
+                files.append(attached.frame(meta, raw, words))
+                used += len(words)
+        if files:
+            out.append("The project's files, there for every chat in it:\n" + "\n\n".join(files))
+        try:
+            others = [c for c in self.store.listing(project=project["id"], limit=OTHER_CHATS + 1)["chats"]
+                      if c["id"] != chat.get("id")][:OTHER_CHATS]
+        except ChatStoreError:
+            others = []
+        if others:
+            out.append("The project's other chats, newest first (you don't see them in full; the user can open "
+                       "them):\n" + "\n".join(f"- \u201c{c['title']}\u201d ({c['updated_at'][:10]}): "
+                                               f"{' '.join(str(c.get('preview') or '').split())[:200]}" for c in others))
+        if project.get("memory") == "project":
+            out.append("The user keeps this project to itself: you don't have their saved memories here, only this "
+                       "chat, the project's instructions and files, and its other chats.")
+        return "\n\n".join(out), used // fit_window.CHARS_PER_TOKEN, pictures
 
     def delete(self, chat_id: str) -> None:
         with self._lock:
@@ -707,7 +819,8 @@ class ChatEngine:
         """Whether the chat's model can see images. Only asked when it matters: about new images (``asking``) or
         a chat that has some; the answer is the model's metadata, cached by the client."""
         if not asking and not any(meta.get("kind") == "image" for m in chat["messages"]
-                                  for meta in m.get("attachments") or []):
+                                  for meta in m.get("attachments") or []) \
+                and not any(f.get("kind") == "image" for f in (self._project_of(chat) or {}).get("files") or []):
             return True
         from ..vision import has_vision
         try:
@@ -879,7 +992,8 @@ class ChatEngine:
         if (upto[-1].get("research") or {}).get("status") in ("planning", "running", "writing", "checking"):
             raise ChatEngineError("Let the research finish, then branch from it.")
         fresh = self.store.create(model=chat.get("model"), thinking=chat.get("thinking"),
-                                  title=f"Branch \u00b7 {chat.get('title') or 'New chat'}")
+                                  title=f"Branch \u00b7 {chat.get('title') or 'New chat'}",
+                                  project=(self._project_of(chat) or {}).get("id"))
         try:
             for m in upto:
                 for meta in [*(m.get("attachments") or []), *((m.get("images") or {}).get("items") or [])]:
@@ -891,9 +1005,8 @@ class ChatEngine:
             # What was summarized goes too, when all of it is in the branch.
             if summary.get("upto") and any(m.get("id") == summary["upto"] for m in upto):
                 fresh["summary"] = copy.deepcopy(summary)
-            for key in ("carried", "project"):
-                if chat.get(key):
-                    fresh[key] = copy.deepcopy(chat[key])
+            if chat.get("carried"):
+                fresh["carried"] = copy.deepcopy(chat["carried"])
             fresh["branched"] = {"from": chat["id"], "title": chat.get("title", ""), "at": message_id, "created_at": now()}
             return self.store.save(fresh)
         except BaseException:
@@ -930,7 +1043,10 @@ class ChatEngine:
         files = sum(fit_window.tokens(attached.frame(meta, b"", "")) + (meta.get("chars") or 0) // fit_window.CHARS_PER_TOKEN
                     if meta.get("kind") != "image" else fit_window.IMAGE_TOKENS
                     for m in chat["messages"][self._summary_start(chat):] for meta in m.get("attachments") or [])
-        parts = {"instructions": max(0, fit_window.tokens(system) - fit_window.tokens(remembered + carried)),
+        project = self._project_of(chat)
+        project_files = self._project_context(chat, project, room, False)[1] if project else 0
+        files += project_files                    # in the instructions, but they're files
+        parts = {"instructions": max(0, fit_window.tokens(system) - fit_window.tokens(remembered + carried) - project_files),
                  "summary": fit_window.tokens(remembered + carried), "files": min(files, estimated)}
         parts["conversation"] = max(0, estimated - sum(parts.values()))
         last = chat["messages"][-1] if chat["messages"] else {}
@@ -954,6 +1070,10 @@ class ChatEngine:
             personality=str(config.get("chatdgc_personality", "default") or "default"),
             ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless,
             memory=self._remembered(chat))
+        project, project_pictures = self._project_of(chat), []
+        if project:
+            told, _, project_pictures = self._project_context(chat, project, room, sees)
+            instructions += told
         carried = chat.get("carried") or {}
         if carried.get("text"):
             instructions += (f"\n\nThis chat continues an earlier one, \u201c{carried.get('title', '')}\u201d. What "
@@ -1008,13 +1128,24 @@ class ChatEngine:
                 built.append({"role": m["role"], "content": [{"type": "text", "text": content or "(image)"}, *reversed(pictures)]})
             else:
                 built.append({"role": m["role"], "content": content})
-        return out + list(reversed(built))
+        history = list(reversed(built))
+        if project_pictures:
+            # A project's pictures go with the first message the model reads (a system message can't hold images).
+            first = next((m for m in history if m["role"] == "user"), None)
+            if first is not None:
+                content = first["content"]
+                parts = content if isinstance(content, list) else [{"type": "text", "text": content or "(files)"}]
+                first["content"] = [*parts, *project_pictures]
+        return out + history
 
     # -- memory (dgc/shared_memory.py): one memory about the user, shared with Work sessions and Pips
 
     def _memory_on(self, chat: dict) -> bool:
-        """Memory is read and written unless it's turned off, or the chat is temporary."""
-        return self.config.get("memory", True) is not False and not chat.get("temporary")
+        """Memory is read and written unless it's turned off, the chat is temporary, or its project keeps its memory
+        to itself (ChatGPT's project-only memory)."""
+        if self.config.get("memory", True) is False or chat.get("temporary"):
+            return False
+        return (self._project_of(chat) or {}).get("memory") != "project"
 
     def _projects(self) -> list[dict]:
         """The user's projects from their Work sessions, read at most every PROJECTS_FRESH seconds."""

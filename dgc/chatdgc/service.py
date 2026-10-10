@@ -33,7 +33,8 @@ def summary(chat: dict) -> dict:
                                             "pinned", "archived")} | {"temporary": bool(chat.get("temporary")),
                                                                       "summary": chat.get("summary"),
                                                                       "carried": chat.get("carried"),
-                                                                      "branched": chat.get("branched")}
+                                                                      "branched": chat.get("branched"),
+                                                                      "project": chat.get("project")}
 
 
 def _size(value) -> int:
@@ -145,6 +146,7 @@ class ChatService:
              "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version, "chatdgc_answer": self._answer,
              "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
              "chatdgc_carry": self._carry, "chatdgc_branch": self._branch, "chatdgc_research": self._research,
+             "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -163,7 +165,8 @@ class ChatService:
 
     def _list(self, cmd: dict) -> None:
         found = self.engine.store.listing(query=cmd.get("query", ""), archived=cmd.get("archived", False),
-                                          limit=cmd.get("limit", 50), offset=cmd.get("offset", 0))
+                                          limit=cmd.get("limit", 50), offset=cmd.get("offset", 0),
+                                          project=cmd.get("project", ""))
         self.emit("chatdgc_chats", request_id=cmd["request_id"], chats=found["chats"], total=found["total"],
                   next_offset=found["next_offset"])
 
@@ -177,11 +180,15 @@ class ChatService:
         with self._lock:
             turn = self._turns.get(chat["id"])
         fields = {"reply_id": turn["reply_id"]} if turn and turn.get("reply_id") else {}
+        project = self.engine._project_of(chat)
+        if project:
+            fields["project"] = project            # its page, and the chat's header, show it
         self.emit("chatdgc_opened", request_id=request_id, conversation=summary(chat),
                   messages=self._marked(chat, messages), earlier=earlier, busy=turn is not None, **fields)
 
     def _open(self, cmd: dict) -> None:
-        chat = self.engine.open(cmd.get("conversation_id") or None, temporary=bool(cmd.get("temporary")))
+        chat = self.engine.open(cmd.get("conversation_id") or None, temporary=bool(cmd.get("temporary")),
+                                project=cmd.get("project") or None)
         self._opened(chat, cmd["request_id"])
         self._context_later(chat["id"])
 
@@ -262,6 +269,51 @@ class ChatService:
         fresh = self.engine.branch(conversation_id, cmd["message_id"])
         self._opened(fresh, cmd["request_id"])
         self._changed(fresh["id"], None)
+
+    # -- projects (ChatGPT's): chats, files and instructions together
+
+    def _projects(self, cmd: dict) -> None:
+        self.emit("chatdgc_projects", request_id=cmd["request_id"], projects=self.engine.store.projects())
+
+    def _projects_changed(self) -> None:
+        """Every screen showing projects (the home's list, a project's page, a chat's header) sees the change."""
+        self.emit("chatdgc_projects", projects=self.engine.store.projects())
+
+    def _project(self, cmd: dict) -> None:
+        op, store, ident = cmd["op"], self.engine.store, cmd.get("project_id") or ""
+        deleted = []
+        if op == "create":
+            project = store.create_project(cmd.get("name", ""), color=cmd.get("color"),
+                                           memory=cmd.get("memory") or "shared", instructions=cmd.get("instructions", ""))
+        elif op == "update":
+            project = store.update_project(ident, name=cmd.get("name"), color=cmd.get("color"),
+                                           instructions=cmd.get("instructions"), memory=cmd.get("memory"))
+        elif op == "add_files":
+            project = self.engine.add_project_files(ident, cmd.get("attachments"))
+        elif op == "remove_file":
+            project = store.remove_project_file(ident, cmd.get("file_id", ""))
+        else:                                         # delete: its chats too, unless they're kept
+            with self._lock:
+                busy = [c for c in self._turns if (self.engine._chat_or_none(c) or {}).get("project") == ident]
+            if busy:
+                raise ChatEngineError("A chat in this project is still answering. Stop it or wait, then delete.")
+            deleted = store.delete_project(ident, keep_chats=bool(cmd.get("keep_chats")))
+            project = None
+        self.emit("chatdgc_project", request_id=cmd["request_id"], project=project,
+                  **({"deleted": deleted} if op == "delete" else {}))
+        for chat_id in deleted:
+            self.emit("chatdgc_changed", conversation_id=chat_id, summary=None)
+        self._projects_changed()
+
+    def _move(self, cmd: dict) -> None:
+        conversation_id = cmd["conversation_id"]
+        moved = self.engine.move(conversation_id, cmd.get("project_id") or "")
+        if not moved.get("draft"):
+            self._changed(conversation_id, cmd["request_id"])
+        else:
+            self.emit("chatdgc_changed", conversation_id=conversation_id, summary=summary(moved),
+                      request_id=cmd["request_id"])
+        self._projects_changed()
 
     def _version(self, cmd: dict) -> None:
         conversation_id = cmd["conversation_id"]

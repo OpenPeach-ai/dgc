@@ -767,42 +767,153 @@
     status.hidden = !status.textContent;
     if (more) { more.hidden = msg.more !== true; more.disabled = false; more.textContent = "Show more"; }
     const focused = document.activeElement?.closest?.(".chat-row")?.dataset.id;
+    openChats = open;
+    homeQuery = query;
     list.replaceChildren();
     for (const item of items) {
-      const title = String(item.title || "New chat");
-      const row = el("li", "session-row chat-row");
-      row.tabIndex = 0; row.dataset.id = String(item.id || "");
-      const main = el("div", "session-main");
-      const name = el("span", "session-name"); name.textContent = title; name.title = title;
-      const meta = el("span", "session-meta");
-      if (item.pinned) { const pin = el("span", "chat-pinned"); pin.textContent = "Pinned"; meta.append(pin); }
-      const when = chatWhen(item.updated_at);
-      if (when) { const span = el("span"); span.textContent = when; meta.append(span); }
-      if (open.has(item.id)) { const tab = el("span", "session-tab"); tab.textContent = "Open in a tab"; meta.append(tab); }
-      main.append(name, meta);
-      // Found by something said in it: the words around that, rather than its last message.
-      const words = plainPreview(typeof item.match === "string" && item.match ? item.match : item.preview);
-      if (words) { const preview = el("span", "session-match chat-preview"); preview.textContent = words; main.append(preview); }
-      const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
-      remove.title = "Delete this chat";
-      remove.setAttribute("aria-label", `Delete chat: ${title}`);
-      row.append(main, remove);
-      const openIt = () => vscode.postMessage({ type: "chatdgcOpen", id: item.id });
-      row.onclick = openIt;
-      row.onkeydown = (e) => {
-        if (e.target !== row) return;
-        if (e.key === "Enter") { e.preventDefault(); openIt(); }
-        else if (e.key === "Delete") { e.preventDefault(); remove.click(); }
-        else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-          e.preventDefault();
-          const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
-          next?.focus();
-        }
-      };
+      const row = chatRow(item);
       list.append(row);
       if (item.id === focused) row.focus();
     }
+    renderProjects();
   }
+  /** One chat in the list: its name, when, where it's open, the words found (or its last message), Delete. A chat
+   *  can be dragged onto a project to move it there, or back onto Chats to take it out. */
+  let openChats = new Set(), homeQuery = "";
+  const CHAT_DRAG = "application/x-dgc-chat", CHAT_IN_PROJECT = "application/x-dgc-chat-in-project";
+  function chatRow(item, nested = false) {
+    const title = String(item.title || "New chat");
+    const row = el("li", "session-row chat-row" + (nested ? " chat-row-nested" : ""));
+    row.tabIndex = 0; row.dataset.id = String(item.id || "");
+    const main = el("div", "session-main");
+    const name = el("span", "session-name"); name.textContent = title; name.title = title;
+    const meta = el("span", "session-meta");
+    if (item.pinned) { const pin = el("span", "chat-pinned"); pin.textContent = "Pinned"; meta.append(pin); }
+    // Found by a search, in a project: which one.
+    const home = !nested && item.project ? projects.find((x) => x.id === item.project) : null;
+    if (home) { const tag = el("span", "chat-project"); tag.textContent = home.name; meta.append(tag); }
+    const when = chatWhen(item.updated_at);
+    if (when) { const span = el("span"); span.textContent = when; meta.append(span); }
+    if (openChats.has(item.id)) { const tab = el("span", "session-tab"); tab.textContent = "Open in a tab"; meta.append(tab); }
+    main.append(name, meta);
+    // Found by something said in it: the words around that, rather than its last message.
+    const words = nested ? "" : plainPreview(typeof item.match === "string" && item.match ? item.match : item.preview);
+    if (words) { const preview = el("span", "session-match chat-preview"); preview.textContent = words; main.append(preview); }
+    const remove = sessionButton("session-delete", "trash", () => vscode.postMessage({ type: "chatdgcDelete", id: item.id, title }));
+    remove.title = "Delete this chat";
+    remove.setAttribute("aria-label", `Delete chat: ${title}`);
+    row.append(main, remove);
+    const openIt = () => vscode.postMessage({ type: "chatdgcOpen", id: item.id });
+    row.onclick = openIt;
+    row.onkeydown = (e) => {
+      if (e.target !== row) return;
+      if (e.key === "Enter") { e.preventDefault(); openIt(); }
+      else if (e.key === "Delete") { e.preventDefault(); remove.click(); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
+        next?.focus();
+      }
+    };
+    row.draggable = true;
+    row.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData(CHAT_DRAG, String(item.id || ""));
+      if (item.project || nested) e.dataTransfer.setData(CHAT_IN_PROJECT, "1");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    return row;
+  }
+  // ---- Projects (ChatGPT's): chats, files and instructions together. A project opens its page in a tab; its
+  // chevron lists its chats here. While searching, the results say each chat's project instead.
+  let projects = [];
+  const projectChats = new Map();
+  const projectsOpen = new Set((() => { try { return vscode.getState()?.projectsOpen || []; } catch { return []; } })());
+  function dropTarget(node, accepts, onDrop) {
+    node.addEventListener("dragover", (e) => {
+      if (!accepts(e.dataTransfer.types)) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = "move"; node.classList.add("drop-here");
+    });
+    node.addEventListener("dragleave", (e) => { if (!node.contains(e.relatedTarget)) node.classList.remove("drop-here"); });
+    node.addEventListener("drop", (e) => {
+      node.classList.remove("drop-here");
+      const chat = e.dataTransfer.getData(CHAT_DRAG);
+      if (chat && accepts(e.dataTransfer.types)) { e.preventDefault(); onDrop(chat); }
+    });
+  }
+  function toggleProject(id) {
+    if (projectsOpen.has(id)) projectsOpen.delete(id); else { projectsOpen.add(id); projectChats.delete(id); }
+    try { vscode.setState({ ...(vscode.getState() || {}), projectsOpen: [...projectsOpen] }); } catch {}
+    renderProjects();
+  }
+  function renderProjects() {
+    const box = $("projects-home"), list = $("projects-list");
+    if (!box || !list) return;
+    box.hidden = !chatsAvailable || !!homeQuery;
+    $("chats-sub").hidden = box.hidden || !projects.length;
+    if (box.hidden) return;
+    const focused = document.activeElement?.closest?.(".project-row, .chat-row-nested")?.dataset.id;
+    list.replaceChildren();
+    if (!projects.length) {
+      const start = el("li", "project-item");
+      const button = el("button", "project-start"); button.type = "button";
+      const glyph = el("span", "codicon codicon-new-folder"); glyph.setAttribute("aria-hidden", "true");
+      const words = el("span"); words.textContent = "New project";
+      button.append(glyph, words);
+      button.title = "Keep chats, files and instructions together, as ChatGPT's projects do";
+      button.onclick = () => vscode.postMessage({ type: "chatdgcProjectNew" });
+      start.append(button);
+      list.append(start);
+    }
+    for (const project of projects) {
+      const id = String(project.id || ""), named = String(project.name || "Project");
+      const item = el("li", "project-item");
+      const row = el("div", "session-row project-row");
+      row.tabIndex = 0; row.dataset.id = id;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", `Open the project ${named}: ${project.chats || 0} chat${project.chats === 1 ? "" : "s"}`);
+      const open = projectsOpen.has(id);
+      const toggle = sessionButton("project-toggle", open ? "chevron-down" : "chevron-right", () => toggleProject(id));
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.setAttribute("aria-label", `${open ? "Hide" : "Show"} the chats in ${named}`);
+      toggle.title = open ? "Hide its chats" : "Show its chats";
+      const folder = el("span", "codicon codicon-folder project-icon"); folder.setAttribute("aria-hidden", "true");
+      folder.dataset.color = String(project.color || "purple");
+      const name = el("span", "session-name project-name"); name.textContent = named; name.title = named;
+      const count = el("span", "project-count"); count.textContent = String(project.chats || 0);
+      row.append(toggle, folder, name, count);
+      const openIt = () => vscode.postMessage({ type: "chatdgcProjectOpen", id });
+      row.onclick = openIt;
+      row.onkeydown = (e) => {
+        if (e.target !== row) return;
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openIt(); }
+        else if (e.key === "ArrowRight" && !open) { e.preventDefault(); toggleProject(id); }
+        else if (e.key === "ArrowLeft" && open) { e.preventDefault(); toggleProject(id); }
+      };
+      dropTarget(row, (types) => types.includes(CHAT_DRAG), (chat) => vscode.postMessage({ type: "chatdgcMove", id: chat, project: id }));
+      item.append(row);
+      if (open) {
+        const inner = el("ul", "project-chats");
+        inner.setAttribute("aria-label", `Chats in ${named}`);
+        const chats = projectChats.get(id);
+        if (!chats) {
+          vscode.postMessage({ type: "chatdgcProjectChats", id });
+          const wait = el("li", "project-empty"); wait.textContent = "Loading…"; inner.append(wait);
+        } else if (!chats.length) {
+          const none = el("li", "project-empty"); none.textContent = "No chats yet: open the project to start one."; inner.append(none);
+        } else for (const chat of chats) inner.append(chatRow(chat, true));
+        item.append(inner);
+      }
+      list.append(item);
+    }
+    const back = list.querySelector(`[data-id="${CSS.escape(focused || "")}"]`);
+    if (focused && back) back.focus();
+  }
+  // Dragged back onto your chats: out of its project.
+  for (const target of ["chats-sub", "chats-list"]) {
+    const node = $(target);
+    if (node) dropTarget(node, (types) => types.includes(CHAT_IN_PROJECT), (chat) => vscode.postMessage({ type: "chatdgcMove", id: chat, project: "" }));
+  }
+  $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
   // Chat | Work: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
   // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
   // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.
@@ -7038,6 +7149,19 @@
     if (msg.type === "pipsOpen") { showPips(); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
     if (msg.type === "chatdgc_list") { if (chatPlace === "home") renderChats(msg); return; }
+    if (msg.type === "chatdgc_projects") {
+      if (chatPlace !== "home") return;
+      projects = Array.isArray(msg.projects) ? msg.projects : [];
+      projectChats.clear();                       // counts changed: what's open is asked for again
+      renderProjects();
+      return;
+    }
+    if (msg.type === "chatdgc_project_chats") {
+      if (chatPlace !== "home") return;
+      projectChats.set(String(msg.project || ""), Array.isArray(msg.items) ? msg.items : []);
+      renderProjects();
+      return;
+    }
     if (msg.type === "sessions_show") { showSessions(); return; }
     if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {

@@ -21,7 +21,7 @@ class Emitter {
 }
 
 const world = { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
-                chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined };
+                chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [] };
 function fakePanel(viewType, title) {
   const disposed = new Emitter(), received = new Emitter();
   const panel = {
@@ -53,7 +53,12 @@ globalThis.__DGC_TEST_VSCODE = {
     createWebviewPanel(viewType, title) { const panel = fakePanel(viewType, title); world.panels.push(panel); return panel; },
     registerWebviewPanelSerializer(viewType, serializer) { world.serializers.push({ viewType, serializer }); return { dispose() {} }; },
     showWarningMessage: async (message) => { world.warnings.push(String(message)); return world.answer; },
-    showQuickPick: async (items) => { world.picks.push(items.map((i) => i.id)); return items.find((i) => i.id === world.pick); },
+    showQuickPick: async (items) => {
+      world.picks.push(items.map((i) => i.id));
+      const want = Array.isArray(world.pick) ? world.pick.shift() : world.pick;     // a list: one answer per question
+      return items.find((i) => i.id === want);
+    },
+    showErrorMessage: async (message) => { world.errors.push(String(message)); return undefined; },
     showInputBox: async () => world.input,
     showOpenDialog: async () => world.chosen,
     showSaveDialog: async (options) => { world.saveAsked = options; return world.saveTo; },
@@ -85,7 +90,7 @@ const MSG = (n) => `msg_${String(n).repeat(32).slice(0, 32)}`;
 let chat, host, sent;
 beforeEach(() => {
   Object.assign(world, { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
-                         chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined });
+                         chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [] });
   sent = [];
   host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" },
     chatdgcSend(cmd) { if (this.outcome === "sent") sent.push(cmd); return this.outcome; },
@@ -178,8 +183,7 @@ test("commands wait for a process that is starting, and an older CLI says so", (
   assert.equal(sent.length, 0);
   host.outcome = "sent";
   chat.backendReady();
-  assert.equal(sent.length, 1, "sent once it was ready");
-  assert.equal(sent[0].type, "chatdgc_open");
+  assert.deepEqual(sent.map((c) => c.type), ["chatdgc_open", "chatdgc_projects"], "sent once it was ready, each once");
   host.outcome = "old_cli";
   chat.open("");
   world.panels[1].say({ type: "ready" });
@@ -457,4 +461,114 @@ test("memory: Forget under a reply deletes it from the one memory, and Manage me
   assert.deepEqual([last("memory_forget").id, typeof last("memory_forget").request_id], ["mem_0123456789ab", "string"]);
   panel.say({ type: "openMemory" });
   assert.deepEqual(shown, ["memory"]);
+});
+
+const PROJ = (c) => `proj_${c.repeat(32)}`;
+const tick = () => new Promise((r) => setImmediate(r));
+
+test("branch in new chat: the branch opens in a tab of its own, and the chat it came from stays", () => {
+  chat.open(ID(1));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(1), title: "Goa" });
+  panel.say({ type: "branch", messageId: MSG(2) });
+  panel.say({ type: "branch", messageId: "not a message" });
+  const ask = last("chatdgc_branch");
+  assert.deepEqual({ ...ask, request_id: undefined }, { type: "chatdgc_branch", conversation_id: ID(1), message_id: MSG(2), request_id: undefined });
+  assert.equal(sent.filter((c) => c.type === "chatdgc_branch").length, 1, "only a message id goes");
+  chat.onEvent({ type: "chatdgc_opened", request_id: ask.request_id, conversation: { id: ID(2), title: "Branch · Goa" }, messages: [], earlier: 0, busy: false });
+  assert.equal(world.panels.length, 2, "a tab of its own");
+  world.panels[1].say({ type: "ready" });
+  assert.equal(last("chatdgc_open").conversation_id, ID(2));
+  assert.equal(panel.last("opened").conversation.id, ID(1), "the first tab still shows the chat it came from");
+  panel.say({ type: "openChat", id: ID(1) });
+  assert.equal(world.panels.length, 2, "a chat already open is brought forward");
+});
+
+test("a project's page is a tab of its own, and its settings, files and deletion go through the host", async () => {
+  chat.openProject(PROJ("a"));
+  chat.openProject("proj_bad");
+  assert.equal(world.panels.length, 1);
+  const [page] = world.panels;
+  page.say({ type: "ready" });
+  assert.equal(last("chatdgc_open").project, PROJ("a"), "a new chat in the project: its page");
+  assert.ok(last("chatdgc_projects"), "and the projects, for the header and the page");
+  opened(page, { id: ID(3), title: "New chat", project: PROJ("a") }, { project: { id: PROJ("a"), name: "Goa trip", files: [] } });
+  assert.equal(page.title, "Goa trip");
+  assert.equal(page.last("opened").project.name, "Goa trip");
+  chat.openProject(PROJ("a"));
+  assert.equal(world.panels.length, 1, "its page again: the same tab");
+  page.say({ type: "projectSave", id: PROJ("a"), name: "Goa, December", color: "chartreuse", instructions: "Rupees.", memory: "project" });
+  const saved = last("chatdgc_project");
+  assert.deepEqual({ ...saved, request_id: undefined }, { type: "chatdgc_project", op: "update", project_id: PROJ("a"), name: "Goa, December",
+                                                         instructions: "Rupees.", memory: "project", request_id: undefined }, "a colour it doesn't know isn't sent");
+  chat.onEvent({ type: "chatdgc_project", request_id: saved.request_id, project: { id: PROJ("a"), name: "Goa, December" } });
+  assert.equal(page.last("projectSaved").project.name, "Goa, December");
+  world.chosen = [{ scheme: "file", fsPath: "/home/u/itinerary.pdf", path: "/home/u/itinerary.pdf" }, { scheme: "untitled", fsPath: "", path: "" }];
+  page.say({ type: "projectAddFiles", id: PROJ("a") });
+  await tick();
+  assert.deepEqual(last("chatdgc_project").attachments, [{ kind: "file", path: "/home/u/itinerary.pdf" }], "picked here: the page names no file");
+  page.say({ type: "projectRemoveFile", id: PROJ("a"), fileId: `att_${"b".repeat(32)}` });
+  assert.deepEqual([last("chatdgc_project").op, last("chatdgc_project").file_id], ["remove_file", `att_${"b".repeat(32)}`]);
+  // Delete: its chats too, or kept as yours; then its page and its chats' tabs close.
+  chat.open(ID(4));
+  world.panels[1].say({ type: "ready" });
+  opened(world.panels[1], { id: ID(4), title: "Where we stay", project: PROJ("a") });
+  world.answer = "Delete project and 2 chats";
+  page.say({ type: "projectDelete", id: PROJ("a"), name: "Goa, December", chats: 2 });
+  await tick();
+  assert.match(world.warnings.at(-1), /Delete the project “Goa, December”\?.*its chats too, unless you keep them/);
+  const gone = last("chatdgc_project");
+  assert.deepEqual([gone.op, gone.keep_chats], ["delete", false]);
+  chat.onEvent({ type: "chatdgc_project", request_id: gone.request_id, project: null, deleted: [ID(4)] });
+  assert.deepEqual(world.panels.map((p) => p.disposedCount), [1, 1], "the page, and the chat that went with it");
+});
+
+test("move to project from a chat's menu: a project, a new one, or out of the one it's in", async () => {
+  chat.open(ID(5));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(5), title: "Beaches", project: PROJ("a") });
+  world.pick = ["move", PROJ("b")];
+  panel.say({ type: "menu" });
+  await tick();
+  chat.onEvent({ type: "chatdgc_projects", request_id: last("chatdgc_projects").request_id,
+                 projects: [{ id: PROJ("a"), name: "Goa", chats: 1 }, { id: PROJ("b"), name: "Kerala", chats: 0 }] });
+  await tick(); await tick();
+  assert.deepEqual(world.picks.at(-1), [PROJ("b"), "new", ""], "not the one it's in; a new one; out of it");
+  assert.deepEqual([last("chatdgc_move").conversation_id, last("chatdgc_move").project_id], [ID(5), PROJ("b")]);
+  world.pick = ["move", "new"];
+  world.input = "Tax 2026";
+  panel.say({ type: "menu" });
+  await tick();
+  chat.onEvent({ type: "chatdgc_projects", request_id: last("chatdgc_projects").request_id, projects: [] });
+  await tick(); await tick();
+  const made = last("chatdgc_project");
+  assert.deepEqual([made.op, made.name], ["create", "Tax 2026"]);
+  chat.onEvent({ type: "chatdgc_project", request_id: made.request_id, project: { id: PROJ("c"), name: "Tax 2026" } });
+  await tick();
+  assert.equal(last("chatdgc_move").project_id, PROJ("c"), "into the project it just made");
+});
+
+test("the home's projects: listed with the chats, opened as pages, and a chat dragged into one", async () => {
+  chat.homeRefresh();
+  const asked = last("chatdgc_projects");
+  chat.onEvent({ type: "chatdgc_projects", request_id: asked.request_id, projects: [{ id: PROJ("a"), name: "Goa" }, { id: "nope", name: "x" }] });
+  assert.deepEqual(host.home.at(-1), { type: "chatdgc_projects", projects: [{ id: PROJ("a"), name: "Goa" }] });
+  await chat.homeMessage({ type: "chatdgcProjectChats", id: PROJ("a") });
+  const list = last("chatdgc_list");
+  assert.equal(list.project, PROJ("a"));
+  chat.onEvent({ type: "chatdgc_chats", request_id: list.request_id, chats: [{ id: ID(6), title: "Where we stay" }, { id: "bad" }], total: 1, next_offset: null });
+  assert.deepEqual(host.home.at(-1), { type: "chatdgc_project_chats", project: PROJ("a"), items: [{ id: ID(6), title: "Where we stay" }], total: 1 });
+  await chat.homeMessage({ type: "chatdgcMove", id: ID(6), project: "" });
+  await chat.homeMessage({ type: "chatdgcMove", id: ID(6), project: "elsewhere" });
+  assert.equal(sent.filter((c) => c.type === "chatdgc_move").length, 1, "only a real project, or none");
+  chat.onEvent({ type: "chatdgc_error", request_id: last("chatdgc_move").request_id, message: "That project doesn't exist." });
+  assert.deepEqual(world.errors, ["That project doesn't exist."], "a move from the home that failed says so");
+  await chat.homeMessage({ type: "chatdgcProjectOpen", id: PROJ("a") });
+  assert.equal(world.panels.length, 1);
+  // A change anywhere reaches the home and every tab.
+  chat.onEvent({ type: "chatdgc_projects", projects: [{ id: PROJ("a"), name: "Goa 2026" }] });
+  assert.equal(world.panels[0].last("projects").projects[0].name, "Goa 2026");
+  assert.equal(host.home.at(-1).projects[0].name, "Goa 2026");
 });

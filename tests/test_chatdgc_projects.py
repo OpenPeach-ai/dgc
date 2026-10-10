@@ -114,5 +114,134 @@ class BranchTests(Phase7):
         self.assertTrue(self.engine.branch(chat["id"], reply["id"]))
 
 
+class ProjectTests(Phase7):
+    def project_chat(self, project, text="Hi", replies=("OK.",)):
+        chat = self.engine.open(project=project["id"])
+        return chat, self.say(chat["id"], text, replies)
+
+    def test_a_chat_started_on_a_projects_page_is_in_it_and_listed_with_it_not_with_your_chats(self):
+        trip = self.store.create_project("Goa trip", color="teal")
+        loose = self.engine.open()
+        self.say(loose["id"], "Unrelated", ["Sure."])
+        chat, _ = self.project_chat(trip, "Beaches near Calangute?", ["Baga and Candolim."])
+        self.assertEqual(self.store.get(chat["id"])["project"], trip["id"])
+        self.assertEqual([c["id"] for c in self.store.listing()["chats"]], [loose["id"]], "your chats: those in no project")
+        inside = self.store.listing(project=trip["id"])["chats"]
+        self.assertEqual(([c["id"] for c in inside], inside[0]["project"]), ([chat["id"]], trip["id"]))
+        found = self.store.listing(query="Candolim")["chats"]
+        self.assertEqual([(c["id"], c.get("project")) for c in found], [(chat["id"], trip["id"])], "search covers every chat")
+        self.assertEqual(self.store.projects()[0]["chats"], 1)
+        with self.assertRaisesRegex(ChatEngineError, "temporary chat isn't kept"):
+            self.engine.open(temporary=True, project=trip["id"])
+
+    def test_a_project_chats_model_reads_its_instructions_files_and_other_chats(self):
+        trip = self.store.create_project("Goa trip", instructions="Budget traveller, vegetarian. Prices in rupees.")
+        plan = self.folder / "itinerary.md"
+        plan.write_text("# Itinerary\nDay 1: Calangute\nDay 2: Old Goa\n")
+        self.engine.add_project_files(trip["id"], [{"kind": "file", "path": str(plan)},
+                                                   {"kind": "text", "text": "Hotel: Casa Anjuna, ₹3,000 a night", "name": "Hotel"}])
+        first, _ = self.project_chat(trip, "Where do we stay?", ["Casa Anjuna."])
+        self.store.update(first["id"], title="Where we stay")
+        self.project_chat(trip, "What's on day two?", ["Old Goa."])
+        system = self.world["read"][-1][0]["content"]
+        self.assertIn("This chat is in the user's project \u201cGoa trip\u201d.", system)
+        self.assertIn("follow these):\n<<<\nBudget traveller, vegetarian. Prices in rupees.\n>>>", system)
+        self.assertIn("Day 2: Old Goa", system)
+        self.assertIn("Hotel: Casa Anjuna, ₹3,000 a night", system)
+        self.assertIn("- \u201cWhere we stay\u201d (", system, "and what its other chats are about")
+        self.assertIn("Casa Anjuna.", system)
+        loose = self.engine.open()
+        self.say(loose["id"], "Hi")
+        self.assertNotIn("Goa trip", self.world["read"][-1][0]["content"], "a chat in no project knows none of it")
+
+    def test_project_only_memory_keeps_your_saved_memories_out_and_offers_no_remember(self):
+        self.engine.memory.add("Is vegetarian")
+        shared = self.store.create_project("Shared")
+        private = self.store.create_project("Private", memory="project")
+        self.project_chat(shared, "Hi")
+        self.assertIn("Is vegetarian", self.world["read"][-1][0]["content"])
+        self.project_chat(private, "Hi")
+        system = self.world["read"][-1][0]["content"]
+        self.assertNotIn("Is vegetarian", system)
+        self.assertIn("The user keeps this project to itself", system)
+        chat = self.engine.open(project=private["id"])
+        self.assertFalse(self.engine._memory_on(chat))
+        self.store.update_project(private["id"], memory="shared")
+        self.assertTrue(self.engine._memory_on(chat), "switchable, as ChatGPT's is")
+
+    def test_moving_a_chat_in_and_out_and_a_move_made_mid_reply_stays(self):
+        trip = self.store.create_project("Goa trip")
+        chat = self.engine.open()
+        self.say(chat["id"], "Hi")
+        self.engine.move(chat["id"], trip["id"])
+        self.assertEqual(self.store.listing(project=trip["id"])["total"], 1)
+        # A reply that started before the move saves the copy it started with: the move stays.
+        started = self.store.get(chat["id"])
+        started.pop("project")
+        self.store.save(started)
+        self.assertEqual(self.store.get(chat["id"])["project"], trip["id"])
+        self.engine.move(chat["id"], "")
+        self.assertNotIn("project", self.store.get(chat["id"]))
+        draft = self.engine.open()
+        self.engine.move(draft["id"], trip["id"])
+        self.say(draft["id"], "Written now")
+        self.assertEqual(self.store.get(draft["id"])["project"], trip["id"], "a new chat moved before its first message")
+        with self.assertRaisesRegex(Exception, "doesn't exist"):
+            self.engine.move(chat["id"], "proj_" + "f" * 32)
+
+    def test_deleting_a_project_deletes_its_chats_or_keeps_them_as_yours(self):
+        one, two = self.store.create_project("One"), self.store.create_project("Two")
+        a, _ = self.project_chat(one)
+        b, _ = self.project_chat(two)
+        notes = self.folder / "n.txt"
+        notes.write_text("notes")
+        self.engine.add_project_files(one["id"], [{"kind": "file", "path": str(notes)}])
+        self.assertEqual(self.store.delete_project(one["id"], keep_chats=False), [a["id"]])
+        with self.assertRaisesRegex(Exception, "doesn't exist"):
+            self.store.get(a["id"])
+        self.assertFalse(self.store.project_files_dir(one["id"]).exists())
+        self.assertEqual(self.store.delete_project(two["id"], keep_chats=True), [])
+        self.assertNotIn("project", self.store.get(b["id"]))
+        self.assertEqual([c["id"] for c in self.store.listing()["chats"]], [b["id"]], "back with your chats")
+        self.assertEqual(self.store.projects(), [])
+
+    def test_project_files_are_capped_removable_and_a_large_one_is_cut_to_fit(self):
+        from dgc.chatdgc import engine as engine_mod
+        from dgc.chatdgc.store import MAX_PROJECT_FILES
+        trip = self.store.create_project("Big")
+        big = self.folder / "big.txt"
+        big.write_text("word " * 60_000)
+        project = self.engine.add_project_files(trip["id"], [{"kind": "file", "path": str(big)}])
+        self.project_chat(trip, "Summarize")
+        self.assertIn("[Only the first part of big.txt fits", self.world["read"][-1][0]["content"])
+        removed = self.store.remove_project_file(trip["id"], project["files"][0]["id"])
+        self.assertEqual(removed["files"], [])
+        for i in range(MAX_PROJECT_FILES):
+            self.engine.add_project_files(trip["id"], [{"kind": "text", "text": f"note {i}", "name": f"n{i}"}])
+        with self.assertRaisesRegex(Exception, f"up to {MAX_PROJECT_FILES} files"):
+            self.engine.add_project_files(trip["id"], [{"kind": "text", "text": "one more"}])
+        self.assertGreater(engine_mod.PROJECT_SHARE, 0)
+
+    def test_a_branch_stays_in_its_project(self):
+        trip = self.store.create_project("Goa trip")
+        chat, reply = self.project_chat(trip)
+        self.assertEqual(self.engine.branch(chat["id"], reply["id"])["project"], trip["id"])
+        self.assertEqual(self.store.listing(project=trip["id"])["total"], 2)
+
+    def test_an_older_index_gains_projects_and_files(self):
+        import sqlite3
+        chat = self.engine.open()
+        self.say(chat["id"], "Hi")
+        db = sqlite3.connect(self.store.root / "index.sqlite3")
+        db.execute("DROP TABLE files")
+        db.execute("DROP INDEX chats_project")
+        db.execute("ALTER TABLE chats DROP COLUMN project")
+        db.execute("PRAGMA user_version = 2")
+        db.commit()
+        db.close()
+        self.assertEqual(self.store.listing()["total"], 1, "the column is back, and the chat is in no project")
+        self.assertEqual(self.store.listing(query="Hi")["total"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

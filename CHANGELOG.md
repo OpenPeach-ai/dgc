@@ -57,6 +57,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **Web search is always there in ChatDGC.** `search` defaults to `auto`, and an `auto` reply first asks the
   model (one small structured call on the message) whether it needs the web; if so it searches and answers from
   the numbered results. The config key `chatdgc_web` (Settings → Web search) turns it off everywhere.
+- **Branch in new chat.** `chatdgc_branch` {conversation_id, message_id} makes a new chat from a reply: the
+  visible conversation up to it, its files copied, its summary when all of what was summarized came along,
+  and `branched` {from, title, at, created_at} on the new chat's conversation; answered by its `chatdgc_opened`.
+- **ChatDGC projects.** `~/.dgc/chat/projects.json` and `project-files/<project>/`; a chat's `project`. New:
+  `chatdgc_projects`, `chatdgc_project` (create, update, delete with or without its chats, add_files,
+  remove_file), `chatdgc_move`; `chatdgc_open` and `chatdgc_list` take `project` (a list without one is the
+  chats in none; a search covers all, each saying its project); `chatdgc_opened` carries the chat's `project`.
+  A project chat's model reads the project's instructions, its files (a quarter of the window at most) and what
+  its other chats are about; project-only memory reads and writes no shared memory. The chat index gains a
+  `project` column (added safely when two processes open an older index at once) and a `files` table.
 - **Pictures from the web, where seeing helps.** The same check (for `auto` and `on`) names an image search
   when pictures are part of the answer (a place, a dish, an animal, a product, a style), and none otherwise.
   The backend runs it with the search set in Settings (`dgc/search.py` `images()`: DuckDuckGo through `ddgs`,
