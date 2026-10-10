@@ -473,8 +473,8 @@ class ChatEngine:
                 piece = pending.pop(0)[:chunk_chars]
                 chunk.append(piece)
                 size += len(piece)
-            asked = ("The summary so far:\n<<<\n" + summary + "\n>>>\n\n" if summary else "") + \
-                "The conversation to add:\n<<<\n" + "\n\n".join(chunk) + "\n>>>"
+            asked = ("The summary so far (of the earlier messages; keep all of it):\n<<<\n" + summary + "\n>>>\n\n"
+                     if summary else "") + "The conversation to add:\n<<<\n" + "\n\n".join(chunk) + "\n>>>"
             try:
                 result = client.chat([{"role": "system", "content": fit_window.COMPACT_PROMPT.format(words=words)},
                                       {"role": "user", "content": asked}], tools=None, reasoning_effort="off",
@@ -487,6 +487,20 @@ class ChatEngine:
                 raise ChatEngineError("Stopped before the summary was written.")
             if not summary:
                 raise ChatEngineError("The model wrote no summary.")
+        # A summary far past its length (a model told to keep everything sometimes retells it) would fill the
+        # window it was written to free, and compact again on every reply: it's asked once for a shorter one.
+        if fit_window.tokens(summary) > words * 2:
+            try:
+                result = client.chat([{"role": "system", "content": fit_window.SHORTEN_PROMPT.format(words=words)},
+                                      {"role": "user", "content": summary}], tools=None, reasoning_effort="off",
+                                     cancel=cancel)
+                shorter = str(getattr(result, "content", "") or "").strip()
+            except Exception:                     # noqa: BLE001 -- the long one still stands
+                shorter = ""
+            if cancel is not None and cancel.is_set():
+                raise ChatEngineError("Stopped before the summary was written.")
+            if shorter and len(shorter) < len(summary):
+                summary = shorter
         return summary[:fit_window.MAX_SUMMARY_CHARS]
 
     def _compact(self, chat: dict, client, room: int, cancel=None, *, keep_messages: int | None = None,

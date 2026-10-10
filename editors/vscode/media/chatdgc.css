@@ -186,7 +186,7 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-summary { border: 1px dashed var(--border-strong); border-radius: var(--r-md); padding: var(--sp-1) var(--sp-3); }
 .cd-summary-label { cursor: pointer; color: var(--muted); font: var(--w-med) var(--t-sm)/1.8 var(--sans); }
 .cd-summary-label:hover { color: var(--text); }
-.cd-summary-text { margin: var(--sp-1) 0 var(--sp-2); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text);
+.cd-summary .cd-summary-text { margin: var(--sp-1) 0 var(--sp-2); overflow-wrap: anywhere; color: var(--text);
   font: var(--w-reg) var(--t-sm)/1.55 var(--sans); max-height: 320px; overflow-y: auto; }
 .cd-summary-note { margin: 0 0 var(--sp-2); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .cd-summary .cd-edit-input { width: 100%; margin: var(--sp-2) 0; }

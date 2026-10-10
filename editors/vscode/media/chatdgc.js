@@ -57,6 +57,13 @@
     cite(node, message.sources);
     return node;
   }
+  /** A summary as the model wrote it: models write Markdown even when asked for plain text. */
+  function summaryText(text) {
+    const node = el("div", "text cd-summary-text");
+    const html = md(text);
+    if (html === null) node.textContent = text || ""; else node.innerHTML = html;
+    return node;
+  }
   /** What a reply looked up: the queries, and the pages it may cite, numbered as it cites them. */
   function sourcesBlock(message) {
     const sources = Array.isArray(message.sources) ? message.sources : [];
@@ -289,7 +296,7 @@
       row.append(cancel, save);
       box.append(area, row);
     } else {
-      box.append(el("div", "cd-summary-text", summary.text || ""));
+      box.append(summaryText(summary.text));
       const note = el("p", "cd-summary-note", "The model reads this in place of the messages above it. They stay here for you.");
       const edit = idleOnly(el("button", "cd-edit-cancel", "Edit summary"));
       edit.type = "button";
@@ -302,7 +309,7 @@
     const carried = state.conversation.carried;
     const box = el("details", "cd-summary cd-carried");
     box.append(el("summary", "cd-summary-label", `Continued from \u201c${carried.title || "a chat"}\u201d`),
-               el("div", "cd-summary-text", carried.text || ""));
+               summaryText(carried.text));
     return box;
   }
   /** The meter: what the chat takes of its window, amber from 70%, red from 85%. */

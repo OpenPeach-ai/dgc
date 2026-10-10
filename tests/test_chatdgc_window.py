@@ -38,8 +38,11 @@ class Model:
             self.world["summaries"].append(messages[1]["content"])
             if self.world.get("summary_fails"):
                 raise RuntimeError("model unavailable")
-            return SimpleNamespace(content=f"SUMMARY #{len(self.world['summaries'])}", finish_reason="stop",
-                                   usage={}, thinking="", tool_calls=[])
+            text = self.world.get("summary_text") or f"SUMMARY #{len(self.world['summaries'])}"
+            return SimpleNamespace(content=text, finish_reason="stop", usage={}, thinking="", tool_calls=[])
+        if messages[0]["content"].startswith("Shorten this summary"):
+            self.world.setdefault("shortened", []).append(messages[1]["content"])
+            return SimpleNamespace(content="SHORTER", finish_reason="stop", usage={}, thinking="", tool_calls=[])
         reply = self.world["replies"].pop(0) if self.world["replies"] else "ok"
         if on_text:
             on_text(reply)
@@ -106,7 +109,12 @@ class WindowTests(unittest.TestCase):
         for i in range(3, 6):
             self.talk(chat, f"question {i}: {long}", f"answer {i}: {long}")
         rolled = self.world["summaries"][-1]
-        self.assertTrue(rolled.startswith("The summary so far:\n<<<\nSUMMARY #"), "a rolling summary: the last one goes in")
+        self.assertTrue(rolled.startswith("The summary so far (of the earlier messages; keep all of it):\n<<<\nSUMMARY #"),
+                        "a rolling summary: the last one goes in")
+        # Told only "the summary so far", deepseek-v4.1-flash dropped all of it in 8 rolls of 8 (Paris, 391, the
+        # sights: gone, the newest story kept); told it replaces it and is the only record, 0 of 19.
+        rolling = [s for s in self.world["sent"] if s["messages"][0]["content"].startswith("You are summarizing")][-1]
+        self.assertIn("yours replaces it and is the only record", rolling["messages"][0]["content"])
         self.assertNotIn("question 0", rolled, "what was summarized isn't read again")
 
     def test_compact_now_edit_the_summary_and_continue_in_a_new_chat(self):
@@ -199,6 +207,18 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.engine.context(chat["id"])["source"], "reported", "the next reply is counted again")
         self.engine.set_summary(chat["id"], "Edited.")
         self.assertEqual(self.engine.context(chat["id"])["source"], "estimated", "so is an edited summary")
+
+    def test_a_summary_far_past_its_length_is_shortened_once(self):
+        chat = self.engine.open()
+        for words in ("one", "two", "three"):
+            self.talk(chat, words, words.upper())
+        self.world["summary_text"] = "A fact. " * 400                  # ~800 tokens, past twice the ~490 words asked
+        self.assertEqual(self.engine.compact(chat["id"])["text"], "A fact. " * 399 + "A fact.", "within reach: kept")
+        self.assertNotIn("shortened", self.world)
+        self.talk(chat, "four")
+        self.world["summary_text"] = "A fact. " * 1200
+        self.assertEqual(self.engine.compact(chat["id"])["text"], "SHORTER")
+        self.assertEqual(len(self.world["shortened"]), 1, "asked once")
 
     def test_a_summary_belongs_to_its_version(self):
         chat = self.engine.open()
