@@ -18,6 +18,19 @@ from dgc.shared_memory import SharedMemory
 from dgc.chatdgc.store import ChatStore, ChatStoreError, title_from
 
 
+def looked_up(messages) -> bool:
+    """The engine's check before an answer: does this message need the web first? (dgc/chatdgc/engine.py)"""
+    from dgc.chatdgc.engine import LOOK_UP
+    return str(messages[0].get("content", "")).startswith(LOOK_UP[:60])
+
+
+def no_look_up():
+    from types import SimpleNamespace as _NS
+    from dgc.llm import ToolCall as _Call
+    return _NS(content="", tool_calls=[_Call("lu", "search_first", {"needs_search": False, "query": ""})],
+               finish_reason="stop", thinking="", usage={})
+
+
 class FakeConfig(dict):
     base_url, api_key, model = "http://127.0.0.1:11434/v1", "", "deepseek-v4.1-flash:cloud"
 
@@ -44,6 +57,8 @@ class FakeClient:
         self.model, self.script, self.calls = model, script, []
 
     def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
+        if looked_up(messages):                      # "does this need the web first?": no
+            return no_look_up()
         self.calls.append({"messages": list(messages), "effort": reasoning_effort, "tools": tools})
         if messages[0]["content"] == NAME_PROMPT:
             return SimpleNamespace(content=self.naming, finish_reason="stop", usage={}, thinking="")

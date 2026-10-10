@@ -1836,6 +1836,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "chatdgc_web": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
     "sandbox": {
       "types": [
         "boolean"

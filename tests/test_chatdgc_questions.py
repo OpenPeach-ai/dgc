@@ -18,6 +18,19 @@ FUNDS = {"question": "Where is the money held now, and where did it come from?",
          "prompt": "The funds for my London property come from: {answer}. Please analyse the FEMA routes open to me."}
 
 
+def looked_up(messages) -> bool:
+    """The engine's check before an answer: does this message need the web first? (dgc/chatdgc/engine.py)"""
+    from dgc.chatdgc.engine import LOOK_UP
+    return str(messages[0].get("content", "")).startswith(LOOK_UP[:60])
+
+
+def no_look_up():
+    from types import SimpleNamespace as _NS
+    from dgc.llm import ToolCall as _Call
+    return _NS(content="", tool_calls=[_Call("lu", "search_first", {"needs_search": False, "query": ""})],
+               finish_reason="stop", thinking="", usage={})
+
+
 class Config(dict):
     base_url, api_key, model = "http://127.0.0.1:11434/v1", "", "chat-model"
 
@@ -39,6 +52,8 @@ class Model:
         return 32768
 
     def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
+        if looked_up(messages):                      # "does this need the web first?": no
+            return no_look_up()
         self.world["requests"].append({"messages": [dict(m) for m in messages],
                                        "tools": [t["function"]["name"] for t in tools or []]})
         if self.world.get("toolless") and tools:

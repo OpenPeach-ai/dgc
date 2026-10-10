@@ -33,6 +33,10 @@
   - copy the last code block: Ctrl/⌘+Shift+;;
   - focus the box: Shift+Esc;
   - the list of shortcuts: Ctrl/⌘+/.
+- **Web search is always on in ChatDGC**, as in ChatGPT: a question about facts that could be wrong or out
+  of date (rules, rates, prices, news, people) is looked up before it's answered, with sources. The box's
+  **Web** picker is gone; **Search** makes it search first for one message, and **Settings → Web search** can
+  turn it off.
 - **Memory**, as ChatGPT has it. ChatDGC remembers what you tell it about yourself, says so under the reply
   (with **Forget**), and knows your projects from your Work sessions. The same memory reaches your Work
   sessions and Pips. **Settings → Memory** shows it all: edit, delete, add, keep a project out, delete all,

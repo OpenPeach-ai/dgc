@@ -42,6 +42,19 @@ from dgc.config import Config  # noqa: E402
 from dgc.editor_protocol import event_error  # noqa: E402
 
 
+def looked_up(messages) -> bool:
+    """The engine's check before an answer: does this message need the web first? (dgc/chatdgc/engine.py)"""
+    from dgc.chatdgc.engine import LOOK_UP
+    return str(messages[0].get("content", "")).startswith(LOOK_UP[:60])
+
+
+def no_look_up():
+    from types import SimpleNamespace as _NS
+    from dgc.llm import ToolCall as _Call
+    return _NS(content="", tool_calls=[_Call("lu", "search_first", {"needs_search": False, "query": ""})],
+               finish_reason="stop", thinking="", usage={})
+
+
 class PromptTests(unittest.TestCase):
     def test_nothing_set_adds_nothing(self):
         plain = system_prompt()
@@ -69,6 +82,8 @@ class EngineTests(unittest.TestCase):
             model = "m"
 
             def chat(self, messages, **_):
+                if looked_up(messages):                      # "does this need the web first?": no
+                    return no_look_up()
                 calls.append(messages[0]["content"])
                 return SimpleNamespace(content="ok", finish_reason="stop", usage={}, thinking="", tool_calls=[])
         config = SimpleNamespace(base_url="", api_key="", model="m", data={})

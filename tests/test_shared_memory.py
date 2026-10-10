@@ -17,6 +17,19 @@ from dgc.llm import ToolCall
 from dgc.shared_memory import NotRemembered, SharedMemory
 
 
+def looked_up(messages) -> bool:
+    """The engine's check before an answer: does this message need the web first? (dgc/chatdgc/engine.py)"""
+    from dgc.chatdgc.engine import LOOK_UP
+    return str(messages[0].get("content", "")).startswith(LOOK_UP[:60])
+
+
+def no_look_up():
+    from types import SimpleNamespace as _NS
+    from dgc.llm import ToolCall as _Call
+    return _NS(content="", tool_calls=[_Call("lu", "search_first", {"needs_search": False, "query": ""})],
+               finish_reason="stop", thinking="", usage={})
+
+
 class StoreTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="dgc-memory-")
@@ -120,6 +133,8 @@ class Model:
         return 32768
 
     def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
+        if looked_up(messages):                      # "does this need the web first?": no
+            return no_look_up()
         self.world["requests"].append({"system": messages[0]["content"], "tools": [t["function"]["name"] for t in tools or []],
                                        "told": [m["content"] for m in messages if m["role"] == "tool"]})
         step = self.world["script"].pop(0) if self.world["script"] else {"parts": ["ok"]}

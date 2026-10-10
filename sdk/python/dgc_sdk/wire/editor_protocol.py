@@ -303,8 +303,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         # Opt-in too: ChatDGC's custom instructions and personality.
         "chatdgc_about": _S(False), "chatdgc_style": _S(False), "chatdgc_personality": _S(False),
         "chatdgc_window": _S(False),
-        # Opt-in too: whether DGC keeps one memory about the user (Settings -> Memory).
-        "memory": _B(False),
+        # Opt-in too: whether DGC keeps one memory about the user (Settings -> Memory), and whether ChatDGC may
+        # search the web at all (Settings -> Web search; on, it searches when an answer depends on it).
+        "memory": _B(False), "chatdgc_web": _B(False),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
         "ultra_mode": _B(False),

@@ -175,7 +175,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
-    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window", "memory",
+    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window", "memory", "chatdgc_web",
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes",
     "thinking_inline", "thinking_inline_max_chars",
@@ -267,12 +267,12 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 # memory: whether DGC keeps one memory about you (dgc/shared_memory.py), for Settings -> Memory.
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
                                    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
-                                   "memory"})
+                                   "memory", "chatdgc_web"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
     "ultra_mode", "monitor_wake",
-    "thinking_inline", "memory",
+    "thinking_inline", "memory", "chatdgc_web",
 })
 _CONFIG_STRING_LIMITS = {
     "subagent_model": 512,
@@ -3628,6 +3628,8 @@ class Backend:
                 extra[key] = str(c.get(key, fallback) or fallback)
         if "memory" in self._config_fields:
             extra["memory"] = c.get("memory", True) is not False
+        if "chatdgc_web" in self._config_fields:
+            extra["chatdgc_web"] = c.get("chatdgc_web", True) is not False
         if "search_url" in self._config_fields:
             extra["search_url"] = str(c.get("search_url", "") or "")
         if "search_api_key_set" in self._config_fields:

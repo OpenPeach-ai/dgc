@@ -446,6 +446,7 @@ DEFAULTS: dict = {
     "recall_max_bytes": 524288,                 # /recall scrollback archive per session (0.5 MiB)
     "notes": True,                              # keep a searchable per-project trace of what was learned
     "memory": True,                             # one memory about you, shared by ChatDGC, Work and Pips
+    "chatdgc_web": True,                        # ChatDGC searches the web when an answer depends on it
     "notes_max_rows": 5000,                     # oldest notes are pruned past this, per project
     "mouse": "capture",                         # capture (wheel scrolls DGC, rows clickable) | off (terminal selection)
     "session_redaction": True,                  # strip credentials from durable transcript/plan history;

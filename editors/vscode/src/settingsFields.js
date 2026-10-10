@@ -85,6 +85,7 @@ export function renderFields(section, main, config, providers, ui) {
         const keyHint = c.search_api_key_set ? "A key is saved. Leave blank to keep it." : "Brave and Tavily need one.";
         main.innerHTML = '<h2>Web search</h2><p class="sub">One search for Work, ChatDGC and your Pips. DuckDuckGo needs nothing; Brave and Tavily need a key; SearXNG is a server you run.</p>'
             + (c.search_settable ? '' : '<p class="note" role="status">Update the DGC CLI to choose the web search here.</p>')
+            + card("ChatDGC", field("Search in ChatDGC", "It looks things up whenever an answer depends on facts it could get wrong, and cites what it found. Off: ChatDGC never goes online.", bool("chatdgc_web", c.chatdgc_web !== false)))
             + card("Search", field("Provider", "", sel("search_provider", [["duckduckgo", "DuckDuckGo (no key)"], ["brave", "Brave Search"], ["tavily", "Tavily"], ["searxng", "SearXNG (your server)"]], provider))
                 + '<div data-search-for="brave tavily">' + field("API key", keyHint, inp("search_api_key", "", "password")) + '</div>'
                 + '<div data-search-for="searxng">' + field("Server address", "For example http://127.0.0.1:8888", inp("search_url", c.search_url || "", "url")) + '</div>')

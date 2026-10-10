@@ -52,6 +52,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   `fields` reads them back. Every chat follows them from its next reply.
 - **Search finds what was said.** `chatdgc_list` `query` searches every chat's name and conversation, with
   FTS5 or plain matching without it. A chat found by its words carries `match`, the words around them.
+- **Web search is always there in ChatDGC.** `search` defaults to `auto`, and an `auto` reply first asks the
+  model (one small structured call on the message) whether it needs the web; if so it searches and answers from
+  the numbered results. The config key `chatdgc_web` (Settings → Web search) turns it off everywhere.
 - **Shared memory.** One memory about the user (`dgc/shared_memory.py`, `~/.dgc/memory/facts.json`), read by
   ChatDGC, Work sessions (under `# Memory`) and Personal Pips (pinned into each run), and written by ChatDGC's
   `remember` and `forget` tools only when the user said it (the Pip-notes rule), never a secret, at most three

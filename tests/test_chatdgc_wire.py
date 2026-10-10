@@ -47,6 +47,19 @@ from dgc.editor_protocol import event_error  # noqa: E402
 from dgc.llm import ToolCall  # noqa: E402
 
 
+def looked_up(messages) -> bool:
+    """The engine's check before an answer: does this message need the web first? (dgc/chatdgc/engine.py)"""
+    from dgc.chatdgc.engine import LOOK_UP
+    return str(messages[0].get("content", "")).startswith(LOOK_UP[:60])
+
+
+def no_look_up():
+    from types import SimpleNamespace as _NS
+    from dgc.llm import ToolCall as _Call
+    return _NS(content="", tool_calls=[_Call("lu", "search_first", {"needs_search": False, "query": ""})],
+               finish_reason="stop", thinking="", usage={})
+
+
 class Model:
     """A model the test drives: `gate` holds it mid-reply until released."""
 
@@ -62,6 +75,8 @@ class Model:
                 self.model = model or "fixture"
 
             def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
+                if looked_up(messages):                      # "does this need the web first?": no
+                    return no_look_up()
                 if messages[0]["content"] == NAME_PROMPT:          # naming a new chat, off the turn
                     outer.named.set()
                     return SimpleNamespace(content="Named by the model", finish_reason="stop", usage={}, thinking="")

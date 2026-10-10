@@ -37,11 +37,12 @@ voice come in later phases.
     ChatDGC tries your sub-agent model, then your main model, then a model installed on the same Ollama
     that says it can see. **Seen by** under your message shows which model looked and what it saw, and the
     chat's model reads that description in place of the pictures.
-- **Web search.** Pick **Web** in the box:
-  - **auto** (the default): your model searches when the answer depends on something current, such as
-    news, prices, weather or a fact it isn't sure of.
-  - **always**: it searches before it answers.
-  - **off**: it never searches.
+- **Web search** is always there, as in ChatGPT. Before it answers a message that turns on facts it could
+  get wrong (news, prices, rates, rules, laws, taxes, limits, figures, specific people, products or places),
+  ChatDGC checks whether it needs the web and, if so, searches first and answers from what it found. It
+  doesn't search for maths, writing, code or explanations of things that don't change. Press **Search** in
+  the box to make it search first for one message. **Settings → Web search → Search in ChatDGC** turns it off
+  entirely; then ChatDGC never goes online (and Deep research says it needs the web).
 
   While it searches, the reply says what it is looking for. A reply that used the web cites its pages with
   small numbered marks; click one to open the page. **Sources** under the reply lists every page and what
@@ -150,7 +151,7 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_list` | `request_id`, `query?`, `archived?`, `limit?` (1–200), `offset?` | `chatdgc_chats` |
 | `chatdgc_open` | `request_id`, `conversation_id?` (omit for a new chat), `temporary?` | `chatdgc_opened` |
 | `chatdgc_earlier` | `request_id`, `conversation_id`, `before` (a message id) | `chatdgc_earlier` |
-| `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`off`, `auto`, `on`), `attachments?` | a turn (below) |
+| `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`auto`, the default: it decides, and looks a factual question up first; `on`: search first; `off`: no web; the config's `chatdgc_web: false` makes every reply `off`), `attachments?` | a turn (below) |
 | `chatdgc_continue` | `request_id`, `conversation_id`, `message_id` | a turn |
 | `chatdgc_edit` | `request_id`, `conversation_id`, `message_id` (yours), `text`, `model?`, `thinking?`, `search?` | `chatdgc_opened` (from the new version on), then a turn |
 | `chatdgc_regenerate` | `request_id`, `conversation_id`, `message_id` (a reply), `model?`, `thinking?`, `search?` | `chatdgc_opened`, then a turn |

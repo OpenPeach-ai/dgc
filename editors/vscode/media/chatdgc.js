@@ -10,11 +10,14 @@
   window.DgcMarkdown?.setFavicons?.(false);      // no image ever loads from a link's site
 
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
-  const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), searchPick = $("cd-search"), notice = $("cd-notice");
+  const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), notice = $("cd-notice");
+  // Web search is always there, as in ChatGPT: the model looks things up whenever an answer depends on it. The
+  // box's Search makes it search first, for the next message only; Settings -> Web search can turn it off.
+  const searchMode = () => (state.searchFirst ? "on" : "auto");
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
-                  research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set() };
+                  research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), searchFirst: false, planEditing: "", steerDraft: "", open: new Set() };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -160,7 +163,7 @@
       const value = choice();
       if (!open || !value || state.busy || state.compacting) return;
       vscode.postMessage({ type: "answer", messageId: message.id, question: index, choice: value, model: modelPick.value || "",
-                           thinking: thinkingPick.value || "", search: searchPick.value || "auto" });
+                           thinking: thinkingPick.value || "", search: searchMode() });
       state.busy = true; controls(); sync();
     });
     sync();
@@ -310,7 +313,7 @@
       e.preventDefault();
       if (!box.value.trim() && !(message.attachments || []).length) return;
       vscode.postMessage({ type: "edit", messageId: message.id, text: box.value, model: modelPick.value || "",
-                           thinking: thinkingPick.value || "", search: searchPick.value || "auto" });
+                           thinking: thinkingPick.value || "", search: searchMode() });
       state.editing = ""; state.busy = true; controls();
     });
     return form;
@@ -629,7 +632,7 @@
       actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
       const again = action("refresh", "Try again", () => {
         vscode.postMessage({ type: "regenerate", messageId: message.id, model: modelPick.value || "",
-                             thinking: thinkingPick.value || "", search: searchPick.value || "auto" });
+                             thinking: thinkingPick.value || "", search: searchMode() });
         state.busy = true; controls();
       });
       actions.append(idleOnly(again));
@@ -826,10 +829,11 @@
       return;
     }
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "",
-                         search: searchPick.value || "auto",
+                         search: searchMode(),
                          ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}) })) } : {}) });
-    state.lastSent = { text, research: false, pending: state.pending };
+    state.lastSent = { text, research: false, pending: state.pending, searchFirst: state.searchFirst };
+    searchFirst(false);
     input.value = ""; grow(); saveDraft();
     state.pending = []; chips();
     state.busy = true;        // until the turn says otherwise: no second send in the meantime
@@ -842,14 +846,18 @@
     state.research = !!on;
     researchToggle.setAttribute("aria-pressed", String(state.research));
     input.placeholder = state.research ? "What should I research?" : "Ask anything";
-    searchPick.disabled = state.research;
+    webToggle.hidden = state.research;                 // research always reads the web
   }
+  const webToggle = $("cd-websearch");
+  /** Search the web first, for the next message. */
+  function searchFirst(on) {
+    state.searchFirst = !!on;
+    webToggle.setAttribute("aria-pressed", String(state.searchFirst));
+  }
+  webToggle.addEventListener("click", () => { searchFirst(!state.searchFirst); input.focus(); });
   researchToggle.addEventListener("click", () => { researchMode(!state.research); input.focus(); });
   modelPick.addEventListener("change", () => { state.model = modelPick.value; });
   thinkingPick.addEventListener("change", () => { state.thinking = thinkingPick.value; });
-  // Web search is the user's standing choice in this tab, not a chat's: it stays as set across chats.
-  searchPick.value = ["auto", "on", "off"].includes((vscode.getState() || {}).search) ? vscode.getState().search : "auto";
-  searchPick.addEventListener("change", () => { try { vscode.setState({ ...(vscode.getState() || {}), search: searchPick.value }); } catch {} });
   $("cd-temporary").addEventListener("change", (e) => vscode.postMessage({ type: "newChat", temporary: e.target.checked }));
   $("cd-new").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
   $("cd-attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
@@ -1098,6 +1106,7 @@
           input.value = state.lastSent.text; grow(); saveDraft();
           state.pending = state.lastSent.pending; chips();
           researchMode(state.lastSent.research);
+          searchFirst(!!state.lastSent.searchFirst);
         }
         if (state.busy && !state.replyId) state.planAsked = false;
         state.lastSent = null;

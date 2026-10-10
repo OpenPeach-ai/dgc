@@ -78,6 +78,16 @@ FORGET_TOOL = {"type": "function", "function": {
     "parameters": {"type": "object", "properties": {"id": {"type": "string", "description": "The memory's id, mem_…"}},
                    "required": ["id"]}}}
 MAX_MEMORY_PER_REPLY = 3
+# Before an answer that turns on facts: does it need the web first? (search "auto"; the model can still search.)
+LOOK_UP = (
+    "Decide whether answering the user's message needs a web search first. Yes when the answer depends on facts "
+    "that could be wrong or out of date: anything current or recent, prices, rates, rules, laws, taxes, limits, "
+    "fees, procedures, figures, statistics, or specific people, products, places or organisations. No for maths, "
+    "writing, code, explanations of things that don't change, opinions, small talk, or questions about this "
+    "conversation itself. If yes, give one short search query (2 to 8 words).")
+LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boolean"},
+                                                   "query": {"type": "string", "description": "One short query."}},
+                  "required": ["needs_search", "query"]}
 PROJECTS_FRESH = 300          # seconds a list of the user's projects is reused
 NAME_PROMPT = ("Name this conversation in three to six words, the way a chat app titles it. Reply with the name "
                "only: no quotes, no full stop.")
@@ -233,6 +243,7 @@ class ChatEngine:
             raise ChatEngineError("Choose off, low, medium, high or extra high thinking.")
         if search not in SEARCH_MODES:
             raise ChatEngineError("Web search is off, auto or on.")
+        search = self._web_mode(search)
         chat = self._chat(chat_id)
         if model:
             chat["model"] = str(model)[:200]
@@ -317,6 +328,8 @@ class ChatEngine:
         text = str(text or "").strip()
         if not text:
             raise ChatEngineError("Say what to research.")
+        if self._web_mode("on") == "off":
+            raise ChatEngineError("Deep research reads the web, and web search is off in Settings \u2192 Web search.")
         if len(text) > MAX_TEXT:
             raise ChatEngineError("That message is too long to send.")
         chat = self._chat(chat_id)
@@ -448,6 +461,12 @@ class ChatEngine:
     # The active one is the conversation you see, inline in `messages`; its slot in `tails` is None. A fork inside
     # an inactive version stays in `forks` under its own key and comes back when that version does.
 
+    def _web_mode(self, search: str) -> str:
+        """Web search is always there, as in ChatGPT: the model looks things up when an answer depends on it
+        ("auto"), or before it answers ("on", the box's Search). None only when Settings turns it off, or a client
+        asks for none."""
+        return "off" if self.config.get("chatdgc_web", True) is False else search
+
     def _choose(self, chat: dict, model, thinking, search) -> None:
         if thinking is not None and thinking not in THINKING:
             raise ChatEngineError("Choose off, low, medium, high or extra high thinking.")
@@ -490,6 +509,7 @@ class ChatEngine:
         if not text.strip() and not old.get("attachments"):
             raise ChatEngineError("Type a message first.")
         self._choose(chat, model, thinking, search)
+        search = self._web_mode(search)
         self._fork(chat, index)
         mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now(),
                 **{key: old[key] for key in ("attachments", "vision") if old.get(key)}}
@@ -512,6 +532,7 @@ class ChatEngine:
         if index == 0 or chat["messages"][index - 1].get("role") != "user":
             raise ChatEngineError("That reply can't be tried again.")
         self._choose(chat, model, thinking, search)
+        search = self._web_mode(search)
         self._fork(chat, index)
         chat = self._save(chat)
         reply_id = new_message_id()
@@ -958,6 +979,30 @@ class ChatEngine:
         except shared_memory.NotRemembered as exc:
             return f"Not done: {exc}"
 
+    def _looked_up(self, client, chat: dict, sources: list, searches: list, on_activity, cancel) -> str:
+        """Whether the user's message needs the web before it's answered (one small structured call on that
+        message, not the whole chat); if so, the search's numbered results, to answer from and cite."""
+        mine = next((m.get("text") or "" for m in reversed(chat["messages"]) if m.get("role") == "user"), "")
+        if not mine.strip():
+            return ""
+        before = next((m.get("text") or "" for m in reversed(chat["messages"]) if m.get("role") == "assistant"), "")
+        asked = (f"Your last reply, for context:\n<<<\n{before[-1500:]}\n>>>\n\n" if before else "") + \
+            f"The user's message:\n<<<\n{mine[-4000:]}\n>>>"
+        try:
+            decided = research.structured(client, LOOK_UP, asked, "search_first", LOOK_UP_SCHEMA, cancel=cancel)
+        except Exception:                         # noqa: BLE001 -- the reply goes on; the model can still search
+            return ""
+        query = " ".join(str(decided.get("query") or "").split())[:200]
+        if not decided.get("needs_search") or not query:
+            return ""
+        from types import SimpleNamespace
+        results = self._web_search(SimpleNamespace(name="web_search", arguments={"query": query}), sources, searches,
+                                   on_activity)
+        if results.startswith("error:"):
+            return ""
+        return ("Searched the web before you answer (the results are numbered as you cite them; search again if "
+                f"you need more):\n{results}")
+
     @staticmethod
     def _question(call, questions: list, at: int) -> tuple[str, dict | None]:
         """One ask_user call: (what the model is told, the question to show, or None when there isn't one)."""
@@ -1063,6 +1108,12 @@ class ChatEngine:
             return out or None
 
         messages = list(history)
+        if search == "auto" and existing is None and name not in self._toolless:
+            # As ChatGPT does: a question that turns on facts is looked up before it's answered, not left to a
+            # model that's sure of itself (deepseek answered tax and remittance rules from memory, 2 in 2).
+            found = self._looked_up(client, chat, sources, searches, on_activity, cancel)
+            if found:
+                messages[0] = {**messages[0], "content": messages[0]["content"] + "\n\n" + found}
         try:
             # A search is one more round: the model asks, the results go back, it answers (or searches again,
             # up to MAX_SEARCHES; after that it is offered no search and answers from what it has). A question

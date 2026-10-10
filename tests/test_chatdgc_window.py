@@ -13,6 +13,19 @@ from dgc.chatdgc.store import ChatStore
 from dgc.shared_memory import SharedMemory
 
 
+def looked_up(messages) -> bool:
+    """The engine's check before an answer: does this message need the web first? (dgc/chatdgc/engine.py)"""
+    from dgc.chatdgc.engine import LOOK_UP
+    return str(messages[0].get("content", "")).startswith(LOOK_UP[:60])
+
+
+def no_look_up():
+    from types import SimpleNamespace as _NS
+    from dgc.llm import ToolCall as _Call
+    return _NS(content="", tool_calls=[_Call("lu", "search_first", {"needs_search": False, "query": ""})],
+               finish_reason="stop", thinking="", usage={})
+
+
 class Config(dict):
     base_url, api_key, model = "http://127.0.0.1:11434/v1", "", "chat-model"
 
@@ -34,6 +47,8 @@ class Model:
         return self.limit
 
     def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
+        if looked_up(messages):                      # "does this need the web first?": no
+            return no_look_up()
         self.world["sent"].append({"messages": list(messages), "window": self.context_size})
         if messages[0]["content"].startswith("You are summarizing a conversation"):
             self.world["summaries"].append(messages[1]["content"])

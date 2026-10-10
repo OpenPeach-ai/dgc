@@ -281,15 +281,18 @@ test("the home: Chat and Work as tabs (a long list never hides the other), one s
 
 test("a reply that searches: what it looks for while it looks, citation marks, and its sources", async (t) => {
   if (skipOrFail(t)) return;
-  const s = await openScreen({ state: { search: "on" } });
+  const s = await openScreen();
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
-    assert.equal(await s.page.locator("#cd-search").inputValue(), "on", "the tab keeps the choice");
-    await s.page.locator("#cd-search").selectOption("auto");
+    // Web search is always there; Search makes it search first, for the next message only.
+    assert.equal(await s.page.locator("#cd-search").count(), 0, "no way to turn the web off from the box");
+    const first = s.page.locator("#cd-websearch");
+    await first.click();
+    assert.equal(await first.getAttribute("aria-pressed"), "true");
     await s.page.locator("#cd-input").fill("Weather in Paris?");
     await s.page.keyboard.press("Enter");
-    assert.equal((await s.posted("send"))[0].search, "auto");
-    assert.equal(await s.page.evaluate(() => window.__state.search), "auto");
+    assert.equal((await s.posted("send"))[0].search, "on");
+    assert.equal(await first.getAttribute("aria-pressed"), "false", "one message: then it's the model's call again");
     await s.send({ type: "turn", state: "started", replyId: M(2) });
     await s.send({ type: "activity", messageId: M(2), kind: "searching", text: "paris weather" });
     await s.frame();
@@ -611,7 +614,7 @@ test("deep research: the toggle, a plan that counts down, editing it, the readin
     const toggle = s.page.locator("#cd-research");
     await toggle.click();
     assert.deepEqual([await toggle.getAttribute("aria-pressed"), await s.page.locator("#cd-input").getAttribute("placeholder"),
-                      await s.page.locator("#cd-search").isDisabled()], ["true", "What should I research?", true]);
+                      await s.page.locator("#cd-websearch").isHidden()], ["true", "What should I research?", true]);
     await s.page.locator("#cd-input").fill("Can I buy a London flat with savings in India?");
     await s.page.keyboard.press("Enter");
     const [asked] = await s.posted("research");

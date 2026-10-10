@@ -83,8 +83,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <label class="sr-only" for="cd-model">Model</label><select id="cd-model" class="cd-select" title="Model"></select>
 <label class="sr-only" for="cd-thinking">Thinking</label><select id="cd-thinking" class="cd-select" title="How much the model thinks first">
 <option value="off">Thinking off</option><option value="low">Think: low</option><option value="medium">Think: medium</option><option value="high">Think: high</option><option value="xhigh">Think: extra high</option></select>
-<label class="sr-only" for="cd-search">Web search</label><select id="cd-search" class="cd-select" title="Web search: Auto lets the model decide; Always searches before it answers">
-<option value="auto">Web: auto</option><option value="on">Web: always</option><option value="off">Web: off</option></select>
+<button type="button" id="cd-websearch" class="cd-tool" aria-pressed="false" title="Search the web for this message. Without it, ChatDGC still searches whenever an answer depends on it"><span class="codicon codicon-globe" aria-hidden="true"></span><span>Search</span></button>
 <button type="button" id="cd-research" class="cd-tool" aria-pressed="false" title="Deep research: a plan to check, then many sources read, then a report with checked citations"><span class="codicon codicon-telescope" aria-hidden="true"></span><span>Deep research</span></button>
 <label id="cd-temp-toggle" class="cd-toggle" title="A temporary chat isn't saved or listed"><input type="checkbox" id="cd-temporary"> Temporary</label>
 <span class="cd-spacer"></span>

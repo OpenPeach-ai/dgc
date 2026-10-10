@@ -300,7 +300,7 @@ class ChatService:
     def _send(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.send(cmd["conversation_id"], cmd["text"], model=cmd.get("model"),
-                                    thinking=cmd.get("thinking"), search=cmd.get("search", "off"),
+                                    thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
                                     attachments=cmd.get("attachments"),
                                     on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run)
@@ -308,14 +308,14 @@ class ChatService:
     def _edit(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.edit(cmd["conversation_id"], cmd["message_id"], cmd["text"], model=cmd.get("model"),
-                                    thinking=cmd.get("thinking"), search=cmd.get("search", "off"),
+                                    thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
                                     on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run, refresh=True)
 
     def _regenerate(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.regenerate(cmd["conversation_id"], cmd["message_id"], model=cmd.get("model"),
-                                          thinking=cmd.get("thinking"), search=cmd.get("search", "off"),
+                                          thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
                                           on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run, refresh=True)
 
@@ -323,7 +323,7 @@ class ChatService:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.answer(cmd["conversation_id"], cmd["message_id"], cmd["question"], cmd["choice"],
                                       model=cmd.get("model"), thinking=cmd.get("thinking"),
-                                      search=cmd.get("search", "off"), on_start=on_start, on_activity=activity,
+                                      search=cmd.get("search", "auto"), on_start=on_start, on_activity=activity,
                                       cancel=cancel, **stream_for())
         self._start(cmd, run)
 

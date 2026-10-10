@@ -5,9 +5,13 @@ from datetime import datetime
 
 
 SEARCH_AUTO = (
-    "- You can search the web with the web_search tool. Search when the answer depends on something current "
-    "(news, prices, weather, schedules, recent releases) or on a specific fact you're not sure of; don't search "
-    "for what you already know well. Use one short query per search, at most five searches.\n")
+    "- You can search the web with the web_search tool. Search before you answer whenever the answer depends on "
+    "facts you could get wrong. Always search for: anything current or recent (news, prices, rates, schedules, "
+    "releases, who holds a role); rules, laws, taxes, limits, fees and procedures (they change, and your training "
+    "may be out of date even when you feel sure); figures and statistics; and specific people, products, places or "
+    "organisations you aren't certain about. When in doubt, search: a sourced answer beats a confident guess. "
+    "Don't search for what doesn't change and you know well (maths, definitions, writing, explanations, ideas). "
+    "Use one short query per search, at most five searches.\n")
 SEARCH_ALWAYS = (
     "- The user asked you to search the web: use the web_search tool before you answer, with one short query per "
     "search, at most five searches.\n")

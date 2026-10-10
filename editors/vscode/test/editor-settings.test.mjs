@@ -377,3 +377,16 @@ test('Memory: what DGC remembers, edited, deleted and added; projects switched; 
   x.message({ type: 'memory_unavailable', message: 'Update the DGC CLI to see and manage what DGC remembers about you.' });
   assert.match(x.d.querySelector('[role=alert]').textContent, /Update the DGC CLI/);
 });
+
+test('Web search: ChatDGC searches on its own unless this switch turns it off, saved with the page', () => {
+  const x = setup();
+  x.message({ type: 'event', event: { ...x.config, search_provider: 'duckduckgo', search_api_key_set: false, search_url: '', chatdgc_web: true } });
+  x.click('[data-nav=web]');
+  const on = x.d.querySelector('#chatdgc_web');
+  assert.equal(on.getAttribute('aria-checked'), 'true', 'on unless you turn it off');
+  assert.match(x.d.body.textContent, /Off: ChatDGC never goes online/);
+  x.click('#chatdgc_web');
+  x.click('#save');
+  assert.equal(x.sent.at(-1).type, 'saveSettings');
+  assert.equal(x.sent.at(-1).values.chatdgc_web, false);
+});
