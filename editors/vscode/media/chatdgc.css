@@ -163,3 +163,32 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-keys dd { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
 .cd-keys kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px solid var(--border-strong); border-bottom-width: 2px;
   border-radius: var(--r-sm); background: var(--surface2); color: var(--text); font: var(--w-med) var(--t-xs)/1.5 var(--sans); text-align: center; }
+
+/* The context window: the meter in the box, its details, the summary of earlier messages. */
+.cd-meter { display: inline-flex; align-items: center; gap: 4px; height: var(--control); padding: 0 var(--sp-2) 0 var(--sp-1);
+  border: 0; border-radius: var(--r-full); background: transparent; color: var(--muted); cursor: pointer;
+  font: var(--w-med) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; --meter: var(--accent-text, var(--accent)); }
+.cd-meter:hover { background: var(--surface); color: var(--text); }
+.cd-meter[data-level="mid"] { --meter: var(--warn); color: var(--warn); }
+.cd-meter[data-level="high"] { --meter: var(--del-text); color: var(--del-text); }
+.cd-ring { width: 16px; height: 16px; transform: rotate(-90deg); }
+.cd-ring circle { fill: none; stroke-width: 2.6; }
+.cd-ring-track { stroke: var(--border-strong); }
+.cd-ring-fill { stroke: var(--meter); stroke-linecap: round; stroke-dasharray: 0 50.27; }
+.cd-pop { margin: 0 0 var(--sp-2) auto; width: min(360px, 100%); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border-strong);
+  border-radius: var(--r-xl); background: var(--surface); box-shadow: var(--shadow-2); }
+.cd-pop h3 { margin: 0 0 var(--sp-1); color: var(--text-strong); font: var(--w-semi) var(--t-base)/1.3 var(--sans); }
+.cd-pop-lead, .cd-pop-note { margin: 0 0 var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.cd-pop-note { margin-top: var(--sp-2); }
+.cd-pop-row { display: flex; justify-content: space-between; gap: var(--sp-3); padding: 2px 0; font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.cd-pop-num { font-variant-numeric: tabular-nums; color: var(--text-strong); }
+.cd-pop .cd-edit-actions { justify-content: flex-start; flex-wrap: wrap; }
+.cd-summary { border: 1px dashed var(--border-strong); border-radius: var(--r-md); padding: var(--sp-1) var(--sp-3); }
+.cd-summary-label { cursor: pointer; color: var(--muted); font: var(--w-med) var(--t-sm)/1.8 var(--sans); }
+.cd-summary-label:hover { color: var(--text); }
+.cd-summary-text { margin: var(--sp-1) 0 var(--sp-2); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text);
+  font: var(--w-reg) var(--t-sm)/1.55 var(--sans); max-height: 320px; overflow-y: auto; }
+.cd-summary-note { margin: 0 0 var(--sp-2); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-summary .cd-edit-input { width: 100%; margin: var(--sp-2) 0; }
+.cd-summary .cd-edit-actions { margin-bottom: var(--sp-2); }
+.cd-summary > .cd-edit-cancel { margin-bottom: var(--sp-2); }

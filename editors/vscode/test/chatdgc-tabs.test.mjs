@@ -378,3 +378,23 @@ test("export: the save dialog's choice says where and in which format, and the r
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(sent.length, before, "cancelled: nothing written");
 });
+
+test("the context window: its commands go as such, and its events reach the tabs showing the chat", () => {
+  chat.open(ID(9));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(9), title: "x" });
+  panel.say({ type: "compact" });
+  panel.say({ type: "summary", text: "  " });
+  panel.say({ type: "summary", text: "Edited." });
+  panel.say({ type: "carry" });
+  assert.deepEqual(sent.slice(-3).map((c) => c.type), ["chatdgc_compact", "chatdgc_summary", "chatdgc_carry"], "an empty summary isn't sent");
+  chat.onEvent({ type: "chatdgc_context", conversation_id: ID(9), window: 32768, limit: 0, used: 900, preset: "32k", source: "estimated", parts: {} });
+  assert.equal(panel.last("context").used, 900);
+  chat.onEvent({ type: "chatdgc_compacted", conversation_id: ID(9), summary: { upto: MSG(1), text: "s" } });
+  assert.equal(panel.last("compacted").summary.text, "s");
+  const carry = last("chatdgc_carry");
+  chat.onEvent({ type: "chatdgc_opened", request_id: carry.request_id, conversation: { id: ID(4), title: "x" }, messages: [], earlier: 0, busy: false });
+  assert.equal(panel.last("opened").conversation.id, ID(4), "the tab moves to the new chat");
+  chat.onEvent({ type: "chatdgc_context", conversation_id: ID(9), window: 1, limit: 0, used: 1, preset: "32k", source: "estimated", parts: {} });
+  assert.equal(panel.last("context").used, 900, "the old chat's meter no longer reaches it");
+});

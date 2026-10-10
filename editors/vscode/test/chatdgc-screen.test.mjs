@@ -466,3 +466,52 @@ test("keyboard shortcuts, as ChatGPT has them, and the list of them", async (t) 
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("the context window: a meter that warns early, Compact now, the summary in place, and a chat carried over", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const messages = [1, 2, 3, 4, 5].map((n) => ({ id: M(n), role: n % 2 ? "user" : "assistant", text: `message ${n}`, finish: "stop" }));
+    await s.send({ type: "opened", conversation: conversation({ title: "Long" }), earlier: 0, busy: false, messages });
+    assert.equal(await s.page.locator("#cd-context").isHidden(), true, "no meter until it's counted");
+    const ctx = (used, extra = {}) => s.send({ type: "context", window: 32768, limit: 262144, used, preset: "32k", source: "reported",
+      parts: { instructions: 600, conversation: used - 600 }, ...extra });
+    for (const [used, level, pct] of [[12000, "low", "37%"], [24000, "mid", "73%"], [30000, "high", "92%"]]) {
+      await ctx(used);
+      assert.deepEqual([await s.page.locator("#cd-context").getAttribute("data-level"), await s.page.locator("#cd-context-pct").textContent()], [level, pct]);
+    }
+    await s.page.locator("#cd-context").click();
+    const pop = s.page.locator("#cd-context-pop");
+    assert.equal(await pop.isVisible(), true);
+    assert.match(await pop.innerText(), /30,000 of 32,768 tokens, as the model counted them/);
+    assert.match(await pop.innerText(), /Window: 32k \(Settings → ChatDGC\)\. This model can take up to 262,144\./);
+    await pop.getByText("Compact now").click();
+    assert.equal((await s.posted("compact")).length, 1);
+    assert.equal(await s.page.locator(".cd-activity").textContent(), "Summarizing earlier messages to fit the context window…");
+    assert.equal(await s.page.locator("#cd-send").isDisabled(), true, "nothing sent while it summarizes");
+    await s.send({ type: "compacted", summary: { upto: M(3), text: "They planned a trip to Goa.", edited: false } });
+    assert.equal(await s.page.locator(".cd-activity").count(), 0);
+    const order = await s.page.locator("#cd-log > *").evaluateAll((n) => n.map((x) => x.dataset.id || x.className));
+    assert.deepEqual(order, [M(1), M(2), M(3), "cd-summary", M(4), M(5)], "the divider sits after what it covers; nothing is hidden");
+    await s.page.locator(".cd-summary-label").click();
+    assert.equal(await s.page.locator(".cd-summary-text").textContent(), "They planned a trip to Goa.");
+    await s.page.getByText("Edit summary").click();
+    await s.page.locator(".cd-summary textarea").fill("They are planning four days in Goa.");
+    await s.page.locator(".cd-summary").getByText("Save").click();
+    assert.deepEqual(await s.posted("summary"), [{ type: "summary", text: "They are planning four days in Goa." }]);
+    await s.page.locator("#cd-context").click();
+    await pop.getByText("Continue in a new chat").click();
+    assert.equal((await s.posted("carry")).length, 1);
+    await s.send({ type: "opened", earlier: 0, busy: false, messages: [],
+      conversation: conversation({ id: `chat_${"c".repeat(32)}`, title: "Long", carried: { from: ID, title: "Long", text: "Goa, four days." } }) });
+    assert.equal(await s.page.locator(".cd-carried .cd-summary-label").textContent(), "Continued from \u201cLong\u201d");
+    assert.equal(await s.page.locator("#cd-context").isHidden(), true, "a new chat: counted afresh");
+    assert.equal(await s.page.locator("#cd-temp-toggle").isHidden(), true, "a chat carried over can't be swapped for a temporary one");
+    await s.send({ type: "turn", state: "started", replyId: M(9) });
+    await s.send({ type: "activity", messageId: M(9), kind: "compacting", text: "" });
+    await s.frame();
+    assert.match(await s.page.locator(".cd-assistant .cd-activity").textContent(), /Summarizing earlier messages/, "while a reply waits on it");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-window.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

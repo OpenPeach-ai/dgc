@@ -57,6 +57,18 @@ voice come in later phases.
   Continue picks up in the same reply.
 - **Temporary chats.** Tick **Temporary** before your first message. A temporary chat is never saved or
   listed, and it disappears when DGC stops.
+- **The context window.** The meter in the box shows how much of the model's context window the chat fills.
+  It uses the model's own count where it reports one, and turns amber at 70% and red at 85%. Click it for
+  the breakdown (instructions, summary, files, conversation) and two actions:
+  - **Compact now:** everything before the last exchange becomes a summary.
+  - **Continue in a new chat:** a new chat starts with a summary of this one.
+
+  The window is the model's real one, capped by **Settings → ChatDGC → Window** (8k, 32k by default, 128k,
+  or the model's maximum), and it is sent with every request. Before a reply would fill more than 75% of
+  it, the older messages are summarized and the recent ones kept word for word. You see "Summarizing
+  earlier messages…" when that happens; it is never done silently. An **Earlier messages summarized**
+  divider shows the summary, and you can edit it. Every message stays in the chat for you. One file never
+  takes more than 40% of the window; the model is told when it only got the first part.
 - **Edit and try again.** **Edit** under a message you sent changes it; **Try again** under a reply asks
   for another one, with whatever model and thinking level the box is set to. Either way, the old version
   stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own
@@ -115,6 +127,9 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_regenerate` | `request_id`, `conversation_id`, `message_id` (a reply), `model?`, `thinking?`, `search?` | `chatdgc_opened`, then a turn |
 | `chatdgc_version` | `request_id`, `conversation_id`, `parent_id` (the message before the point, or `root`), `index` | `chatdgc_opened` |
 | `chatdgc_export` | `request_id`, `conversation_id`, `path` (absolute, chosen by the user), `format` (`markdown`, `json`) | `chatdgc_exported` (`path`, `bytes`) |
+| `chatdgc_compact` | `request_id`, `conversation_id` | `chatdgc_compacted` (`summary`) |
+| `chatdgc_summary` | `request_id`, `conversation_id`, `text` | `chatdgc_compacted` (marked `edited`) |
+| `chatdgc_carry` | `request_id`, `conversation_id` | `chatdgc_opened` for the new chat (its `conversation.carried`) |
 | `chatdgc_cancel` | `conversation_id`, `request_id?` | the turn ends `cancelled` |
 | `chatdgc_file` | `request_id`, `conversation_id`, `attachment_id` | `chatdgc_file` (`data`: an image as a `data:` URI up to 2.5 MB, or `error`) |
 | `chatdgc_update` | `request_id`, `conversation_id`, `title?`, `pinned?`, `archived?`, `delete?` | `chatdgc_changed` |
@@ -140,6 +155,12 @@ A turn sends its events in this order:
    numbers it cites as [n]).
 5. `chatdgc_changed`, the chat's new list entry.
 6. `chatdgc_turn` with `state: "ended"`.
+
+After every turn, and when a chat opens, `chatdgc_context` reports `used` tokens out of `window` (the
+model's own maximum is in `limit`), with `source` saying whether the model counted them (`reported`) or
+ChatDGC estimated them, and `parts` giving the breakdown. A reply that compacts first sends
+`chatdgc_activity` with `kind: "compacting"`, then `chatdgc_compacted`. An opened conversation carries its
+`summary` (`{upto, text, edited, …}`) and, for a chat continued from another, `carried`.
 
 After a new chat's first reply, the model names it. That arrives later as another `chatdgc_changed` with
 no `request_id`.

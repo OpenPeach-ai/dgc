@@ -322,9 +322,12 @@ test('ChatDGC: a personality and custom instructions, saved for every chat; hidd
   assert.equal(x.d.querySelector('#chatdgc_about').maxLength,1500);
   x.input('#chatdgc_style','Lead with the answer.');
   x.input('#chatdgc_personality','warm');
+  assert.equal(x.d.querySelector('#chatdgc_window').value,'32k','the standard window unless chosen');
+  x.input('#chatdgc_window','8k');
   x.click('#save');
   const saved=x.sent.filter(m=>m.type==='saveSettings').pop();
   assert.equal(saved.values.chatdgc_about,'I run a bakery in Pune.');
   assert.equal(saved.values.chatdgc_style,'Lead with the answer.');
   assert.equal(saved.values.chatdgc_personality,'warm');
+  assert.equal(saved.values.chatdgc_window,'8k');
 });

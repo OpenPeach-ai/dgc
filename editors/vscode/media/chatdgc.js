@@ -12,7 +12,8 @@
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), searchPick = $("cd-search"), notice = $("cd-notice");
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
-                  model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "" };
+                  model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
+                  context: null, compacting: false, editingSummary: false };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -156,7 +157,7 @@
   /** A button that starts or changes a turn: off while one runs (controls() keeps every such button in step). */
   function idleOnly(button) {
     button.dataset.whileIdle = "1";
-    button.disabled = state.busy || button.dataset.never === "1";
+    button.disabled = state.busy || state.compacting || button.dataset.never === "1";
     return button;
   }
   /** ‹ 2 / 3 ›: which version of the conversation from this point you're looking at. */
@@ -243,7 +244,8 @@
     if (message.text || !live) node.append(body(message));
     const doing = live && state.searching[message.id];
     if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
-      ? `Looking at the image with ${doing.text}…` : `Searching the web for “${doing.text}”…`));
+      ? `Looking at the image with ${doing.text}…` : doing.kind === "compacting"
+      ? "Summarizing earlier messages to fit the context window…" : `Searching the web for “${doing.text}”…`));
     else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
     if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
@@ -265,8 +267,102 @@
     }
     return node;
   }
+  // ---- the context window: what earlier was summarized, and what a chat carried over from another
+  function summaryNode() {
+    const summary = state.conversation?.summary;
+    const box = el("details", "cd-summary");
+    box.open = state.editingSummary;
+    const label = el("summary", "cd-summary-label", "Earlier messages summarized" + (summary.edited ? " (edited by you)" : ""));
+    box.append(label);
+    if (state.editingSummary) {
+      const area = el("textarea", "cd-input cd-edit-input"); area.value = summary.text || ""; area.rows = 6;
+      area.setAttribute("aria-label", "Edit the summary");
+      const row = el("div", "cd-edit-actions");
+      const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button";
+      const save = el("button", "cd-continue", "Save"); save.type = "button";
+      cancel.addEventListener("click", () => { state.editingSummary = false; render(); });
+      save.addEventListener("click", () => {
+        if (!area.value.trim()) return;
+        vscode.postMessage({ type: "summary", text: area.value });
+        state.editingSummary = false;
+      });
+      row.append(cancel, save);
+      box.append(area, row);
+    } else {
+      box.append(el("div", "cd-summary-text", summary.text || ""));
+      const note = el("p", "cd-summary-note", "The model reads this in place of the messages above it. They stay here for you.");
+      const edit = idleOnly(el("button", "cd-edit-cancel", "Edit summary"));
+      edit.type = "button";
+      edit.addEventListener("click", () => { state.editingSummary = true; render(); });
+      box.append(note, edit);
+    }
+    return box;
+  }
+  function carriedNode() {
+    const carried = state.conversation.carried;
+    const box = el("details", "cd-summary cd-carried");
+    box.append(el("summary", "cd-summary-label", `Continued from \u201c${carried.title || "a chat"}\u201d`),
+               el("div", "cd-summary-text", carried.text || ""));
+    return box;
+  }
+  /** The meter: what the chat takes of its window, amber from 70%, red from 85%. */
+  function meter() {
+    const c = state.context, button = $("cd-context");
+    button.hidden = !c || !c.window || !state.conversation;
+    if (button.hidden) { $("cd-context-pop").hidden = true; return; }
+    const share = Math.min(1, c.used / c.window);
+    const percent = Math.round(share * 100);
+    $("cd-context-pct").textContent = `${percent}%`;
+    $("cd-ring-fill").style.strokeDasharray = `${(share * 50.27).toFixed(2)} 50.27`;
+    button.dataset.level = share >= 0.85 ? "high" : share >= 0.7 ? "mid" : "low";
+    button.title = `Context: ${c.used.toLocaleString()} of ${c.window.toLocaleString()} tokens`;
+    button.setAttribute("aria-label", `Context window: ${percent}% used. Show details`);
+    if (!$("cd-context-pop").hidden) popover();
+  }
+  function popover() {
+    const c = state.context, pop = $("cd-context-pop");
+    const share = Math.min(1, c.used / c.window);
+    const line = (label, value) => { const row = el("div", "cd-pop-row"); row.append(el("span", "", label), el("span", "cd-pop-num", value)); return row; };
+    const parts = c.parts || {};
+    const names = { instructions: "Instructions", summary: "Summary", files: "Files", conversation: "Conversation" };
+    const presets = { "8k": "8k", "32k": "32k", "128k": "128k", max: "the model's maximum" };
+    const compact = el("button", "cd-edit-cancel", state.compacting ? "Summarizing…" : "Compact now");
+    compact.type = "button"; compact.dataset.whileIdle = "1";
+    if (state.messages.length < 3) compact.dataset.never = "1";
+    compact.disabled = state.busy || state.compacting || state.messages.length < 3;
+    compact.title = "Summarize everything before the last exchange";
+    compact.addEventListener("click", () => { vscode.postMessage({ type: "compact" }); state.compacting = true; render(); controls(); popover(); });
+    const carry = el("button", "cd-edit-cancel", "Continue in a new chat");
+    carry.type = "button"; carry.dataset.whileIdle = "1";
+    if (!state.messages.length || state.conversation?.temporary) carry.dataset.never = "1";
+    carry.disabled = state.busy || state.compacting || !state.messages.length || !!state.conversation?.temporary;
+    carry.title = "Start a new chat that carries a summary of this one";
+    carry.addEventListener("click", () => { vscode.postMessage({ type: "carry" }); state.compacting = true; render(); controls(); popover(); });
+    const actions = el("div", "cd-edit-actions"); actions.append(compact, carry);
+    pop.replaceChildren(
+      el("h3", "", `${Math.round(share * 100)}% of the context window`),
+      el("p", "cd-pop-lead", `${c.used.toLocaleString()} of ${c.window.toLocaleString()} tokens, ${c.source === "reported" ? "as the model counted them" : "estimated"}.`),
+      ...Object.entries(names).filter(([key]) => parts[key]).map(([key, label]) => line(label, Number(parts[key]).toLocaleString())),
+      el("p", "cd-pop-note", `Window: ${presets[c.preset] || c.preset} (Settings → ChatDGC)` + (c.limit ? `. This model can take up to ${c.limit.toLocaleString()}.` : ".")
+        + " Near the limit, older messages are summarized and the recent ones kept word for word."),
+      actions);
+  }
+  $("cd-context").addEventListener("click", () => {
+    const pop = $("cd-context-pop");
+    pop.hidden = !pop.hidden;
+    $("cd-context").setAttribute("aria-expanded", String(!pop.hidden));
+    if (!pop.hidden) popover();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest?.("#cd-context, #cd-context-pop")) { $("cd-context-pop").hidden = true; $("cd-context").setAttribute("aria-expanded", "false"); }
+  });
   function render() {
     const nodes = state.messages.map(messageNode);
+    const upto = state.conversation?.summary?.upto;
+    const at = upto ? state.messages.findIndex((m) => m.id === upto) : -1;
+    if (at >= 0) nodes.splice(at + 1, 0, summaryNode());
+    if (state.conversation?.carried?.text) nodes.unshift(carriedNode());
+    if (state.compacting) nodes.push(el("div", "cd-working cd-activity", "Summarizing earlier messages to fit the context window…"));
     log.replaceChildren(...nodes);
     if (state.editingFresh) {
       // Just opened: the box takes the keys now, with the caret at the end. Doing it a frame later moved the
@@ -308,14 +404,16 @@
 
   // ---- the composer
   function controls() {
-    for (const button of document.querySelectorAll("[data-while-idle]")) button.disabled = state.busy || button.dataset.never === "1";
+    for (const button of document.querySelectorAll("[data-while-idle]")) {
+      button.disabled = state.busy || state.compacting || button.dataset.never === "1";
+    }
     const text = input.value;
     send.hidden = state.busy;
     stop.hidden = !state.busy;
-    send.disabled = (!text.trim() && !state.pending.length) || !state.conversation || !!state.unavailable;
+    send.disabled = (!text.trim() && !state.pending.length) || !state.conversation || !!state.unavailable || state.compacting;
     input.disabled = !!state.unavailable;
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
-    $("cd-temp-toggle").hidden = !fresh;
+    $("cd-temp-toggle").hidden = !fresh || !!state.conversation?.carried;   // a chat carried over isn't thrown away
     $("cd-temporary").checked = !!state.conversation?.temporary;
     $("cd-temp-badge").hidden = !state.conversation?.temporary;
     $("cd-menu").hidden = !state.conversation || !!state.conversation.temporary || fresh;
@@ -469,6 +567,8 @@
         state.replyId = msg.replyId || "";
         state.opened = true;
         state.editing = "";
+        state.editingSummary = false;
+        if (!keep) { state.compacting = false; state.context = null; meter(); }
         if (!keep) { state.model = ""; state.thinking = ""; }
         state.unavailable = "";
         $("cd-title").textContent = state.conversation?.title || "New chat";
@@ -509,7 +609,11 @@
         controls();
         return;
       case "activity":
-        if ((msg.kind === "searching" || msg.kind === "looking") && msg.messageId) {
+        if (msg.kind === "compacting" && msg.messageId !== state.replyId) {
+          state.compacting = true; render(); controls();        // Compact now, or a summary for a new chat
+          return;
+        }
+        if ((msg.kind === "searching" || msg.kind === "looking" || msg.kind === "compacting") && msg.messageId) {
           state.searching[msg.messageId] = { kind: msg.kind, text: String(msg.text || "") };
           if (!state.messages.some((m) => m.id === msg.messageId)) state.messages.push({ id: msg.messageId, role: "assistant", text: "", thinking: "" });
           update(msg.messageId);
@@ -545,6 +649,7 @@
         }
         return;
       case "error":
+        if (state.compacting) { state.compacting = false; render(); }
         if (msg.opening && /doesn't exist/i.test(msg.message || "")) {
           vscode.postMessage({ type: "reopenNew" });             // gone (a temporary chat after a restart)
           return;
@@ -568,6 +673,19 @@
         return;
       case "copied":
         announce("Copied.");
+        return;
+      case "context":
+        state.context = { window: Number(msg.window) || 0, limit: Number(msg.limit) || 0, used: Number(msg.used) || 0,
+                          preset: String(msg.preset || ""), source: msg.source === "reported" ? "reported" : "estimated",
+                          parts: msg.parts && typeof msg.parts === "object" ? msg.parts : {} };
+        meter();
+        return;
+      case "compacted":
+        state.compacting = false;
+        if (state.conversation) state.conversation = { ...state.conversation, summary: msg.summary || null };
+        { const keep = pinned; pinned = false; render(); pinned = keep; }
+        controls();
+        announce("Earlier messages summarized.");
         return;
       case "image": {
         if (!/^att_[a-f0-9]{32}$/.test(String(msg.id || ""))) return;

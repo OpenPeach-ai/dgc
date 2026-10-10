@@ -52,6 +52,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   `fields` reads them back. Every chat follows them from its next reply.
 - **Search finds what was said.** `chatdgc_list` `query` searches every chat's name and conversation, with
   FTS5 or plain matching without it. A chat found by its words carries `match`, the words around them.
+- **The context window.**
+  - Each chat uses the model's real window, capped by `chatdgc_window` (`8k`, `32k`, `128k` or `max`),
+    and sends it with every request.
+  - Before a reply would fill more than 75% of the window, the older turns become a rolling summary and the
+    recent ones stay word for word. This is reported with `chatdgc_activity` `compacting`, then
+    `chatdgc_compacted`. If the summary can't be written, the reply still goes.
+  - `chatdgc_compact` compacts now, `chatdgc_summary` edits the summary, and `chatdgc_carry` continues in a
+    new chat with a summary.
+  - One attachment takes at most 40% of the window.
+  - `chatdgc_context` reports what a chat takes after every turn and when it opens.
 
 ### Models
 

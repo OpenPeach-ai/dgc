@@ -5738,7 +5738,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // The web search's address and whether its key is saved are opt-in fields (an older editor never
     // sees them); every supported CLI takes `fields` and ignores names it doesn't know.
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
-              fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality"] });
+              fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
+                       "chatdgc_window"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -6117,6 +6118,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         if (["default", "concise", "warm", "candid", "nerdy"].includes(String(v.chatdgc_personality || ""))) {
           values.chatdgc_personality = v.chatdgc_personality;
+        }
+        if (["8k", "32k", "128k", "max"].includes(String(v.chatdgc_window || ""))) {
+          values.chatdgc_window = v.chatdgc_window;
         }
       }
       if (v.context_size) { values.context_size = Number(v.context_size); }

@@ -33,6 +33,10 @@
   - copy the last code block: Ctrl/⌘+Shift+;;
   - focus the box: Shift+Esc;
   - the list of shortcuts: Ctrl/⌘+/.
+- **A context meter** in the box (amber at 70%, red at 85%), with **Compact now** and **Continue in a new chat**.
+  Near the limit, older messages are summarized. You see when it happens, the summary sits behind an
+  **Earlier messages summarized** divider, and you can edit it.
+- **Settings → ChatDGC → Window:** 8k, 32k, 128k, or the model's maximum.
 
 ### Questions
 

@@ -73,6 +73,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 </div></main>
 <footer class="cd-foot"><div class="cd-column">
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>
+<div id="cd-context-pop" class="cd-pop" role="dialog" aria-label="Context window" hidden></div>
 <form id="cd-box" class="cd-box"><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul><label for="cd-input" class="sr-only">Message ChatDGC</label>
 <textarea id="cd-input" class="cd-input" rows="1" placeholder="Ask anything" maxlength="${MAX_TEXT}"></textarea>
 <div class="cd-tools">
@@ -84,6 +85,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <option value="auto">Web: auto</option><option value="on">Web: always</option><option value="off">Web: off</option></select>
 <label id="cd-temp-toggle" class="cd-toggle" title="A temporary chat isn't saved or listed"><input type="checkbox" id="cd-temporary"> Temporary</label>
 <span class="cd-spacer"></span>
+<button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><svg class="cd-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="cd-ring-track" cx="10" cy="10" r="8"></circle><circle id="cd-ring-fill" class="cd-ring-fill" cx="10" cy="10" r="8"></circle></svg><span id="cd-context-pct">0%</span></button>
 <button type="submit" id="cd-send" class="cd-send" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
 <button type="button" id="cd-stop" class="cd-send cd-stop" title="Stop (Esc)" aria-label="Stop" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
 </div></form>
@@ -251,6 +253,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                  ...(typeof ev.data === "string" ? { data: ev.data } : { error: String(ev.error || "") }) });
         }
         return;
+      case "chatdgc_context":
+        for (const tab of showing(conversation)) {
+          this.post(tab, { type: "context", window: ev.window, limit: ev.limit, used: ev.used, preset: ev.preset,
+                           source: ev.source, parts: ev.parts });
+        }
+        return;
+      case "chatdgc_compacted":
+        if (asker) this.requests.delete(requestId);
+        for (const tab of showing(conversation)) this.post(tab, { type: "compacted", summary: ev.summary ?? null });
+        return;
       case "chatdgc_exported":
         if (asker) {
           this.requests.delete(requestId);
@@ -387,6 +399,20 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         return;
       }
+      case "compact":
+        if (conversation) this.ask({ tab, kind: "compact" }, { type: "chatdgc_compact", conversation_id: conversation });
+        return;
+      case "summary": {
+        const text = typeof message.text === "string" ? message.text : "";
+        if (conversation && text.trim() && text.length <= 20_000) {
+          this.ask({ tab, kind: "summary" }, { type: "chatdgc_summary", conversation_id: conversation, text });
+        }
+        return;
+      }
+      case "carry":
+        // Answered by the new chat's chatdgc_opened, which this tab then shows (an "open" request, as a new chat's).
+        if (conversation) this.ask({ tab, kind: "open" }, { type: "chatdgc_carry", conversation_id: conversation });
+        return;
       case "version": {
         const parent = String(message.parent || "");
         if (!conversation || !(parent === "root" || MESSAGE_ID.test(parent)) || !Number.isInteger(message.index)
