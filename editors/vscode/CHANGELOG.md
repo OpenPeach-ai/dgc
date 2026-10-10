@@ -43,6 +43,9 @@
   side bar; drag a chat onto one, or use **Move to project…**. A project's page shows its instructions, files,
   memory setting and chats, and its box starts a chat in it. Every chat in it reads its instructions and files,
   and a project can keep its memory to itself.
+- **The Library.** **Library** in the side bar shows every file you attached in ChatDGC, by kind, searchable by
+  name. Open where a file is, start a new chat with it, save a copy, add it to a project, or delete it. The
+  paperclip lists your newest files before Upload.
 - **Pictures from the web, where seeing helps.** Ask what a place, a dish, an animal or a style looks like and
   a strip of up to four pictures shows above the answer as it's written, each with the site it's from. Click
   one to see it larger, with its title and **Open page**; the arrow keys step through them. A rules, prices or

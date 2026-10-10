@@ -40,6 +40,23 @@ MAX_INSTRUCTIONS = 8_000             # characters of a project's instructions
 MAX_PROJECT_FILES = 40               # ChatGPT's own most, per project
 PROJECT_COLORS = ("purple", "blue", "teal", "green", "yellow", "orange", "red", "pink", "gray")
 PROJECT_MEMORY = ("shared", "project")     # the memory you share with every chat, or this project's alone
+# The Library's kinds, as ChatGPT filters it: what an attachment is, by its kind and its name.
+LIBRARY_TYPES = ("image", "pdf", "document", "spreadsheet", "presentation", "code", "text")
+_SHEETS = {"xlsx", "xls", "xlsm", "csv", "tsv", "ods", "numbers"}
+_SLIDES = {"pptx", "ppt", "odp", "key"}
+_CODE = {"py", "js", "ts", "tsx", "jsx", "mjs", "cjs", "json", "html", "htm", "css", "scss", "java", "c", "h", "cpp", "hpp",
+         "cc", "cs", "go", "rs", "rb", "php", "sh", "bash", "zsh", "ps1", "sql", "yaml", "yml", "toml", "ini", "xml", "swift",
+         "kt", "kts", "scala", "r", "lua", "pl", "dart", "vue", "svelte", "ipynb", "m", "mm", "gradle"}
+
+
+def library_type(kind: str, name: str) -> str:
+    if kind == "image":
+        return "image"
+    if kind == "text":
+        return "text"
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return ("pdf" if ext == "pdf" else "spreadsheet" if ext in _SHEETS else "presentation" if ext in _SLIDES
+            else "code" if ext in _CODE else "document")
 ROLES = ("user", "assistant")
 FINISHES = ("stop", "length", "cancelled", "error")
 
@@ -181,7 +198,7 @@ class ChatStore:
         for m in [*chat.get("messages", []), *(m for tail in tails for m in tail)]:
             for meta in m.get("attachments") or [] if isinstance(m, dict) else []:
                 ident = str(meta.get("id") or "")
-                if not ident or ident in seen:
+                if not ident or ident in seen or meta.get("removed"):
                     continue
                 seen.add(ident)
                 rows.append((chat["id"], ident, str(m.get("id") or ""), str(meta.get("name") or "attachment")[:255],
@@ -409,6 +426,68 @@ class ChatStore:
                 if self._fts:
                     db.execute("DELETE FROM body_fts WHERE id=?", (chat_id,))
 
+
+    # -- the Library (ChatGPT's): every file you attached, in one place
+
+    def library(self, *, query: str = "", kind: str = "", limit: int = 60, offset: int = 0) -> dict:
+        """Every file you attached, in every chat (archived ones too) and every project, the newest first: ``kind``
+        one of LIBRARY_TYPES, ``query`` part of a name. ``counts`` says how many of each kind the query finds."""
+        if type(limit) is not int or not 1 <= limit <= MAX_LIST or type(offset) is not int or offset < 0:
+            raise ChatStoreError(f"Ask for 1–{MAX_LIST} files at a time.")
+        if kind and kind not in LIBRARY_TYPES:
+            raise ChatStoreError("Choose images, PDFs, documents, spreadsheets, presentations, code or text.")
+        text = " ".join(str(query or "").split())[:200].casefold()
+        self._ensure()
+        with self._index() as db:
+            self._catch_up(db)
+            rows = db.execute("SELECT f.chat_id, f.id, f.message_id, f.name, f.kind, f.mime, f.size, f.chars, f.created_at, "
+                              "c.title, c.project FROM files f JOIN chats c ON c.id = f.chat_id").fetchall()
+        projects = self._read_projects()
+        names = {p["id"]: p.get("name", "") for p in projects}
+        items = [{"source": "chat", "chat_id": r[0], "id": r[1], "message_id": r[2], "name": r[3], "kind": r[4], "mime": r[5],
+                  "size": r[6], "chars": r[7], "created_at": r[8], "chat_title": r[9], "type": library_type(r[4], r[3]),
+                  **({"project_id": r[10], "project_name": names.get(r[10], "")} if r[10] in names else {})} for r in rows]
+        for project in projects:
+            for f in project.get("files") or []:
+                name = str(f.get("name") or "file")
+                items.append({"source": "project", "project_id": project["id"], "project_name": project.get("name", ""),
+                              "id": f.get("id"), "name": name, "kind": f.get("kind", "document"), "mime": f.get("mime", ""),
+                              "size": int(f.get("size") or 0), "chars": int(f.get("chars") or 0),
+                              "created_at": f.get("added_at") or project.get("created_at") or "",
+                              "type": library_type(str(f.get("kind") or ""), name)})
+        if text:
+            items = [i for i in items if text in i["name"].casefold()]
+        counts = {t: sum(1 for i in items if i["type"] == t) for t in LIBRARY_TYPES}
+        if kind:
+            items = [i for i in items if i["type"] == kind]
+        items.sort(key=lambda i: (i["name"].casefold(), i["id"] or ""))       # files sent together: by name
+        items.sort(key=lambda i: i["created_at"] or "", reverse=True)
+        page = items[offset:offset + limit]
+        return {"files": page, "total": len(items), "counts": counts,
+                "next_offset": offset + len(page) if offset + len(page) < len(items) else None}
+
+    def remove_file(self, chat_id: str, attachment_id: str) -> dict:
+        """Delete a file you attached, from the Library: its bytes go; the chat keeps its name, marked removed,
+        and says it's no longer there."""
+        with self._locked():
+            chat = self.get(chat_id)
+            tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
+            found = False
+            for m in [*chat["messages"], *(m for tail in tails for m in tail)]:
+                for meta in m.get("attachments") or []:
+                    if meta.get("id") == attachment_id:
+                        meta["removed"] = True
+                        found = True
+            if not found:
+                raise ChatStoreError("That file isn't in this chat.")
+            folder = self.files_dir(chat_id)
+            for name in (attachment_id, f"{attachment_id}.txt"):
+                try:
+                    (folder / name).unlink()
+                except OSError:
+                    pass
+            self._write(chat)
+        return chat
 
     # -- projects (ChatGPT's): chats, files and instructions together
 

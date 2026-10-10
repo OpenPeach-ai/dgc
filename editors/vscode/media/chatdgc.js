@@ -343,10 +343,12 @@
   /** One attachment as a chip: an icon for its kind, its name, and its size or length. */
   function chip(item, onRemove) {
     const node = el("li", "cd-chip");
-    const kind = item.kind === "file" ? (/\.(png|jpe?g|gif|webp)$/i.test(item.name || "") ? "image" : "file") : item.kind;
+    const kind = item.kind === "library" ? item.fileKind
+      : item.kind === "file" ? (/\.(png|jpe?g|gif|webp)$/i.test(item.name || "") ? "image" : "file") : item.kind;
     const glyph = el("span", `codicon codicon-${KIND_ICON[kind] || "file"}`); glyph.setAttribute("aria-hidden", "true");
     const name = el("span", "cd-chip-name", item.name || "Attachment");
-    const about = item.kind === "text" && typeof item.text === "string" ? `${item.text.length.toLocaleString()} characters`
+    const about = item.removed ? "deleted from your Library"
+      : item.kind === "text" && typeof item.text === "string" ? `${item.text.length.toLocaleString()} characters`
       : Number(item.chars) && item.kind !== "image" ? `${Number(item.chars).toLocaleString()} characters`
       : Number(item.size) ? sizeText(Number(item.size)) : "";
     node.append(glyph, name);
@@ -773,7 +775,7 @@
     node.dataset.id = message.id || "";
     if (message.role === "user") {
       const sent = Array.isArray(message.attachments) ? message.attachments : [];
-      const pictures = sent.filter((item) => item.kind === "image" && /^att_[a-f0-9]{32}$/.test(item.id || ""));
+      const pictures = sent.filter((item) => item.kind === "image" && !item.removed && /^att_[a-f0-9]{32}$/.test(item.id || ""));
       if (pictures.length) {
         const row = el("div", "cd-thumbs");
         for (const item of pictures) row.append(thumb(item));
@@ -1225,8 +1227,9 @@
     }
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "",
                          search: searchMode(),
-                         ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted }) =>
-                           ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}) })) } : {}) });
+                         ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
+                           ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}),
+                              ...(kind === "library" ? { ...(conversation_id ? { conversation_id } : { project_id }), attachment_id } : {}) })) } : {}) });
     state.lastSent = { text, research: false, pending: state.pending, searchFirst: state.searchFirst };
     searchFirst(false);
     input.value = ""; grow(); saveDraft();
@@ -1602,7 +1605,8 @@
       case "attached":
         for (const item of Array.isArray(msg.items) ? msg.items : []) {
           if (state.pending.length >= 10) { showNotice("Attach up to 10 things to one message.", "info"); break; }
-          if (!state.pending.some((p) => p.path && p.path === item.path)) state.pending.push(item);
+          const same = (p) => (p.path && p.path === item.path) || (item.kind === "library" && p.attachment_id === item.attachment_id);
+          if (!state.pending.some(same)) state.pending.push(item);
         }
         chips(); controls(); input.focus();
         return;

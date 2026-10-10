@@ -267,6 +267,47 @@ class ChatEngine:
                 raise ChatEngineError("A temporary chat isn't kept, so it can't be in a project.")
         return self.store.move(chat_id, project_id)
 
+    # -- the Library (store.library): every file you attached, to see, use again, keep elsewhere, or delete
+
+    def library_file(self, ref: dict) -> tuple[dict, bytes, str | None]:
+        """One file in the Library, by {conversation_id, attachment_id} or {project_id, attachment_id}: (what it
+        is, its bytes, what a model reads of it)."""
+        ident = str((ref or {}).get("attachment_id") or (ref or {}).get("id") or "")
+        if ref.get("project_id"):
+            project = self.store.project(str(ref["project_id"]))
+            meta = next((f for f in project.get("files") or [] if f.get("id") == ident), None)
+            if meta is None:
+                raise ChatEngineError("That file isn't in the project.")
+            raw, text = self.store.get_project_file(project["id"], ident)
+            return meta, raw, text
+        chat = self._chat(str(ref.get("conversation_id") or ref.get("chat_id") or ""))
+        tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
+        meta = next((a for m in [*chat["messages"], *(m for tail in tails for m in tail)]
+                     for a in m.get("attachments") or [] if a.get("id") == ident and not a.get("removed")), None)
+        found = self._file(chat, ident) if meta else None
+        if meta is None or found is None:
+            raise ChatEngineError("That file is no longer in your Library.")
+        return meta, found[0], found[1]
+
+    def _from_library(self, ref: dict) -> dict:
+        """A Library file attached again: a copy of it, as a new attachment of this message."""
+        meta, raw, text = self.library_file(ref)
+        kept = {k: meta[k] for k in ("kind", "name", "size", "mime", "chars", "truncated") if k in meta}
+        return {"meta": {**kept, "id": attached.new_attachment_id()}, "raw": raw, "text": text, "summary": {}}
+
+    def library_to_project(self, ref: dict, project_id: str) -> dict:
+        """Add a Library file to a project's files (a copy: the chat it came from keeps its own)."""
+        meta, raw, text = self.library_file(ref)
+        kept = {k: meta[k] for k in ("kind", "name", "size", "mime", "chars", "truncated") if k in meta}
+        self.store.put_project_file(project_id, {**kept, "id": attached.new_attachment_id()}, raw, text)
+        return self.store.project(project_id)
+
+    def remove_library_file(self, ref: dict) -> None:
+        if ref.get("project_id"):
+            self.store.remove_project_file(str(ref["project_id"]), str(ref.get("attachment_id") or ""))
+        else:
+            self.store.remove_file(str(ref.get("conversation_id") or ""), str(ref.get("attachment_id") or ""))
+
     def add_project_files(self, project_id: str, items) -> dict:
         """Files for every chat in a project: read and kept as an attachment is, in the project's own folder."""
         self.store.project(project_id)
@@ -375,10 +416,16 @@ class ChatEngine:
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
         ``reply_id`` is the id the streamed parts and the finished reply will carry."""
         text = str(text or "")
+        # From the Library: copies of files kept elsewhere in DGC (by id, never a path); the rest as attached.
+        listed = attachments if isinstance(attachments, list) else None
+        library = [i for i in listed or [] if isinstance(i, dict) and i.get("kind") == "library"]
         try:
-            prepared = attached.prepare(attachments)
+            prepared = attached.prepare([i for i in listed if i not in library] if listed is not None else attachments)
         except attached.AttachmentError as exc:
             raise ChatEngineError(str(exc)) from exc
+        if len(prepared) + len(library) > attached.MAX_ATTACHMENTS:
+            raise ChatEngineError(f"Attach up to {attached.MAX_ATTACHMENTS} things to one message.")
+        prepared += [self._from_library(ref) for ref in library]
         if not text.strip() and not prepared:
             raise ChatEngineError("Type a message first.")
         if len(text) > MAX_TEXT:

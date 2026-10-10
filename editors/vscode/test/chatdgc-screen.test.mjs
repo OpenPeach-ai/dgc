@@ -565,6 +565,102 @@ test("the home's projects: a New project, each project's chats under it, and a c
   } finally { await page.close(); }
 });
 
+test("a Library file in the box goes by id, and a file deleted from the Library says so where it was sent", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const att = (c) => "att_" + c.repeat(32), FROM = `chat_${"e".repeat(32)}`;
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Check these", attachments: [
+        { id: att("a"), kind: "image", name: "old.png", size: 900, removed: true },
+        { id: att("b"), kind: "document", name: "budget.csv", size: 15, chars: 15, removed: true }] },
+      { id: M(2), role: "assistant", text: "Done.", finish: "stop" }] });
+    assert.equal(await s.page.locator(".cd-user .cd-thumb").count(), 0, "a deleted image isn't asked for");
+    assert.deepEqual(await s.page.locator(".cd-user .cd-sent .cd-chip-about").allTextContents(), ["deleted from your Library", "deleted from your Library"]);
+    const item = { kind: "library", fileKind: "document", name: "itinerary.pdf", size: 52000, chars: 4000, conversation_id: FROM, attachment_id: att("c") };
+    await s.send({ type: "attached", items: [item, item] });
+    assert.deepEqual(await s.page.locator("#cd-chips .cd-chip-name").allTextContents(), ["itinerary.pdf"], "once, however often it's chosen");
+    assert.equal(await s.page.locator("#cd-chips .codicon-file-text").count(), 1, "its own kind's icon");
+    await s.page.locator("#cd-input").fill("Summarize it");
+    await s.page.keyboard.press("Enter");
+    assert.deepEqual((await s.posted("send"))[0].attachments, [{ kind: "library", name: "itinerary.pdf", conversation_id: FROM, attachment_id: att("c") }]);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+function libraryHtml() {
+  const source = readFileSync(join(root, "src/chatdgc.ts"), "utf8");
+  const doc = source.slice(source.indexOf("export function libraryDocument")).match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1]
+    .replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "").replace("font-src ;", "font-src data:;");
+  const codicon = readFileSync(join(root, "media/codicon.css"), "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
+    `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
+  const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
+  const own = readFileSync(join(root, "media/chatdgc.css"), "utf8");
+  return { html: doc.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${own}</style></head>`),
+           js: readFileSync(join(root, "media/library.js"), "utf8") };
+}
+
+test("the Library: every file you attached, by kind, searched by name, each with its actions", async (t) => {
+  if (skipOrFail(t)) return;
+  const { html, js } = libraryHtml();
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await page.setContent(html, { waitUntil: "load" });
+    await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
+    await page.evaluate((code) => {
+      window.__posted = []; window.__state = undefined;
+      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
+      eval(code);
+    }, js);
+    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
+    assert.deepEqual(await posted("ready"), [{ type: "ready", kind: "" }]);
+    assert.equal(await page.locator("#lib-status").textContent(), "Loading…");
+    const today = new Date().toISOString();
+    const files = [
+      { source: "chat", chat_id: `chat_${"a".repeat(32)}`, id: `att_${"1".repeat(32)}`, name: "sign.png", kind: "image", type: "image", size: 7000, created_at: today, chat_title: "Sign" },
+      { source: "chat", chat_id: `chat_${"b".repeat(32)}`, id: `att_${"2".repeat(32)}`, name: '<img src=x onerror="window.__owned=1">.pdf', kind: "document", type: "pdf", size: 52000, created_at: "2026-01-02T10:00:00Z", chat_title: "Visa", project_name: "Travel" },
+      { source: "project", project_id: `proj_${"c".repeat(32)}`, id: `att_${"3".repeat(32)}`, name: "Hotel", kind: "text", type: "text", size: 40, created_at: today, project_name: "Goa trip" }];
+    await send({ type: "library", files, total: 3, next: 3, counts: { image: 1, pdf: 1, text: 1, document: 0 } });
+    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ["sign.png", '<img src=x onerror="window.__owned=1">.pdf', "Hotel"]);
+    assert.equal(await page.evaluate(() => document.querySelectorAll(".lib-name img").length + (window.__owned || 0)), 0, "names are words");
+    const metas = await page.locator(".lib-meta").allTextContents();
+    assert.deepEqual([metas[0], metas[2]], ["Image · 7 KB · in “Sign” · Today", "Pasted text · 40 B · in the project Goa trip · Today"]);
+    assert.match(metas[1], /^PDF · 51 KB · in “Visa” · Travel · (2 Jan|Jan 2)$/, "the date as this machine writes it");
+    assert.deepEqual(await page.locator(".lib-kind").allInnerTexts(), ["All\n3", "Images\n1", "PDFs\n1", "Pasted text\n1"], "only the kinds there are");
+    assert.deepEqual((await posted("image")).map((m) => m.file.id), [`att_${"1".repeat(32)}`], "an image's preview, asked for by id");
+    await send({ type: "image", id: `att_${"1".repeat(32)}`, data: "data:image/png;base64,iVBORw0KGgo=" });
+    assert.equal(await page.locator(".lib-preview img").getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
+    if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library.png") });
+    const second = page.locator(".lib-row").nth(1);
+    for (const label of ["Open the chat it's in", "Use in a new chat", "Save a copy…", "Add a copy to a project…", "Delete from your Library"]) {
+      await second.locator(`button[aria-label="${label}"]`).click();
+    }
+    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.file))).map((m) => [m.type, m.file.id]),
+      [["image", `att_${"1".repeat(32)}`], ...["open", "use", "save", "toProject", "remove"].map((type) => [type, `att_${"2".repeat(32)}`])]);
+    assert.equal(await page.locator('.lib-row').nth(2).locator('button[aria-label^="Open the project"]').getAttribute("aria-label"), "Open the project Goa trip");
+    await page.locator(".lib-kind", { hasText: "PDFs" }).click();
+    assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "pdf", offset: 0 });
+    assert.equal(await page.evaluate(() => window.__state?.kind), "pdf", "remembered");
+    await send({ type: "library", files: [files[1]], total: 2, next: 1, counts: { pdf: 2 } });
+    await page.locator("#lib-more").click();
+    assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "pdf", offset: 1 });
+    await send({ type: "library", files: [{ ...files[1], id: `att_${"4".repeat(32)}`, name: "older.pdf" }], total: 2, next: null, counts: { pdf: 2 } });
+    assert.equal(await page.locator(".lib-row").count(), 2, "the next page adds to the list");
+    assert.equal(await page.locator("#lib-more").isHidden(), true);
+    await page.locator("#lib-search").fill("tax");
+    await page.waitForTimeout(400);
+    assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "tax", kind: "pdf", offset: 0 });
+    await send({ type: "library", files: [], total: 0, next: null, counts: { pdf: 0 } });
+    assert.equal(await page.locator("#lib-status").textContent(), "No file named like “tax”.");
+    await send({ type: "error", message: "That file is no longer in your Library." });
+    assert.equal(await page.locator("#lib-status").textContent(), "That file is no longer in your Library.");
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test("attachments: picked files and pastes become chips, go with the message, and show on it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

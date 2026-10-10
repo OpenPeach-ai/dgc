@@ -48,6 +48,7 @@ globalThis.__DGC_TEST_VSCODE = {
     } },
   FileType: { File: 1, Directory: 2 },
   ViewColumn: { Active: -1 },
+  QuickPickItemKind: { Separator: -1 },
   env: { clipboard: { writeText: async (text) => { world.clipboard = text; } }, openExternal: async (uri) => { world.opened.push(uri.toString()); return true; } },
   window: {
     createWebviewPanel(viewType, title) { const panel = fakePanel(viewType, title); world.panels.push(panel); return panel; },
@@ -82,7 +83,7 @@ await build({
     builder.onLoad({ filter: /^vscode$/, namespace: "test" }, () => ({ contents: "module.exports = globalThis.__DGC_TEST_VSCODE;", loader: "js" }));
   } }],
 });
-const { ChatDGC, chatTitle, CHATDGC_EDITOR } = createRequire(import.meta.url)(bundle);
+const { ChatDGC, chatTitle, CHATDGC_EDITOR, CHATDGC_LIBRARY } = createRequire(import.meta.url)(bundle);
 after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 
 const ID = (n) => `chat_${String(n).repeat(32).slice(0, 32)}`;
@@ -298,6 +299,10 @@ test("attachments: only files this tab's picker returned, real pasted images, an
   world.chosen = [file("/home/u/trip.csv"), { scheme: "untitled", fsPath: "x", path: "x" }, file("/home/u/photo.png")];
   world.sizes = { "/home/u/trip.csv": 42, "/home/u/photo.png": 2048 };
   panel.say({ type: "attach" });
+  await new Promise((r) => setTimeout(r, 0));
+  // Nothing in the Library yet: straight to the picker.
+  chat.onEvent({ type: "chatdgc_library", request_id: last("chatdgc_library").request_id, files: [], total: 0, next_offset: null, counts: {} });
+  await new Promise((r) => setTimeout(r, 0));
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(panel.last("attached").items, [{ kind: "file", path: "/home/u/trip.csv", name: "trip.csv", size: 42 },
                                                    { kind: "file", path: "/home/u/photo.png", name: "photo.png", size: 2048 }]);
@@ -571,4 +576,73 @@ test("the home's projects: listed with the chats, opened as pages, and a chat dr
   chat.onEvent({ type: "chatdgc_projects", projects: [{ id: PROJ("a"), name: "Goa 2026" }] });
   assert.equal(world.panels[0].last("projects").projects[0].name, "Goa 2026");
   assert.equal(host.home.at(-1).projects[0].name, "Goa 2026");
+});
+
+test("the Library: its own tab, its files asked for, and each file's actions through the host", async () => {
+  chat.openLibrary();
+  chat.openLibrary();
+  assert.equal(world.panels.length, 1, "one Library");
+  const [lib] = world.panels;
+  assert.equal(lib.viewType, CHATDGC_LIBRARY);
+  assert.match(lib.webview.html, /media\/library\.js/);
+  assert.match(lib.webview.html, /img-src[^;]*data:;/, "its images come from DGC, never a site");
+  lib.say({ type: "ready", kind: "pdf" });
+  const asked = last("chatdgc_library");
+  assert.deepEqual({ ...asked, request_id: undefined }, { type: "chatdgc_library", kind: "pdf", limit: 60, offset: 0, request_id: undefined });
+  chat.onEvent({ type: "chatdgc_library", request_id: asked.request_id, files: [{ id: "x" }], total: 1, next_offset: null, counts: { pdf: 1 } });
+  assert.deepEqual(lib.last("library"), { type: "library", files: [{ id: "x" }], total: 1, next: null, counts: { pdf: 1 } });
+  const file = { source: "chat", chat_id: ID(7), id: `att_${"a".repeat(32)}`, name: "budget.csv", kind: "document", size: 15 };
+  const projectFile = { source: "project", project_id: PROJ("a"), id: `att_${"b".repeat(32)}`, name: "Hotel", kind: "text" };
+  lib.say({ type: "image", file: { ...file, kind: "image" } });
+  const image = last("chatdgc_file");
+  assert.deepEqual([image.conversation_id, image.attachment_id], [ID(7), file.id]);
+  chat.onEvent({ type: "chatdgc_file", request_id: image.request_id, conversation_id: ID(7), attachment_id: file.id, data: "data:image/png;base64,AAAA" });
+  assert.equal(lib.last("image").data, "data:image/png;base64,AAAA");
+  world.saveTo = { scheme: "file", fsPath: "/home/u/budget.csv" };
+  lib.say({ type: "save", file });
+  await tick();
+  assert.deepEqual([last("chatdgc_library_file").op, last("chatdgc_library_file").path, last("chatdgc_library_file").conversation_id], ["save", "/home/u/budget.csv", ID(7)]);
+  chat.onEvent({ type: "chatdgc_library_file", request_id: last("chatdgc_library_file").request_id, op: "save", path: "/home/u/budget.csv", bytes: 15 });
+  assert.deepEqual(world.infos.at(-1), "Saved budget.csv.");
+  world.answer = undefined;
+  lib.say({ type: "remove", file });
+  await tick();
+  assert.equal(last("chatdgc_library_file").op, "save", "not deleted unless confirmed");
+  world.answer = "Delete";
+  lib.say({ type: "remove", file: projectFile });
+  await tick();
+  const removed = last("chatdgc_library_file");
+  assert.deepEqual([removed.op, removed.project_id, removed.attachment_id], ["remove", PROJ("a"), projectFile.id]);
+  chat.onEvent({ type: "chatdgc_library_file", request_id: removed.request_id, op: "remove" });
+  assert.equal(lib.last("changed").type, "changed", "the list is asked for again");
+  lib.say({ type: "save", file: { ...file, chat_id: "../../etc" } });
+  lib.say({ type: "open", file: projectFile });
+  assert.equal(world.panels.length, 2, "a project's file opens its project");
+  assert.equal(sent.filter((c) => c.type === "chatdgc_library_file").length, 2, "a file the Library didn't name isn't touched");
+});
+
+test("a Library file in a new chat, or from the paperclip, and a send names only files picked for it", async () => {
+  chat.openLibrary();
+  const [lib] = world.panels;
+  const file = { source: "chat", chat_id: ID(7), id: `att_${"a".repeat(32)}`, name: "budget.csv", kind: "document", size: 15, chars: 15 };
+  lib.say({ type: "use", file });
+  assert.equal(world.panels.length, 2);
+  const tab = world.panels[1];
+  tab.say({ type: "ready" });
+  opened(tab, { id: ID(8), title: "New chat" });
+  assert.deepEqual(tab.last("attached").items, [{ kind: "library", fileKind: "document", name: "budget.csv", size: 15, chars: 15,
+                                                   conversation_id: ID(7), attachment_id: file.id }]);
+  tab.say({ type: "send", text: "Total?", attachments: [{ kind: "library", conversation_id: ID(7), attachment_id: file.id },
+                                                      { kind: "library", conversation_id: ID(9), attachment_id: `att_${"c".repeat(32)}` }] });
+  assert.deepEqual(last("chatdgc_send").attachments, [{ kind: "library", conversation_id: ID(7), attachment_id: file.id }],
+                   "a file the page names that wasn't picked here doesn't go");
+  // The paperclip: the newest Library files first, then upload.
+  tab.say({ type: "attach" });
+  await tick();
+  const recent = last("chatdgc_library");
+  assert.equal(recent.limit, 8);
+  world.pick = undefined;
+  chat.onEvent({ type: "chatdgc_library", request_id: recent.request_id, files: [{ ...file, id: `att_${"d".repeat(32)}`, chat_title: "Goa" }], total: 1, next_offset: null, counts: {} });
+  await tick(); await tick();
+  assert.equal(world.picks.at(-1).length, 3, "Upload, a heading, and the recent file");
 });

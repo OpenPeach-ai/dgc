@@ -850,6 +850,7 @@
     if (!box || !list) return;
     box.hidden = !chatsAvailable || !!homeQuery;
     $("chats-sub").hidden = box.hidden || !projects.length;
+    if ($("chats-library")) $("chats-library").hidden = box.hidden;
     if (box.hidden) return;
     const focused = document.activeElement?.closest?.(".project-row, .chat-row-nested")?.dataset.id;
     list.replaceChildren();
@@ -914,6 +915,7 @@
     if (node) dropTarget(node, (types) => types.includes(CHAT_IN_PROJECT), (chat) => vscode.postMessage({ type: "chatdgcMove", id: chat, project: "" }));
   }
   $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
+  $("chats-library")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcLibrary" }));
   // Chat | Work: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
   // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
   // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.

@@ -242,6 +242,12 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .project-start:hover { border-color:var(--accent); color:var(--text); }
 #sessions-host .chat-project { padding:0 6px; border-radius:var(--r-full); background:var(--surface2); color:var(--text); }
 #sessions-host .drop-here { background:color-mix(in srgb, var(--accent) 16%, transparent); outline:1px dashed var(--accent); outline-offset:-1px; }
+#sessions-host .home-library { display:flex; align-items:center; gap:var(--sp-2); width:100%; padding:var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-3);
+  border:0; border-radius:var(--r-md); background:transparent; color:var(--text); font:var(--w-med) var(--t-sm)/1.35 var(--sans); text-align:left; cursor:pointer; }
+#sessions-host .home-library[hidden] { display:none; }
+#sessions-host .home-library:hover { background:var(--surface2); }
+#sessions-host .home-library:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
+#sessions-host .home-library .codicon { color:var(--muted); }
 /* A project's colour: its folder's, here and on its page (chatdgc.css). Mid tones that hold on both themes. */
 .project-icon[data-color="purple"] { color:#8B5CF6; } .project-icon[data-color="blue"] { color:#3B82F6; }
 .project-icon[data-color="teal"] { color:#14B8A6; } .project-icon[data-color="green"] { color:#22C55E; }

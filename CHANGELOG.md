@@ -67,6 +67,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   A project chat's model reads the project's instructions, its files (a quarter of the window at most) and what
   its other chats are about; project-only memory reads and writes no shared memory. The chat index gains a
   `project` column (added safely when two processes open an older index at once) and a `files` table.
+- **The ChatDGC Library.** `chatdgc_library` lists every attached file (chats, archived ones too, and
+  projects), newest first, by `kind` and name, with `counts` per kind; `chatdgc_library_file` saves one where
+  the user chose, removes one (its chat keeps the attachment marked `removed`), or copies one into a project. A
+  send's `attachments` take `{kind: "library", conversation_id | project_id, attachment_id}`, copied into the
+  chat; the extension forwards only files picked for that tab.
 - **Pictures from the web, where seeing helps.** The same check (for `auto` and `on`) names an image search
   when pictures are part of the answer (a place, a dish, an animal, a product, a style), and none otherwise.
   The backend runs it with the search set in Settings (`dgc/search.py` `images()`: DuckDuckGo through `ddgs`,

@@ -433,3 +433,39 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .cd-project-delete { align-self: flex-start; margin-top: var(--sp-3); padding: 4px 0; border: 0; background: transparent; color: var(--err-text, #f87171);
   font: var(--w-med) var(--t-sm)/1.3 var(--sans); cursor: pointer; }
 .cd-project-delete:hover { text-decoration: underline; }
+
+/* The Library (ChatGPT's): every file attached in ChatDGC, a list you can search and narrow to one kind. */
+.lib-body { margin: 0; background: var(--bg); color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.lib { box-sizing: border-box; max-width: 860px; margin: 0 auto; padding: var(--sp-5) var(--sp-4) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }
+.lib-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.lib-title { display: inline-flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-strong); font: var(--w-semi) 22px/1.25 var(--sans); }
+.lib-title .codicon { font-size: 20px; color: var(--muted); }
+.lib-search { width: min(320px, 100%); }
+.lib-about { margin: 0; color: var(--muted); font-size: var(--t-xs); }
+.lib-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.lib-kind { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border: 1px solid var(--border-strong);
+  border-radius: var(--r-full); background: transparent; color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.lib-kind:hover { color: var(--text); border-color: var(--text); }
+.lib-kind[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text-strong); }
+.lib-kind:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.lib-kind-count { color: var(--faint); font-variant-numeric: tabular-nums; }
+.lib-status { margin: var(--sp-3) 0; color: var(--muted); }
+.lib-status[hidden] { display: none; }
+.lib-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+.lib-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; padding: var(--sp-2) var(--sp-1); border-bottom: 1px solid var(--border); }
+.lib-row:hover { background: var(--surface); }
+.lib-preview { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; overflow: hidden;
+  border-radius: var(--r-md); background: var(--surface2); color: var(--muted); }
+.lib-preview img { width: 100%; height: 100%; object-fit: cover; }
+.lib-preview .codicon { font-size: 18px; }
+.lib-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lib-name { overflow: hidden; color: var(--text); font: var(--w-med) var(--t-sm)/1.35 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
+.lib-meta { overflow: hidden; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-overflow: ellipsis; white-space: nowrap; }
+.lib-actions { flex: none; display: flex; gap: 2px; }
+.lib-action { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0;
+  border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.lib-action:hover { background: var(--surface2); color: var(--text); }
+.lib-action:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.lib-action[aria-label^="Delete"]:hover { color: var(--err-text); }
+.lib-more { align-self: center; }
+@media (max-width: 560px) { .lib-actions { flex-wrap: wrap; width: 60px; } }

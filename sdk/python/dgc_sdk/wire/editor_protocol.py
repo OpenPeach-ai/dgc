@@ -818,6 +818,16 @@ COMMAND_FIELDS.update({
                         "memory": _f("string", required=False, enum=("shared", "project")), "keep_chats": _B(False),
                         "attachments": _A(False), "file_id": _S(False)},
     "chatdgc_move": {"request_id": _S(), "conversation_id": _S(), "project_id": _S()},
+    # The Library (ChatGPT's): every file you attached, in every chat and project, newest first; `kind` one of
+    # image, pdf, document, spreadsheet, presentation, code, text; `query` part of a name. Answered by
+    # `chatdgc_library` {files: [{source: chat|project, id, name, kind, type, mime, size, chars, created_at,
+    # chat_id?, chat_title?, message_id?, project_id?, project_name?}], total, next_offset, counts}.
+    # `chatdgc_library_file` saves one where the user chose, removes it, or copies it into a project; a send takes
+    # {kind: "library", conversation_id | project_id, attachment_id} to attach a copy of one.
+    "chatdgc_library": {"request_id": _S(), "query": _S(False), "kind": _S(False), "limit": _I(False), "offset": _I(False)},
+    "chatdgc_library_file": {"request_id": _S(), "op": _f("string", enum=("save", "remove", "to_project")),
+                             "conversation_id": _S(False), "project_id": _S(False), "attachment_id": _S(),
+                             "path": _S(False), "target_project": _S(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "before": _S()},
     "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
                      "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
@@ -890,6 +900,8 @@ EVENT_FIELDS.update({
     "chatdgc_opened": {"request_id": _S(), "conversation": _O(), "messages": _A(), "earlier": _I(),
                        "busy": _B(), "reply_id": _S(False), "project": _O(False)},
     "chatdgc_projects": {"request_id": _S(False), "projects": _A()},
+    "chatdgc_library": {"request_id": _S(), "files": _A(), "total": _I(), "next_offset": _f("integer", "null"), "counts": _O()},
+    "chatdgc_library_file": {"request_id": _S(), "op": _S(), "path": _S(False), "bytes": _I(False)},
     "chatdgc_project": {"request_id": _S(), "project": _f("object", "null"), "deleted": _A(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "messages": _A(), "earlier": _I()},
     "chatdgc_turn": {"conversation_id": _S(), "state": _f("string", enum=("started", "ended")),

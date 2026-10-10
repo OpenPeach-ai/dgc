@@ -147,6 +147,7 @@ class ChatService:
              "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
              "chatdgc_carry": self._carry, "chatdgc_branch": self._branch, "chatdgc_research": self._research,
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
+             "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -304,6 +305,39 @@ class ChatService:
         for chat_id in deleted:
             self.emit("chatdgc_changed", conversation_id=chat_id, summary=None)
         self._projects_changed()
+
+    # -- the Library (ChatGPT's): every file you attached
+
+    def _library(self, cmd: dict) -> None:
+        found = self.engine.store.library(query=cmd.get("query", ""), kind=cmd.get("kind", ""),
+                                          limit=cmd.get("limit", 60), offset=cmd.get("offset", 0))
+        self.emit("chatdgc_library", request_id=cmd["request_id"], **found)
+
+    def _library_file(self, cmd: dict) -> None:
+        ref = {key: cmd[key] for key in ("conversation_id", "project_id", "attachment_id") if cmd.get(key)}
+        op, fields = cmd["op"], {}
+        if op == "save":
+            import os
+            from pathlib import Path
+            target = Path(cmd.get("path") or "")
+            if not target.is_absolute() or target.is_dir() or not target.parent.is_dir():
+                raise ChatEngineError("Choose where to save the file.")
+            _meta, raw, _text = self.engine.library_file(ref)
+            temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+            try:
+                temp.write_bytes(raw)
+                os.replace(temp, target)
+            except OSError as exc:
+                temp.unlink(missing_ok=True)
+                raise ChatEngineError(f"The file couldn't be saved: {exc.strerror or exc}.") from exc
+            fields = {"path": str(target), "bytes": len(raw)}
+        elif op == "to_project":
+            self.engine.library_to_project(ref, cmd.get("target_project") or "")
+        else:                                         # remove
+            self.engine.remove_library_file(ref)
+        self.emit("chatdgc_library_file", request_id=cmd["request_id"], op=op, **fields)
+        if op != "save":
+            self._projects_changed()
 
     def _move(self, cmd: dict) -> None:
         conversation_id = cmd["conversation_id"]

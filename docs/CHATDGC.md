@@ -137,6 +137,13 @@ voice come in later phases.
     project knows what the project's other chats are about.
   - **Deleting a project** deletes its files and instructions, and its chats too unless you keep them; kept
     chats move back to your chats.
+- **The Library**, as ChatGPT has it: **Library** in the side bar opens every file you attached, in every chat
+  and project (temporary chats keep none), newest first. Show one kind (images, PDFs, documents, spreadsheets,
+  presentations, code, pasted text) or search by name. Each file can open the chat or project it's in, start a
+  new chat with it attached, be saved as a copy, be added to a project, or be deleted: the chat it was in keeps
+  its name, marked as deleted, and its model is told it's no longer there. The paperclip lists your newest
+  Library files before **Upload files…**; a file attached from the Library is a copy, so the chat keeps it even
+  if the original goes.
 - **Custom instructions and personality.** **Settings → ChatDGC** sets what ChatDGC should know about you and
   how it should respond (up to 1,500 characters each), and its personality: Default, Concise, Warm, Candid
   or Nerdy. Every chat uses them from its next reply; Work and your Pips don't.

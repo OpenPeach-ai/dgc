@@ -11,6 +11,9 @@ import { homedir } from "os";
  * has a new one, and a retired one must never be started again.
  */
 export const CHATDGC_EDITOR = "dgc.chatdgcEditor";
+export const CHATDGC_LIBRARY = "dgc.chatdgcLibrary";
+const LIBRARY_KINDS = new Set(["image", "pdf", "document", "spreadsheet", "presentation", "code", "text"]);
+const ATTACHMENT_ID = /^att_[a-f0-9]{32}$/;
 const CONVERSATION_ID = /^chat_[a-f0-9]{32}$/;
 const MESSAGE_ID = /^msg_[a-f0-9]{32}$/;
 const PROJECT_ID = /^proj_[a-f0-9]{32}$/;
@@ -51,9 +54,13 @@ interface Tab {
   /** Files this tab's picker returned: the only paths a send may name, so a page can never have the
    *  backend read a file the user didn't choose. */
   picked: Set<string>;
+  /** Library files chosen for this tab ("<chat or project>/<file>"), the only ones a send may copy. */
+  pickedLibrary?: Set<string>;
+  /** A Library file to attach once the tab has its chat (Use in a new chat). */
+  waitingAttach?: Record<string, unknown>[];
 }
 
-type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string };
+type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel };
 
 export function chatTitle(text: string): string {
   const flat = String(text || "").replace(/\s+/g, " ").trim();
@@ -103,6 +110,22 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
+/** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
+export function libraryDocument(asset: (name: string) => string, cspSource: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
+<link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
+<title>Library</title></head><body class="lib-body">
+<main class="lib"><header class="lib-head"><h1 class="lib-title"><span class="codicon codicon-library" aria-hidden="true"></span>Library</h1>
+<label class="sr-only" for="lib-search">Search your files by name</label><input id="lib-search" class="cd-field lib-search" type="search" placeholder="Search files" maxlength="200" autocomplete="off"></header>
+<p class="lib-about">Every file you attached in ChatDGC, in every chat and project. Temporary chats keep none.</p>
+<div id="lib-kinds" class="lib-kinds" role="toolbar" aria-label="Show"></div>
+<p id="lib-status" class="lib-status" role="status"></p>
+<ul id="lib-list" class="lib-list" aria-label="Your files"></ul>
+<button type="button" id="lib-more" class="cd-edit-cancel lib-more" hidden>Show more</button></main>
+<script src="${attr(asset("media/library.js"))}"></script></body></html>`;
+}
+
 export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable {
   private readonly tabs = new Set<Tab>();
   private readonly requests = new Map<string, Asker>();
@@ -129,6 +152,99 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     }
     const panel = vscode.window.createWebviewPanel(CHATDGC_EDITOR, "New chat", vscode.ViewColumn.Active, this.options());
     this.adopt(panel, id, temporary);
+  }
+
+  private library?: vscode.WebviewPanel;
+
+  /** The Library, in a tab of its own (one at a time). */
+  openLibrary(): void {
+    if (this.library) { this.library.reveal(); return; }
+    const panel = vscode.window.createWebviewPanel(CHATDGC_LIBRARY, "Library", vscode.ViewColumn.Active,
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] });
+    panel.iconPath = { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-light.svg"),
+                       dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-dark.svg") };
+    this.library = panel;
+    panel.onDidDispose(() => { if (this.library === panel) this.library = undefined; });
+    panel.webview.onDidReceiveMessage((message) => { void this.fromLibrary(panel, message); });
+    const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
+    panel.webview.html = libraryDocument(asset, panel.webview.cspSource);
+  }
+
+  /** A file as the Library names it: which chat or project it's in, and its id (nothing the page made up). */
+  private libraryRef(file: any): Record<string, string> | undefined {
+    const id = String(file?.id || "");
+    if (!ATTACHMENT_ID.test(id)) return undefined;
+    if (file?.source === "project" && PROJECT_ID.test(String(file.project_id || ""))) return { project_id: String(file.project_id), attachment_id: id };
+    if (CONVERSATION_ID.test(String(file?.chat_id || ""))) return { conversation_id: String(file.chat_id), attachment_id: id };
+    return undefined;
+  }
+
+  private libraryAsk(panel: vscode.WebviewPanel, kind: string, cmd: Record<string, unknown>): void {
+    const requestId = this.nextId(kind);
+    this.requests.set(requestId, { kind, libraryPanel: panel } as Asker);
+    this.deliver({ kind }, { ...cmd, request_id: requestId });
+  }
+
+  private async fromLibrary(panel: vscode.WebviewPanel, message: any): Promise<void> {
+    const ref = this.libraryRef(message?.file);
+    switch (message?.type) {
+      case "ready":
+      case "list": {
+        const kind = LIBRARY_KINDS.has(String(message.kind)) ? String(message.kind) : "";
+        const offset = Number.isInteger(message.offset) && message.offset >= 0 ? message.offset : 0;
+        this.libraryAsk(panel, "library", { type: "chatdgc_library", ...(typeof message.query === "string" && message.query.trim()
+          ? { query: message.query.slice(0, 200) } : {}), ...(kind ? { kind } : {}), limit: 60, offset });
+        return;
+      }
+      case "image":
+        if (ref?.conversation_id) this.libraryAsk(panel, "libraryImage", { type: "chatdgc_file", conversation_id: ref.conversation_id, attachment_id: ref.attachment_id });
+        return;
+      case "open":
+        if (ref?.project_id) this.openProject(ref.project_id); else if (ref?.conversation_id) this.open(ref.conversation_id);
+        return;
+      case "use": {
+        // Use in a new chat: a new chat's tab, with the file attached and waiting for what you'll ask.
+        if (!ref) return;
+        const before = new Set(this.tabs);
+        this.open("");
+        const tab = [...this.tabs].find((t) => !before.has(t));
+        if (tab) tab.waitingAttach = [this.libraryItem(message.file, ref)];
+        return;
+      }
+      case "save": {
+        if (!ref) return;
+        const name = String(message.file?.name || "file").replace(/[\\/:*?"<>|]+/g, " ").trim() || "file";
+        const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Save", title: "Save a copy of this file" });
+        if (!target || target.scheme !== "file") return;
+        this.libraryAsk(panel, "librarySave", { type: "chatdgc_library_file", op: "save", ...ref, path: target.fsPath });
+        return;
+      }
+      case "toProject": {
+        if (!ref) return;
+        const projects = await this.projectList();
+        const choice = await vscode.window.showQuickPick(projects.map((p) => ({ label: `$(folder) ${p.name}`, id: p.id })),
+          { placeHolder: projects.length ? "Add a copy to a project: every chat in it can read it" : "No projects yet: make one from the side bar" });
+        if (!choice) return;
+        this.libraryAsk(panel, "libraryChange", { type: "chatdgc_library_file", op: "to_project", ...ref, target_project: choice.id });
+        return;
+      }
+      case "remove": {
+        if (!ref) return;
+        const DELETE = "Delete";
+        const choice = await vscode.window.showWarningMessage(
+          `Delete “${chatTitle(String(message.file?.name || "this file"))}” from your Library? The chat it's in keeps its name, marked as no longer available. This can't be undone.`,
+          { modal: true }, DELETE);
+        if (choice === DELETE) this.libraryAsk(panel, "libraryChange", { type: "chatdgc_library_file", op: "remove", ...ref });
+        return;
+      }
+    }
+  }
+
+  /** A Library file as the composer shows it, and what a send says of it. */
+  private libraryItem(file: any, ref: Record<string, string>): Record<string, unknown> {
+    return { kind: "library", fileKind: String(file?.kind || "document"), name: String(file?.name || "file").slice(0, 120),
+             size: Number(file?.size) || 0, chars: Number(file?.chars) || 0, ...ref };
   }
 
   /** A project's page: its chats, files and instructions, and a box that starts a chat in it. */
@@ -256,10 +372,26 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         tab.opened = true;
         const page = tab.project && !(Array.isArray(ev.messages) && ev.messages.length) && ev.project?.name;
         tab.panel.title = page ? chatTitle(ev.project.name) : chatTitle(ev.conversation?.title);
+        const waitingAttach = tab.waitingAttach?.splice(0) || [];
         this.post(tab, { type: "opened", conversation: ev.conversation, messages: ev.messages, earlier: ev.earlier,
                          busy: ev.busy === true, replyId: typeof ev.reply_id === "string" ? ev.reply_id : "",
                          ...(ev.project && typeof ev.project === "object" ? { project: ev.project } : {}) });
+        if (waitingAttach.length) this.attachLibrary(tab, waitingAttach);
         this.homeChanged();
+        return;
+      }
+      case "chatdgc_library": {
+        if (asker) this.requests.delete(requestId);
+        if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.(Array.isArray(ev.files) ? ev.files : []); return; }
+        void asker?.libraryPanel?.webview.postMessage({ type: "library", files: Array.isArray(ev.files) ? ev.files : [], total: Number(ev.total) || 0,
+          next: ev.next_offset ?? null, counts: ev.counts && typeof ev.counts === "object" ? ev.counts : {} });
+        return;
+      }
+      case "chatdgc_library_file": {
+        if (asker) this.requests.delete(requestId);
+        if (ev.op === "save" && typeof ev.path === "string") {
+          void vscode.window.showInformationMessage(`Saved ${ev.path.split(/[\\/]/).pop()}.`);
+        } else void asker?.libraryPanel?.webview.postMessage({ type: "changed" });
         return;
       }
       case "chatdgc_projects": {
@@ -323,6 +455,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       }
       case "chatdgc_file":
+        if (asker?.libraryPanel) {
+          this.requests.delete(requestId);
+          void asker.libraryPanel.webview.postMessage({ type: "image", id: String(ev.attachment_id || ""),
+            ...(typeof ev.data === "string" ? { data: ev.data } : { error: String(ev.error || "") }) });
+          return;
+        }
         if (asker?.tab) {
           this.requests.delete(requestId);
           this.post(asker.tab, { type: "image", id: String(ev.attachment_id || ""),
@@ -365,6 +503,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const message = String(ev.message || "ChatDGC hit an error.");
         const waiting = this.createWaiting.get(requestId);
         if (waiting) { this.createWaiting.delete(requestId); waiting(""); }
+        if (asker?.libraryPanel) { void asker.libraryPanel.webview.postMessage({ type: "error", message }); return; }
+        if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.([]); return; }
         if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
         if (asker?.tab) { this.post(asker.tab, { type: "error", message, opening: asker.kind === "open" }); return; }
         if (asker?.home) { this.host?.postHome({ type: "chatdgc_list", available: true, error: message, items: [], query: this.homeQuery }); return; }
@@ -409,6 +549,22 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.homeChanged();
         return;
       case "attach": {
+        // Your recent files from the Library first, as ChatGPT's paperclip lists them; with none, the picker.
+        const recent = await this.recentFiles();
+        if (recent.length) {
+          type Pick = vscode.QuickPickItem & { file?: any };
+          const UPLOAD: Pick = { label: "$(cloud-upload) Upload files…", description: "from this computer" };
+          const picks: Pick[] = [UPLOAD, { label: "Recent files in your Library", kind: vscode.QuickPickItemKind?.Separator ?? -1 } as Pick,
+            ...recent.map((file) => ({ label: `$(${file.kind === "image" ? "file-media" : "file"}) ${String(file.name || "file")}`,
+                                       description: String(file.source === "project" ? file.project_name || "" : file.chat_title || ""), file }))];
+          const chosen = await vscode.window.showQuickPick(picks, { placeHolder: "Attach a file", canPickMany: false });
+          if (!chosen) return;
+          if (chosen !== UPLOAD) {
+            const ref = this.libraryRef(chosen.file);
+            if (ref) this.attachLibrary(tab, [this.libraryItem(chosen.file, ref)]);
+            return;
+          }
+        }
         const chosen = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: "Attach",
           title: "Attach files to this chat" });
         if (!chosen?.length) return;
@@ -658,9 +814,36 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       } else if (item?.kind === "text" && typeof item.text === "string" && item.text.trim()) {
         inline += item.text.length * 3;            // what it may weigh as UTF-8 in the frame
         out.push({ kind: "text", text: item.text, ...(name ? { name } : {}) });
+      } else if (item?.kind === "library" && ATTACHMENT_ID.test(String(item.attachment_id || ""))) {
+        const holder: Record<string, string> | undefined = CONVERSATION_ID.test(String(item.conversation_id || ""))
+          ? { conversation_id: String(item.conversation_id) }
+          : PROJECT_ID.test(String(item.project_id || "")) ? { project_id: String(item.project_id) } : undefined;
+        const key = holder ? `${Object.values(holder)[0]}/${item.attachment_id}` : "";
+        if (holder && tab.pickedLibrary?.has(key)) out.push({ kind: "library", ...holder, attachment_id: String(item.attachment_id) });
       }
     }
     return inline > MAX_INLINE_CHARS ? undefined : out;
+  }
+
+  private recentWaiting: ((files: any[]) => void)[] = [];
+
+  /** The newest files in the Library, for the paperclip ([] if it can't say quickly). */
+  private recentFiles(): Promise<any[]> {
+    return new Promise((resolve) => {
+      const requestId = this.nextId("libraryRecent");
+      this.requests.set(requestId, { kind: "libraryRecent" });
+      this.recentWaiting.push(resolve);
+      const outcome = this.host ? this.host.chatdgcSend({ type: "chatdgc_library", limit: 8, request_id: requestId }) : "starting";
+      if (outcome !== "sent") { this.recentWaiting.splice(this.recentWaiting.indexOf(resolve), 1); resolve([]); return; }
+      setTimeout(() => { const i = this.recentWaiting.indexOf(resolve); if (i >= 0) { this.recentWaiting.splice(i, 1); resolve([]); } }, 3000);
+    });
+  }
+
+  /** Library files into a tab's box: shown as chips, and the only Library files its next send may name. */
+  private attachLibrary(tab: Tab, items: Record<string, unknown>[]): void {
+    tab.pickedLibrary ??= new Set();
+    for (const item of items) tab.pickedLibrary.add(`${item.conversation_id || item.project_id}/${item.attachment_id}`);
+    this.post(tab, { type: "attached", items });
   }
 
   private async models(tab: Tab): Promise<void> {
@@ -824,6 +1007,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return true;
       case "chatdgcProjectOpen":
         this.openProject(String(message.id || ""));
+        return true;
+      case "chatdgcLibrary":
+        this.openLibrary();
         return true;
       case "chatdgcProjectNew": {
         const name = await vscode.window.showInputBox({ prompt: "Name the new project: its chats, files and instructions stay together",
