@@ -1238,6 +1238,10 @@
         const message = msg.message;
         if (!message?.id) return;
         delete state.searching[message.id];
+        // A picture that couldn't be had while the reply was written is asked for once more now it's kept.
+        for (const item of Array.isArray(message.images?.items) ? message.images.items : []) {
+          if (images.get(item?.id)?.error) images.delete(item.id);
+        }
         const at = state.messages.findIndex((m) => m.id === message.id);
         if (at >= 0) state.messages[at] = message; else state.messages.push(message);
         if (message.role === "user") { pinned = true; render(); } else update(message.id);

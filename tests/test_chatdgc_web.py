@@ -146,9 +146,18 @@ class PictureTests(Engine):
     def test_pictures_where_seeing_helps_are_kept_with_the_reply_and_shown_as_it_streams(self):
         self.world["decide"] = {"needs_search": False, "query": "", "images": "Hagia Sophia interior"}
         chat = self.engine.open()
-        shown = []
+        shown, served = [], []
+
+        def announced(images):
+            # What the screen does the moment they're announced, while the reply is still being written (and not
+            # yet saved): ask for each one by id. A live run showed none, every ask refused.
+            shown.append(images)
+            served.extend(self.engine.image(chat["id"], x["id"], limit=10**6).split(",")[0] for x in images["items"])
         reply = self.engine.send(chat["id"], "What does the inside of the Hagia Sophia look like?", search="auto",
-                                 on_images=shown.append)
+                                 on_images=announced)
+        self.assertEqual(served, ["data:image/jpeg;base64", "data:image/png;base64", "data:image/jpeg;base64",
+                                  "data:image/jpeg;base64"], "each one served as soon as it's announced")
+        self.assertEqual(self.engine._live_pictures, {}, "and from the saved reply after that")
         self.assertEqual(self.world["picture_searches"], ["Hagia Sophia interior"])
         items = reply["images"]["items"]
         self.assertEqual(reply["images"]["query"], "Hagia Sophia interior")

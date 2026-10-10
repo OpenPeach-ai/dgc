@@ -382,8 +382,11 @@ test("pictures from the web: a strip above the answer as it streams, each with i
       text: "The dome seems to float above the nave." } });
     await s.send({ type: "turn", state: "ended", replyId: M(2) });
     await s.frame();
+    assert.equal((await s.posted("image")).length, 5, "the one refused while it was written is asked for once more");
+    await s.send({ type: "image", id: att("d"), error: "That image is no longer there." });
+    await s.frame();
     assert.equal(await s.page.locator(".cd-picture").count(), 3, "the saved reply shows them the same way");
-    assert.equal((await s.posted("image")).length, 4, "and nothing is asked twice");
+    assert.equal((await s.posted("image")).length, 5, "and nothing else is asked twice");
     // One opened larger: what it is, the site, the page it's on, and that the model hasn't seen it.
     await s.page.locator(".cd-picture").nth(2).click();
     const view = s.page.locator("#cd-picture-view");

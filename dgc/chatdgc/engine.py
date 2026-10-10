@@ -85,11 +85,15 @@ LOOK_UP = (
     "fees, procedures, figures, statistics, or specific people, products, places or organisations. No for maths, "
     "writing, code, explanations of things that don't change, opinions, small talk, or questions about this "
     "conversation itself. If yes, give one short search query (2 to 8 words).\n\n"
-    "Separately, decide whether pictures would help the user: only when seeing something is part of the answer, "
-    "such as what a place, building, landmark, dish, animal, plant, product, artwork, vehicle, outfit or style looks "
-    "like, or telling one thing from another by sight. Not for rules, prices, news, advice, code, writing, maths, "
-    "explanations or most questions: leave images empty then. If pictures would help, give a short image search "
-    "query in images (2 to 6 words).")
+    "Separately, decide whether pictures belong in the answer: is the user asking how something looks, or what a "
+    "thing is that people know by sight? Yes for what something looks like, to see it, telling things apart by "
+    "sight, or what a landmark, building, animal, plant, dish, product, artwork, vehicle, outfit or style is. No "
+    "when they ask a specific fact about such a thing (its price, fee, opening hours, date, age, weight, size, "
+    "speed, rules, history or how to get there): the fact is the answer, and a picture adds nothing. Never for "
+    "news, advice, code, writing, maths or explaining an idea. Leave images empty unless pictures belong; if they "
+    "do, give a short image search query in images (2 to 6 words).")
+# Pictures where seeing helps, measured on deepseek-v4.1-flash: "would pictures help?" gave 12 of 16 (a place's
+# fee, hours or build date, and an animal's weight, got pictures too); this wording, 16 of 16 twice.
 LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boolean"},
                                                    "query": {"type": "string", "description": "One short query."},
                                                    "images": {"type": "string", "description":
@@ -136,6 +140,9 @@ class ChatEngine:
         self._drafts: dict[str, dict] = {}         # new chats: written with their first message
         self._temporary_files: dict[tuple[str, str], tuple[bytes, str | None]] = {}   # a temporary chat's attachments
         self._toolless: set[str] = set()           # models that said they can't take tools
+        # Pictures shown while their reply streams, before it's saved: the screen asks for each one as soon as
+        # it's announced, so they're served from here until the reply carries them.
+        self._live_pictures: dict[tuple[str, str], dict] = {}
         self._lock = threading.Lock()
 
     # -- the model
@@ -714,6 +721,9 @@ class ChatEngine:
         meta = next((a for m in chat["messages"]
                      for a in [*(m.get("attachments") or []), *((m.get("images") or {}).get("items") or [])]
                      if a.get("id") == attachment_id), None)
+        if meta is None:
+            with self._lock:
+                meta = self._live_pictures.get((chat["id"], attachment_id))
         if meta is None or meta.get("kind") != "image":
             raise ChatEngineError("That image isn't in this chat.")
         found = self._file(chat, attachment_id)
@@ -1062,6 +1072,8 @@ class ChatEngine:
                         else:
                             self.store.put_file(chat["id"], meta["id"], raw)
                     job["items"] = items = [meta for meta, _ in kept]
+                    with self._lock:
+                        self._live_pictures.update({(chat["id"], meta["id"]): meta for meta in items})
             except Exception:                    # noqa: BLE001 -- pictures are extra: a reply never fails for them
                 return
             if on_images is not None:
@@ -1296,6 +1308,18 @@ class ChatEngine:
             finish = "cancelled"
         if picturing is not None:
             web_images = self._end_pictures(picturing, wait=finish not in ("cancelled", "error")) or None
+        try:
+            return self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
+                                    usage, counted, sources, searches, questions, memory_ops, web_images)
+        finally:
+            if picturing is not None:
+                with self._lock:
+                    for meta in picturing["items"]:
+                        self._live_pictures.pop((chat["id"], meta["id"]), None)
+
+    def _keep_reply(self, chat, existing, reply_id, model, client, text, thought_text, finish, failure, usage, counted,
+                    sources, searches, questions, memory_ops, web_images) -> dict:
+        """The reply as it ended, saved (with what it looked up, asked, remembered and showed)."""
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
         if existing is not None:
