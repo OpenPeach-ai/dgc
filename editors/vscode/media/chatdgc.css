@@ -82,13 +82,15 @@ body.cd-blank .cd-fine { display: none; }
    button under the reply with the sites' favicons, and a panel beside the conversation listing them all. */
 .cd-fav { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px;
   border-radius: 50%; overflow: hidden; background: var(--surface); color: var(--muted); }
-.cd-fav img { width: 16px; height: 16px; display: block; }
+/* A site's own icon sits on a white disc, as ChatGPT has it: a dark logo (BBC's blocks, GitHub's cat) would vanish on
+   a dark theme's surface, and inset, a square one isn't clipped to the circle. */
+.cd-fav:has(img) { background: #fff; }
+.cd-fav img { width: 12px; height: 12px; display: block; }
 .cd-fav .codicon { font-size: 11px; }
 .cd-cite { display: inline-flex; align-items: center; gap: 4px; max-width: 16em; height: 20px; margin: 0 2px; padding: 0 7px 0 2px;
   vertical-align: 1px; border: 0; border-radius: var(--r-full); background: var(--surface2); color: var(--muted);
   font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
-.cd-cite .cd-fav { width: 14px; height: 14px; }
-.cd-cite .cd-fav img { width: 14px; height: 14px; }
+.cd-cite .cd-fav { width: 16px; height: 16px; }
 .cd-cite-site { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cd-cite-more { color: var(--faint); font-variant-numeric: tabular-nums; }
 .cd-cite:hover, .cd-cite:focus-visible { background: color-mix(in srgb, var(--accent) 22%, var(--surface2)); color: var(--text); }
