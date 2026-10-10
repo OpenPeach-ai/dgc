@@ -234,10 +234,13 @@ class ExitRestorationTests(unittest.TestCase):
         from dgc import cli
         self.assertIn("termbg.install_stop_handler", self._calls(self._tree(cli.main)))
 
-    def _die_by(self, signame: str) -> subprocess.CompletedProcess:
+    def _die_by(self, signame: str, *, ignored: bool = False) -> subprocess.CompletedProcess:
+        # The signal's disposition is set here, not inherited: a gate run under nohup hands every child SIGHUP
+        # ignored, and this test failed there (and only there) for four gates running.
         script = textwrap.dedent(f"""
             import os, signal, sys
             sys.path.insert(0, {str(PROJECT)!r})
+            signal.signal(signal.{signame}, signal.{"SIG_IGN" if ignored else "SIG_DFL"})
             from dgc import termbg
             termbg._applied = True                     # as if we had repainted the canvas
             handlers = {{}}
@@ -262,6 +265,14 @@ class ExitRestorationTests(unittest.TestCase):
                 self.assertNotIn("survived the signal", done.stdout)
                 # Exiting 0 here would tell a supervisor we chose to stop.
                 self.assertEqual(done.returncode, -getattr(signal, signame))
+
+    def test_a_signal_ignored_when_we_started_stays_ignored(self):
+        # Under nohup SIGHUP is ignored on purpose. Taking it over made a hangup hand the colors back and then
+        # re-send itself under SIG_IGN: the CLI carried on with its canvas gone, and dgc serve stopped its turns.
+        done = self._die_by("SIGHUP", ignored=True)
+        self.assertIn("survived the signal", done.stdout, "nohup's choice stands")
+        self.assertNotIn("\x1b]110", done.stdout, "nothing was torn down")
+        self.assertEqual(done.returncode, 0)
 
 
 if __name__ == '__main__':

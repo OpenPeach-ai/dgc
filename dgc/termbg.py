@@ -163,6 +163,11 @@ def install_stop_handler(on_stop) -> dict:
     terminal we repainted stays repainted and a turn in flight is never told it is ending. The
     handler is the only place either job can be done. Returns {} when we could not install one
     (Windows, a non-main thread) — the caller keeps working, it just gets no notice.
+
+    A signal that was already ignored when we started stays ignored, as POSIX programs leave it: under
+    `nohup` (or from an editor launched that way) SIGHUP is SIG_IGN on purpose. Taking it over made a
+    hangup reset the canvas and then re-send itself under SIG_IGN, so the CLI carried on half torn down
+    and `dgc serve` stopped every turn (seen as a test that failed only in a gate run under nohup).
     """
     import signal as _signal
     import threading
@@ -178,6 +183,8 @@ def install_stop_handler(on_stop) -> dict:
         if sig is None:
             continue                        # Windows has neither
         try:
+            if _signal.getsignal(sig) == _signal.SIG_IGN:
+                continue                    # ignored by whoever started us: theirs to decide
             previous[sig] = _signal.signal(sig, handler)
         except (ValueError, OSError, RuntimeError):
             pass                            # a restricted context: leave that signal alone
