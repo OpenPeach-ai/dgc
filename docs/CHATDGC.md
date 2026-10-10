@@ -60,7 +60,8 @@ voice come in later phases.
 - **The context window.** The meter in the box shows how much of the model's context window the chat fills.
   It uses the model's own count where it reports one, and turns amber at 70% and red at 85%. Click it for
   the breakdown (instructions, summary, files, conversation) and two actions:
-  - **Compact now:** everything before the last exchange becomes a summary.
+  - **Compact now:** everything before the last exchange becomes a summary. When that's already
+    summarized (right after a summary), the details say so and the button waits for another exchange.
   - **Continue in a new chat:** a new chat starts with a summary of this one.
 
   The window is the model's real one, capped by **Settings → ChatDGC → Window** (8k, 32k by default, 128k,
@@ -158,7 +159,8 @@ A turn sends its events in this order:
 
 After every turn, and when a chat opens, `chatdgc_context` reports `used` tokens out of `window` (the
 model's own maximum is in `limit`), with `source` saying whether the model counted them (`reported`) or
-ChatDGC estimated them, and `parts` giving the breakdown. A reply that compacts first sends
+ChatDGC estimated them, `parts` giving the breakdown, and `compactable` saying whether Compact now has
+more than the last exchange to summarize. A reply that compacts first sends
 `chatdgc_activity` with `kind: "compacting"`, then `chatdgc_compacted`. An opened conversation carries its
 `summary` (`{upto, text, edited, …}`) and, for a chat continued from another, `carried`.
 
