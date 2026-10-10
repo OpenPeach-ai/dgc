@@ -49,15 +49,24 @@ def _rows(path):
 
 def _imports_table(db):
     """Which runs are imported, with each run's totals (added in 0.48; older rows have none), and
-    each run's tokens by model (0.48 too: Token Usage shows which models a Pip used)."""
-    db.execute('CREATE TABLE IF NOT EXISTS pip_usage_imports(run_id TEXT PRIMARY KEY, imported_at INTEGER NOT NULL)')
-    columns = {row[1] for row in db.execute('PRAGMA table_info(pip_usage_imports)')}
-    for name in ('input_tokens', 'output_tokens', 'requests'):
-        if name not in columns:
-            db.execute(f'ALTER TABLE pip_usage_imports ADD COLUMN {name} INTEGER')
-    db.execute('CREATE TABLE IF NOT EXISTS pip_usage_run_models(run_id TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL, '
-               'host TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, requests INTEGER NOT NULL, '
-               'PRIMARY KEY(run_id, model, provider, host))')
+    each run's tokens by model (0.48 too: Token Usage shows which models a Pip used).
+
+    Under the database's write lock: two DGC processes (the side bar's and the Pips service) can import at
+    once, and each saw the columns missing and added them, so one failed with "duplicate column name"."""
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        db.execute('CREATE TABLE IF NOT EXISTS pip_usage_imports(run_id TEXT PRIMARY KEY, imported_at INTEGER NOT NULL)')
+        columns = {row[1] for row in db.execute('PRAGMA table_info(pip_usage_imports)')}
+        for name in ('input_tokens', 'output_tokens', 'requests'):
+            if name not in columns:
+                db.execute(f'ALTER TABLE pip_usage_imports ADD COLUMN {name} INTEGER')
+        db.execute('CREATE TABLE IF NOT EXISTS pip_usage_run_models(run_id TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL, '
+                   'host TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, requests INTEGER NOT NULL, '
+                   'PRIMARY KEY(run_id, model, provider, host))')
+        db.execute('COMMIT')
+    except BaseException:
+        db.execute('ROLLBACK')
+        raise
 
 
 def run_totals(run_ids, *, home=None) -> dict:

@@ -104,6 +104,38 @@ class PipUsageImportTests(unittest.TestCase):
             self.assertEqual(pip_usage.sync_completed(),'')
         db=ledger._open(self.home/ledger.LEDGER_NAME,create=True)
         self.assertEqual(db.execute('SELECT count(*) FROM pip_usage_imports').fetchone()[0],pip_usage.BATCH_RUNS+2)
+    def test_two_processes_adding_the_new_columns_at_once_dont_collide(self):
+        # Another process holds the write lock and is adding the 0.48 columns to an older table; this one must
+        # wait and see them, not add them again ("duplicate column name", seen in a loaded full-suite run).
+        import sqlite3,threading,time
+        from dgc import pip_usage
+        path=self.home/'race.sqlite3'
+        setup=sqlite3.connect(path,isolation_level=None)
+        setup.execute('PRAGMA journal_mode=WAL')
+        setup.execute('CREATE TABLE pip_usage_imports(run_id TEXT PRIMARY KEY, imported_at INTEGER NOT NULL)')
+        setup.close()
+        other=sqlite3.connect(path,isolation_level=None,timeout=10)
+        mine=sqlite3.connect(path,isolation_level=None,timeout=10,check_same_thread=False)
+        try:
+            other.execute('BEGIN IMMEDIATE')
+            failed=[]
+            def migrate():
+                try:pip_usage._imports_table(mine)
+                except Exception as exc:failed.append(exc)
+            worker=threading.Thread(target=migrate);worker.start()
+            time.sleep(.3)
+            for name in ('input_tokens','output_tokens','requests'):
+                other.execute(f'ALTER TABLE pip_usage_imports ADD COLUMN {name} INTEGER')
+            other.execute('COMMIT')
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(failed,[])
+            columns=[row[1] for row in mine.execute('PRAGMA table_info(pip_usage_imports)')]
+            self.assertEqual(columns,['run_id','imported_at','input_tokens','output_tokens','requests'])
+            self.assertFalse(mine.in_transaction)
+        finally:
+            other.close();mine.close()
+
     def test_two_processes_cannot_double_import_the_same_worker(self):
         import os,subprocess,sys
         self.source()
