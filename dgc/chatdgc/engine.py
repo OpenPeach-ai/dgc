@@ -13,6 +13,7 @@ from typing import Callable
 
 from ..editor_protocol import CHATDGC_THINKING as THINKING
 from . import attachments as attached
+from . import window as fit_window
 from .prompt import system_prompt
 from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_message_id, now,
                     title_from)
@@ -157,7 +158,7 @@ class ChatEngine:
 
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
-             on_activity=None, cancel: threading.Event | None = None) -> dict:
+             on_activity=None, on_compacted=None, cancel: threading.Event | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
@@ -213,8 +214,10 @@ class ChatEngine:
                                       f"{' '.join(str(exc).split())[:300] or type(exc).__name__}") from exc
             chat["messages"][-1] = mine = {**mine, "vision": {"model": relay["model"], "text": seen}}
             chat = self._save(chat)
-        return self._reply(chat, self._history(chat, search, sees=relay is None and self._sees(chat, cancel)), None,
-                           reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity)
+        sees = relay is None and self._sees(chat, cancel)
+        return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None,
+                           reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity,
+                           on_compacted=on_compacted)
 
     # -- versions: edit a message you sent, or try a reply again; the old version is kept, a click away
     #
@@ -252,7 +255,7 @@ class ChatEngine:
         chat["messages"] = chat["messages"][:index]
 
     def edit(self, chat_id: str, message_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
-             search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
+             search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None, on_compacted=None,
              cancel: threading.Event | None = None) -> dict:
         """Change a message you sent: a new version of the conversation from there, with a new reply. What it
         carried (files, and what a vision model saw in them) goes with it."""
@@ -273,12 +276,13 @@ class ChatEngine:
         reply_id = new_message_id()
         if on_start is not None:
             on_start(mine, reply_id)
-        return self._reply(chat, self._history(chat, search, sees=self._sees(chat, cancel)), None, reply_id, on_text,
-                           on_thinking, cancel, search=search, on_activity=on_activity)
+        sees = self._sees(chat, cancel)
+        return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
+                           on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted)
 
     def regenerate(self, chat_id: str, message_id: str, *, model: str | None = None, thinking: str | None = None,
                    search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
-                   cancel: threading.Event | None = None) -> dict:
+                   on_compacted=None, cancel: threading.Event | None = None) -> dict:
         """Try a reply again (with another model or thinking level, if chosen): a new version from that reply on."""
         chat = self._chat(chat_id)
         index = self._at(chat, message_id, "assistant")
@@ -290,8 +294,9 @@ class ChatEngine:
         reply_id = new_message_id()
         if on_start is not None:
             on_start(None, reply_id)
-        return self._reply(chat, self._history(chat, search, sees=self._sees(chat, cancel)), None, reply_id, on_text,
-                           on_thinking, cancel, search=search, on_activity=on_activity)
+        sees = self._sees(chat, cancel)
+        return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
+                           on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted)
 
     def version(self, chat_id: str, parent_id: str, index: int) -> dict:
         """Show another version at a point of the conversation (``parent_id``: the message before it, or "root")."""
@@ -350,7 +355,7 @@ class ChatEngine:
         return out
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
-                       cancel: threading.Event | None = None) -> dict:
+                       on_activity=None, on_compacted=None, cancel: threading.Event | None = None) -> dict:
         """Carry on a reply the model stopped at its limit (or one that was stopped), in the same message."""
         chat = self._chat(chat_id)
         index = next((i for i, m in enumerate(chat["messages"]) if m.get("id") == message_id), None)
@@ -360,10 +365,12 @@ class ChatEngine:
             raise ChatEngineError("Only the last reply can be continued.")
         if chat["messages"][index].get("finish") not in ("length", "cancelled"):
             raise ChatEngineError("That reply is already complete.")
-        history = self._history(chat, sees=self._sees(chat, cancel)) + [{"role": "user", "content": CONTINUE}]
+        sees = self._sees(chat, cancel)
         if on_start is not None:
             on_start(None, message_id)
-        return self._reply(chat, history, chat["messages"][index], message_id, on_text, on_thinking, cancel)
+        return self._reply(chat, lambda c, room: self._history(c, sees=sees, room=room)
+                           + [{"role": "user", "content": CONTINUE}], chat["messages"][index], message_id, on_text,
+                           on_thinking, cancel, on_activity=on_activity, on_compacted=on_compacted)
 
     def name(self, chat_id: str) -> dict | None:
         """Give a new chat a short name from its first exchange, as a chat app does. Only while it still has
@@ -429,20 +436,167 @@ class ChatEngine:
             raise ChatEngineError("That image is too large to preview here.")
         return attached.image_part(meta, found[0])["image_url"]["url"]
 
-    def _history(self, chat: dict, search: str = "off", sees: bool = True) -> list[dict]:
+    # -- the context window (window.py): the summary of earlier messages, Compact now, Continue in a new chat
+
+    def _preset(self) -> str:
+        return str(self.config.get("chatdgc_window", fit_window.DEFAULT_WINDOW) or fit_window.DEFAULT_WINDOW)
+
+    @staticmethod
+    def _summary_start(chat: dict) -> int:
+        """Where the conversation the model reads word for word starts: after the summary's last message, when
+        that message is in the conversation you see (another version of it has no summary yet)."""
+        upto = (chat.get("summary") or {}).get("upto")
+        if not upto:
+            return 0
+        return next((i + 1 for i, m in enumerate(chat["messages"]) if m.get("id") == upto), 0)
+
+    @staticmethod
+    def _plain(message: dict) -> str:
+        """A message as a summary reads it: who said it, the words, what came with it (by name)."""
+        who = "User" if message.get("role") == "user" else "Assistant"
+        text = message.get("text") or ""
+        names = [a.get("name", "attachment") for a in message.get("attachments") or []]
+        if names:
+            text += "\n[Attached: " + ", ".join(names) + "]"
+        if (message.get("vision") or {}).get("text"):
+            text += "\n[What the images showed: " + message["vision"]["text"][:2000] + "]"
+        return f"{who}: {text}"
+
+    def _summarize(self, client, earlier: str, messages: list[dict], room: int, cancel=None) -> str:
+        """A rolling summary: ``earlier`` (the summary so far, if any) plus ``messages``, in chunks that fit."""
+        words = max(200, min(1500, int(room * 0.08 * 0.75)))
+        chunk_chars = max(4000, int(room * 0.5) * fit_window.CHARS_PER_TOKEN)
+        summary, pending = earlier, [self._plain(m) for m in messages]
+        while pending:
+            chunk, size = [], 0
+            while pending and (not chunk or size + len(pending[0]) <= chunk_chars):
+                piece = pending.pop(0)[:chunk_chars]
+                chunk.append(piece)
+                size += len(piece)
+            asked = ("The summary so far:\n<<<\n" + summary + "\n>>>\n\n" if summary else "") + \
+                "The conversation to add:\n<<<\n" + "\n\n".join(chunk) + "\n>>>"
+            try:
+                result = client.chat([{"role": "system", "content": fit_window.COMPACT_PROMPT.format(words=words)},
+                                      {"role": "user", "content": asked}], tools=None, reasoning_effort="off",
+                                     cancel=cancel)
+            except Exception as exc:              # noqa: BLE001 -- a summary that fails is said, never a crash
+                raise ChatEngineError("The earlier messages couldn't be summarized: "
+                                      f"{' '.join(str(exc).split())[:300] or type(exc).__name__}") from exc
+            summary = str(getattr(result, "content", "") or "").strip()
+            if cancel is not None and cancel.is_set():
+                raise ChatEngineError("Stopped before the summary was written.")
+            if not summary:
+                raise ChatEngineError("The model wrote no summary.")
+        return summary[:fit_window.MAX_SUMMARY_CHARS]
+
+    def _compact(self, chat: dict, client, room: int, cancel=None, *, keep_messages: int | None = None) -> bool:
+        """Summarize the older turns of the conversation you see, keeping the recent ones word for word (by tokens:
+        KEEP_RECENT of the window, at least the last message; or the last ``keep_messages``). False: nothing to."""
+        messages, start = chat["messages"], self._summary_start(chat)
+        if keep_messages is not None:
+            cut = len(messages) - keep_messages
+        else:
+            budget, used, cut = int(room * fit_window.KEEP_RECENT), 0, len(messages)
+            for i in range(len(messages) - 1, start - 1, -1):
+                cost = fit_window.tokens(messages[i].get("text") or "") + 4
+                if used + cost > budget and cut < len(messages):
+                    break
+                used, cut = used + cost, i
+        if cut <= start:
+            return False
+        before = fit_window.estimate([{"content": self._plain(m)} for m in messages[:cut]])
+        text = self._summarize(client, (chat.get("summary") or {}).get("text", "") if start else "",
+                               messages[start:cut], room, cancel)
+        chat["summary"] = {"upto": messages[cut - 1]["id"], "text": text, "model": getattr(client, "model", ""),
+                           "created_at": now(), "covered": cut, "tokens_before": before, "edited": False}
+        self._save(chat)
+        return True
+
+    def compact(self, chat_id: str, *, cancel=None) -> dict:
+        """Compact now: everything before the last exchange becomes the summary."""
+        chat = self._chat(chat_id)
+        client = self.client(chat.get("model") or None)
+        room, _ = fit_window.window(client, self._preset())
+        if not self._compact(chat, client, room, cancel, keep_messages=2):
+            raise ChatEngineError("There's nothing to compact yet: this chat is still short.")
+        return chat["summary"]
+
+    def set_summary(self, chat_id: str, text: str) -> dict:
+        """Change what the summary says: the model reads your words from the next reply on."""
+        text = str(text or "").strip()
+        if not text:
+            raise ChatEngineError("Write something for the summary, or keep the one there.")
+        if len(text) > fit_window.MAX_SUMMARY_CHARS:
+            raise ChatEngineError("That summary is too long.")
+        chat = self._chat(chat_id)
+        if not chat.get("summary"):
+            raise ChatEngineError("This chat has no summary yet.")
+        chat["summary"] = {**chat["summary"], "text": text, "edited": True, "edited_at": now()}
+        self._save(chat)
+        return chat["summary"]
+
+    def carry(self, chat_id: str, *, cancel=None) -> dict:
+        """Continue in a new chat: a summary of this one goes with it, and it starts with an empty window."""
+        chat = self._chat(chat_id)
+        if not chat["messages"]:
+            raise ChatEngineError("Send a message first.")
+        client = self.client(chat.get("model") or None)
+        room, _ = fit_window.window(client, self._preset())
+        start = self._summary_start(chat)
+        text = self._summarize(client, (chat.get("summary") or {}).get("text", "") if start else "",
+                               chat["messages"][start:], room, cancel)
+        fresh = self.store.create(model=chat.get("model"), thinking=chat.get("thinking"),
+                                  title=chat.get("title") or "New chat")
+        fresh["carried"] = {"from": chat["id"], "title": chat.get("title", ""), "text": text, "created_at": now()}
+        return self.store.save(fresh)
+
+    def context(self, chat_id: str) -> dict:
+        """What the chat takes of its window now: counted by the model where its last reply was, else estimated."""
+        chat = self._chat(chat_id)
+        client = self.client(chat.get("model") or None)
+        room, limit = fit_window.window(client, self._preset())
+        history = self._history(chat, sees=self._sees(chat), room=room)
+        estimated = fit_window.estimate(history)
+        system = history[0]["content"] if history else ""
+        remembered = (chat.get("summary") or {}).get("text", "") if self._summary_start(chat) else ""
+        carried = (chat.get("carried") or {}).get("text", "")
+        files = sum(fit_window.tokens(attached.frame(meta, b"", "")) + (meta.get("chars") or 0) // fit_window.CHARS_PER_TOKEN
+                    if meta.get("kind") != "image" else fit_window.IMAGE_TOKENS
+                    for m in chat["messages"][self._summary_start(chat):] for meta in m.get("attachments") or [])
+        parts = {"instructions": max(0, fit_window.tokens(system) - fit_window.tokens(remembered + carried)),
+                 "summary": fit_window.tokens(remembered + carried), "files": min(files, estimated)}
+        parts["conversation"] = max(0, estimated - sum(parts.values()))
+        last = chat["messages"][-1] if chat["messages"] else {}
+        usage = last.get("usage") or {} if last.get("role") == "assistant" else {}
+        reported = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+        return {"window": room, "limit": limit, "preset": self._preset(), "parts": parts,
+                "used": reported or estimated, "source": "reported" if reported else "estimated"}
+
+    def _history(self, chat: dict, search: str = "off", sees: bool = True, room: int = 0) -> list[dict]:
         """What the model reads: ChatDGC's instructions and the conversation. Earlier thinking never goes back;
         an earlier reply's sources do, as a list under it, so a follow-up can ask about [2]. A message's files
         go with it every time: documents and pasted text in DGC's attachment frame, and the newest images as
         images (older ones by name, so a long chat doesn't resend every picture)."""
         zone = str(self.config.get("timezone", "") or "")
         config = self.config
-        out = [{"role": "system", "content": system_prompt(
+        start = self._summary_start(chat)
+        instructions = system_prompt(
             timezone_name=zone, search=search, about=str(config.get("chatdgc_about", "") or ""),
             style=str(config.get("chatdgc_style", "") or ""),
-            personality=str(config.get("chatdgc_personality", "default") or "default"))}]
+            personality=str(config.get("chatdgc_personality", "default") or "default"))
+        carried = chat.get("carried") or {}
+        if carried.get("text"):
+            instructions += (f"\n\nThis chat continues an earlier one, \u201c{carried.get('title', '')}\u201d. What "
+                             f"happened there, summarized:\n<<<\n{carried['text']}\n>>>")
+        if start:
+            instructions += ("\n\nThe earlier part of this conversation, summarized to fit your context window (the "
+                             f"user still sees all of it):\n<<<\n{chat['summary']['text']}\n>>>")
+        out = [{"role": "system", "content": instructions}]
+        # One attachment never takes more than FILE_SHARE of the window: what doesn't fit is said, not sent.
+        file_chars = int(room * fit_window.FILE_SHARE) * fit_window.CHARS_PER_TOKEN if room else 0
         images_left = MAX_HISTORY_IMAGES
         built = []
-        for m in reversed(chat["messages"]):
+        for m in reversed(chat["messages"][start:]):
             content = m.get("text") or ""
             pictures, described = [], False
             for meta in m.get("attachments") or []:
@@ -465,7 +619,14 @@ class ChatEngine:
                     else:
                         content += f"\n\n[An image, {name}, was attached here earlier]"
                 else:
-                    content += "\n\n" + attached.frame(meta, found[0], found[1] or "")
+                    words = found[1] or ""
+                    if file_chars and len(words) > file_chars:
+                        cut = {**meta, "truncated": True}
+                        content += "\n\n" + attached.frame(cut, found[0], words[:file_chars]) + (
+                            f"\n[Only the first part of {name} fits this chat's context window; ask about a later part "
+                            "and quote it, or choose a larger window in Settings.]")
+                    else:
+                        content += "\n\n" + attached.frame(meta, found[0], words)
             if not content and not pictures:
                 continue
             if m["role"] == "assistant" and m.get("sources"):
@@ -510,8 +671,10 @@ class ChatEngine:
             lines.append("No results.")
         return "\n".join(lines)[:12_000]
 
-    def _reply(self, chat, history, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
-               on_activity=None) -> dict:
+    def _reply(self, chat, build, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
+               on_activity=None, on_compacted=None) -> dict:
+        """One reply. ``build(chat, room)`` is what the model reads, for a window of ``room`` tokens: when it would
+        fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent)."""
         model = chat.get("model") or None
         thinking = chat.get("thinking") or str(self.config.get("thinking", "off") or "off")
         streamed, thought = [], []
@@ -527,6 +690,20 @@ class ChatEngine:
                 on_thinking(part)
 
         client = self.client(model)
+        room, _ = fit_window.window(client, self._preset())
+        history = build(chat, room)
+        if fit_window.estimate(history) > room * fit_window.COMPACT_AT:
+            if on_activity is not None:
+                on_activity("compacting", "")
+            try:
+                if self._compact(chat, client, room, cancel):
+                    history = build(chat, room)
+                    if on_compacted is not None:
+                        on_compacted(chat["summary"])
+            except ChatEngineError:
+                if cancel is not None and cancel.is_set():
+                    raise
+                # The summary couldn't be written: the reply still goes, as it would have without one.
         finish, usage, failure = "stop", {}, None
         sources = [dict(x) for x in (existing or {}).get("sources") or []]
         searches = list((existing or {}).get("searches") or [])

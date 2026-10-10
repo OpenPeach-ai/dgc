@@ -302,6 +302,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "search_url": _S(False), "search_api_key_set": _B(False),
         # Opt-in too: ChatDGC's custom instructions and personality.
         "chatdgc_about": _S(False), "chatdgc_style": _S(False), "chatdgc_personality": _S(False),
+        "chatdgc_window": _S(False),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
         "ultra_mode": _B(False),
@@ -825,6 +826,13 @@ COMMAND_FIELDS.update({
     # whole chat. Answered by `chatdgc_exported`.
     "chatdgc_export": {"request_id": _S(), "conversation_id": _S(), "path": _S(),
                        "format": _f("string", enum=("markdown", "json"))},
+    # The context window. Compact now (everything before the last exchange becomes the summary) and editing
+    # the summary are answered by `chatdgc_compacted`; Continue in a new chat (a summary of this one goes with
+    # it) by `chatdgc_opened` for the new chat. After every turn, and when a chat opens, `chatdgc_context` says
+    # what the chat takes of its window.
+    "chatdgc_compact": {"request_id": _S(), "conversation_id": _S()},
+    "chatdgc_summary": {"request_id": _S(), "conversation_id": _S(), "text": _S()},
+    "chatdgc_carry": {"request_id": _S(), "conversation_id": _S()},
     "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
     # An image the chat keeps, to show (answered by `chatdgc_file`: a data: URI, or why not).
     "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S()},
@@ -844,7 +852,7 @@ EVENT_FIELDS.update({
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
     # What the reply is doing besides writing: `text` is the query while it searches the web.
     "chatdgc_activity": {"conversation_id": _S(), "message_id": _S(),
-                         "kind": _f("string", enum=("searching", "looking")), "text": _S()},
+                         "kind": _f("string", enum=("searching", "looking", "compacting")), "text": _S()},
     "chatdgc_message": {"conversation_id": _S(), "message": _O(), "request_id": _S(False)},
     # A conversation's list entry changed (a turn, a rename, a pin), or it was deleted (summary null).
     "chatdgc_changed": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
@@ -852,6 +860,12 @@ EVENT_FIELDS.update({
     "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S(), "data": _S(False),
                      "error": _S(False)},
     "chatdgc_exported": {"request_id": _S(), "conversation_id": _S(), "path": _S(), "bytes": _I()},
+    # `used` of `window` tokens (`limit`: the model's own maximum, 0 unknown), counted by the model (`source`
+    # "reported") or estimated; `parts` splits it: instructions, summary, files, conversation.
+    "chatdgc_context": {"conversation_id": _S(), "window": _I(), "limit": _I(), "used": _I(), "preset": _S(),
+                        "source": _f("string", enum=("reported", "estimated")), "parts": _O()},
+    # The summary of earlier messages, new or changed (null: none).
+    "chatdgc_compacted": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
 })
 
 # Names the envelope owns. A payload field with any of these names would overwrite it on the wire

@@ -30,7 +30,9 @@ CLOSE_GRACE_S = 5.0
 def summary(chat: dict) -> dict:
     """A conversation without its messages: what the list and an opened chat's header show."""
     return {key: chat.get(key) for key in ("id", "title", "created_at", "updated_at", "model", "thinking",
-                                            "pinned", "archived")} | {"temporary": bool(chat.get("temporary"))}
+                                            "pinned", "archived")} | {"temporary": bool(chat.get("temporary")),
+                                                                      "summary": chat.get("summary"),
+                                                                      "carried": chat.get("carried")}
 
 
 def _size(value) -> int:
@@ -140,7 +142,8 @@ class ChatService:
              "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
              "chatdgc_update": self._update, "chatdgc_file": self._file, "chatdgc_edit": self._edit,
              "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version,
-             "chatdgc_export": self._export}[kind](cmd)
+             "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
+             "chatdgc_carry": self._carry}[kind](cmd)
         except (ChatEngineError, ChatStoreError) as exc:
             self._error(str(exc), request_id, conversation_id)
 
@@ -176,6 +179,76 @@ class ChatService:
     def _open(self, cmd: dict) -> None:
         chat = self.engine.open(cmd.get("conversation_id") or None, temporary=bool(cmd.get("temporary")))
         self._opened(chat, cmd["request_id"])
+        self._context_later(chat["id"])
+
+    def _context(self, conversation_id: str) -> None:
+        """What the chat takes of its window, said on the wire (the model's limit may be asked of the provider)."""
+        try:
+            fields = self.engine.context(conversation_id)
+        except Exception:                             # noqa: BLE001 -- a meter is a nicety
+            return
+        self.emit("chatdgc_context", conversation_id=conversation_id, **fields)
+
+    def _context_later(self, conversation_id: str) -> None:
+        threading.Thread(target=self._context, args=(conversation_id,), daemon=True,
+                         name=f"dgc-chatdgc-context-{conversation_id[5:13]}").start()
+
+    def _compacted(self, conversation_id: str, summary, request_id: str | None = None) -> None:
+        fields = {"request_id": request_id} if request_id else {}
+        self.emit("chatdgc_compacted", conversation_id=conversation_id, summary=summary, **fields)
+
+    def _summary(self, cmd: dict) -> None:
+        with self._lock:
+            if cmd["conversation_id"] in self._turns:
+                raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
+        summary = self.engine.set_summary(cmd["conversation_id"], cmd["text"])
+        self._compacted(cmd["conversation_id"], summary, cmd["request_id"])
+        self._context_later(cmd["conversation_id"])
+
+    def _occupied(self, cmd: dict, work) -> None:
+        """Work on a chat that takes a while (a summary is a model request): in the chat's turn slot, on a thread
+        of its own, so nothing else runs in that chat meanwhile and Stop ends it."""
+        conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
+        self.engine.open(conversation_id)
+        cancel = threading.Event()
+        with self._lock:
+            if self._closing:
+                raise ChatEngineError("DGC is shutting down.")
+            if conversation_id in self._turns:
+                raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
+            slot = self._turns[conversation_id] = {"cancel": cancel, "reply_id": None, "thread": None}
+
+        def run():
+            try:
+                self.emit("chatdgc_activity", conversation_id=conversation_id, message_id=request_id[:64],
+                          kind="compacting", text="")
+                work(cancel)
+            except (ChatEngineError, ChatStoreError) as exc:
+                self._error(str(exc), request_id, conversation_id)
+            except Exception as exc:                  # noqa: BLE001
+                self._error(f"ChatDGC hit an error: {' '.join(str(exc).split())[:300] or type(exc).__name__}",
+                            request_id, conversation_id)
+            finally:
+                with self._lock:
+                    if self._turns.get(conversation_id) is slot:
+                        del self._turns[conversation_id]
+        slot["thread"] = threading.Thread(target=run, daemon=True, name=f"dgc-chatdgc-work-{conversation_id[5:13]}")
+        slot["thread"].start()
+
+    def _compact_now(self, cmd: dict) -> None:
+        def work(cancel):
+            summary = self.engine.compact(cmd["conversation_id"], cancel=cancel)
+            self._compacted(cmd["conversation_id"], summary, cmd["request_id"])
+            self._context(cmd["conversation_id"])
+        self._occupied(cmd, work)
+
+    def _carry(self, cmd: dict) -> None:
+        def work(cancel):
+            fresh = self.engine.carry(cmd["conversation_id"], cancel=cancel)
+            self._opened(fresh, cmd["request_id"])
+            self._changed(fresh["id"], None)
+            self._context(fresh["id"])
+        self._occupied(cmd, work)
 
     def _version(self, cmd: dict) -> None:
         conversation_id = cmd["conversation_id"]
@@ -246,7 +319,7 @@ class ChatService:
     def _continue(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.continue_reply(cmd["conversation_id"], cmd["message_id"], on_start=on_start,
-                                              cancel=cancel, **stream_for())
+                                              on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run)
 
     def _start(self, cmd: dict, run, *, refresh: bool = False) -> None:
@@ -292,7 +365,8 @@ class ChatService:
         def stream_for():
             # The stream exists once on_start ran; the engine calls on_text only after that.
             return {"on_text": lambda part: stream["value"].text(part),
-                    "on_thinking": lambda part: stream["value"].thinking(part)}
+                    "on_thinking": lambda part: stream["value"].thinking(part),
+                    "on_compacted": lambda summary: self._compacted(conversation_id, summary)}
 
         try:
             reply = run(cancel, on_start, stream_for, activity)
@@ -308,6 +382,7 @@ class ChatService:
             marked = self._marked(now_, [reply])[0]
             self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked), request_id=request_id)
             self._changed(conversation_id, request_id)
+            self._context(conversation_id)
             if reply.get("finish") == "stop":
                 self._name_later(conversation_id)
         except (ChatEngineError, ChatStoreError) as exc:

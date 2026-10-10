@@ -300,6 +300,36 @@ class ServiceTests(unittest.TestCase):
                                        "path": bad, "format": "markdown"})
                 self.assertEqual(self.wire.of("chatdgc_error")[-1]["message"], "Choose where to save the export.")
 
+    def test_the_window_on_the_wire(self):
+        chat = self.new()
+        meter = self.wire.wait(lambda f: f["type"] == "chatdgc_context" and f["conversation_id"] == chat)
+        self.assertEqual((meter["window"], meter["preset"], meter["source"]), (32768, "32k", "estimated"), "as it opens")
+        self.model.script += [{"parts": ["A1"]}, {"parts": ["A2"]}]
+        self.send(chat, "one", request_id="t1"); self.ended("t1")
+        self.send(chat, "two", request_id="t2"); self.ended("t2")
+        self.assertEqual(self.wire.of("chatdgc_context")[-1]["source"], "reported", "after a turn: what the model counted")
+        self.model.gate.clear()
+        self.model.script.append({"parts": ["S"], "hold_at": 0})
+        with patch.object(self.engine, "_summarize", side_effect=lambda *a, **k: (self.model.reached.set(),
+                                                                                    self.model.gate.wait(5), "Goa trip so far.")[-1]):
+            self.service.dispatch({"type": "chatdgc_compact", "request_id": "c1", "conversation_id": chat})
+            self.assertTrue(self.model.reached.wait(5))
+            self.send(chat, "three", request_id="busy")
+            self.assertIn("still answering", self.wire.of("chatdgc_error")[-1]["message"], "nothing else while it summarizes")
+            self.model.gate.set()
+            done = self.wire.wait(lambda f: f["type"] == "chatdgc_compacted" and f.get("request_id") == "c1")
+        self.assertEqual(done["summary"]["text"], "Goa trip so far.")
+        self.assertEqual(self.wire.of("chatdgc_activity")[-1]["kind"], "compacting")
+        self.service.dispatch({"type": "chatdgc_summary", "request_id": "e1", "conversation_id": chat, "text": "Edited."})
+        self.assertEqual(self.wire.of("chatdgc_compacted")[-1]["summary"]["text"], "Edited.")
+        self.service.dispatch({"type": "chatdgc_open", "request_id": "o2", "conversation_id": chat})
+        self.assertEqual(self.wire.of("chatdgc_opened")[-1]["conversation"]["summary"]["text"], "Edited.", "a chat opens with it")
+        with patch.object(self.engine, "_summarize", return_value="Carried over."):
+            self.service.dispatch({"type": "chatdgc_carry", "request_id": "k1", "conversation_id": chat})
+            fresh = self.wire.wait(lambda f: f["type"] == "chatdgc_opened" and f["request_id"] == "k1")["conversation"]
+        self.assertNotEqual(fresh["id"], chat)
+        self.assertEqual((fresh["carried"]["from"], fresh["carried"]["text"]), (chat, "Carried over."))
+
     def test_one_turn_per_chat_and_two_chats_side_by_side(self):
         first, second = self.new(), self.new()
         self.model.gate.clear()

@@ -175,7 +175,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
-    "chatdgc_about", "chatdgc_style", "chatdgc_personality",
+    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes",
     "thinking_inline", "thinking_inline_max_chars",
@@ -265,7 +265,7 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 # search_url and search_api_key_set: the one web search Work, ChatDGC and Pips share, for Settings.
 # chatdgc_*: ChatDGC's custom instructions and personality, for Settings.
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
-                                   "chatdgc_about", "chatdgc_style", "chatdgc_personality"})
+                                   "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -300,6 +300,8 @@ _CONFIG_ENUMS = {
     "search_provider": frozenset({"duckduckgo", "brave", "tavily", "searxng"}),
     "tool_profile": frozenset({"standard", "adaptive", "full"}),
     "chatdgc_personality": frozenset({"default", "concise", "warm", "candid", "nerdy"}),
+    # ChatDGC's context window: a preset, clamped to the model's real limit (dgc/chatdgc/window.py).
+    "chatdgc_window": frozenset({"8k", "32k", "128k", "max"}),
     "thinking": frozenset({"off", "low", "medium", "high", "xhigh"}),
     "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
 }
@@ -3617,7 +3619,8 @@ class Backend:
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
         extra = {}
-        for key, fallback in (("chatdgc_about", ""), ("chatdgc_style", ""), ("chatdgc_personality", "default")):
+        for key, fallback in (("chatdgc_about", ""), ("chatdgc_style", ""), ("chatdgc_personality", "default"),
+                              ("chatdgc_window", "32k")):
             if key in self._config_fields:
                 extra[key] = str(c.get(key, fallback) or fallback)
         if "search_url" in self._config_fields:
