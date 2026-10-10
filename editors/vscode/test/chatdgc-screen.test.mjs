@@ -317,6 +317,9 @@ test("a reply that searches: what it looks for while it looks, citation marks, a
     await s.page.locator(".cd-cite").nth(1).hover();
     const card = s.page.locator(".cd-cite-card");
     await card.waitFor({ state: "visible" });
+    const [pillBox, cardBox] = [await s.page.locator(".cd-cite").nth(1).boundingBox(), await card.boundingBox()];
+    if (pillBox.y - 14 >= cardBox.height) assert.ok(cardBox.y + cardBox.height <= pillBox.y, "above the pill: the Sources button and actions under it stay in reach");
+    else assert.ok(cardBox.y >= pillBox.y + pillBox.height, "no room above: below it");
     assert.deepEqual(await card.locator(".cd-source-open").allTextContents(), ["Météo", "BBC Weather: Paris"]);
     assert.equal(await card.locator(".cd-source-snippet").textContent(), "A dry week ahead.");
     await card.locator(".cd-source-open").nth(1).click();
@@ -341,6 +344,33 @@ test("a reply that searches: what it looks for while it looks, citation marks, a
     if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-sources.png") });
     await s.page.keyboard.press("Escape");
     assert.equal(await panel.count(), 0);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("a source's card opens above its pill, so a short answer's Sources button stays in reach", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const sources = [{ n: 1, title: "2026 Italian Grand Prix report", url: "https://www.formula1.com/en/latest/italy", snippet: "Antonelli won from Russell." },
+                     { n: 2, title: "F1 results", url: "https://www.espn.com/f1/results" }];
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Earlier question.\n".repeat(8) }, { id: M(2), role: "assistant", text: "Earlier answer.\n\n".repeat(6), finish: "stop" },
+      { id: M(3), role: "user", text: "Who won the most recent Grand Prix?" },
+      { id: M(4), role: "assistant", text: "Kimi Antonelli won the Italian Grand Prix [1] [2].", finish: "stop", sources, searches: ["latest grand prix winner"] }] });
+    await s.frame();
+    const pill = s.page.locator(".cd-assistant").last().locator(".cd-cite");
+    await pill.hover();
+    const card = s.page.locator(".cd-cite-card");
+    await card.waitFor({ state: "visible" });
+    const [p, c] = [await pill.boundingBox(), await card.boundingBox()];
+    assert.ok(c.y + c.height <= p.y, "above the pill");
+    const button = s.page.locator(".cd-assistant").last().locator(".cd-sources-button");
+    const b = await button.boundingBox();
+    assert.equal(await s.page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest(".cd-sources-button") !== null,
+      [b.x + b.width / 2, b.y + b.height / 2]), true, "nothing covers the Sources button while the card is open");
+    await button.click();
+    assert.equal(await s.page.locator("#cd-sources-panel").isVisible(), true);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

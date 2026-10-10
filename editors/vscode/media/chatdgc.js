@@ -105,8 +105,11 @@
     const at = pill.getBoundingClientRect(), width = Math.min(340, window.innerWidth - 24);
     citeCard.style.width = `${width}px`;
     citeCard.style.left = `${Math.max(12, Math.min(at.left, window.innerWidth - width - 12))}px`;
-    const below = at.bottom + 6, height = citeCard.offsetHeight;
-    citeCard.style.top = `${below + height > window.innerHeight - 8 ? Math.max(8, at.top - height - 6) : below}px`;
+    // Above the pill, as ChatGPT's source preview opens: below it, a card held open by the pointer covered the
+    // Sources button and the reply's actions under a short answer (a live run couldn't reach them). Below only
+    // when there's no room above.
+    const height = citeCard.offsetHeight, above = at.top - height - 6;
+    citeCard.style.top = `${above >= 8 ? above : Math.min(at.bottom + 6, window.innerHeight - height - 8)}px`;
   }
   const hideCard = (soon = true) => { clearTimeout(cardTimer); cardTimer = setTimeout(() => { citeCard.hidden = true; }, soon ? 180 : 0); };
   document.addEventListener("mouseover", (e) => {
