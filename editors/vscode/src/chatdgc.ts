@@ -256,7 +256,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_context":
         for (const tab of showing(conversation)) {
           this.post(tab, { type: "context", window: ev.window, limit: ev.limit, used: ev.used, preset: ev.preset,
-                           source: ev.source, parts: ev.parts });
+                           source: ev.source, parts: ev.parts, compactable: ev.compactable });
         }
         return;
       case "chatdgc_compacted":

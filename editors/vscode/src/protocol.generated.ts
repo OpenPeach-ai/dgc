@@ -4211,6 +4211,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "object"
       ],
       "required": true
+    },
+    "compactable": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
     }
   },
   "chatdgc_compacted": {

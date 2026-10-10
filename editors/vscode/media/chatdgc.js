@@ -326,11 +326,16 @@
     const parts = c.parts || {};
     const names = { instructions: "Instructions", summary: "Summary", files: "Files", conversation: "Conversation" };
     const presets = { "8k": "8k", "32k": "32k", "128k": "128k", max: "the model's maximum" };
+    // Compact now keeps the last exchange word for word: with nothing older left to summarize, it says so here
+    // rather than failing after the click.
     const compact = el("button", "cd-edit-cancel", state.compacting ? "Summarizing…" : "Compact now");
     compact.type = "button"; compact.dataset.whileIdle = "1";
-    if (state.messages.length < 3) compact.dataset.never = "1";
-    compact.disabled = state.busy || state.compacting || state.messages.length < 3;
+    if (!c.compactable) compact.dataset.never = "1";
+    compact.disabled = state.busy || state.compacting || !c.compactable;
     compact.title = "Summarize everything before the last exchange";
+    const why = c.compactable || state.compacting ? null : el("p", "cd-pop-note cd-pop-why", state.conversation?.summary
+      ? "Everything before your last exchange is already summarized."
+      : "Nothing to compact yet: Compact now keeps your last exchange word for word.");
     compact.addEventListener("click", () => { vscode.postMessage({ type: "compact" }); state.compacting = true; render(); controls(); popover(); });
     const carry = el("button", "cd-edit-cancel", "Continue in a new chat");
     carry.type = "button"; carry.dataset.whileIdle = "1";
@@ -345,7 +350,7 @@
       ...Object.entries(names).filter(([key]) => parts[key]).map(([key, label]) => line(label, Number(parts[key]).toLocaleString())),
       el("p", "cd-pop-note", `Window: ${presets[c.preset] || c.preset} (Settings → ChatDGC)` + (c.limit ? `. This model can take up to ${c.limit.toLocaleString()}.` : ".")
         + " Near the limit, older messages are summarized and the recent ones kept word for word."),
-      actions);
+      ...(why ? [why] : []), actions);
   }
   $("cd-context").addEventListener("click", () => {
     const pop = $("cd-context-pop");
@@ -677,7 +682,7 @@
       case "context":
         state.context = { window: Number(msg.window) || 0, limit: Number(msg.limit) || 0, used: Number(msg.used) || 0,
                           preset: String(msg.preset || ""), source: msg.source === "reported" ? "reported" : "estimated",
-                          parts: msg.parts && typeof msg.parts === "object" ? msg.parts : {} };
+                          parts: msg.parts && typeof msg.parts === "object" ? msg.parts : {}, compactable: msg.compactable === true };
         meter();
         return;
       case "compacted":

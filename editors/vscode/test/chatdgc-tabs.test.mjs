@@ -388,8 +388,8 @@ test("the context window: its commands go as such, and its events reach the tabs
   panel.say({ type: "summary", text: "Edited." });
   panel.say({ type: "carry" });
   assert.deepEqual(sent.slice(-3).map((c) => c.type), ["chatdgc_compact", "chatdgc_summary", "chatdgc_carry"], "an empty summary isn't sent");
-  chat.onEvent({ type: "chatdgc_context", conversation_id: ID(9), window: 32768, limit: 0, used: 900, preset: "32k", source: "estimated", parts: {} });
-  assert.equal(panel.last("context").used, 900);
+  chat.onEvent({ type: "chatdgc_context", conversation_id: ID(9), window: 32768, limit: 0, used: 900, preset: "32k", source: "estimated", parts: {}, compactable: true });
+  assert.deepEqual([panel.last("context").used, panel.last("context").compactable], [900, true]);
   chat.onEvent({ type: "chatdgc_compacted", conversation_id: ID(9), summary: { upto: MSG(1), text: "s" } });
   assert.equal(panel.last("compacted").summary.text, "s");
   const carry = last("chatdgc_carry");

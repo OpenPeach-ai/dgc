@@ -861,9 +861,11 @@ EVENT_FIELDS.update({
                      "error": _S(False)},
     "chatdgc_exported": {"request_id": _S(), "conversation_id": _S(), "path": _S(), "bytes": _I()},
     # `used` of `window` tokens (`limit`: the model's own maximum, 0 unknown), counted by the model (`source`
-    # "reported") or estimated; `parts` splits it: instructions, summary, files, conversation.
+    # "reported") or estimated; `parts` splits it: instructions, summary, files, conversation; `compactable`:
+    # Compact now has more than the last exchange to summarize.
     "chatdgc_context": {"conversation_id": _S(), "window": _I(), "limit": _I(), "used": _I(), "preset": _S(),
-                        "source": _f("string", enum=("reported", "estimated")), "parts": _O()},
+                        "source": _f("string", enum=("reported", "estimated")), "parts": _O(),
+                        "compactable": _B()},
     # The summary of earlier messages, new or changed (null: none).
     "chatdgc_compacted": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
 })

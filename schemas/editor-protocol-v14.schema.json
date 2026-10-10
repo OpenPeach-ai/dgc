@@ -5488,6 +5488,9 @@
             },
             "parts": {
               "type": "object"
+            },
+            "compactable": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -5499,7 +5502,8 @@
             "used",
             "preset",
             "source",
-            "parts"
+            "parts",
+            "compactable"
           ],
           "additionalProperties": false
         },

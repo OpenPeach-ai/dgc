@@ -512,13 +512,22 @@ class ChatEngine:
         self._save(chat)
         return True
 
+    @classmethod
+    def _compactable(cls, chat: dict) -> bool:
+        """Whether Compact now has anything to summarize: more than the last exchange after what's summarized."""
+        return len(chat["messages"]) - 2 > cls._summary_start(chat)
+
     def compact(self, chat_id: str, *, cancel=None) -> dict:
         """Compact now: everything before the last exchange becomes the summary."""
         chat = self._chat(chat_id)
+        if not self._compactable(chat):
+            raise ChatEngineError("Everything before your last exchange is already summarized."
+                                  if self._summary_start(chat) else
+                                  "There's nothing to compact yet: Compact now keeps your last exchange word for word.")
         client = self.client(chat.get("model") or None)
         room, _ = fit_window.window(client, self._preset())
         if not self._compact(chat, client, room, cancel, keep_messages=2):
-            raise ChatEngineError("There's nothing to compact yet: this chat is still short.")
+            raise ChatEngineError("There's nothing to compact yet.")
         return chat["summary"]
 
     def set_summary(self, chat_id: str, text: str) -> dict:
@@ -570,7 +579,8 @@ class ChatEngine:
         usage = last.get("usage") or {} if last.get("role") == "assistant" else {}
         reported = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
         return {"window": room, "limit": limit, "preset": self._preset(), "parts": parts,
-                "used": reported or estimated, "source": "reported" if reported else "estimated"}
+                "used": reported or estimated, "source": "reported" if reported else "estimated",
+                "compactable": self._compactable(chat)}
 
     def _history(self, chat: dict, search: str = "off", sees: bool = True, room: int = 0) -> list[dict]:
         """What the model reads: ChatDGC's instructions and the conversation. Earlier thinking never goes back;

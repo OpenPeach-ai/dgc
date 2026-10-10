@@ -303,7 +303,8 @@ class ServiceTests(unittest.TestCase):
     def test_the_window_on_the_wire(self):
         chat = self.new()
         meter = self.wire.wait(lambda f: f["type"] == "chatdgc_context" and f["conversation_id"] == chat)
-        self.assertEqual((meter["window"], meter["preset"], meter["source"]), (32768, "32k", "estimated"), "as it opens")
+        self.assertEqual((meter["window"], meter["preset"], meter["source"], meter["compactable"]),
+                         (32768, "32k", "estimated", False), "as it opens")
         self.model.script += [{"parts": ["A1"]}, {"parts": ["A2"]}]
         self.send(chat, "one", request_id="t1"); self.ended("t1")
         self.send(chat, "two", request_id="t2"); self.ended("t2")

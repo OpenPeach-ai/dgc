@@ -137,6 +137,24 @@ class WindowTests(unittest.TestCase):
         self.assertIn("continues an earlier one", self.last_request()["messages"][0]["content"])
         self.assertEqual(len(self.store.get(chat["id"])["messages"]), 10, "the old chat is left as it was")
 
+    def test_compact_now_is_offered_only_with_something_to_summarize(self):
+        chat = self.engine.open()
+        self.talk(chat, "one", "1")
+        self.assertFalse(self.engine.context(chat["id"])["compactable"], "one exchange: what Compact now keeps")
+        with self.assertRaisesRegex(ChatEngineError, "keeps your last exchange word for word"):
+            self.engine.compact(chat["id"])
+        self.talk(chat, "two", "2")
+        self.assertTrue(self.engine.context(chat["id"])["compactable"])
+        self.engine.compact(chat["id"])
+        self.assertFalse(self.engine.context(chat["id"])["compactable"])
+        asked = len(self.world["summaries"])
+        # The live run: right after a summary, Compact now said "this chat is still short" of a chat at 52%.
+        with self.assertRaisesRegex(ChatEngineError, "Everything before your last exchange is already summarized"):
+            self.engine.compact(chat["id"])
+        self.assertEqual(len(self.world["summaries"]), asked, "no model request for nothing")
+        self.talk(chat, "three", "3")
+        self.assertTrue(self.engine.context(chat["id"])["compactable"], "another exchange: the one before can go in")
+
     def test_one_file_never_fills_the_window(self):
         chat = self.engine.open()
         self.talk(chat, "Read this", attachments=[{"kind": "text", "text": "row\n" * 20_000, "name": "big.csv"}])

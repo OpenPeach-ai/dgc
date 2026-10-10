@@ -475,7 +475,7 @@ test("the context window: a meter that warns early, Compact now, the summary in 
     await s.send({ type: "opened", conversation: conversation({ title: "Long" }), earlier: 0, busy: false, messages });
     assert.equal(await s.page.locator("#cd-context").isHidden(), true, "no meter until it's counted");
     const ctx = (used, extra = {}) => s.send({ type: "context", window: 32768, limit: 262144, used, preset: "32k", source: "reported",
-      parts: { instructions: 600, conversation: used - 600 }, ...extra });
+      parts: { instructions: 600, conversation: used - 600 }, compactable: true, ...extra });
     for (const [used, level, pct] of [[12000, "low", "37%"], [24000, "mid", "73%"], [30000, "high", "92%"]]) {
       await ctx(used);
       assert.deepEqual([await s.page.locator("#cd-context").getAttribute("data-level"), await s.page.locator("#cd-context-pct").textContent()], [level, pct]);
@@ -499,7 +499,10 @@ test("the context window: a meter that warns early, Compact now, the summary in 
     await s.page.locator(".cd-summary textarea").fill("They are planning four days in Goa.");
     await s.page.locator(".cd-summary").getByText("Save").click();
     assert.deepEqual(await s.posted("summary"), [{ type: "summary", text: "They are planning four days in Goa." }]);
+    await ctx(20000, { compactable: false });
     await s.page.locator("#cd-context").click();
+    assert.equal(await pop.getByText("Compact now").isDisabled(), true, "nothing older left to summarize: not offered");
+    assert.equal(await pop.locator(".cd-pop-why").textContent(), "Everything before your last exchange is already summarized.");
     await pop.getByText("Continue in a new chat").click();
     assert.equal((await s.posted("carry")).length, 1);
     await s.send({ type: "opened", earlier: 0, busy: false, messages: [],
