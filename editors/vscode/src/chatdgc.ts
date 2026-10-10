@@ -209,6 +209,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         return;
       case "chatdgc_opened": {
+        if (asker?.kind === "branch") {
+          // Branch in new chat: it opens in a tab of its own, as ChatGPT opens one; the chat it came from stays.
+          this.requests.delete(requestId);
+          const id = String(ev.conversation?.id || "");
+          if (CONVERSATION_ID.test(id)) this.open(id);
+          this.homeChanged();
+          return;
+        }
         if (asker?.kind === "fork" || asker?.kind === "version") {
           // A new version, or another one shown: every tab on this chat shows the conversation as it is now. A
           // fork's request stays open: its turn is still to come.
@@ -446,6 +454,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         // Answered by the new chat's chatdgc_opened, which this tab then shows (an "open" request, as a new chat's).
         if (conversation) this.ask({ tab, kind: "open" }, { type: "chatdgc_carry", conversation_id: conversation });
         return;
+      case "branch": {
+        const at = String(message.messageId || "");
+        if (conversation && MESSAGE_ID.test(at)) {
+          this.ask({ tab, kind: "branch" }, { type: "chatdgc_branch", conversation_id: conversation, message_id: at });
+        }
+        return;
+      }
+      case "openChat": {
+        // The chat a branch came from (or any chat the screen names): its tab if open, else a new one.
+        const id = String(message.id || "");
+        if (CONVERSATION_ID.test(id)) this.open(id);
+        return;
+      }
       case "version": {
         const parent = String(message.parent || "");
         if (!conversation || !(parent === "root" || MESSAGE_ID.test(parent)) || !Number.isInteger(message.index)

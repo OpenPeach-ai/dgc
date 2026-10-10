@@ -362,3 +362,14 @@ textarea.cd-plan-input { resize: vertical; }
 .cd-lightbox-note { margin: 0; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 @media (max-width: 520px) { .cd-pictures, .cd-pictures[data-count="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .cd-picture img { transition: none; } .cd-picture:hover img { transform: none; } }
+
+/* Where a branch leaves the chat it came from (Branch in new chat): a rule with the original's name on it. */
+.cd-branched { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-2) 0 var(--sp-4); color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-branched::before, .cd-branched::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.cd-branched-words { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 70%; }
+.cd-branched-words > span:not(.codicon) { flex: none; }
+.cd-branched-from { min-width: 0; overflow: hidden; padding: 0; border: 0; background: none; color: var(--link, var(--accent));
+  font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.cd-branched-from:hover { text-decoration: underline; }
+.cd-branched-from:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }

@@ -860,6 +860,9 @@ COMMAND_FIELDS.update({
     "chatdgc_compact": {"request_id": _S(), "conversation_id": _S()},
     "chatdgc_summary": {"request_id": _S(), "conversation_id": _S(), "text": _S()},
     "chatdgc_carry": {"request_id": _S(), "conversation_id": _S()},
+    # Branch in new chat: a new chat with the conversation up to and including that reply (answered by the new
+    # chat's chatdgc_opened; its conversation's `branched` says {from, title, at, created_at}).
+    "chatdgc_branch": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
     "chatdgc_cancel": {"conversation_id": _S(), "request_id": _S(False)},
     # An image the chat keeps, to show (answered by `chatdgc_file`: a data: URI, or why not).
     "chatdgc_file": {"request_id": _S(), "conversation_id": _S(), "attachment_id": _S()},

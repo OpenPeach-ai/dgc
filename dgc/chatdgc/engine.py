@@ -7,6 +7,7 @@ its own. A reply is as long as the model allows; when the model stops at its own
 """
 from __future__ import annotations
 
+import copy
 import json
 import re
 import threading
@@ -865,6 +866,39 @@ class ChatEngine:
                            "written_at": chat["messages"][-1]["id"] if chat["messages"] else ""}
         self._save(chat)
         return chat["summary"]
+
+    def branch(self, chat_id: str, message_id: str) -> dict:
+        """Branch in new chat, as ChatGPT has it: a new chat holding this conversation up to and including that
+        reply, as you see it (the versions shown), with its files and what was summarized of it. The original is
+        left as it is; the branch says where it came from."""
+        chat = self._chat(chat_id)
+        if chat.get("temporary"):
+            raise ChatEngineError("A temporary chat can't be branched: it isn't kept.")
+        index = self._at(chat, message_id, "assistant")
+        upto = chat["messages"][: index + 1]
+        if (upto[-1].get("research") or {}).get("status") in ("planning", "running", "writing", "checking"):
+            raise ChatEngineError("Let the research finish, then branch from it.")
+        fresh = self.store.create(model=chat.get("model"), thinking=chat.get("thinking"),
+                                  title=f"Branch \u00b7 {chat.get('title') or 'New chat'}")
+        try:
+            for m in upto:
+                for meta in [*(m.get("attachments") or []), *((m.get("images") or {}).get("items") or [])]:
+                    found = self._file(chat, str(meta.get("id") or ""))
+                    if found is not None:
+                        self.store.put_file(fresh["id"], meta["id"], found[0], found[1])
+            fresh["messages"] = copy.deepcopy(upto)
+            summary = chat.get("summary") or {}
+            # What was summarized goes too, when all of it is in the branch.
+            if summary.get("upto") and any(m.get("id") == summary["upto"] for m in upto):
+                fresh["summary"] = copy.deepcopy(summary)
+            for key in ("carried", "project"):
+                if chat.get(key):
+                    fresh[key] = copy.deepcopy(chat[key])
+            fresh["branched"] = {"from": chat["id"], "title": chat.get("title", ""), "at": message_id, "created_at": now()}
+            return self.store.save(fresh)
+        except BaseException:
+            self.store.delete(fresh["id"])
+            raise
 
     def carry(self, chat_id: str, *, cancel=None) -> dict:
         """Continue in a new chat: a summary of this one goes with it, and it starts with an empty window."""

@@ -9095,6 +9095,35 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chatdgc_branch"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "message_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "conversation_id",
+            "message_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chatdgc_cancel"
             },
             "chat_id": {

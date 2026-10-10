@@ -726,6 +726,8 @@
       const versions = versionsControl(message);
       if (versions) actions.append(versions);
       actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
+      const branch = branchAction(message);
+      if (branch) actions.append(branch);
       node.append(actions);
     }
     return node;
@@ -835,10 +837,17 @@
         state.busy = true; controls();
       });
       actions.append(idleOnly(again));
+      const branch = branchAction(message);
+      if (branch) actions.append(branch);
       if (message.model) actions.append(el("span", "cd-meta", String(message.model)));
       node.append(actions);
     }
     return node;
+  }
+  /** Branch in new chat (ChatGPT's): this conversation up to here, in a new chat of its own, opened in a tab. */
+  function branchAction(message) {
+    if (state.conversation?.temporary || !message.id) return null;
+    return idleOnly(action("git-branch", "Branch in new chat", () => vscode.postMessage({ type: "branch", messageId: message.id })));
   }
   // ---- the context window: what earlier was summarized, and what a chat carried over from another
   function summaryNode() {
@@ -870,6 +879,19 @@
       box.append(note, edit);
     }
     return box;
+  }
+  /** Where a branch leaves the chat it came from: what's above is that chat's, what's below is this one's. */
+  function branchedNode() {
+    const branched = state.conversation.branched;
+    const line = el("div", "cd-branched");
+    line.setAttribute("role", "separator");
+    const open = el("button", "cd-branched-from", branched.title || "a chat");
+    open.type = "button"; open.title = "Open the chat this branch came from";
+    open.addEventListener("click", () => vscode.postMessage({ type: "openChat", id: branched.from }));
+    const words = el("span", "cd-branched-words");
+    words.append(icon("git-branch"), el("span", "", "Branched from "), open);
+    line.append(words);
+    return line;
   }
   function carriedNode() {
     const carried = state.conversation.carried;
@@ -939,6 +961,11 @@
     const upto = state.conversation?.summary?.upto;
     const at = upto ? state.messages.findIndex((m) => m.id === upto) : -1;
     if (at >= 0) nodes.splice(at + 1, 0, summaryNode());
+    const branched = state.conversation?.branched;
+    if (branched?.at) {
+      const after = nodes.findIndex((n) => n.dataset?.id === branched.at);
+      if (after >= 0) nodes.splice(after + 1, 0, branchedNode());
+    }
     if (state.conversation?.carried?.text) nodes.unshift(carriedNode());
     if (state.compacting) nodes.push(el("div", "cd-working cd-activity", "Summarizing earlier messages to fit the context window…"));
     log.replaceChildren(...nodes);

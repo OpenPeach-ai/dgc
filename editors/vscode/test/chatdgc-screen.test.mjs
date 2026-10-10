@@ -412,6 +412,40 @@ test("pictures from the web: a strip above the answer as it streams, each with i
   } finally { await s.page.close(); }
 });
 
+test("branch in new chat: on every reply, never in a temporary chat, and the branch says where it came from", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const FROM = `chat_${"b".repeat(32)}`;
+    await s.send({ type: "opened", conversation: conversation({ title: "Goa trip" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Plan Goa" }, { id: M(2), role: "assistant", text: "Beaches first.", finish: "stop" },
+      { id: M(3), role: "user", text: "Day two?" }, { id: M(4), role: "assistant", text: "Old Goa.", finish: "stop" }] });
+    const branches = s.page.locator('button[aria-label="Branch in new chat"]');
+    assert.equal(await branches.count(), 2, "one on each reply");
+    await branches.first().click();
+    assert.deepEqual(await s.posted("branch"), [{ type: "branch", messageId: M(2) }]);
+    await s.send({ type: "turn", state: "started", replyId: M(6) });
+    await s.frame();
+    assert.equal(await branches.first().isDisabled(), true, "not while a reply is being written");
+    await s.send({ type: "turn", state: "ended", replyId: M(6) });
+    await s.send({ type: "opened", conversation: conversation({ temporary: true }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Hi" }, { id: M(2), role: "assistant", text: "Hello.", finish: "stop" }] });
+    assert.equal(await branches.count(), 0, "a temporary chat isn't kept, so it can't be branched");
+    await s.send({ type: "opened", conversation: conversation({ title: "Branch \u00b7 Goa trip",
+      branched: { from: FROM, title: "Goa trip", at: M(2), created_at: "2026-10-10T18:00:00Z" } }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Plan Goa" }, { id: M(2), role: "assistant", text: "Beaches first.", finish: "stop" },
+      { id: M(7), role: "user", text: "What about the north?" }, { id: M(8), role: "assistant", text: "Arambol.", finish: "stop" }] });
+    const line = s.page.locator(".cd-branched");
+    assert.equal(await line.textContent(), "Branched from Goa trip");
+    assert.equal(await s.page.evaluate(() => document.querySelector(".cd-branched").previousElementSibling.dataset.id), M(2),
+                 "right after the reply it branched from");
+    await line.locator("button").click();
+    assert.deepEqual(await s.posted("openChat"), [{ type: "openChat", id: FROM }]);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-branch.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("attachments: picked files and pastes become chips, go with the message, and show on it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

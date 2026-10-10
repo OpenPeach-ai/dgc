@@ -32,7 +32,8 @@ def summary(chat: dict) -> dict:
     return {key: chat.get(key) for key in ("id", "title", "created_at", "updated_at", "model", "thinking",
                                             "pinned", "archived")} | {"temporary": bool(chat.get("temporary")),
                                                                       "summary": chat.get("summary"),
-                                                                      "carried": chat.get("carried")}
+                                                                      "carried": chat.get("carried"),
+                                                                      "branched": chat.get("branched")}
 
 
 def _size(value) -> int:
@@ -143,7 +144,7 @@ class ChatService:
              "chatdgc_update": self._update, "chatdgc_file": self._file, "chatdgc_edit": self._edit,
              "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version, "chatdgc_answer": self._answer,
              "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
-             "chatdgc_carry": self._carry, "chatdgc_research": self._research,
+             "chatdgc_carry": self._carry, "chatdgc_branch": self._branch, "chatdgc_research": self._research,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -252,6 +253,15 @@ class ChatService:
             self._changed(fresh["id"], None)
             self._context(fresh["id"])
         self._occupied(cmd, work)
+
+    def _branch(self, cmd: dict) -> None:
+        conversation_id = cmd["conversation_id"]
+        with self._lock:
+            if conversation_id in self._turns:
+                raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
+        fresh = self.engine.branch(conversation_id, cmd["message_id"])
+        self._opened(fresh, cmd["request_id"])
+        self._changed(fresh["id"], None)
 
     def _version(self, cmd: dict) -> None:
         conversation_id = cmd["conversation_id"]
