@@ -1288,3 +1288,75 @@ test("memory: a reply says what it saved, with Forget, and the way to everything
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("the Library: once ChatDGC has made a file, show what you uploaded or what it made", async (t) => {
+  if (skipOrFail(t)) return;
+  const { html, js } = libraryHtml();
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await page.setContent(html, { waitUntil: "load" });
+    await page.evaluate((code) => {
+      window.__posted = []; window.__state = undefined;
+      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
+      eval(code);
+    }, js);
+    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
+    await send({ type: "library", files: [], total: 0, next: null, counts: {}, origins: { made: 0, uploaded: 0 } });
+    assert.equal(await page.locator("#lib-origins").isHidden(), true, "nothing made yet: no filter to show");
+    const made = { source: "chat", chat_id: `chat_${"a".repeat(32)}`, id: `att_${"1".repeat(32)}`, name: "LRS brief.docx", kind: "document",
+                   type: "document", size: 4754, created_at: new Date().toISOString(), chat_title: "Visa", made: true };
+    await send({ type: "library", files: [made], total: 1, next: null, counts: { document: 1 }, origins: { made: 1, uploaded: 2 } });
+    assert.deepEqual(await page.locator("#lib-origins .lib-kind").allInnerTexts(), ["All\n3", "Uploaded\n2", "Made by ChatDGC\n1"]);
+    assert.equal(await page.locator(".lib-meta").textContent(), "Document · 5 KB · made in “Visa” · Today");
+    await page.locator("#lib-origins .lib-kind", { hasText: "Made by ChatDGC" }).click();
+    assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "", origin: "made", offset: 0 });
+    await send({ type: "library", files: [made], total: 1, next: null, counts: { document: 1 }, origins: { made: 1, uploaded: 2 } });
+    assert.equal(await page.locator("#lib-origins .lib-kind[aria-pressed=true]").innerText(), "Made by ChatDGC\n1");
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test("files a reply made: a card with what each is, Open and Save a copy…, live as it's made", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const F = (c) => "att_" + c.repeat(32);
+    const files = [
+      { id: F("1"), name: "LRS <b>brief</b>.docx", kind: "document", format: "docx", size: 4754, made: true, at: 0 },
+      { id: F("2"), name: "Brief.pdf", kind: "document", format: "pdf", size: 90473, pages: 3, made: true, at: 0,
+        note: "This PDF is plain text in Helvetica: no Chrome or Edge was found to print it." },
+      { id: F("3"), name: "Old.xlsx", kind: "document", format: "xlsx", size: 3980, made: true, at: 0, removed: true }];
+    await s.send({ type: "opened", conversation: conversation({ title: "Brief" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "A brief, please" }, { id: M(2), role: "assistant", text: "Here it is.", finish: "stop", files }] });
+    await s.frame();
+    const card = (c) => s.page.locator(`.cd-file:has(.cd-file-name) >> nth=${c}`);
+    assert.deepEqual(await s.page.locator(".cd-file-badge").allTextContents(), ["DOCX", "PDF", "XLSX"]);
+    assert.equal(await card(0).locator(".cd-file-name").textContent(), "LRS <b>brief</b>.docx", "a name is text");
+    assert.equal(await card(0).locator("b").count(), 0);
+    assert.equal(await card(0).locator(".cd-file-meta").textContent(), "Word document · 5 KB");
+    assert.equal(await card(1).locator(".cd-file-meta").textContent(), "PDF · 88 KB · 3 pages");
+    assert.match(await card(1).locator(".cd-file-note").textContent(), /no Chrome or Edge was found/);
+    assert.equal(await card(2).locator(".cd-file-meta").textContent(), "Deleted from your Library");
+    assert.equal(await card(2).locator("button").count(), 0, "nothing to open");
+    assert.deepEqual(await card(0).locator("button").allTextContents(), ["Open", "Save a copy…"]);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-made-files.png") });
+    await card(0).locator("button", { hasText: "Open" }).click();
+    await card(1).locator("button", { hasText: "Save a copy…" }).click();
+    assert.deepEqual(await s.posted("fileOpen"), [{ type: "fileOpen", messageId: M(2), fileId: F("1"), name: "LRS <b>brief</b>.docx" }]);
+    assert.deepEqual(await s.posted("fileSave"), [{ type: "fileSave", messageId: M(2), fileId: F("2"), name: "Brief.pdf" }]);
+    // As a reply makes one: "Making …" while it's laid out, then its card, with the reply still going.
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "activity", messageId: M(4), kind: "making", text: "Budget" });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-activity").last().textContent(), "Making Budget…");
+    await s.send({ type: "made", messageId: M(4), file: { id: F("4"), name: "Budget.xlsx", format: "xlsx", size: 3000, made: true, at: 0 } });
+    await s.send({ type: "made", messageId: M(4), file: { id: "not-an-id", name: "x.docx", format: "docx" } });
+    await s.frame();
+    assert.equal(await s.page.locator(`.cd-file[aria-label="Budget.xlsx, Excel workbook"]`).count(), 1);
+    assert.equal(await s.page.locator(`.cd-file[aria-label^="x.docx"]`).count(), 0, "only a file DGC named");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

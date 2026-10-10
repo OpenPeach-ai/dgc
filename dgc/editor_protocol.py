@@ -824,7 +824,8 @@ COMMAND_FIELDS.update({
     # chat_id?, chat_title?, message_id?, project_id?, project_name?}], total, next_offset, counts}.
     # `chatdgc_library_file` saves one where the user chose, removes it, or copies it into a project; a send takes
     # {kind: "library", conversation_id | project_id, attachment_id} to attach a copy of one.
-    "chatdgc_library": {"request_id": _S(), "query": _S(False), "kind": _S(False), "limit": _I(False), "offset": _I(False)},
+    "chatdgc_library": {"request_id": _S(), "query": _S(False), "kind": _S(False), "limit": _I(False), "offset": _I(False),
+                        "origin": _f("string", required=False, enum=("", "made", "uploaded"))},
     # Plugins in chat: a reply's card (an action in one of the user's plugins) is decided with `chatdgc_action`: "run"
     # sends it now (with `arguments` as the user edited them), "dismiss" doesn't, "hand" sends it to the Personal
     # Pip `pip_id` (`chatdgc_pips` lists them). Answered by `chatdgc_action` with the card as it is now.
@@ -906,7 +907,8 @@ EVENT_FIELDS.update({
     "chatdgc_opened": {"request_id": _S(), "conversation": _O(), "messages": _A(), "earlier": _I(),
                        "busy": _B(), "reply_id": _S(False), "project": _O(False)},
     "chatdgc_projects": {"request_id": _S(False), "projects": _A()},
-    "chatdgc_library": {"request_id": _S(), "files": _A(), "total": _I(), "next_offset": _f("integer", "null"), "counts": _O()},
+    "chatdgc_library": {"request_id": _S(), "files": _A(), "total": _I(), "next_offset": _f("integer", "null"), "counts": _O(),
+                        "origins": _O(False)},
     # A card under a reply: {id, plugin, plugin_name, money, server, tool, arguments, recurring, status: waiting |
     # done | failed | dismissed | handed, at, answer?, error?, pip?, sent_arguments?}; sent as a reply puts it there
     # and after each choice. The finished reply carries them in `actions`.
@@ -923,7 +925,7 @@ EVENT_FIELDS.update({
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
     # What the reply is doing besides writing: `text` is the query while it searches the web.
     "chatdgc_activity": {"conversation_id": _S(), "message_id": _S(),
-                         "kind": _f("string", enum=("searching", "looking", "compacting", "plugin")), "text": _S()},
+                         "kind": _f("string", enum=("searching", "looking", "compacting", "plugin", "making")), "text": _S()},
     "chatdgc_message": {"conversation_id": _S(), "message": _O(), "request_id": _S(False)},
     # A question the reply put to the user, as it's asked (the reply goes on): {at, question, options, prompt},
     # `at` being where in the reply's text it sits. The finished reply carries it in `questions` too.
@@ -932,6 +934,10 @@ EVENT_FIELDS.update({
     # kind "image", mime, title, url (the page it's on), site, image, width?, height?}]}; each one's bytes are asked
     # for by id with `chatdgc_file`. The finished reply carries them in `images` too.
     "chatdgc_images": {"conversation_id": _S(), "message_id": _S(), "images": _O()},
+    # A file the reply made (ChatGPT's report.docx), as the reply puts it there: {id, name, kind "document", mime, size,
+    # chars, format (docx, pdf, xlsx, pptx, csv, md), made: true, at, created_at, pages?, note?}. It's opened or saved
+    # with `chatdgc_library_file`, as a Library file is; the finished reply carries them in `files`.
+    "chatdgc_made": {"conversation_id": _S(), "message_id": _S(), "file": _O()},
     # Deep research as it goes: the reply's `research` now (status planning, planned, running, writing, checking,
     # done, stopped or failed; plan; notes by number, title and address; the latest activity; steers; check).
     "chatdgc_research": {"conversation_id": _S(), "message_id": _S(), "research": _O()},

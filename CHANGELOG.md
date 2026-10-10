@@ -80,6 +80,26 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   fingerprint and the tool's schema, holds the chat's turn slot, and is kept with its answer; later turns read
   what came of each card. The careful check (`pip_careful.Taint`, per chat) forces a card for a change that
   carries what the chat read from apps, and refuses a web search that would. `chatdgc_activity` gains `plugin`.
+  - **No made-up wallet addresses**, as Pips have it: a 0x address in `call_plugin` must be one the user gave or
+    a plugin answered with, or the call is refused before any card. Plugin answers (`pip_plugins.cleaned`, for
+    Pips too) now keep a field holding a public 0x address (40 hex digits): redaction blanked any key ending in
+    "token", so Aave's `underlyingToken` never reached the model and the guard refused USDC's real contract
+    (live run). A key named like a credential, or a saved credential, is still blanked.
+  - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
+    USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
+    first); with the sentence, 3 of 3.
+- **Files ChatDGC makes** (`dgc/chatdgc/made.py`), as ChatGPT hands you a report: a `make_file` tool (up to 3 a
+  reply) takes `name`, `format` (docx, pdf, xlsx, pptx, csv, md) and `content` (Markdown) or `sheets` (rows) or
+  `slides` (titles, bullets, tables), and DGC lays the file out with the standard library and markdown-it-py
+  (already rich's): Word with title, headings, lists, tables and links; Excel with numbers as numbers, formulas
+  computed on open and a frozen header row; PowerPoint 16:9 with a title slide, bullets and tables. A PDF is
+  printed by the user's Chrome or Edge (`dgc.browser`, `Page.printToPDF`, DGC's own page with every load
+  blocked), or, without one, by a built-in Helvetica writer whose `note` says what it couldn't draw. Each file
+  is kept like an attachment (a temporary chat's in memory), shown live by a new event `chatdgc_made`, carried
+  on the reply as `files`, opened or saved with `chatdgc_library_file`, read back by later turns (its source,
+  up to 12,000 characters), listed in exports, copied by a branch, and in the Library as `made`
+  (`chatdgc_library` takes `origin`: `made` or `uploaded`, and answers `origins`; index version 4).
+  `chatdgc_activity` gains `making`.
 - **The ChatDGC Library.** `chatdgc_library` lists every attached file (chats, archived ones too, and
   projects), newest first, by `kind` and name, with `counts` per kind; `chatdgc_library_file` saves one where
   the user chose, removes one (its chat keeps the attachment marked `removed`), or copies one into a project. A

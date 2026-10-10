@@ -159,9 +159,27 @@ voice come in later phases.
     said yourself isn't held back.
   - A plugin whose sign-in only the editor holds can't be reached from a chat (as from a Pip): sign it in from
     Settings → Plugins.
-- **The Library**, as ChatGPT has it: **Library** in the side bar opens every file you attached, in every chat
-  and project (temporary chats keep none), newest first. Show one kind (images, PDFs, documents, spreadsheets,
-  presentations, code, pasted text) or search by name. Each file can open the chat or project it's in, start a
+- **Files it makes**, as ChatGPT hands you a report: ask for a document, a PDF, a spreadsheet or slides (or
+  something that's plainly a file, like a CV or a budget to fill in) and the reply comes with a card: the
+  file's name, kind, size and pages, with **Open** (in its own app; Markdown and CSV open in an editor tab) and
+  **Save a copy…**.
+  - **Formats:** Word (.docx), PDF, Excel (.xlsx), PowerPoint (.pptx), CSV and Markdown.
+  - **How it's made:** the model writes what the file says (Markdown for a document, rows for a sheet, titles
+    and bullets for a deck) and DGC lays it out the same way every time, with no extra software: headings,
+    lists, tables, links, and in a workbook numbers as numbers, formulas that compute when it opens, and a
+    header row that stays in view.
+  - **PDFs** are printed by the Chrome or Edge you already have, so every script and symbol (₹, हिन्दी, 中文)
+    prints as it should. Without one (or where Chrome can't start its sandbox and `browser_allow_unsandboxed`
+    isn't set), a plain built-in writer lays it out in Helvetica, and the card says which characters it
+    couldn't draw.
+  - **Changing it:** ask ("make the title shorter") and it makes the file again; you keep both. Its next
+    replies know what each file it made says.
+  - **Where it's kept:** with the chat, and in the Library, marked as made. A temporary chat's files last
+    only while DGC runs.
+- **The Library**, as ChatGPT has it: **Library** in the side bar opens every file you attached or ChatDGC
+  made, in every chat and project (temporary chats keep none), newest first. Show what you uploaded or what
+  ChatDGC made, one kind (images, PDFs, documents, spreadsheets, presentations, code, pasted text), or search by
+  name. Each file can open the chat or project it's in, start a
   new chat with it attached, be saved as a copy, be added to a project, or be deleted: the chat it was in keeps
   its name, marked as deleted, and its model is told it's no longer there. The paperclip lists your newest
   Library files before **Upload files…**; a file attached from the Library is a copy, so the chat keeps it even
@@ -252,7 +270,11 @@ A turn sends its events in this order:
    model that can't see, `kind: "looking"` carries that model's name, and the user's message then keeps
    `vision: {model, text}`. When the model asks the user a question, `chatdgc_question` carries it as it's
    asked: `{at, question, options, prompt}`, where `at` is its place in the reply's text and `prompt` the
-   message a choice sends (`{answer}` marks where the choice goes). The reply goes on.
+   message a choice sends (`{answer}` marks where the choice goes). The reply goes on. When it makes a file,
+   `chatdgc_activity` (`kind: "making"`) carries the file's name, then `chatdgc_made` carries its card: `{id,
+   name, kind: "document", mime, size, chars, format (docx, pdf, xlsx, pptx, csv or md), made: true, at,
+   created_at, pages?, note?}`. It's opened or saved with `chatdgc_library_file` (`op: "save"`), as a Library
+   file is, and the finished reply carries every file it made in `files`.
 4. The finished reply, as `chatdgc_message` with `finish` set to `stop`, `length`, `cancelled` or `error`.
    A reply that searched also carries `searches` (its queries) and `sources` (`[{n, title, url}]`, the
    numbers it cites as [n]). A reply that asked carries `questions`; the message that answered one carries

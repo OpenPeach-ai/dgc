@@ -32,7 +32,8 @@ MAX_TEXT = 1_000_000                 # one message, in characters: a reply can b
 MAX_CHAT_BYTES = 32 * 1024 * 1024    # one chat file
 MAX_LIST = 200
 MAX_BODY = 1_000_000                 # characters of a chat kept for search
-INDEX_VERSION = 3                    # 2: what was said is searched too (body, body_fts); 3: the Library (files)
+INDEX_VERSION = 4                    # 2: what was said is searched too (body, body_fts); 3: the Library (files);
+                                     # 4: files ChatDGC made (files.made)
 PROJECT_ID = re.compile(r"proj_[a-f0-9]{32}\Z")
 MAX_PROJECTS = 200
 MAX_PROJECT_NAME = 80
@@ -158,6 +159,12 @@ class ChatStore:
             mime TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0, chars INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL, PRIMARY KEY(chat_id, id))""")
         db.execute("CREATE INDEX IF NOT EXISTS files_order ON files(created_at)")
+        if "made" not in {row[1] for row in db.execute("PRAGMA table_info(files)")}:
+            try:
+                db.execute("ALTER TABLE files ADD COLUMN made INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError as exc:      # another process added it between the look and the add
+                if "duplicate column" not in str(exc):
+                    raise
         db.execute("CREATE TABLE IF NOT EXISTS body (id TEXT PRIMARY KEY, text TEXT NOT NULL DEFAULT '')")
         try:
             db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5(id UNINDEXED, text, "
@@ -191,12 +198,12 @@ class ChatStore:
 
     @staticmethod
     def _files_of(chat: dict) -> list[tuple]:
-        """The files a chat keeps that you attached (in every version of it), for the Library: rows of the files
-        table. Pictures from the web aren't yours, so they aren't here."""
+        """The files a chat keeps that you attached or it made (in every version of it), for the Library: rows of the
+        files table. Pictures from the web aren't yours, so they aren't here."""
         tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
         rows, seen = [], set()
         for m in [*chat.get("messages", []), *(m for tail in tails for m in tail)]:
-            for meta in m.get("attachments") or [] if isinstance(m, dict) else []:
+            for meta in [*(m.get("attachments") or []), *(m.get("files") or [])] if isinstance(m, dict) else []:
                 ident = str(meta.get("id") or "")
                 if not ident or ident in seen or meta.get("removed"):
                     continue
@@ -204,13 +211,13 @@ class ChatStore:
                 rows.append((chat["id"], ident, str(m.get("id") or ""), str(meta.get("name") or "attachment")[:255],
                              str(meta.get("kind") or "file")[:32], str(meta.get("mime") or "")[:100],
                              int(meta.get("size") or 0), int(meta.get("chars") or 0),
-                             str(m.get("created_at") or chat.get("created_at") or "")))
+                             str(m.get("created_at") or chat.get("created_at") or ""), 1 if meta.get("made") else 0))
         return rows
 
     def _put_files(self, db, chat: dict) -> None:
         db.execute("DELETE FROM files WHERE chat_id=?", (chat["id"],))
-        db.executemany("INSERT OR REPLACE INTO files(chat_id,id,message_id,name,kind,mime,size,chars,created_at) "
-                       "VALUES(?,?,?,?,?,?,?,?,?)", self._files_of(chat))
+        db.executemany("INSERT OR REPLACE INTO files(chat_id,id,message_id,name,kind,mime,size,chars,created_at,made) "
+                       "VALUES(?,?,?,?,?,?,?,?,?,?)", self._files_of(chat))
 
     def _catch_up(self, db) -> None:
         """An index from before what was said was searched (2), or before the Library (3): read each chat once and
@@ -429,23 +436,27 @@ class ChatStore:
 
     # -- the Library (ChatGPT's): every file you attached, in one place
 
-    def library(self, *, query: str = "", kind: str = "", limit: int = 60, offset: int = 0) -> dict:
+    def library(self, *, query: str = "", kind: str = "", origin: str = "", limit: int = 60, offset: int = 0) -> dict:
         """Every file you attached, in every chat (archived ones too) and every project, the newest first: ``kind``
-        one of LIBRARY_TYPES, ``query`` part of a name. ``counts`` says how many of each kind the query finds."""
+        one of LIBRARY_TYPES, ``query`` part of a name, ``origin`` "made" (by ChatDGC) or "uploaded" (by you), as
+        ChatGPT filters it. ``counts`` says how many of each kind the query finds, ``origins`` how many of each origin."""
         if type(limit) is not int or not 1 <= limit <= MAX_LIST or type(offset) is not int or offset < 0:
             raise ChatStoreError(f"Ask for 1–{MAX_LIST} files at a time.")
         if kind and kind not in LIBRARY_TYPES:
             raise ChatStoreError("Choose images, PDFs, documents, spreadsheets, presentations, code or text.")
+        if origin not in ("", "made", "uploaded"):
+            raise ChatStoreError("Choose files ChatDGC made, or files you uploaded.")
         text = " ".join(str(query or "").split())[:200].casefold()
         self._ensure()
         with self._index() as db:
             self._catch_up(db)
             rows = db.execute("SELECT f.chat_id, f.id, f.message_id, f.name, f.kind, f.mime, f.size, f.chars, f.created_at, "
-                              "c.title, c.project FROM files f JOIN chats c ON c.id = f.chat_id").fetchall()
+                              "c.title, c.project, f.made FROM files f JOIN chats c ON c.id = f.chat_id").fetchall()
         projects = self._read_projects()
         names = {p["id"]: p.get("name", "") for p in projects}
         items = [{"source": "chat", "chat_id": r[0], "id": r[1], "message_id": r[2], "name": r[3], "kind": r[4], "mime": r[5],
                   "size": r[6], "chars": r[7], "created_at": r[8], "chat_title": r[9], "type": library_type(r[4], r[3]),
+                  "made": bool(r[11]),
                   **({"project_id": r[10], "project_name": names.get(r[10], "")} if r[10] in names else {})} for r in rows]
         for project in projects:
             for f in project.get("files") or []:
@@ -457,13 +468,16 @@ class ChatStore:
                               "type": library_type(str(f.get("kind") or ""), name)})
         if text:
             items = [i for i in items if text in i["name"].casefold()]
+        origins = {"made": sum(1 for i in items if i.get("made")), "uploaded": sum(1 for i in items if not i.get("made"))}
+        if origin:
+            items = [i for i in items if bool(i.get("made")) == (origin == "made")]
         counts = {t: sum(1 for i in items if i["type"] == t) for t in LIBRARY_TYPES}
         if kind:
             items = [i for i in items if i["type"] == kind]
         items.sort(key=lambda i: (i["name"].casefold(), i["id"] or ""))       # files sent together: by name
         items.sort(key=lambda i: i["created_at"] or "", reverse=True)
         page = items[offset:offset + limit]
-        return {"files": page, "total": len(items), "counts": counts,
+        return {"files": page, "total": len(items), "counts": counts, "origins": origins,
                 "next_offset": offset + len(page) if offset + len(page) < len(items) else None}
 
     def remove_file(self, chat_id: str, attachment_id: str) -> dict:
@@ -474,7 +488,7 @@ class ChatStore:
             tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
             found = False
             for m in [*chat["messages"], *(m for tail in tails for m in tail)]:
-                for meta in m.get("attachments") or []:
+                for meta in [*(m.get("attachments") or []), *(m.get("files") or [])]:
                     if meta.get("id") == attachment_id:
                         meta["removed"] = True
                         found = True

@@ -52,6 +52,10 @@
 - **The Library.** **Library** in the side bar shows every file you attached in ChatDGC, by kind, searchable by
   name. Open where a file is, start a new chat with it, save a copy, add it to a project, or delete it. The
   paperclip lists your newest files before Upload.
+- **Files ChatDGC makes.** Ask for a document, PDF, spreadsheet or slides and the reply comes with a card:
+  the file's kind, size and pages, **Open** (in its own app; Markdown and CSV in an editor tab) and **Save a
+  copy…**. "Making Budget…" shows while it's laid out. The Library marks these files, and once ChatDGC has made
+  one, shows **Uploaded** and **Made by ChatDGC** filters. Needs the DGC CLI with this release.
 - **Pictures from the web, where seeing helps.** Ask what a place, a dish, an animal or a style looks like and
   a strip of up to four pictures shows above the answer as it's written, each with the site it's from. Click
   one to see it larger, with its title and **Open page**; the arrow keys step through them. A rules, prices or

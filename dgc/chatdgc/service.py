@@ -311,7 +311,8 @@ class ChatService:
 
     def _library(self, cmd: dict) -> None:
         found = self.engine.store.library(query=cmd.get("query", ""), kind=cmd.get("kind", ""),
-                                          limit=cmd.get("limit", 60), offset=cmd.get("offset", 0))
+                                          origin=cmd.get("origin", ""), limit=cmd.get("limit", 60),
+                                          offset=cmd.get("offset", 0))
         self.emit("chatdgc_library", request_id=cmd["request_id"], **found)
 
     def _library_file(self, cmd: dict) -> None:
@@ -630,7 +631,12 @@ class ChatService:
             return {"on_text": lambda part: stream["value"].text(part),
                     "on_thinking": lambda part: stream["value"].thinking(part),
                     "on_compacted": lambda summary: self._compacted(conversation_id, summary),
-                    "on_question": question, "on_images": pictures, "on_action": card}
+                    "on_question": question, "on_images": pictures, "on_action": card, "on_file": made}
+
+        def made(file):
+            # A file the reply made: its card shows at once, where the reply is (the reply goes on).
+            stream["value"].flush()
+            self.emit("chatdgc_made", conversation_id=conversation_id, message_id=turn["reply_id"], file=file)
 
         def card(action):
             # A plugin's card, as the reply puts it there (the reply goes on): the screen shows it at once.

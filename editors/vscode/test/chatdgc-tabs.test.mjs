@@ -589,8 +589,14 @@ test("the Library: its own tab, its files asked for, and each file's actions thr
   lib.say({ type: "ready", kind: "pdf" });
   const asked = last("chatdgc_library");
   assert.deepEqual({ ...asked, request_id: undefined }, { type: "chatdgc_library", kind: "pdf", limit: 60, offset: 0, request_id: undefined });
-  chat.onEvent({ type: "chatdgc_library", request_id: asked.request_id, files: [{ id: "x" }], total: 1, next_offset: null, counts: { pdf: 1 } });
-  assert.deepEqual(lib.last("library"), { type: "library", files: [{ id: "x" }], total: 1, next: null, counts: { pdf: 1 } });
+  chat.onEvent({ type: "chatdgc_library", request_id: asked.request_id, files: [{ id: "x" }], total: 1, next_offset: null, counts: { pdf: 1 },
+                 origins: { made: 1, uploaded: 0 } });
+  assert.deepEqual(lib.last("library"), { type: "library", files: [{ id: "x" }], total: 1, next: null, counts: { pdf: 1 },
+                                          origins: { made: 1, uploaded: 0 } });
+  lib.say({ type: "list", origin: "made" });
+  assert.equal(last("chatdgc_library").origin, "made", "files ChatDGC made, as ChatGPT filters them");
+  lib.say({ type: "list", origin: "<script>" });
+  assert.equal(last("chatdgc_library").origin, undefined, "only a filter DGC knows");
   const file = { source: "chat", chat_id: ID(7), id: `att_${"a".repeat(32)}`, name: "budget.csv", kind: "document", size: 15 };
   const projectFile = { source: "project", project_id: PROJ("a"), id: `att_${"b".repeat(32)}`, name: "Hotel", kind: "text" };
   lib.say({ type: "image", file: { ...file, kind: "image" } });

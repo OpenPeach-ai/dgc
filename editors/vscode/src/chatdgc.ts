@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
-import { homedir } from "os";
+import { mkdirSync } from "fs";
+import { homedir, tmpdir } from "os";
+import { join } from "path";
 
 /**
  * ChatDGC in the editor: a chat tab of its own (one conversation each) and the home's Chat list.
@@ -60,7 +62,7 @@ interface Tab {
   waitingAttach?: Record<string, unknown>[];
 }
 
-type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel };
+type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string };
 
 export function chatTitle(text: string): string {
   const flat = String(text || "").replace(/\s+/g, " ").trim();
@@ -118,7 +120,8 @@ export function libraryDocument(asset: (name: string) => string, cspSource: stri
 <title>Library</title></head><body class="lib-body">
 <main class="lib"><header class="lib-head"><h1 class="lib-title"><span class="codicon codicon-library" aria-hidden="true"></span>Library</h1>
 <label class="sr-only" for="lib-search">Search your files by name</label><input id="lib-search" class="cd-field lib-search" type="search" placeholder="Search files" maxlength="200" autocomplete="off"></header>
-<p class="lib-about">Every file you attached in ChatDGC, in every chat and project. Temporary chats keep none.</p>
+<p class="lib-about">Every file you attached in ChatDGC or it made for you, in every chat and project. Temporary chats keep none.</p>
+<div id="lib-origins" class="lib-kinds" role="toolbar" aria-label="Show files" hidden></div>
 <div id="lib-kinds" class="lib-kinds" role="toolbar" aria-label="Show"></div>
 <p id="lib-status" class="lib-status" role="status"></p>
 <ul id="lib-list" class="lib-list" aria-label="Your files"></ul>
@@ -185,6 +188,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.deliver({ kind }, { ...cmd, request_id: requestId });
   }
 
+  /** A made file, written where DGC opens files: in its own app, or a Markdown or CSV file in an editor tab. */
+  private async openMade(path: string): Promise<void> {
+    const uri = vscode.Uri.file(path);
+    try {
+      if (/\.(md|csv)$/i.test(path)) { await vscode.window.showTextDocument(uri, { preview: false }); return; }
+      if (await vscode.env.openExternal(uri)) return;
+    } catch { /* said below */ }
+    void vscode.window.showWarningMessage(`${path.split(/[\\/]/).pop()} couldn't be opened here. Use Save a copy… to keep it.`);
+  }
+
   private async fromLibrary(panel: vscode.WebviewPanel, message: any): Promise<void> {
     const ref = this.libraryRef(message?.file);
     switch (message?.type) {
@@ -192,8 +205,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "list": {
         const kind = LIBRARY_KINDS.has(String(message.kind)) ? String(message.kind) : "";
         const offset = Number.isInteger(message.offset) && message.offset >= 0 ? message.offset : 0;
+        const origin = message.origin === "made" || message.origin === "uploaded" ? message.origin : "";
         this.libraryAsk(panel, "library", { type: "chatdgc_library", ...(typeof message.query === "string" && message.query.trim()
-          ? { query: message.query.slice(0, 200) } : {}), ...(kind ? { kind } : {}), limit: 60, offset });
+          ? { query: message.query.slice(0, 200) } : {}), ...(kind ? { kind } : {}), ...(origin ? { origin } : {}), limit: 60, offset });
         return;
       }
       case "image":
@@ -384,11 +398,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (asker) this.requests.delete(requestId);
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.(Array.isArray(ev.files) ? ev.files : []); return; }
         void asker?.libraryPanel?.webview.postMessage({ type: "library", files: Array.isArray(ev.files) ? ev.files : [], total: Number(ev.total) || 0,
-          next: ev.next_offset ?? null, counts: ev.counts && typeof ev.counts === "object" ? ev.counts : {} });
+          next: ev.next_offset ?? null, counts: ev.counts && typeof ev.counts === "object" ? ev.counts : {},
+          origins: ev.origins && typeof ev.origins === "object" ? ev.origins : {} });
         return;
       }
       case "chatdgc_library_file": {
         if (asker) this.requests.delete(requestId);
+        if (asker?.kind === "fileOpen" && typeof ev.path === "string" && ev.path === asker.path) { void this.openMade(ev.path); return; }
         if (ev.op === "save" && typeof ev.path === "string") {
           void vscode.window.showInformationMessage(`Saved ${ev.path.split(/[\\/]/).pop()}.`);
         } else void asker?.libraryPanel?.webview.postMessage({ type: "changed" });
@@ -441,6 +457,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "chatdgc_images":
         for (const tab of showing(conversation)) this.post(tab, { type: "images", messageId: ev.message_id, images: ev.images });
+        return;
+      case "chatdgc_made":
+        // A file the reply made: its card shows under the reply in every tab on the chat.
+        if (ev.file && typeof ev.file === "object") for (const tab of showing(conversation)) this.post(tab, { type: "made", messageId: ev.message_id, file: ev.file });
         return;
       case "chatdgc_followups":
         if (Array.isArray(ev.followups)) {
@@ -699,6 +719,27 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openProject":
         this.openProject(String(message.id || ""));
         return;
+      case "fileOpen":
+      case "fileSave": {
+        // A file the reply made: saved where you choose, or into a folder of DGC's and opened in its own app (a
+        // Markdown or CSV file in an editor tab). The backend writes it, as it saves a Library file.
+        const fileId = String(message.fileId || "");
+        if (!conversation || !/^att_[a-f0-9]{32}$/.test(fileId)) return;
+        const name = String(message.name || "file").replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ").trim().slice(0, 120) || "file";
+        const ref = { type: "chatdgc_library_file", op: "save", conversation_id: conversation, attachment_id: fileId };
+        if (message.type === "fileSave") {
+          const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+          const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, name), saveLabel: "Save", title: "Save a copy of this file" });
+          if (!target || target.scheme !== "file") return;
+          this.ask({ tab, kind: "fileSave" }, { ...ref, path: target.fsPath });
+          return;
+        }
+        const dir = join(tmpdir(), "dgc-chatdgc-files", fileId);
+        try { mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { return; }
+        const path = join(dir, name);
+        this.ask({ tab, kind: "fileOpen", path }, { ...ref, path });
+        return;
+      }
       case "actionRun":
       case "actionDismiss":
       case "actionHand": {

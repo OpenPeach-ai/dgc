@@ -506,3 +506,21 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .cd-followup:hover { background: var(--surface2); }
 .cd-followup:hover .codicon { color: var(--accent-text, var(--accent)); }
 .cd-followup:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 0; }
+
+/* A file the reply made: one line of what it is, and Open / Save a copy…. */
+.cd-file { display: flex; align-items: center; gap: 12px; margin: 8px 0 0; padding: 10px 12px; max-width: 560px;
+  border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.35)); border-radius: 10px;
+  background: var(--vscode-editorWidget-background, transparent); }
+.cd-file-badge { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px;
+  font: 700 10px/1 var(--vscode-font-family); letter-spacing: .04em; color: #fff; background: #6b7280; }
+.cd-file[data-format="docx"] .cd-file-badge { background: #2563eb; }
+.cd-file[data-format="pdf"] .cd-file-badge { background: #dc2626; }
+.cd-file[data-format="xlsx"] .cd-file-badge, .cd-file[data-format="csv"] .cd-file-badge { background: #15803d; }
+.cd-file[data-format="pptx"] .cd-file-badge { background: #c2410c; }
+.cd-file-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.cd-file-name { overflow-wrap: anywhere; }
+.cd-file-meta, .cd-file-note { color: var(--vscode-descriptionForeground); }
+.cd-file-note { font-style: italic; }
+.cd-file-actions { display: flex; gap: 6px; flex: none; }
+.cd-file[data-removed] .cd-file-badge { opacity: .45; }
+@media (max-width: 420px) { .cd-file { flex-wrap: wrap; } .cd-file-actions { width: 100%; } }

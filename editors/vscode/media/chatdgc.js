@@ -822,10 +822,11 @@
     if (message.thinking) node.append(thinkingBlock(message, live));
     { const strip = picturesStrip(message); if (strip) node.append(strip); }
     if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
+    for (const file of Array.isArray(message.files) ? message.files : []) node.append(fileCard(message, file));
     for (const card of Array.isArray(message.actions) ? message.actions : []) node.append(actionCard(message, card, live));
     const doing = live && state.searching[message.id];
     if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
-      ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "compacting"
+      ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "making" ? `Making ${doing.text || "the file"}…` : doing.kind === "compacting"
       ? "Summarizing earlier messages to fit the context window…" : `Searching the web for “${doing.text}”…`));
     else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
@@ -1047,6 +1048,38 @@
     return Object.fromEntries(out);
   }
   const shown = (v) => { const t = typeof v === "string" ? v : JSON.stringify(v); return t.length > 400 ? `${t.slice(0, 399)}…` : t; };
+  // A file the reply made (made.py), as ChatGPT hands you report.docx: what it is, Open, and Save a copy….
+  const MADE = { docx: ["Word document", "DOCX"], pdf: ["PDF", "PDF"], xlsx: ["Excel workbook", "XLSX"],
+                 pptx: ["PowerPoint presentation", "PPTX"], csv: ["CSV", "CSV"], md: ["Markdown", "MD"] };
+  function fileCard(message, file) {
+    const [label, badge] = MADE[file.format] || ["File", "FILE"];
+    const box = el("div", "cd-file");
+    box.dataset.format = String(file.format || "");
+    if (file.removed) box.dataset.removed = "true";
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", `${file.name || "file"}, ${label}`);
+    box.append(el("span", "cd-file-badge", badge));
+    const words = el("div", "cd-file-words");
+    words.append(el("strong", "cd-file-name", file.name || "file"));
+    const pages = Number(file.pages) || 0;
+    const meta = [label, Number(file.size) ? sizeText(Number(file.size)) : "", pages ? `${pages} page${pages === 1 ? "" : "s"}` : ""];
+    words.append(el("small", "cd-file-meta", file.removed ? "Deleted from your Library" : meta.filter(Boolean).join(" · ")));
+    if (file.note && !file.removed) words.append(el("small", "cd-file-note", String(file.note)));
+    box.append(words);
+    if (!file.removed) {
+      const buttons = el("div", "cd-file-actions");
+      const open = el("button", "cd-continue cd-file-open", "Open");
+      open.type = "button";
+      open.addEventListener("click", () => vscode.postMessage({ type: "fileOpen", messageId: message.id, fileId: file.id, name: file.name }));
+      const save = el("button", "cd-edit-cancel cd-file-save", "Save a copy…");
+      save.type = "button";
+      save.addEventListener("click", () => vscode.postMessage({ type: "fileSave", messageId: message.id, fileId: file.id, name: file.name }));
+      buttons.append(open, save);
+      box.append(buttons);
+    }
+    return box;
+  }
+
   function actionCard(message, card, live) {
     const box = el("div", "cd-card");
     box.dataset.action = card.id; box.dataset.status = card.status || "waiting";
@@ -1581,7 +1614,7 @@
           state.compacting = true; render(); controls();        // Compact now, or a summary for a new chat
           return;
         }
-        if (["searching", "looking", "compacting", "plugin"].includes(msg.kind) && msg.messageId) {
+        if (["searching", "looking", "compacting", "plugin", "making"].includes(msg.kind) && msg.messageId) {
           state.searching[msg.messageId] = { kind: msg.kind, text: String(msg.text || "") };
           if (!state.messages.some((m) => m.id === msg.messageId)) state.messages.push({ id: msg.messageId, role: "assistant", text: "", thinking: "" });
           update(msg.messageId);
@@ -1632,6 +1665,23 @@
         }
         message.questions = [...(Array.isArray(message.questions) ? message.questions : []), msg.question];
         update(message.id);
+        return;
+      }
+      case "made": {
+        const file = msg.file;
+        if (!file || typeof file !== "object" || !/^att_[a-f0-9]{32}$/.test(String(file.id || ""))) return;
+        let message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message) {
+          message = { id: msg.messageId, role: "assistant", text: "", thinking: "" };
+          state.messages.push(message);
+        }
+        const files = Array.isArray(message.files) ? [...message.files] : [];
+        const at = files.findIndex((f) => f.id === file.id);
+        if (at >= 0) files[at] = file; else files.push(file);
+        message.files = files;
+        if (state.searching[message.id]?.kind === "making") delete state.searching[message.id];
+        update(message.id);
+        announce(`Made ${file.name || "a file"}.`);
         return;
       }
       case "action": {

@@ -81,6 +81,39 @@ FORGET_TOOL = {"type": "function", "function": {
     "parameters": {"type": "object", "properties": {"id": {"type": "string", "description": "The memory's id, mem_…"}},
                    "required": ["id"]}}}
 MAX_MEMORY_PER_REPLY = 3
+# Files ChatDGC makes (made.py), as ChatGPT hands you report.docx: the model says what the file says, DGC lays it out,
+# and a card under the reply opens or saves it. It's in the Library too, marked as made.
+MAKE_FILE_TOOL = {"type": "function", "function": {
+    "name": "make_file",
+    "description": (
+        "Make a file the user can open or save: a Word document (docx), a PDF, an Excel workbook (xlsx), a PowerPoint "
+        "deck (pptx), a CSV or a Markdown file. Use it when they ask for a file, document, report, spreadsheet, deck or "
+        "download, or when what they want is plainly a file to keep (a CV, a budget to fill in, slides to present). It "
+        "shows as a card under your reply: say what's in it in a sentence or two, and don't paste the file into your "
+        "reply too. To change a file you made, make it again with the change; the user keeps both."),
+    "parameters": {"type": "object", "properties": {
+        "name": {"type": "string", "description": "The file's name without its extension, as the user would save it."},
+        "format": {"type": "string", "enum": ["docx", "pdf", "xlsx", "pptx", "csv", "md"]},
+        "content": {"type": "string", "description": (
+            "docx, pdf and md: the whole text in Markdown: # for the title, ## and ### for headings, lists, tables, "
+            "**bold**, *italic*, links.")},
+        "sheets": {"type": "array", "description": (
+            "xlsx and csv: [{\"name\": \"Costs\", \"rows\": [[\"Item\", \"Amount\"], [\"Rent\", 1200]]}]. The first "
+            "row is the header. A cell is a number, text, or a formula such as =SUM(B2:B9). csv takes the first sheet."),
+            "items": {"type": "object", "properties": {"name": {"type": "string"},
+                                                       "rows": {"type": "array", "items": {"type": "array", "items": {}}}},
+                      "required": ["rows"]}},
+        "slides": {"type": "array", "description": (
+            "pptx: one per slide, {\"title\", \"subtitle\", \"bullets\": [\"a point\", {\"text\": \"a sub-point\", "
+            "\"level\": 1}], \"table\": [[\"Header\", …], [cell, …]]}. A first slide with only a title and subtitle is "
+            "the title slide. Keep a slide to about 6 short bullets."),
+            "items": {"type": "object", "properties": {"title": {"type": "string"}, "subtitle": {"type": "string"},
+                                                       "bullets": {"type": "array", "items": {}},
+                                                       "table": {"type": "array", "items": {"type": "array", "items": {}}}},
+                      "required": ["title"]}}},
+        "required": ["name", "format"]}}}
+MAX_FILES_PER_REPLY = 3
+MAX_FILE_HISTORY_CHARS = 12_000   # of a made file, as the model reads it back (to change it, or to talk about it)
 # Before an answer that turns on facts: does it need the web first? (search "auto"; the model can still search.)
 LOOK_UP = (
     "Decide whether answering the user's message needs a web search first. Yes when the answer depends on facts "
@@ -314,7 +347,8 @@ class ChatEngine:
         chat = self._chat(str(ref.get("conversation_id") or ref.get("chat_id") or ""))
         tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
         meta = next((a for m in [*chat["messages"], *(m for tail in tails for m in tail)]
-                     for a in m.get("attachments") or [] if a.get("id") == ident and not a.get("removed")), None)
+                     for a in [*(m.get("attachments") or []), *(m.get("files") or [])]
+                     if a.get("id") == ident and not a.get("removed")), None)
         found = self._file(chat, ident) if meta else None
         if meta is None or found is None:
             raise ChatEngineError("That file is no longer in your Library.")
@@ -324,6 +358,14 @@ class ChatEngine:
         """A Library file attached again: a copy of it, as a new attachment of this message."""
         meta, raw, text = self.library_file(ref)
         kept = {k: meta[k] for k in ("kind", "name", "size", "mime", "chars", "truncated") if k in meta}
+        if meta.get("made"):          # sent back to a chat it's the user's file now, read as a document is
+            from .. import documents
+            try:
+                text = documents.extract_text(raw, meta["name"]).text if meta.get("format") in (
+                    "docx", "pdf", "xlsx", "pptx") else text
+            except Exception:         # noqa: BLE001 -- what the model wrote is still what it says
+                pass
+            kept["chars"] = len(text or "")
         return {"meta": {**kept, "id": attached.new_attachment_id()}, "raw": raw, "text": text, "summary": {}}
 
     def library_to_project(self, ref: dict, project_id: str) -> dict:
@@ -440,7 +482,7 @@ class ChatEngine:
 
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
-             on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None,
+             on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
              cancel: threading.Event | None = None, answering: dict | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
@@ -510,11 +552,11 @@ class ChatEngine:
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None,
                            reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity,
                            on_compacted=on_compacted, on_question=on_question, on_images=on_images,
-                           on_action=on_action)
+                           on_action=on_action, on_file=on_file)
 
     def answer(self, chat_id: str, message_id: str, question: int, choice: str, *, model: str | None = None,
                thinking: str | None = None, search: str = "off", on_start=None, on_text=None, on_thinking=None,
-               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None,
+               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
                cancel: threading.Event | None = None) -> dict:
         """Answer the question a reply asked: the message the model wrote for it, with the choice in, sent as the
         user's. Only while that reply is the last thing said; after that it's an ordinary message to write."""
@@ -533,7 +575,7 @@ class ChatEngine:
         return self.send(chat_id, answered(asked[question], choice), model=model, thinking=thinking, search=search,
                          on_start=on_start, on_text=on_text, on_thinking=on_thinking, on_activity=on_activity,
                          on_compacted=on_compacted, on_question=on_question, on_images=on_images,
-                         on_action=on_action, cancel=cancel,
+                         on_action=on_action, on_file=on_file, cancel=cancel,
                          answering={"message": message_id, "question": question, "choice": choice})
 
     # -- deep research (research.py): a plan to edit or start, then rounds of reading, then a checked report
@@ -722,7 +764,7 @@ class ChatEngine:
 
     def edit(self, chat_id: str, message_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None, on_compacted=None,
-             on_question=None, on_images=None, on_action=None, cancel: threading.Event | None = None) -> dict:
+             on_question=None, on_images=None, on_action=None, on_file=None, cancel: threading.Event | None = None) -> dict:
         """Change a message you sent: a new version of the conversation from there, with a new reply. What it
         carried (files, and what a vision model saw in them) goes with it."""
         text = str(text or "")
@@ -746,11 +788,11 @@ class ChatEngine:
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
                            on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_images=on_images, on_action=on_action)
+                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file)
 
     def regenerate(self, chat_id: str, message_id: str, *, model: str | None = None, thinking: str | None = None,
                    search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
-                   on_compacted=None, on_question=None, on_images=None, on_action=None,
+                   on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
                    cancel: threading.Event | None = None) -> dict:
         """Try a reply again (with another model or thinking level, if chosen): a new version from that reply on."""
         chat = self._chat(chat_id)
@@ -767,7 +809,7 @@ class ChatEngine:
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
                            on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_images=on_images, on_action=on_action)
+                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file)
 
     def version(self, chat_id: str, parent_id: str, index: int) -> dict:
         """Show another version at a point of the conversation (``parent_id``: the message before it, or "root")."""
@@ -817,6 +859,9 @@ class ChatEngine:
             else:
                 lines += ["## ChatDGC" + (f" ({m['model']})" if m.get("model") else ""), ""]
                 lines += [with_questions(m, _exported) or "*(no reply)*", ""]
+                made_names = [f.get("name", "file") for f in m.get("files") or [] if not f.get("removed")]
+                if made_names:
+                    lines += ["*Made: " + ", ".join(made_names) + "*", ""]
                 if m.get("sources"):
                     lines += ["**Sources**", ""] + [f"{x['n']}. [{x['title']}]({x['url']})" for x in m["sources"]] + [""]
                 shown = (m.get("images") or {}).get("items") or []
@@ -838,7 +883,7 @@ class ChatEngine:
         return out
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
-                       on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None,
+                       on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
                        cancel: threading.Event | None = None) -> dict:
         """Carry on a reply the model stopped at its limit (or one that was stopped), in the same message."""
         chat = self._chat(chat_id)
@@ -855,7 +900,7 @@ class ChatEngine:
         return self._reply(chat, lambda c, room: self._history(c, sees=sees, room=room)
                            + [{"role": "user", "content": CONTINUE}], chat["messages"][index], message_id, on_text,
                            on_thinking, cancel, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_action=on_action)
+                           on_question=on_question, on_action=on_action, on_file=on_file)
 
     def name(self, chat_id: str) -> dict | None:
         """Give a new chat a short name from its first exchange, as a chat app does. Only while it still has
@@ -1109,7 +1154,8 @@ class ChatEngine:
                                   project=(self._project_of(chat) or {}).get("id"))
         try:
             for m in upto:
-                for meta in [*(m.get("attachments") or []), *((m.get("images") or {}).get("items") or [])]:
+                for meta in [*(m.get("attachments") or []), *((m.get("images") or {}).get("items") or []),
+                             *(m.get("files") or [])]:
                     found = self._file(chat, str(meta.get("id") or ""))
                     if found is not None:
                         self.store.put_file(fresh["id"], meta["id"], found[0], found[1])
@@ -1234,6 +1280,8 @@ class ChatEngine:
                 continue
             for card in m.get("actions") or [] if m["role"] == "assistant" else []:
                 content += "\n\n" + _card_note(card)
+            for meta in m.get("files") or [] if m["role"] == "assistant" else []:
+                content += "\n\n" + _made_note(meta, self._file(chat, str(meta.get("id") or "")))
             if m["role"] == "assistant" and (m.get("images") or {}).get("items"):
                 content += (f"\n\n[Shown above this reply: pictures from a web image search for "
                             f"\"{m['images'].get('query', '')}\".]")
@@ -1388,6 +1436,32 @@ class ChatEngine:
                 ops.append({"op": "saved", "id": fact["id"], "text": fact["text"]})
                 kept.append(fact["text"])
         return kept
+
+    def _make_file(self, chat: dict, call, files: list, at: int, on_file) -> str:
+        """make_file: lay the file out (made.py), keep it with the chat as an attachment is kept (a temporary chat's
+        only while DGC runs), and put its card under the reply. The model is told what to say of it."""
+        from . import made as chat_made
+        spec = call.arguments if isinstance(call.arguments, dict) else {}
+        try:
+            out = chat_made.make(spec, self.config)
+        except chat_made.MadeError as exc:
+            return f"error: {exc} Nothing was made; call make_file again with that changed."
+        meta = {"id": attached.new_attachment_id(), "kind": "document", "name": out.name, "mime": out.mime,
+                "size": len(out.raw), "chars": len(out.text), "format": out.format, "made": True, "at": at,
+                "created_at": now()}
+        if out.pages:
+            meta["pages"] = out.pages
+        if out.note:
+            meta["note"] = out.note
+        self._keep_file(chat, {"meta": meta, "raw": out.raw, "text": out.text})
+        files.append(meta)
+        if on_file is not None:
+            on_file(meta)
+        label = chat_made.FORMATS[out.format][0]
+        pages = f", {out.pages} page{'s' if out.pages != 1 else ''}" if out.pages else ""
+        return (f"Made {out.name} ({label}{pages}). It's a card under your reply where the user opens or saves it: say in "
+                "a sentence or two what's in it; don't paste it into your reply or give a link."
+                + (f" Tell the user, in your words: {out.note}" if out.note else ""))
 
     def _memory_call(self, chat: dict, call, ops: list) -> str:
         """One remember or forget call: done (or not, and why), told to the model, and kept on the reply."""
@@ -1571,7 +1645,7 @@ class ChatEngine:
         return "\n".join(lines)[:12_000]
 
     def _reply(self, chat, build, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
-               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None) -> dict:
+               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None) -> dict:
         """One reply. ``build(chat, room)`` is what the model reads, for a window of ``room`` tokens: when it would
         fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent)."""
         model = chat.get("model") or None
@@ -1614,6 +1688,7 @@ class ChatEngine:
         name = str(getattr(client, "model", "") or model or "")
 
         actions = [dict(a) for a in (existing or {}).get("actions") or []]
+        files = [dict(f) for f in (existing or {}).get("files") or []]
         plugins = self._plugins(chat) if name not in self._toolless else None
         plugins_now = plugins.pin() if plugins is not None else []
 
@@ -1622,6 +1697,7 @@ class ChatEngine:
                 return None
             out = [SEARCH_TOOL] if search != "off" and len(searches) < MAX_SEARCHES else []
             out += [ASK_TOOL] if not questions else []
+            out += [MAKE_FILE_TOOL] if len(files) < MAX_FILES_PER_REPLY else []
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
                 out += [REMEMBER_TOOL, FORGET_TOOL]
             if plugins_now and plugins.calls < chat_plugins.MAX_CALLS:
@@ -1692,6 +1768,11 @@ class ChatEngine:
                                 on_question(question)
                     elif call.name in ("remember", "forget"):
                         told = self._memory_call(chat, call, memory_ops)
+                    elif call.name == "make_file":
+                        if on_activity is not None:
+                            on_activity("making", str((call.arguments or {}).get("name") or "")[:80] if isinstance(
+                                call.arguments, dict) else "")
+                        told = self._make_file(chat, call, files, before + len("".join(streamed)), on_file)
                     elif call.name in chat_plugins.TOOLS:
                         if plugins is None or not plugins_now:
                             told = "error: no plugins are turned on. Tell the user they can add one in Settings → Plugins."
@@ -1740,7 +1821,7 @@ class ChatEngine:
         try:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,
-                                       actions=actions)
+                                       actions=actions, files=files)
             return message
         finally:
             if picturing is not None:
@@ -1749,7 +1830,7 @@ class ChatEngine:
                         self._live_pictures.pop((chat["id"], meta["id"]), None)
 
     def _keep_reply(self, chat, existing, reply_id, model, client, text, thought_text, finish, failure, usage, counted,
-                    sources, searches, questions, memory_ops, web_images, *, actions=None) -> dict:
+                    sources, searches, questions, memory_ops, web_images, *, actions=None, files=None) -> dict:
         """The reply as it ended, saved (with what it looked up, asked, remembered and showed)."""
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
@@ -1768,6 +1849,8 @@ class ChatEngine:
                 message["memory"] = memory_ops
             if actions:
                 message["actions"] = actions
+            if files:
+                message["files"] = files
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -1784,6 +1867,8 @@ class ChatEngine:
                 message["memory"] = memory_ops
             if actions:
                 message["actions"] = actions
+            if files:
+                message["files"] = files
             chat["messages"].append(message)
         if counted:
             message["counted"] = counted
@@ -1816,6 +1901,18 @@ def _asked(question: dict) -> str:
     """A question as the model reads it back, in history and summaries."""
     return (f"\n\n[You asked the user, as a card with choices: {question.get('question', '')} Options: "
             + "; ".join(question.get("options") or []) + "; or their own answer.]\n\n")
+
+
+def _made_note(meta: dict, found) -> str:
+    """A file the model made, as it reads it back: where it is, and what it says (as it wrote it)."""
+    name = meta.get("name", "file")
+    if meta.get("removed") or found is None:
+        return f"[You made {name} here; the user has since deleted it.]"
+    words = str(found[1] or "")
+    cut = len(words) > MAX_FILE_HISTORY_CHARS
+    return (f"[You made a file here, shown to the user as a card: {name}. What it says, as you wrote it"
+            + (f" (the first {MAX_FILE_HISTORY_CHARS:,} characters)" if cut else "") + ":\n<<<\n"
+            + words[:MAX_FILE_HISTORY_CHARS] + "\n>>>]")
 
 
 def _exported(question: dict) -> str:
