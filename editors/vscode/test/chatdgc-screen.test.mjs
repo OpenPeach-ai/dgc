@@ -581,3 +581,158 @@ test("a question in the answer: a card where it was asked, Continue sends the ch
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("deep research: the toggle, a plan that counts down, editing it, the reading as it goes, the report and its reader", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.page.clock.install();
+    await s.send({ type: "opened", conversation: conversation({ title: "London" }), earlier: 0, busy: false, messages: [] });
+    const toggle = s.page.locator("#cd-research");
+    await toggle.click();
+    assert.deepEqual([await toggle.getAttribute("aria-pressed"), await s.page.locator("#cd-input").getAttribute("placeholder"),
+                      await s.page.locator("#cd-search").isDisabled()], ["true", "What should I research?", true]);
+    await s.page.locator("#cd-input").fill("Can I buy a London flat with savings in India?");
+    await s.page.keyboard.press("Enter");
+    const [asked] = await s.posted("research");
+    assert.equal(asked.text, "Can I buy a London flat with savings in India?");
+    assert.equal(await toggle.getAttribute("aria-pressed"), "false", "one message: then it's off again");
+    assert.equal((await s.posted("send")).length, 0);
+    // The plan is made, then counts down.
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "message", message: { id: M(1), role: "user", text: asked.text, research: true } });
+    await s.send({ type: "research", messageId: M(2), research: { status: "planning", question: asked.text } });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-research-chip").textContent(), "Deep research");
+    assert.equal(await s.page.locator(".cd-research-label").textContent(), "Making a research plan…");
+    const plan = { title: "London flat from India", steps: ["What FEMA and the LRS allow", "UK taxes for a non-resident"], sites: [] };
+    await s.send({ type: "research", messageId: M(2), research: { status: "planned", question: asked.text, plan } });
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "**Research plan: London flat from India**",
+                                               finish: "stop", research: { status: "planned", question: asked.text, plan } } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    const card = s.page.locator(".cd-research");
+    assert.deepEqual(await card.locator(".cd-plan-steps li").allTextContents(), plan.steps);
+    assert.match(await card.locator(".cd-countdown").textContent(), /^Starting in 1[45]s$/);
+    assert.equal(await s.page.locator(".cd-assistant .cd-body").count(), 0, "the plan shows as the card, not twice");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-research-plan.png") });
+    // Edit stops the count; the edited plan is what starts.
+    await card.getByRole("button", { name: "Edit" }).click();
+    await s.page.clock.runFor(20_000);
+    assert.equal((await s.posted("researchStart")).length, 0, "editing: it waits for you");
+    await card.locator("textarea").fill("What FEMA and the LRS allow\n\nStamp duty for a non-resident buyer");
+    await card.locator(".cd-plan-field").nth(2).locator("input").fill("rbi.org.in, gov.uk");
+    await card.getByRole("button", { name: "Start research" }).click();
+    const [started] = await s.posted("researchStart");
+    assert.deepEqual(started.plan, { title: "London flat from India", steps: ["What FEMA and the LRS allow", "Stamp duty for a non-resident buyer"],
+                                     sites: ["rbi.org.in", "gov.uk"] });
+    // As it reads.
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    const pageNow = await s.page.evaluate(() => Date.now());            // the page's clock, which the test runs
+    const running = (extra) => s.send({ type: "research", messageId: M(2), research: { status: "running", question: asked.text,
+      plan: started.plan, round: 1, reads: 2, started_at: new Date(pageNow - 65_000).toISOString(),
+      notes: [{ n: 1, title: "Master Direction - LRS", url: "https://rbi.org.in/lrs" }],
+      activity: [{ kind: "round", text: "Round 1: choosing what to search" }, { kind: "search", text: "LRS property abroad" },
+                 { kind: "read", text: "Master Direction - LRS", url: "https://rbi.org.in/lrs" },
+                 { kind: "note", text: "Master Direction - LRS", n: 1 }, { kind: "skip", text: "Couldn't read example.com: timed out" }],
+      ...extra } });
+    await running();
+    await s.frame();
+    assert.equal(await card.locator(".cd-research-label").textContent(), "Researching…");
+    assert.equal(await card.locator(".cd-research-stats").textContent(), "round 1 · 2 pages read · 1 noted · 1:05");
+    assert.deepEqual(await card.locator(".cd-research-log li").allTextContents(),
+      ["Round 1: choosing what to search", "Searching: LRS property abroad", "Reading: Master Direction - LRS",
+       "Noted: [1] Master Direction - LRS", "Skipped: Couldn't read example.com: timed out"]);
+    const steer = card.locator(".cd-steer-input");
+    await steer.click();
+    await steer.pressSequentially("I'm an N");
+    await running({ reads: 3 });                         // progress redraws the card while you type
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-steer-input").evaluate((n) => n === document.activeElement), true, "the keys stay");
+    await s.page.keyboard.type("RI");
+    await s.page.keyboard.press("Enter");
+    assert.deepEqual((await s.posted("steer")).map((m) => m.text), ["I'm an NRI"]);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-research-running.png") });
+    // The report streams under the card, then it's done.
+    await s.send({ type: "research", messageId: M(2), research: { status: "writing", plan: started.plan, reads: 3, notes: [], activity: [] } });
+    await s.send({ type: "delta", messageId: M(2), text: "# London flat\n\nThe LRS allows it [1]." });
+    await s.frame();
+    assert.equal(await card.locator(".cd-research-label").textContent(), "Writing the report…");
+    assert.match(await s.page.locator(".cd-assistant .cd-body").textContent(), /The LRS allows it/);
+    const report = "# London flat\n\n## The rules\n\nThe LRS allows it [1].\n\n## Taxes\n\nStamp duty is higher [2].";
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: report, finish: "stop",
+      sources: [{ n: 1, title: "LRS", url: "https://rbi.org.in/lrs" }, { n: 2, title: "SDLT", url: "https://gov.uk/sdlt" }],
+      research: { status: "done", plan: started.plan, round: 2, read: ["a", "b", "c"], started_at: "2026-10-10T10:00:00Z",
+                  finished_at: "2026-10-10T10:06:30Z", notes: [{ n: 1, title: "LRS", url: "u", note: "x" }, { n: 2, title: "SDLT", url: "v", note: "y" }],
+                  check: { claims: 5, checked: 5, supported: 4, invalid: 0, unsupported: [{ claim: "No visa is needed", cites: [2] }] },
+                  activity: [{ kind: "write", text: "Writing the report" }] } } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    assert.equal(await card.locator(".cd-research-stats").textContent(), "3 pages read · 2 noted · 6:30 · citations: 4 of 5 hold up");
+    await card.getByText("How it was researched").click();
+    assert.deepEqual(await card.locator(".cd-research-unsupported li").allTextContents(), ["No visa is needed"]);
+    await card.getByRole("button", { name: "Open report" }).click();
+    const reader = s.page.locator("#cd-reader");
+    assert.equal(await reader.getAttribute("role"), "dialog");
+    assert.deepEqual(await reader.locator(".cd-reader-link").allTextContents(), ["London flat", "The rules", "Taxes"]);
+    assert.equal(await reader.locator(".cd-reader-sources .cd-source").count(), 2);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-research-reader.png") });
+    await reader.getByRole("button", { name: "Export…" }).click();
+    assert.deepEqual((await s.posted("exportReport")).map((m) => [m.messageId, m.title]), [[M(2), "London flat from India"]]);
+    await s.page.keyboard.press("Escape");
+    assert.equal(await reader.count(), 0);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-research-done.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("deep research that stopped, or was cut short by a restart, offers to write from what it found", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const plan = { title: "Scooters", steps: ["Range and price"], sites: [] };
+    const reply = (status, extra = {}) => ({ id: M(2), role: "assistant", text: "Research stopped: 4 pages read, 2 with something useful.",
+      finish: "cancelled", research: { status, plan, round: 1, read: ["a", "b", "c", "d"], notes: [{ n: 1, title: "A", url: "u", note: "x" },
+      { n: 2, title: "B", url: "v", note: "y" }], activity: [{ kind: "search", text: "scooters" }], ...extra } });
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false,
+                   messages: [{ id: M(1), role: "user", text: "Scooters", research: true }, reply("stopped")] });
+    const card = s.page.locator(".cd-research");
+    assert.equal(await card.locator(".cd-research-label").textContent(), "Research stopped");
+    assert.equal(await s.page.locator(".cd-end").count(), 0, "no Continue: this isn't a cut-off reply");
+    await card.getByRole("button", { name: "Write the report from 2 sources" }).click();
+    assert.deepEqual((await s.posted("researchStart")).map((m) => [m.messageId, m.write]), [[M(2), true]]);
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false,
+                   messages: [{ id: M(1), role: "user", text: "Scooters", research: true }, reply("running")] });
+    assert.equal(await card.locator(".cd-research-label").textContent(), "Research was interrupted");
+    await card.getByRole("button", { name: "Keep researching" }).click();
+    assert.deepEqual((await s.posted("researchStart")).map((m) => m.write), [true, undefined]);
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Scooters", research: true },
+      { id: M(2), role: "assistant", text: "plan", finish: "stop", research: { status: "planned", plan } },
+      { id: M(3), role: "user", text: "Never mind" }] });
+    assert.equal(await s.page.locator(".cd-research .cd-research-note").textContent(), "Not started.");
+    assert.equal(await s.page.locator(".cd-countdown").count(), 0, "reopened: no count, and an old plan never starts itself");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("deep research: a new plan you don't touch starts by itself when the count runs out", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.page.clock.install();
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [] });
+    await s.page.locator("#cd-research").click();
+    await s.page.locator("#cd-input").fill("Scooters under 1.5 lakh");
+    await s.page.keyboard.press("Enter");
+    const plan = { title: "Scooters", steps: ["Range and price"], sites: [] };
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "research", messageId: M(2), research: { status: "planned", plan } });
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "plan", finish: "stop", research: { status: "planned", plan } } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.page.clock.runFor(10_000);
+    assert.match(await s.page.locator(".cd-countdown").textContent(), /^Starting in [56]s$/);
+    assert.equal((await s.posted("researchStart")).length, 0);
+    await s.page.clock.runFor(6_000);
+    assert.deepEqual((await s.posted("researchStart")).map((m) => [m.messageId, m.plan, m.write]), [[M(2), undefined, undefined]]);
+    assert.equal(await s.page.locator("#cd-send").isVisible(), false, "it's running: Stop, not Send");
+  } finally { await s.page.close(); }
+});

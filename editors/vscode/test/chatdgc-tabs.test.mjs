@@ -416,3 +416,29 @@ test("a question in the answer: the card's choice goes as chatdgc_answer, and a 
   chat.onEvent({ type: "chatdgc_question", conversation_id: ID(10), message_id: MSG(2), question: asked });
   assert.deepEqual(panel.last("question"), { type: "question", messageId: MSG(2), question: asked });
 });
+
+test("deep research: its commands go as such, its progress reaches the tabs, and an ending out of sight is said", async () => {
+  chat.open(ID(11));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(11), title: "x" });
+  panel.say({ type: "research", text: "  " });
+  panel.say({ type: "research", text: "Scooters", model: "qwen3:8b", thinking: "low" });
+  panel.say({ type: "researchStart", messageId: MSG(2), plan: { title: "t", steps: ["a"] } });
+  panel.say({ type: "researchStart", messageId: MSG(2), write: true });
+  panel.say({ type: "steer", messageId: MSG(2), text: "x".repeat(1001) });
+  panel.say({ type: "steer", messageId: MSG(2), text: " I'm an NRI " });
+  assert.deepEqual(sent.slice(-4).map((c) => c.type), ["chatdgc_research", "chatdgc_research_start", "chatdgc_research_start", "chatdgc_research_steer"]);
+  const [research, start, write, steer] = sent.slice(-4);
+  assert.deepEqual([research.text, research.model, research.thinking], ["Scooters", "qwen3:8b", "low"]);
+  assert.deepEqual([start.plan, start.write, write.write, steer.text], [{ title: "t", steps: ["a"] }, undefined, true, "I'm an NRI"]);
+  const progress = { status: "running", plan: { title: "Scooters" } };
+  chat.onEvent({ type: "chatdgc_research", conversation_id: ID(11), message_id: MSG(2), research: progress });
+  assert.deepEqual(panel.last("research"), { type: "research", messageId: MSG(2), research: progress });
+  assert.equal(world.infos.length, 0, "still running: nothing to say");
+  panel.visible = true;
+  chat.onEvent({ type: "chatdgc_research", conversation_id: ID(11), message_id: MSG(2), research: { status: "done", plan: { title: "Scooters" } } });
+  assert.equal(world.infos.length, 0, "it ended where you can see it");
+  panel.visible = false;
+  chat.onEvent({ type: "chatdgc_research", conversation_id: ID(11), message_id: MSG(2), research: { status: "done", plan: { title: "Scooters" } } });
+  assert.deepEqual(world.infos, ["Deep research finished: Scooters"]);
+});

@@ -26,7 +26,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "ask_request", "ask_resolved",
   "chat_change", "chat_changes", "chat_closed", "chat_opened",
   "chatdgc_activity", "chatdgc_changed", "chatdgc_chats", "chatdgc_compacted", "chatdgc_context", "chatdgc_delta", "chatdgc_earlier", "chatdgc_error", "chatdgc_exported", "chatdgc_file", "chatdgc_message",
-  "chatdgc_opened", "chatdgc_question", "chatdgc_turn", "checkpoints", "command_rejected", "compacted", "config",
+  "chatdgc_opened", "chatdgc_question", "chatdgc_research", "chatdgc_turn", "checkpoints", "command_rejected", "compacted", "config",
   "context", "doc", "docs_catalog", "error", "files_ready", "goal_changed", "handoff", "handoff_started",
   "history", "hook_activity", "hook_catalog", "image", "info", "mcp_call_complete",
   "mcp_command_result", "mcp_context", "mcp_context_catalog", "mcp_input_request", "mcp_servers",

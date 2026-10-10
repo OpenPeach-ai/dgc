@@ -143,7 +143,8 @@ class ChatService:
              "chatdgc_update": self._update, "chatdgc_file": self._file, "chatdgc_edit": self._edit,
              "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version, "chatdgc_answer": self._answer,
              "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
-             "chatdgc_carry": self._carry}[kind](cmd)
+             "chatdgc_carry": self._carry, "chatdgc_research": self._research,
+             "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer}[kind](cmd)
         except (ChatEngineError, ChatStoreError) as exc:
             self._error(str(exc), request_id, conversation_id)
 
@@ -281,7 +282,7 @@ class ChatService:
         target = Path(cmd["path"])
         if not target.is_absolute() or target.is_dir() or not target.parent.is_dir():
             raise ChatEngineError("Choose where to save the export.")
-        data = self.engine.export(cmd["conversation_id"], cmd["format"]).encode("utf-8")
+        data = self.engine.export(cmd["conversation_id"], cmd["format"], cmd.get("message_id")).encode("utf-8")
         temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
         try:
             temp.write_bytes(data)
@@ -323,6 +324,31 @@ class ChatService:
                                       search=cmd.get("search", "off"), on_start=on_start, on_activity=activity,
                                       cancel=cancel, **stream_for())
         self._start(cmd, run)
+
+    # Deep research: the plan is one turn, the research another (on the same reply); progress is chatdgc_research.
+
+    def _researched(self, conversation_id: str):
+        def said(message_id, state):
+            self.emit("chatdgc_research", conversation_id=conversation_id, message_id=message_id, research=state)
+        return said
+
+    def _research(self, cmd: dict) -> None:
+        def run(cancel, on_start, stream_for, activity):
+            return self.engine.research_plan(cmd["conversation_id"], cmd["text"], model=cmd.get("model"),
+                                             thinking=cmd.get("thinking"), on_start=on_start,
+                                             on_research=self._researched(cmd["conversation_id"]), cancel=cancel)
+        self._start(cmd, run)
+
+    def _research_start(self, cmd: dict) -> None:
+        def run(cancel, on_start, stream_for, activity):
+            return self.engine.research_run(cmd["conversation_id"], cmd["message_id"], cmd.get("plan"),
+                                            write=bool(cmd.get("write")), on_start=on_start,
+                                            on_text=stream_for()["on_text"],
+                                            on_research=self._researched(cmd["conversation_id"]), cancel=cancel)
+        self._start(cmd, run)
+
+    def _research_steer(self, cmd: dict) -> None:
+        self.engine.research_steer(cmd["conversation_id"], cmd["message_id"], cmd["text"])
 
     def _continue(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):

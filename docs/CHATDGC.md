@@ -70,6 +70,17 @@ voice come in later phases.
   earlier messages…" when that happens; it is never done silently. An **Earlier messages summarized**
   divider shows the summary, and you can edit it. Every message stays in the chat for you. One file never
   takes more than 40% of the window; the model is told when it only got the first part.
+- **Deep research.** Press **Deep research** in the box, then ask. ChatDGC first shows a research plan: a
+  title and the steps it will take. It starts by itself after 15 seconds, or press **Start now**; **Edit**
+  pauses it so you can change the steps or keep it to a few websites. Then it searches and reads in up to
+  three rounds, about 20 pages in all, PDFs included, and each page that helps becomes a short note. The card
+  shows what it's searching and reading as it goes. To steer it, type in **Add to the research**: it reads
+  that next. Then it writes one report from the notes, citing them as [1], and checks every citation against
+  its note; a claim its note doesn't support loses the citation, and **How it was researched** lists those.
+  **Open report** shows the report full screen with its contents and sources; **Export…** saves it as
+  Markdown. Stop keeps everything found: **Write the report from N sources** finishes from there, and **Keep
+  researching** carries on. If the chat isn't on screen when it finishes, VS Code says so. It needs a context
+  window of at least 16k (32k is the default). With `deepseek-v4.1-flash:cloud` a run took two to five minutes.
 - **Questions in an answer.** When what the model would say next depends on something only you know, it can
   ask you inside its answer. A card shows the question with a few answers to pick from and a **Something
   else** box for your own. The answer goes on below the card. **Continue** sends a message the model wrote
@@ -133,8 +144,11 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_edit` | `request_id`, `conversation_id`, `message_id` (yours), `text`, `model?`, `thinking?`, `search?` | `chatdgc_opened` (from the new version on), then a turn |
 | `chatdgc_regenerate` | `request_id`, `conversation_id`, `message_id` (a reply), `model?`, `thinking?`, `search?` | `chatdgc_opened`, then a turn |
 | `chatdgc_version` | `request_id`, `conversation_id`, `parent_id` (the message before the point, or `root`), `index` | `chatdgc_opened` |
+| `chatdgc_research` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?` | a turn whose reply is the plan (`research.status: "planned"`) |
+| `chatdgc_research_start` | `request_id`, `conversation_id`, `message_id` (the plan's reply), `plan?` (as edited: `title`, `steps`, `sites`), `write?` | a turn on that reply, which becomes the report |
+| `chatdgc_research_steer` | `request_id`, `conversation_id`, `message_id`, `text` | the next `chatdgc_research` shows it |
 | `chatdgc_answer` | `request_id`, `conversation_id`, `message_id` (the reply that asked), `question` (its index), `choice`, `model?`, `thinking?`, `search?` | a turn, whose message is the one the model wrote for the question |
-| `chatdgc_export` | `request_id`, `conversation_id`, `path` (absolute, chosen by the user), `format` (`markdown`, `json`) | `chatdgc_exported` (`path`, `bytes`) |
+| `chatdgc_export` | `request_id`, `conversation_id`, `path` (absolute, chosen by the user), `format` (`markdown`, `json`, or `report` with `message_id`) | `chatdgc_exported` (`path`, `bytes`) |
 | `chatdgc_compact` | `request_id`, `conversation_id` | `chatdgc_compacted` (`summary`) |
 | `chatdgc_summary` | `request_id`, `conversation_id`, `text` | `chatdgc_compacted` (marked `edited`) |
 | `chatdgc_carry` | `request_id`, `conversation_id` | `chatdgc_opened` for the new chat (its `conversation.carried`) |
@@ -166,6 +180,13 @@ A turn sends its events in this order:
    `answers: {message, question, choice}`.
 5. `chatdgc_changed`, the chat's new list entry.
 6. `chatdgc_turn` with `state: "ended"`.
+
+Deep research reports its progress as `chatdgc_research` with the reply's `research` as it is: `status`
+(`planning`, `planned`, `running`, `writing`, `checking`, `done`, `stopped` or `failed`), `question`,
+`plan`, `round`, `reads`, `notes` (number, title and address), the latest `activity` (`search`, `read`,
+`note`, `skip`, `round`, `write`, `check`, `checked`, `steer`, `wait`, `info`, `error`), `steers`, and, at
+the end, `check` (`claims`, `checked`, `supported`, `unsupported`, `invalid`). The saved reply keeps every
+note's words and all its activity. The report streams as `chatdgc_delta` on the plan's reply.
 
 After every turn, and when a chat opens, `chatdgc_context` reports `used` tokens out of `window` (the
 model's own maximum is in `limit`), with `source` saying whether the model counted them (`reported`: its

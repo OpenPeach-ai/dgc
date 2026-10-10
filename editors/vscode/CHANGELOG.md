@@ -33,6 +33,10 @@
   - copy the last code block: Ctrl/⌘+Shift+;;
   - focus the box: Shift+Esc;
   - the list of shortcuts: Ctrl/⌘+/.
+- **Deep research**, as ChatGPT has it. Press **Deep research** in the box: a plan first (it starts in 15
+  seconds unless you edit it), then its searching and reading as it happens, with a box to add to it, then a
+  report whose every citation was checked against its source. **Open report** shows it full screen with
+  contents and sources, and **Export…** saves it. If it finishes out of sight, VS Code tells you.
 - **Questions in an answer**, as ChatGPT asks them. When what comes next depends on something only you know, a
   reply can put a question to you as a card right where it asks: pick an answer, or type your own, and
   **Continue** sends the follow-up the model wrote for it. The reply goes on below the card.

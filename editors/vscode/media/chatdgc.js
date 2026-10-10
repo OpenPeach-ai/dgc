@@ -13,7 +13,8 @@
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), searchPick = $("cd-search"), notice = $("cd-notice");
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
-                  context: null, compacting: false, editingSummary: false, picks: {} };
+                  context: null, compacting: false, editingSummary: false, picks: {},
+                  research: false, planAsked: false, countdowns: {}, planEditing: "", steerDraft: "", open: new Set() };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -287,6 +288,254 @@
     });
     return form;
   }
+  // ---- deep research: a plan to edit or start, the reading as it happens, then the report
+  const icon = (name) => { const glyph = el("span", `codicon codicon-${name}`); glyph.setAttribute("aria-hidden", "true"); return glyph; };
+  const RESEARCHING = ["planning", "running", "writing", "checking"];
+  const COUNTDOWN = 15;                // seconds a new plan waits for Edit before it starts, as ChatGPT's does
+  /** A <details> that stays as you left it across redraws (research redraws often). */
+  function kept(key, cls, label, open = false) {
+    const box = el("details", cls);
+    box.dataset.keep = key;
+    box.open = state.open.has(key) || (open && !state.open.has(`!${key}`));
+    box.addEventListener("toggle", () => {
+      if (box.open) { state.open.add(key); state.open.delete(`!${key}`); } else { state.open.delete(key); state.open.add(`!${key}`); }
+    });
+    box.append(el("summary", "", label));
+    return box;
+  }
+  function elapsed(r) {
+    const from = Date.parse(r.started_at || ""), to = r.finished_at ? Date.parse(r.finished_at) : Date.now();
+    if (!from || !(to >= from)) return "";
+    const seconds = Math.round((to - from) / 1000);
+    return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+  function researchStats(r) {
+    const reads = Number(r.reads ?? (r.read || []).length) || 0, notes = (r.notes || []).length;
+    const parts = [];
+    if (r.round) parts.push(`round ${r.round}`);
+    parts.push(`${reads} page${reads === 1 ? "" : "s"} read`, `${notes} noted`);
+    const time = elapsed(r);
+    if (time) parts.push(time);
+    return parts.join(" · ");
+  }
+  function planList(plan) {
+    const box = el("div", "cd-plan");
+    if (plan.title) box.append(el("h3", "cd-plan-title", plan.title));
+    const list = el("ol", "cd-plan-steps");
+    for (const step of plan.steps || []) list.append(el("li", "", step));
+    box.append(list);
+    if ((plan.sites || []).length) box.append(el("p", "cd-plan-sites", `Only these sites: ${plan.sites.join(", ")}`));
+    return box;
+  }
+  const ACTIVITY = { search: ["search", "Searching"], read: ["globe", "Reading"], note: ["note", "Noted"], skip: ["circle-slash", "Skipped"],
+                     round: ["sync", ""], write: ["edit", ""], check: ["checklist", ""], checked: ["pass", ""], steer: ["comment", "You added"],
+                     info: ["info", ""], error: ["warning", ""], wait: ["watch", ""] };
+  function activityList(lines) {
+    const list = el("ol", "cd-research-log");
+    for (const line of lines) {
+      const [glyph, verb] = ACTIVITY[line.kind] || ["circle-small", ""];
+      const item = el("li", `cd-research-line cd-line-${line.kind || "info"}`);
+      const words = line.kind === "note" && line.n ? `[${line.n}] ${line.text}` : line.text;
+      item.append(icon(glyph), el("span", "", verb ? `${verb}: ${words}` : words));
+      if (line.url) { item.title = line.url; }
+      list.append(item);
+    }
+    return list;
+  }
+  function startResearch(message, extra = {}) {
+    if (state.busy || state.compacting) return;
+    delete state.countdowns[message.id];
+    state.planEditing = "";
+    vscode.postMessage({ type: "researchStart", messageId: message.id, ...extra });
+    state.busy = true; state.replyId = message.id;
+    controls(); update(message.id);
+  }
+  let ticking = 0;
+  /** A new plan starts by itself after COUNTDOWN seconds unless you edit it (or start it sooner). */
+  function tick() {
+    clearTimeout(ticking);
+    for (const [id, deadline] of Object.entries(state.countdowns)) {
+      const message = state.messages.find((m) => m.id === id);
+      const last = state.messages[state.messages.length - 1] === message;
+      if (!message || message.research?.status !== "planned" || !last || state.planEditing === id) { delete state.countdowns[id]; update(id); continue; }
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) { startResearch(message); continue; }
+      const shown = log.querySelector(`.cd-msg[data-id="${CSS.escape(id)}"] .cd-countdown`);
+      if (shown) shown.textContent = `Starting in ${left}s`;
+    }
+    if (Object.keys(state.countdowns).length) ticking = setTimeout(tick, 250);
+  }
+  function planEditor(message) {
+    const plan = message.research.plan || {};
+    const form = el("form", "cd-plan-edit");
+    const field = (label, control) => { const row = el("label", "cd-plan-field"); row.append(el("span", "", label), control); return row; };
+    const title = el("input", "cd-plan-input"); title.value = plan.title || ""; title.maxLength = 200;
+    const steps = el("textarea", "cd-plan-input"); steps.value = (plan.steps || []).join("\n"); steps.rows = Math.max(4, (plan.steps || []).length + 1);
+    const sites = el("input", "cd-plan-input"); sites.value = (plan.sites || []).join(", "); sites.placeholder = "Any site (or, for example: rbi.org.in, gov.uk)";
+    title.dataset.keep = `plan-title-${message.id}`; steps.dataset.keep = `plan-steps-${message.id}`; sites.dataset.keep = `plan-sites-${message.id}`;
+    const row = el("div", "cd-edit-actions");
+    const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button";
+    const go = el("button", "cd-continue", "Start research"); go.type = "submit";
+    row.append(cancel, go);
+    form.append(field("Title", title), field("Steps, one a line", steps), field("Only these sites", sites), row);
+    cancel.addEventListener("click", () => { state.planEditing = ""; update(message.id); });
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const edited = { title: title.value.trim(), steps: steps.value.split("\n").map((x) => x.trim()).filter(Boolean),
+                       sites: sites.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean) };
+      if (!edited.steps.length) { steps.focus(); return; }
+      startResearch(message, { plan: edited });
+    });
+    return form;
+  }
+  function steerForm(message) {
+    const form = el("form", "cd-steer");
+    const box = el("input", "cd-steer-input");
+    box.placeholder = "Add to the research: it reads this next"; box.maxLength = 1000; box.value = state.steerDraft;
+    box.setAttribute("aria-label", "Add to the research"); box.dataset.keep = `steer-${message.id}`;
+    box.addEventListener("input", () => { state.steerDraft = box.value; });
+    const add = el("button", "cd-edit-cancel", "Add"); add.type = "submit";
+    form.append(box, add);
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = box.value.trim();
+      if (!text) return;
+      vscode.postMessage({ type: "steer", messageId: message.id, text });
+      state.steerDraft = ""; box.value = "";
+      announce("Added to the research.");
+    });
+    return form;
+  }
+  /** A research reply: its card (plan, progress, or how it went), then the report once there is one. */
+  function researchMessage(node, message, live) {
+    const r = message.research;
+    const status = r.status || "";
+    const last = state.messages[state.messages.length - 1] === message;
+    const interrupted = !live && RESEARCHING.includes(status);       // DGC restarted while it ran
+    const card = el("section", "cd-research");
+    card.dataset.status = interrupted ? "interrupted" : status;
+    const head = (label, sub) => {
+      const top = el("header", "cd-research-head");
+      top.append(icon("telescope"), el("span", "cd-research-label", label));
+      if (sub) top.append(el("span", "cd-research-stats", sub));
+      card.append(top);
+    };
+    if (status === "planning" && live) {
+      head("Making a research plan…");
+    } else if (status === "planned") {
+      head("Research plan");
+      if (state.planEditing === message.id) card.append(planEditor(message));
+      else {
+        card.append(planList(r.plan || {}));
+        if (last && !state.busy) {
+          const row = el("div", "cd-research-actions");
+          const deadline = state.countdowns[message.id];
+          if (deadline) row.append(el("span", "cd-countdown", `Starting in ${Math.max(1, Math.ceil((deadline - Date.now()) / 1000))}s`));
+          const edit = el("button", "cd-edit-cancel", "Edit"); edit.type = "button";
+          edit.addEventListener("click", () => { delete state.countdowns[message.id]; state.planEditing = message.id; update(message.id); });
+          const go = el("button", "cd-continue", deadline ? "Start now" : "Start research"); go.type = "button";
+          go.addEventListener("click", () => startResearch(message));
+          row.append(edit, go);
+          card.append(row);
+        } else if (!last) card.append(el("p", "cd-research-note", "Not started."));
+      }
+    } else if (live && RESEARCHING.includes(status)) {
+      head(status === "writing" ? "Writing the report…" : status === "checking" ? "Checking the citations…" : "Researching…", researchStats(r));
+      const plan = kept(`plan-${message.id}`, "cd-research-more", `Research plan · ${(r.plan?.steps || []).length} steps`);
+      plan.append(planList(r.plan || {}));
+      card.append(plan);
+      const lines = r.activity || [];
+      card.append(activityList(lines.slice(-8)));
+      if ((r.steers || []).length) card.append(el("p", "cd-research-note", `You added: ${r.steers.join(" · ")}`));
+      if (status === "running") card.append(steerForm(message));
+    } else if (status === "done") {
+      const check = r.check || {};
+      head("Deep research", [researchStats(r).replace(/^round \d+ · /, ""),
+                             check.checked ? `citations: ${check.supported} of ${check.checked} hold up` : ""].filter(Boolean).join(" · "));
+      const row = el("div", "cd-research-actions");
+      const open = el("button", "cd-continue", ""); open.type = "button";
+      open.append(icon("screen-full"), el("span", "", "Open report"));
+      open.addEventListener("click", () => openReader(message));
+      row.append(open);
+      card.append(row);
+      const how = kept(`how-${message.id}`, "cd-research-more", "How it was researched");
+      how.append(planList(r.plan || {}), activityList(r.activity || []));
+      if ((check.unsupported || []).length) {
+        how.append(el("p", "cd-research-note", "These claims lost their citation: the notes they cited don't support them."));
+        const list = el("ul", "cd-research-unsupported");
+        for (const item of check.unsupported) list.append(el("li", "", item.claim));
+        how.append(list);
+      }
+      card.append(how);
+    } else {
+      const failed = status === "failed";
+      head(interrupted ? "Research was interrupted" : failed ? "Research didn't finish" : "Research stopped", researchStats(r));
+      if (failed && r.error) card.append(el("p", "cd-research-note cd-end-error", r.error));
+      if (last && !state.busy) {
+        const row = el("div", "cd-research-actions");
+        if ((r.notes || []).length) {
+          const write = el("button", "cd-continue", `Write the report from ${r.notes.length} source${r.notes.length === 1 ? "" : "s"}`);
+          write.type = "button"; write.addEventListener("click", () => startResearch(message, { write: true }));
+          row.append(write);
+        }
+        const more = el("button", "cd-edit-cancel", "Keep researching"); more.type = "button";
+        more.addEventListener("click", () => startResearch(message));
+        row.append(more);
+        card.append(row);
+      }
+      const trail = kept(`log-${message.id}`, "cd-research-more", "What it did");
+      trail.append(activityList(r.activity || []));
+      card.append(trail);
+    }
+    node.append(card);
+    // The report: as it streams, then checked.
+    if (["writing", "checking", "done"].includes(status) && message.text) {
+      node.append(body(message));
+      if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
+    }
+    if (status === "done" && !live) {
+      const actions = el("div", "cd-actions");
+      const versions = versionsControl(message);
+      if (versions) actions.append(versions);
+      actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
+      node.append(actions);
+    }
+    return node;
+  }
+  /** The report on its own, as ChatGPT's full-screen view has it: contents, the report, and its sources. */
+  function openReader(message) {
+    $("cd-reader")?.remove();
+    const title = message.research?.plan?.title || "Report";
+    const shell = el("div", "cd-reader");
+    shell.id = "cd-reader";
+    shell.setAttribute("role", "dialog"); shell.setAttribute("aria-modal", "true"); shell.setAttribute("aria-label", title);
+    const top = el("header", "cd-reader-head");
+    const exporting = el("button", "cd-edit-cancel", "Export…"); exporting.type = "button";
+    exporting.addEventListener("click", () => vscode.postMessage({ type: "exportReport", messageId: message.id, title }));
+    const close = action("close", "Close", () => { shell.remove(); input.focus(); });
+    top.append(el("span", "cd-reader-title", title), exporting, close);
+    const article = body(message);
+    article.classList.add("cd-reader-text");
+    const toc = el("nav", "cd-reader-toc");
+    toc.setAttribute("aria-label", "Contents");
+    toc.append(el("p", "cd-reader-label", "Contents"));
+    article.querySelectorAll("h1, h2, h3").forEach((heading, i) => {
+      heading.id = `cd-reader-h${i}`;
+      const link = el("button", `cd-reader-link cd-reader-${heading.tagName.toLowerCase()}`, heading.textContent || "");
+      link.type = "button";
+      link.addEventListener("click", () => heading.scrollIntoView({ block: "start" }));
+      toc.append(link);
+    });
+    const side = el("aside", "cd-reader-sources");
+    const found = sourcesBlock(message);
+    if (found) { found.open = true; side.append(found); }
+    const page = el("div", "cd-reader-body");
+    page.append(toc, article, side);
+    shell.append(top, page);
+    shell.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); shell.remove(); input.focus(); } });
+    document.body.append(shell);
+    close.focus();
+  }
   function messageNode(message) {
     const live = state.busy && message.id === state.replyId;
     const node = el("article", `cd-msg cd-${message.role === "user" ? "user" : "assistant"}`);
@@ -311,6 +560,11 @@
         seen.append(el("summary", "", `Seen by ${message.vision.model || "a vision model"}`), el("div", "cd-seen-text", message.vision.text));
         node.append(seen);
       }
+      if (message.research && state.editing !== message.id) {
+        const chip = el("span", "cd-research-chip");
+        chip.append(icon("telescope"), el("span", "", "Deep research"));
+        node.append(chip);
+      }
       if (state.editing === message.id) node.append(editor(message));
       else if (message.text) {
         const bubble = el("div", "cd-bubble");
@@ -328,6 +582,7 @@
       node.append(actions);
       return node;
     }
+    if (message.research && typeof message.research === "object") return researchMessage(node, message, live);
     if (message.thinking) node.append(thinkingBlock(message, live));
     if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
     const doing = live && state.searching[message.id];
@@ -485,7 +740,13 @@
         // Keep an open thinking box open, and a closed one closed, across redraws.
         const was = old?.querySelector("details.cd-thinking"), now = fresh.querySelector("details.cd-thinking");
         if (was && now && was.dataset.touched) { now.open = was.open; now.dataset.touched = "1"; }
+        // A field you're typing in (marked data-keep) keeps the keys and the caret: research redraws as it goes.
+        const typing = old && old.contains(document.activeElement) ? document.activeElement : null;
+        const key = typing?.dataset?.keep;
+        const caret = key && typeof typing.selectionStart === "number" ? [typing.selectionStart, typing.selectionEnd] : null;
         if (old) old.replaceWith(fresh); else log.append(fresh);
+        const twin = key ? fresh.querySelector(`[data-keep="${CSS.escape(key)}"]`) : null;
+        if (twin) { twin.focus(); if (caret) twin.setSelectionRange(caret[0], caret[1]); }
       }
       redraw.clear();
       document.body.classList.remove("cd-blank");
@@ -525,6 +786,16 @@
   function submit() {
     const text = input.value;
     if ((!text.trim() && !state.pending.length) || state.busy || !state.conversation || state.unavailable) return;
+    if (state.research) {
+      if (state.pending.length) { showNotice("Deep research reads the web: send files without it, or turn it off.", "info"); return; }
+      if (!text.trim()) return;
+      vscode.postMessage({ type: "research", text, model: modelPick.value || "", thinking: thinkingPick.value || "" });
+      input.value = ""; grow(); saveDraft();
+      researchMode(false);
+      state.planAsked = true; state.busy = true;
+      hideNotice(); controls();
+      return;
+    }
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "",
                          search: searchPick.value || "auto",
                          ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted }) =>
@@ -535,6 +806,15 @@
     hideNotice();
     controls();
   }
+  const researchToggle = $("cd-research");
+  /** Deep research for the next message: a plan first, then the reading. Off again once it's sent. */
+  function researchMode(on) {
+    state.research = !!on;
+    researchToggle.setAttribute("aria-pressed", String(state.research));
+    input.placeholder = state.research ? "What should I research?" : "Ask anything";
+    searchPick.disabled = state.research;
+  }
+  researchToggle.addEventListener("click", () => { researchMode(!state.research); input.focus(); });
   modelPick.addEventListener("change", () => { state.model = modelPick.value; });
   thinkingPick.addEventListener("change", () => { state.thinking = thinkingPick.value; });
   // Web search is the user's standing choice in this tab, not a chat's: it stays as set across chats.
@@ -720,6 +1000,28 @@
         const at = state.messages.findIndex((m) => m.id === message.id);
         if (at >= 0) state.messages[at] = message; else state.messages.push(message);
         if (message.role === "user") { pinned = true; render(); } else update(message.id);
+        return;
+      }
+      case "research": {
+        // Progress names notes (their words come with the finished reply); a run that starts clears the plan's words.
+        const r = msg.research && typeof msg.research === "object" ? msg.research : null;
+        if (!r || typeof msg.messageId !== "string") return;
+        let message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message) {
+          message = { id: msg.messageId, role: "assistant", text: "", thinking: "" };
+          state.messages.push(message);
+        }
+        const before = message.research?.status;
+        if (r.status === "running" && !["running", "writing", "checking"].includes(before)) {
+          message.text = ""; delete message.sources; delete message.error; message.finish = undefined;
+        }
+        message.research = { ...(message.research || {}), ...r };
+        if (r.status === "planned" && state.planAsked) {
+          state.planAsked = false;                 // the tab that asked counts down; another showing it doesn't
+          state.countdowns[message.id] = Date.now() + COUNTDOWN * 1000;
+          tick();
+        }
+        update(message.id);
         return;
       }
       case "question": {

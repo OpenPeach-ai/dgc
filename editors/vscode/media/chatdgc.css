@@ -219,3 +219,69 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-summary .cd-edit-input { width: 100%; margin: var(--sp-2) 0; }
 .cd-summary .cd-edit-actions { margin-bottom: var(--sp-2); }
 .cd-summary > .cd-edit-cancel { margin-bottom: var(--sp-2); }
+
+/* Deep research. The toggle in the box; then the reply's card: the plan (to edit or start), the reading as it
+   happens, or how it went; the report below it; and the report on its own, full screen. */
+.cd-tool { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control); padding: 0 var(--sp-2);
+  border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface); color: var(--text);
+  font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.cd-tool:hover { border-color: var(--border-strong); }
+.cd-tool[aria-pressed="true"] { border-color: var(--accent-fill); background: color-mix(in srgb, var(--accent-fill) 16%, var(--surface));
+  color: var(--text-strong); }
+.cd-tool:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.cd-research-chip { display: inline-flex; align-items: center; gap: var(--sp-1); align-self: flex-end; color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
+.cd-research { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); background: var(--surface); }
+.cd-research-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); color: var(--text-strong);
+  font: var(--w-semi) var(--t-sm)/1.4 var(--sans); }
+.cd-research[data-status="running"] .cd-research-label, .cd-research[data-status="planning"] .cd-research-label,
+.cd-research[data-status="writing"] .cd-research-label, .cd-research[data-status="checking"] .cd-research-label {
+  animation: pulse 1.6s ease-in-out infinite; }
+.cd-research-stats { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric: tabular-nums; }
+.cd-plan-title { margin: 0; color: var(--text); font: var(--w-semi) var(--t-chat)/1.45 var(--sans); text-wrap: balance; }
+.cd-plan-steps { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); color: var(--text); font: var(--w-reg) var(--t-chat)/1.55 var(--sans); }
+.cd-plan-steps li + li { margin-top: 2px; }
+.cd-plan-sites, .cd-research-note { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.cd-research-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.cd-research-actions .cd-continue { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.cd-countdown { color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
+.cd-research-log { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.cd-research-line { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.cd-research-line > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.cd-research-line .codicon { flex: none; margin-top: 2px; font-size: 12px; }
+.cd-line-note, .cd-line-steer { color: var(--text); }
+.cd-line-error { color: var(--err-text); }
+.cd-research-more > summary { cursor: pointer; color: var(--muted); font: var(--w-med) var(--t-xs)/1.8 var(--sans); }
+.cd-research-more > summary:hover { color: var(--text); }
+.cd-research-more[open] { display: grid; gap: var(--sp-2); }
+.cd-research-unsupported { margin: 0; padding-left: var(--sp-5); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.cd-steer { display: flex; gap: var(--sp-2); }
+.cd-steer-input, .cd-plan-input { box-sizing: border-box; min-width: 0; flex: 1; padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg); color: var(--text);
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.cd-steer-input:focus-visible, .cd-plan-input:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-plan-edit { display: grid; gap: var(--sp-2); }
+.cd-plan-field { display: grid; gap: 2px; color: var(--muted); font: var(--w-med) var(--t-xs)/1.5 var(--sans); }
+textarea.cd-plan-input { resize: vertical; }
+
+.cd-reader { position: fixed; inset: 0; z-index: 30; display: grid; grid-template-rows: auto 1fr; background: var(--bg); }
+.cd-reader-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--border); }
+.cd-reader-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-strong);
+  font: var(--w-semi) var(--t-sm)/1.4 var(--sans); }
+.cd-reader-body { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 72ch) minmax(180px, 280px); justify-content: center;
+  gap: var(--sp-6); min-height: 0; overflow: auto; padding: var(--sp-5) var(--sp-4); }
+.cd-reader-toc, .cd-reader-sources { position: sticky; top: 0; align-self: start; display: grid; gap: 2px; }
+.cd-reader-label { margin: 0 0 var(--sp-1); color: var(--muted); font: var(--w-semi) var(--t-xs)/1.4 var(--sans); letter-spacing: .02em; }
+.cd-reader-link { padding: 2px var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); text-align: left;
+  font: var(--w-reg) var(--t-xs)/1.45 var(--sans); cursor: pointer; }
+.cd-reader-link:hover { background: var(--surface); color: var(--text); }
+.cd-reader-h1 { color: var(--text); font-weight: var(--w-semi); }
+.cd-reader-h3 { padding-left: var(--sp-4); }
+.cd-reader-text { min-width: 0; }
+@media (max-width: 860px) {
+  .cd-reader-body { grid-template-columns: minmax(0, 1fr); }
+  .cd-reader-toc { display: none; }
+  .cd-reader-sources { position: static; }
+}

@@ -120,7 +120,8 @@ class ServiceTests(unittest.TestCase):
         self.model, self.wire = Model(), Wire()
         config = SimpleNamespace(base_url="", api_key="", model="fixture", get=lambda key, default=None: default)
         self.engine = ChatEngine(config, ChatStore(self.root), client_factory=self.model.factory,
-                                 searcher=lambda query: [{"title": "Forecast", "url": "https://weather.example/paris", "snippet": "Sunny"}])
+                                 searcher=lambda query: [{"title": "Forecast", "url": "https://weather.example/paris", "snippet": "Sunny"}],
+                                 fetcher=lambda url: (url, "Paris today: sunny, 24 degrees, light wind from the west. " * 6))
         self.service = ChatService(self.wire.emit, config, engine=self.engine)
         self.addCleanup(self.service.close, 2.0)
 
@@ -188,6 +189,43 @@ class ServiceTests(unittest.TestCase):
                                                              [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris"}]))
         self.send(chat, "again", request_id="r2", search="always")
         self.assertIn("invalid command", self.wire.of("chatdgc_error")[-1]["message"])
+
+    def test_deep_research_on_the_wire(self):
+        chat = self.new()
+        self.model.script.append({"calls": [("research_plan", {"title": "Paris weather", "steps": ["Today's forecast"]})]})
+        self.service.dispatch({"type": "chatdgc_research", "request_id": "p1", "conversation_id": chat,
+                               "text": "Weather in Paris?"})
+        self.wire.wait(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended" and f.get("request_id") == "p1")
+        planned = self.wire.of("chatdgc_message")[-1]["message"]
+        self.assertEqual((planned["research"]["status"], planned["research"]["plan"]["steps"]), ("planned", ["Today's forecast"]))
+        self.assertEqual([f["research"]["status"] for f in self.wire.of("chatdgc_research")], ["planning", "planned"])
+        self.assertTrue([f["message"] for f in self.wire.of("chatdgc_message") if f["message"]["role"] == "user"][-1]["research"])
+        self.model.script += [{"calls": [("next_searches", {"enough": False, "searches": ["paris weather"]})]},
+                              {"calls": [("page_note", {"relevant": True, "note": "- Sunny, 24 degrees"})]},
+                              {"calls": [("next_searches", {"enough": True, "searches": []})]},
+                              {"parts": ["# Paris\n\n", "Sunny today [1]."]},
+                              {"calls": [("citation_check", {"verdicts": [{"id": 1, "supported": True}]})]}]
+        self.service.dispatch({"type": "chatdgc_research_start", "request_id": "r1", "conversation_id": chat,
+                               "message_id": planned["id"], "plan": {"title": "Paris", "steps": ["Today's forecast"]}})
+        self.wire.wait(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended" and f.get("request_id") == "r1")
+        started = [f for f in self.wire.of("chatdgc_turn") if f.get("request_id") == "r1"][0]
+        self.assertEqual(started["reply_id"], planned["id"], "the plan's reply becomes the report")
+        done = self.wire.of("chatdgc_message")[-1]["message"]
+        self.assertEqual((done["id"], done["text"], done["research"]["status"]), (planned["id"], "# Paris\n\nSunny today [1].", "done"))
+        self.assertEqual(done["sources"], [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris"}])
+        statuses = [f["research"]["status"] for f in self.wire.of("chatdgc_research")]
+        for status in ("running", "writing", "checking", "done"):
+            self.assertIn(status, statuses)
+        streamed = "".join(f.get("text", "") for f in self.wire.of("chatdgc_delta") if f["message_id"] == planned["id"])
+        self.assertEqual(streamed, "# Paris\n\nSunny today [1].")
+        self.service.dispatch({"type": "chatdgc_research_steer", "request_id": "s1", "conversation_id": chat,
+                               "message_id": planned["id"], "text": "more"})
+        self.assertIn("isn't running", self.wire.of("chatdgc_error")[-1]["message"])
+        target = Path(self.root).parent / "report.md"
+        self.service.dispatch({"type": "chatdgc_export", "request_id": "e1", "conversation_id": chat, "path": str(target),
+                               "format": "report", "message_id": planned["id"]})
+        self.assertTrue(target.read_text().startswith("# Paris\n\nSunny today [1]."))
+        self.assertIn("## Sources", target.read_text())
 
     def test_a_question_in_the_answer_on_the_wire(self):
         chat = self.new()

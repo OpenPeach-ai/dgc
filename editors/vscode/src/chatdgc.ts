@@ -83,6 +83,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <option value="off">Thinking off</option><option value="low">Think: low</option><option value="medium">Think: medium</option><option value="high">Think: high</option><option value="xhigh">Think: extra high</option></select>
 <label class="sr-only" for="cd-search">Web search</label><select id="cd-search" class="cd-select" title="Web search: Auto lets the model decide; Always searches before it answers">
 <option value="auto">Web: auto</option><option value="on">Web: always</option><option value="off">Web: off</option></select>
+<button type="button" id="cd-research" class="cd-tool" aria-pressed="false" title="Deep research: a plan to check, then many sources read, then a report with checked citations"><span class="codicon codicon-telescope" aria-hidden="true"></span><span>Deep research</span></button>
 <label id="cd-temp-toggle" class="cd-toggle" title="A temporary chat isn't saved or listed"><input type="checkbox" id="cd-temporary"> Temporary</label>
 <span class="cd-spacer"></span>
 <button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><svg class="cd-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="cd-ring-track" cx="10" cy="10" r="8"></circle><circle id="cd-ring-fill" class="cd-ring-fill" cx="10" cy="10" r="8"></circle></svg><span id="cd-context-pct">0%</span></button>
@@ -249,6 +250,18 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_question":
         for (const tab of showing(conversation)) this.post(tab, { type: "question", messageId: ev.message_id, question: ev.question });
         return;
+      case "chatdgc_research": {
+        const research = ev.research && typeof ev.research === "object" ? ev.research : {};
+        const tabs = showing(conversation);
+        for (const tab of tabs) this.post(tab, { type: "research", messageId: ev.message_id, research });
+        // Research takes minutes: when it ends out of sight, say so, as ChatGPT does.
+        if ((research.status === "done" || research.status === "failed") && !tabs.some((tab) => tab.panel.visible)) {
+          const title = String(research.plan?.title || "your research").slice(0, 120);
+          const said = research.status === "done" ? `Deep research finished: ${title}` : `Deep research didn't finish: ${title}`;
+          void vscode.window.showInformationMessage(said, "Open").then((open) => { if (open) this.open(conversation); });
+        }
+        return;
+      }
       case "chatdgc_file":
         if (asker?.tab) {
           this.requests.delete(requestId);
@@ -442,6 +455,35 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "models":
         void this.models(tab);
         return;
+      case "research": {
+        const text = typeof message.text === "string" ? message.text : "";
+        const model = typeof message.model === "string" && message.model.length <= 200 ? message.model : "";
+        const thinking = typeof message.thinking === "string" && THINKING.has(message.thinking) ? message.thinking : "";
+        if (!conversation || !text.trim() || text.length > MAX_TEXT) return;
+        this.ask({ tab, kind: "send" }, { type: "chatdgc_research", conversation_id: conversation, text,
+                                          ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) });
+        return;
+      }
+      case "researchStart": {
+        if (!conversation || !MESSAGE_ID.test(String(message.messageId || ""))) return;
+        const plan = message.plan && typeof message.plan === "object" && !Array.isArray(message.plan) ? message.plan : undefined;
+        this.ask({ tab, kind: "send" }, { type: "chatdgc_research_start", conversation_id: conversation,
+                                          message_id: message.messageId, ...(plan ? { plan } : {}),
+                                          ...(message.write === true ? { write: true } : {}) });
+        return;
+      }
+      case "steer": {
+        const text = typeof message.text === "string" ? message.text.trim() : "";
+        if (!conversation || !MESSAGE_ID.test(String(message.messageId || "")) || !text || text.length > 1000) return;
+        this.ask({ tab, kind: "steer" }, { type: "chatdgc_research_steer", conversation_id: conversation,
+                                           message_id: message.messageId, text });
+        return;
+      }
+      case "exportReport":
+        if (conversation && MESSAGE_ID.test(String(message.messageId || ""))) {
+          void this.exportReport(tab, conversation, message.messageId, String(message.title || ""));
+        }
+        return;
       case "menu":
         await this.menu(tab);
         return;
@@ -492,6 +534,17 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     } catch (err: any) {
       this.post(tab, { type: "models", ids: [], current: "", error: String(err?.message || err || "") });
     }
+  }
+
+  /** A finished research report as a Markdown file, with its sources and what the citation check found. */
+  private async exportReport(tab: Tab, conversation: string, messageId: string, title: string): Promise<void> {
+    const name = chatTitle(title).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "report";
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+    const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, `${name}.md`),
+      filters: { Markdown: ["md"] }, saveLabel: "Export", title: "Export this report" });
+    if (!target || target.scheme !== "file") return;
+    this.ask({ tab, kind: "export" }, { type: "chatdgc_export", conversation_id: conversation, path: target.fsPath,
+                                        format: "report", message_id: messageId });
   }
 
   private async menu(tab: Tab): Promise<void> {

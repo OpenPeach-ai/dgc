@@ -15,7 +15,9 @@ from typing import Callable
 from ..editor_protocol import CHATDGC_THINKING as THINKING
 from . import attachments as attached
 from . import window as fit_window
+from . import research
 from .prompt import system_prompt
+from .research import NO_TOOLS
 from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_message_id, now,
                     title_from)
 
@@ -57,9 +59,8 @@ ASKED = ("Shown to the user as a card under what you've written so far, with you
 MAX_OPTIONS = 6
 MAX_QUESTION_CHARS, MAX_OPTION_CHARS, MAX_PROMPT_CHARS, MAX_CHOICE_CHARS = 300, 160, 1000, 500
 _OTHER = re.compile(r"(?i)(other|something else|none of (these|the above))(\s+\w+)?\W*")
-# What a provider says when a model can't take tools (Ollama: "... does not support tools"): the reply goes
-# without them, and that model isn't offered them again while DGC runs.
-_NO_TOOLS = re.compile(r"(?i)(does not|doesn't) support tools|tools? (are|is) not supported|not support(ed)? (for )?tool")
+# A model that says it can't take tools gets the reply without them, and isn't offered them again while DGC runs.
+_NO_TOOLS = NO_TOOLS
 NAME_PROMPT = ("Name this conversation in three to six words, the way a chat app titles it. Reply with the name "
                "only: no quotes, no full stop.")
 CONTINUE = ("Continue exactly where your last reply stopped. Don't repeat anything you already wrote, and don't "
@@ -72,10 +73,12 @@ class ChatEngineError(Exception):
 
 class ChatEngine:
     def __init__(self, config, store: ChatStore | None = None, *, client_factory: Callable | None = None,
-                 searcher: Callable | None = None):
+                 searcher: Callable | None = None, fetcher: Callable | None = None):
         self.config = config
         self.store = store or ChatStore()
         self._client_factory = client_factory
+        self._fetcher = fetcher or research.fetch_page
+        self._researching: dict[tuple[str, str], research.Research] = {}
         self._searcher = searcher or self._search
         from .eyes import Eyes
         self.eyes = Eyes(self)
@@ -276,6 +279,146 @@ class ChatEngine:
                          on_compacted=on_compacted, on_question=on_question, cancel=cancel,
                          answering={"message": message_id, "question": question, "choice": choice})
 
+    # -- deep research (research.py): a plan to edit or start, then rounds of reading, then a checked report
+
+    def _research_room(self, client) -> int:
+        room, _ = fit_window.window(client, self._preset())
+        if room < research.MIN_WINDOW:
+            raise ChatEngineError("Deep research needs a context window of at least 16k: choose 32k or more in "
+                                  "Settings \u2192 ChatDGC \u2192 Window, or a model that has one.")
+        return room
+
+    def research_plan(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
+                      on_start=None, on_research=None, cancel: threading.Event | None = None) -> dict:
+        """Deep research, first step: the request as the user's message, and a plan for it as the reply, to edit or
+        start (`research.status` "planned")."""
+        text = str(text or "").strip()
+        if not text:
+            raise ChatEngineError("Say what to research.")
+        if len(text) > MAX_TEXT:
+            raise ChatEngineError("That message is too long to send.")
+        chat = self._chat(chat_id)
+        self._choose(chat, model, thinking, "off")
+        client = self.client(chat.get("model") or None)
+        self._research_room(client)
+        if not chat["messages"] and chat["title"] in ("New chat", "Temporary chat") and not chat.get("temporary"):
+            chat["title"] = title_from(text)
+        context = "\n\n".join(self._plain(m) for m in chat["messages"][-6:])[-6000:]
+        mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now(), "research": True}
+        chat["messages"].append(mine)
+        chat = self._save(chat)
+        reply_id = new_message_id()
+        if on_start is not None:
+            on_start(mine, reply_id)
+        thinking_level = chat.get("thinking") or str(self.config.get("thinking", "off") or "off")
+        if on_research is not None:
+            on_research(reply_id, {"status": "planning", "question": text})
+        name = str(getattr(client, "model", "") or "")
+        try:
+            plan = research.make_plan(client, text, context, cancel, tools=name not in self._toolless)
+        except research.ResearchError as exc:
+            raise ChatEngineError(str(exc)) from exc
+        except Exception as exc:                  # noqa: BLE001 -- said in the chat
+            if cancel is not None and cancel.is_set():
+                raise ChatEngineError("Stopped before the plan was made.") from exc
+            raise ChatEngineError(_failure_text(exc)) from exc
+        state = {"status": "planned", "question": text, "plan": plan, "thinking": thinking_level}
+        reply = {"id": reply_id, "role": "assistant", "text": research.plan_text(plan), "created_at": now(),
+                 "model": name or chat.get("model") or "", "finish": "stop", "research": state}
+        chat["messages"].append(reply)
+        self._save(chat)
+        if on_research is not None:
+            on_research(reply_id, dict(state))
+        return reply
+
+    def research_run(self, chat_id: str, message_id: str, plan: dict | None = None, *, write: bool = False,
+                     on_start=None, on_text=None, on_research=None, cancel: threading.Event | None = None) -> dict:
+        """Run the research a reply planned (with the plan as edited), or carry one on that stopped: more rounds,
+        or, with ``write``, the report from what's found. The report becomes the reply."""
+        chat = self._chat(chat_id)
+        index = next((i for i, m in enumerate(chat["messages"]) if m.get("id") == message_id), None)
+        if index is None or not isinstance(chat["messages"][index].get("research"), dict):
+            raise ChatEngineError("That isn't a research plan in this chat.")
+        if index != len(chat["messages"]) - 1:
+            raise ChatEngineError("The conversation has moved on since that plan. Start new research instead.")
+        message = chat["messages"][index]
+        state = message["research"]
+        if state.get("status") == "done":
+            raise ChatEngineError("That research is finished.")
+        if state.get("status") == "planned" and plan is not None:
+            try:
+                state["plan"] = research.clean_plan(plan)
+            except research.ResearchError as exc:
+                raise ChatEngineError(str(exc)) from exc
+        if write and not state.get("notes"):
+            raise ChatEngineError("There's nothing found yet to write from.")
+        model = chat.get("model") or None
+        client = self.client(model)
+        room = self._research_room(client)
+        name = str(getattr(client, "model", "") or "")
+        if on_start is not None:
+            on_start(None, message_id)
+        state.update(status="running", started_at=state.get("started_at") or now())
+        state.pop("error", None)
+        message.update(text="", finish="stop")
+        for key in ("error", "sources"):
+            message.pop(key, None)
+        self._save(chat)
+
+        def said(snapshot):
+            if on_research is not None:
+                on_research(message_id, snapshot)
+        run = research.Research(self, state, client_for=lambda: self.client(model), room=room, search=self._searcher,
+                                fetch=self._fetcher, said=said, save=lambda _: self._save(chat), cancel=cancel,
+                                tools=name not in self._toolless)
+        with self._lock:
+            self._researching[(chat["id"], message_id)] = run
+        try:
+            if not write:
+                run.gather()
+            if run.stopped():
+                raise research.ResearchError("Stopped.")
+            report = run.check(run.write(on_text))
+            if run.stopped():
+                raise research.ResearchError("Stopped.")
+            cited = {int(n) for n in research.CITE.findall(report)}
+            state.update(status="done", finished_at=now())
+            message.update(text=report[:MAX_TEXT], finish="stop",
+                           sources=[{"n": n["n"], "title": n["title"], "url": n["url"]}
+                                    for n in state.get("notes") or [] if n["n"] in cited])
+            if not message["sources"]:
+                message.pop("sources")
+        except Exception as exc:                  # noqa: BLE001 -- said in the reply; what was found stays
+            stopped = cancel is not None and cancel.is_set()
+            reads, notes = len(state.get("read") or []), len(state.get("notes") or [])
+            found = f"{reads} page{'' if reads == 1 else 's'} read, {notes} with something useful"
+            state.update(status="stopped" if stopped else "failed")
+            if stopped:
+                message.update(text=f"Research stopped: {found}.", finish="cancelled")
+            else:
+                why = str(exc) if isinstance(exc, (research.ResearchError, ChatEngineError)) else _failure_text(exc)
+                state["error"] = why
+                message.update(text=f"Research didn't finish ({found}): {why}", finish="error", error=why)
+        finally:
+            with self._lock:
+                self._researching.pop((chat["id"], message_id), None)
+            self._save(chat)
+            said(run.snapshot())
+        return message
+
+    def research_steer(self, chat_id: str, message_id: str, text: str) -> None:
+        """Add to research while it runs: the next round's searches and the report take it in."""
+        with self._lock:
+            run = self._researching.get((chat_id, message_id))
+        if run is None:
+            raise ChatEngineError("That research isn't running.")
+        if not str(text or "").strip():
+            raise ChatEngineError("Say what to add.")
+        try:
+            run.steer(text)
+        except research.ResearchError as exc:
+            raise ChatEngineError(str(exc)) from exc
+
     # -- versions: edit a message you sent, or try a reply again; the old version is kept, a click away
     #
     # A chat's `forks` are keyed by the message before the point where versions differ ("root" before the first):
@@ -375,11 +518,18 @@ class ChatEngine:
         fork["active"] = index
         return self._save(chat)
 
-    def export(self, chat_id: str, fmt: str) -> str:
+    def export(self, chat_id: str, fmt: str, message_id: str | None = None) -> str:
         """The chat as a file: Markdown (the conversation you see, with its sources and what was attached) or JSON
-        (the whole chat, every version, as ChatDGC keeps it; files by name, not their bytes)."""
+        (the whole chat, every version, as ChatDGC keeps it; files by name, not their bytes); or, as "report",
+        one finished research report with its sources and what the citation check found."""
         import json as _json
         chat = self._chat(chat_id)
+        if fmt == "report":
+            found = next((m for m in chat["messages"] if m.get("id") == message_id), None)
+            state = (found or {}).get("research") or {}
+            if state.get("status") != "done":
+                raise ChatEngineError("That isn't a finished research report.")
+            return research.report_file(found)
         if fmt == "json":
             return _json.dumps({"exported_at": now(), "format": "chatdgc-chat", "version": 1, "chat": chat},
                                ensure_ascii=False, indent=2) + "\n"

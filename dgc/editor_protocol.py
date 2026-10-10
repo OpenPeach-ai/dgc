@@ -832,7 +832,16 @@ COMMAND_FIELDS.update({
     # Write the chat to `path` (an absolute path the user chose): Markdown, the conversation as shown; or JSON, the
     # whole chat. Answered by `chatdgc_exported`.
     "chatdgc_export": {"request_id": _S(), "conversation_id": _S(), "path": _S(),
-                       "format": _f("string", enum=("markdown", "json"))},
+                       "format": _f("string", enum=("markdown", "json", "report")), "message_id": _S(False)},
+    # Deep research. `chatdgc_research` makes a plan: a turn whose reply carries `research` {status "planned",
+    # question, plan: {title, steps, sites}}. `chatdgc_research_start` runs it (with `plan` as edited), or carries on
+    # one that stopped (`write`: the report from what's found): a turn on that reply, which becomes the report.
+    # `chatdgc_research_steer` adds to research while it runs. Progress is `chatdgc_research`.
+    "chatdgc_research": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
+                         "thinking": _f("string", required=False, enum=CHATDGC_THINKING)},
+    "chatdgc_research_start": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "plan": _O(False),
+                               "write": _B(False)},
+    "chatdgc_research_steer": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "text": _S()},
     # The context window. Compact now (everything before the last exchange becomes the summary) and editing
     # the summary are answered by `chatdgc_compacted`; Continue in a new chat (a summary of this one goes with
     # it) by `chatdgc_opened` for the new chat. After every turn, and when a chat opens, `chatdgc_context` says
@@ -864,6 +873,9 @@ EVENT_FIELDS.update({
     # A question the reply put to the user, as it's asked (the reply goes on): {at, question, options, prompt},
     # `at` being where in the reply's text it sits. The finished reply carries it in `questions` too.
     "chatdgc_question": {"conversation_id": _S(), "message_id": _S(), "question": _O()},
+    # Deep research as it goes: the reply's `research` now (status planning, planned, running, writing, checking,
+    # done, stopped or failed; plan; notes by number, title and address; the latest activity; steers; check).
+    "chatdgc_research": {"conversation_id": _S(), "message_id": _S(), "research": _O()},
     # A conversation's list entry changed (a turn, a rename, a pin), or it was deleted (summary null).
     "chatdgc_changed": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
     "chatdgc_error": {"message": _S(), "request_id": _S(False), "conversation_id": _S(False)},

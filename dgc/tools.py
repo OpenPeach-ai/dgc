@@ -3908,6 +3908,14 @@ def _validate_public_url(url: str) -> str:
 def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES,
                        https_only: bool = False) -> tuple[str, str]:
     """Fetch bounded public text, revalidating every redirect and ignoring proxy env state."""
+    final, _type, data, encoding = _fetch_public(url, max_bytes=max_bytes, https_only=https_only)
+    return final, data.decode(encoding, errors="replace")
+
+
+def _fetch_public(url: str, *, max_bytes: int = MAX_FETCH_BYTES, https_only: bool = False,
+                  binary_types: frozenset[str] = frozenset()) -> tuple[str, str, bytes, str]:
+    """A bounded public response: (final URL, content type, bytes, encoding). Text types always; a type in
+    ``binary_types`` (deep research reads PDFs) too. Every redirect is revalidated; proxy env state is ignored."""
     session = requests.Session()
     session.trust_env = False
     current = str(url).strip()
@@ -3929,7 +3937,7 @@ def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES,
                     continue
                 response.raise_for_status()
                 ctype = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-                if ctype and not (ctype.startswith("text/") or ctype in {
+                if ctype and not (ctype.startswith("text/") or ctype in binary_types or ctype in {
                         "application/json", "application/xml", "application/xhtml+xml"}):
                     raise ValueError(f"unsupported response content type: {ctype}")
                 try:
@@ -3947,8 +3955,7 @@ def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES,
                     if size > max_bytes:
                         raise ValueError(f"response exceeded the {max_bytes}-byte limit")
                     chunks.append(chunk)
-                encoding = response.encoding or "utf-8"
-                return current, b"".join(chunks).decode(encoding, errors="replace")
+                return current, ctype, b"".join(chunks), response.encoding or "utf-8"
             finally:
                 response.close()
     finally:
