@@ -736,3 +736,27 @@ test("deep research: a new plan you don't touch starts by itself when the count 
     assert.equal(await s.page.locator("#cd-send").isVisible(), false, "it's running: Stop, not Send");
   } finally { await s.page.close(); }
 });
+
+test("a send refused before it starts gives back what was typed, and never leaves the box stuck", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [] });
+    // A finished turn first: its reply id mustn't make a later refusal look like a running reply.
+    await s.page.locator("#cd-input").fill("hi");
+    await s.page.keyboard.press("Enter");
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Hello.", finish: "stop" } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.page.locator("#cd-research").click();
+    await s.page.locator("#cd-input").fill("Scooters under 1.5 lakh");
+    await s.page.keyboard.press("Enter");
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "");
+    await s.send({ type: "error", message: "Deep research needs a context window of at least 16k: choose 32k or more in Settings." });
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "Scooters under 1.5 lakh", "nothing typed is lost");
+    assert.equal(await s.page.locator("#cd-research").getAttribute("aria-pressed"), "true", "still a research request");
+    assert.deepEqual([await s.page.locator("#cd-stop").isHidden(), await s.page.locator("#cd-send").isDisabled()], [true, false],
+                     "not stuck as if a reply were running");
+    assert.match(await s.page.locator("#cd-notice").textContent(), /at least 16k/);
+  } finally { await s.page.close(); }
+});

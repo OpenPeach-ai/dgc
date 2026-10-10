@@ -14,7 +14,7 @@
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
-                  research: false, planAsked: false, countdowns: {}, planEditing: "", steerDraft: "", open: new Set() };
+                  research: false, planAsked: false, countdowns: {}, lastSent: null, planEditing: "", steerDraft: "", open: new Set() };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -347,7 +347,7 @@
     delete state.countdowns[message.id];
     state.planEditing = "";
     vscode.postMessage({ type: "researchStart", messageId: message.id, ...extra });
-    state.busy = true; state.replyId = message.id;
+    state.busy = true;
     controls(); update(message.id);
   }
   let ticking = 0;
@@ -790,6 +790,7 @@
       if (state.pending.length) { showNotice("Deep research reads the web: send files without it, or turn it off.", "info"); return; }
       if (!text.trim()) return;
       vscode.postMessage({ type: "research", text, model: modelPick.value || "", thinking: thinkingPick.value || "" });
+      state.lastSent = { text, research: true, pending: [] };
       input.value = ""; grow(); saveDraft();
       researchMode(false);
       state.planAsked = true; state.busy = true;
@@ -800,6 +801,7 @@
                          search: searchPick.value || "auto",
                          ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}) })) } : {}) });
+    state.lastSent = { text, research: false, pending: state.pending };
     input.value = ""; grow(); saveDraft();
     state.pending = []; chips();
     state.busy = true;        // until the turn says otherwise: no second send in the meantime
@@ -970,12 +972,12 @@
       }
       case "turn":
         if (msg.state === "started") {
-          state.busy = true; state.replyId = msg.replyId || "";
+          state.busy = true; state.replyId = msg.replyId || ""; state.lastSent = null;
           if (!state.messages.some((m) => m.id === state.replyId)) {
             // A continued reply already exists; a new one appears now, empty, and fills in.
           }
         } else {
-          state.busy = false;
+          state.busy = false; state.replyId = "";      // a later send refused before it starts isn't this turn
           state.searching = {};
           announce("Reply finished.");
           render();
@@ -1062,6 +1064,15 @@
           vscode.postMessage({ type: "reopenNew" });             // gone (a temporary chat after a restart)
           return;
         }
+        // A send refused before it started (no model, a window too small for research): not running, and what
+        // was typed comes back to the box rather than being lost.
+        if (state.busy && !state.replyId && state.lastSent && !input.value.trim()) {
+          input.value = state.lastSent.text; grow(); saveDraft();
+          state.pending = state.lastSent.pending; chips();
+          researchMode(state.lastSent.research);
+        }
+        if (state.busy && !state.replyId) state.planAsked = false;
+        state.lastSent = null;
         state.busy = state.busy && !!state.replyId;           // a send that never started isn't running
         showNotice(msg.message || "ChatDGC hit an error.");
         controls();

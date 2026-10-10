@@ -674,20 +674,23 @@ class ChatEngine:
         return f"{who}: {text}"
 
     def _summarize(self, client, earlier: str, messages: list[dict], room: int, cancel=None) -> str:
-        """A rolling summary: ``earlier`` (the summary so far, if any) plus ``messages``, in chunks that fit."""
+        """A summary that grows by parts: ``earlier`` (the summary so far, if any) stays as it was, and ``messages``
+        are summarized, in chunks that fit, and added after it. Past SUMMARY_SHARE of the window, it's shortened
+        once, the one step that rewrites what came before."""
         words = max(200, min(1500, int(room * 0.08 * 0.75)))
         chunk_chars = max(4000, int(room * 0.5) * fit_window.CHARS_PER_TOKEN)
-        summary, pending = earlier, [self._plain(m) for m in messages]
+        parts, pending = ([earlier] if earlier else []), [self._plain(m) for m in messages]
         while pending:
             chunk, size = [], 0
             while pending and (not chunk or size + len(pending[0]) <= chunk_chars):
                 piece = pending.pop(0)[:chunk_chars]
                 chunk.append(piece)
                 size += len(piece)
-            asked = ("The summary so far (of the earlier messages; keep all of it):\n<<<\n" + summary + "\n>>>\n\n"
-                     if summary else "") + "The conversation to add:\n<<<\n" + "\n\n".join(chunk) + "\n>>>"
+            before = "\n\n".join(parts)
+            asked = ("Summarized before (for context only):\n<<<\n" + before[-8000:] + "\n>>>\n\n" if before else "") + \
+                "The conversation to summarize:\n<<<\n" + "\n\n".join(chunk) + "\n>>>"
             try:
-                rolling = fit_window.ROLLING if summary else ""
+                rolling = fit_window.ROLLING if before else ""
                 result = client.chat([{"role": "system", "content": fit_window.COMPACT_PROMPT.format(words=words,
                                                                                                    rolling=rolling)},
                                       {"role": "user", "content": asked}], tools=None, reasoning_effort="off",
@@ -695,14 +698,16 @@ class ChatEngine:
             except Exception as exc:              # noqa: BLE001 -- a summary that fails is said, never a crash
                 raise ChatEngineError("The earlier messages couldn't be summarized: "
                                       f"{' '.join(str(exc).split())[:300] or type(exc).__name__}") from exc
-            summary = str(getattr(result, "content", "") or "").strip()
+            part = str(getattr(result, "content", "") or "").strip()
             if cancel is not None and cancel.is_set():
                 raise ChatEngineError("Stopped before the summary was written.")
-            if not summary:
+            if not part:
                 raise ChatEngineError("The model wrote no summary.")
-        # A summary far past its length (a model told to keep everything sometimes retells it) would fill the
-        # window it was written to free, and compact again on every reply: it's asked once for a shorter one.
-        if fit_window.tokens(summary) > words * 2:
+            parts.append(part)
+        summary = "\n\n".join(parts)
+        # Past its share it would fill the window it was written to free, and compact again on every reply: it's
+        # asked once for a shorter one.
+        if fit_window.tokens(summary) > int(room * fit_window.SUMMARY_SHARE):
             try:
                 result = client.chat([{"role": "system", "content": fit_window.SHORTEN_PROMPT.format(words=words)},
                                       {"role": "user", "content": summary}], tools=None, reasoning_effort="off",

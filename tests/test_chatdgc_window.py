@@ -109,14 +109,18 @@ class WindowTests(unittest.TestCase):
         for i in range(3, 6):
             self.talk(chat, f"question {i}: {long}", f"answer {i}: {long}")
         rolled = self.world["summaries"][-1]
-        self.assertTrue(rolled.startswith("The summary so far (of the earlier messages; keep all of it):\n<<<\nSUMMARY #"),
-                        "a rolling summary: the last one goes in")
-        # Told only "the summary so far", deepseek-v4.1-flash dropped all of it in 8 rolls of 8 (Paris, 391, the
-        # sights: gone, the newest story kept); told it replaces it and is the only record, 0 of 27.
+        self.assertTrue(rolled.startswith("Summarized before (for context only):\n<<<\nSUMMARY #"), "the summary so far, as context")
+        # Asked to rewrite the old summary with the new, deepseek-v4.1-flash kept only the new: 8 rolls of 8 until the
+        # prompt said it replaced the old, and then still, live, every earlier answer gone in one run of about thirty.
+        # Now what was summarized stays word for word, and only the new stretch is summarized after it.
         rolling = [s for s in self.world["sent"] if s["messages"][0]["content"].startswith("You are summarizing")][-1]
-        self.assertIn("yours replaces it and is the only record", rolling["messages"][0]["content"])
+        self.assertIn("don't repeat it or rewrite it", rolling["messages"][0]["content"])
+        kept = self.store.get(chat["id"])["summary"]["text"]
+        self.assertTrue(kept.startswith("SUMMARY #1\n\nSUMMARY #2"), "the first summary, as it was written")
+        self.assertTrue(kept.endswith(f"SUMMARY #{len(self.world['summaries'])}"), "and the newest part after it")
         first = next(s for s in self.world["sent"] if s["messages"][0]["content"].startswith("You are summarizing"))
-        self.assertNotIn("summary so far", first["messages"][0]["content"],
+        self.assertNotIn("Summarized before", first["messages"][1]["content"])
+        self.assertNotIn("for context only", first["messages"][0]["content"],
                          "the first summary isn't told of one: a model wrote \"no prior context\" into it")
         self.assertNotIn("question 0", rolled, "what was summarized isn't read again")
 
@@ -142,7 +146,8 @@ class WindowTests(unittest.TestCase):
         fresh = self.engine.carry(chat["id"])
         self.assertNotEqual(fresh["id"], chat["id"])
         self.assertEqual((fresh["messages"], fresh["carried"]["from"]), ([], chat["id"]))
-        self.assertTrue(fresh["carried"]["text"].startswith("SUMMARY"))
+        self.assertTrue(fresh["carried"]["text"].startswith("The user is planning a trip to Goa.\n\nSUMMARY"),
+                        "what you edited goes with it word for word, then the rest")
         self.assertIn("planning a trip to Goa", self.world["summaries"][-1], "it starts from what you edited")
         self.talk(fresh, "where were we?")
         self.assertIn("continues an earlier one", self.last_request()["messages"][0]["content"])

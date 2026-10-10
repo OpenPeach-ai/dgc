@@ -25,12 +25,14 @@ COMPACT_PROMPT = (
     "assistant can rely on: the user's goals and preferences, facts and numbers they gave, decisions made, what "
     "was asked and answered (briefly), files and images discussed, open questions, and anything they asked to be "
     "remembered. Keep names, numbers and dates exact.{rolling} Plain text, short paragraphs or bullets, at most "
-    "{words} words in all. Write only the summary.")
-# Only with a summary so far: told about one that isn't there, a model wrote "no prior context" into the first.
+    "{words} words. Write only the summary.")
+# A summary grows by parts: what was summarized before stays word for word, and only the new stretch is
+# summarized and added after it. Asked to rewrite the old summary with the new, a model now and then kept only
+# the new (live: every earlier answer gone in one run of about thirty).
 ROLLING = (
-    " A summary so far is given: yours replaces it and is the only record of those earlier messages, so carry "
-    "over everything in it (shorten it if you must, but drop nothing the user might come back to), then add the "
-    "conversation that follows, old and new together within the length below.")
+    " What was summarized before is given for context only: don't repeat it or rewrite it; summarize just the "
+    "new conversation, which will be added after it.")
+SUMMARY_SHARE = 0.15             # of the window, at most, for the summary; past it, shortened once
 SHORTEN_PROMPT = (
     "Shorten this summary of a conversation to at most {words} words. Keep every name, number, date, decision and "
     "fact the user might come back to, from all of it, early and late; cut retellings and description. Write "
