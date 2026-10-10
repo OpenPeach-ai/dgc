@@ -51,6 +51,33 @@ body.cd-blank .cd-fine { display: none; }
 .cd-continue:hover { background: var(--accent-hover); }
 .cd-continue:disabled { opacity: .6; cursor: default; }
 
+/* A question in the answer: a card with the options where the reply asked it; Continue sends the answer. */
+.cd-question { display: grid; gap: var(--sp-2); margin: var(--sp-3) 0; padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); }
+.cd-question-text { margin: 0; color: var(--text); font: var(--w-semi) var(--t-chat)/1.45 var(--sans); text-wrap: balance; }
+.cd-options { display: grid; gap: 2px; }
+.cd-option { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border-radius: var(--r-md);
+  color: var(--text); font: var(--w-reg) var(--t-chat)/1.45 var(--sans); cursor: pointer; }
+.cd-option:hover { background: var(--surface2); }
+/* Drawn, not native: a disabled native radio is grey whatever it holds, so an answered card hid its answer. */
+.cd-option input { appearance: none; flex: none; display: grid; place-content: center; width: 15px; height: 15px;
+  margin: 2px 0 0; border: 1.5px solid var(--border-strong); border-radius: 50%; background: var(--bg); cursor: inherit; }
+.cd-option input::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-fill); transform: scale(0); }
+.cd-option input:checked { border-color: var(--accent-fill); }
+.cd-option input:checked::before { transform: scale(1); }
+.cd-option input:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.cd-option:has(input:disabled) { cursor: default; }
+.cd-option:has(input:disabled):hover { background: transparent; }
+.cd-option:has(input:disabled:not(:checked)) { color: var(--muted); }
+.cd-option:has(input:disabled:checked) { font-weight: var(--w-semi); }
+.cd-question .cd-other { box-sizing: border-box; width: calc(100% - 31px); margin: var(--sp-1) 0 0 31px; padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg); color: var(--text);
+  font: var(--w-reg) var(--t-chat)/1.45 var(--sans); }
+.cd-question .cd-other:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-question .cd-other::placeholder { color: var(--muted); }
+.cd-question-go { justify-self: stretch; padding: var(--sp-1) var(--sp-3); font-size: var(--t-sm); }
+.cd-question-note { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+
 /* Citations and sources: a numbered mark after a claim opens its page; the list sits under the reply. */
 .cd-cite { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; margin: 0 1px;
   padding: 0 4px; vertical-align: 2px; border: 0; border-radius: var(--r-full); background: var(--surface2);

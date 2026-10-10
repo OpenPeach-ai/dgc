@@ -822,6 +822,13 @@ COMMAND_FIELDS.update({
                            "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
                            "search": _f("string", required=False, enum=CHATDGC_SEARCH)},
     "chatdgc_version": {"request_id": _S(), "conversation_id": _S(), "parent_id": _S(), "index": _I()},
+    # Answer the question a reply asked (`question`: its index in the reply's `questions`) with `choice` (one of
+    # its options, or the user's own words): the message the model wrote for it is sent as the user's, carrying
+    # `answers: {message, question, choice}`, and a turn follows. Only while that reply is the last message.
+    "chatdgc_answer": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "question": _I(),
+                       "choice": _S(), "model": _S(False),
+                       "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
+                       "search": _f("string", required=False, enum=CHATDGC_SEARCH)},
     # Write the chat to `path` (an absolute path the user chose): Markdown, the conversation as shown; or JSON, the
     # whole chat. Answered by `chatdgc_exported`.
     "chatdgc_export": {"request_id": _S(), "conversation_id": _S(), "path": _S(),
@@ -854,6 +861,9 @@ EVENT_FIELDS.update({
     "chatdgc_activity": {"conversation_id": _S(), "message_id": _S(),
                          "kind": _f("string", enum=("searching", "looking", "compacting")), "text": _S()},
     "chatdgc_message": {"conversation_id": _S(), "message": _O(), "request_id": _S(False)},
+    # A question the reply put to the user, as it's asked (the reply goes on): {at, question, options, prompt},
+    # `at` being where in the reply's text it sits. The finished reply carries it in `questions` too.
+    "chatdgc_question": {"conversation_id": _S(), "message_id": _S(), "question": _O()},
     # A conversation's list entry changed (a turn, a rename, a pin), or it was deleted (summary null).
     "chatdgc_changed": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
     "chatdgc_error": {"message": _S(), "request_id": _S(False), "conversation_id": _S(False)},

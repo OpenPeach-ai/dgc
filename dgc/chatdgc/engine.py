@@ -8,6 +8,7 @@ its own. A reply is as long as the model allows; when the model stops at its own
 from __future__ import annotations
 
 import json
+import re
 import threading
 from typing import Callable
 
@@ -30,6 +31,35 @@ SEARCH_TOOL = {"type": "function", "function": {
                     "One short query per call."),
     "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "What to search for"}},
                    "required": ["query"]}}}
+# A question in the answer, as ChatGPT puts one: a card with choices where the model asked it. It doesn't wait:
+# the model carries on, and the choice comes back as the user's next message, which the model wrote ahead
+# (`prompt`, with {answer} where the choice goes). Kept on the reply (`questions`), answered by a message that
+# says so (`answers`), so it survives a reload, a restart and every version.
+ASK_TOOL = {"type": "function", "function": {
+    "name": "ask_user",
+    "description": (
+        "Put one multiple-choice question to the user inside your answer, as a card they answer with a click. "
+        "For when what you'd say next depends on something only they know, and a few answers cover it. It "
+        "doesn't wait: the card appears where you are in your answer, you carry on writing, and their choice "
+        "comes back as their next message. Don't also write the question or its options in your text."),
+    "parameters": {"type": "object", "properties": {
+        "question": {"type": "string", "description": "The question, in one short sentence."},
+        "options": {"type": "array", "items": {"type": "string"}, "description": (
+            "2 to 6 answers, a few words each. A box for their own answer is always added: don't add 'Other'.")},
+        "prompt": {"type": "string", "description": (
+            "The message their choice sends, written as the user, with {answer} where the choice goes, saying "
+            "what they want from you next. Example: 'The funds come from {answer}. Please analyse the routes "
+            "open to me.'")}},
+        "required": ["question", "options", "prompt"]}}}
+ASKED = ("Shown to the user as a card under what you've written so far, with your options and a box for their own "
+         "answer. Carry on with the rest of your answer; don't answer the question for them. Their choice comes "
+         "back as their next message.")
+MAX_OPTIONS = 6
+MAX_QUESTION_CHARS, MAX_OPTION_CHARS, MAX_PROMPT_CHARS, MAX_CHOICE_CHARS = 300, 160, 1000, 500
+_OTHER = re.compile(r"(?i)(other|something else|none of (these|the above))(\s+\w+)?\W*")
+# What a provider says when a model can't take tools (Ollama: "... does not support tools"): the reply goes
+# without them, and that model isn't offered them again while DGC runs.
+_NO_TOOLS = re.compile(r"(?i)(does not|doesn't) support tools|tools? (are|is) not supported|not support(ed)? (for )?tool")
 NAME_PROMPT = ("Name this conversation in three to six words, the way a chat app titles it. Reply with the name "
                "only: no quotes, no full stop.")
 CONTINUE = ("Continue exactly where your last reply stopped. Don't repeat anything you already wrote, and don't "
@@ -52,6 +82,7 @@ class ChatEngine:
         self._temporary: dict[str, dict] = {}      # temporary chats: never written, gone with the process
         self._drafts: dict[str, dict] = {}         # new chats: written with their first message
         self._temporary_files: dict[tuple[str, str], tuple[bytes, str | None]] = {}   # a temporary chat's attachments
+        self._toolless: set[str] = set()           # models that said they can't take tools
         self._lock = threading.Lock()
 
     # -- the model
@@ -158,7 +189,8 @@ class ChatEngine:
 
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
-             on_activity=None, on_compacted=None, cancel: threading.Event | None = None) -> dict:
+             on_activity=None, on_compacted=None, on_question=None, cancel: threading.Event | None = None,
+             answering: dict | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
@@ -197,6 +229,8 @@ class ChatEngine:
         mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now()}
         if prepared:
             mine["attachments"] = [item["meta"] for item in prepared]
+        if answering:
+            mine["answers"] = answering
         chat["messages"].append(mine)
         chat = self._save(chat)
         reply_id = new_message_id()
@@ -217,7 +251,30 @@ class ChatEngine:
         sees = relay is None and self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None,
                            reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity,
-                           on_compacted=on_compacted)
+                           on_compacted=on_compacted, on_question=on_question)
+
+    def answer(self, chat_id: str, message_id: str, question: int, choice: str, *, model: str | None = None,
+               thinking: str | None = None, search: str = "off", on_start=None, on_text=None, on_thinking=None,
+               on_activity=None, on_compacted=None, on_question=None,
+               cancel: threading.Event | None = None) -> dict:
+        """Answer the question a reply asked: the message the model wrote for it, with the choice in, sent as the
+        user's. Only while that reply is the last thing said; after that it's an ordinary message to write."""
+        chat = self._chat(chat_id)
+        index = next((i for i, m in enumerate(chat["messages"]) if m.get("id") == message_id), None)
+        if index is None or chat["messages"][index].get("role") != "assistant":
+            raise ChatEngineError("That reply isn't in this chat.")
+        asked = chat["messages"][index].get("questions") or []
+        if isinstance(question, bool) or not isinstance(question, int) or not 0 <= question < len(asked):
+            raise ChatEngineError("That question isn't in this reply.")
+        if index != len(chat["messages"]) - 1:
+            raise ChatEngineError("The conversation has moved on since that question: write your answer as a message.")
+        choice = " ".join(str(choice or "").split())[:MAX_CHOICE_CHARS]
+        if not choice:
+            raise ChatEngineError("Choose an answer first.")
+        return self.send(chat_id, answered(asked[question], choice), model=model, thinking=thinking, search=search,
+                         on_start=on_start, on_text=on_text, on_thinking=on_thinking, on_activity=on_activity,
+                         on_compacted=on_compacted, on_question=on_question, cancel=cancel,
+                         answering={"message": message_id, "question": question, "choice": choice})
 
     # -- versions: edit a message you sent, or try a reply again; the old version is kept, a click away
     #
@@ -256,7 +313,7 @@ class ChatEngine:
 
     def edit(self, chat_id: str, message_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None, on_compacted=None,
-             cancel: threading.Event | None = None) -> dict:
+             on_question=None, cancel: threading.Event | None = None) -> dict:
         """Change a message you sent: a new version of the conversation from there, with a new reply. What it
         carried (files, and what a vision model saw in them) goes with it."""
         text = str(text or "")
@@ -278,11 +335,12 @@ class ChatEngine:
             on_start(mine, reply_id)
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
-                           on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted)
+                           on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
+                           on_question=on_question)
 
     def regenerate(self, chat_id: str, message_id: str, *, model: str | None = None, thinking: str | None = None,
                    search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
-                   on_compacted=None, cancel: threading.Event | None = None) -> dict:
+                   on_compacted=None, on_question=None, cancel: threading.Event | None = None) -> dict:
         """Try a reply again (with another model or thinking level, if chosen): a new version from that reply on."""
         chat = self._chat(chat_id)
         index = self._at(chat, message_id, "assistant")
@@ -296,7 +354,8 @@ class ChatEngine:
             on_start(None, reply_id)
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
-                           on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted)
+                           on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
+                           on_question=on_question)
 
     def version(self, chat_id: str, parent_id: str, index: int) -> dict:
         """Show another version at a point of the conversation (``parent_id``: the message before it, or "root")."""
@@ -338,7 +397,7 @@ class ChatEngine:
                     lines += ["*Attached: " + ", ".join(names) + "*", ""]
             else:
                 lines += ["## ChatDGC" + (f" ({m['model']})" if m.get("model") else ""), ""]
-                lines += [m.get("text") or "*(no reply)*", ""]
+                lines += [with_questions(m, _exported) or "*(no reply)*", ""]
                 if m.get("sources"):
                     lines += ["**Sources**", ""] + [f"{x['n']}. [{x['title']}]({x['url']})" for x in m["sources"]] + [""]
         return "\n".join(lines).rstrip() + "\n"
@@ -355,7 +414,8 @@ class ChatEngine:
         return out
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
-                       on_activity=None, on_compacted=None, cancel: threading.Event | None = None) -> dict:
+                       on_activity=None, on_compacted=None, on_question=None,
+                       cancel: threading.Event | None = None) -> dict:
         """Carry on a reply the model stopped at its limit (or one that was stopped), in the same message."""
         chat = self._chat(chat_id)
         index = next((i for i, m in enumerate(chat["messages"]) if m.get("id") == message_id), None)
@@ -370,7 +430,8 @@ class ChatEngine:
             on_start(None, message_id)
         return self._reply(chat, lambda c, room: self._history(c, sees=sees, room=room)
                            + [{"role": "user", "content": CONTINUE}], chat["messages"][index], message_id, on_text,
-                           on_thinking, cancel, on_activity=on_activity, on_compacted=on_compacted)
+                           on_thinking, cancel, on_activity=on_activity, on_compacted=on_compacted,
+                           on_question=on_question)
 
     def name(self, chat_id: str) -> dict | None:
         """Give a new chat a short name from its first exchange, as a chat app does. Only while it still has
@@ -454,7 +515,7 @@ class ChatEngine:
     def _plain(message: dict) -> str:
         """A message as a summary reads it: who said it, the words, what came with it (by name)."""
         who = "User" if message.get("role") == "user" else "Assistant"
-        text = message.get("text") or ""
+        text = with_questions(message, _asked)
         names = [a.get("name", "attachment") for a in message.get("attachments") or []]
         if names:
             text += "\n[Attached: " + ", ".join(names) + "]"
@@ -613,7 +674,8 @@ class ChatEngine:
         instructions = system_prompt(
             timezone_name=zone, search=search, about=str(config.get("chatdgc_about", "") or ""),
             style=str(config.get("chatdgc_style", "") or ""),
-            personality=str(config.get("chatdgc_personality", "default") or "default"))
+            personality=str(config.get("chatdgc_personality", "default") or "default"),
+            ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless)
         carried = chat.get("carried") or {}
         if carried.get("text"):
             instructions += (f"\n\nThis chat continues an earlier one, \u201c{carried.get('title', '')}\u201d. What "
@@ -627,7 +689,7 @@ class ChatEngine:
         images_left = MAX_HISTORY_IMAGES
         built = []
         for m in reversed(chat["messages"][start:]):
-            content = m.get("text") or ""
+            content = with_questions(m, _asked) if m.get("role") == "assistant" else m.get("text") or ""
             pictures, described = [], False
             for meta in m.get("attachments") or []:
                 found = self._file(chat, meta.get("id", ""))
@@ -667,6 +729,24 @@ class ChatEngine:
                 built.append({"role": m["role"], "content": content})
         return out + list(reversed(built))
 
+    @staticmethod
+    def _question(call, questions: list, at: int) -> tuple[str, dict | None]:
+        """One ask_user call: (what the model is told, the question to show, or None when there isn't one)."""
+        if questions:
+            return "Not shown: one question per reply, and this one already has it. Carry on with your answer.", None
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        question = " ".join(str(args.get("question") or "").split())[:MAX_QUESTION_CHARS]
+        options: list[str] = []
+        for item in args.get("options") if isinstance(args.get("options"), list) else []:
+            text = " ".join(str(item).split())[:MAX_OPTION_CHARS]
+            # "Other" is the card's own box for their answer.
+            if text and not _OTHER.fullmatch(text) and text.casefold() not in (o.casefold() for o in options):
+                options.append(text)
+        if not question or len(options) < 2:
+            return "Not shown: a question needs its words and at least two options. Carry on with your answer.", None
+        prompt = str(args.get("prompt") or "").strip()[:MAX_PROMPT_CHARS]
+        return ASKED, {"at": at, "question": question, "options": options[:MAX_OPTIONS], "prompt": prompt}
+
     def _web_search(self, call, sources: list, searches: list, on_activity) -> str:
         """One web_search call: run it, number its results after the reply's earlier ones, say them as data."""
         if call.name != "web_search":
@@ -702,7 +782,7 @@ class ChatEngine:
         return "\n".join(lines)[:12_000]
 
     def _reply(self, chat, build, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
-               on_activity=None, on_compacted=None) -> dict:
+               on_activity=None, on_compacted=None, on_question=None) -> dict:
         """One reply. ``build(chat, room)`` is what the model reads, for a window of ``room`` tokens: when it would
         fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent)."""
         model = chat.get("model") or None
@@ -739,14 +819,33 @@ class ChatEngine:
         finish, usage, counted, failure = "stop", {}, 0, None
         sources = [dict(x) for x in (existing or {}).get("sources") or []]
         searches = list((existing or {}).get("searches") or [])
-        tools = [SEARCH_TOOL] if search != "off" else None
+        before = len((existing or {}).get("text") or "")      # a continued reply: a question's place counts from here
+        questions = [dict(q) for q in (existing or {}).get("questions") or []]
+        name = str(getattr(client, "model", "") or model or "")
+
+        def offered():
+            if name in self._toolless:
+                return None
+            out = [SEARCH_TOOL] if search != "off" and len(searches) < MAX_SEARCHES else []
+            return (out + ([ASK_TOOL] if not questions else [])) or None
+
         messages = list(history)
         try:
             # A search is one more round: the model asks, the results go back, it answers (or searches again,
-            # up to MAX_SEARCHES; after that it is offered no tool and answers from what it has).
+            # up to MAX_SEARCHES; after that it is offered no search and answers from what it has). A question
+            # is one too, though nothing waits: the card is shown and the model is told to carry on.
             while True:
-                result = client.chat(messages, tools=tools, reasoning_effort=thinking, on_text=text_part,
-                                     on_thinking=thought_part, cancel=cancel)
+                tools = offered()
+                try:
+                    result = client.chat(messages, tools=tools, reasoning_effort=thinking, on_text=text_part,
+                                         on_thinking=thought_part, cancel=cancel)
+                except Exception as exc:          # noqa: BLE001 -- only "this model takes no tools" is retried
+                    if tools is None or streamed or not _NO_TOOLS.search(str(exc)):
+                        raise
+                    self._toolless.add(name)
+                    tools = None
+                    result = client.chat(messages, tools=None, reasoning_effort=thinking, on_text=text_part,
+                                         on_thinking=thought_part, cancel=cancel)
                 spent = dict(getattr(result, "usage", {}) or {})
                 usage = _add_usage(usage, spent)
                 counted = int(spent.get("input_tokens") or 0) + int(spent.get("output_tokens") or 0)
@@ -763,10 +862,15 @@ class ChatEngine:
                     asked["_responses_output"] = result.provider_items
                 messages.append(asked)
                 for call in calls:
-                    messages.append({"role": "tool", "tool_call_id": call.id,
-                                     "content": self._web_search(call, sources, searches, on_activity)})
-                if len(searches) >= MAX_SEARCHES:
-                    tools = None
+                    if call.name == "ask_user":
+                        told, question = self._question(call, questions, before + len("".join(streamed)))
+                        if question is not None:
+                            questions.append(question)
+                            if on_question is not None:
+                                on_question(question)
+                    else:
+                        told = self._web_search(call, sources, searches, on_activity)
+                    messages.append({"role": "tool", "tool_call_id": call.id, "content": told})
                 if streamed and not "".join(streamed[-2:]).endswith("\n"):
                     # What it said before searching ("Let me check.") ends there: the answer starts a new
                     # paragraph, on screen and in the saved reply alike.
@@ -792,6 +896,8 @@ class ChatEngine:
                        "usage": _add_usage(existing.get("usage") or {}, usage)}
             message.pop("counted", None)
             message.update(_found(sources, searches))
+            if questions:
+                message["questions"] = questions
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -800,6 +906,8 @@ class ChatEngine:
             if failure is not None:
                 message["error"] = _failure_text(failure)
             message.update(_found(sources, searches))
+            if questions:
+                message["questions"] = questions
             chat["messages"].append(message)
         if counted:
             message["counted"] = counted
@@ -807,6 +915,36 @@ class ChatEngine:
             chat["summary"].pop("written_at", None)     # this reply was counted with the summary as it is now
         self._save(chat)
         return message
+
+
+def answered(question: dict, choice: str) -> str:
+    """The message a choice sends: the one the model wrote for it, with the choice where it said."""
+    prompt = question.get("prompt") or ""
+    if "{answer}" in prompt:
+        return prompt.replace("{answer}", choice)
+    return f"{question.get('question', '')} {choice}." + (f" {prompt}" if prompt else "")
+
+
+def with_questions(message: dict, show: Callable[[dict], str]) -> str:
+    """A reply's words with each question it asked where it asked it, as ``show`` writes one."""
+    text = message.get("text") or ""
+    out, done = [], 0
+    for question in sorted(message.get("questions") or [], key=lambda q: int(q.get("at") or 0)):
+        at = max(done, min(len(text), int(question.get("at") or 0)))
+        out += [text[done:at], show(question)]
+        done = at
+    return "".join(out + [text[done:]])
+
+
+def _asked(question: dict) -> str:
+    """A question as the model reads it back, in history and summaries."""
+    return (f"\n\n[You asked the user, as a card with choices: {question.get('question', '')} Options: "
+            + "; ".join(question.get("options") or []) + "; or their own answer.]\n\n")
+
+
+def _exported(question: dict) -> str:
+    return ("\n\n> **" + question.get("question", "") + "**\n>\n"
+            + "\n".join(f"> - {o}" for o in question.get("options") or []) + "\n\n")
 
 
 def _found(sources: list, searches: list) -> dict:

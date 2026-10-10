@@ -398,3 +398,21 @@ test("the context window: its commands go as such, and its events reach the tabs
   chat.onEvent({ type: "chatdgc_context", conversation_id: ID(9), window: 1, limit: 0, used: 1, preset: "32k", source: "estimated", parts: {} });
   assert.equal(panel.last("context").used, 900, "the old chat's meter no longer reaches it");
 });
+
+test("a question in the answer: the card's choice goes as chatdgc_answer, and a question reaches the tabs showing the chat", () => {
+  chat.open(ID(10));
+  const [panel] = world.panels.slice(-1);
+  panel.say({ type: "ready" }); opened(panel, { id: ID(10), title: "x" });
+  const before = sent.length;
+  for (const bad of [{ choice: "" }, { choice: "x".repeat(501) }, { question: -1 }, { question: 1.5 }, { messageId: "nope" }]) {
+    panel.say({ type: "answer", messageId: MSG(2), question: 0, choice: "Pune", ...bad });
+  }
+  assert.equal(sent.length, before, "nothing that isn't an answer is sent");
+  panel.say({ type: "answer", messageId: MSG(2), question: 0, choice: " Pune ", model: "qwen3:8b", thinking: "low", search: "off" });
+  const answer = last("chatdgc_answer");
+  assert.deepEqual([answer.conversation_id, answer.message_id, answer.question, answer.choice, answer.model, answer.thinking, answer.search],
+                   [ID(10), MSG(2), 0, "Pune", "qwen3:8b", "low", "off"]);
+  const asked = { at: 4, question: "Which city?", options: ["Pune", "Goa"], prompt: "I mean {answer}." };
+  chat.onEvent({ type: "chatdgc_question", conversation_id: ID(10), message_id: MSG(2), question: asked });
+  assert.deepEqual(panel.last("question"), { type: "question", messageId: MSG(2), question: asked });
+});

@@ -52,6 +52,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   `fields` reads them back. Every chat follows them from its next reply.
 - **Search finds what was said.** `chatdgc_list` `query` searches every chat's name and conversation, with
   FTS5 or plain matching without it. A chat found by its words carries `match`, the words around them.
+- **Questions in an answer.** A reply can ask the user one multiple-choice question as it goes (the `ask_user`
+  tool, which doesn't wait). `chatdgc_question` carries it as it's asked, and the reply keeps it in
+  `questions`. `chatdgc_answer` sends the message the model wrote for it, with the choice in, and that message
+  carries `answers`. A model that can't take tools now answers without them, where web search used to fail it.
 - **The context window.**
   - Each chat uses the model's real window, capped by `chatdgc_window` (`8k`, `32k`, `128k` or `max`),
     and sends it with every request.

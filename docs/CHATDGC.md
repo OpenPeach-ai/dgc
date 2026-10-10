@@ -70,6 +70,12 @@ voice come in later phases.
   earlier messages…" when that happens; it is never done silently. An **Earlier messages summarized**
   divider shows the summary, and you can edit it. Every message stays in the chat for you. One file never
   takes more than 40% of the window; the model is told when it only got the first part.
+- **Questions in an answer.** When what the model would say next depends on something only you know, it can
+  ask you inside its answer. A card shows the question with a few answers to pick from and a **Something
+  else** box for your own. The answer goes on below the card. **Continue** sends a message the model wrote
+  for that question, with your choice filled in. You can answer while that reply is the last thing said;
+  afterwards the card shows what you chose, or **Not answered**. One question per reply. Models that can't
+  use tools answer without asking.
 - **Edit and try again.** **Edit** under a message you sent changes it; **Try again** under a reply asks
   for another one, with whatever model and thinking level the box is set to. Either way, the old version
   stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own
@@ -127,6 +133,7 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_edit` | `request_id`, `conversation_id`, `message_id` (yours), `text`, `model?`, `thinking?`, `search?` | `chatdgc_opened` (from the new version on), then a turn |
 | `chatdgc_regenerate` | `request_id`, `conversation_id`, `message_id` (a reply), `model?`, `thinking?`, `search?` | `chatdgc_opened`, then a turn |
 | `chatdgc_version` | `request_id`, `conversation_id`, `parent_id` (the message before the point, or `root`), `index` | `chatdgc_opened` |
+| `chatdgc_answer` | `request_id`, `conversation_id`, `message_id` (the reply that asked), `question` (its index), `choice`, `model?`, `thinking?`, `search?` | a turn, whose message is the one the model wrote for the question |
 | `chatdgc_export` | `request_id`, `conversation_id`, `path` (absolute, chosen by the user), `format` (`markdown`, `json`) | `chatdgc_exported` (`path`, `bytes`) |
 | `chatdgc_compact` | `request_id`, `conversation_id` | `chatdgc_compacted` (`summary`) |
 | `chatdgc_summary` | `request_id`, `conversation_id`, `text` | `chatdgc_compacted` (marked `edited`) |
@@ -150,10 +157,13 @@ A turn sends its events in this order:
 3. The reply's text and thinking, as `chatdgc_delta` parts, sent about every 50 ms. While it searches the web,
    `chatdgc_activity` (`kind: "searching"`) carries the query. While a vision model looks at images for a
    model that can't see, `kind: "looking"` carries that model's name, and the user's message then keeps
-   `vision: {model, text}`.
+   `vision: {model, text}`. When the model asks the user a question, `chatdgc_question` carries it as it's
+   asked: `{at, question, options, prompt}`, where `at` is its place in the reply's text and `prompt` the
+   message a choice sends (`{answer}` marks where the choice goes). The reply goes on.
 4. The finished reply, as `chatdgc_message` with `finish` set to `stop`, `length`, `cancelled` or `error`.
    A reply that searched also carries `searches` (its queries) and `sources` (`[{n, title, url}]`, the
-   numbers it cites as [n]).
+   numbers it cites as [n]). A reply that asked carries `questions`; the message that answered one carries
+   `answers: {message, question, choice}`.
 5. `chatdgc_changed`, the chat's new list entry.
 6. `chatdgc_turn` with `state: "ended"`.
 

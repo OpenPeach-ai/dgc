@@ -141,7 +141,7 @@ class ChatService:
             {"chatdgc_list": self._list, "chatdgc_open": self._open, "chatdgc_earlier": self._earlier,
              "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
              "chatdgc_update": self._update, "chatdgc_file": self._file, "chatdgc_edit": self._edit,
-             "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version,
+             "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version, "chatdgc_answer": self._answer,
              "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
              "chatdgc_carry": self._carry}[kind](cmd)
         except (ChatEngineError, ChatStoreError) as exc:
@@ -316,6 +316,14 @@ class ChatService:
                                           on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run, refresh=True)
 
+    def _answer(self, cmd: dict) -> None:
+        def run(cancel, on_start, stream_for, activity):
+            return self.engine.answer(cmd["conversation_id"], cmd["message_id"], cmd["question"], cmd["choice"],
+                                      model=cmd.get("model"), thinking=cmd.get("thinking"),
+                                      search=cmd.get("search", "off"), on_start=on_start, on_activity=activity,
+                                      cancel=cancel, **stream_for())
+        self._start(cmd, run)
+
     def _continue(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.continue_reply(cmd["conversation_id"], cmd["message_id"], on_start=on_start,
@@ -366,7 +374,13 @@ class ChatService:
             # The stream exists once on_start ran; the engine calls on_text only after that.
             return {"on_text": lambda part: stream["value"].text(part),
                     "on_thinking": lambda part: stream["value"].thinking(part),
-                    "on_compacted": lambda summary: self._compacted(conversation_id, summary)}
+                    "on_compacted": lambda summary: self._compacted(conversation_id, summary),
+                    "on_question": question}
+
+        def question(asked):
+            stream["value"].flush()                   # what it wrote before asking reaches the screen first
+            self.emit("chatdgc_question", conversation_id=conversation_id, message_id=turn["reply_id"],
+                      question=asked)
 
         try:
             reply = run(cancel, on_start, stream_for, activity)

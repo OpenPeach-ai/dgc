@@ -13,7 +13,7 @@
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), searchPick = $("cd-search"), notice = $("cd-notice");
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
-                  context: null, compacting: false, editingSummary: false };
+                  context: null, compacting: false, editingSummary: false, picks: {} };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -56,6 +56,87 @@
     if (html === null) node.textContent = message.text || ""; else node.innerHTML = html;
     cite(node, message.sources);
     return node;
+  }
+  /** A reply's words, with each question it asked as a card where it asked it. */
+  function replyParts(message, live) {
+    const questions = Array.isArray(message.questions) ? message.questions : [];
+    if (!questions.length) return [body(message)];
+    const text = message.text || "";
+    const parts = [];
+    let done = 0;
+    questions.map((q, i) => [q, i]).sort((a, b) => (Number(a[0].at) || 0) - (Number(b[0].at) || 0)).forEach(([q, i]) => {
+      const at = Math.max(done, Math.min(text.length, Number(q.at) || 0));
+      if (text.slice(done, at).trim()) parts.push(body({ ...message, text: text.slice(done, at) }));
+      parts.push(questionCard(message, q, i, live));
+      done = at;
+    });
+    if (text.slice(done).trim()) parts.push(body({ ...message, text: text.slice(done) }));
+    return parts;
+  }
+  const OTHER = "\u0000other";
+  /** A question the reply asked: its options and a box for your own answer. Continue sends the message the model
+   *  wrote for it, with your choice in. Answerable while the reply is the last thing said; then it shows what you
+   *  chose, or that you moved on. What you pick survives the reply re-drawing as it streams. */
+  function questionCard(message, q, index, live) {
+    const key = `${message.id}:${index}`;
+    const at = state.messages.findIndex((m) => m.id === message.id);
+    const next = at >= 0 ? state.messages[at + 1] : undefined;
+    const said = next?.role === "user" && next.answers?.message === message.id && Number(next.answers.question) === index
+      ? String(next.answers.choice || "") : null;
+    const open = !next && !live;
+    const options = (Array.isArray(q.options) ? q.options : []).map(String);
+    const pick = state.picks[key] || (state.picks[key] = { value: "", other: "" });
+    const theirs = said !== null && !options.includes(said);
+    const card = el("form", "cd-question");
+    card.dataset.state = said !== null ? "answered" : next ? "passed" : "open";
+    const title = el("p", "cd-question-text", String(q.question || ""));
+    title.id = `cd-q-${message.id}-${index}`;
+    const list = el("div", "cd-options");
+    list.setAttribute("role", "radiogroup");
+    list.setAttribute("aria-labelledby", title.id);
+    const go = el("button", "cd-continue cd-question-go", "Continue");
+    go.type = "submit";
+    const other = el("input", "cd-other");
+    const choice = () => (pick.value === OTHER ? pick.other.trim() : pick.value);
+    const drafted = open ? pick : { value: "", other: "" };       // a pick you didn't send isn't shown after
+    const sync = () => {
+      other.hidden = !(theirs || drafted.value === OTHER);
+      go.disabled = !open || state.busy || state.compacting || !choice();
+    };
+    const row = (value, label) => {
+      const item = el("label", "cd-option");
+      const radio = el("input");
+      radio.type = "radio"; radio.name = title.id; radio.value = value;
+      radio.checked = said !== null ? (value === OTHER ? theirs : value === said) : drafted.value === value;
+      radio.disabled = !open;
+      radio.addEventListener("change", () => {
+        pick.value = value; sync();
+        if (value === OTHER) other.focus();
+      });
+      item.append(radio, el("span", "", label));
+      return item;
+    };
+    for (const option of options) list.append(row(option, option));
+    list.append(row(OTHER, "Something else"));
+    other.type = "text"; other.maxLength = 500; other.placeholder = "Your answer";
+    other.setAttribute("aria-label", "Your own answer");
+    other.value = theirs ? said : drafted.other;
+    other.disabled = !open;
+    other.addEventListener("input", () => { pick.other = other.value; sync(); });
+    list.append(other);
+    card.append(title, list);
+    if (open) card.append(go);
+    else card.append(el("p", "cd-question-note", said !== null ? "Answered" : next ? "Not answered" : "Answer when the reply finishes"));
+    card.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const value = choice();
+      if (!open || !value || state.busy || state.compacting) return;
+      vscode.postMessage({ type: "answer", messageId: message.id, question: index, choice: value, model: modelPick.value || "",
+                           thinking: thinkingPick.value || "", search: searchPick.value || "auto" });
+      state.busy = true; controls(); sync();
+    });
+    sync();
+    return card;
   }
   /** A summary as the model wrote it: models write Markdown even when asked for plain text. */
   function summaryText(text) {
@@ -248,7 +329,7 @@
       return node;
     }
     if (message.thinking) node.append(thinkingBlock(message, live));
-    if (message.text || !live) node.append(body(message));
+    if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
     const doing = live && state.searching[message.id];
     if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
       ? `Looking at the image with ${doing.text}…` : doing.kind === "compacting"
@@ -572,6 +653,7 @@
         // keep: the same chat shown again (a new version, or another one chosen): what you're typing and the
         // model and thinking you picked stay, and so does where you were reading.
         const keep = msg.keep === true && state.conversation?.id === msg.conversation?.id;
+        if (state.conversation?.id !== msg.conversation?.id) state.picks = {};
         state.conversation = msg.conversation || null;
         state.messages = Array.isArray(msg.messages) ? msg.messages : [];
         state.earlier = Number(msg.earlier) || 0;
@@ -638,6 +720,18 @@
         const at = state.messages.findIndex((m) => m.id === message.id);
         if (at >= 0) state.messages[at] = message; else state.messages.push(message);
         if (message.role === "user") { pinned = true; render(); } else update(message.id);
+        return;
+      }
+      case "question": {
+        // Asked mid-reply: the card appears where the reply is now, and the reply goes on below it.
+        if (!msg.question || typeof msg.question !== "object") return;
+        let message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message) {
+          message = { id: msg.messageId, role: "assistant", text: "", thinking: "" };
+          state.messages.push(message);
+        }
+        message.questions = [...(Array.isArray(message.questions) ? message.questions : []), msg.question];
+        update(message.id);
         return;
       }
       case "delta": {

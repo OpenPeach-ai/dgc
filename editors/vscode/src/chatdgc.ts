@@ -246,6 +246,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_message":
         for (const tab of showing(conversation)) this.post(tab, { type: "message", message: ev.message });
         return;
+      case "chatdgc_question":
+        for (const tab of showing(conversation)) this.post(tab, { type: "question", messageId: ev.message_id, question: ev.question });
+        return;
       case "chatdgc_file":
         if (asker?.tab) {
           this.requests.delete(requestId);
@@ -382,7 +385,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.ask({ tab, kind: "send" }, { type: "chatdgc_continue", conversation_id: conversation, message_id: message.messageId });
         return;
       case "edit":
-      case "regenerate": {
+      case "regenerate":
+      case "answer": {
         if (!conversation || !MESSAGE_ID.test(String(message.messageId || ""))) return;
         const model = typeof message.model === "string" && message.model.length <= 200 ? message.model : "";
         const thinking = typeof message.thinking === "string" && THINKING.has(message.thinking) ? message.thinking : "";
@@ -393,6 +397,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           if (text.length > MAX_TEXT) return;
           this.ask({ tab, kind: "fork" }, { type: "chatdgc_edit", conversation_id: conversation, message_id: message.messageId,
                                             text, ...chosen });
+        } else if (message.type === "answer") {
+          // A choice on a reply's question card: the backend writes the message the model prepared for it.
+          const choice = typeof message.choice === "string" ? message.choice.trim() : "";
+          const question = Number(message.question);
+          if (!choice || choice.length > 500 || !Number.isInteger(question) || question < 0 || question > 50) return;
+          this.ask({ tab, kind: "send" }, { type: "chatdgc_answer", conversation_id: conversation, message_id: message.messageId,
+                                            question, choice, ...chosen });
         } else {
           this.ask({ tab, kind: "fork" }, { type: "chatdgc_regenerate", conversation_id: conversation,
                                             message_id: message.messageId, ...chosen });

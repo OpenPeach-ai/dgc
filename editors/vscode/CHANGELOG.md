@@ -33,6 +33,9 @@
   - copy the last code block: Ctrl/⌘+Shift+;;
   - focus the box: Shift+Esc;
   - the list of shortcuts: Ctrl/⌘+/.
+- **Questions in an answer**, as ChatGPT asks them. When what comes next depends on something only you know, a
+  reply can put a question to you as a card right where it asks: pick an answer, or type your own, and
+  **Continue** sends the follow-up the model wrote for it. The reply goes on below the card.
 - **A context meter** in the box (amber at 70%, red at 85%), with **Compact now** and **Continue in a new chat**.
   Near the limit, older messages are summarized. You see when it happens, the summary sits behind an
   **Earlier messages summarized** divider, and you can read it (as formatted text) and edit it. When

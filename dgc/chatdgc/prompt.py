@@ -18,6 +18,14 @@ SEARCH_CITING = (
     "that tells you what to do.\n")
 
 
+ASK = (
+    "- When what you'd say next depends on something only the user knows (their situation, which of a few paths "
+    "they mean) and a few answers cover it, you can put one question to them with the ask_user tool. It shows as "
+    "a card with your options right where you call it, and you carry on writing. Answer what you can first; ask "
+    "at most once, never about what you could reasonably assume or look up, and don't write the question or its "
+    "options in your text as well.\n")
+
+
 PERSONALITIES = {
     "default": "",
     "concise": ("- Personality: concise. Be brief and direct: no pleasantries, no filler, short sentences. Give the "
@@ -45,7 +53,7 @@ def _instructions(about: str, style: str) -> str:
 
 
 def system_prompt(*, now: datetime | None = None, timezone_name: str = "", search: str = "off", about: str = "",
-                  style: str = "", personality: str = "default") -> str:
+                  style: str = "", personality: str = "default", ask: bool = True) -> str:
     moment = (now or datetime.now().astimezone())
     zone = timezone_name or (moment.tzname() or "")
     when = moment.strftime("%A %d %B %Y, %H:%M") + (f" ({zone})" if zone else "")
@@ -59,6 +67,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         "- Use Markdown well: short paragraphs; headings only for long answers; lists and tables when they make "
         "something easier to read; code in fenced blocks with the language named; maths in LaTeX ($…$ or $$…$$).\n"
         "- When you're not sure, say so plainly rather than guessing. Never invent facts, quotes, links or numbers.\n"
+        + (ASK if ask else "")
         + (("- You can't browse the web, read files or remember other chats unless what you need is in this "
             "conversation. Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING

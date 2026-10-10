@@ -129,8 +129,13 @@ class ChatStore:
 
     @staticmethod
     def _body(chat: dict) -> str:
-        """What a chat is searched by: its name and everything said in the conversation you see."""
-        parts = [chat.get("title", "")] + [m.get("text", "") for m in chat.get("messages", [])]
+        """What a chat is searched by: its name and everything said in the conversation you see, questions asked
+        in a reply included."""
+        parts = [chat.get("title", "")]
+        for m in chat.get("messages", []):
+            parts.append(m.get("text", ""))
+            parts += [" ".join([q.get("question", ""), *q.get("options", [])]) for q in m.get("questions") or []
+                      if isinstance(q, dict)]
         return "\n".join(p for p in parts if p)[:MAX_BODY]
 
     def _put_body(self, db, chat: dict) -> None:

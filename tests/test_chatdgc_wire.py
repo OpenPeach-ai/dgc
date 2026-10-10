@@ -189,6 +189,32 @@ class ServiceTests(unittest.TestCase):
         self.send(chat, "again", request_id="r2", search="always")
         self.assertIn("invalid command", self.wire.of("chatdgc_error")[-1]["message"])
 
+    def test_a_question_in_the_answer_on_the_wire(self):
+        chat = self.new()
+        asked = {"question": "Which city?", "options": ["Pune", "Goa"], "prompt": "I mean {answer}. What should I see?"}
+        self.model.script += [{"parts": ["Depends on the city. "], "calls": [("ask_user", asked)]},
+                              {"parts": ["Either way, go in winter."]}]
+        self.send(chat, "Plan a weekend")
+        self.wire.wait(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended")
+        kinds = [f["type"] for f in self.wire.frames if f["type"] in ("chatdgc_delta", "chatdgc_question")]
+        self.assertEqual(kinds[0], "chatdgc_delta", "what it wrote before asking shows first")
+        shown = self.wire.of("chatdgc_question")[0]
+        reply = self.wire.of("chatdgc_message")[-1]["message"]
+        self.assertEqual((shown["message_id"], shown["question"]), (reply["id"], reply["questions"][0]))
+        self.assertGreater(kinds.index("chatdgc_question"), 0)
+        self.assertIn("chatdgc_delta", kinds[kinds.index("chatdgc_question"):], "the answer goes on after it")
+        self.model.script.append({"parts": ["Shaniwar Wada."]})
+        self.service.dispatch({"type": "chatdgc_answer", "request_id": "a1", "conversation_id": chat,
+                               "message_id": reply["id"], "question": 0, "choice": "Pune"})
+        self.wire.wait(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended" and f.get("request_id") == "a1")
+        mine = [f["message"] for f in self.wire.of("chatdgc_message") if f["message"]["role"] == "user"][-1]
+        self.assertEqual((mine["text"], mine["answers"]),
+                         ("I mean Pune. What should I see?", {"message": reply["id"], "question": 0, "choice": "Pune"}))
+        self.service.dispatch({"type": "chatdgc_answer", "request_id": "a2", "conversation_id": chat,
+                               "message_id": reply["id"], "question": 0, "choice": "Goa"})
+        refused = self.wire.wait(lambda f: f["type"] == "chatdgc_error" and f.get("request_id") == "a2")
+        self.assertIn("moved on", refused["message"])
+
     def test_what_a_vision_model_saw_reaches_the_screen(self):
         import base64
         uri = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64).decode()

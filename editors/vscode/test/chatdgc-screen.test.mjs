@@ -521,3 +521,63 @@ test("the context window: a meter that warns early, Compact now, the summary in 
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("a question in the answer: a card where it was asked, Continue sends the choice, and then it shows it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const question = { at: 23, question: "Where is the money held?", options: ["Savings in India", "Company profits"], prompt: "From {answer}." };
+    await s.send({ type: "opened", conversation: conversation({ title: "London" }), earlier: 0, busy: false,
+                   messages: [{ id: M(1), role: "user", text: "Can I buy a flat in London?" }] });
+    // Mid-reply: the card appears where the model asked, and the reply goes on below it.
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "delta", messageId: M(2), text: "Get a written opinion.\n" });
+    await s.send({ type: "question", messageId: M(2), question });
+    await s.send({ type: "delta", messageId: M(2), text: "\nThe answer matters." });
+    await s.frame();
+    const parts = await s.page.locator(`.cd-assistant[data-id="${M(2)}"] > *`).evaluateAll((n) => n.map((x) => x.className));
+    assert.deepEqual(parts.slice(0, 3), ["text cd-body", "cd-question", "text cd-body"]);
+    const card = s.page.locator(".cd-question");
+    assert.equal(await card.locator(".cd-question-text").textContent(), "Where is the money held?");
+    assert.deepEqual(await card.locator(".cd-option").allTextContents(), ["Savings in India", "Company profits", "Something else"]);
+    assert.equal(await card.locator("input[type=radio]").first().isDisabled(), true, "not while it's still answering");
+    assert.equal(await card.locator(".cd-question-note").textContent(), "Answer when the reply finishes");
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Get a written opinion.\n\nThe answer matters.",
+                                               finish: "stop", questions: [question] } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    const go = card.getByRole("button", { name: "Continue" });
+    assert.equal(await go.isDisabled(), true, "nothing chosen yet");
+    assert.equal(await card.locator(".cd-other").isHidden(), true);
+    await card.getByText("Something else").click();
+    assert.equal(await card.locator(".cd-other").evaluate((n) => n === document.activeElement), true, "your own answer, typed at once");
+    await card.locator(".cd-other").fill("An inheritance");
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });       // the chat redraws: what you picked stays
+    assert.equal(await card.locator(".cd-other").inputValue(), "An inheritance");
+    assert.equal(await card.locator('input[type=radio]').last().isChecked(), true);
+    await card.locator(".cd-other").press("Enter");
+    const [sent] = await s.posted("answer");
+    assert.deepEqual([sent.messageId, sent.question, sent.choice], [M(2), 0, "An inheritance"]);
+    assert.equal(await s.page.locator("#cd-send").isDisabled(), true, "it's answering now");
+    await s.send({ type: "message", message: { id: M(3), role: "user", text: "From An inheritance.",
+                                               answers: { message: M(2), question: 0, choice: "An inheritance" } } });
+    await s.frame();
+    assert.equal(await card.getAttribute("data-state"), "answered");
+    assert.equal(await card.locator(".cd-question-note").textContent(), "Answered");
+    assert.deepEqual([await card.locator(".cd-other").inputValue(), await card.locator(".cd-other").isDisabled()], ["An inheritance", true]);
+    assert.equal(await card.getByRole("button", { name: "Continue" }).count(), 0);
+    // A question you moved on from is kept, and says so; a pick from a list option shows as that option.
+    await s.send({ type: "opened", conversation: conversation({ title: "London" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Can I buy a flat?" },
+      { id: M(2), role: "assistant", text: "Asked.", finish: "stop", questions: [question] },
+      { id: M(3), role: "user", text: "Actually, tell me about taxes." },
+      { id: M(4), role: "assistant", text: "Asked again.", finish: "stop", questions: [question] },
+      { id: M(5), role: "user", text: "From Company profits.", answers: { message: M(4), question: 0, choice: "Company profits" } }] });
+    const [moved, picked] = [s.page.locator(`[data-id="${M(2)}"] .cd-question`), s.page.locator(`[data-id="${M(4)}"] .cd-question`)];
+    assert.deepEqual([await moved.getAttribute("data-state"), await moved.locator(".cd-question-note").textContent()], ["passed", "Not answered"]);
+    assert.deepEqual([await moved.locator("input:checked").count(), await moved.locator(".cd-other").isHidden()], [0, true],
+                     "what you'd picked but never sent isn't shown as an answer");
+    assert.equal(await picked.getByLabel("Company profits").isChecked(), true);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-question.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
