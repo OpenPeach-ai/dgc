@@ -175,7 +175,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
-    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
+    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window", "memory",
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes",
     "thinking_inline", "thinking_inline_max_chars",
@@ -264,13 +264,15 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 # listed them in `fields`.
 # search_url and search_api_key_set: the one web search Work, ChatDGC and Pips share, for Settings.
 # chatdgc_*: ChatDGC's custom instructions and personality, for Settings.
+# memory: whether DGC keeps one memory about you (dgc/shared_memory.py), for Settings -> Memory.
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
-                                   "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window"})
+                                   "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
+                                   "memory"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
     "ultra_mode", "monitor_wake",
-    "thinking_inline",
+    "thinking_inline", "memory",
 })
 _CONFIG_STRING_LIMITS = {
     "subagent_model": 512,
@@ -2058,7 +2060,8 @@ class Backend:
         offers it. Chats belong to no project, so a pinned process offers it too."""
         if getattr(self, "_host", None) is None:
             return {}
-        return {"chatdgc": {"version": 1}}
+        # memory_*: one memory about the user (dgc/shared_memory.py), kept by the same process.
+        return {"chatdgc": {"version": 1}, "memory": {"version": 1}}
 
     def _chats_capability(self) -> dict:
         """ready.capabilities.chats: offered only by a Host, and never when DGC_PROJECT_ROOT pins the
@@ -3623,6 +3626,8 @@ class Backend:
                               ("chatdgc_window", "32k")):
             if key in self._config_fields:
                 extra[key] = str(c.get(key, fallback) or fallback)
+        if "memory" in self._config_fields:
+            extra["memory"] = c.get("memory", True) is not False
         if "search_url" in self._config_fields:
             extra["search_url"] = str(c.get("search_url", "") or "")
         if "search_api_key_set" in self._config_fields:
@@ -7111,7 +7116,7 @@ class Host:
             if problem:
                 return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
             return self._open_chat(cmd) if kind == "open_chat" else self._close_chat(cmd)
-        if isinstance(kind, str) and kind.startswith("chatdgc_"):
+        if isinstance(kind, str) and kind.startswith(("chatdgc_", "memory_")):
             # The process's, never a session's: a chat is the same whatever folder is open.
             return self.chatdgc().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
         if "chat_id" not in cmd:

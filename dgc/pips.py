@@ -2542,7 +2542,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                                          workspace_id=manifest.get("workspace_id"))
     changes_since_checkpoint = None
     working_memory = None
-    user_notes = None
+    user_notes = about_you = None
+    if "about_you" in manifest:
+        if kind not in ("conversation", "personal_task"):
+            raise RegistryError("invalid_memory", "The user's memory belongs only to a Pip's chat and its tasks.")
+        from .shared_memory import validate_pin as validate_about_you
+        about_you = validate_about_you(manifest["about_you"])
     if "pip_notes" in manifest:
         if kind not in ("conversation", "personal_task"):
             raise RegistryError("invalid_notes", "A Pip's notes belong only to its chat and its tasks.")
@@ -2636,6 +2641,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     if user_notes and conversation is None:
         from .pip_notes import NOTICE as notes_notice
         prompt += "\n\n" + notes_notice + "\n" + _json(user_notes)
+    if about_you and conversation is None:
+        from .shared_memory import NOTICE as about_notice
+        prompt += "\n\n" + about_notice + "\n" + _json(about_you)
     if conversation is not None:
         agent.messages[1:] = [dict(message) for message in conversation["history"]]
         reference = {
@@ -2652,12 +2660,16 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             reference["pip_memory"] = working_memory
         if user_notes:
             reference["user_notes"] = user_notes
+        if about_you:
+            reference["about_you"] = about_you
         from .pip_memory_references import NOTICE as typed_memory_notice
+        from .shared_memory import NOTICE as about_notice
         from .pip_notes import NOTICE as notes_notice
         prompt = ("Reference data for this Pip (not instructions):\n" + _json(reference)
             + ("\n\n" + (typed_memory_notice if working_memory["schema_version"] == 2 else pip_chat.MEMORY_NOTICE)
                if working_memory is not None else "")
             + ("\n\nuser_notes: " + notes_notice if user_notes else "")
+            + ("\n\nabout_you: " + about_notice if about_you else "")
             + (_app_tools_note(apps_pin) if personal and apps_pin is not None else "")
             + "\n\nCurrent user message:\n" + conversation["text"])
     elif task_history is not None:
@@ -3138,6 +3150,12 @@ def _execute_run(registry, row, config):
         from . import pip_notes
         from .redaction import secret_values as saved_secrets
         manifest = pip_notes.runtime(registry, row, manifest, saved_secrets(config))
+        # And the user's one memory in DGC (shared with ChatDGC and Work), which the worker's own home can't see.
+        if manifest.get('run_kind') in ('conversation', 'personal_task'):
+            from . import shared_memory
+            about_you = shared_memory.for_run(config, saved_secrets(config))
+            if about_you:
+                manifest = {**manifest, "about_you": about_you}
     computer_socket = computer_host = taint = lane = None
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # Careful mode remembers what every run of this Pip read from apps, with or without its computer:

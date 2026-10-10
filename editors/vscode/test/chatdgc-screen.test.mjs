@@ -780,3 +780,26 @@ test("a send refused before it starts gives back what was typed, and never leave
     assert.match(await s.page.locator("#cd-notice").textContent(), /at least 16k/);
   } finally { await s.page.close(); }
 });
+
+test("memory: a reply says what it saved, with Forget, and the way to everything remembered", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "I'm vegetarian and I moved to Goa" },
+      { id: M(2), role: "assistant", text: "Noted.", finish: "stop", memory: [
+        { op: "saved", id: "mem_aaaaaaaaaaaa", text: "Is vegetarian" }, { op: "forgot", id: "mem_bbbbbbbbbbbb", text: "Lives in Pune" }] }] });
+    const note = s.page.locator(".cd-memory");
+    assert.deepEqual(await note.locator(".cd-memory-text").allTextContents(), ["Remembered: Is vegetarian", "Forgot: Lives in Pune"]);
+    assert.equal(await note.locator(".cd-memory-forget").count(), 1, "Forget only for what it kept");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-memory-chip.png") });
+    await note.getByRole("button", { name: "Forget" }).click();
+    assert.deepEqual(await s.posted("forgetMemory"), [{ type: "forgetMemory", id: "mem_aaaaaaaaaaaa" }]);
+    await s.frame();
+    assert.equal(await note.locator(".cd-memory-text").first().textContent(), "Forgotten: Is vegetarian");
+    assert.equal(await note.locator(".cd-memory-forget").count(), 0);
+    await note.getByRole("button", { name: "Manage memory" }).click();
+    assert.equal((await s.posted("openMemory")).length, 1);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

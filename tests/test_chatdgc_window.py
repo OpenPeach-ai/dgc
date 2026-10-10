@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from dgc.chatdgc import window as fit_window
 from dgc.chatdgc.engine import ChatEngine, ChatEngineError
 from dgc.chatdgc.store import ChatStore
+from dgc.shared_memory import SharedMemory
 
 
 class Config(dict):
@@ -57,7 +58,8 @@ class WindowTests(unittest.TestCase):
         self.store = ChatStore(Path(temp.name) / "chat")
         self.world = {"sent": [], "summaries": [], "replies": [], "prepared": 0}
         self.config = Config(chatdgc_window="8k")
-        self.engine = ChatEngine(self.config, self.store, client_factory=lambda model: Model(model or "chat-model", self.world))
+        self.engine = ChatEngine(self.config, self.store, client_factory=lambda model: Model(model or "chat-model", self.world),
+                                 memory=SharedMemory(Path(temp.name) / "memory"), projects=lambda hidden: [])
         self.addCleanup(setattr, Model, "limit", 0)
 
     def talk(self, chat, words, reply="ok", **kwargs):

@@ -1491,6 +1491,15 @@ the bound loads exactly as written.
 A `#` line is memory, not a comment: it is written to the file, then the prompt is not sent as a
 normal question.
 
+## What DGC remembers about you
+
+Separately from these files, DGC keeps one memory about you that ChatDGC, Work sessions and Pips
+share: short facts you told ChatDGC (it saves them as you talk, and says so under the reply) or
+added yourself, plus your projects, from your Work sessions. A Work session reads those facts
+under **# Memory**; it never writes them. See, change or delete everything in **Settings →
+Memory**, where one switch turns it off everywhere. A fact is kept only when you said it yourself,
+never a password, key or account number, and temporary chats are never remembered.
+
 ## What belongs in it
 
 Stack, layout, build/test/lint commands, house style, durable facts. Not credentials, personal

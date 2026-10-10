@@ -33,6 +33,10 @@
   - copy the last code block: Ctrl/⌘+Shift+;;
   - focus the box: Shift+Esc;
   - the list of shortcuts: Ctrl/⌘+/.
+- **Memory**, as ChatGPT has it. ChatDGC remembers what you tell it about yourself, says so under the reply
+  (with **Forget**), and knows your projects from your Work sessions. The same memory reaches your Work
+  sessions and Pips. **Settings → Memory** shows it all: edit, delete, add, keep a project out, delete all,
+  or turn it off.
 - **Chat and Work are tabs** in the side bar, so a long list of chats no longer pushes your sessions out of
   sight. The search covers both, and each tab shows what it found.
 - **Deep research**, as ChatGPT has it. Press **Deep research** in the box: a plan first (it starts in 15

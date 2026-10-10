@@ -303,6 +303,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         # Opt-in too: ChatDGC's custom instructions and personality.
         "chatdgc_about": _S(False), "chatdgc_style": _S(False), "chatdgc_personality": _S(False),
         "chatdgc_window": _S(False),
+        # Opt-in too: whether DGC keeps one memory about the user (Settings -> Memory).
+        "memory": _B(False),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
         "ultra_mode": _B(False),
@@ -842,6 +844,14 @@ COMMAND_FIELDS.update({
     "chatdgc_research_start": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "plan": _O(False),
                                "write": _B(False)},
     "chatdgc_research_steer": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "text": _S()},
+    # One memory about the user, shared by ChatDGC, Work sessions and Pips (dgc/shared_memory.py): Settings ->
+    # Memory, and the Forget under a reply that saved a fact. Each is answered by `memory_state`.
+    "memory_list": {"request_id": _S()},
+    "memory_add": {"request_id": _S(), "text": _S()},
+    "memory_edit": {"request_id": _S(), "id": _S(), "text": _S()},
+    "memory_forget": {"request_id": _S(), "id": _S()},
+    "memory_clear": {"request_id": _S()},
+    "memory_project": {"request_id": _S(), "folder": _S(), "remember": _B()},
     # The context window. Compact now (everything before the last exchange becomes the summary) and editing
     # the summary are answered by `chatdgc_compacted`; Continue in a new chat (a summary of this one goes with
     # it) by `chatdgc_opened` for the new chat. After every turn, and when a chat opens, `chatdgc_context` says
@@ -876,6 +886,10 @@ EVENT_FIELDS.update({
     # Deep research as it goes: the reply's `research` now (status planning, planned, running, writing, checking,
     # done, stopped or failed; plan; notes by number, title and address; the latest activity; steers; check).
     "chatdgc_research": {"conversation_id": _S(), "message_id": _S(), "research": _O()},
+    # What DGC remembers: `enabled` (the config's `memory`), the facts ({id, text, created_at, updated_at, edited?,
+    # source: {surface, where}}), the projects from Work sessions ({folder, name, when, recent, remember}), and
+    # `error` when the command that asked couldn't be done. Also sent, unasked, after a reply saved or forgot one.
+    "memory_state": {"request_id": _S(False), "enabled": _B(), "facts": _A(), "projects": _A(), "error": _S(False)},
     # A conversation's list entry changed (a turn, a rename, a pin), or it was deleted (summary null).
     "chatdgc_changed": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
     "chatdgc_error": {"message": _S(), "request_id": _S(False), "conversation_id": _S(False)},

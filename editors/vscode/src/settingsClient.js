@@ -21,9 +21,9 @@ import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const paths = { general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13' };
+const paths = { memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13' };
 const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${paths[name] || paths.plugins}"/></svg>`;
-const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
+const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
 let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null;
 let mcpError = "";
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
@@ -125,6 +125,11 @@ function render() {
         renderMcp(main);
         return;
     }
+    if (section === 'memory') {
+        if (!memory.asked) { memory.asked = true; send({ type: 'getMemory' }); }
+        renderMemory(main);
+        return;
+    }
     if (section === 'usage') {
         const view = (id, label) => `<button type="button" data-usage-view="${id}" class="${usageView === id ? 'on' : ''}" aria-pressed="${usageView === id}">${label}</button>`;
         main.innerHTML = '<h1>Token usage</h1><p class="sub">Your local ledger of model requests.</p>'
@@ -213,6 +218,78 @@ function bindChips(main) {
     });
 }
 const offered = row => row.install !== 'block' && row.license !== 'Proprietary';
+// ---- Memory: one memory about you, shared by ChatDGC, Work sessions and Pips (dgc/shared_memory.py)
+const memory = { asked: false, state: null, note: '', editing: '', confirming: false, busy: false };
+function memoryFrom(fact) {
+    const where = fact.source?.where ? ': ' + fact.source.where : '';
+    const from = { chat: 'From a chat' + where, settings: 'Added by you', work: 'From a Work session' + where, pip: 'From a Pip' + where }[fact.source?.surface] || 'Saved';
+    const day = String(fact.updated_at || fact.created_at || '').slice(0, 10);
+    return from + (day ? ' · ' + day : '') + (fact.edited ? ' · edited' : '');
+}
+function renderMemory(main) {
+    const st = memory.state;
+    const facts = st?.facts || [], projects = st?.projects || [];
+    let html = '<h2>Memory</h2><p class="sub">One memory of what you tell DGC, shared by ChatDGC, your Work sessions and your Pips: '
+        + 'facts, never files or secrets, and only what you said yourself. Temporary chats are never remembered.</p>';
+    if (memory.note) html += `<div class="banner error" role="alert"><p>${esc(memory.note)}</p></div>`;
+    if (!st) {
+        main.innerHTML = html + (memory.note ? '' : '<p class="note" role="status">Reading what DGC remembers…</p>');
+        return;
+    }
+    html += ui.card('Memory', ui.field('Remember things about you', 'Off: nothing is read or saved anywhere. What\'s kept stays until you delete it.',
+        switchHTML(st.enabled, 'Remember things about you', 'data-memory-switch', memory.busy)));
+    html += `<h3 class="section">What DGC remembers${facts.length ? ' · ' + facts.length : ''}</h3><div class="card memory-facts">`;
+    if (!facts.length) html += '<p class="empty">Nothing yet. Tell ChatDGC something about you, or add it here.</p>';
+    for (const f of facts) {
+        if (memory.editing === f.id) {
+            html += `<form class="row memory-edit" data-memory-save="${esc(f.id)}"><input id="memory-edit" aria-label="Edit this memory" maxlength="300" value="${esc(f.text)}">`
+                + '<button type="submit" class="save">Save</button><button type="button" class="link" data-memory-cancel>Cancel</button></form>';
+        } else {
+            html += `<div class="row"><div class="copy"><strong>${esc(f.text)}</strong><span class="summary">${esc(memoryFrom(f))}</span></div>`
+                + `<div class="actions"><button type="button" class="secondary" data-memory-edit="${esc(f.id)}" title="Change what it says">Edit</button>`
+                + `<button type="button" class="secondary" data-memory-forget="${esc(f.id)}" title="Delete this memory" aria-label="Delete: ${esc(f.text)}">Delete</button></div></div>`;
+        }
+    }
+    html += '<form class="row memory-add"><input id="memory-add" aria-label="Add a memory" maxlength="300" placeholder="Add a fact, like: Prefers metric units">'
+        + '<button type="submit" class="secondary">Add</button></form></div>';
+    html += '<h3 class="section">Your projects</h3><p class="note">From your Work sessions: each folder, when you last worked there and what you asked lately. '
+        + 'ChatDGC uses it to connect a chat to your work. Switch off a project to keep it out of memory.</p><div class="card">';
+    if (!projects.length) html += '<p class="empty">No Work sessions yet.</p>';
+    for (const p of projects) {
+        const lately = (p.recent || []).join(' · ');
+        html += `<div class="row"><div class="copy"><strong>${esc(p.name)}</strong><span class="summary">${esc(p.folder)} · last worked on ${esc(p.when)}</span>`
+            + (lately ? `<span class="description">${esc(lately)}</span>` : '') + '</div>'
+            + switchHTML(p.remember, 'Remember ' + p.name, `data-memory-project="${esc(p.folder)}"`, memory.busy) + '</div>';
+    }
+    html += '</div>';
+    if (facts.length) {
+        html += memory.confirming
+            ? `<div class="banner" role="alertdialog" aria-label="Delete all memories"><p>Delete all ${facts.length} memories? This can't be undone.</p>`
+              + '<div class="actions"><button type="button" class="secondary memory-danger" data-memory-clear-yes>Delete all</button><button type="button" class="link" data-memory-clear-no>Cancel</button></div></div>'
+            : '<div class="actions"><button type="button" class="secondary memory-danger" data-memory-clear title="Delete everything DGC remembers about you">Delete all memories</button></div>';
+    }
+    main.innerHTML = html;
+    const go = (message) => { memory.busy = true; memory.note = ''; send(message); };
+    main.querySelector('[data-memory-switch]')?.addEventListener('click', () => go({ type: 'memorySwitch', on: !st.enabled }));
+    main.querySelectorAll('[data-memory-edit]').forEach(b => b.addEventListener('click', () => { memory.editing = b.dataset.memoryEdit; render(); $('memory-edit')?.focus(); }));
+    main.querySelector('[data-memory-cancel]')?.addEventListener('click', () => { memory.editing = ''; render(); });
+    main.querySelector('[data-memory-save]')?.addEventListener('submit', e => {
+        e.preventDefault();
+        const text = $('memory-edit').value.trim();
+        if (text) { go({ type: 'memoryEdit', id: e.currentTarget.dataset.memorySave, text }); memory.editing = ''; }
+    });
+    main.querySelectorAll('[data-memory-forget]').forEach(b => b.addEventListener('click', () => go({ type: 'memoryForget', id: b.dataset.memoryForget })));
+    main.querySelector('.memory-add')?.addEventListener('submit', e => {
+        e.preventDefault();
+        const text = $('memory-add').value.trim();
+        if (text) go({ type: 'memoryAdd', text });
+    });
+    main.querySelectorAll('[data-memory-project]').forEach(b => b.addEventListener('click', () =>
+        go({ type: 'memoryProject', folder: b.dataset.memoryProject, remember: b.getAttribute('aria-checked') !== 'true' })));
+    main.querySelector('[data-memory-clear]')?.addEventListener('click', () => { memory.confirming = true; render(); main.querySelector('[data-memory-clear-no]')?.focus(); });
+    main.querySelector('[data-memory-clear-no]')?.addEventListener('click', () => { memory.confirming = false; render(); });
+    main.querySelector('[data-memory-clear-yes]')?.addEventListener('click', () => { memory.confirming = false; go({ type: 'memoryClear' }); });
+}
 function renderPlugins(main) {
     if (detail && mcpEditing) { renderMcpForm(main, mcpEditing); return; }
     if (detail) { renderDetail(main); return; }
@@ -533,7 +610,7 @@ function renderMcpForm(main, s) {
         $('mcp-remove').onclick = () => send({ type: 'mcpRemove', name: s.name });
     }
 }
-document.querySelector('nav').innerHTML = sections.map(([id, label], i) => (i === 5 ? '<div class="nav-divider"></div>' : '') + `<button data-nav="${id}" title="${label}">${icon(id)}<span class="nav-text">${label}</span></button>`).join('');
+document.querySelector('nav').innerHTML = sections.map(([id, label], i) => (i === 6 ? '<div class="nav-divider"></div>' : '') + `<button data-nav="${id}" title="${label}">${icon(id)}<span class="nav-text">${label}</span></button>`).join('');
 document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => { navTo(b.dataset.nav); if (b.dataset.nav === 'mcp')
     send({ type: 'listMcp' }); });
 $('collapse-nav').innerHTML = icon('panel');
@@ -620,6 +697,10 @@ window.addEventListener('message', event => {
                 render();
         }
     }
+    else if (msg.type === 'memory_unavailable') {
+        memory.busy = false; memory.note = msg.message || 'DGC couldn\'t reach what it remembers.';
+        if (section === 'memory') render();
+    }
     else if (msg.type === 'usage_unavailable') {
         usage?.unavailable(msg);
     }
@@ -642,6 +723,10 @@ window.addEventListener('message', event => {
             applyConfig(ev);
         else if (ev.type === 'usage_report')
             usage?.receive(ev);
+        else if (ev.type === 'memory_state') {
+            memory.state = ev; memory.busy = false; memory.note = ev.error || '';
+            if (section === 'memory') render();
+        }
         else if (ev.type === 'pip_usage_report')
             pipUsage?.receive(ev);
         else if (ev.type === 'mcp_servers') {

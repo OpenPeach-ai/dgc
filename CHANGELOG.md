@@ -52,6 +52,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   `fields` reads them back. Every chat follows them from its next reply.
 - **Search finds what was said.** `chatdgc_list` `query` searches every chat's name and conversation, with
   FTS5 or plain matching without it. A chat found by its words carries `match`, the words around them.
+- **Shared memory.** One memory about the user (`dgc/shared_memory.py`, `~/.dgc/memory/facts.json`), read by
+  ChatDGC, Work sessions (under `# Memory`) and Personal Pips (pinned into each run), and written by ChatDGC's
+  `remember` and `forget` tools only when the user said it (the Pip-notes rule), never a secret, at most three
+  a reply. Your projects come from your Work sessions' index. `memory_list`, `memory_add`, `memory_edit`,
+  `memory_forget`, `memory_clear` and `memory_project` are answered by `memory_state`; the config key `memory`
+  turns it off everywhere. Pip notes now match a fact at the end of a sentence ("vegetarian." is
+  "vegetarian").
 - **Deep research.** `chatdgc_research` makes a plan; `chatdgc_research_start` runs it as edited (or writes from
   what a stopped run found); `chatdgc_research_steer` adds to it while it runs; `chatdgc_research` reports
   progress. Up to three rounds of searching and reading (about 20 pages, PDFs included), a note per useful

@@ -47,3 +47,4 @@ body.vscode-high-contrast{--line:#888;--border-strong:#fff;--muted:#ddd}
 
 /* A field holding a text box (ChatDGC's custom instructions) stacks: the words above, the box the full width below. */
 .field:has(>textarea){flex-direction:column;align-items:stretch;gap:8px}.field>textarea{width:100%;min-height:84px;resize:vertical;line-height:1.5}
+.memory-facts .row{gap:12px}.memory-edit input,.memory-add input{flex:1;min-width:0}.memory-add{border-bottom:0}.memory-danger{color:#ffc4bf}.memory-danger:hover{background:#3a2626}

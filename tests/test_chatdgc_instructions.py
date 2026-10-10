@@ -36,7 +36,8 @@ from dgc import config as config_module  # noqa: E402
 from dgc import headless, sessions  # noqa: E402
 from dgc.chatdgc.engine import ChatEngine  # noqa: E402
 from dgc.chatdgc.prompt import MAX_INSTRUCTIONS, PERSONALITIES, system_prompt  # noqa: E402
-from dgc.chatdgc.store import ChatStore  # noqa: E402
+from dgc.chatdgc.store import ChatStore
+from dgc.shared_memory import SharedMemory  # noqa: E402
 from dgc.config import Config  # noqa: E402
 from dgc.editor_protocol import event_error  # noqa: E402
 
@@ -72,7 +73,8 @@ class EngineTests(unittest.TestCase):
                 return SimpleNamespace(content="ok", finish_reason="stop", usage={}, thinking="", tool_calls=[])
         config = SimpleNamespace(base_url="", api_key="", model="m", data={})
         config.get = lambda key, default=None: config.data.get(key, default)
-        engine = ChatEngine(config, ChatStore(Path(tempfile.mkdtemp())), client_factory=lambda model: Client())
+        engine = ChatEngine(config, ChatStore(Path(tempfile.mkdtemp())), client_factory=lambda model: Client(),
+                            memory=SharedMemory(Path(tempfile.mkdtemp()) / "memory"), projects=lambda hidden: [])
         chat = engine.open()
         engine.send(chat["id"], "hi")
         self.assertNotIn("Personality", calls[-1])

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from dgc.chatdgc import research
 from dgc.chatdgc.engine import ChatEngine, ChatEngineError
 from dgc.chatdgc.store import ChatStore
+from dgc.shared_memory import SharedMemory
 from dgc.llm import ToolCall
 
 KINDS = {"plan": research.PLANNER[:40], "search": research.SEARCHER[:40], "note": research.NOTER[:40],
@@ -109,7 +110,8 @@ class ResearchTests(unittest.TestCase):
                                   "note": note_for, "write": REPORT, "check": checks}}
         self.config = Config(chatdgc_window="32k")
         self.engine = ChatEngine(self.config, self.store, client_factory=lambda model: Model(model or "chat-model", self.world),
-                                 searcher=self.search, fetcher=self.fetch)
+                                 searcher=self.search, fetcher=self.fetch,
+                                 memory=SharedMemory(Path(temp.name) / "memory"), projects=lambda hidden: [])
         self.said = []
         # Pages are read WORKERS at a time and numbered as their notes land; one at a time, the numbers are known.
         workers, research.WORKERS = research.WORKERS, 1

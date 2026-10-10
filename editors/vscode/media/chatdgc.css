@@ -285,3 +285,14 @@ textarea.cd-plan-input { resize: vertical; }
   .cd-reader-toc { display: none; }
   .cd-reader-sources { position: static; }
 }
+
+/* What a reply saved to the user's memory: a quiet line under it, with Forget, and the way to all of it. */
+.cd-memory { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.cd-memory-row { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.cd-memory-row .codicon { font-size: 12px; }
+.cd-memory-text { min-width: 0; overflow-wrap: anywhere; }
+.cd-memory-forget, .cd-memory-manage { padding: 0; border: 0; background: none; color: var(--link, var(--accent-text)); font: inherit; cursor: pointer; }
+.cd-memory-forget:hover, .cd-memory-manage:hover { text-decoration: underline; }
+.cd-memory-forget:focus-visible, .cd-memory-manage:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+

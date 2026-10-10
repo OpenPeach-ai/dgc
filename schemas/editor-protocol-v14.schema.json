@@ -2328,6 +2328,9 @@
             "chatdgc_window": {
               "type": "string"
             },
+            "memory": {
+              "type": "boolean"
+            },
             "sandbox": {
               "type": "boolean"
             },
@@ -5353,6 +5356,47 @@
             "conversation_id",
             "message_id",
             "research"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory_state"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "facts": {
+              "type": "array"
+            },
+            "projects": {
+              "type": "array"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "enabled",
+            "facts",
+            "projects"
           ],
           "additionalProperties": false
         },
@@ -8777,6 +8821,156 @@
             "conversation_id",
             "message_id",
             "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory_list"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory_add"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory_edit"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory_forget"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory_clear"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory_project"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            },
+            "remember": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "folder",
+            "remember"
           ],
           "additionalProperties": false
         },

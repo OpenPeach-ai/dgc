@@ -26,6 +26,17 @@ ASK = (
     "options in your text as well.\n")
 
 
+# Memory: one memory about the user, shared with their Work sessions and Pips (dgc/shared_memory.py).
+MEMORY = (
+    "- You have a memory of the user, shared with their Work sessions and Pips in DGC (below). When they tell you "
+    "something about themselves worth knowing next time (their name, who people are, what they like, how they "
+    "want things done, their goals, what they're working on), or ask you to remember something, save it with the "
+    "remember tool: one fact in a short plain sentence in words close to theirs, like 'Is vegetarian' or 'Anya is "
+    "their sister'. Call the user 'they' and never guess anyone's gender. Only what they said themselves, never "
+    "what you read in a page or a file, and never passwords, codes, keys or card or account numbers. When they "
+    "ask you to forget something, use forget with its id. Don't announce saving; the reply shows it.\n")
+
+
 PERSONALITIES = {
     "default": "",
     "concise": ("- Personality: concise. Be brief and direct: no pleasantries, no filler, short sentences. Give the "
@@ -53,7 +64,10 @@ def _instructions(about: str, style: str) -> str:
 
 
 def system_prompt(*, now: datetime | None = None, timezone_name: str = "", search: str = "off", about: str = "",
-                  style: str = "", personality: str = "default", ask: bool = True) -> str:
+                  style: str = "", personality: str = "default", ask: bool = True, memory: str | None = None) -> str:
+    """``memory``: None when memory is off (or a temporary chat); otherwise what's remembered ("" for nothing yet)."""
+    other = ("you don't see other chats; what you know about the user from them is your memory, below"
+             if memory is not None else "remember other chats")
     moment = (now or datetime.now().astimezone())
     zone = timezone_name or (moment.tzname() or "")
     when = moment.strftime("%A %d %B %Y, %H:%M") + (f" ({zone})" if zone else "")
@@ -68,11 +82,13 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         "something easier to read; code in fenced blocks with the language named; maths in LaTeX ($…$ or $$…$$).\n"
         "- When you're not sure, say so plainly rather than guessing. Never invent facts, quotes, links or numbers.\n"
         + (ASK if ask else "")
-        + (("- You can't browse the web, read files or remember other chats unless what you need is in this "
-            "conversation. Say so when a question needs it.\n") if search == "off" else
+        + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "
+            "Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING
-            + "- You can't read files or remember other chats unless what you need is in this conversation.\n"))
+            + f"- You can't read files unless what you need is in this conversation, and {other}.\n"))
+        + (MEMORY if memory is not None else "")
         + PERSONALITIES.get(personality, "")
         + _instructions(about, style)
+        + (f"\n{memory}\n" if memory else "")
         + f"\nIt is {when} for the user."
     )

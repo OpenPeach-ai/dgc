@@ -72,6 +72,15 @@ voice come in later phases.
   earlier messages…" when that happens; it is never done silently. An **Earlier messages summarized**
   divider shows the summary, and you can edit it. Every message stays in the chat for you. One file never
   takes more than 40% of the window; the model is told when it only got the first part.
+- **Memory.** ChatDGC remembers what you tell it about yourself: your name, the people you mention, what
+  you like, how you want things done, what you're working on. A reply that saved something says so
+  underneath, **Remembered: …**, with **Forget**. You can also say "remember that…" or "forget that…", or
+  ask what it remembers. The same memory is read by your Work sessions and your Pips, and ChatDGC also
+  knows your projects from your Work sessions (each folder, when you last worked there, what you asked
+  lately). **Settings → Memory** shows everything, lets you edit, delete or add facts, keep a project out,
+  delete all, or turn memory off everywhere. A fact is kept only when it's something you said yourself (a
+  page or a file can't plant one), never a password, key or account number, and at most three a reply.
+  Temporary chats neither read nor write it.
 - **Deep research.** Press **Deep research** in the box, then ask. ChatDGC first shows a research plan: a
   title and the steps it will take. It starts by itself after 15 seconds, or press **Start now**; **Edit**
   pauses it so you can change the steps or keep it to a few websites. Then it searches and reads in up to
@@ -149,6 +158,10 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_research` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?` | a turn whose reply is the plan (`research.status: "planned"`) |
 | `chatdgc_research_start` | `request_id`, `conversation_id`, `message_id` (the plan's reply), `plan?` (as edited: `title`, `steps`, `sites`), `write?` | a turn on that reply, which becomes the report |
 | `chatdgc_research_steer` | `request_id`, `conversation_id`, `message_id`, `text` | the next `chatdgc_research` shows it |
+| `memory_list` | `request_id` | `memory_state` |
+| `memory_add` / `memory_edit` | `request_id`, `text` (and `id` to edit) | `memory_state` (`error` when it wasn't kept) |
+| `memory_forget` / `memory_clear` | `request_id` (and `id` to forget one) | `memory_state` |
+| `memory_project` | `request_id`, `folder`, `remember` | `memory_state` |
 | `chatdgc_answer` | `request_id`, `conversation_id`, `message_id` (the reply that asked), `question` (its index), `choice`, `model?`, `thinking?`, `search?` | a turn, whose message is the one the model wrote for the question |
 | `chatdgc_export` | `request_id`, `conversation_id`, `path` (absolute, chosen by the user), `format` (`markdown`, `json`, or `report` with `message_id`) | `chatdgc_exported` (`path`, `bytes`) |
 | `chatdgc_compact` | `request_id`, `conversation_id` | `chatdgc_compacted` (`summary`) |
@@ -182,6 +195,12 @@ A turn sends its events in this order:
    `answers: {message, question, choice}`.
 5. `chatdgc_changed`, the chat's new list entry.
 6. `chatdgc_turn` with `state: "ended"`.
+
+`memory_state` is the one memory DGC keeps about the user (offered as `ready.capabilities.memory`):
+`enabled` (the config's `memory`, settable with `set_config` and read through `get_config` `fields`),
+`facts` (`{id, text, created_at, updated_at, edited?, source: {surface, where}}`), and `projects` (`{folder,
+name, when, recent, remember}`). It's also sent, unasked, after a reply saved or forgot a fact; that reply
+carries `memory: [{op: "saved"|"forgot", id, text}]`.
 
 Deep research reports its progress as `chatdgc_research` with the reply's `research` as it is: `status`
 (`planning`, `planned`, `running`, `writing`, `checking`, `done`, `stopped` or `failed`), `question`,

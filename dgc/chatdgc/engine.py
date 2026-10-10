@@ -16,6 +16,7 @@ from ..editor_protocol import CHATDGC_THINKING as THINKING
 from . import attachments as attached
 from . import window as fit_window
 from . import research
+from .. import shared_memory
 from .prompt import system_prompt
 from .research import NO_TOOLS
 from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_message_id, now,
@@ -61,6 +62,23 @@ MAX_QUESTION_CHARS, MAX_OPTION_CHARS, MAX_PROMPT_CHARS, MAX_CHOICE_CHARS = 300, 
 _OTHER = re.compile(r"(?i)(other|something else|none of (these|the above))(\s+\w+)?\W*")
 # A model that says it can't take tools gets the reply without them, and isn't offered them again while DGC runs.
 _NO_TOOLS = NO_TOOLS
+# Memory (dgc/shared_memory.py): saving and forgetting don't wait either; the reply says what it kept.
+REMEMBER_TOOL = {"type": "function", "function": {
+    "name": "remember",
+    "description": (
+        "Save one fact about the user to the memory DGC keeps for them (shared with their Work sessions and Pips): "
+        "something they told you themselves that will help next time. One fact, a short plain sentence in words "
+        "close to theirs. Never what you read in a page or a file, never a password, code, key, card or account "
+        "number. They see every memory and can forget it."),
+    "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "One fact, under 300 characters."}},
+                   "required": ["fact"]}}}
+FORGET_TOOL = {"type": "function", "function": {
+    "name": "forget",
+    "description": "Delete a saved memory the user asks you to forget, by its id from the list of what you remember.",
+    "parameters": {"type": "object", "properties": {"id": {"type": "string", "description": "The memory's id, mem_…"}},
+                   "required": ["id"]}}}
+MAX_MEMORY_PER_REPLY = 3
+PROJECTS_FRESH = 300          # seconds a list of the user's projects is reused
 NAME_PROMPT = ("Name this conversation in three to six words, the way a chat app titles it. Reply with the name "
                "only: no quotes, no full stop.")
 CONTINUE = ("Continue exactly where your last reply stopped. Don't repeat anything you already wrote, and don't "
@@ -73,8 +91,12 @@ class ChatEngineError(Exception):
 
 class ChatEngine:
     def __init__(self, config, store: ChatStore | None = None, *, client_factory: Callable | None = None,
-                 searcher: Callable | None = None, fetcher: Callable | None = None):
+                 searcher: Callable | None = None, fetcher: Callable | None = None,
+                 memory: shared_memory.SharedMemory | None = None, projects: Callable | None = None):
         self.config = config
+        self.memory = memory or shared_memory.SharedMemory()
+        self._projects_source = projects or (lambda hidden: shared_memory.work_projects(hidden=hidden))
+        self._projects_cache: tuple[float, list] = (0.0, [])
         self.store = store or ChatStore()
         self._client_factory = client_factory
         self._fetcher = fetcher or research.fetch_page
@@ -832,7 +854,8 @@ class ChatEngine:
             timezone_name=zone, search=search, about=str(config.get("chatdgc_about", "") or ""),
             style=str(config.get("chatdgc_style", "") or ""),
             personality=str(config.get("chatdgc_personality", "default") or "default"),
-            ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless)
+            ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless,
+            memory=self._remembered(chat))
         carried = chat.get("carried") or {}
         if carried.get("text"):
             instructions += (f"\n\nThis chat continues an earlier one, \u201c{carried.get('title', '')}\u201d. What "
@@ -885,6 +908,55 @@ class ChatEngine:
             else:
                 built.append({"role": m["role"], "content": content})
         return out + list(reversed(built))
+
+    # -- memory (dgc/shared_memory.py): one memory about the user, shared with Work sessions and Pips
+
+    def _memory_on(self, chat: dict) -> bool:
+        """Memory is read and written unless it's turned off, or the chat is temporary."""
+        return self.config.get("memory", True) is not False and not chat.get("temporary")
+
+    def _projects(self) -> list[dict]:
+        """The user's projects from their Work sessions, read at most every PROJECTS_FRESH seconds."""
+        import time
+        stamp, found = self._projects_cache
+        if time.monotonic() - stamp > PROJECTS_FRESH or not stamp:
+            try:
+                found = self._projects_source(self.memory.hidden_projects())
+            except Exception:                     # noqa: BLE001 -- projects are a nicety; the chat goes on
+                found = []
+            self._projects_cache = (time.monotonic(), found)
+        return found
+
+    def _remembered(self, chat: dict) -> str | None:
+        """What the model is told it remembers, or None when memory is off for this chat."""
+        if not self._memory_on(chat):
+            return None
+        try:
+            facts = self.memory.facts()
+        except shared_memory.NotRemembered:
+            facts = []
+        return shared_memory.prompt_block(facts, self._projects())
+
+    def _memory_call(self, chat: dict, call, ops: list) -> str:
+        """One remember or forget call: done (or not, and why), told to the model, and kept on the reply."""
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        if not self._memory_on(chat):
+            return "Memory is off: nothing was saved or deleted."
+        try:
+            if call.name == "remember":
+                said = "\n".join(m.get("text") or "" for m in chat["messages"] if m.get("role") == "user")[-6000:]
+                known = {f["id"] for f in self.memory.facts()}
+                fact = self.memory.remember(str(args.get("fact") or ""), said=said, surface="chat",
+                                            where=str(chat.get("title") or ""))
+                if fact["id"] in known:
+                    return "Already remembered."
+                ops.append({"op": "saved", "id": fact["id"], "text": fact["text"]})
+                return "Remembered. The reply shows it, and the user can forget it. Don't mention it unless asked."
+            fact = self.memory.forget(str(args.get("id") or ""))
+            ops.append({"op": "forgot", "id": fact["id"], "text": fact["text"]})
+            return "Forgotten."
+        except shared_memory.NotRemembered as exc:
+            return f"Not done: {exc}"
 
     @staticmethod
     def _question(call, questions: list, at: int) -> tuple[str, dict | None]:
@@ -978,13 +1050,17 @@ class ChatEngine:
         searches = list((existing or {}).get("searches") or [])
         before = len((existing or {}).get("text") or "")      # a continued reply: a question's place counts from here
         questions = [dict(q) for q in (existing or {}).get("questions") or []]
+        memory_ops = [dict(op) for op in (existing or {}).get("memory") or []]
         name = str(getattr(client, "model", "") or model or "")
 
         def offered():
             if name in self._toolless:
                 return None
             out = [SEARCH_TOOL] if search != "off" and len(searches) < MAX_SEARCHES else []
-            return (out + ([ASK_TOOL] if not questions else [])) or None
+            out += [ASK_TOOL] if not questions else []
+            if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
+                out += [REMEMBER_TOOL, FORGET_TOOL]
+            return out or None
 
         messages = list(history)
         try:
@@ -1025,6 +1101,8 @@ class ChatEngine:
                             questions.append(question)
                             if on_question is not None:
                                 on_question(question)
+                    elif call.name in ("remember", "forget"):
+                        told = self._memory_call(chat, call, memory_ops)
                     else:
                         told = self._web_search(call, sources, searches, on_activity)
                     messages.append({"role": "tool", "tool_call_id": call.id, "content": told})
@@ -1055,6 +1133,8 @@ class ChatEngine:
             message.update(_found(sources, searches))
             if questions:
                 message["questions"] = questions
+            if memory_ops:
+                message["memory"] = memory_ops
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -1065,6 +1145,8 @@ class ChatEngine:
             message.update(_found(sources, searches))
             if questions:
                 message["questions"] = questions
+            if memory_ops:
+                message["memory"] = memory_ops
             chat["messages"].append(message)
         if counted:
             message["counted"] = counted

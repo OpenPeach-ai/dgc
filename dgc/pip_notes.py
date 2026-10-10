@@ -57,7 +57,10 @@ def _flat(value) -> str:
 
 
 def _words(text) -> set:
-    return {w for w in re.findall(r"[a-z0-9][a-z0-9'@.+-]*", text.casefold()) if len(w) >= 3 and w not in COMMON}
+    # A sentence's full stop isn't part of its last word ("vegetarian." is "vegetarian"); an address keeps its
+    # inner dots, and EXACT checks addresses whole.
+    found = (w.rstrip(".") for w in re.findall(r"[a-z0-9][a-z0-9'@.+-]*", text.casefold()))
+    return {w for w in found if len(w) >= 3 and w not in COMMON}
 
 
 def check_text(text, config=None) -> str:

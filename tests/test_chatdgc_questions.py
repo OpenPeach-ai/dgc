@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from dgc.chatdgc import engine as engine_module
 from dgc.chatdgc.engine import ASKED, ChatEngine, ChatEngineError
 from dgc.chatdgc.store import ChatStore
+from dgc.shared_memory import SharedMemory
 from dgc.llm import ToolCall
 
 FUNDS = {"question": "Where is the money held now, and where did it come from?",
@@ -56,7 +57,8 @@ class QuestionTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.store = ChatStore(Path(temp.name) / "chat")
         self.world = {"requests": [], "script": []}
-        self.engine = ChatEngine(Config(), self.store, client_factory=lambda model: Model(model or "chat-model", self.world))
+        self.engine = ChatEngine(Config(), self.store, client_factory=lambda model: Model(model or "chat-model", self.world),
+                                 memory=SharedMemory(Path(temp.name) / "memory"), projects=lambda hidden: [])
 
     def asked(self, chat, **extra):
         """A reply that answers, asks, and goes on, as ChatGPT's did."""
@@ -71,8 +73,8 @@ class QuestionTests(unittest.TestCase):
         chat = self.engine.open()
         reply, shown = self.asked(chat)
         first, second = self.world["requests"][-2:]
-        self.assertEqual(first["tools"], ["ask_user"], "offered with web search off: the model decides")
-        self.assertEqual(second["tools"], [], "one question per reply: not offered again")
+        self.assertEqual(first["tools"], ["ask_user", "remember", "forget"], "offered with web search off: the model decides")
+        self.assertEqual(second["tools"], ["remember", "forget"], "one question per reply: not offered again")
         self.assertEqual(second["messages"][-1], {"role": "tool", "tool_call_id": "c0", "content": ASKED},
                          "it doesn't wait: told it's shown, and to carry on")
         question = reply["questions"][0]
@@ -152,7 +154,7 @@ class QuestionTests(unittest.TestCase):
         self.world["toolless"] = True
         reply = self.engine.send(chat["id"], "hi")
         self.assertEqual(reply["text"], "ok")
-        self.assertEqual([r["tools"] for r in self.world["requests"]], [["ask_user"], []], "asked once, then without")
+        self.assertEqual([r["tools"] for r in self.world["requests"]], [["ask_user", "remember", "forget"], []], "asked once, then without")
         self.engine.send(chat["id"], "again", search="auto")
         self.assertEqual(self.world["requests"][-1]["tools"], [], "not offered again, web search included")
         self.assertNotIn("ask_user", self.world["requests"][-1]["messages"][0]["content"], "nor told about it")

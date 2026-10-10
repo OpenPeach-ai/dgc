@@ -41,6 +41,7 @@ from dgc.chatdgc import service as service_module  # noqa: E402
 from dgc.chatdgc.engine import NAME_PROMPT, ChatEngine  # noqa: E402
 from dgc.chatdgc.service import ChatService, fit, page  # noqa: E402
 from dgc.chatdgc.store import ChatStore  # noqa: E402
+from dgc.shared_memory import SharedMemory  # noqa: E402
 from dgc.config import Config  # noqa: E402
 from dgc.editor_protocol import event_error  # noqa: E402
 from dgc.llm import ToolCall  # noqa: E402
@@ -121,7 +122,8 @@ class ServiceTests(unittest.TestCase):
         config = SimpleNamespace(base_url="", api_key="", model="fixture", get=lambda key, default=None: default)
         self.engine = ChatEngine(config, ChatStore(self.root), client_factory=self.model.factory,
                                  searcher=lambda query: [{"title": "Forecast", "url": "https://weather.example/paris", "snippet": "Sunny"}],
-                                 fetcher=lambda url: (url, "Paris today: sunny, 24 degrees, light wind from the west. " * 6))
+                                 fetcher=lambda url: (url, "Paris today: sunny, 24 degrees, light wind from the west. " * 6),
+                                 memory=SharedMemory(Path(temp.name) / "memory"), projects=lambda hidden: [])
         self.service = ChatService(self.wire.emit, config, engine=self.engine)
         self.addCleanup(self.service.close, 2.0)
 
@@ -189,6 +191,38 @@ class ServiceTests(unittest.TestCase):
                                                              [{"n": 1, "title": "Forecast", "url": "https://weather.example/paris"}]))
         self.send(chat, "again", request_id="r2", search="always")
         self.assertIn("invalid command", self.wire.of("chatdgc_error")[-1]["message"])
+
+    def test_memory_on_the_wire(self):
+        ask = lambda kind, **f: (self.service.dispatch({"type": kind, "request_id": f"{kind}-{len(self.wire.frames)}", **f}),
+                                 self.wire.of("memory_state")[-1])[1]
+        state = ask("memory_add", text="Is vegetarian")
+        self.assertEqual((state["enabled"], [f["text"] for f in state["facts"]], state["facts"][0]["source"]),
+                         (True, ["Is vegetarian"], {"surface": "settings", "where": ""}))
+        fact = state["facts"][0]["id"]
+        state = ask("memory_edit", id=fact, text="Is vegetarian, eats eggs")
+        self.assertEqual((state["facts"][0]["text"], state["facts"][0]["edited"]), ("Is vegetarian, eats eggs", True))
+        state = ask("memory_add", text="My PIN is 4521")
+        self.assertIn("password, a key or an account number", state["error"])
+        self.assertEqual(len(state["facts"]), 1, "nothing kept")
+        state = ask("memory_project", folder="/w/openpeach", remember=False)
+        self.assertEqual(self.engine.memory.hidden_projects(), {"/w/openpeach"})
+        self.assertEqual(ask("memory_forget", id=fact)["facts"], [])
+        with self.subTest("a reply that remembers says so, unasked"):
+            chat = self.new()
+            self.model.script += [{"parts": ["Noted. "], "calls": [("remember", {"fact": "Lives in Pune"})]}, {"parts": ["ok"]}]
+            before = len(self.wire.of("memory_state"))
+            self.send(chat, "I live in Pune now", request_id="m-turn")
+            self.wire.wait(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended" and f.get("request_id") == "m-turn")
+            reply = self.wire.of("chatdgc_message")[-1]["message"]
+            self.assertEqual([op["text"] for op in reply["memory"]], ["Lives in Pune"])
+            unasked = self.wire.of("memory_state")[before:]
+            self.assertEqual(len(unasked), 1)
+            self.assertNotIn("request_id", unasked[0])
+            self.assertEqual([f["text"] for f in unasked[0]["facts"]], ["Lives in Pune"])
+        self.assertEqual(ask("memory_clear")["facts"], [])
+        self.engine.config = SimpleNamespace(**{**vars(self.engine.config),
+                                                "get": lambda key, default=None: False if key == "memory" else default})
+        self.assertFalse(ask("memory_list")["enabled"])
 
     def test_deep_research_on_the_wire(self):
         chat = self.new()

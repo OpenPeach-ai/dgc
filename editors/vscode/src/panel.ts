@@ -639,6 +639,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       chatdgcSend: (cmd) => this.chatdgcSend(cmd),
       chatdgcModels: () => this.chatdgcModels(),
       postHome: (message) => { if (this.home && this.webviewReady) this.post(message); },
+      openSettings: (section) => this.openSettings(section),
     };
     chat.attach(host);
   }
@@ -3173,7 +3174,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // duplicate skill name, a full follow-up queue) as a red MCP-server banner over a page that
     // was working, where it then outlived leaving the section.
     const settingsRejection = ev.type === "command_rejected" && SETTINGS_REJECTIONS.includes(String(ev.command || ""));
-    if (this.settingsEditor && (settingsRejection || ["config", "usage_report", "pip_usage_report", "mcp_servers"].includes(ev.type))) {
+    if (this.settingsEditor && (settingsRejection || ["config", "usage_report", "pip_usage_report", "mcp_servers", "memory_state"].includes(ev.type))) {
       const managed = ev.type === "mcp_servers" ? new Map(this.managedMcpServers().map((m) => [m.name, m])) : null;
       // The form shows a server's own OAuth app (its public client id and port); never its secret.
       const event = managed && Array.isArray((ev as any).items) ? { ...ev, items: (ev as any).items.map((item: any) => {
@@ -5739,7 +5740,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // sees them); every supported CLI takes `fields` and ignores names it doesn't know.
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
               fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
-                       "chatdgc_window"] });
+                       "chatdgc_window", "memory"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -5849,6 +5850,33 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.settingsEditor?.webview.postMessage({ type: "usage_unavailable", requestId,
           message: "DGC could not ask its backend for token usage. Try Refresh." });
       }
+    } else if (["getMemory", "memoryAdd", "memoryEdit", "memoryForget", "memoryClear", "memoryProject", "memorySwitch"].includes(msg?.type)) {
+      // Settings -> Memory: one memory about the user, kept by the side bar's process (dgc/shared_memory.py).
+      const say = (message: string) => this.settingsEditor?.webview.postMessage({ type: "memory_unavailable", message });
+      if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.memory) {
+        say("Update the DGC CLI to see and manage what DGC remembers about you.");
+        return;
+      }
+      const requestId = this.nextRequestId("memory");
+      const text = typeof msg.text === "string" ? msg.text.slice(0, 1000) : "";
+      const id = typeof msg.id === "string" && /^mem_[0-9a-f]{12}$/.test(msg.id) ? msg.id : "";
+      let cmd: { type: string } & Record<string, unknown> | null = null;
+      if (msg.type === "getMemory") cmd = { type: "memory_list" };
+      else if (msg.type === "memoryAdd" && text.trim()) cmd = { type: "memory_add", text };
+      else if (msg.type === "memoryEdit" && id && text.trim()) cmd = { type: "memory_edit", id, text };
+      else if (msg.type === "memoryForget" && id) cmd = { type: "memory_forget", id };
+      else if (msg.type === "memoryClear") cmd = { type: "memory_clear" };
+      else if (msg.type === "memoryProject" && typeof msg.folder === "string" && msg.folder) {
+        cmd = { type: "memory_project", folder: msg.folder.slice(0, 4096), remember: msg.remember === true };
+      } else if (msg.type === "memorySwitch") {
+        // On or off for every surface at once: saved now, not with the page's Save.
+        if (!be.send({ type: "set_config", request_id: this.nextRequestId("memory-switch"), values: { memory: msg.on === true } })) {
+          say("DGC couldn't reach its backend. Try again.");
+          return;
+        }
+        cmd = { type: "memory_list" };
+      }
+      if (cmd && !be.send({ ...cmd, request_id: requestId } as Parameters<DgcBackend["send"]>[0])) say("DGC couldn't reach its backend. Try again.");
     } else if (msg?.type === "getPipUsage") {
       const range = ["today", "7d", "30d", "month", "all"].includes(msg.range) ? msg.range : "7d";
       const requestId = String(msg.requestId || this.nextRequestId("pip-usage")).slice(0, 128);

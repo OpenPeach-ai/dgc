@@ -14,7 +14,7 @@
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
-                  research: false, planAsked: false, countdowns: {}, lastSent: null, planEditing: "", steerDraft: "", open: new Set() };
+                  research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set() };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -57,6 +57,33 @@
     if (html === null) node.textContent = message.text || ""; else node.innerHTML = html;
     cite(node, message.sources);
     return node;
+  }
+  /** What a reply saved to (or deleted from) the user's memory, each with Forget, and the way to all of it. */
+  function memoryNote(message) {
+    const ops = Array.isArray(message.memory) ? message.memory.filter((op) => op && typeof op.text === "string") : [];
+    if (!ops.length) return null;
+    const box = el("div", "cd-memory");
+    for (const op of ops) {
+      const gone = op.op === "forgot" || state.forgotten.has(op.id);
+      const row = el("div", "cd-memory-row");
+      row.append(icon(op.op === "forgot" ? "trash" : gone ? "circle-slash" : "bookmark"),
+                 el("span", "cd-memory-text", `${op.op === "forgot" ? "Forgot" : gone ? "Forgotten" : "Remembered"}: ${op.text}`));
+      if (op.op === "saved" && !gone) {
+        const forget = el("button", "cd-memory-forget", "Forget");
+        forget.type = "button"; forget.title = "Delete this from what DGC remembers about you";
+        forget.addEventListener("click", () => {
+          vscode.postMessage({ type: "forgetMemory", id: op.id });
+          state.forgotten.add(op.id); update(message.id); announce("Forgotten.");
+        });
+        row.append(forget);
+      }
+      box.append(row);
+    }
+    const manage = el("button", "cd-memory-manage", "Manage memory");
+    manage.type = "button"; manage.title = "See, change or delete everything DGC remembers about you";
+    manage.addEventListener("click", () => vscode.postMessage({ type: "openMemory" }));
+    box.append(manage);
+    return box;
   }
   /** A reply's words, with each question it asked as a card where it asked it. */
   function replyParts(message, live) {
@@ -592,6 +619,7 @@
     else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
     if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
+    if (!live) { const kept = memoryNote(message); if (kept) node.append(kept); }
     const end = endNote(message);
     if (end) node.append(end);
     if (!live && (message.text || message.versions)) {

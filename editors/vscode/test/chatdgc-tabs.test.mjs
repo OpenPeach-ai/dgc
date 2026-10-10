@@ -442,3 +442,18 @@ test("deep research: its commands go as such, its progress reaches the tabs, and
   chat.onEvent({ type: "chatdgc_research", conversation_id: ID(11), message_id: MSG(2), research: { status: "done", plan: { title: "Scooters" } } });
   assert.deepEqual(world.infos, ["Deep research finished: Scooters"]);
 });
+
+test("memory: Forget under a reply deletes it from the one memory, and Manage memory opens Settings at Memory", () => {
+  chat.open(ID(12));
+  const [panel] = world.panels;
+  const shown = [];
+  host.openSettings = (section) => shown.push(section);
+  panel.say({ type: "ready" }); opened(panel, { id: ID(12), title: "x" });
+  const before = sent.length;
+  panel.say({ type: "forgetMemory", id: "not-an-id" });
+  assert.equal(sent.length, before);
+  panel.say({ type: "forgetMemory", id: "mem_0123456789ab" });
+  assert.deepEqual([last("memory_forget").id, typeof last("memory_forget").request_id], ["mem_0123456789ab", "string"]);
+  panel.say({ type: "openMemory" });
+  assert.deepEqual(shown, ["memory"]);
+});

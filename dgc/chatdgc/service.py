@@ -144,7 +144,9 @@ class ChatService:
              "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version, "chatdgc_answer": self._answer,
              "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
              "chatdgc_carry": self._carry, "chatdgc_research": self._research,
-             "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer}[kind](cmd)
+             "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
+             "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
+             "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
         except (ChatEngineError, ChatStoreError) as exc:
             self._error(str(exc), request_id, conversation_id)
 
@@ -350,6 +352,49 @@ class ChatService:
     def _research_steer(self, cmd: dict) -> None:
         self.engine.research_steer(cmd["conversation_id"], cmd["message_id"], cmd["text"])
 
+    # One memory about the user (dgc/shared_memory.py): Settings -> Memory, and Forget under a reply.
+
+    def _memory(self, cmd: dict) -> None:
+        from ..shared_memory import NotRemembered
+        memory, kind, error = self.engine.memory, cmd["type"], None
+        try:
+            if kind == "memory_add":
+                memory.add(cmd["text"])
+            elif kind == "memory_edit":
+                memory.edit(cmd["id"], cmd["text"])
+            elif kind == "memory_forget":
+                memory.forget(cmd["id"])
+            elif kind == "memory_clear":
+                memory.clear()
+            elif kind == "memory_project":
+                memory.hide_project(cmd["folder"], not cmd["remember"])
+                self.engine._projects_cache = (0.0, [])      # the next reply sees the change
+        except NotRemembered as exc:
+            error = str(exc)
+        self._memory_state(cmd["request_id"], error)
+
+    def _memory_state(self, request_id: str | None = None, error: str | None = None) -> None:
+        from ..shared_memory import NotRemembered, work_projects
+        memory = self.engine.memory
+        try:
+            facts, hidden = memory.facts(), memory.hidden_projects()
+        except NotRemembered as exc:
+            facts, hidden, error = [], set(), error or str(exc)
+        try:
+            projects = work_projects()
+        except Exception:                         # noqa: BLE001 -- the facts still show
+            projects = []
+        fields = {"request_id": request_id} if request_id else {}
+        if error:
+            fields["error"] = error
+        self.emit("memory_state", enabled=self.engine.config.get("memory", True) is not False, **fields,
+                  facts=[{key: f.get(key) for key in ("id", "text", "created_at", "updated_at")}
+                         | ({"edited": True} if f.get("edited") else {})
+                         | {"source": {k: (f.get("source") or {}).get(k, "") for k in ("surface", "where")}}
+                         for f in facts],
+                  projects=[{"folder": p["folder"], "name": p["name"], "when": p["when"], "recent": p["recent"],
+                             "remember": p["folder"] not in hidden} for p in projects])
+
     def _continue(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.continue_reply(cmd["conversation_id"], cmd["message_id"], on_start=on_start,
@@ -423,6 +468,8 @@ class ChatService:
             self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked), request_id=request_id)
             self._changed(conversation_id, request_id)
             self._context(conversation_id)
+            if reply.get("memory"):
+                self._memory_state()                  # Settings -> Memory, if it's open, shows what changed
             if reply.get("finish") == "stop":
                 self._name_later(conversation_id)
         except (ChatEngineError, ChatStoreError) as exc:

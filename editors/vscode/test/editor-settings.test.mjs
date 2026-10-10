@@ -331,3 +331,49 @@ test('ChatDGC: a personality and custom instructions, saved for every chat; hidd
   assert.equal(saved.values.chatdgc_personality,'warm');
   assert.equal(saved.values.chatdgc_window,'8k');
 });
+
+test('Memory: what DGC remembers, edited, deleted and added; projects switched; all deleted after you confirm', () => {
+  const x = setup();
+  x.click('[data-nav=memory]');
+  assert.equal(x.sent.at(-1).type, 'getMemory');
+  assert.match(x.d.body.textContent, /Reading what DGC remembers/);
+  const fact = (id, text, extra = {}) => ({ id, text, created_at: '2026-10-10T10:00:00Z', updated_at: '2026-10-10T10:00:00Z', source: { surface: 'chat', where: 'Dinner' }, ...extra });
+  const state = { type: 'memory_state', enabled: true,
+    facts: [fact('mem_aaaaaaaaaaaa', '<b>Is vegetarian</b>'), fact('mem_bbbbbbbbbbbb', 'Prefers metric units', { source: { surface: 'settings', where: '' }, edited: true })],
+    projects: [{ folder: '/w/openpeach', name: 'openpeach', when: '2026-10-09', recent: ['Billing page'], remember: true }] };
+  x.message({ type: 'event', event: state });
+  assert.equal(x.d.querySelector('h2').textContent, 'Memory');
+  const rows = [...x.d.querySelectorAll('.memory-facts .row strong')].map((n) => n.textContent);
+  assert.deepEqual(rows, ['<b>Is vegetarian</b>', 'Prefers metric units'], 'their words, as text');
+  assert.equal(x.d.querySelectorAll('.memory-facts b').length, 0);
+  assert.match(x.d.querySelector('.memory-facts').textContent, /From a chat: Dinner · 2026-10-10/);
+  assert.match(x.d.querySelector('.memory-facts').textContent, /Added by you · 2026-10-10 · edited/);
+  x.click('[data-memory-switch]');
+  assert.deepEqual({ ...x.sent.at(-1) }, { type: 'memorySwitch', on: false });
+  x.message({ type: 'event', event: state });
+  x.click('[data-memory-edit=mem_aaaaaaaaaaaa]');
+  const edit = x.d.querySelector('#memory-edit');
+  edit.value = 'Is vegetarian, eats eggs';
+  x.d.querySelector('[data-memory-save]').dispatchEvent(new x.w.Event('submit', { bubbles: true, cancelable: true }));
+  assert.deepEqual({ ...x.sent.at(-1) }, { type: 'memoryEdit', id: 'mem_aaaaaaaaaaaa', text: 'Is vegetarian, eats eggs' });
+  x.message({ type: 'event', event: state });
+  x.click('[data-memory-forget=mem_bbbbbbbbbbbb]');
+  assert.deepEqual({ ...x.sent.at(-1) }, { type: 'memoryForget', id: 'mem_bbbbbbbbbbbb' });
+  x.message({ type: 'event', event: state });
+  x.d.querySelector('#memory-add').value = 'Has two kids';
+  x.d.querySelector('.memory-add').dispatchEvent(new x.w.Event('submit', { bubbles: true, cancelable: true }));
+  assert.deepEqual({ ...x.sent.at(-1) }, { type: 'memoryAdd', text: 'Has two kids' });
+  x.message({ type: 'event', event: { ...state, error: "That looks like a password, a key or an account number: DGC doesn't remember those." } });
+  assert.match(x.d.querySelector('[role=alert]').textContent, /password, a key/);
+  x.click('[data-memory-project]');
+  assert.deepEqual({ ...x.sent.at(-1) }, { type: 'memoryProject', folder: '/w/openpeach', remember: false });
+  x.message({ type: 'event', event: state });
+  const before = x.sent.length;
+  x.click('[data-memory-clear]');
+  assert.match(x.d.querySelector('[role=alertdialog]').textContent, /Delete all 2 memories\? This can't be undone\./);
+  assert.equal(x.sent.length, before, 'nothing deleted yet');
+  x.click('[data-memory-clear-yes]');
+  assert.deepEqual({ ...x.sent.at(-1) }, { type: 'memoryClear' });
+  x.message({ type: 'memory_unavailable', message: 'Update the DGC CLI to see and manage what DGC remembers about you.' });
+  assert.match(x.d.querySelector('[role=alert]').textContent, /Update the DGC CLI/);
+});

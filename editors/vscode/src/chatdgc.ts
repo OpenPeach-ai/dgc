@@ -32,6 +32,8 @@ export interface ChatDGCHost {
   chatdgcSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli";
   chatdgcModels(): Promise<{ ids: string[]; current: string }>;
   postHome(message: Record<string, unknown>): void;
+  /** Settings at a section (Memory, from "Manage memory" under a reply). */
+  openSettings?(section: string): void;
 }
 
 interface Tab {
@@ -479,6 +481,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                            message_id: message.messageId, text });
         return;
       }
+      case "forgetMemory":
+        // "Forget" under a reply that saved a fact: the one memory every DGC surface shares.
+        if (typeof message.id === "string" && /^mem_[0-9a-f]{12}$/.test(message.id)) {
+          this.ask({ tab, kind: "memory" }, { type: "memory_forget", id: message.id });
+        }
+        return;
+      case "openMemory":
+        this.host?.openSettings?.("memory");
+        return;
       case "exportReport":
         if (conversation && MESSAGE_ID.test(String(message.messageId || ""))) {
           void this.exportReport(tab, conversation, message.messageId, String(message.title || ""));

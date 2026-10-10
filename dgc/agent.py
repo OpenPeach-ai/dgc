@@ -3849,6 +3849,25 @@ class Agent(GoalLifecycle):
         return lines
 
     # ------------------------------------------------------ system prompt ---
+    def _shared_memory_view(self) -> str:
+        """The facts the user's one memory keeps (dgc/shared_memory.py), for this session to read; never written
+        from here. Empty when memory is turned off or there's nothing yet."""
+        if self.config.get("memory", True) is False:
+            return ""
+        try:
+            from .shared_memory import MAX_PROMPT_FACTS_CHARS, NotRemembered, SharedMemory
+            facts = SharedMemory().facts()
+        except (NotRemembered, OSError):
+            return ""
+        lines, used = [], 0
+        for fact in reversed(facts):              # the newest first, when not all fit
+            line = "- " + self._safe_text(fact["text"])
+            if used + len(line) > MAX_PROMPT_FACTS_CHARS:
+                break
+            lines.insert(0, line)
+            used += len(line)
+        return "\n".join(lines)
+
     def system_prompt(self) -> str:
         from .pip_access import tools_available as pips_tools_available
         cfg = self.config
@@ -4167,12 +4186,16 @@ class Agent(GoalLifecycle):
         # where it may belong to a different agent (another assistant) and hijack the session.
         if not project_mem and cfg.project_root != Path.home():
             project_mem = load_instruction_file(agents_md, sanitizer=self._safe_text)
-        if project_mem or user_mem:
+        shared_mem = self._shared_memory_view()
+        if project_mem or user_mem or shared_mem:
             parts += ["", "# Memory"]
             if project_mem:
                 parts += ["## Project memory (DGC.md)", project_mem]
             if user_mem:
                 parts += ["## User memory (~/.dgc/DGC.md)", user_mem]
+            if shared_mem:
+                parts += ["## What you remember about the user (shared with ChatDGC and Pips; they manage it in "
+                          "Settings \u2192 Memory)", shared_mem]
 
         skill_catalog = self._skill_catalog()
         if skill_catalog:
