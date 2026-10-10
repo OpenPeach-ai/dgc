@@ -132,6 +132,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Sessions
 
+- **A hangup no longer half-stops DGC that was started with hangups ignored** (under `nohup`, or from an editor
+  launched that way). DGC took SIGHUP over anyway: the CLI handed its colors back and carried on, and `dgc serve`
+  stopped every turn. A signal ignored when DGC starts now stays ignored.
 - **The Sessions list holds thousands and searches them.** Listing read every session file in full on
   every refresh; a per-project index (`<sessions>/<project>/.index.sqlite`) now keeps what the list
   shows and a full-text copy of what was said, and reads a file again only when it changed. A broken
