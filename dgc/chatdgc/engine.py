@@ -537,7 +537,9 @@ class ChatEngine:
             asked = ("The summary so far (of the earlier messages; keep all of it):\n<<<\n" + summary + "\n>>>\n\n"
                      if summary else "") + "The conversation to add:\n<<<\n" + "\n\n".join(chunk) + "\n>>>"
             try:
-                result = client.chat([{"role": "system", "content": fit_window.COMPACT_PROMPT.format(words=words)},
+                rolling = fit_window.ROLLING if summary else ""
+                result = client.chat([{"role": "system", "content": fit_window.COMPACT_PROMPT.format(words=words,
+                                                                                                   rolling=rolling)},
                                       {"role": "user", "content": asked}], tools=None, reasoning_effort="off",
                                      cancel=cancel)
             except Exception as exc:              # noqa: BLE001 -- a summary that fails is said, never a crash

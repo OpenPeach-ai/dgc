@@ -112,9 +112,12 @@ class WindowTests(unittest.TestCase):
         self.assertTrue(rolled.startswith("The summary so far (of the earlier messages; keep all of it):\n<<<\nSUMMARY #"),
                         "a rolling summary: the last one goes in")
         # Told only "the summary so far", deepseek-v4.1-flash dropped all of it in 8 rolls of 8 (Paris, 391, the
-        # sights: gone, the newest story kept); told it replaces it and is the only record, 0 of 19.
+        # sights: gone, the newest story kept); told it replaces it and is the only record, 0 of 27.
         rolling = [s for s in self.world["sent"] if s["messages"][0]["content"].startswith("You are summarizing")][-1]
         self.assertIn("yours replaces it and is the only record", rolling["messages"][0]["content"])
+        first = next(s for s in self.world["sent"] if s["messages"][0]["content"].startswith("You are summarizing"))
+        self.assertNotIn("summary so far", first["messages"][0]["content"],
+                         "the first summary isn't told of one: a model wrote \"no prior context\" into it")
         self.assertNotIn("question 0", rolled, "what was summarized isn't read again")
 
     def test_compact_now_edit_the_summary_and_continue_in_a_new_chat(self):

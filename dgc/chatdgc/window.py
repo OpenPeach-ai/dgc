@@ -24,10 +24,13 @@ COMPACT_PROMPT = (
     "You are summarizing a conversation so it can continue without its earlier messages. Write a summary the "
     "assistant can rely on: the user's goals and preferences, facts and numbers they gave, decisions made, what "
     "was asked and answered (briefly), files and images discussed, open questions, and anything they asked to be "
-    "remembered. Keep names, numbers and dates exact. When a summary so far is given, yours replaces it and is "
-    "the only record of those earlier messages: carry over everything in it (shorten it if you must, but drop "
-    "nothing the user might come back to), then add the conversation that follows. Plain text, short paragraphs "
-    "or bullets, at most {words} words in all, old and new together. Write only the summary.")
+    "remembered. Keep names, numbers and dates exact.{rolling} Plain text, short paragraphs or bullets, at most "
+    "{words} words in all. Write only the summary.")
+# Only with a summary so far: told about one that isn't there, a model wrote "no prior context" into the first.
+ROLLING = (
+    " A summary so far is given: yours replaces it and is the only record of those earlier messages, so carry "
+    "over everything in it (shorten it if you must, but drop nothing the user might come back to), then add the "
+    "conversation that follows, old and new together within the length below.")
 SHORTEN_PROMPT = (
     "Shorten this summary of a conversation to at most {words} words. Keep every name, number, date, decision and "
     "fact the user might come back to, from all of it, early and late; cut retellings and description. Write "
