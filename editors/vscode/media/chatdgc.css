@@ -329,3 +329,36 @@ textarea.cd-plan-input { resize: vertical; }
 .cd-memory-forget:hover, .cd-memory-manage:hover { text-decoration: underline; }
 .cd-memory-forget:focus-visible, .cd-memory-manage:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 
+
+/* Pictures from the web above a reply (ChatGPT's image strip): each with its site, opening larger over the chat. */
+.cd-pictures { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: grid; gap: 6px; max-width: 640px;
+  grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cd-pictures[data-count="1"] { grid-template-columns: minmax(0, 320px); }
+.cd-pictures[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 440px; }
+.cd-pictures[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 540px; }
+.cd-picture-item { min-width: 0; }
+.cd-picture { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 0; overflow: hidden;
+  border-radius: var(--r-md); background: var(--surface2); cursor: zoom-in; }
+.cd-picture img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .2s ease; }
+.cd-picture:hover img { transform: scale(1.04); }
+.cd-picture:focus-visible { outline: 2px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.cd-picture-site { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 7px 4px; overflow: hidden; color: #fff;
+  font: var(--w-med) var(--t-xs)/1.2 var(--sans); text-align: left; text-overflow: ellipsis; white-space: nowrap;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .66)); }
+.cd-lightbox { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  gap: var(--sp-2); padding: var(--sp-4); background: rgba(0, 0, 0, .74); }
+.cd-lightbox-box { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; max-width: min(760px, 100%); max-height: 100%; }
+.cd-lightbox-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); color: #e6e6e6;
+  font: var(--w-med) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
+.cd-lightbox-top .cd-action, .cd-lightbox-nav { color: #f2f2f2; }
+.cd-lightbox-nav { flex: none; width: 32px; height: 32px; border-radius: var(--r-full); background: rgba(255, 255, 255, .12); }
+.cd-lightbox-nav:hover { background: rgba(255, 255, 255, .22); }
+.cd-lightbox-frame { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 0; margin: 0; padding: var(--sp-3);
+  overflow: auto; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--bg); }
+.cd-lightbox-frame img { align-self: center; max-width: 100%; max-height: calc(100vh - 240px); object-fit: contain; border-radius: var(--r-md); }
+.cd-lightbox-caption { display: grid; gap: var(--sp-1); }
+.cd-lightbox-title { margin: 0; color: var(--text-strong); font: var(--w-med) var(--t-sm)/1.4 var(--sans); }
+.cd-lightbox-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.cd-lightbox-note { margin: 0; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+@media (max-width: 520px) { .cd-pictures, .cd-pictures[data-count="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (prefers-reduced-motion: reduce) { .cd-picture img { transition: none; } .cd-picture:hover img { transform: none; } }

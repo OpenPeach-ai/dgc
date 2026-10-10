@@ -251,6 +251,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_question":
         for (const tab of showing(conversation)) this.post(tab, { type: "question", messageId: ev.message_id, question: ev.question });
         return;
+      case "chatdgc_images":
+        for (const tab of showing(conversation)) this.post(tab, { type: "images", messageId: ev.message_id, images: ev.images });
+        return;
       case "chatdgc_research": {
         const research = ev.research && typeof ev.research === "object" ? ev.research : {};
         const tabs = showing(conversation);

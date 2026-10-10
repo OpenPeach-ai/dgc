@@ -345,6 +345,70 @@ test("a reply that searches: what it looks for while it looks, citation marks, a
   } finally { await s.page.close(); }
 });
 
+test("pictures from the web: a strip above the answer as it streams, each with its site, and one opened larger", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const att = (c) => "att_" + c.repeat(32);
+    const picture = (c, i, extra = {}) => ({ id: att(c), kind: "image", mime: "image/jpeg", title: `Hagia Sophia ${i}`,
+      url: `https://site${i}.example/page`, site: `site${i}.example`, image: `https://img${i}.example/full.jpg`, ...extra });
+    await s.send({ type: "opened", conversation: conversation({ title: "Hagia Sophia" }), earlier: 0, busy: false, messages: [] });
+    await s.page.locator("#cd-input").fill("What does the inside of the Hagia Sophia look like?");
+    await s.page.keyboard.press("Enter");
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "delta", messageId: M(2), text: "The dome seems to float" });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-pictures").count(), 0, "none until the reply has some");
+    const images = { query: "Hagia Sophia interior", items: [picture("a", 0), picture("b", 1, { title: "" }), picture("c", 2), picture("d", 3)] };
+    await s.send({ type: "images", messageId: M(2), images });
+    await s.frame();
+    const strip = s.page.locator(".cd-assistant .cd-pictures");
+    assert.equal(await strip.getAttribute("aria-label"), "Images from the web for “Hagia Sophia interior”");
+    assert.deepEqual(await strip.locator(".cd-picture-site").allTextContents(), ["site0.example", "site1.example", "site2.example", "site3.example"]);
+    assert.equal(await s.page.locator(".cd-assistant > .cd-pictures + .cd-body").count(), 1, "above the answer");
+    assert.deepEqual((await s.posted("image")).map((m) => m.id), [att("a"), att("b"), att("c"), att("d")], "each asked for once, by id");
+    const png = await s.page.evaluate(() => { const c = document.createElement("canvas"); c.width = 160; c.height = 120;
+      c.getContext("2d").fillRect(0, 0, 160, 120); return c.toDataURL("image/png"); });
+    for (const c of "abc") await s.send({ type: "image", id: att(c), data: png });
+    await s.send({ type: "image", id: att("d"), error: "That image is no longer there." });
+    const kept = await s.page.locator('.cd-pictures img[data-att="' + att("a") + '"]').elementHandle();
+    await s.send({ type: "delta", messageId: M(2), text: " above the nave." });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-picture").count(), 3, "one that can't be shown leaves the strip");
+    assert.equal(await kept.evaluate((n) => n.isConnected && n.src.startsWith("data:image/png")), true,
+                 "the strip isn't drawn again as the reply streams: no flicker");
+    assert.equal(await s.page.locator(".cd-picture").nth(1).getAttribute("aria-label"), "Image, from site1.example: view larger");
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", finish: "stop", images,
+      text: "The dome seems to float above the nave." } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-picture").count(), 3, "the saved reply shows them the same way");
+    assert.equal((await s.posted("image")).length, 4, "and nothing is asked twice");
+    // One opened larger: what it is, the site, the page it's on, and that the model hasn't seen it.
+    await s.page.locator(".cd-picture").nth(2).click();
+    const view = s.page.locator("#cd-picture-view");
+    assert.equal(await view.getAttribute("role"), "dialog");
+    assert.equal(await view.locator(".cd-lightbox-title").textContent(), "Hagia Sophia 2");
+    assert.equal(await view.locator(".cd-lightbox-count").textContent(), "3 / 3");
+    assert.equal(await view.locator(".cd-source-site").innerText(), "site2.example");
+    assert.equal(await view.locator(".cd-lightbox-note").textContent(), "From an image search for “Hagia Sophia interior”: the model hasn't seen it.");
+    assert.equal(await view.locator(".cd-lightbox-frame img").evaluate((i) => i.src.startsWith("data:image/png")), true);
+    await view.locator("button", { hasText: "Open page" }).click();
+    assert.equal((await s.posted("openLink")).at(-1).target, "https://site2.example/page", "the page, not the picture");
+    await s.page.keyboard.press("ArrowRight");
+    assert.equal(await view.locator(".cd-lightbox-count").textContent(), "1 / 3", "round to the first");
+    await view.locator('button[aria-label="Previous image"]').click();
+    assert.equal(await view.locator(".cd-lightbox-title").textContent(), "Hagia Sophia 2");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-pictures-view.png") });
+    await s.page.keyboard.press("Escape");
+    assert.equal(await view.count(), 0);
+    assert.equal(await s.page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Hagia Sophia 2, from site2.example: view larger",
+                 "focus goes back to the picture it came from");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-pictures.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("attachments: picked files and pastes become chips, go with the message, and show on it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

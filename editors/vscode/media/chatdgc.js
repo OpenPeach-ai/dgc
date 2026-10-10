@@ -379,6 +379,98 @@
     else if (!known) { images.set(item.id, "asked"); vscode.postMessage({ type: "image", id: item.id }); }
     return button;
   }
+  // ---- pictures from the web above a reply (ChatGPT's image strip). The backend fetched and kept them with the
+  // chat, so each is asked for by id like an attached image: the screen never asks an image host itself.
+  function webPicture(item) {
+    const picture = el("img");
+    picture.alt = item.title || `Image from ${item.site || "the web"}`; picture.dataset.att = item.id; picture.decoding = "async";
+    const known = images.get(item.id);
+    if (known?.data) picture.src = known.data;
+    else if (!known) { images.set(item.id, "asked"); vscode.postMessage({ type: "image", id: item.id }); }
+    return picture;
+  }
+  function shownPictures(message) {
+    const items = Array.isArray(message.images?.items) ? message.images.items : [];
+    return items.filter((x) => x && /^att_[a-f0-9]{32}$/.test(x.id || "") && !images.get(x.id)?.error);
+  }
+  /** Up to four pictures, each with the site it's from; one opens larger, with the page it's on. */
+  function picturesStrip(message) {
+    const items = shownPictures(message);
+    if (!items.length) return null;
+    const strip = el("ul", "cd-pictures");
+    strip.dataset.count = String(items.length); strip.dataset.key = items.map((x) => x.id).join(",");
+    strip.setAttribute("aria-label", `Images from the web for “${message.images.query || ""}”`);
+    for (const item of items) {
+      const li = el("li", "cd-picture-item");
+      const tile = el("button", "cd-picture");
+      tile.type = "button"; tile.title = item.title ? `${item.title} (${item.site || "web"})` : item.site || "Image";
+      tile.setAttribute("aria-label", `${item.title || "Image"}, from ${item.site || "the web"}: view larger`);
+      tile.append(webPicture(item), el("span", "cd-picture-site", item.site || ""));
+      tile.addEventListener("click", () => openPicture(message.id, item.id));
+      li.append(tile);
+      strip.append(li);
+    }
+    return strip;
+  }
+  /** A picture larger, over the chat: what it is, where it's from, the page it's on; arrows for the others. */
+  function openPicture(messageId, pictureId) {
+    $("cd-picture-view")?.remove();
+    const back = document.activeElement;
+    const message = state.messages.find((m) => m.id === messageId);
+    const items = message ? shownPictures(message) : [];
+    let at = items.findIndex((x) => x.id === pictureId);
+    if (at < 0) return;
+    const view = el("div", "cd-lightbox");
+    view.id = "cd-picture-view";
+    view.setAttribute("role", "dialog"); view.setAttribute("aria-modal", "true");
+    const frame = el("figure", "cd-lightbox-frame");
+    const count = el("span", "cd-lightbox-count");
+    const done = () => { view.remove(); (back && back.isConnected ? back : input).focus(); };
+    const close = action("close", "Close", done);
+    const show = (i) => {
+      at = (i + items.length) % items.length;
+      const item = items[at];
+      view.setAttribute("aria-label", item.title || "Image");
+      const site = el("div", "cd-source-site");
+      site.append(faviconNode(item.url), el("span", "", item.site || siteOf(item.url)));
+      const open = el("button", "cd-continue", "Open page");
+      open.type = "button"; open.title = item.url;
+      open.addEventListener("click", () => vscode.postMessage({ type: "openLink", target: item.url }));
+      const row = el("div", "cd-lightbox-row");
+      row.append(site, open);
+      const caption = el("figcaption", "cd-lightbox-caption");
+      if (item.title) caption.append(el("p", "cd-lightbox-title", item.title));
+      caption.append(row, el("p", "cd-lightbox-note", `From an image search for “${message.images.query || ""}”: the model hasn't seen it.`));
+      frame.replaceChildren(webPicture(item), caption);
+      count.textContent = items.length > 1 ? `${at + 1} / ${items.length}` : "";
+    };
+    const top = el("div", "cd-lightbox-top");
+    top.append(count, close);
+    const box = el("div", "cd-lightbox-box");
+    box.append(top, frame);
+    if (items.length > 1) {
+      const prev = action("chevron-left", "Previous image", () => show(at - 1));
+      const next = action("chevron-right", "Next image", () => show(at + 1));
+      prev.classList.add("cd-lightbox-nav"); next.classList.add("cd-lightbox-nav");
+      view.append(prev, box, next);
+    } else view.append(box);
+    view.addEventListener("click", (e) => { if (e.target === view) done(); });
+    view.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); }
+      else if (e.key === "ArrowLeft" && items.length > 1) { e.preventDefault(); show(at - 1); }
+      else if (e.key === "ArrowRight" && items.length > 1) { e.preventDefault(); show(at + 1); }
+      else if (e.key === "Tab") {
+        // Focus stays in the view while it's open.
+        const stops = [...view.querySelectorAll("button")].filter((b) => !b.disabled);
+        const i = stops.indexOf(document.activeElement);
+        if (e.shiftKey && i <= 0) { e.preventDefault(); stops[stops.length - 1].focus(); }
+        else if (!e.shiftKey && i === stops.length - 1) { e.preventDefault(); stops[0].focus(); }
+      }
+    });
+    show(at);
+    document.body.append(view);
+    close.focus();
+  }
   /** A button that starts or changes a turn: off while one runs (controls() keeps every such button in step). */
   function idleOnly(button) {
     button.dataset.whileIdle = "1";
@@ -720,6 +812,7 @@
     }
     if (message.research && typeof message.research === "object") return researchMessage(node, message, live);
     if (message.thinking) node.append(thinkingBlock(message, live));
+    { const strip = picturesStrip(message); if (strip) node.append(strip); }
     if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
     const doing = live && state.searching[message.id];
     if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
@@ -881,6 +974,10 @@
         const typing = old && old.contains(document.activeElement) ? document.activeElement : null;
         const key = typing?.dataset?.keep;
         const caret = key && typeof typing.selectionStart === "number" ? [typing.selectionStart, typing.selectionEnd] : null;
+        // The pictures, unchanged, stay the same nodes: a streaming reply redraws every frame, and a picture
+        // drawn again would flicker.
+        const strip = old?.querySelector(".cd-pictures"), stripNow = fresh.querySelector(".cd-pictures");
+        if (strip && stripNow && strip.dataset.key === stripNow.dataset.key) stripNow.replaceWith(strip);
         if (old) old.replaceWith(fresh); else log.append(fresh);
         const twin = key ? fresh.querySelector(`[data-keep="${CSS.escape(key)}"]`) : null;
         if (twin) { twin.focus(); if (caret) twin.setSelectionRange(caret[0], caret[1]); }
@@ -1180,6 +1277,18 @@
         update(message.id);
         return;
       }
+      case "images": {
+        // Pictures for the reply, kept while it streams: they show above it.
+        if (!msg.images || typeof msg.images !== "object" || !Array.isArray(msg.images.items)) return;
+        let message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message) {
+          message = { id: msg.messageId, role: "assistant", text: "", thinking: "" };
+          state.messages.push(message);
+        }
+        message.images = msg.images;
+        update(message.id);
+        return;
+      }
       case "delta": {
         let message = state.messages.find((m) => m.id === msg.messageId);
         if (!message) {
@@ -1259,6 +1368,15 @@
         images.set(msg.id, ok ? { data: msg.data } : { error: String(msg.error || "") });
         for (const picture of document.querySelectorAll(`img[data-att="${CSS.escape(msg.id)}"]`)) {
           if (ok) picture.src = msg.data;
+          else if (picture.closest(".cd-picture-item")) {
+            // Gone from the strip, and the strip says so: the next redraw keeps it rather than drawing it again.
+            const strip = picture.closest(".cd-pictures");
+            picture.closest(".cd-picture-item").remove();
+            const left = [...strip.querySelectorAll("img[data-att]")].map((i) => i.dataset.att);
+            strip.dataset.key = left.join(","); strip.dataset.count = String(left.length);
+            if (!left.length) strip.remove();
+          }
+          else if (picture.closest(".cd-lightbox-frame")) picture.replaceWith(el("p", "cd-thumb-missing", "This picture is no longer there."));
           else picture.closest(".cd-thumb")?.replaceChildren(el("span", "cd-thumb-missing", picture.alt || "Image"));
         }
         while (images.size > 200) images.delete(images.keys().next().value);

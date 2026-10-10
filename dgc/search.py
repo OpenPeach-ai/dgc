@@ -213,6 +213,115 @@ def shared_settings(config) -> tuple[str, str, str]:
     return str(found["search_provider"] or "duckduckgo"), str(found["search_api_key"] or ""), str(found["search_url"] or "")
 
 
+def _site(link: str) -> str:
+    from urllib.parse import urlsplit
+    host = (urlsplit(link).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _size(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _picture(title, image, thumbnail, page, width=0, height=0) -> dict | None:
+    """One image result, the same from every provider: what it is, the picture, a small copy to show, and the page
+    it's on (where "Open page" goes; the picture itself when a provider names no page)."""
+    image, thumbnail, page = (str(x or "").strip() for x in (image, thumbnail, page))
+    thumbnail = thumbnail or image
+    page = page if page.startswith(("http://", "https://")) else image
+    if not thumbnail.startswith("https://") or not page.startswith(("http://", "https://")):
+        return None
+    return {"title": " ".join(str(title or "").split())[:200], "image": image[:2000], "thumbnail": thumbnail[:2000],
+            "url": page[:2000], "site": _site(page), "width": _size(width), "height": _size(height)}
+
+
+def _ddgs_images(query: str, n: int) -> list[dict]:
+    try:
+        from ddgs import DDGS                                   # type: ignore[import-not-found]
+    except ImportError:
+        try:
+            from duckduckgo_search import DDGS                  # type: ignore[import-not-found,no-redef]
+        except ImportError:
+            raise SearchError("image search with DuckDuckGo needs the ddgs package, which this install lacks") from None
+    with DDGS() as client:
+        rows = list(client.images(query, max_results=n, safesearch="moderate") or [])
+    return [_picture(r.get("title"), r.get("image"), r.get("thumbnail"), r.get("url"), r.get("width"), r.get("height"))
+            for r in rows if isinstance(r, dict)]
+
+
+def _brave_images(query: str, n: int, key: str) -> list[dict]:
+    if not key:
+        raise SearchError("Brave needs an API key — use `/search brave` (masked prompt), `DGC_SEARCH_API_KEY`, or `dgc setup`.")
+    r = requests.get("https://api.search.brave.com/res/v1/images/search",
+                     params={"q": query, "count": n, "safesearch": "strict"},
+                     headers={"Accept": "application/json", "X-Subscription-Token": key, **_UA}, timeout=20)
+    r.raise_for_status()
+    out = []
+    for x in r.json().get("results") or []:
+        props = x.get("properties") or {}
+        out.append(_picture(x.get("title"), props.get("url"), (x.get("thumbnail") or {}).get("src"), x.get("url"),
+                            props.get("width"), props.get("height")))
+    return out
+
+
+def _tavily_images(query: str, n: int, key: str) -> list[dict]:
+    if not key:
+        raise SearchError("Tavily needs an API key — use `/search tavily` (masked prompt), `DGC_SEARCH_API_KEY`, or `dgc setup`.")
+    r = requests.post("https://api.tavily.com/search", timeout=25,
+                      json={"api_key": key, "query": query, "max_results": 1, "include_images": True,
+                            "include_image_descriptions": True})
+    r.raise_for_status()
+    out = []
+    for x in r.json().get("images") or []:
+        link, about = (x, "") if isinstance(x, str) else (x.get("url"), x.get("description"))
+        out.append(_picture(about, link, link, ""))
+    return out
+
+
+def _searxng_images(query: str, n: int, base_url: str) -> list[dict]:
+    if not base_url:
+        raise SearchError("SearXNG needs a base URL — set it with `/search searxng <url>` or `dgc setup`.")
+    r = requests.get(base_url.rstrip("/") + "/search", headers=_UA, timeout=20,
+                     params={"q": query, "format": "json", "categories": "images", "safesearch": 1})
+    r.raise_for_status()
+    out = []
+    for x in r.json().get("results") or []:
+        width, _, height = str(x.get("resolution") or "").replace("×", "x").partition("x")
+        thumb = x.get("thumbnail_src") or x.get("img_src")
+        if str(thumb or "").startswith("//"):
+            thumb = "https:" + thumb
+        out.append(_picture(x.get("title"), x.get("img_src"), thumb, x.get("url"), width.strip(), height.strip()))
+    return out
+
+
+def images(query: str, provider: str, api_key: str = "", url: str = "", n: int = 8) -> list[dict]:
+    """An image search with the configured provider, for a chat reply that shows pictures: [{"title", "image",
+    "thumbnail", "url" (the page it's on), "site", "width", "height"}], only results with an https thumbnail.
+    Raises SearchError saying why when it fails."""
+    query = (query or "").strip()
+    if not query:
+        raise SearchError("empty image search query")
+    try:
+        if provider == "brave":
+            found = _brave_images(query, n, api_key)
+        elif provider == "tavily":
+            found = _tavily_images(query, n, api_key)
+        elif provider == "searxng":
+            found = _searxng_images(query, n, url)
+        else:
+            found = _ddgs_images(query, n)
+    except requests.RequestException as e:
+        raise SearchError(f"image search failed ({provider}): {e}") from e
+    except SearchError:
+        raise
+    except Exception as e:                      # noqa: BLE001 -- a client library's own failure, said plainly
+        raise SearchError(f"image search failed ({provider}): {' '.join(str(e).split())[:200]}") from e
+    return [x for x in found if x][:n]
+
+
 def results(query: str, provider: str, api_key: str = "", url: str = "", n: int = 6) -> list[dict]:
     """The same search as data, for a reply that cites its sources: [{"title", "url", "snippet"}].
     Raises SearchError saying why when it fails."""

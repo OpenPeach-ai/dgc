@@ -50,7 +50,18 @@ voice come in later phases.
   favicons, opens a panel beside the chat: what it searched for, the pages it cited, and the other results it
   found, each with its site, title and a few words from it. Favicons come from Google's icon service, asked
   about a site's address only (never the page), as Work's links do; `dgc.linkFavicons` off turns them all
-  into a globe. One reply makes at most five searches. The search itself is the one set in
+  into a globe. One reply makes at most five searches.
+
+  **Pictures**, as ChatGPT shows them, only where seeing helps: the same check that decides whether to search
+  decides whether pictures belong in the answer (what a place, building, dish, animal, plant, product,
+  artwork or style looks like), and for rules, prices, news, advice, code or writing there are none. Up to
+  four show above the answer, each with the site it's from; click one for it larger, with its title and
+  **Open page** (the arrow keys step through them). DGC fetches each picture's small copy from the image
+  search and keeps it with the chat, so the chat screen never contacts an image site. The model is told the
+  pictures are shown but hasn't seen them, so it doesn't describe them: an image search can return a picture
+  of the wrong thing, and the site under each one is there to check it.
+
+  The search itself is the one set in
   **Settings → Web search**, shared with Work and your Pips:
   - DuckDuckGo needs nothing.
   - Brave and Tavily need a key, which is kept in `~/.dgc/secrets.json` (owner-only), where `dgc setup`

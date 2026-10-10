@@ -57,6 +57,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **Web search is always there in ChatDGC.** `search` defaults to `auto`, and an `auto` reply first asks the
   model (one small structured call on the message) whether it needs the web; if so it searches and answers from
   the numbered results. The config key `chatdgc_web` (Settings → Web search) turns it off everywhere.
+- **Pictures from the web, where seeing helps.** The same check (for `auto` and `on`) names an image search
+  when pictures are part of the answer (a place, a dish, an animal, a product, a style), and none otherwise.
+  The backend runs it with the search set in Settings (`dgc/search.py` `images()`: DuckDuckGo through `ddgs`,
+  Brave, Tavily, SearXNG), fetches the first four small copies that are really pictures (public https, 400 KB
+  each), and keeps them with the chat like attached images. A new event, `chatdgc_images`, shows them while
+  the reply streams; the reply carries them as `images` {query, items: [{id, kind, mime, title, url, site,
+  image, width?, height?}]}, and `chatdgc_file` serves each by id. The model is told they're shown and that it
+  hasn't seen them; a later turn reads that they were.
 - **Shared memory.** One memory about the user (`dgc/shared_memory.py`, `~/.dgc/memory/facts.json`), read by
   ChatDGC, Work sessions (under `# Memory`) and Personal Pips (pinned into each run), and written by ChatDGC's
   `remember` and `forget` tools only when the user said it (the Pip-notes rule), never a secret, at most three

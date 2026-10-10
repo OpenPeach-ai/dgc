@@ -35,7 +35,13 @@
   - the list of shortcuts: Ctrl/⌘+/.
 - **Sources, as ChatGPT shows them.** A fact a reply took from the web carries a pill with the site's favicon
   and name; point at it for the page's title and what it says. **Sources** under the reply opens every page it
-  cited, and the other results it found, in a panel beside the chat.
+  cited, and the other results it found, in a panel beside the chat. A site's icon sits on a white disc, so
+  a dark logo still shows on a dark theme.
+- **Pictures from the web, where seeing helps.** Ask what a place, a dish, an animal or a style looks like and
+  a strip of up to four pictures shows above the answer as it's written, each with the site it's from. Click
+  one to see it larger, with its title and **Open page**; the arrow keys step through them. A rules, prices or
+  code question gets none. The pictures are fetched by DGC and kept with the chat: the chat screen never asks
+  an image site itself.
 - **Web search is always on in ChatDGC**, as in ChatGPT: a question about facts that could be wrong or out
   of date (rules, rates, prices, news, people) is looked up before it's answered, with sources. The box's
   **Web** picker is gone; **Search** makes it search first for one message, and **Settings → Web search** can

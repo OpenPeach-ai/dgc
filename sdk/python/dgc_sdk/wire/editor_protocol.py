@@ -884,6 +884,10 @@ EVENT_FIELDS.update({
     # A question the reply put to the user, as it's asked (the reply goes on): {at, question, options, prompt},
     # `at` being where in the reply's text it sits. The finished reply carries it in `questions` too.
     "chatdgc_question": {"conversation_id": _S(), "message_id": _S(), "question": _O()},
+    # Pictures from the web shown above a reply, as soon as they're kept (the reply goes on): {query, items: [{id,
+    # kind "image", mime, title, url (the page it's on), site, image, width?, height?}]}; each one's bytes are asked
+    # for by id with `chatdgc_file`. The finished reply carries them in `images` too.
+    "chatdgc_images": {"conversation_id": _S(), "message_id": _S(), "images": _O()},
     # Deep research as it goes: the reply's `research` now (status planning, planned, running, writing, checking,
     # done, stopped or failed; plan; notes by number, title and address; the latest activity; steers; check).
     "chatdgc_research": {"conversation_id": _S(), "message_id": _S(), "research": _O()},

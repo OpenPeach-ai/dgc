@@ -84,10 +84,25 @@ LOOK_UP = (
     "that could be wrong or out of date: anything current or recent, prices, rates, rules, laws, taxes, limits, "
     "fees, procedures, figures, statistics, or specific people, products, places or organisations. No for maths, "
     "writing, code, explanations of things that don't change, opinions, small talk, or questions about this "
-    "conversation itself. If yes, give one short search query (2 to 8 words).")
+    "conversation itself. If yes, give one short search query (2 to 8 words).\n\n"
+    "Separately, decide whether pictures would help the user: only when seeing something is part of the answer, "
+    "such as what a place, building, landmark, dish, animal, plant, product, artwork, vehicle, outfit or style looks "
+    "like, or telling one thing from another by sight. Not for rules, prices, news, advice, code, writing, maths, "
+    "explanations or most questions: leave images empty then. If pictures would help, give a short image search "
+    "query in images (2 to 6 words).")
 LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boolean"},
-                                                   "query": {"type": "string", "description": "One short query."}},
+                                                   "query": {"type": "string", "description": "One short query."},
+                                                   "images": {"type": "string", "description":
+                                                              "An image search query, or empty for no pictures."}},
                   "required": ["needs_search", "query"]}
+# Pictures from the web above a reply, when the check above asks for them (ChatGPT's image strip): fetched while the
+# answer streams, kept with the chat, shown from there (the screen never asks an image host itself).
+MAX_PICTURES = 4
+PICTURE_BYTES = 400_000                 # one thumbnail at most; a search engine's copy is a few tens of KB
+PICTURE_WAIT = 8.0                      # seconds a finished reply waits for its pictures before it's saved without
+PICTURE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+PICTURES_SHOWN = ("The user sees pictures from a web image search for \"{query}\" above your reply. You haven't "
+                  "seen them, so don't describe them or point to them; answer as you would without them.")
 PROJECTS_FRESH = 300          # seconds a list of the user's projects is reused
 NAME_PROMPT = ("Name this conversation in three to six words, the way a chat app titles it. Reply with the name "
                "only: no quotes, no full stop.")
@@ -102,7 +117,8 @@ class ChatEngineError(Exception):
 class ChatEngine:
     def __init__(self, config, store: ChatStore | None = None, *, client_factory: Callable | None = None,
                  searcher: Callable | None = None, fetcher: Callable | None = None,
-                 memory: shared_memory.SharedMemory | None = None, projects: Callable | None = None):
+                 memory: shared_memory.SharedMemory | None = None, projects: Callable | None = None,
+                 image_searcher: Callable | None = None, thumbnailer: Callable | None = None):
         self.config = config
         self.memory = memory or shared_memory.SharedMemory()
         self._projects_source = projects or (lambda hidden: shared_memory.work_projects(hidden=hidden))
@@ -112,6 +128,8 @@ class ChatEngine:
         self._fetcher = fetcher or research.fetch_page
         self._researching: dict[tuple[str, str], research.Research] = {}
         self._searcher = searcher or self._search
+        self._image_searcher = image_searcher or self._image_search
+        self._thumbnailer = thumbnailer or _thumbnail
         from .eyes import Eyes
         self.eyes = Eyes(self)
         self._temporary: dict[str, dict] = {}      # temporary chats: never written, gone with the process
@@ -222,10 +240,16 @@ class ChatEngine:
         provider, key, url = search.shared_settings(self.config)
         return search.results(query, provider, api_key=key, url=url, n=6)
 
+    def _image_search(self, query: str) -> list[dict]:
+        """The same search, for pictures."""
+        from .. import search
+        provider, key, url = search.shared_settings(self.config)
+        return search.images(query, provider, api_key=key, url=url, n=8)
+
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
-             on_activity=None, on_compacted=None, on_question=None, cancel: threading.Event | None = None,
-             answering: dict | None = None) -> dict:
+             on_activity=None, on_compacted=None, on_question=None, on_images=None,
+             cancel: threading.Event | None = None, answering: dict | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
@@ -287,11 +311,11 @@ class ChatEngine:
         sees = relay is None and self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None,
                            reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity,
-                           on_compacted=on_compacted, on_question=on_question)
+                           on_compacted=on_compacted, on_question=on_question, on_images=on_images)
 
     def answer(self, chat_id: str, message_id: str, question: int, choice: str, *, model: str | None = None,
                thinking: str | None = None, search: str = "off", on_start=None, on_text=None, on_thinking=None,
-               on_activity=None, on_compacted=None, on_question=None,
+               on_activity=None, on_compacted=None, on_question=None, on_images=None,
                cancel: threading.Event | None = None) -> dict:
         """Answer the question a reply asked: the message the model wrote for it, with the choice in, sent as the
         user's. Only while that reply is the last thing said; after that it's an ordinary message to write."""
@@ -309,7 +333,7 @@ class ChatEngine:
             raise ChatEngineError("Choose an answer first.")
         return self.send(chat_id, answered(asked[question], choice), model=model, thinking=thinking, search=search,
                          on_start=on_start, on_text=on_text, on_thinking=on_thinking, on_activity=on_activity,
-                         on_compacted=on_compacted, on_question=on_question, cancel=cancel,
+                         on_compacted=on_compacted, on_question=on_question, on_images=on_images, cancel=cancel,
                          answering={"message": message_id, "question": question, "choice": choice})
 
     # -- deep research (research.py): a plan to edit or start, then rounds of reading, then a checked report
@@ -498,7 +522,7 @@ class ChatEngine:
 
     def edit(self, chat_id: str, message_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None, on_compacted=None,
-             on_question=None, cancel: threading.Event | None = None) -> dict:
+             on_question=None, on_images=None, cancel: threading.Event | None = None) -> dict:
         """Change a message you sent: a new version of the conversation from there, with a new reply. What it
         carried (files, and what a vision model saw in them) goes with it."""
         text = str(text or "")
@@ -522,11 +546,12 @@ class ChatEngine:
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
                            on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question)
+                           on_question=on_question, on_images=on_images)
 
     def regenerate(self, chat_id: str, message_id: str, *, model: str | None = None, thinking: str | None = None,
                    search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
-                   on_compacted=None, on_question=None, cancel: threading.Event | None = None) -> dict:
+                   on_compacted=None, on_question=None, on_images=None,
+                   cancel: threading.Event | None = None) -> dict:
         """Try a reply again (with another model or thinking level, if chosen): a new version from that reply on."""
         chat = self._chat(chat_id)
         index = self._at(chat, message_id, "assistant")
@@ -542,7 +567,7 @@ class ChatEngine:
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
                            on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question)
+                           on_question=on_question, on_images=on_images)
 
     def version(self, chat_id: str, parent_id: str, index: int) -> dict:
         """Show another version at a point of the conversation (``parent_id``: the message before it, or "root")."""
@@ -594,6 +619,11 @@ class ChatEngine:
                 lines += [with_questions(m, _exported) or "*(no reply)*", ""]
                 if m.get("sources"):
                     lines += ["**Sources**", ""] + [f"{x['n']}. [{x['title']}]({x['url']})" for x in m["sources"]] + [""]
+                shown = (m.get("images") or {}).get("items") or []
+                if shown:
+                    lines += ["**Images from the web**", ""] + [
+                        f"- [{x.get('title') or x.get('site') or 'Image'}]({x['url']})" + (f" ({x['site']})" if x.get("site") else "")
+                        for x in shown if x.get("url")] + [""]
         return "\n".join(lines).rstrip() + "\n"
 
     @staticmethod
@@ -608,7 +638,7 @@ class ChatEngine:
         return out
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
-                       on_activity=None, on_compacted=None, on_question=None,
+                       on_activity=None, on_compacted=None, on_question=None, on_images=None,
                        cancel: threading.Event | None = None) -> dict:
         """Carry on a reply the model stopped at its limit (or one that was stopped), in the same message."""
         chat = self._chat(chat_id)
@@ -681,7 +711,9 @@ class ChatEngine:
         """An image this chat keeps, as a data: URI to show. Raises ChatEngineError when it isn't one, is gone, or
         is larger than ``limit`` bytes."""
         chat = self._chat(chat_id)
-        meta = next((a for m in chat["messages"] for a in m.get("attachments") or [] if a.get("id") == attachment_id), None)
+        meta = next((a for m in chat["messages"]
+                     for a in [*(m.get("attachments") or []), *((m.get("images") or {}).get("items") or [])]
+                     if a.get("id") == attachment_id), None)
         if meta is None or meta.get("kind") != "image":
             raise ChatEngineError("That image isn't in this chat.")
         found = self._file(chat, attachment_id)
@@ -923,6 +955,9 @@ class ChatEngine:
                         content += "\n\n" + attached.frame(meta, found[0], words)
             if not content and not pictures:
                 continue
+            if m["role"] == "assistant" and (m.get("images") or {}).get("items"):
+                content += (f"\n\n[Shown above this reply: pictures from a web image search for "
+                            f"\"{m['images'].get('query', '')}\".]")
             if m["role"] == "assistant" and m.get("sources"):
                 content += "\n\nSources:\n" + "\n".join(f"[{x['n']}] {x['title']} {x['url']}" for x in m["sources"])
             if pictures:
@@ -980,29 +1015,103 @@ class ChatEngine:
         except shared_memory.NotRemembered as exc:
             return f"Not done: {exc}"
 
-    def _looked_up(self, client, chat: dict, sources: list, searches: list, on_activity, cancel) -> str:
-        """Whether the user's message needs the web before it's answered (one small structured call on that
-        message, not the whole chat); if so, the search's numbered results, to answer from and cite."""
+    def _looked_up(self, client, chat: dict, sources: list, searches: list, on_activity, cancel, *,
+                   search_first: bool = True) -> tuple[str, str]:
+        """Whether the user's message needs the web before it's answered, and whether pictures would help (one
+        small structured call on that message, not the whole chat): the search's numbered results, to answer from
+        and cite ("" when it needs none, or ``search_first`` is off), and an image search query ("" for none)."""
         mine = next((m.get("text") or "" for m in reversed(chat["messages"]) if m.get("role") == "user"), "")
         if not mine.strip():
-            return ""
+            return "", ""
         before = next((m.get("text") or "" for m in reversed(chat["messages"]) if m.get("role") == "assistant"), "")
         asked = (f"Your last reply, for context:\n<<<\n{before[-1500:]}\n>>>\n\n" if before else "") + \
             f"The user's message:\n<<<\n{mine[-4000:]}\n>>>"
         try:
             decided = research.structured(client, LOOK_UP, asked, "search_first", LOOK_UP_SCHEMA, cancel=cancel)
         except Exception:                         # noqa: BLE001 -- the reply goes on; the model can still search
-            return ""
+            return "", ""
+        wanted = " ".join(str(decided.get("images") or "").split())[:120]
+        if wanted.casefold() in ("none", "no", "n/a", "null", "empty", "-"):
+            wanted = ""
         query = " ".join(str(decided.get("query") or "").split())[:200]
-        if not decided.get("needs_search") or not query:
-            return ""
+        if not search_first or not decided.get("needs_search") or not query:
+            return "", wanted
         from types import SimpleNamespace
         results = self._web_search(SimpleNamespace(name="web_search", arguments={"query": query}), sources, searches,
                                    on_activity)
         if results.startswith("error:"):
-            return ""
+            return "", wanted
         return ("Searched the web before you answer (the results are numbered as you cite them; search again if "
-                f"you need more):\n{results}")
+                f"you need more):\n{results}"), wanted
+
+    def _start_pictures(self, chat: dict, query: str, on_images, cancel) -> dict:
+        """Look for pictures on a thread of their own while the answer streams; ``on_images`` shows them as soon as
+        they're kept. _end_pictures collects them for the saved reply."""
+        job = {"query": query, "items": [], "closed": False, "lock": threading.Lock()}
+
+        def run():
+            try:
+                kept = self._pictures(query, cancel)
+                with job["lock"]:
+                    if job["closed"] or not kept or (cancel is not None and cancel.is_set()):
+                        return
+                    for meta, raw in kept:
+                        if chat.get("temporary"):
+                            with self._lock:
+                                self._temporary_files[(chat["id"], meta["id"])] = (raw, None)
+                        else:
+                            self.store.put_file(chat["id"], meta["id"], raw)
+                    job["items"] = items = [meta for meta, _ in kept]
+            except Exception:                    # noqa: BLE001 -- pictures are extra: a reply never fails for them
+                return
+            if on_images is not None:
+                try:
+                    on_images({"query": query, "items": items})
+                except Exception:                # noqa: BLE001 -- the saved reply still carries them
+                    pass
+        job["thread"] = threading.Thread(target=run, name="chatdgc-pictures", daemon=True)
+        job["thread"].start()
+        return job
+
+    @staticmethod
+    def _end_pictures(job: dict, *, wait: bool) -> dict | None:
+        """The pictures a reply keeps: what was found by the time it ended (waiting a little for a slow image search
+        when it ended well), and nothing from after: a late search is dropped, not shown on a saved reply."""
+        job["thread"].join(PICTURE_WAIT if wait else 0)
+        with job["lock"]:
+            job["closed"] = True
+            return {"query": job["query"], "items": job["items"]} if job["items"] else None
+
+    def _pictures(self, query: str, cancel) -> list[tuple[dict, bytes]]:
+        """An image search's first pictures that load (MAX_PICTURES), each fetched here: (what it is and the page
+        it's on, its bytes), for the chat to keep as an image of its own."""
+        from concurrent.futures import ThreadPoolExecutor
+        found = [x for x in self._image_searcher(query) or [] if isinstance(x, dict)][:MAX_PICTURES * 2]
+
+        def fetch(item):
+            if cancel is not None and cancel.is_set():
+                return None
+            try:
+                raw = self._thumbnailer(str(item.get("thumbnail") or ""))
+            except Exception:                    # noqa: BLE001 -- that one isn't shown
+                return None
+            mime = _image_type(raw)
+            return (raw, mime) if mime else None
+
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="chatdgc-picture") as pool:
+            fetched = list(pool.map(fetch, found))
+        kept = []
+        for item, got in zip(found, fetched):
+            if got is None or len(kept) >= MAX_PICTURES:
+                continue
+            page = str(item.get("url") or "")
+            kept.append(({"id": attached.new_attachment_id(), "kind": "image", "mime": got[1],
+                          "title": " ".join(str(item.get("title") or "").split())[:200],
+                          "url": page[:2000], "site": str(item.get("site") or "")[:200],
+                          "image": str(item.get("image") or "")[:2000],
+                          **{k: int(item[k]) for k in ("width", "height") if isinstance(item.get(k), int) and item[k] > 0}},
+                         got[0]))
+        return kept
 
     @staticmethod
     def _question(call, questions: list, at: int) -> tuple[str, dict | None]:
@@ -1059,7 +1168,7 @@ class ChatEngine:
         return "\n".join(lines)[:12_000]
 
     def _reply(self, chat, build, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
-               on_activity=None, on_compacted=None, on_question=None) -> dict:
+               on_activity=None, on_compacted=None, on_question=None, on_images=None) -> dict:
         """One reply. ``build(chat, room)`` is what the model reads, for a window of ``room`` tokens: when it would
         fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent)."""
         model = chat.get("model") or None
@@ -1111,12 +1220,21 @@ class ChatEngine:
             return out or None
 
         messages = list(history)
-        if search == "auto" and existing is None and name not in self._toolless:
+        web_images = (existing or {}).get("images")       # a continued reply keeps the pictures it has
+        picturing = None
+        if search in ("auto", "on") and existing is None and name not in self._toolless:
             # As ChatGPT does: a question that turns on facts is looked up before it's answered, not left to a
-            # model that's sure of itself (deepseek answered tax and remittance rules from memory, 2 in 2).
-            found = self._looked_up(client, chat, sources, searches, on_activity, cancel)
-            if found:
-                messages[0] = {**messages[0], "content": messages[0]["content"] + "\n\n" + found}
+            # model that's sure of itself (deepseek answered tax and remittance rules from memory, 2 in 2). With
+            # the box's Search ("on") the model is told to search anyway: the check only says whether to show
+            # pictures, which it does for either.
+            found, wanted = self._looked_up(client, chat, sources, searches, on_activity, cancel,
+                                            search_first=search == "auto")
+            told = [found] if found else []
+            if wanted:
+                picturing = self._start_pictures(chat, wanted, on_images, cancel)
+                told.append(PICTURES_SHOWN.format(query=wanted))
+            if told:
+                messages[0] = {**messages[0], "content": messages[0]["content"] + "\n\n" + "\n\n".join(told)}
         try:
             # A search is one more round: the model asks, the results go back, it answers (or searches again,
             # up to MAX_SEARCHES; after that it is offered no search and answers from what it has). A question
@@ -1176,6 +1294,8 @@ class ChatEngine:
                 finish, failure = "error", exc
         if cancel is not None and cancel.is_set() and finish != "error":
             finish = "cancelled"
+        if picturing is not None:
+            web_images = self._end_pictures(picturing, wait=finish not in ("cancelled", "error")) or None
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
         if existing is not None:
@@ -1185,6 +1305,8 @@ class ChatEngine:
                        "usage": _add_usage(existing.get("usage") or {}, usage)}
             message.pop("counted", None)
             message.update(_found(sources, searches))
+            if web_images:
+                message["images"] = web_images
             if questions:
                 message["questions"] = questions
             if memory_ops:
@@ -1197,6 +1319,8 @@ class ChatEngine:
             if failure is not None:
                 message["error"] = _failure_text(failure)
             message.update(_found(sources, searches))
+            if web_images:
+                message["images"] = web_images
             if questions:
                 message["questions"] = questions
             if memory_ops:
@@ -1238,6 +1362,32 @@ def _asked(question: dict) -> str:
 def _exported(question: dict) -> str:
     return ("\n\n> **" + question.get("question", "") + "**\n>\n"
             + "\n".join(f"> - {o}" for o in question.get("options") or []) + "\n\n")
+
+
+def _image_type(raw) -> str | None:
+    """What a fetched picture is, from its own bytes (a server's word isn't taken): one of PICTURE_TYPES, or None."""
+    if not isinstance(raw, (bytes, bytearray)) or not 64 <= len(raw) <= PICTURE_BYTES:
+        return None
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _thumbnail(url: str) -> bytes:
+    """A picture's small copy, fetched as deep research reads a page: public https addresses only, every redirect
+    checked, and no more than PICTURE_BYTES."""
+    from ..tools import _fetch_public
+    if not url.startswith("https://"):
+        raise ValueError("only https pictures are fetched")
+    _final, _type, raw, _encoding = _fetch_public(url, max_bytes=PICTURE_BYTES, https_only=True,
+                                                  binary_types=PICTURE_TYPES | {"application/octet-stream"})
+    return raw
 
 
 def _found(sources: list, searches: list) -> dict:

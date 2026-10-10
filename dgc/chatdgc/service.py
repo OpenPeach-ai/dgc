@@ -446,7 +446,11 @@ class ChatService:
             return {"on_text": lambda part: stream["value"].text(part),
                     "on_thinking": lambda part: stream["value"].thinking(part),
                     "on_compacted": lambda summary: self._compacted(conversation_id, summary),
-                    "on_question": question}
+                    "on_question": question, "on_images": pictures}
+
+        def pictures(shown):
+            # From the pictures' own thread, while the answer streams: they show above it as soon as they're kept.
+            self.emit("chatdgc_images", conversation_id=conversation_id, message_id=turn["reply_id"], images=shown)
 
         def question(asked):
             stream["value"].flush()                   # what it wrote before asking reaches the screen first
