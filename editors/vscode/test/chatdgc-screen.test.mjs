@@ -691,6 +691,91 @@ test("the Library: every file you attached, by kind, searched by name, each with
   } finally { await page.close(); }
 });
 
+test("plugins in chat: a card for each change, Send it now as edited, Hand it to a Pip first for something recurring, Don't", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const A = (c) => "act_" + c.repeat(32);
+    const base = { plugin: "gcal", plugin_name: "Google Calendar", money: false, server: "gcal", tool: "create_event",
+                   arguments: { title: "Lunch <b>with</b> Anya", when: "Fri 13:00", guests: ["anya@example.com"] }, recurring: false, status: "waiting", at: 0 };
+    const cards = [
+      { ...base, id: A("1") },
+      { ...base, id: A("2"), recurring: true, arguments: { title: "Planning" } },
+      { ...base, id: A("3"), plugin: "aave", plugin_name: "Aave", money: true, tool: "supply", arguments: { amount: 10 } },
+      { ...base, id: A("4"), status: "done", answer: '{"id":"evt_1"}', sent_arguments: { title: "Lunch", when: "Fri 13:30" } },
+      { ...base, id: A("5"), status: "failed", error: "Google Calendar said: calendar is read-only" },
+      { ...base, id: A("6"), status: "handed", pip: { id: "pip_" + "a".repeat(32), name: "Ava" } },
+      { ...base, id: A("7"), status: "dismissed" }];
+    await s.send({ type: "opened", conversation: conversation({ title: "Plans" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Lunch Friday" }, { id: M(2), role: "assistant", text: "Here are the cards.", finish: "stop", actions: cards }] });
+    await s.frame();
+    const card = (c) => s.page.locator(`.cd-card[data-action="${A(c)}"]`);
+    const buttons = (c) => card(c).locator(".cd-card-actions button").allTextContents();
+    assert.equal(await card("1").locator("strong").textContent(), "Do this in Google Calendar?");
+    assert.equal(await card("1").locator("small").textContent(), "create_event · nothing happens until you choose.");
+    assert.equal(await card("1").locator("b").count(), 0, "inputs are text");
+    assert.match(await card("1").locator(".cd-card-inputs").textContent(), /titleLunch <b>with<\/b> Anya.*guests\["anya@example\.com"\]/);
+    assert.deepEqual(await buttons("1"), ["Send it now", "Hand it to a Pip", "Edit", "Don't"]);
+    assert.deepEqual(await buttons("2"), ["Hand it to a Pip", "Send it now", "Edit", "Don't"], "something recurring: a Pip first");
+    assert.deepEqual([await card("2").locator("button", { hasText: "Hand it to a Pip" }).getAttribute("class"),
+                      await card("2").locator("button", { hasText: "Send it now" }).getAttribute("class")], ["cd-continue", "cd-edit-cancel"],
+                     "one choice stands out: the Pip's");
+    assert.equal(await card("3").locator("small").textContent(), "supply · Aave can move money, so it always asks.");
+    assert.equal(await card("4").locator(".cd-card-status").textContent(), "Done. Sent with your changes.");
+    assert.match(await card("4").locator(".cd-card-inputs").textContent(), /Fri 13:30/, "what was sent, as edited");
+    assert.equal(await card("4").locator("summary").textContent(), "What Google Calendar answered");
+    assert.equal(await card("5").locator(".cd-card-status").textContent(), "Didn't go: Google Calendar said: calendar is read-only");
+    assert.equal(await card("6").locator(".cd-card-status").textContent(), "Handed to Ava: it takes it from here.");
+    assert.equal(await card("7").locator(".cd-card-status").textContent(), "Not sent.");
+    assert.equal(await card("4").locator("small").count(), 0, "a decided card says what came of it, not the tool twice");
+    if (process.env.DGC_SHOTS) {
+      await card("1").scrollIntoViewIfNeeded();
+      await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-plugin-cards.png") });
+    }
+    // Edit: each input its own field (JSON for a list); a list that won't read says so and nothing goes.
+    await card("1").locator("button", { hasText: "Edit" }).click();
+    await s.frame();
+    assert.deepEqual(await card("1").locator(".cd-field-label").allTextContents(), ["title", "when", "guests (JSON)"]);
+    await card("1").locator("textarea, input").nth(1).fill("Fri 13:30");
+    await card("1").locator("textarea").last().fill('["anya@example.com"');
+    await card("1").locator("button", { hasText: "Send it now" }).click();
+    await s.frame();
+    assert.equal(await card("1").locator(".cd-card-error").textContent(), "guests aren't valid JSON. Check the brackets and quotes.");
+    assert.equal((await s.posted("actionRun")).length, 0);
+    await card("1").locator("textarea").last().fill('["anya@example.com","me@home.example"]');
+    await card("1").locator("button", { hasText: "Send it now" }).click();
+    await s.frame();
+    assert.deepEqual(await s.posted("actionRun"), [{ type: "actionRun", messageId: M(2), actionId: A("1"),
+      arguments: { title: "Lunch <b>with</b> Anya", when: "Fri 13:30", guests: ["anya@example.com", "me@home.example"] } }]);
+    assert.equal(await card("1").locator("button", { hasText: "Sending…" }).isDisabled(), true, "sending: nothing else to press");
+    await s.send({ type: "action", messageId: M(2), action: { ...cards[0], status: "done", answer: "ok",
+      sent_arguments: { title: "Lunch <b>with</b> Anya", when: "Fri 13:30" } } });
+    await s.frame();
+    assert.equal(await card("1").locator(".cd-card-status").textContent(), "Done. Sent with your changes.");
+    // Hand it to a Pip, and a picker closed without choosing; Don't.
+    await card("2").locator("button", { hasText: "Hand it to a Pip" }).click();
+    assert.deepEqual(await s.posted("actionHand"), [{ type: "actionHand", messageId: M(2), actionId: A("2") }]);
+    await s.send({ type: "actionIdle", actionId: A("2") });
+    await s.frame();
+    assert.equal(await card("2").locator("button", { hasText: "Hand it to a Pip" }).isDisabled(), false, "closed without a Pip: choose again");
+    await card("3").locator("button", { hasText: "Don't" }).click();
+    assert.deepEqual(await s.posted("actionDismiss"), [{ type: "actionDismiss", messageId: M(2), actionId: A("3") }]);
+    await s.send({ type: "error", message: "Let the reply finish first." });
+    await s.frame();
+    assert.equal(await card("3").locator("button", { hasText: "Don't" }).isDisabled(), false, "refused: the buttons come back");
+    // While a reply is still being written, its card waits for it.
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "activity", messageId: M(4), kind: "plugin", text: "Google Calendar" });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-activity").textContent(), "Using Google Calendar…");
+    await s.send({ type: "action", messageId: M(4), action: { ...base, id: A("8") } });
+    await s.frame();
+    assert.equal(await card("8").locator("button", { hasText: "Send it now" }).isDisabled(), true);
+    assert.equal(await card("8").locator(".cd-card-note").textContent(), "You can choose once the reply is finished.");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("attachments: picked files and pastes become chips, go with the message, and show on it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

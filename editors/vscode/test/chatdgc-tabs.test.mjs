@@ -646,3 +646,40 @@ test("a Library file in a new chat, or from the paperclip, and a send names only
   await tick(); await tick();
   assert.equal(world.picks.at(-1).length, 3, "Upload, a heading, and the recent file");
 });
+
+test("a plugin card's choices go by id; Hand it to a Pip asks which Pip, and a picker closed without one changes nothing", async () => {
+  chat.open(ID(9));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(9), title: "Plans" });
+  const act = `act_${"a".repeat(32)}`;
+  chat.onEvent({ type: "chatdgc_action", conversation_id: ID(9), message_id: MSG(2), action: { id: act, status: "waiting" } });
+  assert.deepEqual(panel.last("action"), { type: "action", messageId: MSG(2), action: { id: act, status: "waiting" } });
+  panel.say({ type: "actionRun", messageId: MSG(2), actionId: act, arguments: { when: "Fri 13:30" } });
+  panel.say({ type: "actionRun", messageId: MSG(2), actionId: "act_bad" });
+  assert.deepEqual({ ...last("chatdgc_action"), request_id: undefined }, { type: "chatdgc_action", conversation_id: ID(9), message_id: MSG(2),
+    action_id: act, op: "run", arguments: { when: "Fri 13:30" }, request_id: undefined });
+  assert.equal(sent.filter((c) => c.type === "chatdgc_action").length, 1, "only a real card id goes");
+  panel.say({ type: "actionDismiss", messageId: MSG(2), actionId: act });
+  assert.equal(last("chatdgc_action").op, "dismiss");
+  // Hand it to a Pip: your Personal Pips, then the one chosen.
+  world.pick = `pip_${"b".repeat(32)}`;
+  panel.say({ type: "actionHand", messageId: MSG(2), actionId: act });
+  await tick();
+  chat.onEvent({ type: "chatdgc_pips", request_id: last("chatdgc_pips").request_id,
+                 pips: [{ id: `pip_${"b".repeat(32)}`, name: "Ava", goal: "Plans" }, { id: "nope", name: "x" }] });
+  await tick(); await tick();
+  assert.deepEqual(world.picks.at(-1), [`pip_${"b".repeat(32)}`], "only real Pips are offered");
+  assert.deepEqual([last("chatdgc_action").op, last("chatdgc_action").pip_id], ["hand", `pip_${"b".repeat(32)}`]);
+  world.pick = undefined;
+  panel.say({ type: "actionHand", messageId: MSG(2), actionId: act });
+  await tick();
+  chat.onEvent({ type: "chatdgc_pips", request_id: last("chatdgc_pips").request_id, pips: [{ id: `pip_${"b".repeat(32)}`, name: "Ava" }] });
+  await tick(); await tick();
+  assert.deepEqual(panel.last("actionIdle"), { type: "actionIdle", actionId: act }, "closed without a Pip: the card's buttons come back");
+  panel.say({ type: "actionHand", messageId: MSG(2), actionId: act });
+  await tick();
+  chat.onEvent({ type: "chatdgc_pips", request_id: last("chatdgc_pips").request_id, pips: [], error: "Pips are disabled in this profile." });
+  await tick(); await tick();
+  assert.match(world.infos.at(-1), /Pips are disabled/, "no Pips: it says why");
+});

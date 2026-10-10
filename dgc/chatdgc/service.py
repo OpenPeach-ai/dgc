@@ -148,6 +148,7 @@ class ChatService:
              "chatdgc_carry": self._carry, "chatdgc_branch": self._branch, "chatdgc_research": self._research,
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
+             "chatdgc_action": self._action, "chatdgc_pips": self._pips,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -338,6 +339,93 @@ class ChatService:
         self.emit("chatdgc_library_file", request_id=cmd["request_id"], op=op, **fields)
         if op != "save":
             self._projects_changed()
+
+    # -- plugins: the user's choice on a card under a reply
+
+    def _action(self, cmd: dict) -> None:
+        """Send it now (as edited), don't, or hand it to a Pip. Sending holds the chat's turn slot, so no reply starts
+        meanwhile (its save would overwrite the card's outcome) and Stop has nothing to cut short."""
+        conversation_id, request_id, op = cmd["conversation_id"], cmd["request_id"], cmd["op"]
+        message_id, action_id = cmd["message_id"], cmd["action_id"]
+        self.engine.open(conversation_id)
+        if op == "dismiss":
+            with self._lock:
+                if conversation_id in self._turns:
+                    raise ChatEngineError("Let the reply finish first.")
+            done = self.engine.act(conversation_id, message_id, action_id, "dismiss")
+            self.emit("chatdgc_action", conversation_id=conversation_id, message_id=message_id, action=done,
+                      request_id=request_id)
+            return
+        arguments = cmd.get("arguments") if op == "run" else None
+        pip_id = str(cmd.get("pip_id") or "")
+        if op == "hand" and not pip_id:
+            raise ChatEngineError("Choose a Pip to hand it to.")
+        with self._lock:
+            if self._closing:
+                raise ChatEngineError("DGC is shutting down.")
+            if conversation_id in self._turns:
+                raise ChatEngineError("Let the reply finish first.")
+            slot = self._turns[conversation_id] = {"cancel": threading.Event(), "reply_id": None, "thread": None}
+
+        def run():
+            try:
+                if op == "run":
+                    done = self.engine.act(conversation_id, message_id, action_id, "run", arguments=arguments)
+                else:
+                    done = self._hand(conversation_id, message_id, action_id, pip_id)
+                self.emit("chatdgc_action", conversation_id=conversation_id, message_id=message_id, action=done,
+                          request_id=request_id)
+                self._changed(conversation_id, None)
+            except (ChatEngineError, ChatStoreError) as exc:
+                self._error(str(exc), request_id, conversation_id)
+            except Exception as exc:                  # noqa: BLE001 -- said, never lost
+                self._error(f"ChatDGC hit an error: {' '.join(str(exc).split())[:300] or type(exc).__name__}",
+                            request_id, conversation_id)
+            finally:
+                with self._lock:
+                    if self._turns.get(conversation_id) is slot:
+                        del self._turns[conversation_id]
+        thread = threading.Thread(target=run, daemon=True, name="chatdgc-action")
+        slot["thread"] = thread
+        thread.start()
+
+    def _pips_call(self, request: dict) -> dict:
+        """One Pips control, as the side bar runs it (the user's own, from this machine)."""
+        from ..pips import handle_control
+        if request.get("type") == "send_pip_message":
+            from ..pip_runtime import require_supervisor
+            require_supervisor(self.engine.config)
+        response = handle_control(self.engine.config, {**request, "request_id": "chatdgc"}, "editor-user", start_worker=False)
+        if not response.get("ok"):
+            raise ChatEngineError(str((response.get("error") or {}).get("message") or "Pips didn't answer.")[:300])
+        return response.get("result") or {}
+
+    def _personal_pips(self) -> list[dict]:
+        found = self._pips_call({"type": "list_workspaces"})
+        personal = next((w for w in found.get("workspaces") or [] if w.get("kind") == "personal"), None)
+        if personal is None:
+            return []
+        rows = self._pips_call({"type": "list_pips", "workspace_id": personal["id"], "order": "recent", "limit": 50})
+        return [{"id": p["id"], "name": p.get("name") or "Pip", "goal": str(p.get("goal") or "")[:200]}
+                for p in rows.get("pips") or [] if p.get("status") != "archived"]
+
+    def _pips(self, cmd: dict) -> None:
+        """Your Personal Pips, for "Hand it to a Pip"."""
+        try:
+            pips = self._personal_pips()
+        except Exception as exc:                      # noqa: BLE001 -- Pips off, or the runner can't start: said
+            self.emit("chatdgc_pips", request_id=cmd["request_id"], pips=[], error=" ".join(str(exc).split())[:300])
+            return
+        self.emit("chatdgc_pips", request_id=cmd["request_id"], pips=pips)
+
+    def _hand(self, conversation_id, message_id, action_id, pip_id) -> dict:
+        pip = next((p for p in self._personal_pips() if p["id"] == pip_id), None)
+        if pip is None:
+            raise ChatEngineError("That Pip isn't one of yours now.")
+        text = self.engine.pip_message(conversation_id, message_id, action_id)
+        self._pips_call({"type": "send_pip_message", "pip_id": pip_id, "text": text,
+                         "idempotency_key": f"chatdgc-{action_id}"})
+        return self.engine.act(conversation_id, message_id, action_id, "handed", pip=pip)
 
     def _move(self, cmd: dict) -> None:
         conversation_id = cmd["conversation_id"]
@@ -542,7 +630,12 @@ class ChatService:
             return {"on_text": lambda part: stream["value"].text(part),
                     "on_thinking": lambda part: stream["value"].thinking(part),
                     "on_compacted": lambda summary: self._compacted(conversation_id, summary),
-                    "on_question": question, "on_images": pictures}
+                    "on_question": question, "on_images": pictures, "on_action": card}
+
+        def card(action):
+            # A plugin's card, as the reply puts it there (the reply goes on): the screen shows it at once.
+            stream["value"].flush()
+            self.emit("chatdgc_action", conversation_id=conversation_id, message_id=turn["reply_id"], action=action)
 
         def pictures(shown):
             # From the pictures' own thread, while the answer streams: they show above it as soon as they're kept.

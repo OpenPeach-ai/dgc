@@ -825,6 +825,12 @@ COMMAND_FIELDS.update({
     # `chatdgc_library_file` saves one where the user chose, removes it, or copies it into a project; a send takes
     # {kind: "library", conversation_id | project_id, attachment_id} to attach a copy of one.
     "chatdgc_library": {"request_id": _S(), "query": _S(False), "kind": _S(False), "limit": _I(False), "offset": _I(False)},
+    # Plugins in chat: a reply's card (an action in one of the user's plugins) is decided with `chatdgc_action`: "run"
+    # sends it now (with `arguments` as the user edited them), "dismiss" doesn't, "hand" sends it to the Personal
+    # Pip `pip_id` (`chatdgc_pips` lists them). Answered by `chatdgc_action` with the card as it is now.
+    "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
+                       "op": _f("string", enum=("run", "dismiss", "hand")), "arguments": _O(False), "pip_id": _S(False)},
+    "chatdgc_pips": {"request_id": _S()},
     "chatdgc_library_file": {"request_id": _S(), "op": _f("string", enum=("save", "remove", "to_project")),
                              "conversation_id": _S(False), "project_id": _S(False), "attachment_id": _S(),
                              "path": _S(False), "target_project": _S(False)},
@@ -901,6 +907,11 @@ EVENT_FIELDS.update({
                        "busy": _B(), "reply_id": _S(False), "project": _O(False)},
     "chatdgc_projects": {"request_id": _S(False), "projects": _A()},
     "chatdgc_library": {"request_id": _S(), "files": _A(), "total": _I(), "next_offset": _f("integer", "null"), "counts": _O()},
+    # A card under a reply: {id, plugin, plugin_name, money, server, tool, arguments, recurring, status: waiting |
+    # done | failed | dismissed | handed, at, answer?, error?, pip?, sent_arguments?}; sent as a reply puts it there
+    # and after each choice. The finished reply carries them in `actions`.
+    "chatdgc_action": {"conversation_id": _S(), "message_id": _S(), "action": _O(), "request_id": _S(False)},
+    "chatdgc_pips": {"request_id": _S(), "pips": _A(), "error": _S(False)},
     "chatdgc_library_file": {"request_id": _S(), "op": _S(), "path": _S(False), "bytes": _I(False)},
     "chatdgc_project": {"request_id": _S(), "project": _f("object", "null"), "deleted": _A(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "messages": _A(), "earlier": _I()},
@@ -909,7 +920,7 @@ EVENT_FIELDS.update({
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
     # What the reply is doing besides writing: `text` is the query while it searches the web.
     "chatdgc_activity": {"conversation_id": _S(), "message_id": _S(),
-                         "kind": _f("string", enum=("searching", "looking", "compacting")), "text": _S()},
+                         "kind": _f("string", enum=("searching", "looking", "compacting", "plugin")), "text": _S()},
     "chatdgc_message": {"conversation_id": _S(), "message": _O(), "request_id": _S(False)},
     # A question the reply put to the user, as it's asked (the reply goes on): {at, question, options, prompt},
     # `at` being where in the reply's text it sits. The finished reply carries it in `questions` too.

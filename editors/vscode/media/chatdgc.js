@@ -18,7 +18,7 @@
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), searchFirst: false, planEditing: "", steerDraft: "", open: new Set(),
-                  projects: [], projectChats: null, projectChatsAsked: "" };
+                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {} };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -822,9 +822,10 @@
     if (message.thinking) node.append(thinkingBlock(message, live));
     { const strip = picturesStrip(message); if (strip) node.append(strip); }
     if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
+    for (const card of Array.isArray(message.actions) ? message.actions : []) node.append(actionCard(message, card, live));
     const doing = live && state.searching[message.id];
     if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
-      ? `Looking at the image with ${doing.text}…` : doing.kind === "compacting"
+      ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "compacting"
       ? "Summarizing earlier messages to fit the context window…" : `Searching the web for “${doing.text}”…`));
     else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
@@ -1005,6 +1006,132 @@
     panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } });
     document.body.append(panel);
     (focus === "instructions" ? inst : name).focus();
+  }
+  // ---- plugins: a card under a reply for what the model would do in one of your plugins (ChatGPT's confirmation).
+  // Nothing goes until you choose: Send it now (with your edits), Hand it to a Pip (first for something recurring),
+  // or Don't. Its inputs are the model's: text only, and editable here.
+  function cardFields(args) {
+    const keys = Object.keys(args || {});
+    if (keys.length > 20) return [{ key: null, kind: "json", value: JSON.stringify(args, null, 2) }];
+    return keys.map((key) => {
+      const v = args[key], kind = typeof v === "string" ? "text" : typeof v === "number" ? "number" : typeof v === "boolean" ? "boolean" : "json";
+      return { key, kind, value: kind === "text" ? v : kind === "json" ? JSON.stringify(v, null, 2) : String(v) };
+    });
+  }
+  /** The inputs as the user left them; says which one to fix when one won't read. */
+  function editedArgs(args, values) {
+    const out = [];
+    for (const [i, f] of cardFields(args).entries()) {
+      const raw = String(values[i] ?? "");
+      if (f.kind === "text") { out.push([f.key, raw]); continue; }
+      if (f.kind === "number") {
+        const t = raw.trim(), n = Number(t);
+        if (!/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(t) || !Number.isFinite(n)) throw new Error(`${f.key} needs a number.`);
+        out.push([f.key, n]); continue;
+      }
+      if (f.kind === "boolean") {
+        const b = raw.trim().toLowerCase();
+        if (b !== "true" && b !== "false") throw new Error(`${f.key} needs true or false.`);
+        out.push([f.key, b === "true"]); continue;
+      }
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { throw new Error(`${f.key === null ? "The inputs" : f.key} aren't valid JSON. Check the brackets and quotes.`); }
+      if (f.key === null) {
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("The inputs need to be one JSON object.");
+        return parsed;
+      }
+      out.push([f.key, parsed]);
+    }
+    return Object.fromEntries(out);
+  }
+  const shown = (v) => { const t = typeof v === "string" ? v : JSON.stringify(v); return t.length > 400 ? `${t.slice(0, 399)}…` : t; };
+  function actionCard(message, card, live) {
+    const box = el("div", "cd-card");
+    box.dataset.action = card.id; box.dataset.status = card.status || "waiting";
+    box.setAttribute("role", "group");
+    const waiting = card.status === "waiting", plugin = card.plugin_name || card.plugin || "the plugin";
+    box.setAttribute("aria-label", `${card.tool} in ${plugin}`);
+    const head = el("div", "cd-card-head");
+    head.append(el("span", "cd-card-mark", plugin.slice(0, 1).toUpperCase()));
+    const words = el("div", "cd-card-words");
+    words.append(el("strong", "", waiting ? `Do this in ${plugin}?` : `${card.tool} in ${plugin}`));
+    if (waiting) words.append(el("small", "", card.money ? `${card.tool} · ${plugin} can move money, so it always asks.`
+                                                         : `${card.tool} · nothing happens until you choose.`));
+    head.append(words);
+    box.append(head);
+    const args = card.sent_arguments || card.arguments || {};
+    const editing = waiting ? state.cardEdit[card.id] : null;
+    if (editing) {
+      const form = el("div", "cd-card-fields");
+      cardFields(card.arguments).forEach((f, i) => {
+        const label = el("label", "cd-field-label", f.key === null ? "Inputs (JSON)" : f.key + (f.kind === "json" ? " (JSON)" : ""));
+        const long = f.kind === "json" || f.kind === "text" && (f.value.length > 80 || f.value.includes("\n"));
+        const input = el(long ? "textarea" : "input", "cd-field");
+        input.id = `cd-card-${card.id}-${i}`; label.htmlFor = input.id;
+        if (long) input.rows = f.kind === "json" ? 4 : 3;
+        input.value = editing.values[i] ?? f.value;
+        input.dataset.keep = input.id;
+        input.addEventListener("input", () => { editing.values[i] = input.value; editing.error = ""; });
+        form.append(label, input);
+      });
+      if (editing.error) form.append(el("p", "cd-card-error", editing.error));
+      box.append(form);
+    } else {
+      const keys = Object.keys(args);
+      if (keys.length) {
+        const list = el("dl", "cd-card-inputs");
+        for (const key of keys.slice(0, 12)) list.append(el("dt", "", key), el("dd", "", shown(args[key])));
+        box.append(list);
+      }
+    }
+    if (waiting) {
+      const busy = state.cardBusy[card.id], off = live || !!busy;
+      const row = el("div", "cd-card-actions");
+      const send = el("button", card.recurring ? "cd-edit-cancel" : "cd-continue", busy === "sending" ? "Sending…" : "Send it now");
+      send.type = "button"; send.title = `Do it in ${plugin} now`;
+      send.addEventListener("click", () => {
+        let edited;
+        if (state.cardEdit[card.id]) {
+          try { edited = editedArgs(card.arguments, state.cardEdit[card.id].values); }
+          catch (e) { state.cardEdit[card.id].error = e.message; update(message.id); return; }
+        }
+        state.cardBusy[card.id] = "sending"; update(message.id);
+        vscode.postMessage({ type: "actionRun", messageId: message.id, actionId: card.id, ...(edited ? { arguments: edited } : {}) });
+      });
+      const pip = el("button", card.recurring ? "cd-continue" : "cd-edit-cancel", busy === "handing" ? "Handing it over…" : "Hand it to a Pip");
+      pip.type = "button"; pip.title = "One of your Pips takes it on: best for something recurring, or that has to wait";
+      pip.addEventListener("click", () => {
+        state.cardBusy[card.id] = "handing"; update(message.id);
+        vscode.postMessage({ type: "actionHand", messageId: message.id, actionId: card.id });
+      });
+      const edit = el("button", "cd-edit-cancel", editing ? "Undo changes" : "Edit");
+      edit.type = "button";
+      edit.addEventListener("click", () => {
+        if (state.cardEdit[card.id]) delete state.cardEdit[card.id];
+        else state.cardEdit[card.id] = { values: cardFields(card.arguments).map((f) => f.value), error: "" };
+        update(message.id);
+      });
+      const no = el("button", "cd-edit-cancel", "Don't"); no.type = "button";
+      no.addEventListener("click", () => { state.cardBusy[card.id] = "dismissing"; update(message.id);
+        vscode.postMessage({ type: "actionDismiss", messageId: message.id, actionId: card.id }); });
+      // Something recurring, or that has to wait, is a Pip's: that choice comes first.
+      row.append(...(card.recurring ? [pip, send] : [send, pip]), ...(Object.keys(card.arguments || {}).length ? [edit] : []), no);
+      for (const b of row.querySelectorAll("button")) b.disabled = off;
+      box.append(row);
+      if (live) box.append(el("p", "cd-card-note", "You can choose once the reply is finished."));
+    } else {
+      const said = card.status === "done" ? "Done." + (card.sent_arguments ? " Sent with your changes." : "")
+        : card.status === "failed" ? `Didn't go: ${card.error || "no answer."}`
+        : card.status === "handed" ? `Handed to ${card.pip?.name || "your Pip"}: it takes it from here.`
+        : card.status === "dismissed" ? "Not sent." : "";
+      box.append(el("p", `cd-card-status cd-card-${card.status}`, said));
+      if (card.status === "done" && card.answer) {
+        const more = el("details", "cd-card-answer");
+        more.append(el("summary", "", `What ${plugin} answered`), el("pre", "", String(card.answer)));
+        box.append(more);
+      }
+    }
+    return box;
   }
   /** Branch in new chat (ChatGPT's): this conversation up to here, in a new chat of its own, opened in a tab. */
   function branchAction(message) {
@@ -1427,7 +1554,7 @@
           state.compacting = true; render(); controls();        // Compact now, or a summary for a new chat
           return;
         }
-        if ((msg.kind === "searching" || msg.kind === "looking" || msg.kind === "compacting") && msg.messageId) {
+        if (["searching", "looking", "compacting", "plugin"].includes(msg.kind) && msg.messageId) {
           state.searching[msg.messageId] = { kind: msg.kind, text: String(msg.text || "") };
           if (!state.messages.some((m) => m.id === msg.messageId)) state.messages.push({ id: msg.messageId, role: "assistant", text: "", thinking: "" });
           update(msg.messageId);
@@ -1480,6 +1607,28 @@
         update(message.id);
         return;
       }
+      case "action": {
+        const card = msg.action;
+        if (!card || typeof card !== "object" || !/^act_[a-f0-9]{32}$/.test(String(card.id || ""))) return;
+        let message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message) {
+          message = { id: msg.messageId, role: "assistant", text: "", thinking: "" };
+          state.messages.push(message);
+        }
+        const cards = Array.isArray(message.actions) ? [...message.actions] : [];
+        const at = cards.findIndex((c) => c.id === card.id);
+        if (at >= 0) cards[at] = card; else cards.push(card);
+        message.actions = cards;
+        delete state.cardBusy[card.id];
+        if (card.status !== "waiting") delete state.cardEdit[card.id];
+        update(message.id);
+        if (card.status === "done") announce(`Sent: ${card.tool} in ${card.plugin_name}.`);
+        return;
+      }
+      case "actionIdle":
+        delete state.cardBusy[String(msg.actionId || "")];
+        for (const m of state.messages) if ((m.actions || []).some((c) => c.id === msg.actionId)) update(m.id);
+        return;
       case "images": {
         // Pictures for the reply, kept while it streams: they show above it.
         if (!msg.images || typeof msg.images !== "object" || !Array.isArray(msg.images.items)) return;
@@ -1532,6 +1681,10 @@
       }
       case "error":
         if (state.compacting) { state.compacting = false; render(); }
+        if (Object.keys(state.cardBusy).length) {        // a card's choice that was refused: its buttons come back
+          const busy = Object.keys(state.cardBusy); state.cardBusy = {};
+          for (const m of state.messages) if ((m.actions || []).some((c) => busy.includes(c.id))) update(m.id);
+        }
         { const panel = $("cd-project-panel");       // a save that was refused: the panel stays, to fix and save again
           if (panel?.dataset.saving) { delete panel.dataset.saving; const save = panel.querySelector('button[type="submit"]'); if (save) save.disabled = false; } }
         if (msg.opening && /doesn't exist/i.test(msg.message || "")) {

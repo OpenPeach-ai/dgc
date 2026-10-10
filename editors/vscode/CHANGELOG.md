@@ -43,6 +43,10 @@
   side bar; drag a chat onto one, or use **Move to project…**. A project's page shows its instructions, files,
   memory setting and chats, and its box starts a chat in it. Every chat in it reads its instructions and files,
   and a project can keep its memory to itself.
+- **Plugins in chat.** Every plugin you turned on is ChatDGC's too. A read runs at once; a change shows a card
+  under the reply with what it would do: **Send it now** (edit its inputs first if you like), **Hand it to a
+  Pip** (offered first for something recurring), or **Don't**. A plugin that can move money always asks, and
+  what the chat read from your apps never goes to a web search or out in a change without its card.
 - **The Library.** **Library** in the side bar shows every file you attached in ChatDGC, by kind, searchable by
   name. Open where a file is, start a new chat with it, save a copy, add it to a project, or delete it. The
   paperclip lists your newest files before Upload.

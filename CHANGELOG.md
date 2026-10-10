@@ -67,6 +67,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   A project chat's model reads the project's instructions, its files (a quarter of the window at most) and what
   its other chats are about; project-only memory reads and writes no shared memory. The chat index gains a
   `project` column (added safely when two processes open an older index at once) and a `files` table.
+- **Plugins in ChatDGC** (`dgc/chatdgc/plugins.py`). Every plugin turned on (`pip_plugins.installed`) is the
+  chat's: `plugin_tools` and `call_plugin`, decided as a Pip's are (`pip_plugins.asks`, `read_only`, each plugin's
+  level). A change that asks becomes a card on the reply (`actions`; new event `chatdgc_action`, sent as it's put
+  there), decided with `chatdgc_action` (`run` with the user's edited `arguments`, `dismiss`, or `hand` to a
+  Personal Pip from `chatdgc_pips`, by `send_pip_message`). A send re-checks the plugin is on, its server's
+  fingerprint and the tool's schema, holds the chat's turn slot, and is kept with its answer; later turns read
+  what came of each card. The careful check (`pip_careful.Taint`, per chat) forces a card for a change that
+  carries what the chat read from apps, and refuses a web search that would. `chatdgc_activity` gains `plugin`.
 - **The ChatDGC Library.** `chatdgc_library` lists every attached file (chats, archived ones too, and
   projects), newest first, by `kind` and name, with `counts` per kind; `chatdgc_library_file` saves one where
   the user chose, removes one (its chat keeps the attachment marked `removed`), or copies one into a project. A

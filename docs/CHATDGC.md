@@ -138,6 +138,21 @@ voice come in later phases.
     project knows what the project's other chats are about.
   - **Deleting a project** deletes its files and instructions, and its chats too unless you keep them; kept
     chats move back to your chats.
+- **Plugins in chat**, as ChatGPT uses its apps: every plugin turned on in **Settings → Plugins** is ChatDGC's
+  to use, with no "use this plugin?" question. Ask for something one of them does and it uses it in the reply.
+  - **Reads** (what the vendor marks read-only, or DGC's reviewed list) run at once.
+  - **Changes** (sending, creating, editing, deleting, sharing, paying) show a card under the reply with the
+    exact tool and inputs. Nothing happens until you choose: **Send it now** (after **Edit**, if you like),
+    **Hand it to a Pip** (one of your Personal Pips takes it on: that's offered first for something recurring,
+    on a schedule, or that has to wait), or **Don't**. The card then says what came of it, and the chat's next
+    reply knows.
+  - **How much asks** is each plugin's level in Settings → Pips → Plugins (Always ask, Any changes, Important
+    actions, Never ask), shared with your Pips. A plugin that can move money always asks.
+  - **Your private data stays put:** what the chat read from your apps never goes into a web search, and a
+    change that carries it always shows its card, whatever the level (the careful check Pips use). What you
+    said yourself isn't held back.
+  - A plugin whose sign-in only the editor holds can't be reached from a chat (as from a Pip): sign it in from
+    Settings → Plugins.
 - **The Library**, as ChatGPT has it: **Library** in the side bar opens every file you attached, in every chat
   and project (temporary chats keep none), newest first. Show one kind (images, PDFs, documents, spreadsheets,
   presentations, code, pasted text) or search by name. Each file can open the chat or project it's in, start a

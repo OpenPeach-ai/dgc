@@ -442,6 +442,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_images":
         for (const tab of showing(conversation)) this.post(tab, { type: "images", messageId: ev.message_id, images: ev.images });
         return;
+      case "chatdgc_action":
+        // A plugin's card under a reply, as it's put there or decided: every tab on the chat shows it.
+        if (asker) this.requests.delete(requestId);
+        if (ev.action && typeof ev.action === "object") {
+          for (const tab of showing(conversation)) this.post(tab, { type: "action", messageId: ev.message_id, action: ev.action });
+        }
+        return;
+      case "chatdgc_pips": {
+        if (asker) this.requests.delete(requestId);
+        const pips = (Array.isArray(ev.pips) ? ev.pips : []).filter((p: any) => /^pip_[a-f0-9]{32}$/.test(String(p?.id || "")));
+        this.pipsWaiting.shift()?.({ pips, error: typeof ev.error === "string" ? ev.error : "" });
+        return;
+      }
       case "chatdgc_research": {
         const research = ev.research && typeof ev.research === "object" ? ev.research : {};
         const tabs = showing(conversation);
@@ -680,6 +693,32 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openProject":
         this.openProject(String(message.id || ""));
         return;
+      case "actionRun":
+      case "actionDismiss":
+      case "actionHand": {
+        // A card's choice: only ids go to the backend, and edited inputs as one JSON object.
+        const messageId = String(message.messageId || ""), actionId = String(message.actionId || "");
+        if (!conversation || !MESSAGE_ID.test(messageId) || !/^act_[a-f0-9]{32}$/.test(actionId)) return;
+        const base = { type: "chatdgc_action", conversation_id: conversation, message_id: messageId, action_id: actionId };
+        if (message.type === "actionDismiss") { this.ask({ tab, kind: "action" }, { ...base, op: "dismiss" }); return; }
+        if (message.type === "actionRun") {
+          const edited = message.arguments && typeof message.arguments === "object" && !Array.isArray(message.arguments)
+            && JSON.stringify(message.arguments).length <= 10_000 ? { arguments: message.arguments } : {};
+          this.ask({ tab, kind: "action" }, { ...base, op: "run", ...edited });
+          return;
+        }
+        const { pips, error } = await this.personalPips();
+        if (!pips.length) {
+          this.post(tab, { type: "actionIdle", actionId });
+          void vscode.window.showInformationMessage(error || "You have no Personal Pips yet. Make one in Pips, then hand this to it.");
+          return;
+        }
+        const choice = await vscode.window.showQuickPick(pips.map((p: any) => ({ label: `$(hubot) ${String(p.name || "Pip")}`,
+          description: String(p.goal || "").slice(0, 80), id: String(p.id) })), { placeHolder: "Hand this to one of your Pips" });
+        if (!choice) { this.post(tab, { type: "actionIdle", actionId }); return; }
+        this.ask({ tab, kind: "action" }, { ...base, op: "hand", pip_id: choice.id });
+        return;
+      }
       case "projectChats": {
         const project = String(message.id || "");
         if (PROJECT_ID.test(project)) {
@@ -826,6 +865,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   private recentWaiting: ((files: any[]) => void)[] = [];
+  private pipsWaiting: ((answer: { pips: any[]; error: string }) => void)[] = [];
+
+  /** Your Personal Pips, for "Hand it to a Pip" (none, and why, when Pips are off or don't answer). */
+  private personalPips(): Promise<{ pips: any[]; error: string }> {
+    return new Promise((resolve) => {
+      const requestId = this.nextId("pips");
+      this.requests.set(requestId, { kind: "pips" });
+      this.pipsWaiting.push(resolve);
+      const outcome = this.host ? this.host.chatdgcSend({ type: "chatdgc_pips", request_id: requestId }) : "starting";
+      if (outcome !== "sent") { this.pipsWaiting.splice(this.pipsWaiting.indexOf(resolve), 1); resolve({ pips: [], error: "" }); return; }
+      setTimeout(() => { const i = this.pipsWaiting.indexOf(resolve); if (i >= 0) { this.pipsWaiting.splice(i, 1); resolve({ pips: [], error: "Pips didn't answer." }); } }, 10_000);
+    });
+  }
 
   /** The newest files in the Library, for the paperclip ([] if it can't say quickly). */
   private recentFiles(): Promise<any[]> {
