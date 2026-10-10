@@ -652,7 +652,9 @@ class ChatService:
         preview = " ".join(str(last.get("text", "")).split())[:200] if last else ""
         return {key: chat.get(key) for key in ("id", "title", "created_at", "updated_at")} | {
             "pinned": bool(chat.get("pinned")), "archived": bool(chat.get("archived")), "preview": preview,
-            "messages": len(chat["messages"])}
+            "messages": len(chat["messages"]),
+            # Its project, or null: an open tab shows it in the header, and a move (in or out) reaches it here.
+            "project": chat.get("project") or None}
 
     # -- the process going down
 

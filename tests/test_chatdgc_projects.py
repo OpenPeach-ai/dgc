@@ -222,6 +222,36 @@ class ProjectTests(Phase7):
             self.engine.add_project_files(trip["id"], [{"kind": "text", "text": "one more"}])
         self.assertGreater(engine_mod.PROJECT_SHARE, 0)
 
+    def test_a_move_reaches_an_open_chat_on_the_wire_in_and_out(self):
+        # A live run moved a chat from its menu and its open tab never showed the project: the changed event's
+        # summary (the list entry) didn't carry it.
+        from dgc.chatdgc.service import ChatService
+        from dgc.editor_protocol import event_error
+        frames = []
+
+        def emit(type, **fields):
+            frame = {"type": type, "seq": len(frames), **fields}
+            problem = event_error(frame)
+            if problem:
+                raise AssertionError(f"invalid event: {problem}")
+            frames.append(frame)
+        service = ChatService(emit, self.config, engine=self.engine)
+        self.addCleanup(service.close, 2.0)
+        trip = self.store.create_project("Goa trip")
+        chat = self.engine.open()
+        self.say(chat["id"], "Hi")
+        service.dispatch({"type": "chatdgc_move", "request_id": "m1", "conversation_id": chat["id"], "project_id": trip["id"]})
+        changed = [f for f in frames if f["type"] == "chatdgc_changed"][-1]
+        self.assertEqual(changed["summary"]["project"], trip["id"])
+        self.assertEqual(frames[-1]["type"], "chatdgc_projects")
+        self.assertEqual(frames[-1]["projects"][0]["chats"], 1)
+        service.dispatch({"type": "chatdgc_move", "request_id": "m2", "conversation_id": chat["id"], "project_id": ""})
+        changed = [f for f in frames if f["type"] == "chatdgc_changed"][-1]
+        self.assertIsNone(changed["summary"]["project"], "moved out: null, so the header lets go of it")
+        self.say(chat["id"], "Again")
+        service.dispatch({"type": "chatdgc_update", "request_id": "u1", "conversation_id": chat["id"], "title": "Renamed"})
+        self.assertIn("project", [f for f in frames if f["type"] == "chatdgc_changed"][-1]["summary"], "every changed event says it")
+
     def test_a_branch_stays_in_its_project(self):
         trip = self.store.create_project("Goa trip")
         chat, reply = self.project_chat(trip)
