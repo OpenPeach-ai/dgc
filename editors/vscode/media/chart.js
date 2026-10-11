@@ -36,8 +36,11 @@
       while (x.length < n) x.push(String(x.length + 1));
       for (const s of series) while (s.values.length < n) s.values.push(null);
     }
-    return { type, x, series, title: String(raw.title || "").slice(0, 120), xLabel: String(raw.x_label || "").slice(0, 60),
-             yLabel: String(raw.y_label || "").slice(0, 60), unit: String(raw.unit || "").slice(0, 8),
+    const unit = String(raw.unit || "").slice(0, 8);
+    // A label that's only the unit (or a lone symbol) says nothing the ticks don't, and drew as a stray glyph.
+    const label = (v) => { const t = String(v || "").trim().slice(0, 60); return t.length < 3 || t === unit ? "" : t; };
+    return { type, x, series, title: String(raw.title || "").slice(0, 120), xLabel: label(raw.x_label),
+             yLabel: label(raw.y_label), unit,
              stacked: raw.stacked === true && type !== "scatter", horizontal: raw.horizontal === true && type === "bar" };
   }
 
@@ -183,22 +186,35 @@
   }
   const csv = (table) => table.map((r) => r.map((c) => (/[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : String(c))).join(",")).join("\n");
 
-  /** The chart as a PNG: the SVG with its colours made concrete, on the theme's background, drawn at 2x. */
-  function png(svg, callback) {
+  /** The chart as a PNG: the SVG with its colours made concrete, its title above, on the theme's background, at 2x. */
+  function png(svg, callback, title = "", legend = []) {
     const copy = svg.cloneNode(true);
-    copy.setAttribute("width", String(W * 2)); copy.setAttribute("height", String(H * 2));
+    const top = title ? 34 : 0, bottom = legend.length ? 30 : 0, height = H + top + bottom;
+    copy.setAttribute("viewBox", `0 0 ${W} ${height}`);
+    copy.setAttribute("width", String(W * 2)); copy.setAttribute("height", String(height * 2));
     const live = [svg, ...svg.querySelectorAll("*")], cloned = [copy, ...copy.querySelectorAll("*")];
     live.forEach((node, i) => {
       const cs = getComputedStyle(node);
       for (const prop of ["fill", "stroke", "stroke-width", "opacity", "font-size", "font-family", "font-weight"]) cloned[i].style.setProperty(prop, cs.getPropertyValue(prop));
     });
     copy.querySelectorAll("title").forEach((t) => t.remove());
-    const bg = svgEl("rect", { x: 0, y: 0, width: W, height: H, fill: getComputedStyle(document.body).backgroundColor || "#ffffff" });
-    copy.insertBefore(bg, copy.firstChild);
+    const shifted = svgEl("g", { transform: `translate(0 ${top})` });
+    while (copy.firstChild) shifted.append(copy.firstChild);
+    const ink = getComputedStyle(document.body).color || "#000000";
+    copy.append(svgEl("rect", { x: 0, y: 0, width: W, height, fill: getComputedStyle(document.body).backgroundColor || "#ffffff" }), shifted);
+    if (title) copy.append(svgEl("text", { x: 16, y: 24, fill: ink, "font-size": 15, "font-weight": 600, "font-family": "sans-serif" }, title));
+    let x = 16;                                   // the legend, as the card shows it: what each colour is
+    for (const { name, color } of legend) {
+      copy.append(svgEl("rect", { x, y: H + top + 10, width: 10, height: 10, rx: 2, fill: color }));
+      const label = svgEl("text", { x: x + 16, y: H + top + 19, fill: ink, "font-size": 12, "font-family": "sans-serif" }, name);
+      copy.append(label);
+      x += 28 + Math.min(220, name.length * 7);
+      if (x > W - 60) break;
+    }
     const image = new Image();
     image.onload = () => {
       const canvas = document.createElement("canvas");
-      canvas.width = W * 2; canvas.height = H * 2;
+      canvas.width = W * 2; canvas.height = height * 2;
       canvas.getContext("2d").drawImage(image, 0, 0);
       try { callback(canvas.toDataURL("image/png")); } catch { callback(null); }
     };
@@ -254,7 +270,12 @@
     const toggle = tool("Data", () => { table.hidden = !table.hidden; toggle.setAttribute("aria-pressed", String(!table.hidden)); });
     toggle.setAttribute("aria-pressed", "false");
     tool("Copy data", () => actions.copy?.(csv(data)));
-    tool("Save image", () => png(area.querySelector("svg"), (url) => actions.save?.(`${(spec.title || "chart").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 60) || "chart"}.png`, url)));
+    tool("Save image", () => {
+      const keys = [...legend.querySelectorAll(".cd-chart-key")].filter((k) => k.getAttribute("aria-pressed") !== "false")
+        .map((k) => ({ name: k.textContent, color: getComputedStyle(k.querySelector(".cd-chart-swatch")).backgroundColor }));
+      png(area.querySelector("svg"), (url) => actions.save?.(`${(spec.title || "chart").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 60) || "chart"}.png`, url),
+          spec.title, keys);
+    });
     head.append(tools);
     box.append(head, area, legend, table);
     paint();

@@ -3,7 +3,7 @@
 // would receive. Everything a person or a model wrote must arrive as text or inert Markdown, never markup.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
@@ -1537,6 +1537,7 @@ test("charts: a ```chart block drawn as bar, line, pie or scatter; hover values,
     const saved = (await s.posted("saveImage")).at(-1);
     assert.match(saved.name, /^Spend by month .*2026.*\.png$/);
     assert.match(saved.data, /^data:image\/png;base64,/);
+    if (process.env.DGC_SHOTS) writeFileSync(join(process.env.DGC_SHOTS, "chatdgc-chart-saved.png"), Buffer.from(saved.data.split(",")[1], "base64"));
     // What the reply ran on the spreadsheets: shut, then each SQL and its rows.
     await s.send({ type: "message", message: { id: M(2), role: "assistant", text, finish: "stop", queries: [
       { sql: "SELECT category, SUM(amount) FROM expenses GROUP BY category", columns: ["category", "SUM(amount)"],
