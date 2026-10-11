@@ -141,7 +141,9 @@ def controls(store, pip_id, config):
 
 def context_estimate(store, pip_id, config, context_size=None) -> dict:
     """How much of the context window this chat takes in the next reply: its brief and the recent
-    messages that fit, as the reply itself prepares them. Read-only; about four bytes a token."""
+    messages that fit, as the reply itself prepares them, and what its last reply measured besides (its
+    instructions, tools, job, memory, skills, apps and references), part by part in `breakdown`
+    (dgc/context_breakdown.py's shape). Read-only; about four bytes a token."""
     pip = store._job(pip_id)
     if pip['source_policy'] != {'mode': 'personal'}:
         raise RegistryError('invalid_request', 'Context use is shown for Personal Pips.')
@@ -153,6 +155,14 @@ def context_estimate(store, pip_id, config, context_size=None) -> dict:
     continuity, history = prepare(store, pip_id, size, secrets=secret_values(config))
     brief = len(continuity['state']['summary'].encode())
     recent = len(encoded(history)) if history else 0
-    return {'pip_id': pip_id, 'context_size': size, 'used_tokens': (brief + recent + 3) // 4,
+    # Part by part (pip_chat_breakdown): what its last reply measured, then its brief and these messages.
+    from .pip_chat_breakdown import breakdown, last_parts
+    try:
+        threshold = float(config.get('compact_threshold', 0.85))
+    except (AttributeError, TypeError, ValueError):
+        threshold = 0.85
+    shown = breakdown(last_parts(store, pip_id), brief=(brief + 3) // 4, recent=(recent + 3) // 4, window=size,
+                      compact_at=threshold if 0 < threshold <= 1 else 0.85)
+    return {'pip_id': pip_id, 'context_size': size, 'used_tokens': shown['used'],
             'brief_tokens': (brief + 3) // 4, 'recent_messages': len(history),
-            'summarized_messages': int(continuity['state'].get('messages') or 0)}
+            'summarized_messages': int(continuity['state'].get('messages') or 0), 'breakdown': shown}

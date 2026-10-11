@@ -752,8 +752,12 @@ def insert_user(store, pip, req, run_id, model, now):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
+    if "context" in result:
+        # What filled its window besides the chat (pip_chat_breakdown), for the meter's breakdown.
+        from .pip_chat_breakdown import validate as validate_context
+        validate_context(result["context"])
     if "computer" in result:
         # A chat that used the Pip's computer: how many steps, and what it left waiting for the user.
         used = result["computer"]

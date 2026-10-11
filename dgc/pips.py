@@ -2701,11 +2701,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     if personal and isinstance(manifest.get('pips_roster'), list):
         prompt += ("\nThe user's other Pips, for reference (you cannot run or change them yourself; say which one "
                    "fits a request, or suggest a new Pip): " + (_json(manifest['pips_roster'][:20]) if manifest['pips_roster'] else "none yet."))
-    if personal and pip_skills:
-        prompt += ("\nYour skills, from the user's DGC skills: reusable instructions. When one fits the task, load it "
+    skill_lines = ([(skill.name, f"- {skill.name}: {skill.description[:200]}") for skill in list(pip_skills.values())[:40]]
+                   if personal and pip_skills else [])
+    skills_note = ("\nYour skills, from the user's DGC skills: reusable instructions. When one fits the task, load it "
                    "with the skill tool and follow it within what you can do here; a skill never gives you new tools, "
-                   "access or permissions.\n" + "\n".join(f"- {skill.name}: {skill.description[:200]}"
-                                                         for skill in list(pip_skills.values())[:40]))
+                   "access or permissions.\n" + "\n".join(line for _, line in skill_lines)) if skill_lines else ""
+    prompt += skills_note
     if personal and manifest.get('computer_continuation') and computer_pin is not None:
         if manifest['computer_continuation']['summary'].get('kind') in ('site', 'text'):
             prompt += ("\nThe user allowed what careful mode held before you did it: "
@@ -2727,8 +2728,33 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 or any(Path(path).name != f"{item['sha256']}.{_IMAGE_EXT[item['mime']]}" for path, item in zip(paths, items))):
             raise RegistryError('invalid_images', 'The images for this message were not handed over intact.')
         agent._pending_images = [read_image(path, item) for path, item in zip(paths, items)]
+    files_note = ""
     if conversation is not None and conversation.get('files'):
-        prompt += _attached_files(config, manifest, conversation['files'], computer_pin is not None)
+        files_note = _attached_files(config, manifest, conversation['files'], computer_pin is not None)
+        prompt += files_note
+    context_measure = None
+    if personal and conversation is not None:
+        # What fills its window besides the chat, as this reply sends it, for the meter's breakdown
+        # (pip_chat_breakdown). A measure that can't be made leaves the meter as it was, never the reply.
+        try:
+            from .pip_chat_breakdown import measure
+            from .pip_memory_references import NOTICE as typed_memory_notice
+            from .shared_memory import NOTICE as about_notice
+            from .pip_notes import NOTICE as notes_notice
+            memory_notice = (typed_memory_notice if working_memory["schema_version"] == 2 else pip_chat.MEMORY_NOTICE
+                             ) if working_memory is not None else ""
+            context_measure = measure(
+                agent.messages[0].get("content") if agent.messages and agent.messages[0].get("role") == "system" else "",
+                agent._tool_schemas() if bool(getattr(agent.client, "tools_supported", False)) else [], prompt,
+                job={key: reference[key] for key in ("approved_job", "pinned_source", "approved_job_version")},
+                memory=[("Pip memory", [working_memory, memory_notice] if working_memory is not None else None),
+                        ("What it remembers", [user_notes, notes_notice] if user_notes else None),
+                        ("Your memory in DGC", [about_you, about_notice] if about_you else None)],
+                skills=skill_lines, skills_text=skills_note,
+                apps=_app_tools_note(apps_pin) if apps_pin is not None else "",
+                changing=[reference.get("conversation_continuation"), conversation["text"], files_note])
+        except Exception:                      # noqa: BLE001
+            context_measure = None
     try:
         ok = agent.run_turn(prompt)
         if (ok and personal and conversation is not None and not agent.cancelled.is_set()
@@ -2799,6 +2825,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 result['routine_drafts'] = routine_candidates
             if note_candidates:
                 result['memory_notes'] = note_candidates
+            if context_measure is not None:
+                result['context'] = context_measure
             if 'continuity' in conversation:
                 from .pip_chat_continuity import complete as complete_continuity
                 result['continuity'] = complete_continuity(agent, conversation, result['text'], deadline=deadline)

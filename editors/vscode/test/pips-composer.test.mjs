@@ -112,3 +112,17 @@ test('continuity inspector escapes summary text, shows fallback, and stays scope
   const bad=setup({api:26,continuity:{...c,...changed}});await bad.select('a');assert.match(bad.d.body.textContent,/continuity is invalid or belongs to another Pip/);bad.click('#chat-context-toggle');assert.equal(bad.d.querySelector('.chat-continuity'),null);
  }
 });
+
+test('a Personal Pip\'s context menu shows its window part by part, as text, and the old meter when a DGC sends none',async()=>{
+ const personal=job('a',{source_policy:{mode:'personal'}}),parts={window:8192,used:3100,source:'estimated',compact_at:6963,buffer:1229,free:3863,categories:[{id:'tools',label:'Tools',tokens:1700,items:[{name:'draft_email',tokens:500},{name:'remember',tokens:230}]},{id:'system_prompt',label:'System prompt',tokens:1200},{id:'messages',label:'<b>Messages</b>',tokens:200}]};
+ const context=breakdown=>r=>({pip_id:r.pip_id,context_size:r.context_size,used_tokens:3100,brief_tokens:0,recent_messages:2,summarized_messages:0,...(breakdown?{breakdown}:{})});
+ const x=setup({api:45,jobs:[personal]});await x.select('a');await x.drain({get_pip_chat_context:context(parts)});x.click('#chat-context-toggle');
+ const menu=x.d.querySelector('.composer-context-menu');
+ assert.deepEqual([...menu.querySelectorAll('.bd-list > .bd-row .bd-label, .bd-list > details .bd-label')].map(e=>e.childNodes[0].textContent),['Tools','System prompt','<b>Messages</b>','Kept free for summarizing','Free space']);
+ assert.equal(menu.querySelector('b'),null,'a label is text, never markup');
+ assert.deepEqual([...menu.querySelectorAll('.bd-item-name')].map(e=>e.textContent),['draft_email','remember'],'its tools one by one');
+ assert.equal(menu.querySelector('.ctx-track'),null,'the bar is the breakdown now');
+ assert.match(menu.querySelector('.ctx-head').textContent,/3,100 \/ 8,192/);
+ for(const none of [null,{...parts,window:4096}]){const old=setup({api:45,jobs:[personal]});await old.select('a');await old.drain({get_pip_chat_context:context(none)});old.click('#chat-context-toggle');
+  const plain=old.d.querySelector('.composer-context-menu');assert.equal(plain.querySelector('.bd'),null,'none sent, or one that doesn\'t fit its window');assert.ok(plain.querySelector('.ctx-track'));assert.match(plain.querySelector('.ctx-split').textContent,/2 recent messages/);}
+});

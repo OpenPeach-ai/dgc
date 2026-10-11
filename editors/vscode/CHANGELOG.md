@@ -167,6 +167,9 @@
 
 ### Chat
 
+- **What fills the window.** The context menu shows the session's window part by part, as ChatDGC's does: the
+  messages and tool results, the system prompt, each tool (MCP tools by server), memory by file, skills and
+  plugins, the room kept for summarizing, the free space, and the MCP tools held back until a search finds them.
 - The model menu's note is three lines at most, with **Show more** to read the rest in place: Ollama's
   note about thinking levels took over the menu.
 
@@ -177,6 +180,9 @@
 
 ### Pips
 
+- **What fills a Pip's window.** A Personal Pip's context menu shows it part by part: its instructions, each
+  tool, its job, what it remembers, its skills, apps and references, as its last reply sent them, then its
+  conversation brief and the messages its next reply sends.
 - **Needs attention.** The Pips home lists, above Your Pips, every card your Personal Pips are waiting
   on you for: an email to Send, an event to add, a plugin action, a Connect card, a submit its computer
   holds, a robot check, a routine it suggested, a new Pip to create. Newest first, six until you choose

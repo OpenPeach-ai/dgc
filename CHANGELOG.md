@@ -100,6 +100,22 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   thread by a new `context_breakdown` event (an existing event never gains a field); offered as
   `ready.capabilities.chatdgc.context_breakdown`; in the TypeScript SDK's known events. The screen draws it with
   `media/breakdown.js` (shared, for main DGC and Pips next) in the meter's details, header from the same count.
+  - **Main DGC and the SDKs** (phase 2). `Agent.context_breakdown(window, compact_at)` splits a session's window
+    into messages and tool results (each message counted as the client counts it), the system prompt by its
+    sections (memory, with each file named; skills, each; installed plugins; the rest), built-in tools and MCP tools
+    (`server · tool`), each, and the MCP schemas kept back until a search finds them (`deferred`), scaled to the
+    meter's own estimate. New `context_breakdown` command answered by the `context_breakdown` event, offered as
+    `ready.capabilities.context_breakdown`; `Session.context_breakdown()` (Python, `ContextBreakdown`) and
+    `session.contextBreakdown()` (TypeScript) raise unsupported against an older CLI. The side bar's context menu
+    draws it.
+  - **Pips** (phase 3). A Personal Pip's reply is built by its worker from what was pinned at queue time, so the
+    worker measures the parts that stay from one reply to the next as that reply sends them (its instructions,
+    each tool, its job, its memory with notices, its skills, its apps note, the rest of its references) and returns
+    them as the reply's `context` (`dgc/pip_chat_breakdown.py`, validated where the reply is saved; a measure that
+    can't be made leaves it out, never the reply). `get_pip_chat_context` adds `breakdown`: those parts from the
+    newest reply, then the brief and the recent messages as the next reply sends them; `used_tokens` now counts
+    them all (it counted the brief and the messages only). A Pip that hasn't replied since, or replied on an older
+    DGC, shows the brief and the messages alone. The Pip's context menu draws it (the side bar and the Pips tab).
 - **A welcome for the time of day.** "What can I help with?" gives way to ChatDGC's mark, its slashes drawn in one
   by one (still, with reduced motion), and a line for the hour (three each for morning, afternoon, evening and night;
   a temporary chat: "Off the record. Nothing here is kept."), chosen once a chat and kept in place across renders.
