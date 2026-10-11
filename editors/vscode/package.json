@@ -106,13 +106,19 @@
         "command": "dgc.newChatDGC",
         "title": "New Chat (ChatDGC)",
         "category": "DGC",
-        "icon": { "light": "media/chatdgc-tab-light.svg", "dark": "media/chatdgc-tab-dark.svg" }
+        "icon": {
+          "light": "media/chatdgc-tab-light.svg",
+          "dark": "media/chatdgc-tab-dark.svg"
+        }
       },
       {
         "command": "dgc.chatdgcCanvasAsk",
         "title": "Ask ChatDGC About This",
         "category": "DGC",
-        "icon": { "light": "media/chatdgc-tab-light.svg", "dark": "media/chatdgc-tab-dark.svg" }
+        "icon": {
+          "light": "media/chatdgc-tab-light.svg",
+          "dark": "media/chatdgc-tab-dark.svg"
+        }
       },
       {
         "command": "dgc.chatdgcCanvasShortcut",
@@ -691,6 +697,7 @@
     "esbuild": "^0.28.2",
     "highlight.js": "11.12.0",
     "jsdom": "^30.0.1",
+    "katex": "0.16.47",
     "markdown-it": "15.0.1",
     "mermaid": "^12.0.0",
     "ovsx": "1.2.0",

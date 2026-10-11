@@ -88,6 +88,19 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **Maths in ChatDGC's replies.** The prompt always asked for LaTeX and nothing drew it, so every formula showed as
+  raw `$E = P \cdot r…$`. `src/markdown.ts` gains an opt-in (`setMath`, off for main DGC's chat): `$…$`/`\(…\)`
+  inline and `$$…$$`/`\[…\]` display become placeholders holding the TeX (pandoc's rule keeps "$5 and $10" text;
+  never inside code; an escaped `\$` stays a dollar; at most 4,000 characters), drawn by KaTeX 0.16.47
+  (`dist/katex/`: script, stylesheet and WOFF2 fonts only, ~590 KB, loaded the first time a formula shows, as
+  mermaid is) with `trust: false`, `maxSize` and `maxExpand` bounded, and MathML for screen readers. A copied reply
+  carries the TeX as written. KaTeX is now a direct, exact dev dependency (it was already locked through mermaid),
+  with its license in `licenses/KATEX-LICENSE.txt`.
+- **The VSIX allowlist caught up.** `scripts/check-extension-vsix.py`'s reviewed member list (and its mirror in
+  `tests/run_tests.py`) lacked 16 files this branch ships (ChatDGC's page, charts and Library, the tab marks, Pips'
+  bundles and art, noVNC's licenses), so a release VSIX would have failed it; they're listed now, with ChatDGC's own
+  marks and KaTeX's files (154 members; each passes the credential scan, none needs an exemption, ~10 MB of the
+  16 MB ceiling).
 - **Interactive answers in ChatDGC** (Phase 8, part 5). A `show_widget` tool ({title, html}, once a reply) keeps a
   small self-contained HTML page on the reply (`widgets`, new event `chatdgc_widget`); the extension opens it in a
   webview tab of its own beside the chat (the chat keeps focus), one tab a widget, and the card under the reply has

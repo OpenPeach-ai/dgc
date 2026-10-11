@@ -61,6 +61,30 @@ async function main() {
     outfile: "dist/mermaid.js", minify: true, sourcemap: false,
     legalComments: "inline",
   });
+  // KaTeX (maths in ChatDGC's replies) is ~270KB, loaded only when a reply has a formula, as mermaid is. Its
+  // stylesheet keeps only the WOFF2 fonts: every webview reads them, so the WOFF and TTF copies would be dead weight.
+  await esbuild.build({
+    entryPoints: ["src/katex-entry.mts"], bundle: true, format: "iife",
+    platform: "browser", target: "chrome108",
+    outfile: "dist/katex/katex.js", minify: true, sourcemap: false,
+    legalComments: "inline",
+  });
+  await esbuild.build({
+    entryPoints: [require.resolve("katex/dist/katex.min.css")], bundle: true,
+    outfile: "dist/katex/katex.css", minify: true, sourcemap: false,
+    loader: { ".woff2": "file" }, assetNames: "fonts/[name]",
+    plugins: [{
+      name: "katex-woff2-only",
+      setup(build) {
+        build.onLoad({ filter: /katex\.min\.css$/ }, (args) => ({
+          contents: readFileSync(args.path, "utf8")
+            .replace(/,\s*url\([^)]*\.woff\)\s*format\(["']woff["']\)/g, "")
+            .replace(/,\s*url\([^)]*\.ttf\)\s*format\(["']truetype["']\)/g, ""),
+          loader: "css", resolveDir: resolve(args.path, ".."),
+        }));
+      },
+    }],
+  });
   await esbuild.build({
     entryPoints: ["src/settingsClient.js"], bundle: true, format: "iife",
     loader: { ".ico": "dataurl", ".png": "dataurl", ".svg": "dataurl" },

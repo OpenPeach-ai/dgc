@@ -1737,6 +1737,36 @@ test("a widget's page in a browser: put back as you left it (its code reruns), s
   } finally { await page.close(); }
 });
 
+test("maths in a reply, drawn by KaTeX as ChatGPT draws it: in a line and on its own; money stays money; Copy keeps the TeX", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    // KaTeX, as the page loads it the first time a formula shows (its file is the extension's own).
+    await s.page.evaluate((code) => { eval(code); }, readFileSync(join(root, "node_modules/katex/dist/katex.min.js"), "utf8"));
+    await s.page.addStyleTag({ content: readFileSync(join(root, "node_modules/katex/dist/katex.min.css"), "utf8").replace(/url\([^)]*\)/g, "local(x)") });
+    const text = "The area is $\\pi r^2$, which costs $5 or $10 to paint.\n\n$$\nA = P\\left(1 + \\frac{r}{n}\\right)^{nt}\n$$";
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Area of a circle?" }, { id: M(2), role: "assistant", text, finish: "stop" }] });
+    await s.frame(); await s.frame();
+    const reply = s.page.locator(`.cd-assistant[data-id="${M(2)}"]`);
+    assert.equal(await reply.locator(".md-math").count(), 2);
+    assert.equal(await reply.locator("span.md-math .katex").count(), 1, "in a line");
+    assert.equal(await reply.locator("div.md-math-display .katex-display").count(), 1, "on its own line");
+    assert.equal(await reply.locator(".katex-mathml annotation").first().textContent(), "\\pi r^2", "and readable by a screen reader");
+    assert.match(await reply.locator("p").first().innerText(), /costs \$5 or \$10 to paint/);
+    // While it's written: drawn as it comes.
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "delta", messageId: M(4), text: "So $x^2 + y^2 = z^2$ holds" });
+    await s.frame(); await s.frame();
+    assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(4)}"] .md-math .katex`).count(), 1);
+    await reply.getByRole("button", { name: "Copy" }).click();
+    const copied = (await s.posted("copy")).at(-1)?.text ?? await s.page.evaluate(() => navigator.clipboard.readText()).catch(() => "");
+    assert.match(copied, /The area is \$\\pi r\^2\$/, "the TeX, as written");
+    if (process.env.DGC_SHOTS) await reply.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-maths.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("a widget deleted from the Library: its card keeps its name and says so, with nothing to open or show", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

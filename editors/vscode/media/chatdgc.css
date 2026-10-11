@@ -626,3 +626,8 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 .cd-widget { max-width: 560px; }
 .cd-widget-badge { background: color-mix(in srgb, var(--accent) 45%, #0f766e); font-size: 16px; }
 .cd-widget pre.code { margin: 6px 0 0; max-height: 360px; overflow: auto; }
+
+/* Maths (KaTeX): a display formula on its own line, centred, scrolled sideways when wider than the reply. */
+.md-math-display { display: block; margin: var(--sp-2) 0; text-align: center; overflow-x: auto; overflow-y: hidden; }
+.md-math .katex { font-size: 1.08em; }
+.md-math .katex-error { color: var(--vscode-errorForeground, #f14c4c); }

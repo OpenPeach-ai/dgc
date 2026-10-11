@@ -171,6 +171,10 @@ voice come in later phases.
 - **Charts**, as ChatGPT's interactive charts: where numbers compare or change, a reply can draw a bar, line, area,
   pie or scatter chart from numbers it has (never made-up ones). Hover for a value, click the legend to hide a
   series, **Data** for the numbers as a table, **Copy data** (CSV) and **Save image** (PNG).
+- **Maths**, drawn as ChatGPT draws it: a formula in a reply (`$…$` or `\(…\)` in a line, `$$…$$` or `\[…\]` on
+  its own) shows as typeset maths, in the editor's colours; a screen reader reads it too. Dollar amounts stay
+  dollar amounts ("$5 and $10" has no maths in it), and code stays code. **Copy** gives the formula as it was
+  written (TeX), as ChatGPT's does.
 - **Interactive answers**, as ChatGPT has them: when something is better used than read (a loan calculator, a
   converter, a timer, a quiz, a small simulation), the reply makes a widget, and it opens in a tab beside the chat
   (as a canvas does; the chat keeps focus). It's a small page that runs on its own: no network, nothing loaded from

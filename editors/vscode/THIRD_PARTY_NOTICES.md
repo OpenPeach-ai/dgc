@@ -73,6 +73,13 @@ fetched by the panel only when an answer actually contains a diagram. Exact depe
 are locked in `package-lock.json`. Every package's copyright notice and license is reproduced in
 `licenses/MERMAID-LICENSES.txt`.
 
+## Maths renderer
+
+`dist/katex/` bundles [KaTeX](https://github.com/KaTeX/KaTeX) 0.16.47: `katex.js`, its stylesheet
+`katex.css` and its WOFF2 fonts (`fonts/`). ChatDGC's chat loads them only when a reply holds a
+formula. KaTeX is MIT-licensed by Khan Academy and other contributors; its copyright notice and
+license are reproduced in `licenses/KATEX-LICENSE.txt`.
+
 ## Service marks in the settings and connector directory
 
 `media/plugin-logos/` bundles the logos of third-party services so the settings webview can

@@ -252,6 +252,87 @@ parser.renderer.rules.list_item_open = (tokens, index, options, _env, self) => {
     + `aria-label="${checked ? "done" : "not done"}">`;
 };
 
+// Maths, for a page that asks for it (ChatDGC's replies; main DGC's chat doesn't): $…$ and \(…\) in a line, $$…$$ and
+// \[…\] as a block (or $$…$$ inside a line), kept as TeX in a placeholder the page renders with KaTeX. Never inside
+// code, never across an escaped \$, and a dollar amount is text: as pandoc reads it, an opening $ is followed by a
+// non-space and a closing one follows a non-space and isn't followed by a digit ("$5 and $10" is money).
+let mathEnabled = false;
+export function setMath(on: boolean): void { mathEnabled = !!on; }
+const MAX_MATH = 4000;
+
+function mathInline(state: any, silent: boolean): boolean {
+  if (!mathEnabled) return false;
+  const src: string = state.src, start: number = state.pos, max: number = state.posMax;
+  let open: string, close: string, from: number, end: number, display = false;
+  if (src.startsWith("\\(", start)) {
+    open = "\\("; close = "\\)"; from = start + 2;
+    end = src.indexOf(close, from);
+  } else if (src.startsWith("$$", start) || src.startsWith("\\[", start)) {
+    open = src[start] === "$" ? "$$" : "\\["; close = open === "$$" ? "$$" : "\\]"; from = start + 2; display = true;
+    end = src.indexOf(close, from);
+  } else if (src[start] === "$") {
+    open = close = "$"; from = start + 1;
+    if (from >= max || /\s/.test(src[from])) return false;
+    end = from;
+    for (;;) {
+      end = src.indexOf("$", end);
+      if (end < 0 || end >= max) return false;
+      if (src[end - 1] === "\\" || /\s/.test(src[end - 1]) || /\d/.test(src[end + 1] || "")) { end += 1; continue; }
+      break;
+    }
+  } else return false;
+  if (end < 0 || end + close.length > max) return false;
+  const content = src.slice(from, end);
+  if (!content.trim() || content.length > MAX_MATH) return false;
+  if (!silent) {
+    const token = state.push("math_inline", "math", 0);
+    token.content = content; token.markup = open; token.info = close; token.meta = { display };
+  }
+  state.pos = end + close.length;
+  return true;
+}
+
+function mathBlock(state: any, startLine: number, endLine: number, silent: boolean): boolean {
+  if (!mathEnabled || state.sCount[startLine] - state.blkIndent >= 4) return false;
+  const lineText = (line: number) => state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]);
+  const first: string = lineText(startLine);
+  const open = first.startsWith("$$") ? "$$" : first.startsWith("\\[") ? "\\[" : "";
+  if (!open) return false;
+  const close = open === "$$" ? "$$" : "\\]";
+  const lines: string[] = [];
+  let line = startLine, rest = first.slice(open.length), found = false;
+  for (;;) {
+    const at = rest.indexOf(close);
+    if (at >= 0) {
+      if (rest.slice(at + close.length).trim()) return false;      // words after it: maths inside a paragraph
+      lines.push(rest.slice(0, at)); found = true; break;
+    }
+    lines.push(rest);
+    line += 1;
+    if (line >= endLine || (state.sCount[line] < state.blkIndent && state.bMarks[line] + state.tShift[line] < state.eMarks[line])) break;
+    rest = lineText(line);
+  }
+  const content = lines.join("\n");
+  if (!found || !content.trim() || content.length > MAX_MATH) return false;
+  if (silent) return true;
+  state.line = line + 1;
+  const token = state.push("math_block", "math", 0);
+  token.block = true; token.content = content; token.markup = open; token.info = close; token.map = [startLine, state.line];
+  return true;
+}
+
+parser.inline.ruler.before("escape", "math_inline", mathInline);
+parser.block.ruler.before("fence", "math_block", mathBlock, { alt: ["paragraph", "reference", "blockquote", "list"] });
+// Until KaTeX draws it (or if it can't), the placeholder shows the TeX as written; data-tex is what it draws.
+parser.renderer.rules.math_inline = (tokens, index) => {
+  const t = tokens[index];
+  return `<span class="md-math${t.meta?.display ? " md-math-display" : ""}" data-tex="${escape(t.content)}">${escape(t.markup + t.content + t.info)}</span>`;
+};
+parser.renderer.rules.math_block = (tokens, index) => {
+  const t = tokens[index];
+  return `<div class="md-math md-math-display" data-tex="${escape(t.content)}">${escape(t.markup + t.content + t.info)}</div>\n`;
+};
+
 export function render(source: string): string {
   // JSON can carry lone UTF-16 surrogates; URI encoding in copy controls must not crash a turn.
   const cleaned = String(source).replace(

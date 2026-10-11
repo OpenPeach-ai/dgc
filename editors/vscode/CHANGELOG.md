@@ -54,6 +54,8 @@
   paperclip lists your newest files before Upload.
 - **ChatDGC has its own mark:** DGC's three slashes in a speech bubble, on its chat tabs, its project pages, the
   Library and the New Chat (ChatDGC) and Ask ChatDGC buttons, so a ChatDGC tab is never taken for a DGC session.
+- **Maths in replies.** Formulas show typeset (KaTeX, loaded the first time one appears), not as raw `$…$`;
+  dollar amounts and code are left alone, and Copy keeps the formula as written.
 - **Interactive answers.** A calculator, converter, timer or quiz to use right away: it opens in a tab beside the
   chat, locked down (no network, no access to your chats or VS Code), in the editor's colours. ChatDGC checks what it
   shows once it's open and fixes it if it's wrong; if its code still fails, it says so. It opens again as you left it,

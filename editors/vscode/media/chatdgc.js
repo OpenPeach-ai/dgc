@@ -8,8 +8,39 @@
   const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
   const md = (text) => (window.DgcMarkdown?.render ? window.DgcMarkdown.render(String(text || "")) : null);
   window.DgcMarkdown?.setFavicons?.(false);      // no image ever loads from a link's site
+  // Maths, as ChatGPT draws it: the Markdown leaves each formula as TeX in a placeholder, and KaTeX (loaded the first
+  // time one shows) draws it in the conversation. A copied reply is built afresh, so it carries the TeX as written.
+  window.DgcMarkdown?.setMath?.(true);
+  let katexAsked = false;
+  function renderMath(root) {
+    const waiting = root.querySelectorAll(".md-math:not([data-drawn])");
+    if (!waiting.length) return;
+    if (!window.katex) { loadKatex(); return; }
+    for (const node of waiting) {
+      node.dataset.drawn = "";
+      try {
+        window.katex.render(node.dataset.tex || "", node, { displayMode: node.classList.contains("md-math-display"), throwOnError: false,
+                                                          output: "htmlAndMathml", strict: "ignore", trust: false, maxSize: 20, maxExpand: 500 });
+      } catch { /* it stays as written */ }
+    }
+  }
+  function loadKatex() {
+    if (katexAsked) return;
+    katexAsked = true;
+    const js = document.body.dataset.katex, css = document.body.dataset.katexCss;
+    if (!js) return;
+    if (css) { const link = document.createElement("link"); link.rel = "stylesheet"; link.href = css; document.head.append(link); }
+    const script = document.createElement("script");
+    script.src = js;
+    script.addEventListener("load", () => { const log = document.getElementById("cd-log"); if (log) renderMath(log); });
+    document.head.append(script);
+  }
 
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
+  // A formula drawn as soon as its reply is (or streams) on screen.
+  let mathFrame = 0;
+  new MutationObserver(() => { if (!mathFrame) mathFrame = requestAnimationFrame(() => { mathFrame = 0; renderMath(log); }); })
+    .observe(log, { childList: true, subtree: true });
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), notice = $("cd-notice");
   // Web search is always there, as in ChatGPT: the model looks things up whenever an answer depends on it. The
   // box's Search makes it search first, for the next message only; Settings -> Web search can turn it off.
