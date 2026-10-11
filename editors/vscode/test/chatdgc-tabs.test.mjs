@@ -1227,3 +1227,76 @@ test("a plugin card's choices go by id; Hand it to a Pip asks which Pip, and a p
   await tick(); await tick();
   assert.match(world.infos.at(-1), /Pips are disabled/, "no Pips: it says why");
 });
+
+test("dictation: one tab records at a time; Stop's words reach the tab that recorded; a closed or reloaded tab's recording is dropped", async () => {
+  const tick = () => new Promise((r) => setImmediate(r));
+  const posted = (panel) => panel.webview.posted.filter((m) => m.type === "mic");
+  // A CLI without voice: the page is told, and nothing else happens.
+  chat.open(ID(5));
+  const [a] = world.panels;
+  a.say({ type: "micStart" });
+  await tick();
+  assert.deepEqual(posted(a).at(-1), { type: "mic", state: "idle", error: "Update the DGC CLI to use voice." });
+
+  const calls = [];
+  let finishStart;
+  const voice = {
+    start: () => { calls.push("start"); return new Promise((r) => { finishStart = r; }); },
+    stop: async () => { calls.push("stop"); return { ok: true, text: "book a table for two" }; },
+    cancel: async () => { calls.push("cancel"); },
+  };
+  host.dictation = () => voice;
+  chat.open(ID(6));
+  const b = world.panels[1];
+  a.say({ type: "micStart" });
+  await tick();
+  b.say({ type: "micStart" });
+  await tick();
+  assert.deepEqual(posted(b).at(-1), { type: "mic", state: "idle", error: "Another chat is recording: stop it there first." });
+  finishStart({ ok: true });
+  await tick();
+  assert.deepEqual(posted(a).at(-1), { type: "mic", state: "recording" });
+  b.say({ type: "micStop" });
+  await tick();
+  assert.deepEqual(calls, ["start"], "another tab can't stop it");
+  a.say({ type: "micStop" });
+  await tick(); await tick();
+  assert.deepEqual(posted(a).slice(-2), [{ type: "mic", state: "writing" }, { type: "mic", state: "idle", text: "book a table for two" }]);
+  assert.deepEqual(posted(b).filter((m) => m.text), [], "the words go only to the tab that recorded them");
+
+  // No model: the error goes as information (Settings -> Voice is open on the choice).
+  voice.start = async () => ({ ok: false, code: "no_model", error: "Choose a dictation model in Settings → Voice, then press the microphone again." });
+  b.say({ type: "micStart" });
+  await tick();
+  assert.equal(posted(b).at(-1).kind, "info");
+
+  // Cancelled while the microphone was still starting: the recording that then starts is dropped at once.
+  voice.start = () => { calls.push("start"); return new Promise((r) => { finishStart = r; }); };
+  calls.length = 0;
+  a.say({ type: "micStart" });
+  await tick();
+  a.say({ type: "micCancel" });
+  await tick();
+  calls.length = 0;
+  finishStart({ ok: true });
+  await tick(); await tick();
+  assert.deepEqual(calls, ["cancel"], "the recording that started after all is dropped");
+  assert.notDeepEqual(posted(a).at(-1), { type: "mic", state: "recording" });
+
+  // A tab closed, or its page reloaded, while it records: the recording goes with it.
+  calls.length = 0;
+  voice.start = async () => { calls.push("start"); return { ok: true }; };
+  b.say({ type: "micStart" });
+  await tick(); await tick();
+  b.say({ type: "ready" });
+  await tick();
+  assert.deepEqual(calls, ["start", "cancel"]);
+  a.say({ type: "micStart" });
+  await tick(); await tick();
+  a.dispose();
+  await tick();
+  assert.deepEqual(calls, ["start", "cancel", "start", "cancel"]);
+  b.say({ type: "micStart" });
+  await tick(); await tick();
+  assert.deepEqual(posted(b).at(-1), { type: "mic", state: "recording" }, "the microphone is free again");
+});

@@ -156,21 +156,25 @@ test("with no click, the thinking is open while it thinks and closes when the an
   } finally { await s.page.close(); }
 });
 
-test("however narrow the editor, the prompt box keeps one row: the tools turn to icons, the meter, model and Send hold their places", async (t) => {
+test("however narrow the editor, the prompt box keeps one row: the tools turn to icons, the meter, model, microphone and Send hold their places", async (t) => {
   if (skipOrFail(t)) return;
-  for (const width of [1100, 640, 460, 340, 230]) {
+  for (const [width, recording] of [1100, 640, 460, 340, 230].flatMap((w) => [[w, false], [w, true]])) {
     const s = await openScreen({ width, height: 700 });
     try {
       await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
       await s.send({ type: "models", ids: ["qwen3.6-35b-a3b-instruct-long-name:cloud"], current: "qwen3.6-35b-a3b-instruct-long-name:cloud" });
       await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
+      // Recording, the microphone is Stop with the time beside it: wider, and the row still holds.
+      if (recording) await s.send({ type: "mic", state: "recording" });
       await s.frame();
       const got = await s.page.evaluate(() => {
         const box = (sel) => { const n = document.querySelector(sel); if (!n || n.hidden || !n.offsetWidth) return null; const r = n.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
-        const parts = ["#cd-attach", "#cd-websearch", "#cd-research", "#cd-study", "#cd-temp-toggle", "#cd-context", "#cd-model-pill", "#cd-send"].map((sel) => [sel, box(sel)]).filter(([, b]) => b);
+        const parts = ["#cd-attach", "#cd-websearch", "#cd-research", "#cd-study", "#cd-temp-toggle", "#cd-context", "#cd-model-pill", "#cd-mic", "#cd-send"].map((sel) => [sel, box(sel)]).filter(([, b]) => b);
         const tools = document.querySelector(".cd-tools").getBoundingClientRect();
         const words = [...document.querySelectorAll(".cd-tools .cd-tool-label")].filter((n) => n.offsetWidth).length;
-        return { parts, tools: { l: tools.left, r: tools.right }, words, sideways: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth };
+        // A part squeezed narrower than what it holds spills over its neighbour while its box looks in place.
+        const spills = ["#cd-model-pill", "#cd-mic", "#cd-context"].filter((sel) => { const n = document.querySelector(sel); return n && n.offsetWidth && n.scrollWidth > n.clientWidth + 1; });
+        return { parts, tools: { l: tools.left, r: tools.right }, words, spills, sideways: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth };
       });
       const at = Object.fromEntries(got.parts);
       const mid = (b) => Math.round((b.t + b.b) / 2);
@@ -179,16 +183,79 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
       else assert.ok(Math.abs(mid(at["#cd-send"]) - mid(at["#cd-model-pill"])) <= 2 && Math.abs(mid(at["#cd-send"]) - mid(at["#cd-context"])) <= 2
                      && mid(at["#cd-send"]) > mid(at["#cd-attach"]), `${width}px: too narrow for one row: the meter, model and Send together on the row below`);
       for (const [sel, b] of got.parts) assert.ok(b.l >= got.tools.l - 1 && b.r <= got.tools.r + 1, `${width}px: ${sel} inside the box`);
-      assert.ok(at["#cd-send"].l > at["#cd-model-pill"].r && at["#cd-model-pill"].l > at["#cd-context"].r, `${width}px: meter, model, then Send`);
+      assert.ok(at["#cd-send"].l > at["#cd-mic"].r && at["#cd-mic"].l > at["#cd-model-pill"].r && at["#cd-model-pill"].l > at["#cd-context"].r,
+                `${width}px${recording ? " recording" : ""}: meter, model, microphone, then Send`);
+      if (recording) assert.equal(await shown(s.page, "#cd-mic-time"), width > 340, `${width}px: the time shows while it records, where there's room`);
       assert.ok(at["#cd-send"].r >= got.tools.r - 2, `${width}px: Send ends the row`);
       assert.equal(got.sideways, 0);
+      assert.deepEqual(got.spills, [], `${width}px${recording ? " recording" : ""}: nothing spills out of its place`);
       if (width >= 1100) assert.ok(got.words >= 3, "wide: Search, Deep research and Study say their names");
       if (width <= 460) assert.equal(got.words, 0, `${width}px: icons only`);
       assert.equal(await s.page.locator("#cd-research").getAttribute("aria-label"), "Deep research", "an icon still has its name");
-      if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-box-${width}.png`) });
+      if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-box-${width}${recording ? "-recording" : ""}.png`) });
       assert.deepEqual(s.errors, []);
     } finally { await s.page.close(); }
   }
+});
+
+test("dictation: the microphone records, Stop writes it down at the caret, Esc cancels, and what went wrong is said", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900 });
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    const mic = s.page.locator("#cd-mic");
+    assert.equal(await mic.getAttribute("aria-label"), "Dictate");
+    await mic.click();
+    assert.deepEqual((await s.posted("micStart")).length, 1);
+    assert.equal(await mic.isDisabled(), true, "starting: one press is enough");
+    await s.send({ type: "mic", state: "recording" });
+    assert.equal(await mic.getAttribute("aria-pressed"), "true");
+    assert.equal(await mic.getAttribute("aria-label"), "Stop and write it down");
+    assert.equal(await s.page.locator("#cd-mic .codicon").getAttribute("class"), "codicon codicon-debug-stop");
+    assert.match(await s.page.locator("#cd-mic-time").textContent(), /^0:0\d$/);
+
+    // Typed text either side of the caret: what was said goes between, spaced, and Send can send it.
+    await s.page.locator("#cd-input").fill("Plan a trip to Lisbon");
+    await s.page.evaluate(() => { const i = document.getElementById("cd-input"); i.setSelectionRange(11, 11); });
+    await mic.click();
+    assert.equal((await s.posted("micStop")).length, 1);
+    assert.equal(await mic.getAttribute("aria-label"), "Writing down what you said");
+    await s.send({ type: "mic", state: "idle", text: "for two people" });
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "Plan a trip for two people to Lisbon");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").selectionStart), "Plan a trip for two people".length, "the caret after what was said");
+    assert.equal(await s.page.locator("#cd-send").isDisabled(), false);
+    assert.equal(await mic.getAttribute("aria-pressed"), "false");
+    assert.equal(await s.page.locator("#cd-mic-time").isHidden(), true);
+
+    // Esc while recording drops it, from the box or anywhere on the page.
+    await mic.click();
+    await s.send({ type: "mic", state: "recording" });
+    await s.page.locator("#cd-input").press("Escape");
+    assert.equal((await s.posted("micCancel")).length, 1);
+    assert.equal(await mic.getAttribute("aria-label"), "Dictate");
+    assert.equal((await s.posted("stop")).length, 0, "Esc cancelled the recording, not a reply");
+    await mic.click();
+    await s.send({ type: "mic", state: "recording" });
+    await s.page.locator("#cd-title").click();
+    await s.page.keyboard.press("Escape");
+    assert.equal((await s.posted("micCancel")).length, 2);
+
+    // No model yet: the host opened Settings -> Voice; the page says why, as information. Nothing heard, too.
+    await mic.click();
+    await s.send({ type: "mic", state: "idle", error: "Choose a dictation model in Settings → Voice, then press the microphone again.", kind: "info" });
+    assert.equal(await s.page.locator("#cd-notice").textContent(), "Choose a dictation model in Settings → Voice, then press the microphone again.");
+    assert.equal(await s.page.locator("#cd-notice").getAttribute("data-kind"), "info");
+    await mic.click();
+    assert.equal(await s.page.locator("#cd-notice").isHidden(), true, "a new press clears the old word");
+    await s.send({ type: "mic", state: "recording" });
+    await mic.click();
+    await s.send({ type: "mic", state: "idle", text: "" });
+    assert.match(await s.page.locator("#cd-notice").textContent(), /Nothing was heard/);
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "Plan a trip for two people to Lisbon", "nothing added");
+    await s.send({ type: "mic", state: "idle", error: "Another chat is recording: stop it there first." });
+    assert.equal(await s.page.locator("#cd-notice").getAttribute("data-kind"), "error");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
 });
 
 test("a reply streams in as Markdown; your words and its words never become markup", async (t) => {

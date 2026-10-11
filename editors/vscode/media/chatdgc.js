@@ -1789,10 +1789,59 @@
   input.addEventListener("input", () => { grow(); controls(); saveDraft(); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
+    else if (e.key === "Escape" && micState === "recording") { e.preventDefault(); e.stopPropagation(); micCancel(); }
     else if (e.key === "Escape" && state.busy) { e.preventDefault(); vscode.postMessage({ type: "stop" }); }
   });
   $("cd-box").addEventListener("submit", (e) => { e.preventDefault(); submit(); });
   stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+
+  // ---- dictation: the microphone beside Send records on the computer you're at (DGC Voice), and what you said
+  // lands where the caret is. The first press with no model chosen opens Settings -> Voice.
+  const mic = $("cd-mic"), micTime = $("cd-mic-time");
+  let micState = "idle", micTimer = 0;
+  const MIC_LOOK = {
+    idle: { icon: "codicon-mic", label: "Dictate", title: "Dictate" },
+    starting: { icon: "codicon-loading codicon-modifier-spin", label: "Starting the microphone", title: "Starting the microphone" },
+    recording: { icon: "codicon-debug-stop", label: "Stop and write it down", title: "Stop and write it down (Esc cancels)" },
+    writing: { icon: "codicon-loading codicon-modifier-spin", label: "Writing down what you said", title: "Writing down what you said" },
+  };
+  function micShow(next) {
+    const look = MIC_LOOK[next] || MIC_LOOK.idle;
+    micState = MIC_LOOK[next] ? next : "idle";
+    mic.dataset.state = micState;
+    mic.setAttribute("aria-pressed", String(micState === "recording"));
+    mic.setAttribute("aria-label", look.label);
+    mic.title = look.title;
+    mic.disabled = micState === "starting" || micState === "writing";
+    mic.querySelector(".codicon").className = `codicon ${look.icon}`;
+    clearInterval(micTimer);
+    micTime.hidden = micState !== "recording";
+    if (micState === "recording") {
+      const began = Date.now();
+      const tick = () => { const s = Math.floor((Date.now() - began) / 1000); micTime.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+      tick();
+      micTimer = setInterval(tick, 500);
+      announce("Recording. Press the microphone again to stop, or Escape to cancel.");
+    }
+  }
+  function micCancel() { micShow("idle"); vscode.postMessage({ type: "micCancel" }); announce("Recording cancelled."); }
+  mic.addEventListener("click", () => {
+    if (micState === "idle") { hideNotice(); micShow("starting"); vscode.postMessage({ type: "micStart" }); }
+    else if (micState === "recording") { micShow("writing"); vscode.postMessage({ type: "micStop" }); }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && micState === "recording" && e.target !== input) { e.preventDefault(); micCancel(); }
+  });
+  /** What was said, at the caret (or over the selection), spaced from its neighbours. */
+  function dictated(text) {
+    const start = input.selectionStart ?? input.value.length, end = input.selectionEnd ?? start;
+    const before = input.value.slice(0, start), after = input.value.slice(end);
+    const piece = (before && !/\s$/.test(before) ? " " : "") + text + (after && !/^\s/.test(after) ? " " : "");
+    input.focus();
+    input.setRangeText(piece, start, end, "end");
+    grow(); controls(); saveDraft();
+    announce("Added what you said.");
+  }
   function submit() {
     const text = input.value;
     if ((!text.trim() && !state.pending.length) || state.busy || !state.conversation || state.unavailable) return;
@@ -2129,6 +2178,15 @@
   window.addEventListener("message", (event) => {
     const msg = event.data || {};
     switch (msg.type) {
+      case "mic": {
+        micShow(msg.state);
+        if (msg.error) showNotice(String(msg.error), msg.kind === "info" ? "info" : "error");
+        if (typeof msg.text === "string") {
+          if (msg.text) dictated(msg.text);
+          else showNotice("Nothing was heard. Try again, a little closer to the microphone.", "info");
+        }
+        break;
+      }
       case "opened": {
         // keep: the same chat shown again (a new version, or another one chosen): what you're typing and the
         // model and thinking you picked stay, and so does where you were reading.

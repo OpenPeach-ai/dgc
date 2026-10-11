@@ -10,6 +10,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
+import { VOICE_EXTENSION, VoiceClient } from "./voice";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
@@ -575,6 +576,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private home = false;
   /** ChatDGC (chatdgc.ts): only the side bar's provider has it. */
   private chatdgc?: ChatDGC;
+  /** Dictation for ChatDGC (made the first time a chat asks for it). */
+  private voice?: VoiceClient;
   /** The side bar's tabs: their review documents and file events go through it. */
   private readonly tabProviders = new Set<DgcViewProvider>();
   /** The tab's title has been set from its session or its first prompt. */
@@ -654,8 +657,31 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const offered = (this.lastReadyEvent?.capabilities as any)?.chatdgc;
         return offered && typeof offered === "object" ? offered : {};
       },
+      dictation: () => {
+        if (this.lastReadyEvent && !(this.lastReadyEvent.capabilities as any)?.voice) return undefined;
+        return this.voice ??= new VoiceClient({
+          send: (cmd) => this.voiceSend(cmd),
+          openSettings: (section) => this.openSettings(section),
+          offerInstall: (message) => {
+            void vscode.window.showInformationMessage(message, "Install DGC Voice").then((install) => {
+              if (!install) return;
+              void Promise.resolve(vscode.commands.executeCommand("workbench.extensions.installExtension", VOICE_EXTENSION)).catch(() =>
+                vscode.commands.executeCommand("workbench.extensions.search", `@id:${VOICE_EXTENSION}`));
+            });
+          },
+        });
+      },
     };
     chat.attach(host);
+  }
+
+  /** Voice's commands, on the side bar's process as Settings -> Voice uses (dgc/voice). */
+  private voiceSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli" {
+    let be: ChatBackend;
+    try { be = this.ensureBackend(); } catch { return "starting"; }
+    if (!this.sessionReady || !this.lastReadyEvent || !be.ready) return "starting";
+    if (!(this.lastReadyEvent.capabilities as any)?.voice) return "old_cli";
+    return be.send(cmd as Parameters<DgcBackend["send"]>[0]) ? "sent" : "starting";
   }
 
   /** Never a cached backend: the one this provider holds now, started if it has none. A send to a
@@ -1203,6 +1229,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private routeEvent(slot: ChatSlot, ev: DgcEvent): void {
     // ChatDGC's, never a session's: no transcript, chip or card of this chat is about a ChatDGC chat.
     if (isChatdgcEvent(ev as any)) { this.chatdgc?.onEvent(ev); return; }
+    // A dictation's answer, whichever chat's process carried it: no session's.
+    if (String(ev.type).startsWith("voice_") && this.voice?.onEvent(ev)) return;
     if (slot.id === this.activeSlotId) { this.onEvent(ev); return; }
     this.backgroundEvent(slot, ev);
   }
@@ -6730,6 +6758,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     if (this.pipsAttentionTimer) { clearInterval(this.pipsAttentionTimer); this.pipsAttentionTimer = undefined; }
+    this.voice?.dispose();
     // Note first, dispose the channel after: a panel teardown is one of the three things that can
     // end a turn, and it is the one the user never sees.
     this.backendNote("[extension: panel disposed — stopping the backend]");

@@ -5,7 +5,7 @@ the folder you have open, so every window lists the same chats. It runs on its o
 own store, separate from Work (the coding sessions) and from Pips.
 
 Everything described below is in ChatDGC today: chats and projects, web search with cited sources, deep
-research, files, data and charts, the canvas, memory, plugins and more. Voice comes next.
+research, files, data and charts, the canvas, memory, plugins, dictation and more. Read aloud comes next.
 
 ## Using it
 
@@ -17,6 +17,20 @@ research, files, data and charts, the canvas, memory, plugins and more. Voice co
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
+- **Dictate.** Press the microphone beside Send and speak. Press it again, and what you said appears in the box
+  where the caret is, so you can edit it before you send. Esc cancels the recording.
+  - **The first time:** the microphone opens **Settings → Voice**. Install a speech model there:
+    - **Moonshine Base:** English, 111 MB.
+    - **NVIDIA Nemotron 3.5:** many languages, 475 MB.
+
+    The first model you install also adds DGC's voice engine, about 50 MB.
+  - **Your words stay on your computer.** The model runs on your own computer, and what you say is never sent
+    anywhere.
+  - **Recording happens on the computer you're at,** through the small **DGC Voice** extension. It records the
+    same way in a Remote SSH window, where DGC itself runs on the other machine. DGC Voice keeps nothing once it
+    hands the recording over.
+  - **On a Mac,** macOS asks the first time whether your editor may use the microphone. If you said no, allow it
+    in **System Settings → Privacy & Security → Microphone**.
 - **Files, images and long pastes.** Use the paperclip to attach up to ten files to a message, or paste an
   image or a long piece of text (more than 5,000 characters) into the box. You can send a message with only
   files.

@@ -4,6 +4,15 @@
 
 ### ChatDGC
 
+- **Dictation.** A microphone beside Send: press it and speak, then press it again, and what you said lands in
+  the box at the caret. Esc cancels. The first press opens **Settings → Voice**.
+  - **Settings → Voice:** lists each model with its download size and licence. **Install** downloads it with a
+    progress bar you can cancel, then **Use** picks it and **Remove** deletes it.
+  - **DGC Voice:** a small extension that records on the computer you're at, even in a Remote SSH window. It uses
+    the recorder the system already has: AVAudioRecorder on macOS, the Windows audio API, or `arecord`,
+    `pw-record` or `parecord` on Linux.
+  - **Silent recordings:** a recording that is digitally silent is reported as a microphone the system withheld
+    (macOS records zeros without permission), never sent as speech.
 - **Chat, above Work.** The side bar lists your chats above this project's sessions (now **Work**), with
   one search over both. **New chat** (or **DGC: New Chat (ChatDGC)**) opens a chat in an editor tab of
   its own. Replies stream as Markdown, with code, tables and links that open only when you click them.

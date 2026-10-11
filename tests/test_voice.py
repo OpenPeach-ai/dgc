@@ -227,7 +227,17 @@ class ServeTests(unittest.TestCase):
         env.pop("DGC_HOME", None)
         proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], cwd=work, env=env, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        self.addCleanup(proc.kill)
+        # A backend that goes quiet ends the read (the loop below only looks at the clock when a line arrives).
+        watchdog = threading.Timer(60, proc.kill)
+        watchdog.start()
+
+        def stop():
+            watchdog.cancel()
+            proc.kill()
+            proc.wait(timeout=10)
+            proc.stdin.close()
+            proc.stdout.close()
+        self.addCleanup(stop)
         seen = []
         deadline = time.monotonic() + 60
         for line in proc.stdout:

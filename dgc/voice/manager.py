@@ -53,9 +53,12 @@ def make_runtime(runtime: Path, log) -> None:
     """A fresh environment with the voice engine in it (sherpa-onnx and numpy, pinned, wheels only)."""
     if runtime.exists():
         shutil.rmtree(runtime)
-    subprocess.run([sys.executable, "-m", "venv", str(runtime)], check=True, stdout=log, stderr=log, timeout=300)
+    # stdin: never `dgc serve`'s own, which is the editor's command stream.
+    subprocess.run([sys.executable, "-m", "venv", str(runtime)], check=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                   timeout=300)
     subprocess.run([str(_runtime_python(runtime)), "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
-                    "--only-binary=:all:", *catalog.RUNTIME["packages"]], check=True, stdout=log, stderr=log, timeout=1800)
+                    "--only-binary=:all:", *catalog.RUNTIME["packages"]], check=True, stdin=subprocess.DEVNULL, stdout=log,
+                   stderr=log, timeout=1800)
 
 
 def fetch(url: str, target: Path, on_bytes: Callable[[int], None], cancel: threading.Event) -> None:

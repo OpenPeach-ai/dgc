@@ -8,6 +8,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### ChatDGC
 
+- **Voice models on your own computer.** `dgc serve` installs and runs speech models for dictation (Moonshine Base,
+  English, 111 MB; NVIDIA Nemotron 3.5, many languages, 475 MB) and for reading replies aloud (Kitten, Pocket TTS).
+  - **What it uses:** sherpa-onnx, in an environment of its own under `~/.dgc/voice`.
+  - **Downloads are checked:** each model is checked against the release's published SHA-256 before it is unpacked.
+  - **Nothing is sent anywhere:** recordings are written down on your machine.
+  - **New protocol commands:** `voice_models`, `voice_install`, `voice_cancel`, `voice_remove`, `voice_use`,
+    `voice_transcribe` and `voice_speak`/`voice_stop`. A backend that has them says so in
+    `ready.capabilities.voice`.
 - **Memory keeps only what you tell it about yourself.** The check before a reply says where each fact comes from
   (you told it, you asked to keep it, a task's material, a question's background) and only the first two are kept;
   a request to write or do something keeps only what you ask it to remember. Measured on deepseek-v4.1-flash, a

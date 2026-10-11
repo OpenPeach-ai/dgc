@@ -1,0 +1,77 @@
+{
+  "name": "dgc-voice",
+  "displayName": "DGC Voice",
+  "description": "Records your voice for DGC on the computer you're at, so DGC can take dictation even when it runs on another machine.",
+  "version": "0.1.0",
+  "publisher": "vibedgc",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpenPeach-ai/dgc.git",
+    "directory": "editors/vscode-voice"
+  },
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "icon.png",
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:dgcVoice.start",
+    "onCommand:dgcVoice.stop",
+    "onCommand:dgcVoice.cancel",
+    "onCommand:dgcVoice.status"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "dgcVoice.start",
+        "title": "Start recording for DGC",
+        "category": "DGC Voice"
+      },
+      {
+        "command": "dgcVoice.stop",
+        "title": "Stop recording for DGC",
+        "category": "DGC Voice"
+      },
+      {
+        "command": "dgcVoice.cancel",
+        "title": "Cancel recording for DGC",
+        "category": "DGC Voice"
+      },
+      {
+        "command": "dgcVoice.status",
+        "title": "Can DGC record here?",
+        "category": "DGC Voice"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "dgcVoice.start",
+          "when": "false"
+        },
+        {
+          "command": "dgcVoice.stop",
+          "when": "false"
+        },
+        {
+          "command": "dgcVoice.cancel",
+          "when": "false"
+        },
+        {
+          "command": "dgcVoice.status",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
