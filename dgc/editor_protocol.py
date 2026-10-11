@@ -915,6 +915,18 @@ COMMAND_FIELDS.update({
     "chatdgc_research_steer": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "text": _S()},
     # One memory about the user, shared by ChatDGC, Work sessions and Pips (dgc/shared_memory.py): Settings ->
     # Memory, and the Forget under a reply that saved a fact. Each is answered by `memory_state`.
+    # Voice (dgc/voice): Settings -> Voice models, answered by `voice_state`; an install reports `voice_progress` as it
+    # goes and `voice_state` when it ends (or `voice_error`, with the model's `id`). Dictation is 16-bit mono PCM at
+    # 16 kHz, base64, in chunks numbered from 0 (`done` on the last), answered by `voice_text`; reading aloud is
+    # answered by `voice_audio` chunks the same way, until one with `done`. `voice_stop` stops reading aloud.
+    "voice_models": {"request_id": _S()},
+    "voice_install": {"request_id": _S(), "id": _S()},
+    "voice_cancel": {"request_id": _S(), "id": _S()},
+    "voice_remove": {"request_id": _S(), "id": _S()},
+    "voice_use": {"request_id": _S(), "role": _f("string", enum=("dictation", "read_aloud")), "id": _S()},
+    "voice_transcribe": {"request_id": _S(), "part": _I(), "audio": _S(), "done": _B(), "language": _S(False)},
+    "voice_speak": {"request_id": _S(), "text": _S()},
+    "voice_stop": {"request_id": _S()},
     "memory_list": {"request_id": _S()},
     "memory_add": {"request_id": _S(), "text": _S()},
     "memory_edit": {"request_id": _S(), "id": _S(), "text": _S()},
@@ -1005,6 +1017,15 @@ EVENT_FIELDS.update({
     # source: {surface, where}}), the projects from Work sessions ({folder, name, when, recent, remember}), and
     # `error` when the command that asked couldn't be done. Also sent, unasked, after a reply saved or forgot one.
     "memory_state": {"request_id": _S(False), "enabled": _B(), "facts": _A(), "projects": _A(), "error": _S(False)},
+    # Voice: the models ({id, role, name, summary, languages, licence, size, installed, in_use, installing}), whether
+    # the engine is installed, and which model dictates and which reads aloud ("" for none).
+    "voice_state": {"request_id": _S(False), "runtime": _O(), "models": _A(), "dictation": _S(), "read_aloud": _S()},
+    "voice_progress": {"id": _S(), "stage": _S(), "done": _I(), "total": _I()},
+    "voice_text": {"request_id": _S(), "text": _S()},
+    "voice_audio": {"request_id": _S(), "part": _I(), "audio": _S(), "sample_rate": _I(), "done": _B()},
+    # code: no_model (nothing installed for that: the screen opens Settings -> Voice models), install_failed,
+    # cancelled; id: the model an install error is about.
+    "voice_error": {"message": _S(), "request_id": _S(False), "code": _S(False), "id": _S(False)},
     # A conversation's list entry changed (a turn, a rename, a pin), or it was deleted (summary null).
     "chatdgc_changed": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
     "chatdgc_error": {"message": _S(), "request_id": _S(False), "conversation_id": _S(False)},

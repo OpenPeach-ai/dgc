@@ -2067,9 +2067,10 @@ class Backend:
         # widget_report: chatdgc_open takes widget_reports, and chatdgc_widget_report is understood. widget_library:
         # chatdgc_widgets is. windows: the window presets chatdgc_window takes, and chatdgc_context is understood.
         # context_breakdown: chatdgc_context_breakdown is, answered by context_breakdown.
+        # voice: the voice_* commands (dgc/voice), offered with ChatDGC: a Host's, the same in every folder.
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1},
-                "memory": {"version": 1}}
+                "memory": {"version": 1}, "voice": {"version": 1}}
 
     def _chats_capability(self) -> dict:
         """ready.capabilities.chats: offered only by a Host, and never when DGC_PROJECT_ROOT pins the
@@ -6881,6 +6882,7 @@ class Host:
         self._editor_liveness = None
         self._finalizer_wait = ""
         self._chatdgc = None                 # ChatDGC's service, made on its first command
+        self._voice = None                   # voice (dgc/voice), made on its first command
         self.default = self.add_chat(config)
 
     def add_chat(self, config: Config, chat_id: str = "") -> "Backend":
@@ -7113,6 +7115,14 @@ class Host:
     def _sanitize(self, event):
         return redact_value(event, self._secret_values())
 
+    def voice(self):
+        """Voice: the models in Settings -> Voice models, dictation and reading aloud (dgc/voice)."""
+        with self._chats_lock:
+            if self._voice is None:
+                from .voice.service import VoiceService
+                self._voice = VoiceService(self.core.emit, self.default.config)
+            return self._voice
+
     def chatdgc(self):
         """ChatDGC's service: its own engine and store (~/.dgc/chat), on the user's model settings.
         Its events go straight to the wire, so none carries a session's chat_id."""
@@ -7141,6 +7151,12 @@ class Host:
         if isinstance(kind, str) and kind.startswith(("chatdgc_", "memory_")):
             # The process's, never a session's: a chat is the same whatever folder is open.
             return self.chatdgc().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
+        if isinstance(kind, str) and kind.startswith("voice_"):
+            # The process's too: the same voice models in every folder (dgc/voice).
+            problem = command_error(cmd)
+            if problem:
+                return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
+            return self.voice().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
         if "chat_id" not in cmd:
             return self._deliver(self.default, cmd)
         chat_id = cmd.get("chat_id")
@@ -7251,6 +7267,9 @@ class Host:
             queues, self._queues = list(self._queues.values()), {}
             drains, self._drains = list(self._drains.values()), {}
         chat_closer = None
+        voice = getattr(self, "_voice", None)
+        if voice is not None:
+            voice.close()                     # stops reading aloud and the voice worker; installs are threads of theirs
         if chatdgc is not None:
             # A ChatDGC reply stops and saves what it wrote, alongside the sessions' own closes.
             chat_closer = threading.Thread(target=chatdgc.close, daemon=True, name="dgc-chatdgc-close")

@@ -40,6 +40,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "steering_update", "stream_end", "text_delta", "think_changed", "thinking_delta",
   "thinking_end", "todos", "tool_call", "tool_denied", "tool_images", "tool_progress",
   "tool_result", "turn_activity", "turn_end", "turn_eta", "turn_start", "usage_report",
+  "voice_audio", "voice_error", "voice_progress", "voice_state", "voice_text",
   "workspace_change", "workspace_changes", "workspace_roots",
   "composio_connection", "plugin_catalog", "plugin_marketplaces", "plugin_operation", "plugin_preview",
 ]);
