@@ -204,8 +204,11 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-box { container: cd-box / inline-size; }
 .cd-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-2); min-width: 0; }
 .cd-tools > * { flex: none; }
-.cd-tools > .cd-picker { flex: 0 1 auto; min-width: 0; }
 .cd-tools > .cd-spacer { flex: 1 1 0; min-width: 0; }
+/* The meter, the model and Send: one group, always together at the right end. */
+.cd-tools-end { display: flex; align-items: center; gap: var(--sp-2); flex: 0 1 auto; min-width: 0; margin-left: auto; }
+.cd-tools-end > * { flex: none; }
+.cd-tools-end > .cd-picker { flex: 0 1 auto; min-width: 0; }
 /* (.codicon[class*='codicon-'] sets display itself: these say which, at its weight.) */
 .cd-toggle > .codicon.cd-toggle-icon { display: none; }
 @container cd-box (max-width: 640px) {
@@ -215,13 +218,19 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 }
 /* Narrower still: the model keeps its arc and chevron (its name is the pill's tooltip and heads its menu)... */
 @container cd-box (max-width: 420px) {
-  .cd-tools { gap: var(--sp-1); }
+  .cd-tools, .cd-tools-end { gap: var(--sp-1); }
   .cd-model-name { display: none; }
 }
 /* ...and the meter its pie. */
 @container cd-box (max-width: 340px) {
-  .cd-tools { gap: 2px; }
+  .cd-tools, .cd-tools-end { gap: 2px; }
   #cd-context-pct { display: none; }
+}
+/* Too narrow for one row (both side bars open, say): the tools take the first row and the group the second, at the
+   right, rather than Send leaving the box. */
+@container cd-box (max-width: 270px) {
+  .cd-tools { flex-wrap: wrap; row-gap: var(--sp-1); }
+  .cd-tools > .cd-spacer { display: none; }
 }
 /* The model and its thinking, as main DGC's model control: the name, a small arc for thinking, a chevron. */
 .cd-picker { position: relative; display: inline-flex; min-width: 0; }

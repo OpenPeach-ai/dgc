@@ -158,7 +158,7 @@ test("with no click, the thinking is open while it thinks and closes when the an
 
 test("however narrow the editor, the prompt box keeps one row: the tools turn to icons, the meter, model and Send hold their places", async (t) => {
   if (skipOrFail(t)) return;
-  for (const width of [1100, 640, 460, 340]) {
+  for (const width of [1100, 640, 460, 340, 230]) {
     const s = await openScreen({ width, height: 700 });
     try {
       await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
@@ -173,8 +173,11 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
         return { parts, tools: { l: tools.left, r: tools.right }, words, sideways: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth };
       });
       const at = Object.fromEntries(got.parts);
-      const rows = new Set(got.parts.map(([, b]) => Math.round((b.t + b.b) / 2)));
-      assert.ok(Math.max(...rows) - Math.min(...rows) <= 2, `${width}px: one row, not wrapped (${[...rows]})`);
+      const mid = (b) => Math.round((b.t + b.b) / 2);
+      const rows = new Set(got.parts.map(([, b]) => mid(b)));
+      if (width > 300) assert.ok(Math.max(...rows) - Math.min(...rows) <= 2, `${width}px: one row, not wrapped (${[...rows]})`);
+      else assert.ok(Math.abs(mid(at["#cd-send"]) - mid(at["#cd-model-pill"])) <= 2 && Math.abs(mid(at["#cd-send"]) - mid(at["#cd-context"])) <= 2
+                     && mid(at["#cd-send"]) > mid(at["#cd-attach"]), `${width}px: too narrow for one row: the meter, model and Send together on the row below`);
       for (const [sel, b] of got.parts) assert.ok(b.l >= got.tools.l - 1 && b.r <= got.tools.r + 1, `${width}px: ${sel} inside the box`);
       assert.ok(at["#cd-send"].l > at["#cd-model-pill"].r && at["#cd-model-pill"].l > at["#cd-context"].r, `${width}px: meter, model, then Send`);
       assert.ok(at["#cd-send"].r >= got.tools.r - 2, `${width}px: Send ends the row`);

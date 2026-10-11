@@ -220,11 +220,11 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <button type="button" id="cd-study" class="cd-tool" aria-pressed="false" aria-label="Study" title="Study: it teaches you step by step, asks you questions and quizzes you, instead of handing over answers. It stays on in this chat until you turn it off"><span class="codicon codicon-mortar-board" aria-hidden="true"></span><span class="cd-tool-label">Study</span></button>
 <label id="cd-temp-toggle" class="cd-toggle" title="Temporary: this chat isn't saved or listed"><input type="checkbox" id="cd-temporary" aria-label="Temporary chat"><span class="codicon codicon-comment-draft cd-toggle-icon" aria-hidden="true"></span><span class="cd-tool-label">Temporary</span></label>
 <span class="cd-spacer"></span>
-<button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-pie-chart" aria-hidden="true"></span><span id="cd-context-pct">0%</span></button>
+<div class="cd-tools-end"><button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-pie-chart" aria-hidden="true"></span><span id="cd-context-pct">0%</span></button>
 <div class="cd-picker"><button type="button" id="cd-model-pill" class="cd-model-pill" aria-haspopup="dialog" aria-expanded="false" hidden><span id="cd-model-name" class="cd-model-name">Model</span><svg class="cd-pill-arc" viewBox="0 0 16 10" aria-hidden="true"><path class="cd-arc-track" d="M2 9 A6 6 0 0 1 14 9"></path><path id="cd-pill-arc-fill" class="cd-arc-fill" d=""></path></svg><span class="codicon codicon-chevron-up cd-model-chevron" aria-hidden="true"></span></button>
 <div id="cd-model-menu" class="cd-model-menu" role="dialog" aria-label="Model and thinking" hidden></div></div>
 <button type="submit" id="cd-send" class="cd-send" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
-<button type="button" id="cd-stop" class="cd-send cd-stop" title="Stop (Esc)" aria-label="Stop" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
+<button type="button" id="cd-stop" class="cd-send cd-stop" title="Stop (Esc)" aria-label="Stop" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button></div>
 </div></form>
 <p class="cd-fine">ChatDGC answers with your own model. Check what matters.</p>
 </div></footer>
