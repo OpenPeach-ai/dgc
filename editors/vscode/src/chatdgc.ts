@@ -326,6 +326,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     for (const tab of this.tabs) {
       const held = tab.held.splice(0);
       for (const cmd of held) this.deliver({ tab, kind: "held" }, cmd);
+      // A tab opened before the backend was ready asked for models too early: its picker showed nothing chosen.
+      void this.models(tab);
     }
     if (this.homeHeld) { this.homeHeld = false; this.homeRefresh(); }
   }

@@ -180,15 +180,20 @@ test("a tab sends only what the protocol accepts", () => {
   assert.deepEqual(last("chatdgc_cancel"), { type: "chatdgc_cancel", conversation_id: ID(5) });
 });
 
-test("commands wait for a process that is starting, and an older CLI says so", () => {
+test("commands wait for a process that is starting, and an older CLI says so", async () => {
   host.outcome = "starting";
+  host.models = { ids: [], current: "" };              // too early: nothing known yet
   chat.open("");
   const [panel] = world.panels;
   panel.say({ type: "ready" });
   assert.equal(sent.length, 0);
   host.outcome = "sent";
+  host.models = { ids: ["qwen3:32b", "fixture"], current: "fixture" };
   chat.backendReady();
   assert.deepEqual(sent.map((c) => c.type), ["chatdgc_open", "chatdgc_projects"], "sent once it was ready, each once");
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(panel.last("models"), { type: "models", ids: ["qwen3:32b", "fixture"], current: "fixture" },
+                   "a tab opened before the backend was ready gets its models then, so the picker shows the model");
   host.outcome = "old_cli";
   chat.open("");
   world.panels[1].say({ type: "ready" });
