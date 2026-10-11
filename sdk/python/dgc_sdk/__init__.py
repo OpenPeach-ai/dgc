@@ -7,6 +7,7 @@ Install: ``pip install dgc-sdk``. Import ``dgc_sdk``. Version 0.7.0 pairs with D
 from ._mcp_bridge import define_tool
 from ._version import PROTOCOL, REQUIRES_CLI, __version__
 from .audit import redact, redact_text
+from .chat import AsyncChat, AsyncChats, Chat, ChatEvent, ChatReply, ChatSource, ChatSummary, Chats
 from .client import AsyncDGC, AsyncRunHandle, AsyncSession, DGC
 from .policy import RuntimePolicy
 from .pips import AsyncPips, Pips, PipReadCommand, PipMutationCommand
@@ -28,6 +29,7 @@ from .types import (
 )
 
 __all__ = [
+    "AsyncChat", "AsyncChats", "Chat", "ChatEvent", "ChatReply", "ChatSource", "ChatSummary", "Chats",
     "AsyncPips", "Pips", "PipReadCommand", "PipMutationCommand",
     "PROTOCOL", "REQUIRES_CLI", "__version__",
     "AgentInfo", "Artifact", "AsyncDGC", "AsyncRunHandle", "AsyncSession", "Checkpoint", "ContextBreakdown",

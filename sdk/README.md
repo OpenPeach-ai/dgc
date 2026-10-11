@@ -87,3 +87,11 @@ the Pips of an existing DGC profile from trusted host code. It pairs with CLI 0.
 sessions. Every mutation needs the host's explicit `approved=True`
 (`{ approved: true }`) on that call. See [PIPS.md](PIPS.md) for the commands,
 capability gates and payloads.
+
+## ChatDGC
+
+`DGC.chat()` (Python, sync and async) and `dgc.chat()` (TypeScript) put ChatDGC in your program: ask a question
+and your model answers, with web search and numbered sources, streaming, deep research and saved chats. It runs on
+a backend of its own that never opens a workspace; with `inherit_user_state=True` (`inheritUserState: true`) the
+chats are the user's own, as the editor lists them. See [docs/SDK.md](../docs/SDK.md#chatdgc-dgcchat).
+

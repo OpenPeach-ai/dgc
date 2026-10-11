@@ -53,6 +53,62 @@ job, `memory`, `skills`, `plugins` for its connected apps, `data` for its refere
 conversation brief) and `messages`, as the next reply sends them. A Pip that hasn't replied since shows those last
 two only, and an older CLI sends no `breakdown`.
 
+### ChatDGC (`DGC.chat()`)
+
+`DGC.chat()` puts ChatDGC, DGC's chat app, in your program: your model answers, searching the web when an answer
+depends on it, with every source numbered. It runs on a backend of its own that never opens a workspace (a
+private, empty folder in the client's state). With `inherit_user_state=True` (`inheritUserState: true`) these are
+your chats, the ones the editor's Chat tab and `dgc chat` list; otherwise the client's own.
+
+```python
+from dgc_sdk import DGC
+
+with DGC(inherit_user_state=True) as dgc, dgc.chat() as chats:
+    reply = chats.ask("How does compound interest work?")
+    print(reply.text)                      # Markdown, with [n] citations
+    for source in reply.sources:
+        print(source.n, source.title, source.url)
+
+    chat = chats.new()
+    for event in chat.stream("And with monthly deposits?"):
+        if event.kind == "text":
+            print(event.text, end="", flush=True)
+```
+
+```typescript
+import { DGC } from "@vibedgc/sdk";
+
+const dgc = new DGC({ inheritUserState: true });
+try {
+  const chats = await dgc.chat();
+  const reply = await chats.ask("How does compound interest work?");
+  console.log(reply.text, reply.sources);
+  const chat = await chats.new();
+  for await (const event of chat.stream("And with monthly deposits?")) {
+    if (event.kind === "text") process.stdout.write(event.text);
+  }
+} finally {
+  await dgc.close();
+}
+```
+
+| API | Purpose |
+| --- | --- |
+| `dgc.chat(model=, thinking=, reply_timeout=)` | `Chats` on its own backend. `model` and `thinking` (`off` to `xhigh`) apply to every message unless one says otherwise; `reply_timeout` (TypeScript `replyTimeoutMs`) bounds each reply. A CLI without ChatDGC raises `DGCUnsupportedError`. |
+| `chats.ask(text, **options)` | One question in a new chat: its `ChatReply`. Takes `temporary=True` for a chat that's never saved or listed. |
+| `chats.list(query=None, limit=, offset=, archived=)` | `ChatSummary` rows, newest first; `query` finds a chat by its title or anything said in it. |
+| `chats.new(temporary=)`, `chats.open(chat_id)` | A `Chat`: a new one (saved from its first message) or an existing one with its latest `messages`. |
+| `chat.send(text, model=, thinking=, search=, files=, timeout=)` | Send and wait for the whole reply. `search`: `auto` (default), `on` or `off`; `files`: up to ten local files. |
+| `chat.stream(...)` | The same, as `ChatEvent`s while it's written: `text`, `thinking`, `activity` (searching, looking), `question`, `research`, and last `reply`. |
+| `chat.research(question, edit_plan=, on_event=)` | Deep research: a plan you may change, then the research, then a report whose citations are checked. |
+| `chat.cancel()`, `rename(title)`, `pin()`, `archive()`, `delete()`, `export(path, format=)`, `refresh()` | Stop a reply (what it wrote is kept), manage the chat, save it as Markdown or JSON. |
+
+A `ChatReply` has `chat_id`, `message_id`, `text`, `sources` (each a `ChatSource`: `n`, `title`, `url`, `snippet`),
+`searches`, `files`, `model`, `finish` and `usage`. One reply at a time per chat; any number of chats at once.
+`AsyncDGC.chat()` returns `AsyncChats`, whose `AsyncChat` has the same API to `await`, with `stream()` an async
+iterator. TypeScript uses camelCase (`chatId`, `messageId`,
+`timeoutMs`, `editPlan`, `onEvent`) and milliseconds.
+
 ### Published packages
 
 ```bash

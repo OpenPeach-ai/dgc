@@ -27,6 +27,7 @@ from .policy import (
 )
 from .runtime import RuntimeSpec, discover_runtime, isolated_env, runtime_for_argv
 from .session import RunHandle, Session, _Completed, _new_id
+from .chat import AsyncChats, Chats
 from .types import (
     AgentInfo, Artifact, Checkpoint, ContextBreakdown, Goal, HookInfo, McpServerInfo, Monitor, OnMcpInput,
     OnPermission, OnPlan, OnQuestion, PermissionMode, PermissionPolicy, PermissionRule,
@@ -562,6 +563,26 @@ class DGC:
         return install_tools(transport, tools, runtime=self._runtime, request_id=_new_id("mcp"),
                              timeout=max(20.0, self._request_timeout))
 
+    def chat(self, *, model: str | None = None, thinking: str | None = None,
+             reply_timeout: float = 600.0) -> Chats:
+        """ChatDGC: DGC's chat app, from your program (see :mod:`dgc_sdk.chat`).
+
+        It runs on a backend of its own that never opens a workspace (a private, empty folder in this
+        client's state). With ``inherit_user_state=True`` these are your chats, the ones the editor lists;
+        otherwise the client's own. ``model`` and ``thinking`` (off, low, medium, high, xhigh) apply to every
+        message unless one says otherwise; ``reply_timeout`` bounds each reply in seconds. Close the returned
+        :class:`Chats` (or this client) when done. A CLI without ChatDGC raises :class:`DGCUnsupportedError`."""
+        if self._closed:
+            raise DGCRuntimeError("this DGC client is closed")
+        workspace = self._state_dir / "chat-workspace"
+        workspace.mkdir(mode=0o700, exist_ok=True)
+        session = self.session(cwd=workspace, permissions={"mode": "plan", "unhandled": "deny"})
+        try:
+            return Chats(session, model=model, thinking=thinking, reply_timeout=reply_timeout)
+        except BaseException:
+            session.close()
+            raise
+
     def usage_report(self, *, department: str | None = None) -> dict[str, Any]:
         """Queryable isolated usage (JSONL). Does not read host ~/.dgc."""
         return self._usage_log.query(department=department)
@@ -1009,6 +1030,12 @@ class AsyncDGC:
             raise
         session._set_callback_loop(loop)
         return AsyncSession(session)
+
+    async def chat(self, *, model: str | None = None, thinking: str | None = None,
+                   reply_timeout: float = 600.0) -> AsyncChats:
+        """ChatDGC, as :meth:`DGC.chat`, awaitable."""
+        chats = await asyncio.to_thread(self._sync.chat, model=model, thinking=thinking, reply_timeout=reply_timeout)
+        return AsyncChats(chats)
 
     def usage_report(self, *, department: str | None = None) -> dict[str, Any]:
         return self._sync.usage_report(department=department)

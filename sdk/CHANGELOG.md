@@ -4,8 +4,13 @@
 
 The ChatDGC events (`chatdgc_chats`, `chatdgc_opened`, `chatdgc_earlier`, `chatdgc_turn`, `chatdgc_activity`,
 `chatdgc_delta`, `chatdgc_message`, `chatdgc_changed`, `chatdgc_error`) are part of the vendored
-protocol and the TypeScript SDK's known events, so neither SDK drops them. `DGC.chat()` comes in a
-later release.
+protocol and the TypeScript SDK's known events, so neither SDK drops them.
+
+`DGC.chat()` (Python, and `AsyncDGC.chat()`) and `dgc.chat()` (TypeScript): ChatDGC from your program. `Chats`
+lists, opens and starts chats (`ask`, `list`, `new`, `open`); a `Chat` sends (`send`, `stream`), runs deep research
+(`research`, with a plan you may edit), stops a reply (`cancel`) and is renamed, pinned, archived, deleted or
+exported. Replies carry their numbered `sources`. It runs on a backend of its own in a private empty folder, in plan
+mode; a CLI without ChatDGC raises `DGCUnsupportedError`.
 
 More Pips API 44, all local only and refused before sending to a runtime below API 44:
 `list_pip_attention` (`limit`) reads everything your Personal Pips wait on you for; `list_pip_notes`

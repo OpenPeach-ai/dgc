@@ -1,6 +1,6 @@
 /** Public DGC client. Mirrors sdk/python/dgc_sdk/client.py. */
 import {
-  closeSync, constants as fsConstants, openSync, realpathSync, rmSync, statSync, unlinkSync, writeSync,
+  closeSync, constants as fsConstants, mkdirSync, openSync, realpathSync, rmSync, statSync, unlinkSync, writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import {
 } from "./policy.ts";
 import { defaultRuntime, isolatedEnv } from "./runtime.ts";
 import { Session } from "./session.ts";
+import { Chats, type ChatsOptions } from "./chat.ts";
 import { configDrift, prepareStateDir, stateLock, writeSessionConfig } from "./state.ts";
 import { installTools, type ToolHub } from "./tools.ts";
 import { Transport, type Frame } from "./transport.ts";
@@ -392,6 +393,26 @@ export class DGC {
   }
 
   /** Open a session on a persisted transcript (`sessionId`, or `latest: true`). */
+  /**
+   * ChatDGC: DGC's chat app, from your program (see `chat.ts`). It runs on a backend of its own that never opens a
+   * workspace (a private, empty folder in this client's state). With `inheritUserState: true` these are your chats,
+   * the ones the editor lists; otherwise the client's own. `model` and `thinking` apply to every message unless one
+   * says otherwise; `replyTimeoutMs` bounds each reply. Close the returned {@link Chats} (or this client) when done.
+   * A CLI without ChatDGC throws {@link DGCUnsupportedError}.
+   */
+  async chat(options: ChatsOptions = {}): Promise<Chats> {
+    if (this.closed) throw new DGCRuntimeError("this DGC client is closed");
+    const workspace = join(this.stateDir, "chat-workspace");
+    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    const session = await this.session({ cwd: workspace, permissions: { mode: "plan", unhandled: "deny" } });
+    try {
+      return new Chats(session, options);
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
+  }
+
   async resume(options: ResumeOptions): Promise<Session> {
     const session = await this.session(options);
     const command: Frame = { type: "resume_session", request_id: newId("resume") };

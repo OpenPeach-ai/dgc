@@ -10,6 +10,8 @@ export type {
 } from "./types.ts";
 export { DGC } from "./client.ts";
 export { RunHandle, Session } from "./session.ts";
+export { Chat, Chats, CHAT_THINKING, type ChatEvent, type ChatReply, type ChatSearch, type ChatSendOptions, type ChatSource,
+  type ChatSummary, type ChatThinking, type ChatsOptions, type ResearchOptions } from "./chat.ts";
 export { Pips, type PipReadCommand, type PipMutationCommand, type PipReadParams, type PipMutationParams,
   type PipResult, type PipJson, type PipChatOptions, type PipCalendarEvent } from "./pips.ts";
 export { defineTool, type ToolSpec } from "./tools.ts";
