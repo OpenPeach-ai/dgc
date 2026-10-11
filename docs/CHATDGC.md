@@ -4,9 +4,8 @@ ChatDGC is a chat app inside DGC. You ask a question and your own model answers.
 the folder you have open, so every window lists the same chats. It runs on its own engine and keeps its
 own store, separate from Work (the coding sessions) and from Pips.
 
-Today ChatDGC has chats, streaming replies, the model and thinking picker, files and images, web search with
-cited sources, Stop and Continue, and temporary chats. Editing and regenerating, memory, Deep Research and
-voice come in later phases.
+Everything described below is in ChatDGC today: chats and projects, web search with cited sources, deep
+research, files, data and charts, the canvas, memory, plugins and more. Voice comes next.
 
 ## Using it
 
