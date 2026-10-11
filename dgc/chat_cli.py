@@ -77,8 +77,9 @@ class ChatClient:
         self._n = 0
         self.titles: dict[str, str] = {}
 
-    def _emit(self, kind: str, **fields: Any) -> None:
-        self.events.put({"type": kind, **fields})
+    def _emit(self, event_type: str, /, **fields: Any) -> None:
+        # Positional-only: ChatDGC's events carry fields of every name (an activity has a `kind`).
+        self.events.put({"type": event_type, **fields})
 
     def _rid(self) -> str:
         self._n += 1

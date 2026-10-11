@@ -93,6 +93,22 @@ class ChatCliTests(unittest.TestCase):
         self.assertEqual(subprocess.run([sys.executable, "-m", "dgc", "chat", "--help"], env=self.env, capture_output=True,
                                         text=True, timeout=60).returncode, 0)
 
+    def test_an_event_with_a_field_named_kind_reaches_the_screen(self):
+        """Found live: a search's activity event has a `kind` field, which the event callback's own parameter took."""
+        from dgc.chat_cli import ChatClient, Printer
+
+        class Quiet:
+            def close(self):
+                pass
+
+        client = ChatClient(None, service=Quiet())
+        client._emit("chatdgc_activity", conversation_id="chat_x", kind="search", text="Searching the web: IRA rules")
+        event = client.events.get_nowait()
+        self.assertEqual((event["type"], event["kind"]), ("chatdgc_activity", "search"))
+        out = io.StringIO()
+        Printer(out, False).event(event)
+        self.assertEqual(out.getvalue(), "· Searching the web: IRA rules\n")
+
     def test_the_chat_you_type_into(self):
         old = os.environ.get("HOME")
         os.environ["HOME"] = str(self.home)
