@@ -176,6 +176,11 @@ voice come in later phases.
     replies know what each file it made says.
   - **Where it's kept:** with the chat, and in the Library, marked as made. A temporary chat's files last
     only while DGC runs.
+- **Study mode**, as ChatGPT's "Study and learn": **Study** in the box turns it on for the chat, until you turn
+  it off (the chat remembers it). It teaches instead of handing over answers: it first asks what you know or
+  what it's for, goes one step at a time, ends each reply with a question or something to try, gives hints
+  before solutions, and every few steps checks with a quick quiz (a question card with choices; your choice
+  comes back and it says whether you were right and why). Ask it to just tell you, and it does.
 - **The Library**, as ChatGPT has it: **Library** in the side bar opens every file you attached or ChatDGC
   made, in every chat and project (temporary chats keep none), newest first. Show what you uploaded or what
   ChatDGC made, one kind (images, PDFs, documents, spreadsheets, presentations, code, pasted text), or search by
@@ -232,7 +237,7 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_list` | `request_id`, `query?`, `archived?`, `limit?` (1–200), `offset?` | `chatdgc_chats` |
 | `chatdgc_open` | `request_id`, `conversation_id?` (omit for a new chat), `temporary?` | `chatdgc_opened` |
 | `chatdgc_earlier` | `request_id`, `conversation_id`, `before` (a message id) | `chatdgc_earlier` |
-| `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`auto`, the default: it decides, and looks a factual question up first; `on`: search first; `off`: no web; the config's `chatdgc_web: false` makes every reply `off`), `attachments?` | a turn (below) |
+| `chatdgc_send` | `request_id`, `conversation_id`, `text`, `model?`, `thinking?`, `search?` (`auto`, the default: it decides, and looks a factual question up first; `on`: search first; `off`: no web; the config's `chatdgc_web: false` makes every reply `off`), `attachments?`, `study?` (true turns study mode on for the chat from this message, false turns it off; the conversation carries `study`) | a turn (below) |
 | `chatdgc_continue` | `request_id`, `conversation_id`, `message_id` | a turn |
 | `chatdgc_edit` | `request_id`, `conversation_id`, `message_id` (yours), `text`, `model?`, `thinking?`, `search?` | `chatdgc_opened` (from the new version on), then a turn |
 | `chatdgc_regenerate` | `request_id`, `conversation_id`, `message_id` (a reply), `model?`, `thinking?`, `search?` | `chatdgc_opened`, then a turn |

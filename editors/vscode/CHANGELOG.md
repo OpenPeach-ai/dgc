@@ -52,6 +52,8 @@
 - **The Library.** **Library** in the side bar shows every file you attached in ChatDGC, by kind, searchable by
   name. Open where a file is, start a new chat with it, save a copy, add it to a project, or delete it. The
   paperclip lists your newest files before Upload.
+- **Study mode.** **Study** in the box makes the chat a tutor until you turn it off: it asks what you know,
+  teaches a step at a time, has you try, and checks with quick quizzes you answer with a click.
 - **Files ChatDGC makes.** Ask for a document, PDF, spreadsheet or slides and the reply comes with a card:
   the file's kind, size and pages, **Open** (in its own app; Markdown and CSV in an editor tab) and **Save a
   copy…**. "Making Budget…" shows while it's laid out. The Library marks these files, and once ChatDGC has made

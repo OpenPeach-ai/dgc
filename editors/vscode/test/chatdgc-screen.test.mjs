@@ -87,7 +87,7 @@ test("a new chat: the question and the box together, and a message goes out with
     await s.page.locator("#cd-input").fill("What's the capital of France?");
     await s.page.keyboard.press("Enter");
     assert.deepEqual(await s.posted("send"), [{ type: "send", text: "What's the capital of France?", model: "qwen3:32b", thinking: "high",
-                                                search: "auto" }], "web search is auto unless you choose");
+                                                search: "auto", study: false }], "web search is auto unless you choose");
     assert.equal(await s.page.locator("#cd-input").inputValue(), "");
     assert.equal(await shown(s.page, "#cd-stop"), true, "Stop while it answers");
     assert.equal(await shown(s.page, "#cd-send"), false);
@@ -1321,6 +1321,39 @@ test("the Library: once ChatDGC has made a file, show what you uploaded or what 
     assert.equal(await page.locator(".lib-name").count(), 1, "what it showed stays until the new list comes");
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
+});
+
+test("study mode: the chat's, on when it opens on, sent with each message, and off for a chat without it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const study = s.page.locator("#cd-study");
+    await s.send({ type: "opened", conversation: conversation({ title: "Fractions", study: true }), earlier: 0, busy: false, messages: [] });
+    await s.frame();
+    assert.equal(await study.getAttribute("aria-pressed"), "true", "a chat in study mode opens with it on");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "What do you want to learn?");
+    await s.page.locator("#cd-input").fill("Teach me halves");
+    await s.page.keyboard.press("Enter");
+    assert.equal((await s.posted("send")).at(-1).study, true);
+    await s.send({ type: "opened", conversation: conversation({ id: `chat_${"9".repeat(32)}`, title: "Other" }), earlier: 0, busy: false, messages: [] });
+    await s.frame();
+    assert.equal(await study.getAttribute("aria-pressed"), "false", "another chat: as it is");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "Ask anything");
+    await study.click();
+    assert.equal(await study.getAttribute("aria-pressed"), "true");
+    await s.page.locator("#cd-input").fill("x");          // a redraw keeps what the box asks for
+    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "What do you want to learn?");
+    await s.page.locator("#cd-input").fill("");
+    await s.page.locator("#cd-research").click();
+    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "What should I research?", "research asks for its own");
+    await s.page.locator("#cd-input").fill("y");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "What should I research?", "and keeps it as you type");
+    await s.page.locator("#cd-input").fill("");
+    await s.page.locator("#cd-research").click();
+    await study.click();
+    assert.equal(await study.getAttribute("aria-pressed"), "false", "and off again");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
 });
 
 test("files a reply made: a card with what each is, Open and Save a copy…, live as it's made", async (t) => {

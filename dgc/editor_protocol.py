@@ -842,7 +842,10 @@ COMMAND_FIELDS.update({
                      # Up to 10: {kind: "file", path} (a file the user picked: the backend reads it, so a frame
                      # never carries it), {kind: "image", data, name?} (a pasted image as a data: URI, small
                      # enough for the frame) or {kind: "text", text, name?} (a long paste). The chat keeps a copy.
-                     "attachments": _A(False)},
+                     "attachments": _A(False),
+                     # Study mode (ChatGPT's "Study and learn"): true turns it on for the chat from this message,
+                     # false turns it off; left out, the chat stays as it is. The conversation carries `study`.
+                     "study": _B(False)},
     "chatdgc_continue": {"request_id": _S(), "conversation_id": _S(), "message_id": _S()},
     # Versions. Edit a message you sent, or try a reply again (another model or thinking level if named): a new
     # version from that point, answered by `chatdgc_opened` (the conversation from then on), then a turn. Switch

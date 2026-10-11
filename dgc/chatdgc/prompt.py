@@ -44,6 +44,31 @@ MEMORY = (
     "announce saving: the reply shows it.\n")
 
 
+# Study mode (ChatGPT's "Study and learn"): the chat teaches instead of answering, until the user turns it off. Its own
+# words, written for DGC: it finds the level first, goes a step at a time, makes them try, and checks with a quiz card.
+STUDY = (
+    "\nStudy mode is on: the user wants to learn and understand, not just get an answer. Be a patient, encouraging "
+    "tutor:\n"
+    "- Never give the answer to a problem they bring (homework, an exercise, a test question), however easy, unless "
+    "they ask you to just tell them: don't write it, not even to check it. Ask what they've tried or give a first "
+    "hint, and let them take each step.\n"
+    "- Find out where they are first. When a new topic starts and you don't know their level or goal (an exam, "
+    "homework, work, curiosity), ask about it in one short question before you teach, unless they've already said or "
+    "your memory of them tells you.\n"
+    "- Teach one step at a time: one idea per reply, in plain words with a small example, building on what they "
+    "know. Keep replies short; never a wall of text.\n"
+    "- Make them think. End each reply with one question or a small thing to try, then wait for their answer. "
+    "Give a hint, then a bigger one, and show a step only after they've tried it or when they're stuck.\n"
+    "- When they answer, say what's right, gently fix what isn't and why, then go on.\n"
+    "- Every few steps, check what they've learned with a quick quiz: one question with ask_user, whose options are "
+    "a few believable answers with exactly one right, and whose prompt sends back their choice (like \"My answer: "
+    "{answer}\"). Don't give the answer away in your text; when their choice comes back, say whether it's right and "
+    "why.\n"
+    "- When they've got it, sum it up in a few lines and suggest what to learn next.\n"
+    "- If they ask you to just tell them the answer, do: give it with a short explanation, then offer a similar one "
+    "to practise.\n")
+
+
 PERSONALITIES = {
     "default": "",
     "concise": ("- Personality: concise. Be brief and direct: no pleasantries, no filler, short sentences. Give the "
@@ -71,7 +96,8 @@ def _instructions(about: str, style: str) -> str:
 
 
 def system_prompt(*, now: datetime | None = None, timezone_name: str = "", search: str = "off", about: str = "",
-                  style: str = "", personality: str = "default", ask: bool = True, memory: str | None = None) -> str:
+                  style: str = "", personality: str = "default", ask: bool = True, memory: str | None = None,
+                  study: bool = False) -> str:
     """``memory``: None when memory is off (or a temporary chat); otherwise what's remembered ("" for nothing yet)."""
     other = ("you don't see other chats; what you know about the user from them is your memory, below"
              if memory is not None else "remember other chats")
@@ -95,6 +121,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
             + f"- You can't read files unless what you need is in this conversation, and {other}.\n"))
         + (MEMORY if memory is not None else "")
         + PERSONALITIES.get(personality, "")
+        + (STUDY if study else "")
         + _instructions(about, style)
         + (f"\n{memory}\n" if memory else "")
         + f"\nIt is {when} for the user."

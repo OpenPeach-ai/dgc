@@ -98,6 +98,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <option value="off">Thinking off</option><option value="low">Think: low</option><option value="medium">Think: medium</option><option value="high">Think: high</option><option value="xhigh">Think: extra high</option></select>
 <button type="button" id="cd-websearch" class="cd-tool" aria-pressed="false" title="Search the web for this message. Without it, ChatDGC still searches whenever an answer depends on it"><span class="codicon codicon-globe" aria-hidden="true"></span><span>Search</span></button>
 <button type="button" id="cd-research" class="cd-tool" aria-pressed="false" title="Deep research: a plan to check, then many sources read, then a report with checked citations"><span class="codicon codicon-telescope" aria-hidden="true"></span><span>Deep research</span></button>
+<button type="button" id="cd-study" class="cd-tool" aria-pressed="false" title="Study: it teaches you step by step, asks you questions and quizzes you, instead of handing over answers. It stays on in this chat until you turn it off"><span class="codicon codicon-mortar-board" aria-hidden="true"></span><span>Study</span></button>
 <label id="cd-temp-toggle" class="cd-toggle" title="A temporary chat isn't saved or listed"><input type="checkbox" id="cd-temporary"> Temporary</label>
 <span class="cd-spacer"></span>
 <button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><svg class="cd-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="cd-ring-track" cx="10" cy="10" r="8"></circle><circle id="cd-ring-fill" class="cd-ring-fill" cx="10" cy="10" r="8"></circle></svg><span id="cd-context-pct">0%</span></button>
@@ -657,6 +658,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.ask({ tab, kind: "send" }, { type: "chatdgc_send", conversation_id: conversation, text,
                                           ...(model ? { model } : {}), ...(thinking ? { thinking } : {}),
                                           ...(search ? { search } : {}),
+                                          ...(typeof message.study === "boolean" ? { study: message.study } : {}),
                                           ...(attachments.length ? { attachments } : {}) });
         return;
       }

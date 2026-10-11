@@ -325,6 +325,23 @@ class ChatDGCTests(unittest.TestCase):
                          "search off: no web_search")
         self.assertIn("can't browse the web", follow[0]["content"])
 
+    def test_study_mode_is_the_chats_from_the_message_that_turns_it_on_until_one_turns_it_off(self):
+        from dgc.chatdgc.service import summary
+        chat = self.engine.open()
+        self.script += [{"parts": ["What do you know already?"]}, {"parts": ["Good: try 1/2 + 1/4."]}, {"parts": ["It's 3/4."]}]
+        self.engine.send(chat["id"], "Teach me fractions", study=True)
+        told = self.clients[-1].calls[0]["messages"][0]["content"]
+        self.assertIn("Study mode is on", told)
+        self.assertIn("quick quiz: one question with ask_user", told, "the question card is the quiz")
+        self.assertTrue(self.store.get(chat["id"])["study"])
+        self.assertTrue(summary(self.store.get(chat["id"]))["study"], "the screen shows it on when the chat opens")
+        self.engine.send(chat["id"], "I know halves")              # left out: it stays on
+        self.assertIn("Study mode is on", self.clients[-1].calls[0]["messages"][0]["content"])
+        self.engine.send(chat["id"], "Just tell me the answer", study=False)
+        self.assertNotIn("Study mode is on", self.clients[-1].calls[0]["messages"][0]["content"])
+        self.assertNotIn("study", self.store.get(chat["id"]))
+        self.assertFalse(summary(self.store.get(chat["id"]))["study"])
+
     def test_at_most_five_searches_then_it_answers(self):
         chat = self.engine.open()
         self.script += [{"calls": [("web_search", {"query": f"q{i}"})]} for i in range(MAX_SEARCHES)]

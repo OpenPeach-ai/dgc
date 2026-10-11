@@ -483,7 +483,7 @@ class ChatEngine:
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
              on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
-             cancel: threading.Event | None = None, answering: dict | None = None) -> dict:
+             cancel: threading.Event | None = None, answering: dict | None = None, study: bool | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
@@ -531,6 +531,11 @@ class ChatEngine:
             mine["attachments"] = [item["meta"] for item in prepared]
         if answering:
             mine["answers"] = answering
+        if study is not None:          # Study mode is the chat's: on from this message until it's turned off
+            if study:
+                chat["study"] = True
+            else:
+                chat.pop("study", None)
         chat["messages"].append(mine)
         chat = self._save(chat)
         reply_id = new_message_id()
@@ -1228,7 +1233,7 @@ class ChatEngine:
             style=str(config.get("chatdgc_style", "") or ""),
             personality=str(config.get("chatdgc_personality", "default") or "default"),
             ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless,
-            memory=self._remembered(chat))
+            memory=self._remembered(chat), study=bool(chat.get("study")))
         project, project_pictures = self._project_of(chat), []
         if project:
             told, _, project_pictures = self._project_context(chat, project, room, sees)

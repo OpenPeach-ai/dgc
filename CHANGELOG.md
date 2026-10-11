@@ -88,6 +88,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **Study mode in ChatDGC**, as ChatGPT's "Study and learn": `chatdgc_send` takes `study` (true on, false off,
+  left out unchanged); the chat keeps it (`study` on the conversation) and its system prompt then adds `STUDY`
+  (`dgc/chatdgc/prompt.py`): find the level first, one step at a time, end with something to try, hints before
+  solutions, a quiz every few steps through `ask_user` (exactly one right option; the choice comes back as the
+  next message), and the answer when asked for it.
 - **Files ChatDGC makes** (`dgc/chatdgc/made.py`), as ChatGPT hands you a report: a `make_file` tool (up to 3 a
   reply) takes `name`, `format` (docx, pdf, xlsx, pptx, csv, md) and `content` (Markdown) or `sheets` (rows) or
   `slides` (titles, bullets, tables), and DGC lays the file out with the standard library and markdown-it-py

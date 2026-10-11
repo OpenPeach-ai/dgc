@@ -9066,6 +9066,9 @@
             },
             "attachments": {
               "type": "array"
+            },
+            "study": {
+              "type": "boolean"
             }
           },
           "required": [

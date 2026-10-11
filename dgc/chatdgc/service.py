@@ -34,7 +34,8 @@ def summary(chat: dict) -> dict:
                                                                       "summary": chat.get("summary"),
                                                                       "carried": chat.get("carried"),
                                                                       "branched": chat.get("branched"),
-                                                                      "project": chat.get("project")}
+                                                                      "project": chat.get("project"),
+                                                                      "study": bool(chat.get("study"))}
 
 
 def _size(value) -> int:
@@ -486,7 +487,7 @@ class ChatService:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.send(cmd["conversation_id"], cmd["text"], model=cmd.get("model"),
                                     thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
-                                    attachments=cmd.get("attachments"),
+                                    attachments=cmd.get("attachments"), study=cmd.get("study"),
                                     on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run)
 

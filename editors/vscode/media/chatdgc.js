@@ -1384,8 +1384,7 @@
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
     // A chat carried over isn't thrown away, and a project's chat is kept: neither can be temporary.
     $("cd-temp-toggle").hidden = !fresh || !!state.conversation?.carried || !!state.conversation?.project;
-    const project = isProjectPage() ? projectOf(state.conversation) : null;
-    input.placeholder = project ? `New chat in ${project.name}` : "Ask anything";
+    placeholder();
     $("cd-temporary").checked = !!state.conversation?.temporary;
     $("cd-temp-badge").hidden = !state.conversation?.temporary;
     $("cd-menu").hidden = !state.conversation || !!state.conversation.temporary || fresh;
@@ -1416,7 +1415,7 @@
       return;
     }
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "",
-                         search: searchMode(),
+                         search: searchMode(), study: !!state.study,
                          ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}),
                               ...(kind === "library" ? { ...(conversation_id ? { conversation_id } : { project_id }), attachment_id } : {}) })) } : {}) });
@@ -1433,8 +1432,21 @@
   function researchMode(on) {
     state.research = !!on;
     researchToggle.setAttribute("aria-pressed", String(state.research));
-    input.placeholder = state.research ? "What should I research?" : "Ask anything";
+    placeholder();
     webToggle.hidden = state.research;                 // research always reads the web
+  }
+  const studyToggle = $("cd-study");
+  /** Study mode: the chat's, on from the next message until it's turned off (the conversation says which). */
+  function studyMode(on) {
+    state.study = !!on;
+    studyToggle.setAttribute("aria-pressed", String(state.study));
+    placeholder();
+  }
+  /** What the box asks for: research, study, a project's new chat, or anything. (Every redraw asks this.) */
+  function placeholder() {
+    const project = isProjectPage() ? projectOf(state.conversation) : null;
+    input.placeholder = state.research ? "What should I research?" : state.study ? "What do you want to learn?"
+      : project ? `New chat in ${project.name}` : "Ask anything";
   }
   const webToggle = $("cd-websearch");
   /** Search the web first, for the next message. */
@@ -1444,6 +1456,7 @@
   }
   webToggle.addEventListener("click", () => { searchFirst(!state.searchFirst); input.focus(); });
   researchToggle.addEventListener("click", () => { researchMode(!state.research); input.focus(); });
+  studyToggle.addEventListener("click", () => { studyMode(!state.study); input.focus(); });
   modelPick.addEventListener("change", () => { state.model = modelPick.value; });
   thinkingPick.addEventListener("change", () => { state.thinking = thinkingPick.value; });
   $("cd-temporary").addEventListener("change", (e) => vscode.postMessage({ type: "newChat", temporary: e.target.checked }));
@@ -1569,7 +1582,7 @@
         state.editing = "";
         state.editingSummary = false;
         if (!keep) { state.compacting = false; state.context = null; meter(); }
-        if (!keep) { state.model = ""; state.thinking = ""; }
+        if (!keep) { state.model = ""; state.thinking = ""; studyMode(state.conversation?.study === true); }
         state.unavailable = "";
         if (msg.project && typeof msg.project === "object") upsertProject(msg.project);
         $("cd-title").textContent = state.conversation?.title || "New chat";

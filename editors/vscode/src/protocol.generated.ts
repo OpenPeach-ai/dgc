@@ -6617,6 +6617,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": false
+    },
+    "study": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
     }
   },
   "chatdgc_continue": {

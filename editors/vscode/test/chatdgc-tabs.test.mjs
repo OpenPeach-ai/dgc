@@ -147,6 +147,10 @@ test("each event reaches only the tabs showing its chat; an error goes to whoeve
   a.say({ type: "send", text: "Hello", model: "qwen3:32b", thinking: "high" });
   const send = last("chatdgc_send");
   assert.deepEqual({ ...send, request_id: "" }, { type: "chatdgc_send", conversation_id: ID(3), text: "Hello", model: "qwen3:32b", thinking: "high", request_id: "" });
+  b.say({ type: "send", text: "Teach me", study: true });
+  assert.equal(last("chatdgc_send").study, true, "study mode goes with the message");
+  b.say({ type: "send", text: "Teach me", study: "yes" });
+  assert.equal(last("chatdgc_send").study, undefined, "only true or false");
   chat.onEvent({ type: "chatdgc_turn", conversation_id: ID(3), state: "started", reply_id: MSG(1), request_id: send.request_id });
   chat.onEvent({ type: "chatdgc_delta", conversation_id: ID(3), message_id: MSG(1), text: "Hi " });
   chat.onEvent({ type: "chatdgc_message", conversation_id: ID(3), message: { id: MSG(1), role: "assistant", text: "Hi there" } });
