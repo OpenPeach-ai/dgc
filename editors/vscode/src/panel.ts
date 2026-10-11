@@ -4066,6 +4066,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "compact":
         void this.compactContext();
         break;
+      case "contextBreakdown":            // the context menu opened (or the window changed while it's open)
+        void this.contextBreakdown();
+        break;
       case "setContextSize":
         await this.setContextSize(Number(msg.size));
         break;
@@ -4923,7 +4926,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "resume": this.resume(); break;
       case "new": this.newSession(); break;
       case "compact": void this.compactContext(); break;
-      case "contextBreakdown": void this.contextBreakdown(); break;
       case "clear": this.ensureBackend().send(
         this.stateCommand("session-clear", { type: "clear_session" })); break;
       case "rewind": this.rewind(); break;
