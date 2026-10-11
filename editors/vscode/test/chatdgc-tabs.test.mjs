@@ -95,7 +95,7 @@ await build({
     builder.onLoad({ filter: /^vscode$/, namespace: "test" }, () => ({ contents: "module.exports = globalThis.__DGC_TEST_VSCODE;", loader: "js" }));
   } }],
 });
-const { ChatDGC, chatTitle, CHATDGC_EDITOR, CHATDGC_LIBRARY, CHATDGC_WIDGET, widgetDocument } = createRequire(import.meta.url)(bundle);
+const { ChatDGC, chatTitle, CHATDGC_EDITOR, CHATDGC_LIBRARY, CHATDGC_WIDGET, widgetDocument, isChatdgcEvent } = createRequire(import.meta.url)(bundle);
 after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 
 const ID = (n) => `chat_${String(n).repeat(32).slice(0, 32)}`;
@@ -647,6 +647,12 @@ test("what fills a chat's window: asked of a backend that counts it, shown in th
   panel.say({ type: "breakdown" });
   chat.onEvent({ type: "chatdgc_error", request_id: last("chatdgc_context_breakdown").request_id, conversation_id: ID(7), message: "couldn't count" });
   assert.equal(panel.webview.posted.slice(before).filter((m) => m.type === "error").length, 0, "a breakdown that fails says nothing: the meter's lines stay");
+  // The side bar sends ChatDGC a chat's breakdown (it carries the chat), never a session's (live, it went nowhere).
+  assert.equal(isChatdgcEvent({ type: "context_breakdown", conversation_id: ID(7) }), true);
+  assert.equal(isChatdgcEvent({ type: "context_breakdown" }), false);
+  assert.equal(isChatdgcEvent({ type: "context_breakdown", conversation_id: "" }), false);
+  assert.equal(isChatdgcEvent({ type: "chatdgc_opened" }), true);
+  assert.equal(isChatdgcEvent({ type: "context" }), false);
 });
 
 test("a reload brings each chat back in its tab, once", async () => {

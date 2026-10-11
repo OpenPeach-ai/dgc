@@ -109,6 +109,13 @@ export function widgetFields(value: unknown): WidgetField[] | null {
 /** Which widget a tab shows, kept by VS Code with the tab so it opens again after a restart. */
 export type WidgetRef = { id: string; chat: string; title: string };
 export const CHATDGC_WIDGET = "dgc.chatdgcWidget";
+/** An event for ChatDGC rather than a session: every chatdgc_* one, and a breakdown of a chat's window (one of a
+ *  session's carries no conversation). */
+export function isChatdgcEvent(ev: { type?: unknown; conversation_id?: unknown } | null | undefined): boolean {
+  const type = typeof ev?.type === "string" ? ev.type : "";
+  return type.startsWith("chatdgc_") || (type === "context_breakdown" && typeof ev?.conversation_id === "string" && !!ev.conversation_id);
+}
+
 /** ChatDGC's context window presets, as main DGC's sizes run (a backend offers the ones it takes). */
 export const CHATDGC_WINDOWS = ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"];
 const WIDGET_ID = /^wg_[a-f0-9]{16}$/;

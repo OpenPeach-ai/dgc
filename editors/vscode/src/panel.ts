@@ -9,7 +9,7 @@ import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
-import { CHATDGC_WINDOWS, type ChatDGC, type ChatDGCHost } from "./chatdgc";
+import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
@@ -1199,7 +1199,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  snapshot -- which re-announces whatever decision it is blocked on, with the same request ids. */
   private routeEvent(slot: ChatSlot, ev: DgcEvent): void {
     // ChatDGC's, never a session's: no transcript, chip or card of this chat is about a ChatDGC chat.
-    if (typeof ev.type === "string" && ev.type.startsWith("chatdgc_")) { this.chatdgc?.onEvent(ev); return; }
+    if (isChatdgcEvent(ev as any)) { this.chatdgc?.onEvent(ev); return; }
     if (slot.id === this.activeSlotId) { this.onEvent(ev); return; }
     this.backgroundEvent(slot, ev);
   }
