@@ -2021,8 +2021,13 @@
       });
       return row;
     });
-    modelMenu.replaceChildren(el("div", "cd-menu-kicker", "Model"), ...rows, el("div", "cd-menu-sep"), el("div", "cd-menu-kicker", "Thinking"), dialNode());
+    // The models scroll in a list of their own (a provider can list dozens), so the dial is always in view, by the pill.
+    const list = el("div", "cd-menu-models");
+    list.setAttribute("role", "menu"); list.setAttribute("aria-label", "Model");
+    list.append(...rows);
+    modelMenu.replaceChildren(el("div", "cd-menu-kicker", "Model"), list, el("div", "cd-menu-sep"), el("div", "cd-menu-kicker", "Thinking"), dialNode());
     showDial();
+    list.querySelector(".cd-menu-row.sel")?.scrollIntoView({ block: "nearest" });
   }
   function closeModelMenu(focusPill) {
     if (modelMenu.hidden) return;

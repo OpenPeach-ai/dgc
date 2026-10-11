@@ -203,7 +203,7 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-arc-fill { stroke: var(--accent-text, var(--accent)); }
 .cd-model-chevron { flex: none; color: var(--faint); font-size: var(--t-sm); }
 .cd-model-menu { position: absolute; right: 0; bottom: 100%; z-index: 20; margin-bottom: var(--sp-2);
-  width: min(300px, calc(100vw - 20px)); max-height: min(460px, calc(100vh - 120px)); overflow-y: auto; padding: var(--sp-1);
+  width: min(300px, calc(100vw - 20px)); padding: var(--sp-1);
   border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
 .cd-menu-kicker { padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans);
   letter-spacing: .1em; text-transform: uppercase; }
@@ -217,6 +217,7 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-menu-row > .codicon-check { margin-left: auto; color: var(--accent-text, var(--accent)); }
 .cd-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cd-menu-sep { height: 1px; margin: var(--sp-1) var(--sp-1); background: var(--border); }
+.cd-menu-models { max-height: min(196px, calc(100vh - 300px)); min-height: 30px; overflow-y: auto; overscroll-behavior: contain; }
 /* Thinking, as a dial: Off on the left, Extra high on the right; click a mark, drag, or step it with the arrow keys. */
 .cd-dial { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
 .cd-dial-face { flex: none; width: 120px; height: 66px; cursor: pointer; touch-action: none; border-radius: var(--r-md); }

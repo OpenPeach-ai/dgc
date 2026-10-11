@@ -1089,6 +1089,21 @@ test("the box as main DGC's: no accent ring, one pill for the model and a dial f
     await pill.click();
     await s.page.locator("#cd-log").click({ position: { x: 5, y: 5 } });
     assert.equal(await menu.isHidden(), true, "a click elsewhere closes it");
+    // A provider listing dozens of models: they scroll in their own list; the dial stays in view and takes a real click.
+    await s.send({ type: "models", ids: Array.from({ length: 22 }, (_, i) => `model-${String(i).padStart(2, "0")}:latest`), current: "model-17:latest" });
+    await pill.click();
+    const [menuBox, dialBox] = [await menu.boundingBox(), await menu.locator(".cd-dial-face").boundingBox()];
+    assert.ok(dialBox.y >= menuBox.y && dialBox.y + dialBox.height <= menuBox.y + menuBox.height && dialBox.y >= 0, "the dial is in view");
+    assert.equal(await menu.locator(".cd-menu-models").evaluate((n) => n.scrollHeight > n.clientHeight), true, "the models scroll");
+    const chosen = await menu.locator(".cd-menu-row.sel").boundingBox(), list = await menu.locator(".cd-menu-models").boundingBox();
+    assert.ok(chosen.y >= list.y && chosen.y + chosen.height <= list.y + list.height + 1, "the chosen model shown in its list");
+    const high = await menu.locator('.cd-dial-hit[data-level="3"]').boundingBox();
+    await s.page.mouse.click(high.x + high.width / 2, high.y + high.height / 2);
+    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "high");
+    await s.page.keyboard.press("Escape");
+    await s.send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "qwen3:32b"], current: "qwen3:32b" });
+    await pill.click(); await menu.locator(".cd-dial-face").focus(); await s.page.keyboard.press("Home"); await s.page.keyboard.press("ArrowUp");
+    await s.page.keyboard.press("Escape");
     // The window's size, in the meter's details, as main DGC's.
     await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
     await s.page.locator("#cd-context").click();
