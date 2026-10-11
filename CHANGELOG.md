@@ -101,6 +101,20 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   widget the real model wrote was then run in Chromium in that page: before telling it the variables are already set
   and that every element its script uses must exist, 1 of 2 live widgets threw on every input and 1 of 2 brought its
   own light colours; after, 9 of 9 ran, changed when used, and used the editor's colours.
+  **Checked, fixed once, kept.** Once a widget's tab is open, DGC's part of its page (which takes the page's only VS
+  Code handle before the widget's code runs) reports its fields as set and what it shows, with any error it threw
+  (`chatdgc_widget_report`, offered as `ready.capabilities.chatdgc.widget_report`; a screen says it reports with
+  `chatdgc_open.widget_reports` and answers `shown: false` at once for a chat no tab shows; the reply waits up to 6 s).
+  An error goes back to the reply; otherwise a call of its own, never streamed, checks the figures (asked in the
+  reply, the model wrote its working there, "Check: r = 0.085/12 …", in 5 of 10 replies even when told not to), and
+  only a wrong one goes back. Either way the model may call show_widget once more, replacing the widget in its tab.
+  Without the fields' values the check read a widget set to monthly compounding as yearly. A reply that says a widget
+  is beside the chat and made none (1 of 7 compound-interest replies) is told once to make it. Measured with
+  deepseek-v4.1-flash on 14 asks (EMI, compound interest, prepayment, SIP), each widget run in Chromium in the real
+  page: every widget ended working (one threw at first and was fixed in the same reply), every EMI, prepayment and SIP
+  figure matched its formula (9 of 9), no reply mentioned the check, and the check flagged 3 of 13 clean widgets, one
+  a real mislabelled total and two wrongly (each cost one rewrite, still right). Its fields are kept as you type (the
+  60 newest widgets, in VS Code's storage) and put back when it opens again, so its own code reruns on them.
   Without tools, a ` ```widget ` block becomes the same card, and opens on **Open**. With deepseek-v4.1-flash, as
   a fenced block an EMI calculator or stopwatch went into a canvas or a file 5 of 6 times; as a tool, a widget 9 of 9
   (self-contained and themed), none for a plain question.
