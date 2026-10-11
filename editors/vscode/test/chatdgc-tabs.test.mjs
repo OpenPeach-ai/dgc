@@ -5,7 +5,7 @@
 // only what the protocol accepts.
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -510,6 +510,19 @@ test("a widget opens again as you left it: its fields kept as you type, never an
   keeping.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget: { ...widget, html: "<input id=bill><b>fixed</b>" } });
   assert.match(tab.webview.html, /var saved=\[\];/, "a fixed page starts afresh");
   assert.equal(kept["dgc.chatdgcWidgetFields"][WG], undefined);
+});
+
+test("ChatDGC's tabs wear its own mark, the speech bubble, so they aren't taken for DGC's sessions", () => {
+  chat.open("");
+  chat.openLibrary();
+  const [tab, library] = world.panels;
+  for (const panel of [tab, library]) {
+    assert.deepEqual([String(panel.iconPath.light), String(panel.iconPath.dark)], ["ext/media/chatdgc-tab-light.svg", "ext/media/chatdgc-tab-dark.svg"]);
+  }
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  const command = manifest.contributes.commands.find((c) => c.command === "dgc.newChatDGC");
+  assert.deepEqual(command.icon, { light: "media/chatdgc-tab-light.svg", dark: "media/chatdgc-tab-dark.svg" });
+  for (const theme of ["light", "dark"]) assert.match(readFileSync(join(root, `media/chatdgc-tab-${theme}.svg`), "utf8"), /aria-label="ChatDGC"/);
 });
 
 test("a reload brings each chat back in its tab, once", async () => {

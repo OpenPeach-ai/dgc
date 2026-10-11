@@ -244,6 +244,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.adopt(panel, id, temporary);
   }
 
+  /** ChatDGC's own mark (DGC's three slashes in a speech bubble), so its tabs aren't taken for DGC's sessions. */
+  private chatdgcIcon(): { light: vscode.Uri; dark: vscode.Uri } {
+    return { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "chatdgc-tab-light.svg"),
+             dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "chatdgc-tab-dark.svg") };
+  }
+
   private library?: vscode.WebviewPanel;
 
   /** The Library, in a tab of its own (one at a time). */
@@ -252,8 +258,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     if (this.library) { this.library.reveal(); void this.library.webview.postMessage({ type: "refresh" }); return; }
     const panel = vscode.window.createWebviewPanel(CHATDGC_LIBRARY, "Library", vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] });
-    panel.iconPath = { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-light.svg"),
-                       dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-dark.svg") };
+    panel.iconPath = this.chatdgcIcon();
     this.library = panel;
     panel.onDidDispose(() => { if (this.library === panel) this.library = undefined; });
     panel.webview.onDidReceiveMessage((message) => { void this.fromLibrary(panel, message); });
@@ -616,8 +621,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean, project = ""): void {
-    panel.iconPath = { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-light.svg"),
-                       dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-dark.svg") };
+    panel.iconPath = this.chatdgcIcon();
     const tab: Tab = { panel, conversation, temporary, held: [], opened: false, picked: new Set(), ...(project ? { project } : {}) };
     this.tabs.add(tab);
     panel.onDidDispose(() => {

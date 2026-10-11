@@ -105,13 +105,13 @@
         "command": "dgc.newChatDGC",
         "title": "New Chat (ChatDGC)",
         "category": "DGC",
-        "icon": "$(comment-discussion)"
+        "icon": { "light": "media/chatdgc-tab-light.svg", "dark": "media/chatdgc-tab-dark.svg" }
       },
       {
         "command": "dgc.chatdgcCanvasAsk",
         "title": "Ask ChatDGC About This",
         "category": "DGC",
-        "icon": "$(comment-discussion)"
+        "icon": { "light": "media/chatdgc-tab-light.svg", "dark": "media/chatdgc-tab-dark.svg" }
       },
       {
         "command": "dgc.chatdgcCanvasShortcut",
