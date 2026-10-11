@@ -640,6 +640,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       chatdgcModels: () => this.chatdgcModels(),
       postHome: (message) => { if (this.home && this.webviewReady) this.post(message); },
       openSettings: (section) => this.openSettings(section),
+      chatdgcOffers: () => {
+        const offered = (this.lastReadyEvent?.capabilities as any)?.chatdgc;
+        return offered && typeof offered === "object" ? offered : {};
+      },
     };
     chat.attach(host);
   }

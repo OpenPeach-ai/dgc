@@ -8790,6 +8790,9 @@
             },
             "project": {
               "type": "string"
+            },
+            "widget_reports": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -9042,6 +9045,45 @@
             "conversation_id",
             "canvas_id",
             "op"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_widget_report"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "widget_id": {
+              "type": "string"
+            },
+            "shown": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            },
+            "errors": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "conversation_id",
+            "widget_id",
+            "shown"
           ],
           "additionalProperties": false
         },

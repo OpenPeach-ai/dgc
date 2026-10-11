@@ -1,14 +1,21 @@
-"""Interactive answers (ChatGPT's): show_widget puts one small self-contained HTML page under the reply, which the
-screen frames in a sandbox with no network. Measured with deepseek-v4.1-flash: as a ```widget block, an EMI calculator
-or a stopwatch went into a canvas or a file 5 of 6 times; as a tool, a widget 9 of 9, and none for a plain question."""
+"""Interactive answers (ChatGPT's): show_widget keeps one small self-contained HTML page on the reply, which opens in a
+locked-down tab beside the chat. Measured with deepseek-v4.1-flash: as a ```widget block, an EMI calculator or a
+stopwatch went into a canvas or a file 5 of 6 times; as a tool, a widget 9 of 9, and none for a plain question. The
+screen tells what an open widget shows, and the model checks it with that, fixing it once if it's wrong."""
 import tempfile
+import threading
+import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
+from dgc.chatdgc import service as chat_service
 from dgc.chatdgc.engine import LOOK_UP, MAX_WIDGET_CHARS, ChatEngine
 from dgc.chatdgc.prompt import WIDGETS, system_prompt
+from dgc.chatdgc.service import ChatService
 from dgc.chatdgc.store import ChatStore
+from dgc.editor_protocol import event_error
 from dgc.llm import ToolCall
 from dgc.shared_memory import SharedMemory
 
@@ -69,6 +76,47 @@ class Widgets(unittest.TestCase):
         history = "\n".join(str(m["content"]) for m in self.world["read"][-1]["messages"])
         self.assertIn(f"[You showed an interactive widget here, EMI calculator. Its page:\n<<<\n{PAGE}\n>>>]", history)
 
+    def told(self, step):
+        return [m["content"] for m in self.world["read"][step]["messages"] if m["role"] == "tool"]
+
+    def test_a_widget_whose_code_failed_is_told_so_and_fixed_once_in_place(self):
+        fixed = PAGE.replace("/* math */", "/* math, fixed */")
+        reports = [{"shown": True, "text": "EMI Monthly payment —", "errors": ["Uncaught TypeError: Cannot set properties of undefined"]},
+                   {"shown": True, "text": "EMI Monthly payment ₹43,391", "errors": []}]
+        shown = []
+
+        def on_widget(widget):
+            shown.append(dict(widget))
+            return reports.pop(0)
+        self.world["script"] += [{"calls": [("show_widget", {"title": "EMI", "html": PAGE})]},
+                                 {"calls": [("show_widget", {"title": "EMI calculator", "html": fixed})]},
+                                 {"parts": ["It works out your monthly payment."]}]
+        chat = self.engine.open()
+        reply = self.engine.send(chat["id"], "EMI calculator please", on_widget=on_widget)
+        self.assertIn("but its code failed: Uncaught TypeError: Cannot set properties of undefined. It shows: «EMI Monthly "
+                      "payment —». Fix it: call show_widget again with the whole corrected page (it replaces this one).",
+                      self.told(1)[0])
+        self.assertIn("show_widget", self.world["read"][1]["tools"], "one fix")
+        self.assertIn("The widget EMI calculator is fixed. It shows: «EMI Monthly payment ₹43,391».", self.told(2)[-1])
+        self.assertNotIn("show_widget", self.world["read"][2]["tools"], "and only one")
+        [widget] = reply["widgets"]
+        self.assertEqual([w["id"] for w in shown], [widget["id"]] * 2, "the same widget, replaced")
+        self.assertEqual((widget["html"], widget["title"]), (fixed, "EMI calculator"))
+
+    def test_a_widget_that_runs_is_checked_against_what_it_shows_and_kept_if_right(self):
+        self.world["script"] += [{"calls": [("show_widget", {"title": "EMI", "html": PAGE})]},
+                                 {"parts": ["₹50,00,000 at 8.5% for 20 years is ₹43,391 a month: right."]}]
+        chat = self.engine.open()
+        reply = self.engine.send(chat["id"], "EMI calculator please",
+                                 on_widget=lambda w: {"shown": True, "text": "EMI\n\n ₹43,391", "errors": []})
+        self.assertIn("As it shows now, with its starting values: «EMI ₹43,391». Check that each figure is right for those "
+                      "values (work one out yourself)", self.told(1)[0])
+        self.assertEqual(len(reply["widgets"]), 1)
+        self.world["script"] += [{"calls": [("show_widget", {"title": "EMI", "html": PAGE})]}, {"parts": ["Done."]}]
+        self.engine.send(chat["id"], "Another", on_widget=lambda w: {"shown": False})
+        self.assertTrue(self.told(-1)[0].startswith("The widget EMI is open in a tab beside the chat"),
+                        "no tab showed it: nothing to check")
+
     def test_an_empty_or_huge_page_is_refused(self):
         self.world["script"] += [{"calls": [("show_widget", {"title": "x", "html": " "}), ("show_widget", {"title": "y", "html": "x" * (MAX_WIDGET_CHARS + 1)})]},
                                  {"parts": ["Sorry."]}]
@@ -81,6 +129,87 @@ class Widgets(unittest.TestCase):
     def test_only_a_model_that_takes_tools_is_told_about_widgets(self):
         self.assertIn(WIDGETS, system_prompt())
         self.assertNotIn(WIDGETS, system_prompt(ask=False))
+
+
+class Wire:
+    def __init__(self):
+        self.frames, self.lock = [], threading.Lock()
+
+    def emit(self, type, **fields):
+        frame = {"type": type, "seq": len(self.frames), **fields}
+        problem = event_error(frame)
+        if problem:
+            raise AssertionError(problem)
+        with self.lock:
+            self.frames.append(frame)
+
+    def wait(self, kind, timeout=10.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self.lock:
+                found = [f for f in self.frames if f["type"] == kind]
+            if found:
+                return found[-1]
+            time.sleep(0.01)
+        raise AssertionError(f"no {kind}")
+
+
+class OnTheWire(unittest.TestCase):
+    """The reply waits a moment to hear, from a screen that says it tells, what its widget shows."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="chatdgc-widgets-wire-")
+        self.addCleanup(temp.cleanup)
+        folder = Path(temp.name)
+        self.world, self.wire = {"script": [], "read": []}, Wire()
+        config = SimpleNamespace(base_url="", api_key="", model="chat-model", get=lambda key, default=None: default)
+        self.engine = ChatEngine(config, ChatStore(folder / "chat"), searcher=lambda q: [],
+                                 memory=SharedMemory(folder / "memory"), projects=lambda hidden: [],
+                                 client_factory=lambda model: Model(self.world), plugins=lambda chat, said, taint: None)
+        self.service = ChatService(self.wire.emit, config, engine=self.engine)
+        self.addCleanup(self.service.close, 2.0)
+
+    def turn(self, reports: bool, answer=None):
+        self.service.dispatch({"type": "chatdgc_open", "request_id": "o", **({"widget_reports": True} if reports else {})})
+        chat = self.wire.wait("chatdgc_opened")["conversation"]["id"]
+        self.world["script"] += [{"calls": [("show_widget", {"title": "EMI", "html": PAGE})]}, {"parts": ["Done."]}]
+        started = time.monotonic()
+        self.service.dispatch({"type": "chatdgc_send", "request_id": "s", "conversation_id": chat, "text": "EMI please",
+                               "search": "off"})
+        widget = self.wire.wait("chatdgc_widget")["widget"]
+        if answer is not None:
+            self.service.dispatch({"type": "chatdgc_widget_report", "request_id": "w", "conversation_id": chat,
+                                   "widget_id": widget["id"], **answer})
+        deadline = time.monotonic() + 10
+        while not [f for f in self.wire.frames if f["type"] == "chatdgc_turn" and f["state"] == "ended"]:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.01)
+        took = time.monotonic() - started
+        # The reply's step after show_widget (the chat's naming and follow-ups ask the model too).
+        told = [m["content"] for r in self.world["read"] for m in r["messages"] if m["role"] == "tool"][0]
+        return told, took
+
+    def test_what_the_widget_shows_reaches_the_model_in_the_same_reply(self):
+        told, _ = self.turn(True, {"shown": True, "text": "Monthly EMI ₹43,391", "errors": [7]})
+        self.assertIn("As it shows now, with its starting values: «Monthly EMI ₹43,391».", told)
+        self.assertNotIn("chatdgc_error", [f["type"] for f in self.wire.frames])
+
+    def test_a_screen_that_doesnt_tell_is_never_waited_for(self):
+        told, took = self.turn(False)
+        self.assertTrue(told.startswith("The widget EMI is open in a tab beside the chat"))
+        self.assertLess(took, chat_service.WIDGET_REPORT_SECONDS)
+
+    def test_no_report_in_time_and_the_reply_goes_on(self):
+        with patch.object(chat_service, "WIDGET_REPORT_SECONDS", 0.2):
+            told, took = self.turn(True)
+        self.assertTrue(told.startswith("The widget EMI is open in a tab beside the chat"))
+        self.assertLess(took, 5)
+        self.service.dispatch({"type": "chatdgc_widget_report", "request_id": "late", "conversation_id": "chat_x",
+                               "widget_id": "wg_" + "0" * 16, "shown": True, "text": "late"})
+        self.service.dispatch({"type": "chatdgc_widget_report", "request_id": "bad", "conversation_id": "chat_x",
+                               "widget_id": "wg_" + "0" * 16})
+        errors = [f for f in self.wire.frames if f["type"] == "chatdgc_error"]
+        self.assertEqual([f.get("request_id") for f in errors], ["bad"], "a late one is dropped; one without shown, refused")
 
 
 if __name__ == "__main__":

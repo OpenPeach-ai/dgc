@@ -92,8 +92,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   small self-contained HTML page on the reply (`widgets`, new event `chatdgc_widget`); the extension opens it in a
   webview tab of its own beside the chat (the chat keeps focus), one tab a widget, and the card under the reply has
   **Open** and **Show code**. Not inline: VS Code serves nothing to a frame inside a webview (checked live), and a
-  `srcdoc`/`data:`/`blob:` frame runs no script there. The widget's webview has scripts but no local resource roots
-  and no message handler; its page policy loads nothing (`default-src 'none'`, inline script and style only), and
+  `srcdoc`/`data:`/`blob:` frame runs no script there. The widget's webview has scripts but no local resource roots;
+  its page policy loads nothing (`default-src 'none'`, inline script and style only), and
   network and peer-connection APIs are removed before its code runs. The chat page's own policy is unchanged. The
   editor's colours win over a page's own (`!important` theme variables, and `color-scheme` from VS Code's theme kind:
   in a webview `prefers-color-scheme` is the system's, so a model's light-by-default page came out white on a dark

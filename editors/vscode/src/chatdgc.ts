@@ -42,6 +42,8 @@ export interface ChatDGCHost {
   postHome(message: Record<string, unknown>): void;
   /** Settings at a section (Memory, from "Manage memory" under a reply). */
   openSettings?(section: string): void;
+  /** What its backend offers ChatDGC (ready.capabilities.chatdgc), or {} before it's ready. */
+  chatdgcOffers?(): Record<string, unknown>;
 }
 
 interface Tab {
@@ -77,7 +79,28 @@ const CANVAS_ID = /^cv_[a-f0-9]{16}$/;
 
 /** A widget's page: the model's HTML under a policy that loads nothing from anywhere and runs only its own inline
  *  code; network and peer-connection APIs gone before it runs; the theme's colours as CSS variables. */
-export function widgetDocument(html: string): string {
+/** A widget's field as its page keeps it: by its place among the page's fields (and its id when it has one), a value
+ *  or, for a checkbox or radio button, whether it's checked. */
+export type WidgetField = { i: number; id: string; v?: string; c?: boolean };
+const WIDGET_STATE_KEY = "dgc.chatdgcWidgetFields";
+const MAX_WIDGET_STATES = 60;
+const MAX_WIDGET_FIELDS = 200;
+
+/** A widget page's fields as it said them, or null: anything else in it is dropped, and too much is refused. */
+export function widgetFields(value: unknown): WidgetField[] | null {
+  if (!Array.isArray(value) || value.length > MAX_WIDGET_FIELDS) return null;
+  const out: WidgetField[] = [];
+  for (const f of value) {
+    if (!f || typeof f !== "object" || !Number.isInteger(f.i) || f.i < 0 || f.i >= MAX_WIDGET_FIELDS) return null;
+    const id = typeof f.id === "string" ? f.id.slice(0, 100) : "";
+    if (typeof f.c === "boolean") out.push({ i: f.i, id, c: f.c });
+    else if (typeof f.v === "string" && f.v.length <= 2000) out.push({ i: f.i, id, v: f.v });
+    else return null;
+  }
+  return JSON.stringify(out).length <= 64_000 ? out : null;
+}
+
+export function widgetDocument(html: string, fields?: WidgetField[]): string {
   // The editor's own colours (a webview has them as --vscode-* variables), so it follows the theme as it changes. They
   // win over a page's own (a model often writes light ones, and prefers-color-scheme in a webview is the system's,
   // not VS Code's); color-scheme follows VS Code's theme too, for the form controls.
@@ -95,8 +118,25 @@ export function widgetDocument(html: string): string {
     + `font:12px/1.4 system-ui,sans-serif;background:var(--vscode-inputValidation-errorBackground,#5a1d1d);color:var(--vscode-foreground,#fff);`
     + `border-top:1px solid var(--vscode-inputValidation-errorBorder,#be1100)";(document.body||document.documentElement).appendChild(b)}`
     + `b.textContent="This widget hit an error, so it may not work: "+String(m||"unknown error").slice(0,240).replace(/\\.?$/,".")+" Ask ChatDGC to fix it."}catch(e){}}`
-    + `addEventListener("error",function(e){if(e&&e.message)bar(e.message)});`
-    + `addEventListener("unhandledrejection",function(e){var r=e&&e.reason;bar(r&&r.message||r)});`
+    + `var errors=[];function failed(m){errors.push(String(m||"unknown error").slice(0,300));bar(m)}`
+    + `addEventListener("error",function(e){if(e&&e.message)failed(e.message)});`
+    + `addEventListener("unhandledrejection",function(e){var r=e&&e.reason;failed(r&&r.message||r)});`
+    // The only handle to VS Code, taken before the widget's own code runs (a second ask for it fails), and used for
+    // two things: its fields as you change them, and what it shows once it's open.
+    + `var api=null;try{api=acquireVsCodeApi()}catch(e){}function post(m){try{if(api)api.postMessage(m)}catch(e){}}`
+    + `function controls(){return Array.prototype.slice.call(document.querySelectorAll("input,select,textarea"),0,${MAX_WIDGET_FIELDS})}`
+    + `function kind(f){return String(f.type||"").toLowerCase()}`
+    + `function snap(){return controls().map(function(f,i){var t=kind(f),id=String(f.id||"").slice(0,100);`
+    + `return t==="checkbox"||t==="radio"?{i:i,id:id,c:!!f.checked}:{i:i,id:id,v:String(f.value==null?"":f.value).slice(0,2000)}})}`
+    + `var timer=0;function changed(){clearTimeout(timer);timer=setTimeout(function(){post({type:"state",fields:snap()})},300)}`
+    + `addEventListener("input",changed,true);addEventListener("change",changed,true);`
+    + `var saved=${JSON.stringify(fields || []).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")};`
+    + `function restore(){try{var list=controls(),done=[];saved.forEach(function(s){var f=(s.id&&document.getElementById(s.id))||list[s.i];`
+    + `if(!f||list.indexOf(f)<0)return;var t=kind(f);if(typeof s.c==="boolean"){if(t==="checkbox"||t==="radio"){f.checked=s.c;done.push(f)}}`
+    + `else if(t!=="file"&&t!=="checkbox"&&t!=="radio"&&typeof s.v==="string"){f.value=s.v;done.push(f)}});`
+    + `done.forEach(function(f){f.dispatchEvent(new Event("input",{bubbles:true}));f.dispatchEvent(new Event("change",{bubbles:true}))})}catch(e){}}`
+    + `addEventListener("load",function(){setTimeout(function(){if(saved.length)restore();setTimeout(function(){`
+    + `post({type:"report",text:String(document.body&&document.body.innerText||"").slice(0,4000),errors:errors.slice(0,3)})},700)},0)});`
     + `})();`;
   // (Built, then returned: the chat page's tests find that page as the file's first `return` of a document.)
   const page = `<!doctype html><html><head><meta charset="utf-8">
@@ -497,20 +537,74 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   // ---- interactive answers: a reply's widget (one self-contained HTML page) in a tab of its own beside the chat.
   // VS Code serves nothing to a frame inside a webview, and inline script in the chat page itself would open it up,
-  // so a widget runs in its own webview: its own origin, a policy that loads nothing, no VS Code API wired to it.
+  // so a widget runs in its own webview: its own origin, a policy that loads nothing. Its page (DGC's part of it, which
+  // holds the only handle to VS Code) says two things, and nothing else is heard: what its fields hold as you type
+  // (kept, so it opens again as you left it) and, once open, what it shows (to the reply, which checks it).
   private readonly widgetPanels = new Map<string, vscode.WebviewPanel>();
+  private readonly widgetPages = new Map<string, string>();         // the page each open tab shows
+  private readonly widgetWaiting = new Map<string, string>();     // widget id -> its chat, while a reply waits
+
+  /** The backend hears what a widget shows (ready.capabilities.chatdgc.widget_report). */
+  private reportsWidgets(): boolean {
+    try { return Number(this.host?.chatdgcOffers?.()?.widget_report) >= 1; } catch { return false; }
+  }
+
+  private widgetReport(id: string, report: { shown: boolean; text?: string; errors?: string[] }): void {
+    const conversation = this.widgetWaiting.get(id);
+    if (conversation === undefined) return;
+    this.widgetWaiting.delete(id);
+    this.host?.chatdgcSend({ type: "chatdgc_widget_report", request_id: this.nextId("widget"), conversation_id: conversation,
+                             widget_id: id, shown: report.shown,
+                             ...(report.shown ? { text: String(report.text || "").slice(0, 4000),
+                                                  errors: (report.errors || []).slice(0, 3).map((e) => String(e).slice(0, 300)) } : {}) });
+  }
+
+  private widgetStates(): Record<string, { at: number; fields: WidgetField[] }> {
+    try {
+      const kept = this.context.globalState?.get<Record<string, { at: number; fields: WidgetField[] }>>(WIDGET_STATE_KEY);
+      return kept && typeof kept === "object" ? kept : {};
+    } catch { return {}; }
+  }
+
+  private keepWidgetState(key: string, fields: WidgetField[] | null): void {
+    const all = this.widgetStates();
+    if (fields) all[key] = { at: Date.now(), fields }; else delete all[key];
+    const newest = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, MAX_WIDGET_STATES);
+    void Promise.resolve(this.context.globalState?.update(WIDGET_STATE_KEY, Object.fromEntries(newest))).catch(() => {});
+  }
 
   private showWidget(id: string, html: string, title: string, focus: boolean): void {
     // One tab a widget: by its id, or (a ```widget block in a reply has none) by its page.
     const key = id || "page:" + createHash("sha256").update(html).digest("hex");
-    const open = this.widgetPanels.get(key);
-    if (open) { open.reveal(undefined, !focus); return; }
     const name = String(title || "Interactive").replace(/\s+/g, " ").trim().slice(0, 60) || "Interactive";
+    const open = this.widgetPanels.get(key);
+    if (open) {
+      if (this.widgetPages.get(key) !== html) {
+        // The reply fixed it: the new page, from its start.
+        this.keepWidgetState(key, null);
+        this.widgetPages.set(key, html);
+        open.title = name;
+        open.webview.html = widgetDocument(html);
+      }
+      open.reveal(undefined, !focus);
+      return;
+    }
     const panel = vscode.window.createWebviewPanel("dgc.chatdgcWidget", name, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: !focus },
                                                    { enableScripts: true, localResourceRoots: [] });
-    panel.webview.html = widgetDocument(html);
+    panel.webview.html = widgetDocument(html, this.widgetStates()[key]?.fields);
     this.widgetPanels.set(key, panel);
-    panel.onDidDispose(() => { if (this.widgetPanels.get(key) === panel) this.widgetPanels.delete(key); });
+    this.widgetPages.set(key, html);
+    panel.webview.onDidReceiveMessage((message: any) => {
+      if (this.widgetPanels.get(key) !== panel || !message || typeof message !== "object") return;
+      if (message.type === "state") {
+        const fields = widgetFields(message.fields);
+        if (fields) this.keepWidgetState(key, fields);
+      } else if (message.type === "report" && id) {
+        const errors = Array.isArray(message.errors) ? message.errors.filter((e: unknown) => typeof e === "string") : [];
+        this.widgetReport(id, { shown: true, text: typeof message.text === "string" ? message.text : "", errors });
+      }
+    });
+    panel.onDidDispose(() => { if (this.widgetPanels.get(key) === panel) { this.widgetPanels.delete(key); this.widgetPages.delete(key); } });
   }
 
   private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean, project = ""): void {
@@ -539,6 +633,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   private deliver(asker: Asker, cmd: Record<string, unknown>): void {
+    // Said as late as this: a command held while the backend started learns only now what it offers.
+    if (cmd.type === "chatdgc_open" && !cmd.widget_reports && this.reportsWidgets()) cmd = { ...cmd, widget_reports: true };
     const outcome = this.host ? this.host.chatdgcSend(cmd) : "starting";
     if (outcome === "sent") return;
     if (outcome === "old_cli") {
@@ -712,7 +808,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const w = ev.widget && typeof ev.widget === "object" ? ev.widget : null;
         if (!w || !/^wg_[a-f0-9]{16}$/.test(String(w.id || "")) || typeof w.html !== "string" || w.html.length > 200_000) return;
         for (const tab of showing(conversation)) this.post(tab, { type: "widgetShown", messageId: ev.message_id, widget: w });
+        // The reply waits to hear what it shows (from its page, once open), or at once that no tab shows the chat.
+        if (this.reportsWidgets() && typeof conversation === "string" && conversation) this.widgetWaiting.set(w.id, conversation);
         if (showing(conversation).length) this.showWidget(w.id, w.html, String(w.title || ""), false);
+        else this.widgetReport(w.id, { shown: false });
         return;
       }
       case "chatdgc_made":

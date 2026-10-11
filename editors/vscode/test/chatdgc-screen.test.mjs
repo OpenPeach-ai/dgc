@@ -1661,6 +1661,34 @@ test("a widget's page in a browser: the editor's colours win over its own, an er
   } finally { await page.close(); }
 });
 
+test("a widget's page in a browser: put back as you left it (its code reruns), said as you type, and told once open", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await browser.newPage({ viewport: { width: 500, height: 400 } });
+  try {
+    // As VS Code gives a webview its handle (a script it puts first in the page's head): once.
+    const handle = `<script>window.__posted=[];var taken=false;window.acquireVsCodeApi=function(){if(taken)throw new Error(
+      "An instance of the VS Code API has already been acquired");taken=true;return{postMessage:function(m){window.__posted.push(JSON.parse(JSON.stringify(m)))}}}</script>`;
+    const own = `<label>Bill <input id=bill type=number value=100></label><label>Tip <input type=range min=0 max=30 value=10></label>
+      <label><input type=checkbox id=round> Round</label><p>Tip: <span id=out></span></p>
+      <script>function calc(){var t=bill.value*document.querySelector("[type=range]").value/100;out.textContent=round.checked?Math.round(t):t.toFixed(2)}
+      document.addEventListener("input",calc);calc();try{acquireVsCodeApi()}catch(e){document.body.dataset.api=e.message}</script>`;
+    const saved = [{ i: 0, id: "bill", v: "1251" }, { i: 1, id: "", v: "20" }, { i: 2, id: "round", c: true }];
+    await page.setContent(widgetPage()(own, saved).replace("<head>", `<head>${handle}`), { waitUntil: "load" });
+    await page.waitForFunction(() => window.__posted.some((m) => m.type === "report"), null, { timeout: 5000 });
+    assert.equal(await page.locator("#out").textContent(), "250", "1251 at 20%, rounded: as left, and worked out again");
+    const report = await page.evaluate(() => window.__posted.filter((m) => m.type === "report"));
+    assert.equal(report.length, 1);
+    assert.match(report[0].text, /Tip: 250/);
+    assert.deepEqual(report[0].errors, []);
+    assert.equal(await page.evaluate(() => document.body.dataset.api), "An instance of the VS Code API has already been acquired",
+                 "the widget's own code can't take the handle");
+    await page.locator("#bill").fill("1000");
+    await page.waitForFunction(() => window.__posted.some((m) => m.type === "state" && m.fields[0].v === "1000"), null, { timeout: 5000 });
+    const state = await page.evaluate(() => window.__posted.filter((m) => m.type === "state").at(-1));
+    assert.deepEqual(state.fields, [{ i: 0, id: "bill", v: "1000" }, { i: 1, id: "", v: "20" }, { i: 2, id: "round", c: true }]);
+  } finally { await page.close(); }
+});
+
 test("files a reply made: a card with what each is, Open and Save a copy…, live as it's made", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

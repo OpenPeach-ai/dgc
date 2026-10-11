@@ -20,6 +20,9 @@ from ..editor_protocol import command_error
 from .engine import ChatEngine, ChatEngineError
 from .store import ChatStoreError
 
+WIDGET_REPORT_SECONDS = 6.0        # how long a reply waits to hear what its widget shows
+WIDGET_REPORT_CHARS = 4_000
+
 PAGE_BYTES = 3 * 1024 * 1024          # one frame's messages, encoded
 PREVIEW_BYTES = 2_500_000             # an image shown in the chat: its data: URI must fit one frame
 FLUSH_S = 0.05
@@ -129,6 +132,8 @@ class ChatService:
         self._turns: dict[str, dict] = {}
         self._naming: set[threading.Thread] = set()     # chats being named after their first reply
         self._lock = threading.Lock()
+        self._widget_screen = False                      # a screen that tells what a widget shows is here
+        self._widget_reports: dict[str, dict] = {}       # widget id -> {event, report}, while a reply waits
         self._closing = False
 
     # -- the router's door
@@ -150,7 +155,7 @@ class ChatService:
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
              "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_draft": self._draft,
-             "chatdgc_canvas": self._canvas,
+             "chatdgc_canvas": self._canvas, "chatdgc_widget_report": self._widget_report,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -193,8 +198,22 @@ class ChatService:
     def _open(self, cmd: dict) -> None:
         chat = self.engine.open(cmd.get("conversation_id") or None, temporary=bool(cmd.get("temporary")),
                                 project=cmd.get("project") or None)
+        if cmd.get("widget_reports"):
+            # Said by the screen as it opens a chat; it answers for every chat (shown: false where none shows it).
+            self._widget_screen = True
         self._opened(chat, cmd["request_id"])
         self._context_later(chat["id"])
+
+    def _widget_report(self, cmd: dict) -> None:
+        """What a widget shows, from the screen: to the reply waiting for it (if it still is)."""
+        with self._lock:
+            waiting = self._widget_reports.get(str(cmd.get("widget_id") or ""))
+        if waiting is None:
+            return
+        errors = [e[:300] for e in (cmd.get("errors") or []) if isinstance(e, str)][:3]
+        waiting["report"] = {"shown": bool(cmd.get("shown")), "text": str(cmd.get("text") or "")[:WIDGET_REPORT_CHARS],
+                             "errors": errors}
+        waiting["event"].set()
 
     def _context(self, conversation_id: str) -> None:
         """What the chat takes of its window, said on the wire (the model's limit may be asked of the provider)."""
@@ -689,9 +708,23 @@ class ChatService:
                     "on_canvas": canvas, "on_widget": widget}
 
         def widget(shown):
-            # An interactive answer: its card shows at once, under the reply (the reply goes on).
+            # An interactive answer: its card shows at once, under the reply, and its tab opens. A screen that tells
+            # what it shows gets a moment to (the model checks the widget with it); the reply goes on either way.
             stream["value"].flush()
+            with self._lock:
+                waiting = {"event": threading.Event(), "report": None} if self._widget_screen else None
+                if waiting is not None:
+                    self._widget_reports[shown["id"]] = waiting
             self.emit("chatdgc_widget", conversation_id=conversation_id, message_id=turn["reply_id"], widget=shown)
+            if waiting is None:
+                return None
+            try:
+                waiting["event"].wait(WIDGET_REPORT_SECONDS)
+                return waiting["report"]
+            finally:
+                with self._lock:
+                    if self._widget_reports.get(shown["id"]) is waiting:
+                        del self._widget_reports[shown["id"]]
 
         def canvas(view):
             # A canvas made or changed: the editor beside the chat shows it at once (the reply goes on).

@@ -53,8 +53,9 @@
   name. Open where a file is, start a new chat with it, save a copy, add it to a project, or delete it. The
   paperclip lists your newest files before Upload.
 - **Interactive answers.** A calculator, converter, timer or quiz to use right away: it opens in a tab beside the
-  chat, locked down (no network, no access to your chats or VS Code), in the editor's colours. If its code fails, it
-  says so. A card under the reply has **Open** and **Show code**.
+  chat, locked down (no network, no access to your chats or VS Code), in the editor's colours. ChatDGC checks what it
+  shows once it's open and fixes it if it's wrong; if its code still fails, it says so. It opens again as you left it.
+  A card under the reply has **Open** and **Show code**.
 - **Data analysis and charts.** Attach a spreadsheet and ask about it: answers come from exact queries (open
   **Analyzed the data** to see them). Replies can draw bar, line, area, pie and scatter charts: hover for values,
   click the legend, **Data**, **Copy data** and **Save image**.

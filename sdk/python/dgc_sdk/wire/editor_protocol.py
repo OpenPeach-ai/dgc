@@ -804,7 +804,10 @@ COMMAND_FIELDS.update({
                      "limit": _I(False), "offset": _I(False), "project": _S(False)},
     # One conversation, or a new one when conversation_id is left out (temporary: never written or
     # listed). Answered by `chatdgc_opened` with its latest messages; `chatdgc_earlier` pages back.
-    "chatdgc_open": {"request_id": _S(), "conversation_id": _S(False), "temporary": _B(False), "project": _S(False)},
+    # `widget_reports` (only to a backend offering ready.capabilities.chatdgc.widget_report): this screen tells what a
+    # widget shows once it's open, in any chat, with `chatdgc_widget_report`, so a reply waits a moment for it.
+    "chatdgc_open": {"request_id": _S(), "conversation_id": _S(False), "temporary": _B(False), "project": _S(False),
+                     "widget_reports": _B(False)},
     # Projects, as ChatGPT has them: chats, files and instructions together. `chatdgc_projects` lists them (each
     # {id, name, color, instructions, memory: shared|project, files: [{id, kind, name, size, ...}], chats,
     # created_at, updated_at}); `chatdgc_project` creates, changes, deletes (its chats too unless keep_chats) or
@@ -838,6 +841,11 @@ COMMAND_FIELDS.update({
     "chatdgc_canvas": {"request_id": _S(), "conversation_id": _S(), "canvas_id": _S(),
                        "op": _f("string", enum=("get", "restore", "export")), "version": _I(False),
                        "format": _f("string", required=False, enum=("docx", "pdf", "md", "file")), "path": _S(False)},
+    # Interactive answers: what a widget shows once its tab opened (its page's text, up to 4,000 characters, and up
+    # to 3 errors its code threw), or shown: false when no tab shows the chat. The model checks its figures with it,
+    # in the same reply. Nothing answers it.
+    "chatdgc_widget_report": {"request_id": _S(), "conversation_id": _S(), "widget_id": _S(), "shown": _B(),
+                              "text": _S(False), "errors": _A(False)},
     "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
                        "op": _f("string", enum=("run", "dismiss", "hand")), "arguments": _O(False), "pip_id": _S(False)},
     "chatdgc_pips": {"request_id": _S()},

@@ -106,7 +106,8 @@ beforeEach(() => {
                          chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [],
                          shown: [], visible: [], active: undefined, docs: [], commands: [], choose: undefined, written: [] });
   sent = [];
-  host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" },
+  host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" }, offers: { version: 1 },
+    chatdgcOffers() { return this.offers; },
     chatdgcSend(cmd) { if (this.outcome === "sent") sent.push(cmd); return this.outcome; },
     async chatdgcModels() { return this.models; },
     postHome(message) { this.home.push(message); } };
@@ -409,7 +410,8 @@ test("a widget's page: nothing loads from anywhere, its own code only, no networ
   assert.match(page, /--bg:var\(--vscode-editor-background\)!important;--text:var\(--vscode-editor-foreground\)!important;/,
                "it follows the theme as it changes, over the page's own");
   assert.match(page, /:root:has\(>body\[data-vscode-theme-kind="vscode-dark"\]\),[^{]*\{color-scheme:dark\}/);
-  assert.doesNotMatch(page, /postMessage|acquireVsCodeApi/, "nothing to say to anyone");
+  assert.ok(page.indexOf("acquireVsCodeApi()") < page.indexOf("<body>"), "the only handle to VS Code is DGC's, taken first");
+  assert.deepEqual([...page.matchAll(/post\(\{type:"(\w+)"/g)].map((m) => m[1]), ["state", "report"], "and all it says");
   assert.match(page, /<body><h1>EMI<\/h1><script>calc\(\)<\/script><\/body>/);
 });
 
@@ -449,6 +451,65 @@ test("a widget opens in a tab of its own beside the chat, once; Open shows that 
   // A chat no tab shows: its card waits on the reply; no tab of its own.
   chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(9), message_id: MSG(2), widget: { ...widget, id: `wg_${"d".repeat(16)}` } });
   assert.equal(world.panels.length, 4);
+});
+
+test("a backend that hears what a widget shows: every open says so, and each widget's tab tells it once", () => {
+  chat.open(ID(7));
+  let [panel] = world.panels;
+  panel.say({ type: "ready" });
+  assert.equal(last("chatdgc_open").widget_reports, undefined, "not to a backend that doesn't offer it");
+  host.offers = { version: 1, widget_report: 1 };
+  panel.say({ type: "ready" });
+  assert.equal(last("chatdgc_open").widget_reports, true);
+  opened(panel, { id: ID(7), title: "EMI" });
+  const WG = `wg_${"e".repeat(16)}`;
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget: { id: WG, title: "EMI", html: "<b>EMI</b>", at: 0 } });
+  const tab = world.panels.at(-1);
+  assert.equal(last("chatdgc_widget_report"), undefined, "not before it's open and has run");
+  tab.say({ type: "report", text: "EMI ₹43,391", errors: ["Uncaught TypeError: x", 5] });
+  const told = last("chatdgc_widget_report");
+  assert.deepEqual({ ...told, request_id: "" }, { type: "chatdgc_widget_report", request_id: "", conversation_id: ID(7), widget_id: WG,
+                                                  shown: true, text: "EMI ₹43,391", errors: ["Uncaught TypeError: x"] });
+  tab.say({ type: "report", text: "again" });
+  assert.equal(sent.filter((c) => c.type === "chatdgc_widget_report").length, 1, "once");
+  // The reply fixed it: the same tab, the new page.
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget: { id: WG, title: "EMI calculator", html: "<i>fixed</i>", at: 0 } });
+  assert.equal(world.panels.at(-1), tab);
+  assert.match(tab.webview.html, /<body><i>fixed<\/i><\/body>/);
+  assert.equal(tab.title, "EMI calculator");
+  tab.say({ type: "report", text: "fixed", errors: [] });
+  assert.equal(last("chatdgc_widget_report").text, "fixed", "the fixed one tells too");
+  // A chat no tab shows: told at once that nothing shows it.
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(9), message_id: MSG(2), widget: { id: `wg_${"f".repeat(16)}`, title: "X", html: "x", at: 0 } });
+  assert.deepEqual([last("chatdgc_widget_report").widget_id, last("chatdgc_widget_report").shown, "text" in last("chatdgc_widget_report")],
+                   [`wg_${"f".repeat(16)}`, false, false]);
+});
+
+test("a widget opens again as you left it: its fields kept as you type, never anything else, and a fix starts afresh", () => {
+  const kept = {};
+  const globalState = { get: (k) => kept[k], update: (k, v) => { kept[k] = v; return Promise.resolve(); } };
+  const keeping = new ChatDGC({ extensionUri: "ext", globalState });
+  keeping.attach(host);
+  const WG = `wg_${"9".repeat(16)}`;
+  const widget = { id: WG, title: "Tip", html: "<input id=bill><input type=checkbox>", at: 0 };
+  keeping.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  keeping.onEvent({ type: "chatdgc_opened", request_id: last("chatdgc_open").request_id, conversation: { id: ID(7), title: "Tip" }, messages: [], earlier: 0, busy: false });
+  keeping.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget });
+  let tab = world.panels.at(-1);
+  assert.match(tab.webview.html, /var saved=\[\];/);
+  tab.say({ type: "state", fields: [{ i: 0, id: "bill", v: "1200" }, { i: 1, id: "", c: true }] });
+  for (const bad of [{ type: "state", fields: [{ i: 0, v: { x: 1 } }] }, { type: "state", fields: "x" }, { type: "state", fields: Array(201).fill({ i: 0, v: "" }) },
+                     { type: "state", fields: [{ i: 0, v: "x".repeat(2001) }] }, { type: "anything", fields: [] }]) tab.say(bad);
+  assert.deepEqual(kept["dgc.chatdgcWidgetFields"][WG].fields, [{ i: 0, id: "bill", v: "1200" }, { i: 1, id: "", c: true }]);
+  tab.dispose();
+  panel.say({ type: "widgetOpen", id: WG, html: widget.html, title: "Tip" });
+  tab = world.panels.at(-1);
+  assert.match(tab.webview.html, /var saved=\[\{"i":0,"id":"bill","v":"1200"\},\{"i":1,"id":"","c":true\}\];/, "as you left it");
+  keeping.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget: { ...widget, html: "<input id=bill><b>fixed</b>" } });
+  assert.match(tab.webview.html, /var saved=\[\];/, "a fixed page starts afresh");
+  assert.equal(kept["dgc.chatdgcWidgetFields"][WG], undefined);
 });
 
 test("a reload brings each chat back in its tab, once", async () => {

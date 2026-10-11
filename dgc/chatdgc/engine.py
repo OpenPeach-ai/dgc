@@ -173,6 +173,7 @@ WIDGET_TOOL = {"type": "function", "function": {
         "required": ["title", "html"]}}}
 MAX_WIDGET_CHARS = 200_000
 MAX_WIDGET_HISTORY_CHARS = 8_000
+WIDGET_REPORT_SHOWN = 2_500        # of what an open widget shows, as the model reads it to check it
 MAX_CANVAS_HISTORY_CHARS = 40_000
 MAX_FILE_HISTORY_CHARS = 12_000   # of a made file, as the model reads it back (to change it, or to talk about it)
 # Before an answer that turns on facts: does it need the web first? (search "auto"; the model can still search.)
@@ -1585,20 +1586,45 @@ class ChatEngine:
 
     # -- interactive answers
 
-    def _widget(self, call, widgets: list, at: int, on_widget) -> str:
-        """show_widget: kept on the reply (a card under it) and opened in a locked-down tab beside the chat."""
+    def _widget(self, call, widgets: list, at: int, on_widget, state: dict) -> str:
+        """show_widget: kept on the reply (a card under it) and opened in a locked-down tab beside the chat. When the
+        screen tells what it shows, the model checks it with that, and may fix it once (the same widget, replaced)."""
         args = call.arguments if isinstance(call.arguments, dict) else {}
         html, title = str(args.get("html") or ""), " ".join(str(args.get("title") or "").split())[:80] or "Interactive"
         if not html.strip():
             return "error: give the widget's page as html."
         if len(html) > MAX_WIDGET_CHARS:
             return f"error: a widget's page holds at most {MAX_WIDGET_CHARS:,} characters. Make it smaller."
-        widget = {"id": "wg_" + uuid.uuid4().hex[:16], "title": title, "html": html, "at": at, "created_at": now()}
-        widgets.append(widget)
-        if on_widget is not None:
-            on_widget(widget)
-        return (f"The widget {title} is open in a tab beside the chat, with a card under your reply. Say in a sentence "
-                "or two what it does and how to use it; don't paste its code.")
+        fixing = state["fix"] and bool(widgets)
+        if fixing:
+            widget = {**widgets[-1], "title": title, "html": html, "fixed_at": now()}
+            widgets[-1] = widget
+        else:
+            widget = {"id": "wg_" + uuid.uuid4().hex[:16], "title": title, "html": html, "at": at, "created_at": now()}
+            widgets.append(widget)
+        state["calls"] += 1
+        state["fix"] = False
+        report = on_widget(widget) if on_widget is not None else None
+        done = "Say in a sentence or two what it does and how to use it; don't paste its code."
+        if not isinstance(report, dict) or not report.get("shown"):
+            where = "fixed" if fixing else "open in a tab beside the chat, with a card under your reply"
+            return f"The widget {title} is {where}. {done}"
+        shows = " ".join(str(report.get("text") or "").split())[:WIDGET_REPORT_SHOWN] or "(nothing)"
+        errors = [str(e) for e in report.get("errors") or []][:3]
+        if fixing:
+            if errors:
+                return (f"The fixed widget {title} still fails: {' | '.join(errors)}. It shows: «{shows}». Tell the user "
+                        "it may not work, and why.")
+            return f"The widget {title} is fixed. It shows: «{shows}». {done}"
+        state["fix"] = True
+        if errors:
+            return (f"The widget {title} opened in a tab beside the chat, but its code failed: {' | '.join(errors)}. "
+                    f"It shows: «{shows}». Fix it: call show_widget again with the whole corrected page (it replaces "
+                    "this one).")
+        return (f"The widget {title} is open in a tab beside the chat, with a card under your reply. As it shows now, "
+                f"with its starting values: «{shows}». Check that each figure is right for those values (work one out "
+                "yourself) and that every label says what its number is. If something's wrong, call show_widget again "
+                f"with the whole corrected page (it replaces this one). If it's right, {done[0].lower() + done[1:]}")
 
     # -- data analysis (data.py)
 
@@ -2023,6 +2049,7 @@ class ChatEngine:
         canvas_state = {"calls": 0, "any": bool(canvases) or bool(self._canvas_list(chat))}
         queries = [dict(q) for q in (existing or {}).get("queries") or []]
         widgets = [dict(w) for w in (existing or {}).get("widgets") or []]
+        widget_state = {"calls": len(widgets), "fix": False}
         tables = self._tables(chat) if name not in self._toolless else None
         plugins = self._plugins(chat) if name not in self._toolless else None
         plugins_now = plugins.pin() if plugins is not None else []
@@ -2035,7 +2062,7 @@ class ChatEngine:
             out += [MAKE_FILE_TOOL] if len(files) < MAX_FILES_PER_REPLY else []
             if tables is not None and tables.tables and len(queries) < MAX_QUERIES:
                 out += [QUERY_DATA_TOOL]
-            out += [WIDGET_TOOL] if not widgets else []
+            out += [WIDGET_TOOL] if not widgets or (widget_state["fix"] and widget_state["calls"] < 2) else []
             if canvas_state["calls"] < MAX_CANVAS_CALLS:
                 out += [CANVAS_CREATE_TOOL] + ([CANVAS_EDIT_TOOL] if canvas_state["any"] else [])
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
@@ -2118,7 +2145,7 @@ class ChatEngine:
                     elif call.name in ("remember", "forget"):
                         told = self._memory_call(chat, call, memory_ops)
                     elif call.name == "show_widget":
-                        told = self._widget(call, widgets, before + len("".join(streamed)), on_widget)
+                        told = self._widget(call, widgets, before + len("".join(streamed)), on_widget, widget_state)
                     elif call.name == "query_data":
                         if on_activity is not None:
                             on_activity("analyzing", "the data")
