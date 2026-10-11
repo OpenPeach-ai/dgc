@@ -33,6 +33,8 @@ globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
       closeListeners.push(listener);
       return { dispose() { closeListeners.splice(closeListeners.indexOf(listener), 1); } };
     },
+    // ChatDGC's canvas commands show only for a canvas file: activation sets that context and follows the editor.
+    onDidChangeActiveTextEditor: () => ({ dispose() {} }),
   },
   ProgressLocation: { Notification: 15 },
   commands: {
@@ -40,6 +42,7 @@ globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
       registered.set(name, callback);
       return { dispose() {} };
     },
+    executeCommand: async () => undefined,
   },
   workspace: {
     isTrusted: true,
