@@ -108,6 +108,30 @@
         "icon": "$(comment-discussion)"
       },
       {
+        "command": "dgc.chatdgcCanvasAsk",
+        "title": "Ask ChatDGC About This",
+        "category": "DGC",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "dgc.chatdgcCanvasShortcut",
+        "title": "Canvas Shortcuts…",
+        "category": "DGC",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "dgc.chatdgcCanvasVersions",
+        "title": "Canvas Versions…",
+        "category": "DGC",
+        "icon": "$(history)"
+      },
+      {
+        "command": "dgc.chatdgcCanvasDownload",
+        "title": "Download Canvas…",
+        "category": "DGC",
+        "icon": "$(desktop-download)"
+      },
+      {
         "command": "dgc.newParallelChat",
         "title": "Open a Second Chat",
         "category": "DGC",
@@ -304,9 +328,36 @@
       ],
       "editor/context": [
         {
+          "command": "dgc.chatdgcCanvasAsk",
+          "when": "dgc.chatdgcCanvas",
+          "group": "dgc@0"
+        },
+        {
           "command": "dgc.addSelection",
           "when": "editorHasSelection",
           "group": "dgc"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "dgc.chatdgcCanvasAsk",
+          "when": "dgc.chatdgcCanvas",
+          "group": "navigation@0"
+        },
+        {
+          "command": "dgc.chatdgcCanvasShortcut",
+          "when": "dgc.chatdgcCanvas",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dgc.chatdgcCanvasVersions",
+          "when": "dgc.chatdgcCanvas",
+          "group": "navigation@2"
+        },
+        {
+          "command": "dgc.chatdgcCanvasDownload",
+          "when": "dgc.chatdgcCanvas",
+          "group": "navigation@3"
         }
       ],
       "explorer/context": [
@@ -324,6 +375,22 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "dgc.chatdgcCanvasAsk",
+          "when": "dgc.chatdgcCanvas"
+        },
+        {
+          "command": "dgc.chatdgcCanvasShortcut",
+          "when": "dgc.chatdgcCanvas"
+        },
+        {
+          "command": "dgc.chatdgcCanvasVersions",
+          "when": "dgc.chatdgcCanvas"
+        },
+        {
+          "command": "dgc.chatdgcCanvasDownload",
+          "when": "dgc.chatdgcCanvas"
+        },
         {
           "command": "dgc.selectModel",
           "when": "dgc.ready"

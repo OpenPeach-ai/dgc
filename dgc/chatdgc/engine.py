@@ -16,6 +16,7 @@ from typing import Callable
 
 from ..editor_protocol import CHATDGC_THINKING as THINKING
 from . import attachments as attached
+from . import canvas as chat_canvas
 from . import plugins as chat_plugins
 from . import window as fit_window
 from . import research
@@ -113,6 +114,35 @@ MAKE_FILE_TOOL = {"type": "function", "function": {
                       "required": ["title"]}}},
         "required": ["name", "format"]}}}
 MAX_FILES_PER_REPLY = 3
+# Canvas (canvas.py), ChatGPT's: a document or code beside the chat, in a real editor, that both sides change.
+CANVAS_CREATE_TOOL = {"type": "function", "function": {
+    "name": "canvas_create",
+    "description": (
+        "Open a canvas beside the chat: a document or code the user and you will keep working on together. It opens in "
+        "an editor next to the chat, where the user can edit it too. Don't repeat its text in your reply."),
+    "parameters": {"type": "object", "properties": {
+        "title": {"type": "string", "description": "A short name, like 'Goa trip plan' or 'clean_csv'."},
+        "kind": {"type": "string", "enum": ["document", "code"]},
+        "language": {"type": "string", "description": "For code: its language, like python or typescript."},
+        "content": {"type": "string", "description": "The whole text: Markdown for a document, the code for code."}},
+        "required": ["title", "kind", "content"]}}}
+CANVAS_EDIT_TOOL = {"type": "function", "function": {
+    "name": "canvas_edit",
+    "description": (
+        "Change a canvas. Prefer edits: each an exact piece of its current text (as shown to you, with the user's own "
+        "changes) and what replaces it. Rewrite the whole text with content only when most of it changes. Then say in a "
+        "sentence what you changed."),
+    "parameters": {"type": "object", "properties": {
+        "id": {"type": "string", "description": "The canvas's id, like cv_0123456789abcdef."},
+        "edits": {"type": "array", "items": {"type": "object", "properties": {
+            "find": {"type": "string", "description": "Exact text in the canvas now, enough to be found once."},
+            "replace": {"type": "string"},
+            "all": {"type": "boolean", "description": "Change every place it's found."}}, "required": ["find", "replace"]}},
+        "content": {"type": "string", "description": "The whole new text, instead of edits."},
+        "note": {"type": "string", "description": "A few words on what changed, for its versions."}},
+        "required": ["id"]}}}
+MAX_CANVAS_CALLS = 8
+MAX_CANVAS_HISTORY_CHARS = 40_000
 MAX_FILE_HISTORY_CHARS = 12_000   # of a made file, as the model reads it back (to change it, or to talk about it)
 # Before an answer that turns on facts: does it need the web first? (search "auto"; the model can still search.)
 LOOK_UP = (
@@ -197,6 +227,8 @@ class ChatEngine:
         self._image_searcher = image_searcher or self._image_search
         # Plugins (plugins.py): a reply's session, and what sends a card's action (tests stand in for both).
         self._plugins_factory = plugins
+        self._canvases = chat_canvas.Canvases(self.store.root / "canvas")
+        self._temporary_canvases = chat_canvas.Canvases.temporary()
         self._plugin_runner = plugin_runner or (lambda card, arguments: chat_plugins.run(self.config, card, arguments))
         self._taints: dict[str, object] = {}
         self._acting: set[str] = set()             # cards being sent, so a second press is refused
@@ -490,8 +522,10 @@ class ChatEngine:
             for key in [k for k in self._temporary_files if k[0] == chat_id]:
                 del self._temporary_files[key]
             if self._temporary.pop(chat_id, None) is not None or self._drafts.pop(chat_id, None) is not None:
+                self._temporary_canvases.remove_chat(chat_id)
                 return
         self.store.delete(chat_id)
+        self._canvases.remove_chat(chat_id)
 
     # -- a turn
 
@@ -509,8 +543,9 @@ class ChatEngine:
 
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
-             on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
-             cancel: threading.Event | None = None, answering: dict | None = None, study: bool | None = None) -> dict:
+             on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None,
+             cancel: threading.Event | None = None, answering: dict | None = None, study: bool | None = None,
+             canvas_selection: dict | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
@@ -558,6 +593,8 @@ class ChatEngine:
             mine["attachments"] = [item["meta"] for item in prepared]
         if answering:
             mine["answers"] = answering
+        if canvas_selection is not None:
+            mine["canvas"] = self._selection(chat, canvas_selection)
         if study is not None:          # Study mode is the chat's: on from this message until it's turned off
             if study:
                 chat["study"] = True
@@ -584,11 +621,11 @@ class ChatEngine:
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None,
                            reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity,
                            on_compacted=on_compacted, on_question=on_question, on_images=on_images,
-                           on_action=on_action, on_file=on_file)
+                           on_action=on_action, on_file=on_file, on_canvas=on_canvas)
 
     def answer(self, chat_id: str, message_id: str, question: int, choice: str, *, model: str | None = None,
                thinking: str | None = None, search: str = "off", on_start=None, on_text=None, on_thinking=None,
-               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
+               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None,
                cancel: threading.Event | None = None) -> dict:
         """Answer the question a reply asked: the message the model wrote for it, with the choice in, sent as the
         user's. Only while that reply is the last thing said; after that it's an ordinary message to write."""
@@ -607,7 +644,7 @@ class ChatEngine:
         return self.send(chat_id, answered(asked[question], choice), model=model, thinking=thinking, search=search,
                          on_start=on_start, on_text=on_text, on_thinking=on_thinking, on_activity=on_activity,
                          on_compacted=on_compacted, on_question=on_question, on_images=on_images,
-                         on_action=on_action, on_file=on_file, cancel=cancel,
+                         on_action=on_action, on_file=on_file, on_canvas=on_canvas, cancel=cancel,
                          answering={"message": message_id, "question": question, "choice": choice})
 
     # -- deep research (research.py): a plan to edit or start, then rounds of reading, then a checked report
@@ -796,7 +833,7 @@ class ChatEngine:
 
     def edit(self, chat_id: str, message_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None, on_compacted=None,
-             on_question=None, on_images=None, on_action=None, on_file=None, cancel: threading.Event | None = None) -> dict:
+             on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, cancel: threading.Event | None = None) -> dict:
         """Change a message you sent: a new version of the conversation from there, with a new reply. What it
         carried (files, and what a vision model saw in them) goes with it."""
         text = str(text or "")
@@ -820,11 +857,11 @@ class ChatEngine:
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
                            on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file)
+                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file, on_canvas=on_canvas)
 
     def regenerate(self, chat_id: str, message_id: str, *, model: str | None = None, thinking: str | None = None,
                    search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
-                   on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
+                   on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None,
                    cancel: threading.Event | None = None) -> dict:
         """Try a reply again (with another model or thinking level, if chosen): a new version from that reply on."""
         chat = self._chat(chat_id)
@@ -841,7 +878,7 @@ class ChatEngine:
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
                            on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file)
+                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file, on_canvas=on_canvas)
 
     def version(self, chat_id: str, parent_id: str, index: int) -> dict:
         """Show another version at a point of the conversation (``parent_id``: the message before it, or "root")."""
@@ -915,7 +952,7 @@ class ChatEngine:
         return out
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
-                       on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None,
+                       on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None,
                        cancel: threading.Event | None = None) -> dict:
         """Carry on a reply the model stopped at its limit (or one that was stopped), in the same message."""
         chat = self._chat(chat_id)
@@ -932,7 +969,7 @@ class ChatEngine:
         return self._reply(chat, lambda c, room: self._history(c, sees=sees, room=room)
                            + [{"role": "user", "content": CONTINUE}], chat["messages"][index], message_id, on_text,
                            on_thinking, cancel, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_action=on_action, on_file=on_file)
+                           on_question=on_question, on_action=on_action, on_file=on_file, on_canvas=on_canvas)
 
     def name(self, chat_id: str) -> dict | None:
         """Give a new chat a short name from its first exchange, as a chat app does. Only while it still has
@@ -1199,6 +1236,7 @@ class ChatEngine:
             if chat.get("carried"):
                 fresh["carried"] = copy.deepcopy(chat["carried"])
             fresh["branched"] = {"from": chat["id"], "title": chat.get("title", ""), "at": message_id, "created_at": now()}
+            self._canvas_store(chat).copy_chat(chat["id"], fresh["id"], into=self._canvases)
             return self.store.save(fresh)
         except BaseException:
             self.store.delete(fresh["id"])
@@ -1261,6 +1299,7 @@ class ChatEngine:
             personality=str(config.get("chatdgc_personality", "default") or "default"),
             ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless,
             memory=self._remembered(chat), study=bool(chat.get("study")))
+        instructions += self._canvas_context(chat)
         project, project_pictures = self._project_of(chat), []
         if project:
             told, _, project_pictures = self._project_context(chat, project, room, sees)
@@ -1279,6 +1318,10 @@ class ChatEngine:
         built = []
         for m in reversed(chat["messages"][start:]):
             content = with_questions(m, _asked) if m.get("role") == "assistant" else m.get("text") or ""
+            if m.get("role") == "user" and isinstance(m.get("canvas"), dict):
+                picked = m["canvas"]
+                content += (f"\n\n[About this part of the canvas {picked.get('title', '')} ({picked.get('id', '')}), lines "
+                            f"{picked.get('start_line')}\u2013{picked.get('end_line')}:\n<<<\n{picked.get('text', '')}\n>>>]")
             pictures, described = [], False
             for meta in m.get("attachments") or []:
                 found = self._file(chat, meta.get("id", ""))
@@ -1314,6 +1357,8 @@ class ChatEngine:
                 content += "\n\n" + _card_note(card)
             for meta in m.get("files") or [] if m["role"] == "assistant" else []:
                 content += "\n\n" + _made_note(meta, self._file(chat, str(meta.get("id") or "")))
+            for card in m.get("canvases") or [] if m["role"] == "assistant" else []:
+                content += f"\n\n[You {card.get('op', 'edited')} the canvas {card.get('title', '')} ({card.get('id', '')}) here.]"
             if m["role"] == "assistant" and m.get("draft_edited"):
                 # Without this, "make it shorter" went back to the date the user had first asked for (live run).
                 content += ("\n\n[The user edited the draft in this reply themselves: the words above are theirs now. "
@@ -1472,6 +1517,92 @@ class ChatEngine:
                 ops.append({"op": "saved", "id": fact["id"], "text": fact["text"]})
                 kept.append(fact["text"])
         return kept
+
+    # -- canvas (canvas.py)
+
+    def _canvas_store(self, chat: dict) -> chat_canvas.Canvases:
+        return self._temporary_canvases if chat.get("temporary") else self._canvases
+
+    def _canvas_list(self, chat: dict) -> list[dict]:
+        try:
+            return self._canvas_store(chat).all(chat["id"])
+        except OSError:
+            return []
+
+    def canvas(self, chat_id: str, canvas_id: str, *, text: bool = False) -> dict:
+        chat = self._chat(chat_id)
+        try:
+            return self._canvas_store(chat).get(chat["id"], canvas_id, text=text)
+        except chat_canvas.CanvasError as exc:
+            raise ChatEngineError(str(exc)) from None
+
+    def canvas_restore(self, chat_id: str, canvas_id: str, version: int) -> dict:
+        chat = self._chat(chat_id)
+        try:
+            return self._canvas_store(chat).restore(chat["id"], canvas_id, int(version))
+        except (chat_canvas.CanvasError, ValueError, TypeError) as exc:
+            raise ChatEngineError(str(exc) or "That version isn't kept any more.") from None
+
+    def _canvas_context(self, chat: dict) -> str:
+        """What the model reads of the chat's canvases each turn: as they are on disk now, the user's edits in."""
+        canvases = self._canvas_list(chat)
+        if not canvases:
+            return ""
+        out = ("\n\nCanvases in this chat, each open in an editor beside it. The user can edit them; this is their text "
+               "now, so work from it:")
+        room = MAX_CANVAS_HISTORY_CHARS
+        for c in canvases[:4]:
+            shown = c["text"][:max(0, room)]
+            room -= len(shown)
+            kind = c["kind"] + (f", {c['language']}" if c["kind"] == "code" else "")
+            out += (f"\n\nCanvas {c['title']} (id {c['id']}, {kind}, version {c['version']}):\n<<<\n{shown}\n>>>"
+                    + (" [Cut here: the rest isn't shown. Edit what you can see, or ask the user.]" if len(shown) < len(c["text"]) else ""))
+        return out
+
+    def _selection(self, chat: dict, picked: dict) -> dict:
+        """Part of a canvas a message is about (Ask ChatDGC on a selection): checked against the canvas it names."""
+        if not isinstance(picked, dict):
+            raise ChatEngineError("That selection isn't in a canvas of this chat.")
+        try:
+            view = self._canvas_store(chat).get(chat["id"], str(picked.get("canvas_id") or ""))
+        except chat_canvas.CanvasError:
+            raise ChatEngineError("That selection isn't in a canvas of this chat.") from None
+        start, end = picked.get("start_line"), picked.get("end_line")
+        if type(start) is not int or type(end) is not int or not 1 <= start <= end:
+            raise ChatEngineError("Select some lines of the canvas first.")
+        text = str(picked.get("text") or "")[:20_000]
+        if not text.strip():
+            raise ChatEngineError("Select some of the canvas first.")
+        return {"id": view["id"], "title": view["title"], "start_line": start, "end_line": end, "text": text}
+
+    def _canvas_call(self, chat: dict, call, cards: list, state: dict, at: int, on_canvas) -> str:
+        """canvas_create / canvas_edit: the file changes on disk, the editor beside the chat shows it, and the reply
+        keeps one card per canvas it touched."""
+        state["calls"] += 1
+        store = self._canvas_store(chat)
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        created = call.name == "canvas_create"
+        try:
+            if created:
+                view = store.create(chat["id"], title=args.get("title"), kind=args.get("kind"),
+                                    language=args.get("language"), content=args.get("content"))
+            else:
+                view = store.edit(chat["id"], str(args.get("id") or ""), edits=args.get("edits"),
+                                  content=args.get("content"), note=str(args.get("note") or ""))
+        except chat_canvas.CanvasError as exc:
+            return f"error: {exc}"
+        state["any"] = True
+        card = {"id": view["id"], "title": view["title"], "kind": view["kind"], "language": view["language"],
+                "version": view["version"], "op": "created" if created else "edited", "at": at}
+        before = next((c for c in cards if c["id"] == view["id"]), None)
+        if before is not None and before.get("op") == "created":
+            card["op"] = "created"                          # made and changed in one reply: it was made here
+        cards[:] = [c for c in cards if c["id"] != view["id"]] + [card]
+        if on_canvas is not None:
+            on_canvas({**view, "op": card["op"]})
+        return (f"The canvas {view['title']} ({view['id']}) is open beside the chat, version {view['version']}. "
+                + ("Say in a sentence or two what's in it; don't repeat its text in your reply." if created
+                   else "Say in a sentence what you changed."))
 
     def _make_file(self, chat: dict, call, files: list, at: int, on_file) -> str:
         """make_file: lay the file out (made.py), keep it with the chat as an attachment is kept (a temporary chat's
@@ -1681,7 +1812,7 @@ class ChatEngine:
         return "\n".join(lines)[:12_000]
 
     def _reply(self, chat, build, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
-               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None) -> dict:
+               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None) -> dict:
         """One reply. ``build(chat, room)`` is what the model reads, for a window of ``room`` tokens: when it would
         fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent)."""
         model = chat.get("model") or None
@@ -1725,6 +1856,8 @@ class ChatEngine:
 
         actions = [dict(a) for a in (existing or {}).get("actions") or []]
         files = [dict(f) for f in (existing or {}).get("files") or []]
+        canvases = [dict(c) for c in (existing or {}).get("canvases") or []]
+        canvas_state = {"calls": 0, "any": bool(canvases) or bool(self._canvas_list(chat))}
         plugins = self._plugins(chat) if name not in self._toolless else None
         plugins_now = plugins.pin() if plugins is not None else []
 
@@ -1734,6 +1867,8 @@ class ChatEngine:
             out = [SEARCH_TOOL] if search != "off" and len(searches) < MAX_SEARCHES else []
             out += [ASK_TOOL] if not questions else []
             out += [MAKE_FILE_TOOL] if len(files) < MAX_FILES_PER_REPLY else []
+            if canvas_state["calls"] < MAX_CANVAS_CALLS:
+                out += [CANVAS_CREATE_TOOL] + ([CANVAS_EDIT_TOOL] if canvas_state["any"] else [])
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
                 out += [REMEMBER_TOOL, FORGET_TOOL]
             if plugins_now and plugins.calls < chat_plugins.MAX_CALLS:
@@ -1804,6 +1939,11 @@ class ChatEngine:
                                 on_question(question)
                     elif call.name in ("remember", "forget"):
                         told = self._memory_call(chat, call, memory_ops)
+                    elif call.name in ("canvas_create", "canvas_edit"):
+                        if on_activity is not None:
+                            named = (call.arguments or {}).get("title") if isinstance(call.arguments, dict) else ""
+                            on_activity("canvas", str(named or "the canvas")[:80])
+                        told = self._canvas_call(chat, call, canvases, canvas_state, before + len("".join(streamed)), on_canvas)
                     elif call.name == "make_file":
                         if on_activity is not None:
                             on_activity("making", str((call.arguments or {}).get("name") or "")[:80] if isinstance(
@@ -1857,7 +1997,7 @@ class ChatEngine:
         try:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,
-                                       actions=actions, files=files)
+                                       actions=actions, files=files, canvases=canvases)
             return message
         finally:
             if picturing is not None:
@@ -1866,7 +2006,8 @@ class ChatEngine:
                         self._live_pictures.pop((chat["id"], meta["id"]), None)
 
     def _keep_reply(self, chat, existing, reply_id, model, client, text, thought_text, finish, failure, usage, counted,
-                    sources, searches, questions, memory_ops, web_images, *, actions=None, files=None) -> dict:
+                    sources, searches, questions, memory_ops, web_images, *, actions=None, files=None,
+                    canvases=None) -> dict:
         """The reply as it ended, saved (with what it looked up, asked, remembered and showed)."""
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
@@ -1887,6 +2028,8 @@ class ChatEngine:
                 message["actions"] = actions
             if files:
                 message["files"] = files
+            if canvases:
+                message["canvases"] = canvases
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -1905,6 +2048,8 @@ class ChatEngine:
                 message["actions"] = actions
             if files:
                 message["files"] = files
+            if canvases:
+                message["canvases"] = canvases
             chat["messages"].append(message)
         if counted:
             message["counted"] = counted

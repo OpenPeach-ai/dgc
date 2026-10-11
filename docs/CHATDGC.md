@@ -159,6 +159,19 @@ voice come in later phases.
     said yourself isn't held back.
   - A plugin whose sign-in only the editor holds can't be reached from a chat (as from a Pip): sign it in from
     Settings → Plugins.
+- **Canvas**, as ChatGPT has it: for a longer piece you'll keep working on (an essay, a plan, a report, a program),
+  or when you ask for one, ChatDGC opens a canvas: a real file in an editor beside the chat. You both work on it.
+  - **You edit it** like any file; what you typed is what ChatDGC reads next (it's saved before your message goes).
+  - **ChatDGC changes it** with small exact edits, so the rest stays as you left it; each change shows in the
+    editor as an edit you can undo. A card in the reply says it made or changed it, with **Open**.
+  - **Ask about a part:** select it and choose **Ask ChatDGC About This** (right-click, or the editor's title bar).
+  - **Shortcuts** in the title bar: for a document, suggest edits, shorter, longer, reading level, final polish; for
+    code, review, comments, logs, fix bugs, port to another language.
+  - **Versions:** every change is one, yours too. **Canvas Versions…** compares any of them with now (VS Code's
+    diff) or brings one back.
+  - **Download:** a document as Word, PDF or Markdown; code as its file.
+  - Canvases live with the chat (`~/.dgc/chat/canvas/`); a branch gets its own copy, and deleting the chat deletes
+    them.
 - **Writing blocks**, as ChatGPT has them: an email, a message, a letter or a post you'll send as it is comes in
   its own box, apart from what ChatDGC says about it. An email shows who it's to and its subject on their own.
   - **Copy** puts just the text on the clipboard: no stars, no hashes.
@@ -263,6 +276,7 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_compact` | `request_id`, `conversation_id` | `chatdgc_compacted` (`summary`) |
 | `chatdgc_summary` | `request_id`, `conversation_id`, `text` | `chatdgc_compacted` (marked `edited`) |
 | `chatdgc_carry` | `request_id`, `conversation_id` | `chatdgc_opened` for the new chat (its `conversation.carried`) |
+| `chatdgc_canvas` | `request_id`, `conversation_id`, `canvas_id`, `op` (`get`, `restore` with `version`, `export` with `format`: docx, pdf, md or file, and `path`) | `chatdgc_canvas` (`export`: `chatdgc_exported`) |
 | `chatdgc_draft` | `request_id`, `conversation_id`, `message_id`, `original` (the draft's words as shown), `text` | `chatdgc_message` (the reply with the draft edited) |
 | `chatdgc_cancel` | `conversation_id`, `request_id?` | the turn ends `cancelled` |
 | `chatdgc_file` | `request_id`, `conversation_id`, `attachment_id` | `chatdgc_file` (`data`: an image as a `data:` URI up to 2.5 MB, or `error`) |

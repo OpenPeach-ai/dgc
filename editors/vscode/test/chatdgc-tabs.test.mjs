@@ -47,7 +47,10 @@ globalThis.__DGC_TEST_VSCODE = {
                   : { scheme: value.split(":")[0], path: "", fsPath: "", toString: () => value, value };
     } },
   FileType: { File: 1, Directory: 2 },
-  ViewColumn: { Active: -1 },
+  ViewColumn: { Active: -1, Beside: -2 },
+  Range: class { constructor(start, end) { this.start = start; this.end = end; } },
+  WorkspaceEdit: class { constructor() { this.edits = []; } replace(uri, range, text) { this.edits.push({ uri, range, text }); } },
+  commands: { executeCommand: async (...args) => { world.commands.push(args); } },
   QuickPickItemKind: { Separator: -1 },
   env: { clipboard: { writeText: async (text) => { world.clipboard = text; } }, openExternal: async (uri) => { world.opened.push(uri.toString()); return true; } },
   window: {
@@ -55,6 +58,7 @@ globalThis.__DGC_TEST_VSCODE = {
     registerWebviewPanelSerializer(viewType, serializer) { world.serializers.push({ viewType, serializer }); return { dispose() {} }; },
     showWarningMessage: async (message) => { world.warnings.push(String(message)); return world.answer; },
     showQuickPick: async (items) => {
+      if (typeof world.choose === "function") return world.choose(items);
       world.picks.push(items.map((i) => i.id));
       const want = Array.isArray(world.pick) ? world.pick.shift() : world.pick;     // a list: one answer per question
       return items.find((i) => i.id === want);
@@ -64,9 +68,15 @@ globalThis.__DGC_TEST_VSCODE = {
     showOpenDialog: async () => world.chosen,
     showSaveDialog: async (options) => { world.saveAsked = options; return world.saveTo; },
     showInformationMessage: async (message) => { world.infos.push(String(message)); return undefined; },
-    showTextDocument: async () => undefined,
+    showTextDocument: async (uri, options) => { world.shown.push({ path: uri.fsPath, options }); },
+    get visibleTextEditors() { return world.visible; },
+    get activeTextEditor() { return world.active; },
+    onDidChangeActiveTextEditor: () => ({ dispose() {} }),
   },
-  workspace: { getConfiguration: () => ({ get: (key, fallback) => (key === "linkFavicons" && world.favicons !== undefined ? world.favicons : fallback) }),
+  workspace: {
+    get textDocuments() { return world.docs; },
+    applyEdit: async (edit) => { for (const e of edit.edits) { const doc = world.docs.find((d) => d.uri.fsPath === e.uri.fsPath); if (doc) doc.text = e.text; } return true; },
+    getConfiguration: () => ({ get: (key, fallback) => (key === "linkFavicons" && world.favicons !== undefined ? world.favicons : fallback) }),
     fs: { stat: async (uri) => {
     if (world.dirs?.includes(uri.fsPath)) return { size: 0, type: 2 };
     if (world.missing?.includes(uri.fsPath)) throw new Error("ENOENT");
@@ -91,7 +101,8 @@ const MSG = (n) => `msg_${String(n).repeat(32).slice(0, 32)}`;
 let chat, host, sent;
 beforeEach(() => {
   Object.assign(world, { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
-                         chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [] });
+                         chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [],
+                         shown: [], visible: [], active: undefined, docs: [], commands: [], choose: undefined });
   sent = [];
   host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" },
     chatdgcSend(cmd) { if (this.outcome === "sent") sent.push(cmd); return this.outcome; },
@@ -277,6 +288,99 @@ test("writing blocks: an edit goes to the backend as words; Open in mail app is 
   assert.deepEqual(world.opened, ["mailto:rao@example.com?subject=Long"], "too long for a link: the body isn't in it");
   assert.equal(world.clipboard, "word ".repeat(600), "it's on the clipboard instead");
   assert.match(world.infos.at(-1), /on your clipboard: paste it/);
+});
+
+const CV = `cv_${"1".repeat(16)}`;
+const canvasFile = (chatId, name = "Plan.md") => `/home/u/.dgc/chat/canvas/${chatId}/${CV}/${name}`;
+const doc = (path, text, dirty = false) => ({ uri: { fsPath: path, path }, text, isDirty: dirty, saved: 0,
+  getText(range) { return range?.picked ?? this.text; }, async save() { this.saved++; this.isDirty = false; return true; },
+  positionAt: (n) => n, lineAt: (line) => ({ range: { picked: `line ${line}` } }) });
+const tick = () => new Promise((r) => setImmediate(r));
+
+test("canvas: a reply's canvas opens beside the chat; a change goes in as an edit and is saved; never a file elsewhere", async () => {
+  chat.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "Trip" });
+  const path = canvasFile(ID(7));
+  const view = { id: CV, title: "Plan", kind: "document", language: "markdown", version: 1, path, op: "created", text: "# Plan" };
+  chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(2), canvas: view });
+  await tick();
+  assert.deepEqual(world.shown, [{ path, options: { viewColumn: -2, preserveFocus: true, preview: false } }], "beside the chat, which keeps focus");
+  assert.deepEqual(panel.last("canvas"), { type: "canvas", messageId: MSG(2), canvas: { id: CV, title: "Plan", kind: "document",
+                                                                                    language: "markdown", version: 1, op: "created" } });
+  const open = doc(path, "# Plan");
+  world.docs = [open]; world.visible = [{ document: open }];
+  chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(4), canvas: { ...view, version: 2, op: "edited", text: "# Plan\n\nMore" } });
+  await tick(); await tick();
+  assert.equal(open.text, "# Plan\n\nMore", "the reply's change, as an edit of the open document");
+  assert.equal(open.saved, 1);
+  assert.equal(world.shown.length, 1, "already in view: not opened again");
+  open.isDirty = true;
+  chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(6), canvas: { ...view, version: 3, text: "Other" } });
+  await tick();
+  assert.equal(open.text, "# Plan\n\nMore", "your unsaved typing is never overwritten");
+  assert.match(world.warnings.at(-1), /while you were typing in it/);
+  for (const elsewhere of [canvasFile(ID(8)), "/etc/passwd", `/home/u/.dgc/chat/canvas/${ID(7)}/${CV}/../../x.md`,
+                           `/home/u/.dgc/chat/canvas/${ID(7)}/${CV}/../../../../etc/canvas/${ID(7)}/${CV}/passwd`]) {
+    chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(8), canvas: { ...view, path: elsewhere, text: undefined } });
+  }
+  await tick();
+  assert.equal(world.shown.length, 1, "only this chat's own canvas files");
+});
+
+test("canvas: Ask ChatDGC about a selection sends from the chat's tab, saved first; sends forward only a real selection", async () => {
+  chat.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "Trip" });
+  const file = doc(canvasFile(ID(7)), "x", true);
+  world.docs = [file];
+  world.active = { document: file, selection: { isEmpty: false, start: { line: 2 }, end: { line: 3, character: 5 }, active: { line: 3 }, picked: "Beach\nFort" } };
+  world.input = "Make it livelier";
+  await chat.canvasAsk();
+  assert.equal(file.saved, 1, "what you typed is what the model reads");
+  assert.deepEqual(panel.last("sendFromEditor"), { type: "sendFromEditor", text: "Make it livelier",
+    canvasSelection: { canvas_id: CV, start_line: 3, end_line: 4, text: "Beach\nFort" } });
+  const selection = { canvas_id: CV, start_line: 3, end_line: 4, text: "Beach\nFort" };
+  panel.say({ type: "send", text: "Make it livelier", canvas_selection: selection });
+  await tick();
+  assert.deepEqual(last("chatdgc_send").canvas_selection, selection);
+  panel.say({ type: "send", text: "x", canvas_selection: { ...selection, canvas_id: "../x" } });
+  await tick();
+  assert.equal(last("chatdgc_send").canvas_selection, undefined);
+  world.active = { document: doc("/home/u/notes.md", "x"), selection: world.active.selection };
+  await chat.canvasAsk();
+  assert.match(world.infos.at(-1), /Open a ChatDGC canvas first/, "not a canvas: says so");
+});
+
+test("canvas: versions compare in VS Code's diff or come back; Download saves a Word copy", async () => {
+  chat.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "Trip" });
+  const path = canvasFile(ID(7));
+  world.active = { document: doc(path, "now"), selection: { isEmpty: true, active: { line: 0 } } };
+  const versions = [1, 2].map((n) => ({ n, at: "2026-10-11T10:00:00Z", by: n === 1 ? "model" : "user", note: "", chars: 3,
+                                         path: `/home/u/.dgc/chat/canvas/${ID(7)}/${CV}/.versions/v${n}.md` }));
+  const answer = (requestId) => chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), request_id: requestId,
+    canvas: { id: CV, title: "Plan", kind: "document", language: "markdown", version: 2, path, versions, text: "now" } });
+  const picks = [(items) => items.find((i) => i.label === "Version 1"), (items) => "Compare with now"];
+  world.choose = (items) => picks.shift()(items);
+  await chat.canvasVersions();
+  assert.equal(last("chatdgc_canvas").op, "get");
+  answer(last("chatdgc_canvas").request_id);
+  await tick(); await tick(); await tick();
+  const [command, left, right, title] = world.commands.at(-1);
+  assert.deepEqual([command, left.fsPath, right.fsPath, title], ["vscode.diff", versions[0].path, path, "Plan: version 1 ↔ now"]);
+  picks.push((items) => items.find((i) => i.label === "Version 1"), () => "Restore this version");
+  await chat.canvasVersions();
+  answer(last("chatdgc_canvas").request_id);
+  await tick(); await tick(); await tick();
+  assert.deepEqual({ ...last("chatdgc_canvas"), request_id: "" }, { type: "chatdgc_canvas", conversation_id: ID(7), canvas_id: CV,
+                                                                    op: "restore", version: 1, request_id: "" });
+  world.choose = (items) => items.find((i) => i.format === "docx");
+  world.saveTo = { scheme: "file", fsPath: "/tmp/out/Plan.docx" };
+  await chat.canvasDownload();
+  assert.deepEqual({ ...last("chatdgc_canvas"), request_id: "" }, { type: "chatdgc_canvas", conversation_id: ID(7), canvas_id: CV,
+                                                                    op: "export", format: "docx", path: "/tmp/out/Plan.docx", request_id: "" });
 });
 
 test("a reload brings each chat back in its tab, once", async () => {
@@ -502,7 +606,6 @@ test("memory: Forget under a reply deletes it from the one memory, and Manage me
 });
 
 const PROJ = (c) => `proj_${c.repeat(32)}`;
-const tick = () => new Promise((r) => setImmediate(r));
 
 test("branch in new chat: the branch opens in a tab of its own, and the chat it came from stays", () => {
   chat.open(ID(1));

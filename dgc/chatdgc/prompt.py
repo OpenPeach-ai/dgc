@@ -55,6 +55,14 @@ DRAFTS = (
     "whole block again.\n")
 
 
+# Canvas (ChatGPT's): a longer piece to keep working on together goes in an editor beside the chat.
+CANVAS = (
+    "- For a longer piece the user will keep working on with you (an essay, a report, a plan, a story, a program over "
+    "about 40 lines), or when they ask for a canvas, write it in a canvas with canvas_create: it opens in an editor "
+    "beside the chat, where they can edit it too, and you don't repeat its text in your reply. To change a canvas, use "
+    "canvas_edit with small exact edits. Short answers, short code and drafts to send stay in your reply.\n")
+
+
 # Study mode (ChatGPT's "Study and learn"): the chat teaches instead of answering, until the user turns it off. Its own
 # words, written for DGC: it finds the level first, goes a step at a time, makes them try, and checks with a quiz card.
 STUDY = (
@@ -129,7 +137,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         # Main DGC's rule (dgc/presentation.py), as the founder decided for ChatDGC too.
         + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
-        + (ASK if ask else "")
+        + (ASK + CANVAS if ask else "")
         + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "
             "Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING

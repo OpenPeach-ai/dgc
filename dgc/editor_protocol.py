@@ -832,6 +832,12 @@ COMMAND_FIELDS.update({
     # Writing blocks: a draft in a reply (an ```email or ```draft block) the user edited in place. `original` is the
     # block's words as shown; `text` replaces them. Answered by `chatdgc_message` with the reply as it is now.
     "chatdgc_draft": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "original": _S(), "text": _S()},
+    # Canvas: `get` (its file, versions and text), `restore` a `version`, or `export` it to `path` the user chose
+    # (`format`: docx, pdf or md for a document; file for the canvas as it is). Answered by `chatdgc_canvas`, or
+    # `chatdgc_exported` for export.
+    "chatdgc_canvas": {"request_id": _S(), "conversation_id": _S(), "canvas_id": _S(),
+                       "op": _f("string", enum=("get", "restore", "export")), "version": _I(False),
+                       "format": _f("string", required=False, enum=("docx", "pdf", "md", "file")), "path": _S(False)},
     "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
                        "op": _f("string", enum=("run", "dismiss", "hand")), "arguments": _O(False), "pip_id": _S(False)},
     "chatdgc_pips": {"request_id": _S()},
@@ -846,6 +852,9 @@ COMMAND_FIELDS.update({
                      # never carries it), {kind: "image", data, name?} (a pasted image as a data: URI, small
                      # enough for the frame) or {kind: "text", text, name?} (a long paste). The chat keeps a copy.
                      "attachments": _A(False),
+                     # A part of a canvas the message is about (Ask ChatDGC on a selection): {canvas_id,
+                     # start_line, end_line, text}. The user's message keeps it as `canvas`.
+                     "canvas_selection": _O(False),
                      # Study mode (ChatGPT's "Study and learn"): true turns it on for the chat from this message,
                      # false turns it off; left out, the chat stays as it is. The conversation carries `study`.
                      "study": _B(False)},
@@ -931,7 +940,7 @@ EVENT_FIELDS.update({
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
     # What the reply is doing besides writing: `text` is the query while it searches the web.
     "chatdgc_activity": {"conversation_id": _S(), "message_id": _S(),
-                         "kind": _f("string", enum=("searching", "looking", "compacting", "plugin", "making")), "text": _S()},
+                         "kind": _f("string", enum=("searching", "looking", "compacting", "plugin", "making", "canvas")), "text": _S()},
     "chatdgc_message": {"conversation_id": _S(), "message": _O(), "request_id": _S(False)},
     # A question the reply put to the user, as it's asked (the reply goes on): {at, question, options, prompt},
     # `at` being where in the reply's text it sits. The finished reply carries it in `questions` too.
@@ -944,6 +953,11 @@ EVENT_FIELDS.update({
     # chars, format (docx, pdf, xlsx, pptx, csv, md), made: true, at, created_at, pages?, note?}. It's opened or saved
     # with `chatdgc_library_file`, as a Library file is; the finished reply carries them in `files`.
     "chatdgc_made": {"conversation_id": _S(), "message_id": _S(), "file": _O()},
+    # A canvas made or changed by a reply (`message_id`), or asked for with `chatdgc_canvas` (`request_id`): {id,
+    # title, kind (document or code), language, created_at, path (the file the editor opens), version, versions:
+    # [{n, at, by (model or user), note, chars, path}], text?}. The finished reply carries a card per canvas it
+    # touched in `canvases`: {id, title, kind, language, version, op (created or edited), at}.
+    "chatdgc_canvas": {"conversation_id": _S(), "message_id": _S(False), "canvas": _O(), "request_id": _S(False)},
     # Deep research as it goes: the reply's `research` now (status planning, planned, running, writing, checking,
     # done, stopped or failed; plan; notes by number, title and address; the latest activity; steers; check).
     "chatdgc_research": {"conversation_id": _S(), "message_id": _S(), "research": _O()},

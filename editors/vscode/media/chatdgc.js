@@ -964,6 +964,14 @@
         chip.append(icon("telescope"), el("span", "", "Deep research"));
         node.append(chip);
       }
+      if (message.canvas && typeof message.canvas === "object") {
+        // Asked from a canvas about part of it: which part, above what was asked.
+        const c = message.canvas, lines = c.start_line === c.end_line ? `line ${c.start_line}` : `lines ${c.start_line}\u2013${c.end_line}`;
+        const about = el("div", "cd-user-canvas");
+        about.append(icon("note"), el("span", "", `About ${lines} of ${c.title || "the canvas"}`));
+        about.title = String(c.text || "").slice(0, 600);
+        node.append(about);
+      }
       if (state.editing === message.id) node.append(editor(message));
       else if (message.text) {
         const bubble = el("div", "cd-bubble");
@@ -986,10 +994,11 @@
     { const strip = picturesStrip(message); if (strip) node.append(strip); }
     if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
     for (const file of Array.isArray(message.files) ? message.files : []) node.append(fileCard(message, file));
+    for (const canvas of Array.isArray(message.canvases) ? message.canvases : []) node.append(canvasCard(canvas));
     for (const card of Array.isArray(message.actions) ? message.actions : []) node.append(actionCard(message, card, live));
     const doing = live && state.searching[message.id];
     if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
-      ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "making" ? `Making ${doing.text || "the file"}…` : doing.kind === "compacting"
+      ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "making" ? `Making ${doing.text || "the file"}…` : doing.kind === "canvas" ? `Writing in the canvas ${doing.text}…` : doing.kind === "compacting"
       ? "Summarizing earlier messages to fit the context window…" : `Searching the web for “${doing.text}”…`));
     else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
@@ -1240,6 +1249,29 @@
       buttons.append(open, save);
       box.append(buttons);
     }
+    return box;
+  }
+
+  /** A canvas the reply made or changed: it's open in an editor beside the chat; Open brings it back. */
+  function canvasCard(canvas) {
+    const box = el("div", "cd-file cd-canvas");
+    box.dataset.kind = String(canvas.kind || "document");
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", `Canvas: ${canvas.title || "Canvas"}`);
+    const mark = el("span", "cd-file-badge cd-canvas-badge");
+    mark.append(icon(canvas.kind === "code" ? "code" : "file-text"));
+    box.append(mark);
+    const words = el("div", "cd-file-words");
+    words.append(el("strong", "cd-file-name", canvas.title || "Canvas"));
+    const what = canvas.kind === "code" ? `${canvas.language && canvas.language !== "text" ? canvas.language[0].toUpperCase() + canvas.language.slice(1) + " code" : "Code"}` : "Document";
+    words.append(el("small", "cd-file-meta", `Canvas \u00b7 ${what} \u00b7 ${canvas.op === "created" ? "made" : "changed"}, version ${Number(canvas.version) || 1}`));
+    box.append(words);
+    const buttons = el("div", "cd-file-actions");
+    const open = el("button", "cd-continue cd-canvas-open", "Open");
+    open.type = "button";
+    open.addEventListener("click", () => vscode.postMessage({ type: "canvasOpen", canvasId: canvas.id }));
+    buttons.append(open);
+    box.append(buttons);
     return box;
   }
 
@@ -1790,7 +1822,7 @@
           state.compacting = true; render(); controls();        // Compact now, or a summary for a new chat
           return;
         }
-        if (["searching", "looking", "compacting", "plugin", "making"].includes(msg.kind) && msg.messageId) {
+        if (["searching", "looking", "compacting", "plugin", "making", "canvas"].includes(msg.kind) && msg.messageId) {
           state.searching[msg.messageId] = { kind: msg.kind, text: String(msg.text || "") };
           if (!state.messages.some((m) => m.id === msg.messageId)) state.messages.push({ id: msg.messageId, role: "assistant", text: "", thinking: "" });
           update(msg.messageId);
@@ -1845,6 +1877,35 @@
         }
         message.questions = [...(Array.isArray(message.questions) ? message.questions : []), msg.question];
         update(message.id);
+        return;
+      }
+      case "canvas": {
+        const card = msg.canvas;
+        if (!card || typeof card !== "object" || !/^cv_[a-f0-9]{16}$/.test(String(card.id || ""))) return;
+        let message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message) {
+          message = { id: msg.messageId, role: "assistant", text: "", thinking: "" };
+          state.messages.push(message);
+        }
+        const cards = Array.isArray(message.canvases) ? [...message.canvases] : [];
+        const at = cards.findIndex((c) => c.id === card.id);
+        if (at >= 0) cards[at] = { ...card, op: cards[at].op === "created" ? "created" : card.op }; else cards.push(card);
+        message.canvases = cards;
+        if (state.searching[message.id]?.kind === "canvas") delete state.searching[message.id];
+        update(message.id);
+        return;
+      }
+      case "sendFromEditor": {
+        // Asked from a canvas (Ask ChatDGC, a shortcut): sent as if typed here, with this tab's model and thinking.
+        if (typeof msg.text !== "string" || !msg.text.trim()) return;
+        if (state.busy || !state.conversation || state.unavailable) { showNotice("Let the reply finish first, then ask again.", "info"); return; }
+        const picked = msg.canvasSelection && typeof msg.canvasSelection === "object" ? msg.canvasSelection : null;
+        vscode.postMessage({ type: "send", text: msg.text, model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode(),
+                             study: !!state.study, ...(picked ? { canvas_selection: picked } : {}) });
+        state.lastSent = { text: msg.text, research: false, pending: [], searchFirst: false };
+        state.busy = true;
+        hideNotice();
+        controls();
         return;
       }
       case "made": {

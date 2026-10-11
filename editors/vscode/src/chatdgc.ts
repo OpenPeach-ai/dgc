@@ -51,6 +51,8 @@ interface Tab {
   /** Commands held while the process starts. */
   held: Record<string, unknown>[];
   opened: boolean;
+  /** Messages for the page once its chat has opened (one sent from a canvas, before the tab was ready). */
+  waitingSend?: Record<string, unknown>[];
   /** A project's page (a new chat in that project, as ChatGPT's project page is), until it's sent. */
   project?: string;
   /** Files this tab's picker returned: the only paths a send may name, so a page can never have the
@@ -70,6 +72,8 @@ export function chatTitle(text: string): string {
   return flat.length > TITLE_CHARS ? `${flat.slice(0, TITLE_CHARS - 1).trimEnd()}…` : flat;
 }
 
+const CANVAS_ID = /^cv_[a-f0-9]{16}$/;
+const CANVAS_PATH = /^(?:\/|[A-Za-z]:\\).*[\\/]canvas[\\/](chat_[a-f0-9]{32})[\\/](cv_[a-f0-9]{16})[\\/][^\\/]+$/;
 const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 export function chatdgcDocument(asset: (name: string) => string, cspSource: string): string {
@@ -188,6 +192,180 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const requestId = this.nextId(kind);
     this.requests.set(requestId, { kind, libraryPanel: panel } as Asker);
     this.deliver({ kind }, { ...cmd, request_id: requestId });
+  }
+
+  // ---- canvas (ChatGPT's): a document or code in a real editor beside the chat, that both of you change
+
+  /** The chat and canvas a file belongs to, when it's a canvas's file (`<chat root>/canvas/<chat>/<canvas>/<file>`). */
+  canvasOf(path: string): { conversation: string; canvas: string } | undefined {
+    if (/(^|[\\/])\.\.([\\/]|$)/.test(String(path || ""))) return undefined;      // never a path that climbs out
+    const m = CANVAS_PATH.exec(String(path || ""));
+    return m ? { conversation: m[1], canvas: m[2] } : undefined;
+  }
+
+  /** The canvas in an editor beside the chat. A change the reply made goes into an open document as an edit (Undo
+   *  takes it back) and is saved; a document with your unsaved typing is left alone: VS Code asks when you save. */
+  private async showCanvas(conversation: string, view: any, focus: boolean): Promise<void> {
+    const path = String(view?.path || "");
+    if (this.canvasOf(path)?.conversation !== conversation) return;
+    const uri = vscode.Uri.file(path);
+    const open = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === uri.fsPath);
+    try {
+      if (open && typeof view.text === "string" && open.getText() !== view.text) {
+        if (open.isDirty) {
+          void vscode.window.showWarningMessage(`ChatDGC changed “${view.title}” while you were typing in it. Your changes aren't saved yet: when you save, VS Code lets you compare and choose.`);
+        } else {
+          const edit = new vscode.WorkspaceEdit();
+          edit.replace(uri, new vscode.Range(open.positionAt(0), open.positionAt(open.getText().length)), view.text);
+          if (await vscode.workspace.applyEdit(edit)) await open.save();
+        }
+      }
+      const shown = vscode.window.visibleTextEditors.some((e) => e.document.uri.fsPath === uri.fsPath);
+      if (!shown || focus) {
+        await vscode.window.showTextDocument(uri, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: !focus, preview: false });
+      }
+    } catch (err: any) {
+      void vscode.window.showWarningMessage(`The canvas couldn't be opened: ${String(err?.message || err)}`);
+    }
+  }
+
+  private unsavedCanvas(conversation: string): boolean {
+    return vscode.workspace.textDocuments.some((d) => d.isDirty && this.canvasOf(d.uri.fsPath)?.conversation === conversation);
+  }
+
+  /** Before a message goes, a canvas's unsaved typing is saved: the model reads the file. */
+  private async saveCanvases(conversation: string): Promise<void> {
+    for (const doc of vscode.workspace.textDocuments) {
+      if (doc.isDirty && this.canvasOf(doc.uri.fsPath)?.conversation === conversation) {
+        try { await doc.save(); } catch { /* it goes as it was */ }
+      }
+    }
+  }
+
+  /** The canvas in front of you, for its commands. */
+  private canvasHere(): { editor: vscode.TextEditor; conversation: string; canvas: string } | undefined {
+    const editor = vscode.window.activeTextEditor;
+    const found = editor ? this.canvasOf(editor.document.uri.fsPath) : undefined;
+    if (!editor || !found) {
+      void vscode.window.showInformationMessage("Open a ChatDGC canvas first: ask a chat for a document or code to work on together.");
+      return undefined;
+    }
+    return { editor, ...found };
+  }
+
+  /** A message to the canvas's chat, as if typed there: its tab opens (or shows), and the page sends it. */
+  private sendFromCanvas(conversation: string, text: string, selection?: Record<string, unknown>): void {
+    const message = { type: "sendFromEditor", text, ...(selection ? { canvasSelection: selection } : {}) };
+    const tab = [...this.tabs].find((t) => t.conversation === conversation);
+    if (tab?.opened) { tab.panel.reveal(undefined, true); this.post(tab, message); return; }
+    const before = new Set(this.tabs);
+    this.open(conversation);
+    const fresh = [...this.tabs].find((t) => !before.has(t)) ?? [...this.tabs].find((t) => t.conversation === conversation);
+    if (fresh) (fresh.waitingSend ??= []).push(message);
+  }
+
+  /** Ask ChatDGC about the selected part of a canvas (the line the cursor is on, with nothing selected). */
+  async canvasAsk(): Promise<void> {
+    const here = this.canvasHere();
+    if (!here) return;
+    const sel = here.editor.selection, doc = here.editor.document;
+    const text = doc.getText(sel.isEmpty ? doc.lineAt(sel.active.line).range : sel);
+    if (!text.trim()) { void vscode.window.showInformationMessage("Select the part of the canvas to ask about."); return; }
+    const ask = await vscode.window.showInputBox({ title: "Ask ChatDGC about the selection", prompt: "What should change, or what do you want to know?",
+                                                    placeHolder: "Make this friendlier", ignoreFocusOut: true });
+    if (!ask?.trim()) return;
+    await this.saveCanvases(here.conversation);
+    const first = sel.isEmpty ? sel.active.line : sel.start.line;
+    const last = sel.isEmpty ? sel.active.line : (sel.end.character === 0 && sel.end.line > sel.start.line ? sel.end.line - 1 : sel.end.line);
+    this.sendFromCanvas(here.conversation, ask.trim(), { canvas_id: here.canvas, start_line: first + 1, end_line: last + 1, text: text.slice(0, 20_000) });
+  }
+
+  /** ChatGPT's canvas shortcuts, for a document or for code. */
+  async canvasShortcut(): Promise<void> {
+    const here = this.canvasHere();
+    if (!here) return;
+    const code = !/\.md$/i.test(here.editor.document.uri.fsPath);
+    const items: [string, string][] = code
+      ? [["Review the code", "Review the code in the canvas and suggest improvements as comments in it."],
+         ["Add comments", "Add clear comments to the code in the canvas."],
+         ["Add logs", "Add helpful logging to the code in the canvas."],
+         ["Fix bugs", "Find and fix the bugs in the code in the canvas."],
+         ["Port to another language…", ""]]
+      : [["Suggest edits", "Improve the canvas where it needs it, and say what you changed."],
+         ["Make it shorter", "Make the canvas shorter, keeping what matters."],
+         ["Make it longer", "Make the canvas longer, with more useful detail."],
+         ["Change the reading level…", ""],
+         ["Add final polish", "Give the canvas a final polish: grammar, clarity and flow, without changing what it says."]];
+    const pick = await vscode.window.showQuickPick(items.map(([label, ask]) => ({ label, ask })), { placeHolder: "What should ChatDGC do with this canvas?" });
+    if (!pick) return;
+    let ask = pick.ask;
+    if (!ask && code) {
+      const to = await vscode.window.showInputBox({ prompt: "Port the code to which language?", placeHolder: "TypeScript" });
+      if (!to?.trim()) return;
+      ask = `Port the code in the canvas to ${to.trim()}, in a new canvas.`;
+    } else if (!ask) {
+      const level = await vscode.window.showQuickPick(["A young child", "Middle school", "High school", "College", "Graduate school"],
+                                                      { placeHolder: "Rewrite it for which reader?" });
+      if (!level) return;
+      ask = `Rewrite the canvas for a reader at this level: ${level}.`;
+    }
+    await this.saveCanvases(here.conversation);
+    this.sendFromCanvas(here.conversation, ask);
+  }
+
+  /** Versions: any one compared with the canvas now (VS Code's diff), or restored. */
+  async canvasVersions(): Promise<void> {
+    const here = this.canvasHere();
+    if (!here) return;
+    await this.saveCanvases(here.conversation);
+    this.ask({ kind: "canvasVersions" }, { type: "chatdgc_canvas", conversation_id: here.conversation, canvas_id: here.canvas, op: "get" });
+  }
+
+  private async pickVersion(conversation: string, view: any): Promise<void> {
+    const versions = (Array.isArray(view.versions) ? view.versions : [])
+      .filter((v: any) => this.canvasOf(String(v?.path || "").replace(/[\\/]\.versions[\\/][^\\/]+$/, "/x"))?.conversation === conversation).reverse();
+    if (!versions.length) return;
+    const when = (at: string) => { const t = Date.parse(at); return Number.isFinite(t) ? new Date(t).toLocaleString() : ""; };
+    const pick = await vscode.window.showQuickPick(versions.map((v: any) => ({
+      label: `Version ${v.n}${v.n === view.version ? " (now)" : ""}`, description: `${v.by === "user" ? "You" : "ChatDGC"} · ${v.note || ""}`,
+      detail: when(v.at), v })), { placeHolder: `${view.title}: compare a version with the canvas now, or restore it` });
+    if (!pick) return;
+    const v = (pick as any).v;
+    const choice = v.n === view.version ? "Compare with now"
+      : await vscode.window.showQuickPick(["Compare with now", "Restore this version"], { placeHolder: `Version ${v.n}` });
+    if (!choice) return;
+    if (choice === "Restore this version") {
+      this.ask({ kind: "canvasRestore" }, { type: "chatdgc_canvas", conversation_id: conversation, canvas_id: view.id, op: "restore", version: v.n });
+      return;
+    }
+    await vscode.commands.executeCommand("vscode.diff", vscode.Uri.file(v.path), vscode.Uri.file(view.path), `${view.title}: version ${v.n} ↔ now`);
+  }
+
+  /** Download: Word, PDF or Markdown for a document (made.py lays it out), or the code file as it is. */
+  async canvasDownload(): Promise<void> {
+    const here = this.canvasHere();
+    if (!here) return;
+    await this.saveCanvases(here.conversation);
+    const file = here.editor.document.uri.fsPath, name = file.split(/[\\/]/).pop() || "canvas";
+    const code = !/\.md$/i.test(file);
+    const format = code ? { label: "The code file", format: "file", ext: name.split(".").pop() || "txt" }
+      : await vscode.window.showQuickPick([{ label: "Word document (.docx)", format: "docx", ext: "docx" }, { label: "PDF", format: "pdf", ext: "pdf" },
+                                           { label: "Markdown (.md)", format: "md", ext: "md" }], { placeHolder: "Download the canvas as" });
+    if (!format) return;
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+    const base = name.replace(/\.[^.]+$/, "");
+    const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, `${base}.${format.ext}`), saveLabel: "Save" });
+    if (!target || target.scheme !== "file") return;
+    this.ask({ kind: "canvasExport" }, { type: "chatdgc_canvas", conversation_id: here.conversation, canvas_id: here.canvas, op: "export",
+                                         format: format.format, path: target.fsPath });
+  }
+
+  /** The canvas commands show in an editor's title bar and menus when the file in front is a canvas. */
+  canvasContext(): vscode.Disposable {
+    const set = (editor?: vscode.TextEditor) => void vscode.commands.executeCommand("setContext", "dgc.chatdgcCanvas",
+      !!(editor && this.canvasOf(editor.document.uri.fsPath)));
+    set(vscode.window.activeTextEditor);
+    return vscode.window.onDidChangeActiveTextEditor(set);
   }
 
   /** A made file, written where DGC opens files: in its own app, or a Markdown or CSV file in an editor tab. */
@@ -395,6 +573,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                          busy: ev.busy === true, replyId: typeof ev.reply_id === "string" ? ev.reply_id : "",
                          ...(ev.project && typeof ev.project === "object" ? { project: ev.project } : {}) });
         if (waitingAttach.length) this.attachLibrary(tab, waitingAttach);
+        for (const waiting of tab.waitingSend?.splice(0) || []) this.post(tab, waiting);
         this.homeChanged();
         return;
       }
@@ -462,6 +641,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "chatdgc_images":
         for (const tab of showing(conversation)) this.post(tab, { type: "images", messageId: ev.message_id, images: ev.images });
         return;
+      case "chatdgc_canvas": {
+        const view = ev.canvas && typeof ev.canvas === "object" ? ev.canvas : null;
+        if (!view || !CANVAS_ID.test(String(view.id || ""))) return;
+        if (asker) this.requests.delete(requestId);
+        if (asker?.kind === "canvasVersions") { void this.pickVersion(conversation, view); return; }
+        // Asked to open it, a reply made or changed it, or a version came back: the editor beside the chat shows it.
+        void this.showCanvas(conversation, view, asker?.kind === "canvasOpen");
+        if (typeof ev.message_id === "string") {
+          const card = { id: view.id, title: view.title, kind: view.kind, language: view.language, version: view.version, op: view.op };
+          for (const tab of showing(conversation)) this.post(tab, { type: "canvas", messageId: ev.message_id, canvas: card });
+        }
+        return;
+      }
       case "chatdgc_made":
         // A file the reply made: its card shows under the reply in every tab on the chat.
         if (ev.file && typeof ev.file === "object") for (const tab of showing(conversation)) this.post(tab, { type: "made", messageId: ev.message_id, file: ev.file });
@@ -521,6 +713,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         for (const tab of showing(conversation)) this.post(tab, { type: "compacted", summary: ev.summary ?? null });
         return;
       case "chatdgc_exported":
+        if (asker?.kind === "canvasExport") {
+          this.requests.delete(requestId);
+          void vscode.window.showInformationMessage(`Saved ${String(ev.path || "").split(/[\\/]/).pop()}.`);
+          return;
+        }
         if (asker) {
           this.requests.delete(requestId);
           const where = String(ev.path || "");
@@ -657,10 +854,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const model = typeof message.model === "string" && message.model.length <= 200 ? message.model : "";
         const thinking = typeof message.thinking === "string" && THINKING.has(message.thinking) ? message.thinking : "";
         const search = typeof message.search === "string" && SEARCH.has(message.search) ? message.search : "";
+        const picked = message.canvas_selection, selection = picked && typeof picked === "object" && CANVAS_ID.test(String(picked.canvas_id || ""))
+          && Number.isInteger(picked.start_line) && Number.isInteger(picked.end_line) && typeof picked.text === "string" && picked.text.length <= 20_000
+          ? { canvas_id: picked.canvas_id, start_line: picked.start_line, end_line: picked.end_line, text: picked.text } : undefined;
+        if (this.unsavedCanvas(conversation)) await this.saveCanvases(conversation);   // the model reads what's on screen
         this.ask({ tab, kind: "send" }, { type: "chatdgc_send", conversation_id: conversation, text,
                                           ...(model ? { model } : {}), ...(thinking ? { thinking } : {}),
                                           ...(search ? { search } : {}),
                                           ...(typeof message.study === "boolean" ? { study: message.study } : {}),
+                                          ...(selection ? { canvas_selection: selection } : {}),
                                           ...(attachments.length ? { attachments } : {}) });
         return;
       }
@@ -724,6 +926,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openProject":
         this.openProject(String(message.id || ""));
         return;
+      case "canvasOpen": {
+        const canvasId = String(message.canvasId || "");
+        if (!conversation || !CANVAS_ID.test(canvasId)) return;
+        this.ask({ tab, kind: "canvasOpen" }, { type: "chatdgc_canvas", conversation_id: conversation, canvas_id: canvasId, op: "get" });
+        return;
+      }
       case "draftEdit": {
         // A writing block edited in place: the block's words as shown, and what replaces them.
         const messageId = String(message.messageId || "");

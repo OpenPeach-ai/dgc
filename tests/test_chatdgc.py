@@ -136,7 +136,7 @@ class ChatDGCTests(unittest.TestCase):
         self.assertIn("You are ChatDGC", sent[0]["content"])
         self.assertNotIn("coding", sent[0]["content"].lower(), "not the coding agent's prompt")
         self.assertEqual([(m["role"], m["content"]) for m in sent[1:]], [("user", "one"), ("assistant", "First."), ("user", "two")])
-        self.assertEqual([t["function"]["name"] for t in self.clients[-1].calls[0]["tools"]], ["ask_user", "make_file", "remember", "forget"],
+        self.assertEqual([t["function"]["name"] for t in self.clients[-1].calls[0]["tools"]], ["ask_user", "make_file", "canvas_create", "remember", "forget"],
                          "the question card and memory: no web search unless it's on")
         self.assertEqual(self.store.get(chat["id"])["messages"][1]["thinking"], "hmm", "its thinking is kept to show")
 
@@ -308,7 +308,7 @@ class ChatDGCTests(unittest.TestCase):
         self.assertEqual(seen, [("searching", "paris weather today"), ("searching", "paris rain this week")])
         calls = self.clients[-1].calls
         self.assertEqual(calls[0]["tools"][0], SEARCH_TOOL)
-        self.assertEqual([t["function"]["name"] for t in calls[0]["tools"]], ["web_search", "ask_user", "make_file", "remember", "forget"])
+        self.assertEqual([t["function"]["name"] for t in calls[0]["tools"]], ["web_search", "ask_user", "make_file", "canvas_create", "remember", "forget"])
         self.assertIn("web_search", calls[0]["messages"][0]["content"])
         told = calls[1]["messages"][-1]
         self.assertEqual(told["role"], "tool")
@@ -321,7 +321,7 @@ class ChatDGCTests(unittest.TestCase):
         self.engine.send(chat["id"], "What is [1]?")
         follow = self.clients[-1].calls[0]["messages"]
         self.assertIn("Sources:\n[1] Paris forecast https://weather.example/paris", follow[2]["content"], "a follow-up can ask about [1]")
-        self.assertEqual([t["function"]["name"] for t in self.clients[-1].calls[0]["tools"]], ["ask_user", "make_file", "remember", "forget"],
+        self.assertEqual([t["function"]["name"] for t in self.clients[-1].calls[0]["tools"]], ["ask_user", "make_file", "canvas_create", "remember", "forget"],
                          "search off: no web_search")
         self.assertIn("can't browse the web", follow[0]["content"])
 
@@ -348,7 +348,7 @@ class ChatDGCTests(unittest.TestCase):
         self.script.append({"parts": ["Here is what I found."]})
         reply = self.engine.send(chat["id"], "Research this", search="on")
         self.assertEqual(len(reply["searches"]), MAX_SEARCHES)
-        self.assertEqual([t["function"]["name"] for t in self.clients[-1].calls[-1]["tools"]], ["ask_user", "make_file", "remember", "forget"],
+        self.assertEqual([t["function"]["name"] for t in self.clients[-1].calls[-1]["tools"]], ["ask_user", "make_file", "canvas_create", "remember", "forget"],
                          "no web_search once the searches are spent")
         self.assertIn("use the web_search tool before you answer", self.clients[-1].calls[0]["messages"][0]["content"])
 

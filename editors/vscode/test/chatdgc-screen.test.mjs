@@ -1445,6 +1445,51 @@ test("writing blocks: a draft reads as the email or message it is, with Copy, Op
   } finally { await s.page.close(); }
 });
 
+test("canvas: a card where the reply made or changed one (Open), a message from the editor, and what part it was about", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const CV = `cv_${"1".repeat(16)}`;
+    await s.send({ type: "opened", conversation: conversation({ title: "Trip" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Plan my trip in a canvas" },
+      { id: M(2), role: "assistant", text: "A two-day plan is open beside the chat.", finish: "stop",
+        canvases: [{ id: CV, title: "Goa <b>trip</b>", kind: "document", language: "markdown", version: 1, op: "created", at: 0 }] },
+      { id: M(3), role: "user", text: "Make this livelier", canvas: { id: CV, title: "Goa trip", start_line: 5, end_line: 7, text: "Beach" } },
+      { id: M(4), role: "assistant", text: "Done.", finish: "stop" }] });
+    await s.frame();
+    const card = s.page.locator(".cd-canvas");
+    assert.equal(await card.locator(".cd-file-name").textContent(), "Goa <b>trip</b>", "a title is text");
+    assert.equal(await card.locator(".cd-file-meta").textContent(), "Canvas · Document · made, version 1");
+    await card.getByRole("button", { name: "Open" }).click();
+    assert.deepEqual((await s.posted("canvasOpen")).at(-1), { type: "canvasOpen", canvasId: CV });
+    assert.equal(await s.page.locator(".cd-user-canvas").textContent(), "About lines 5–7 of Goa trip");
+    // Live: "Writing in the canvas…", then the card; an edit of the same canvas updates its card.
+    await s.send({ type: "turn", state: "started", replyId: M(6) });
+    await s.send({ type: "activity", messageId: M(6), kind: "canvas", text: "Goa trip" });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-activity").last().textContent(), "Writing in the canvas Goa trip…");
+    await s.send({ type: "canvas", messageId: M(6), canvas: { id: CV, title: "Goa trip", kind: "document", version: 2, op: "edited" } });
+    await s.send({ type: "canvas", messageId: M(6), canvas: { id: CV, title: "Goa trip", kind: "document", version: 3, op: "edited" } });
+    await s.frame();
+    assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(6)}"] .cd-canvas`).count(), 1, "one card per canvas");
+    assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(6)}"] .cd-canvas .cd-file-meta`).textContent(), "Canvas · Document · changed, version 3");
+    await s.send({ type: "message", message: { id: M(6), role: "assistant", text: "Livelier now.", finish: "stop",
+                                               canvases: [{ id: CV, title: "Goa trip", kind: "document", version: 3, op: "edited", at: 0 }] } });
+    await s.send({ type: "turn", state: "ended", replyId: M(6) });
+    await s.frame();
+    // From the editor (Ask ChatDGC, a shortcut): sent as if typed here, with this tab's model and thinking.
+    const selection = { canvas_id: CV, start_line: 2, end_line: 2, text: "Day 1" };
+    await s.send({ type: "sendFromEditor", text: "Make day 1 calmer", canvasSelection: selection });
+    const sent = (await s.posted("send")).at(-1);
+    assert.deepEqual([sent.text, sent.canvas_selection], ["Make day 1 calmer", selection]);
+    await s.send({ type: "sendFromEditor", text: "Again" });
+    await s.frame();
+    assert.equal((await s.posted("send")).length, 1, "not while a reply is being written");
+    assert.match(await s.page.locator("#cd-notice").textContent(), /Let the reply finish first/);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("files a reply made: a card with what each is, Open and Save a copy…, live as it's made", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

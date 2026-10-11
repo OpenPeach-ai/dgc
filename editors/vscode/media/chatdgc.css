@@ -542,3 +542,9 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .cd-draft-text { resize: vertical; min-height: 96px; }
 .cd-draft-buttons { display: flex; gap: var(--sp-2); margin-top: var(--sp-1); }
 @media (max-width: 420px) { .cd-draft-tool span:last-child { display: none; } }
+
+/* A canvas the reply made or changed (it's open beside the chat), and a message asked about part of one. */
+.cd-canvas-badge { background: color-mix(in srgb, var(--accent) 70%, #1f2937); font-size: 16px; }
+.cd-canvas[data-kind="code"] .cd-canvas-badge { background: #334155; }
+.cd-user-canvas { display: inline-flex; align-items: center; gap: 4px; align-self: flex-end; margin-bottom: 4px;
+  color: var(--muted); font-size: var(--t-sm); }

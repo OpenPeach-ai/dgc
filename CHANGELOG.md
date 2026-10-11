@@ -88,6 +88,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **Canvas in ChatDGC** (`dgc/chatdgc/canvas.py`), as ChatGPT has it: tools `canvas_create` and `canvas_edit` (exact
+  find-and-replace edits, each found once, or a rewrite); the canvas is a file under `~/.dgc/chat/canvas/<chat>/<id>/`
+  that the editor opens beside the chat, read fresh every turn (the user's edits become a version of theirs first),
+  with versions in `.versions/`. New event `chatdgc_canvas` (as a reply makes or changes one), command
+  `chatdgc_canvas` (get, restore, export through made.py), `chatdgc_send` `canvas_selection` (a part of a canvas the
+  message is about; kept as `canvas` on the message), the reply's `canvases` cards, `chatdgc_activity` `canvas`.
+  Branches copy a chat's canvases; deleting a chat deletes them.
 - **Writing blocks in ChatDGC**, as ChatGPT has them: the prompt (`DRAFTS`) puts a draft the user will send as it is
   in its own ` ```email ` (Subject:, To:) or ` ```draft ` block; `chatdgc_draft` {conversation_id, message_id, original,
   text} edits one in place (answered by `chatdgc_message`; refused mid-turn, or when the block's words changed

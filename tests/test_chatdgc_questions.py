@@ -88,8 +88,8 @@ class QuestionTests(unittest.TestCase):
         chat = self.engine.open()
         reply, shown = self.asked(chat)
         first, second = self.world["requests"][-2:]
-        self.assertEqual(first["tools"], ["ask_user", "make_file", "remember", "forget"], "offered with web search off: the model decides")
-        self.assertEqual(second["tools"], ["make_file", "remember", "forget"], "one question per reply: not offered again")
+        self.assertEqual(first["tools"], ["ask_user", "make_file", "canvas_create", "remember", "forget"], "offered with web search off: the model decides")
+        self.assertEqual(second["tools"], ["make_file", "canvas_create", "remember", "forget"], "one question per reply: not offered again")
         self.assertEqual(second["messages"][-1], {"role": "tool", "tool_call_id": "c0", "content": ASKED},
                          "it doesn't wait: told it's shown, and to carry on")
         question = reply["questions"][0]
@@ -169,7 +169,7 @@ class QuestionTests(unittest.TestCase):
         self.world["toolless"] = True
         reply = self.engine.send(chat["id"], "hi")
         self.assertEqual(reply["text"], "ok")
-        self.assertEqual([r["tools"] for r in self.world["requests"]], [["ask_user", "make_file", "remember", "forget"], []], "asked once, then without")
+        self.assertEqual([r["tools"] for r in self.world["requests"]], [["ask_user", "make_file", "canvas_create", "remember", "forget"], []], "asked once, then without")
         self.engine.send(chat["id"], "again", search="auto")
         self.assertEqual(self.world["requests"][-1]["tools"], [], "not offered again, web search included")
         self.assertNotIn("ask_user", self.world["requests"][-1]["messages"][0]["content"], "nor told about it")

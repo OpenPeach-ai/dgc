@@ -150,6 +150,7 @@ class ChatService:
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
              "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_draft": self._draft,
+             "chatdgc_canvas": self._canvas,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -344,6 +345,45 @@ class ChatService:
 
     # -- plugins: the user's choice on a card under a reply
 
+    def _canvas(self, cmd: dict) -> None:
+        """A canvas, for the editor: its file and versions (get, with its text), a version restored, or a copy saved
+        where the user chose (export: Word, PDF or Markdown for a document; the code file for code)."""
+        conversation_id, canvas_id, op = cmd["conversation_id"], cmd["canvas_id"], cmd["op"]
+        if op == "export":
+            import os
+            from pathlib import Path
+            from . import made
+            target = Path(cmd.get("path") or "")
+            if not target.is_absolute() or target.is_dir() or not target.parent.is_dir():
+                raise ChatEngineError("Choose where to save it.")
+            view = self.engine.canvas(conversation_id, canvas_id, text=True)
+            fmt = str(cmd.get("format") or "file")
+            if fmt == "file" or (view["kind"] == "code" and fmt != "md"):
+                data = view["text"].encode("utf-8")
+            else:
+                try:
+                    data = made.make({"name": view["title"], "format": fmt, "content": view["text"]}, self.engine.config).raw
+                except made.MadeError as exc:
+                    raise ChatEngineError(str(exc)) from None
+            temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+            try:
+                temp.write_bytes(data)
+                os.replace(temp, target)
+            except OSError as exc:
+                temp.unlink(missing_ok=True)
+                raise ChatEngineError(f"It couldn't be saved: {exc.strerror or exc}.") from exc
+            self.emit("chatdgc_exported", request_id=cmd["request_id"], conversation_id=conversation_id,
+                      path=str(target), bytes=len(data))
+            return
+        if op == "restore":
+            with self._lock:
+                if conversation_id in self._turns:
+                    raise ChatEngineError("Let the reply finish first.")
+            view = self.engine.canvas_restore(conversation_id, canvas_id, cmd.get("version"))
+        else:
+            view = self.engine.canvas(conversation_id, canvas_id, text=True)
+        self.emit("chatdgc_canvas", conversation_id=conversation_id, canvas=view, request_id=cmd["request_id"])
+
     def _draft(self, cmd: dict) -> None:
         """A draft edited in place (ChatGPT's writing blocks): the reply as it is now, on every screen. Not while a
         reply is being written in the chat: its save would put the old words back."""
@@ -500,6 +540,7 @@ class ChatService:
             return self.engine.send(cmd["conversation_id"], cmd["text"], model=cmd.get("model"),
                                     thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
                                     attachments=cmd.get("attachments"), study=cmd.get("study"),
+                                    canvas_selection=cmd.get("canvas_selection"),
                                     on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run)
 
@@ -644,7 +685,13 @@ class ChatService:
             return {"on_text": lambda part: stream["value"].text(part),
                     "on_thinking": lambda part: stream["value"].thinking(part),
                     "on_compacted": lambda summary: self._compacted(conversation_id, summary),
-                    "on_question": question, "on_images": pictures, "on_action": card, "on_file": made}
+                    "on_question": question, "on_images": pictures, "on_action": card, "on_file": made,
+                    "on_canvas": canvas}
+
+        def canvas(view):
+            # A canvas made or changed: the editor beside the chat shows it at once (the reply goes on).
+            stream["value"].flush()
+            self.emit("chatdgc_canvas", conversation_id=conversation_id, message_id=turn["reply_id"], canvas=view)
 
         def made(file):
             # A file the reply made: its card shows at once, where the reply is (the reply goes on).
