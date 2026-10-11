@@ -165,6 +165,16 @@ class ServiceTests(unittest.TestCase):
         got = self.wire.wait(lambda f: f["type"] == "chatdgc_context" and f["seq"] >= after)
         self.assertEqual((got["conversation_id"], got["preset"]), (chat, "32k"))
 
+    def test_what_fills_the_window_on_the_wire(self):
+        chat = self.new()
+        self.service.dispatch({"type": "chatdgc_context_breakdown", "request_id": "b1", "conversation_id": chat})
+        got = self.wire.wait(lambda f: f["type"] == "context_breakdown" and f.get("request_id") == "b1")
+        self.assertEqual(got["conversation_id"], chat)
+        self.assertEqual(sum(c["tokens"] for c in got["categories"]), got["used"])
+        self.assertIn("system_prompt", [c["id"] for c in got["categories"]])
+        self.service.dispatch({"type": "chatdgc_context_breakdown", "request_id": "b2", "conversation_id": "chat_" + "0" * 32})
+        self.assertEqual(self.wire.wait(lambda f: f.get("request_id") == "b2")["type"], "chatdgc_error")
+
     def test_a_draft_edited_in_place_is_the_replys_from_then_on_but_never_mid_turn(self):
         chat = self.new()
         email = "Subject: Moving out\n\nDear Mr Rao,\n\nI'm leaving flat 4B on 30 November."
@@ -671,7 +681,7 @@ class HostTests(unittest.TestCase):
 
     def test_ready_offers_it(self):
         self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1, "widget_library": 1,
-                          "windows": ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"]})
+                          "windows": ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"], "context_breakdown": 1})
 
     def test_no_frame_carries_a_sessions_chat_id_even_with_several_sessions(self):
         self.host.dispatch({"type": "open_chat", "request_id": "oc", "cwd": str(self.tmp / "b")})

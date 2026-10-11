@@ -21,6 +21,7 @@ from . import data as chat_data
 from . import plugins as chat_plugins
 from . import window as fit_window
 from . import research
+from .. import context_breakdown as breakdown
 from .. import shared_memory
 from .prompt import system_prompt
 from .research import NO_TOOLS
@@ -1331,12 +1332,92 @@ class ChatEngine:
         parts = {"instructions": max(0, fit_window.tokens(system) - fit_window.tokens(remembered + carried) - project_files),
                  "summary": fit_window.tokens(remembered + carried), "files": min(files, estimated)}
         parts["conversation"] = max(0, estimated - sum(parts.values()))
+        # A request holds the tools it offers too (the model's own count always had them): as the breakdown counts.
+        tools, plugin_items = self._offered(chat, str(getattr(client, "model", "") or chat.get("model") or ""))
+        estimated += sum(n for _, n in tools) + sum(n for _, n in plugin_items)
         last = chat["messages"][-1] if chat["messages"] else {}
         since = remembered and (chat.get("summary") or {}).get("written_at") == last.get("id")
         reported = int(last.get("counted") or 0) if last.get("role") == "assistant" and not since else 0
         return {"window": room, "limit": limit, "preset": self._preset(), "parts": parts,
                 "used": reported or estimated, "source": "reported" if reported else "estimated",
                 "compactable": self._compactable(chat)}
+
+    def _offered(self, chat: dict, name: str) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+        """The tools a reply starts with, as _reply offers them, and its plugins' (connecting to none of them), each as
+        (name, tokens): what a request holds besides the conversation."""
+        if name in self._toolless:
+            return [], []
+        T = fit_window.tokens
+        tables = self._tables(chat)
+        search = "off" if self.config.get("chatdgc_web", True) is False else "auto"
+        offered = ([SEARCH_TOOL] if search != "off" else []) + [ASK_TOOL, MAKE_FILE_TOOL]
+        offered += [QUERY_DATA_TOOL] if tables is not None and tables.tables else []
+        offered += [WIDGET_TOOL, CANVAS_CREATE_TOOL] + ([CANVAS_EDIT_TOOL] if self._canvas_list(chat) else [])
+        offered += [REMEMBER_TOOL, FORGET_TOOL] if self._memory_on(chat) else []
+        tools = [(t["function"]["name"], T(json.dumps(t))) for t in offered]
+        plugin_items = []
+        plugins = self._plugins(chat)
+        if plugins is not None:
+            try:
+                now_on = plugins.pin()
+                plugin_items = [(t["function"]["name"], T(json.dumps(t))) for t in chat_plugins.schemas(now_on)]
+                plugin_items.append((f"Instructions ({', '.join(p['name'] for p in now_on)})"[:120], T(chat_plugins.instructions(now_on))))
+            finally:
+                getattr(plugins, "close", lambda: None)()
+        return tools, plugin_items
+
+    def context_breakdown(self, chat_id: str) -> dict:
+        """What fills the chat's window, part by part, as Claude's Usage sheet shows it (dgc/context_breakdown.py): the
+        conversation, its files, ChatDGC's instructions, yours, memory, the project, the canvas and data, the summary,
+        and the tools a reply is offered (each), plugins included. Counted as the meter counts; the model's own count
+        of its last request, where it gave one, scales them."""
+        chat = self._chat(chat_id)
+        client = self.client(chat.get("model") or None)
+        room, limit = fit_window.window(client, self._preset())
+        name = str(getattr(client, "model", "") or chat.get("model") or "")
+        history = self._history(chat, sees=self._sees(chat), room=room)
+        system = history[0]["content"] if history else ""
+        T, config = fit_window.tokens, self.config
+        # ChatDGC's instructions, yours and memory: the same prompt with and without each, at one moment.
+        from datetime import datetime
+        now_local = datetime.now().astimezone()
+        common = {"now": now_local, "timezone_name": str(config.get("timezone", "") or ""), "search": "off",
+                  "ask": name not in self._toolless, "study": bool(chat.get("study"))}
+        memory = self._remembered(chat)
+        yours = system_prompt(**common, about=str(config.get("chatdgc_about", "") or ""), style=str(config.get("chatdgc_style", "") or ""),
+                              personality=str(config.get("chatdgc_personality", "default") or "default"), memory=memory)
+        plain = system_prompt(**common, memory=memory)
+        bare = system_prompt(**common, memory="" if memory is not None else None)
+        canvas, data = T(self._canvas_context(chat)), T(self._data_context(chat))
+        remembered = (chat.get("summary") or {}).get("text", "") if self._summary_start(chat) else ""
+        summary = T(remembered + (chat.get("carried") or {}).get("text", ""))
+        project = max(0, T(system) - T(yours) - canvas - data - summary)
+        # The conversation, and the files in it (each).
+        conversation = fit_window.estimate(history[1:]) + (4 if history else 0)
+        files = []
+        for m in chat["messages"][self._summary_start(chat):]:
+            for meta in m.get("attachments") or []:
+                n = (fit_window.IMAGE_TOKENS if meta.get("kind") == "image" else
+                     T(attached.frame(meta, b"", "")) + (meta.get("chars") or 0) // fit_window.CHARS_PER_TOKEN)
+                files.append((meta.get("name") or "file", n))
+        in_files = min(sum(n for _, n in files), conversation)
+        tools, plugin_items = self._offered(chat, name)
+        cats = [breakdown.category("messages", "Messages", conversation - in_files),
+                breakdown.category("files", "Files", in_files, files),
+                breakdown.category("system_prompt", "System prompt", T(bare)),
+                breakdown.category("instructions", "Your instructions", T(yours) - T(plain)),
+                breakdown.category("memory", "Memory", T(plain) - T(bare)),
+                breakdown.category("project", "Project", project),
+                breakdown.category("canvas", "Canvas", canvas),
+                breakdown.category("data", "Data", data),
+                breakdown.category("summary", "Summary", summary),
+                breakdown.category("tools", "Tools", sum(n for _, n in tools), tools),
+                breakdown.category("plugins", "Plugin tools", sum(n for _, n in plugin_items), plugin_items)]
+        last = chat["messages"][-1] if chat["messages"] else {}
+        since = remembered and (chat.get("summary") or {}).get("written_at") == last.get("id")
+        reported = int(last.get("counted") or 0) if last.get("role") == "assistant" and not since else 0
+        return {**breakdown.build(room, cats, compact_at=fit_window.COMPACT_AT, reported=reported),
+                "limit": limit, "preset": self._preset()}
 
     def _history(self, chat: dict, search: str = "off", sees: bool = True, room: int = 0) -> list[dict]:
         """What the model reads: ChatDGC's instructions and the conversation. Earlier thinking never goes back;

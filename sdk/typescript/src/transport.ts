@@ -27,7 +27,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "chat_change", "chat_changes", "chat_closed", "chat_opened",
   "chatdgc_action", "chatdgc_activity", "chatdgc_canvas", "chatdgc_changed", "chatdgc_chats", "chatdgc_compacted", "chatdgc_context", "chatdgc_delta", "chatdgc_earlier", "chatdgc_error", "chatdgc_exported", "chatdgc_file", "chatdgc_followups", "chatdgc_images", "chatdgc_library", "chatdgc_library_file", "chatdgc_made", "chatdgc_message",
   "chatdgc_opened", "chatdgc_pips", "chatdgc_project", "chatdgc_projects", "chatdgc_question", "chatdgc_research", "chatdgc_turn", "chatdgc_widget", "chatdgc_widgets", "checkpoints", "command_rejected", "compacted", "config",
-  "context", "doc", "docs_catalog", "error", "files_ready", "goal_changed", "handoff", "handoff_started",
+  "context", "context_breakdown", "doc", "docs_catalog", "error", "files_ready", "goal_changed", "handoff", "handoff_started",
   "history", "hook_activity", "hook_catalog", "image", "info", "mcp_call_complete",
   "mcp_command_result", "mcp_context", "mcp_context_catalog", "mcp_input_request", "mcp_servers",
   "mcp_tools", "memory", "memory_state", "mode_changed", "model_changed", "model_retry", "models",

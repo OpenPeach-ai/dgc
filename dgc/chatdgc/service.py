@@ -157,6 +157,7 @@ class ChatService:
              "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_draft": self._draft,
              "chatdgc_canvas": self._canvas, "chatdgc_widget_report": self._widget_report, "chatdgc_widgets": self._widgets,
              "chatdgc_context": lambda cmd: self._context_later(cmd["conversation_id"]),
+             "chatdgc_context_breakdown": self._breakdown,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -248,6 +249,23 @@ class ChatService:
         except Exception:                             # noqa: BLE001 -- a meter is a nicety
             return
         self.emit("chatdgc_context", conversation_id=conversation_id, **fields)
+
+    def _breakdown(self, cmd: dict) -> None:
+        """What fills a chat's window, part by part: on a thread of its own, as the meter is (asking the provider for
+        the model's limit can take a moment)."""
+        conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
+
+        def answer():
+            try:
+                parts = self.engine.context_breakdown(conversation_id)
+            except (ChatEngineError, ChatStoreError) as exc:
+                self._error(str(exc), request_id, conversation_id)
+                return
+            except Exception:                     # noqa: BLE001 -- a breakdown is a nicety
+                self._error("What fills the window couldn't be counted just now.", request_id, conversation_id)
+                return
+            self.emit("context_breakdown", request_id=request_id, conversation_id=conversation_id, **parts)
+        threading.Thread(target=answer, daemon=True, name=f"dgc-chatdgc-breakdown-{conversation_id[5:13]}").start()
 
     def _context_later(self, conversation_id: str) -> None:
         threading.Thread(target=self._context, args=(conversation_id,), daemon=True,

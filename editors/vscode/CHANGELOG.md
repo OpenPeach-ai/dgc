@@ -54,6 +54,9 @@
   paperclip lists your newest files before Upload.
 - **ChatDGC has its own mark:** DGC's three slashes in a speech bubble, on its chat tabs, its project pages, the
   Library and the New Chat (ChatDGC) and Ask ChatDGC buttons, so a ChatDGC tab is never taken for a DGC session.
+- **What fills the window.** ChatDGC's meter details show it as Claude's Usage sheet does: a bar a colour a part,
+  each part's tokens and share, every tool listed with its own, the room kept for summarizing and the free space.
+- **A welcome for the time of day.** A new chat greets you under ChatDGC's mark with a line that fits the hour.
 - **ChatDGC's box, as main DGC's.** No purple ring around it; Search, Deep research and Study are plain buttons;
   the context meter is main DGC's (its details laid out the same, with **Window size** from 8K to 1M); and one
   button by Send names the model and opens a menu of the models with a **dial** for thinking: click a mark, drag,

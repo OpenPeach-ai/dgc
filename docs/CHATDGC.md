@@ -76,11 +76,16 @@ voice come in later phases.
 - **Long replies.** ChatDGC doesn't limit reply length; the model's own limit is the only one. If a reply
   stops at that limit, or you press Stop, the reply keeps what was written and shows **Continue**.
   Continue picks up in the same reply.
+- **The welcome.** A new chat greets you under ChatDGC's mark (its three slashes drawn in one by one) with a line
+  for the time of day ("Up late? I'm here.", "Good morning. Where should we start?"), chosen once a chat.
 - **Temporary chats.** Tick **Temporary** before your first message. A temporary chat is never saved or
   listed, and it disappears when DGC stops.
 - **The context window.** The meter in the box shows how much of the model's context window the chat fills.
   It uses the model's own count where it reports one, and turns amber at 70% and red at 85%. Click it for
-  the breakdown (instructions, summary, files, conversation) and two actions:
+  what fills the window, as Claude's Usage sheet shows it: a bar in one colour a part, then each part with its
+  tokens and its share (the conversation, files, ChatDGC's own instructions, yours, memory, the project, the canvas
+  and data, the summary, and the tools a reply is offered, each listed with its own tokens, plugins' too), the room
+  kept free for summarizing, and what's free. Then two actions:
   - **Compact now:** everything before the last exchange becomes a summary. When that's already
     summarized (right after a summary), the details say so and the button waits for another exchange.
   - **Continue in a new chat:** a new chat starts with a summary of this one.

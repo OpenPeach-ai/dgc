@@ -188,7 +188,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <main id="cd-scroll" class="cd-scroll"><div class="cd-column">
 <button type="button" id="cd-earlier" class="cd-earlier" hidden>Show earlier messages</button>
 <div id="cd-log" class="cd-log" role="log" aria-label="Conversation"></div>
-<section id="cd-empty" class="cd-empty"><h2>What can I help with?</h2></section>
+<section id="cd-empty" class="cd-empty" aria-live="polite"></section>
 </div></main>
 <footer class="cd-foot"><div class="cd-column">
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>
@@ -215,7 +215,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -849,6 +849,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           origins: ev.origins && typeof ev.origins === "object" ? ev.origins : {} });
         return;
       }
+      case "context_breakdown": {
+        if (asker) this.requests.delete(requestId);
+        if (!conversation) return;                        // a session's, not a chat's
+        const breakdown = { window: ev.window, used: ev.used, source: ev.source, compact_at: ev.compact_at, buffer: ev.buffer,
+                            free: ev.free, categories: Array.isArray(ev.categories) ? ev.categories : [],
+                            ...(Array.isArray(ev.deferred) ? { deferred: ev.deferred } : {}) };
+        for (const tab of showing(conversation)) this.post(tab, { type: "breakdown", conversation, breakdown });
+        return;
+      }
       case "chatdgc_widgets": {
         if (asker) this.requests.delete(requestId);
         if (asker?.kind === "widgets") {
@@ -1042,6 +1051,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const waiting = this.createWaiting.get(requestId);
         if (waiting) { this.createWaiting.delete(requestId); waiting(""); }
         if (asker?.kind === "widgetRestore") { asker.widgetPanel?.dispose(); return; }       // deleted since: no tab
+        if (asker?.kind === "breakdown") return;          // the details show the meter's own lines instead
         if (asker?.libraryPanel) { void asker.libraryPanel.webview.postMessage({ type: "error", message }); return; }
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.([]); return; }
         if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
@@ -1078,6 +1088,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.post(tab, { type: "windows", presets: this.windowPresets() });
         return;
       }
+      case "breakdown":
+        // What fills this chat's window, part by part, for the meter's details (a backend that counts it).
+        if (conversation && Number(this.host?.chatdgcOffers?.()?.context_breakdown) >= 1) {
+          this.ask({ tab, kind: "breakdown" }, { type: "chatdgc_context_breakdown", conversation_id: conversation });
+        }
+        return;
       case "window": {
         // The window's size, chosen in the meter's details: for every chat, then this chat's meter again.
         const preset = String(message.preset || "");

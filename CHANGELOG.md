@@ -88,6 +88,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **What fills the context window, part by part** (founder, from Claude's Usage sheet; phase 1 of
+  CONTEXT_BREAKDOWN_PLAN.md: ChatDGC; main DGC, the SDKs and Pips follow). `dgc/context_breakdown.py` puts any
+  surface's parts in one shape: `{window, used, source, compact_at, categories: [{id, label, tokens, items?}], buffer,
+  free, deferred?}`, biggest first, scaled to the model's own count where it reported one, with the room kept before
+  compaction and the free space never below zero. ChatDGC's engine counts its parts as its meter does: the
+  conversation and its files (each), its own instructions, the user's (about, style, personality) and memory (the
+  same prompt with and without each, at one moment), the project, canvas, data and summary, and the tools a reply
+  starts with, each, plugins' included (read from what's installed: nothing connects). Its meter's estimate now
+  counts those tools too (the model's count always had them). New `chatdgc_context_breakdown` command, answered on a
+  thread by a new `context_breakdown` event (an existing event never gains a field); offered as
+  `ready.capabilities.chatdgc.context_breakdown`; in the TypeScript SDK's known events. The screen draws it with
+  `media/breakdown.js` (shared, for main DGC and Pips next) in the meter's details, header from the same count.
+- **A welcome for the time of day.** "What can I help with?" gives way to ChatDGC's mark, its slashes drawn in one
+  by one (still, with reduced motion), and a line for the hour (three each for morning, afternoon, evening and night;
+  a temporary chat: "Off the record. Nothing here is kept."), chosen once a chat and kept in place across renders.
 - **ChatDGC's box, as main DGC's** (founder: the purple ring off, the model and thinking pickers and the context
   meter as main DGC has them, thinking "something creative": he chose a dial). The box keeps its border on focus with
   main DGC's shadow; the tools are borderless. The two native selects stay as what a send reads, hidden behind one

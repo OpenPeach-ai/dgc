@@ -130,6 +130,7 @@ STATIC_MEMBERS = {
     "extension/media/chatdgc.css": "media/chatdgc.css",
     "extension/media/chart.js": "media/chart.js",
     "extension/media/library.js": "media/library.js",
+    "extension/media/breakdown.js": "media/breakdown.js",
     "extension/media/dgc-tab-light.svg": "media/dgc-tab-light.svg",
     "extension/media/dgc-tab-dark.svg": "media/dgc-tab-dark.svg",
     "extension/media/chatdgc-tab-light.svg": "media/chatdgc-tab-light.svg",

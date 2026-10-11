@@ -112,6 +112,38 @@ class WindowTests(unittest.TestCase):
         self.talk(chat, "bigger than the model")
         self.assertEqual(self.last_request()["window"], 200_000, "the model's own limit still applies")
 
+    def test_what_fills_the_window_part_by_part_adds_up_with_its_buffer_and_free_space(self):
+        self.config.update(chatdgc_window="32k", chatdgc_about="I teach maths to 14-year-olds in Pune.", chatdgc_style="Be brief.")
+        Model.limit = 262_144
+        chat = self.engine.open()
+        self.talk(chat, "What is 17 x 23?", "391.")
+        got = self.engine.context_breakdown(chat["id"])
+        by = {c["id"]: c for c in got["categories"]}
+        self.assertEqual((got["window"], got["limit"], got["preset"], got["source"]), (32768, 262_144, "32k", "estimated"))
+        self.assertEqual(sum(c["tokens"] for c in got["categories"]), got["used"])
+        self.assertGreater(by["system_prompt"]["tokens"], by["instructions"]["tokens"])
+        self.assertGreater(by["instructions"]["tokens"], fit_window.tokens("I teach maths to 14-year-olds in Pune. Be brief.") - 1,
+                           "what you wrote, apart from ChatDGC's own")
+        self.assertGreater(by["messages"]["tokens"], 0)
+        names = [i["name"] for i in by["tools"]["items"]]
+        for tool in ("ask_user", "make_file", "show_widget", "canvas_create", "remember", "forget"):
+            self.assertIn(tool, names)
+        self.assertEqual(by["tools"]["tokens"], sum(i["tokens"] for i in by["tools"]["items"]))
+        self.assertEqual([i["tokens"] for i in by["tools"]["items"]], sorted((i["tokens"] for i in by["tools"]["items"]), reverse=True))
+        self.assertEqual([c["tokens"] for c in got["categories"]], sorted((c["tokens"] for c in got["categories"]), reverse=True))
+        self.assertNotIn("files", by, "nothing attached: no row")
+        self.assertEqual(got["compact_at"], int(32768 * fit_window.COMPACT_AT))
+        self.assertEqual(got["buffer"], 32768 - got["compact_at"])
+        self.assertEqual(got["used"] + got["buffer"] + got["free"], 32768)
+        # The model's own count of its last request: the parts, scaled to it.
+        stored = self.store.get(chat["id"])
+        stored["messages"][-1]["counted"] = got["used"] * 3
+        self.store.save(stored)
+        counted = self.engine.context_breakdown(chat["id"])
+        self.assertEqual((counted["source"], counted["used"]), ("reported", got["used"] * 3))
+        self.assertEqual(sum(c["tokens"] for c in counted["categories"]), counted["used"])
+        self.assertEqual(counted["free"], max(0, 32768 - counted["used"] - counted["buffer"]))
+
     def test_a_long_chat_is_summarized_before_it_overflows_and_says_so(self):
         chat = self.engine.open()
         long = "word " * 1200            # ~1,500 tokens each way
@@ -227,12 +259,13 @@ class WindowTests(unittest.TestCase):
     def test_the_meter_counts_the_last_request_and_a_summary_since_resets_it(self):
         chat = self.engine.open()
         Model.limit = 32768
-        self.world.update(usage={"input_tokens": 1500, "output_tokens": 300}, finish="length")
+        # Counts as a model gives them: a request holds its tool definitions (about 2,700 tokens here) as well.
+        self.world.update(usage={"input_tokens": 15000, "output_tokens": 300}, finish="length")
         reply = self.talk(chat, "tell me a long story", "Once upon")
-        self.world.update(usage={"input_tokens": 1900, "output_tokens": 200}, finish="stop")
+        self.world.update(usage={"input_tokens": 19000, "output_tokens": 200}, finish="stop")
         self.engine.continue_reply(chat["id"], reply["id"])
-        self.assertEqual(self.store.get(chat["id"])["messages"][-1]["usage"]["input_tokens"], 3400, "its cost: both calls")
-        self.assertEqual(self.engine.context(chat["id"])["used"], 2100, "what the window holds: the last request, not the sum")
+        self.assertEqual(self.store.get(chat["id"])["messages"][-1]["usage"]["input_tokens"], 34000, "its cost: both calls")
+        self.assertEqual(self.engine.context(chat["id"])["used"], 19200, "what the window holds: the last request, not the sum")
         for words in ("two", "three"):
             self.talk(chat, words, words.upper())
         self.assertEqual(self.engine.context(chat["id"])["source"], "reported")
@@ -240,7 +273,7 @@ class WindowTests(unittest.TestCase):
         after = self.engine.context(chat["id"])
         # The live run: the meter stayed at 60% after Compact now, the count of the request before the summary.
         self.assertEqual(after["source"], "estimated", "Compact now changed the next request: that count no longer stands")
-        self.assertLess(after["used"], 2100)
+        self.assertLess(after["used"], 19200)
         self.talk(chat, "four")
         self.assertEqual(self.engine.context(chat["id"])["source"], "reported", "the next reply is counted again")
         self.engine.set_summary(chat["id"], "Edited.")

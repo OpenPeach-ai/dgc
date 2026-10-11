@@ -24,6 +24,16 @@ body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760p
 /* A new chat: the question and the box sit together near the middle, the way a chat app opens. */
 .cd-empty { text-align: center; }
 .cd-empty h2 { margin: 0; color: var(--text-strong); font: var(--w-semi) 24px/1.3 var(--sans); text-wrap: balance; }
+/* The welcome: ChatDGC's mark (its bubble, then its three slashes drawn in one by one, as the chat's own thinking
+   mark does), above a line for the time of day. */
+.cd-welcome { display: grid; justify-items: center; gap: var(--sp-3); }
+.cd-welcome-mark { width: 44px; height: 44px; }
+.cd-welcome-bubble { fill: none; stroke: var(--accent-text, var(--accent)); stroke-width: 1.4; stroke-linejoin: round; }
+.cd-welcome-slash { fill: var(--accent-text, var(--accent)); opacity: 0; animation: cd-slash-in .42s ease-out forwards; }
+.cd-welcome-slash.s2 { animation-delay: .14s; }
+.cd-welcome-slash.s3 { animation-delay: .28s; }
+@keyframes cd-slash-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .cd-welcome-slash { opacity: 1; animation: none; } }
 body.cd-blank .cd-scroll { display: flex; flex-direction: column; justify-content: flex-end; flex: 1 1 0; padding-bottom: var(--sp-6); }
 body.cd-blank .cd-foot { flex: 1 1 0; }
 body.cd-blank .cd-fine { display: none; }
@@ -281,7 +291,7 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-meter[data-level="high"] { --meter: var(--del-text); color: var(--del-text); }
 .cd-meter .codicon { font-size: var(--t-lg); }
 /* Its details, laid out as main DGC's context window menu (its own classes: context-head, -track, -split, -action). */
-.cd-pop { margin: 0 0 var(--sp-2) auto; width: min(300px, 100%); padding: var(--sp-3); border: 1px solid var(--border-strong);
+.cd-pop { margin: 0 0 var(--sp-2) auto; width: min(320px, 100%); max-height: calc(100vh - 170px); overflow-y: auto; padding: var(--sp-3); border: 1px solid var(--border-strong);
   border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
 .cd-pop-pct { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1 var(--mono); font-variant-numeric: tabular-nums; }
 .cd-pop-rows { margin-top: var(--sp-2); }

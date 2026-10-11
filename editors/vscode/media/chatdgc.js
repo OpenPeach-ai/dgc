@@ -45,7 +45,7 @@
   // Web search is always there, as in ChatGPT: the model looks things up whenever an answer depends on it. The
   // box's Search makes it search first, for the next message only; Settings -> Web search can turn it off.
   const searchMode = () => (state.searchFirst ? "on" : "auto");
-  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", windows: [],
+  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", windows: [], breakdown: null,
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), searchFirst: false, planEditing: "", steerDraft: "", open: new Set(),
@@ -1602,7 +1602,7 @@
     button.dataset.level = share >= 0.85 ? "high" : share >= 0.7 ? "mid" : "low";
     button.title = `Context: ${c.used.toLocaleString()} of ${c.window.toLocaleString()} tokens`;
     button.setAttribute("aria-label", `Context window: ${percent}% used. Show details`);
-    if (!$("cd-context-pop").hidden) popover();
+    if (!$("cd-context-pop").hidden) { popover(); vscode.postMessage({ type: "breakdown" }); }
   }
   function popover() {
     const c = state.context, pop = $("cd-context-pop");
@@ -1628,10 +1628,15 @@
     carry.disabled = state.busy || state.compacting || !state.messages.length || !!state.conversation?.temporary;
     carry.title = "Start a new chat that carries a summary of this one";
     carry.addEventListener("click", () => { vscode.postMessage({ type: "carry" }); state.compacting = true; render(); controls(); popover(); });
-    // As main DGC lays out its own: what's used of the window, a bar, what's left, then what fills it.
+    // As main DGC lays out its own: what's used of the window, a bar, what's left, then what fills it. With the
+    // breakdown in, its count is the one shown (the parts add up to it).
+    const counted = state.breakdown && state.breakdown.conversation === state.conversation?.id ? state.breakdown.of : null;
+    const used = counted ? counted.used : c.used, room = counted ? counted.window : c.window;
     const head = el("div", "context-head"), named = el("div");
-    named.append(el("span", "context-kicker", "Context window"), el("strong", "", `${c.used.toLocaleString()} / ${c.window.toLocaleString()}`));
-    head.append(named, el("span", "cd-pop-pct", `${Math.round(share * 100)}%`));
+    named.append(el("span", "context-kicker", "Context window"), el("strong", "", `${used.toLocaleString()} / ${room.toLocaleString()}`));
+    head.append(named, el("span", "cd-pop-pct", `${Math.round(Math.min(1, used / (room || 1)) * 100)}%`));
+    // What fills it, part by part (as Claude's Usage sheet), once counted for this chat; until then, the meter's lines.
+    const drawn = counted && window.DgcBreakdown ? window.DgcBreakdown.render(counted) : null;
     const track = el("div", "context-track"), fill = el("span");
     fill.style.width = `${(share * 100).toFixed(1)}%`;
     track.append(fill);
@@ -1666,13 +1671,14 @@
       + (c.limit ? `. This model can take up to ${c.limit.toLocaleString()}.` : ".")
       + " Near the limit, older messages are summarized and the recent ones kept word for word."));
     compact.className = "context-action"; carry.className = "context-action cd-pop-second";
-    pop.replaceChildren(head, track, split, rows, ...(state.windows.length ? [size] : []), note, ...(why ? [why] : []), compact, carry);
+    pop.replaceChildren(head, ...(drawn ? [drawn] : [track, split, rows]), ...(state.windows.length ? [size] : []), note,
+                        ...(why ? [why] : []), compact, carry);
   }
   $("cd-context").addEventListener("click", () => {
     const pop = $("cd-context-pop");
     pop.hidden = !pop.hidden;
     $("cd-context").setAttribute("aria-expanded", String(!pop.hidden));
-    if (!pop.hidden) popover();
+    if (!pop.hidden) { popover(); vscode.postMessage({ type: "breakdown" }); }
   });
   document.addEventListener("click", (e) => {
     if (!e.target.closest?.("#cd-context, #cd-context-pop")) { $("cd-context-pop").hidden = true; $("cd-context").setAttribute("aria-expanded", "false"); }
@@ -1702,7 +1708,8 @@
     document.body.classList.toggle("cd-blank", blank && !page);
     document.body.classList.toggle("cd-on-project", page);
     $("cd-empty").hidden = !blank;
-    $("cd-empty").replaceChildren(page ? projectPage() : el("h2", "", "What can I help with?"));
+    const empty = page ? projectPage() : welcome();
+    if (!$("cd-empty").contains(empty)) $("cd-empty").replaceChildren(empty);      // the welcome stays put: no replayed drawing
     $("cd-title").textContent = page ? projectOf(state.conversation).name : state.conversation?.title || "New chat";
     crumb();
     controls();
@@ -1921,6 +1928,49 @@
     thinkingPick.value = state.thinking || state.conversation?.thinking || "off";
     updatePill();
     if (!modelMenu.hidden) renderModelMenu();
+  }
+
+  // ---- the welcome: ChatDGC's mark, its slashes drawn in one after another, and a line for the time of day,
+  // chosen once a chat (a render must never change it under you). A temporary chat says it keeps nothing.
+  const GREETINGS = {
+    morning: ["Good morning. Where should we start?", "Morning. What's first today?", "A fresh page. What's on your mind?"],
+    afternoon: ["Good afternoon. What are we figuring out?", "What can we get done this afternoon?", "Afternoon. Bring me a question."],
+    evening: ["Good evening. What's on your mind?", "Evening. Let's think something through.", "Winding down, or just getting going?"],
+    night: ["Up late? I'm here.", "Quiet hours. What are you thinking about?", "Night owl mode. Ask away."],
+  };
+  let greeted = { key: null, text: "", node: null };
+  function greeting() {
+    const key = `${state.conversation?.id || "new"}:${state.conversation?.temporary ? "t" : ""}`;
+    if (greeted.key === key) return greeted.text;
+    greeted.node = null;
+    const hour = new Date().getHours();
+    const part = hour >= 5 && hour < 12 ? "morning" : hour >= 12 && hour < 17 ? "afternoon" : hour >= 17 && hour < 22 ? "evening" : "night";
+    const lines = state.conversation?.temporary ? ["Off the record. Nothing here is kept."] : GREETINGS[part];
+    greeted = { key, text: lines[Math.floor(Math.random() * lines.length)], node: null };
+    return greeted.text;
+  }
+  function welcome() {
+    const text = greeting();
+    if (greeted.node) return greeted.node;
+    const box = el("div", "cd-welcome");
+    const ns = "http://www.w3.org/2000/svg";
+    const mark = document.createElementNS(ns, "svg");
+    mark.setAttribute("viewBox", "0 0 24 24"); mark.setAttribute("class", "cd-welcome-mark"); mark.setAttribute("aria-hidden", "true");
+    const bubble = document.createElementNS(ns, "path");
+    bubble.setAttribute("class", "cd-welcome-bubble");
+    bubble.setAttribute("d", "M5.5 2.5 H18.5 A4 4 0 0 1 22.5 6.5 V13.5 A4 4 0 0 1 18.5 17.5 H11 L6 21.5 V17.5 H5.5 A4 4 0 0 1 1.5 13.5 V6.5 A4 4 0 0 1 5.5 2.5 Z");
+    const slashes = document.createElementNS(ns, "g");
+    slashes.setAttribute("transform", "translate(6.53 4.53) scale(0.4560)");
+    ["M7.63 4.67 L3.44 6.76 L1 21.43 L5.19 19.33 Z", "M15.32 2.57 L11.13 4.67 L8.68 21.43 L12.87 19.33 Z",
+     "M23 4.67 L18.81 6.76 L16.37 19.33 L20.56 17.24 Z"].forEach((d, i) => {
+      const slash = document.createElementNS(ns, "path");
+      slash.setAttribute("d", d); slash.setAttribute("class", `cd-welcome-slash s${i + 1}`);
+      slashes.append(slash);
+    });
+    mark.append(bubble, slashes);
+    box.append(mark, el("h2", "", text));
+    greeted.node = box;
+    return box;
   }
 
   // ---- the model and its thinking, as main DGC shows them: one pill (the model's name and a small arc for how much it
@@ -2357,6 +2407,13 @@
         state.models = Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string").slice(0, 500) : [];
         state.defaultModel = typeof msg.current === "string" ? msg.current : "";
         fillModels();
+        return;
+      case "breakdown":
+        // What fills the window, for the chat on screen (one asked for before a switch is dropped).
+        if (msg.conversation && msg.conversation === state.conversation?.id && msg.breakdown && typeof msg.breakdown === "object") {
+          state.breakdown = { conversation: msg.conversation, of: msg.breakdown };
+          if (!$("cd-context-pop").hidden) popover();
+        }
         return;
       case "windows":
         // The window sizes its backend takes (none from an older one: the details then point to Settings).

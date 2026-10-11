@@ -41,7 +41,7 @@ function screenHtml() {
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/chatdgc.css"), "utf8");
-  const js = readFileSync(join(root, "media/chart.js"), "utf8") + "\n" + readFileSync(join(root, "media/chatdgc.js"), "utf8");
+  const js = ["chart.js", "breakdown.js", "chatdgc.js"].map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   cached = { html: doc.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${own}</style></head>`), js, markdownJs };
@@ -1118,6 +1118,58 @@ test("the box as main DGC's: no accent ring, one pill for the model and a dial f
     assert.deepEqual((await s.posted("send")).map((m) => [m.model, m.thinking]), [["qwen3:32b", "low"]], "the send reads what the pill chose");
     await s.page.locator("#cd-context").click();
     assert.equal(await s.page.locator("#cd-window-size").isDisabled(), true, "not while a reply is written");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("the welcome: ChatDGC's mark and a line for the time of day, chosen once a chat; a temporary chat keeps nothing", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.page.evaluate(() => { const D = Date; window.Date = class extends D { constructor(...a) { super(...(a.length ? a : [2026, 9, 11, 23, 30])); } }; });
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    const line = await s.page.locator(".cd-welcome h2").textContent();
+    assert.ok(["Up late? I'm here.", "Quiet hours. What are you thinking about?", "Night owl mode. Ask away."].includes(line), `a night line: ${line}`);
+    assert.equal(await s.page.locator(".cd-welcome-mark .cd-welcome-slash").count(), 3);
+    const node = await s.page.locator(".cd-welcome").elementHandle();
+    for (let i = 0; i < 5; i++) await s.send({ type: "models", ids: ["a", "b"], current: "a" });
+    assert.equal(await s.page.locator(".cd-welcome h2").textContent(), line, "the same line, however often it draws");
+    assert.equal(await node.evaluate((n) => n.isConnected), true, "the same element: its drawing doesn't replay");
+    await s.send({ type: "opened", conversation: conversation({ id: `chat_${"b".repeat(32)}`, temporary: true }), messages: [], earlier: 0, busy: false });
+    assert.equal(await s.page.locator(".cd-welcome h2").textContent(), "Off the record. Nothing here is kept.");
+    assert.equal(await s.page.getByText("What can I help with?").count(), 0);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("what fills the window, in the meter's details: a bar a colour a part, each part's share, tools one by one", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [{ id: M(1), role: "user", text: "hi" }, { id: M(2), role: "assistant", text: "Hello.", finish: "stop" }], earlier: 0, busy: false });
+    await s.send({ type: "context", window: 32768, limit: 262144, used: 9200, preset: "32k", source: "reported", parts: { conversation: 9200 }, compactable: true });
+    await s.page.locator("#cd-context").click();
+    assert.deepEqual((await s.posted("breakdown")).length, 1, "asked for as the details open");
+    const pop = s.page.locator("#cd-context-pop");
+    assert.equal(await pop.locator(".bd").count(), 0, "until it comes: the meter's own lines");
+    const breakdown = { window: 32768, used: 9200, source: "reported", compact_at: 24576, buffer: 8192, free: 15376, categories: [
+      { id: "messages", label: "Messages", tokens: 5200 },
+      { id: "tools", label: "Tools", tokens: 3100, items: [{ name: "make_file", tokens: 900 }, { name: "<b>x</b>", tokens: 800 }] },
+      { id: "system_prompt", label: "System prompt", tokens: 900 }] };
+    await s.send({ type: "breakdown", conversation: `chat_${"f".repeat(32)}`, breakdown: { ...breakdown, used: 1 } });
+    assert.equal(await pop.locator(".bd").count(), 0, "another chat's: not this one's");
+    await s.send({ type: "breakdown", conversation: ID, breakdown });
+    assert.equal(await pop.locator(".bd-seg").count(), 4, "three parts and the summarizing room");
+    assert.deepEqual(await pop.locator(".bd-list > .bd-row .bd-label, .bd-list > details .bd-label").allTextContents(),
+                     ["Messages", "Tools2", "System prompt", "Kept free for summarizing", "Free space"]);
+    assert.deepEqual(await pop.locator('.bd-row[data-id="messages"] .bd-num, .bd-row[data-id="messages"] .bd-share').allTextContents(), ["5.2k", "15.9%"]);
+    assert.match(await pop.locator(".context-head").innerText(), /9,200 \/ 32,768\s*28%/);
+    await pop.locator(".bd-more summary").click();
+    assert.deepEqual(await pop.locator(".bd-item-name").allTextContents(), ["make_file", "<b>x</b>"], "names are words");
+    assert.equal(await pop.locator(".bd-item b").count(), 0);
+    assert.match(await pop.locator(".bd-bar").getAttribute("aria-label"), /^28\.1% of the context window used: Messages 5\.2k, Tools 3\.1k, System prompt 900$/);
+    await s.send({ type: "context", window: 32768, limit: 262144, used: 9300, preset: "32k", source: "reported", parts: { conversation: 9300 }, compactable: true });
+    assert.equal((await s.posted("breakdown")).length, 2, "asked again as the window changes, while it's open");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

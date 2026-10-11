@@ -628,6 +628,27 @@ test("the window's size, chosen in a chat's meter: for every chat, its meter ask
   assert.deepEqual(host.windows, ["64k"], "never one it doesn't know");
 });
 
+test("what fills a chat's window: asked of a backend that counts it, shown in the tabs on that chat only", () => {
+  chat.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "Loan" });
+  panel.say({ type: "breakdown" });
+  assert.equal(last("chatdgc_context_breakdown"), undefined, "not of a backend that doesn't say it counts it");
+  host.offers = { version: 1, context_breakdown: 1 };
+  panel.say({ type: "breakdown" });
+  const asked = last("chatdgc_context_breakdown");
+  assert.deepEqual({ ...asked, request_id: "" }, { type: "chatdgc_context_breakdown", request_id: "", conversation_id: ID(7) });
+  const parts = { window: 32768, used: 100, source: "estimated", compact_at: 24576, buffer: 8192, free: 24476, categories: [{ id: "messages", label: "Messages", tokens: 100 }] };
+  chat.onEvent({ type: "context_breakdown", request_id: asked.request_id, conversation_id: ID(7), ...parts, limit: 262144, preset: "32k" });
+  assert.deepEqual(panel.last("breakdown"), { type: "breakdown", conversation: ID(7), breakdown: parts });
+  chat.onEvent({ type: "context_breakdown", conversation_id: ID(9), ...parts });
+  assert.equal(panel.webview.posted.filter((m) => m.type === "breakdown").length, 1, "another chat's goes nowhere here");
+  const before = panel.webview.posted.length;
+  panel.say({ type: "breakdown" });
+  chat.onEvent({ type: "chatdgc_error", request_id: last("chatdgc_context_breakdown").request_id, conversation_id: ID(7), message: "couldn't count" });
+  assert.equal(panel.webview.posted.slice(before).filter((m) => m.type === "error").length, 0, "a breakdown that fails says nothing: the meter's lines stay");
+});
+
 test("a reload brings each chat back in its tab, once", async () => {
   chat.register();
   const { serializer } = world.serializers[0];

@@ -853,6 +853,9 @@ COMMAND_FIELDS.update({
     # The context window's meter again, for a chat (after its window preset changed): answered by `chatdgc_context`.
     # Offered with ready.capabilities.chatdgc.windows.
     "chatdgc_context": {"request_id": _S(), "conversation_id": _S()},
+    # What fills a chat's window, part by part (offered as ready.capabilities.chatdgc.context_breakdown): answered by
+    # `context_breakdown` with the conversation's id.
+    "chatdgc_context_breakdown": {"request_id": _S(), "conversation_id": _S()},
     "chatdgc_widgets": {"request_id": _S(), "op": _f("string", enum=("list", "get", "remove")), "query": _S(False),
                         "limit": _I(False), "offset": _I(False), "conversation_id": _S(False), "widget_id": _S(False)},
     "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
@@ -981,6 +984,14 @@ EVENT_FIELDS.update({
     # The answer to chatdgc_widgets: for list, {widgets: [{chat_id, chat_title, project_id?, project_name?, id,
     # message_id, title, created_at}], total, next_offset}; for get, the widget {id, title, html, at, created_at,
     # message_id}; for remove, the conversation and widget it removed.
+    # What fills a context window, part by part, as Claude's Usage sheet shows it (dgc/context_breakdown.py): the
+    # window, what's used (`source`: reported by the model, or estimated), where it compacts, `categories` biggest
+    # first ([{id, label, tokens, items?: [{name, tokens}]}]: messages, files, system prompt, instructions, memory,
+    # tools one by one...), the `buffer` kept before compaction and what's `free`; `deferred` lists what isn't sent
+    # until it's needed. A chat's carries `conversation_id` (and its window's `limit` and `preset`).
+    "context_breakdown": {"request_id": _S(False), "conversation_id": _S(False), "window": _I(), "used": _I(),
+                          "source": _f("string", enum=("reported", "estimated")), "compact_at": _I(), "categories": _A(),
+                          "buffer": _I(), "free": _I(), "deferred": _A(False), "limit": _I(False), "preset": _S(False)},
     "chatdgc_widgets": {"request_id": _S(), "op": _S(), "widgets": _A(False), "total": _I(False),
                         "next_offset": _f("integer", "null", required=False), "conversation_id": _S(False),
                         "widget_id": _S(False), "widget": _O(False)},
