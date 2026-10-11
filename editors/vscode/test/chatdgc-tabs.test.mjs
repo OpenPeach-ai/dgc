@@ -616,6 +616,8 @@ test("the window's size, chosen in a chat's meter: for every chat, its meter ask
   panel.say({ type: "window", preset: "64k" });
   assert.deepEqual(host.windows, []);
   host.offers = { version: 1, windows: ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max", "2m"] };
+  chat.backendReady();
+  assert.equal(panel.last("windows").presets.length, 9, "a tab that loaded first is told once the backend is up");
   panel.say({ type: "ready" });
   assert.deepEqual(panel.last("windows").presets, ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"], "the ones this screen knows");
   opened(panel, { id: ID(7), title: "Loan" });

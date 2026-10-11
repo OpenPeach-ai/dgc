@@ -769,6 +769,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       void this.models(tab);
     }
     if (this.homeHeld) { this.homeHeld = false; this.homeRefresh(); }
+    // A tab that loaded before the backend was up was told of no window sizes: now it knows them.
+    for (const tab of this.tabs) this.post(tab, { type: "windows", presets: this.windowPresets() });
     this.restoreWidgets();
   }
 
