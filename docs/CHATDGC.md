@@ -201,8 +201,18 @@ voice come in later phases.
     Markdown**. Markdown shortcuts work as you type (`# `, `- `, `1. `, `> `, three backticks, `---`). It's the same
     `.md` file: **Open Canvas as Markdown** / **Open Canvas Formatted** switch between the two, and a block you didn't
     touch is written back exactly as it was (only what you changed is rewritten), so ChatDGC's edits and the
-    versions stay exact. A table or display maths shows drawn and is edited in Markdown. It saves itself when you
-    pause; what ChatDGC changes lights up as it lands. Code opens in the code editor.
+    versions stay exact. It saves itself when you pause; what ChatDGC changes lights up as it lands. Code opens in
+    the code editor.
+  - **Tables** are edited in place: type in a cell, Tab to the next (past the last, a new row), Enter to the cell
+    below. In a table, a second row of tools adds or deletes rows and columns, aligns a column and deletes the table;
+    **Table** in the toolbar adds one. It's written as a GitHub table.
+  - **Maths:** click a formula (or press Enter on it) to edit its TeX, drawn as you type; Enter finishes, Esc
+    cancels. Type `$x^2$` and it becomes a formula (`$5 and $10` stays money); `$$` and a space on an empty line
+    starts an equation of its own (Ctrl+Enter to finish). **Equation** in the toolbar adds one.
+  - **Checklists:** `- [ ]` items have a box to tick (a ticked one is crossed through). **Checklist** in the toolbar
+    (Ctrl+Shift+9) makes the lines you're on one; `[ ] ` at the start of a list item does too; Enter adds an unticked
+    item and Ctrl+Enter ticks the one you're in.
+  - A table or equation inside a list or quote stays as written and opens in Markdown to edit.
   - **You edit it** like any file; what you typed is what ChatDGC reads next (it's saved before your message goes).
   - **ChatDGC changes it** with small exact edits, so the rest stays as you left it; each change shows in the
     editor as an edit you can undo. A card in the reply says it made or changed it, with **Open**.

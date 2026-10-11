@@ -84,7 +84,7 @@ license are reproduced in `licenses/KATEX-LICENSE.txt`.
 
 `dist/canvas.js` is ChatDGC's formatted canvas. It bundles [ProseMirror](https://prosemirror.net)
 (prosemirror-model 1.25.12, -state 1.4.4, -view 1.42.6, -transform 1.12.2, -commands 1.7.2, -history 1.5.1,
--inputrules 1.5.1, -keymap 1.2.3, -schema-list 1.5.1 and -markdown 1.13.8) with its dependencies orderedmap,
+-inputrules 1.5.1, -keymap 1.2.3, -schema-list 1.5.1, -markdown 1.13.8 and -tables 1.8.5) with its dependencies orderedmap,
 rope-sequence and w3c-keyname, all MIT-licensed by Marijn Haverbeke and others, and the same markdown-it build
 described above. Exact versions are locked in `package-lock.json`. Their copyright notices and licenses are
 reproduced in `licenses/PROSEMIRROR-LICENSES.txt`.

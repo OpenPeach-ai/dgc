@@ -80,6 +80,10 @@
   shortcuts). Type Markdown shortcuts as you would (`# `, `- `, `> `). It saves itself when you pause, and what
   ChatDGC changes lights up as it lands. **Open Canvas as Markdown** shows the same file as text, and **Open Canvas
   Formatted** brings the page back; only the parts you changed are rewritten. Code canvases open in the code editor.
+- **Tables, maths and checklists in the formatted canvas.** Type in a table's cells (Tab to the next, Enter to the
+  one below), and add or delete rows and columns or align a column from the table's own tools. Click a formula to edit
+  it with its result drawn as you type; `$…$` becomes one as you type it, `$$` starts an equation. Checklist items
+  have a box to tick; **Checklist** makes one.
 - **Writing blocks.** A drafted email, message, letter or post comes in its own box: **Copy** (just the text, no
   stars or hashes), **Open in mail app** (address, subject and text filled in), and **Edit** in place, which the
   chat then works from. A reply's **Copy** now copies it as it reads: formatted in a mail app or document, clean

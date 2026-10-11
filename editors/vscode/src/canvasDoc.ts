@@ -32,10 +32,21 @@ export function canvasDocDocument(asset: (name: string) => string, cspSource: st
 <span class="cv-sep" aria-hidden="true"></span>
 ${b("strong", "bold", "Bold (Ctrl+B)", ' data-mark="strong" aria-pressed="false"')}${b("em", "italic", "Italic (Ctrl+I)", ' data-mark="em" aria-pressed="false"')}${b("strike", "strikethrough", "Strikethrough (Ctrl+Shift+X)", ' data-mark="strike" aria-pressed="false"')}${b("code", "code", "Code (Ctrl+E)", ' data-mark="code" aria-pressed="false"')}${b("link", "link", "Link (Ctrl+K)", ' data-mark="link" aria-pressed="false"')}
 <span class="cv-sep" aria-hidden="true"></span>
-${b("bullet", "list-unordered", "Bulleted list")}${b("ordered", "list-ordered", "Numbered list")}${b("quote", "quote", "Quote")}${b("rule", "horizontal-rule", "Divider")}
+${b("bullet", "list-unordered", "Bulleted list")}${b("ordered", "list-ordered", "Numbered list")}${b("checklist", "checklist", "Checklist (Ctrl+Shift+9)", ' aria-pressed="false"')}${b("quote", "quote", "Quote")}${b("rule", "horizontal-rule", "Divider")}
+<span class="cv-sep" aria-hidden="true"></span>
+${b("table", "table", "Table")}${b("equation", "symbol-operator", "Equation (on an empty line, an equation of its own)")}
 <span class="cv-spacer"></span>
 <button type="button" id="cv-ask" class="cv-ask" data-do="ask" title="Ask ChatDGC about the selection"><span class="codicon codicon-sparkle" aria-hidden="true"></span><span>Ask ChatDGC</span></button>
 ${b("shortcuts", "wand", "Shortcuts: suggest edits, length, reading level, polish")}${b("markdown", "markdown", "Open as Markdown")}
+</div>
+<div id="cv-table-bar" class="cv-bar cv-table-bar" role="toolbar" aria-label="Table" hidden>
+<span class="cv-bar-label">Table</span>
+<label class="sr-only" for="cv-insert">Insert a row or column</label><select id="cv-insert" class="cv-style" title="Insert a row or column">
+<option value="">Insert…</option><option value="rowAbove">Row above</option><option value="rowBelow">Row below</option><option value="colLeft">Column left</option><option value="colRight">Column right</option></select>
+<label class="sr-only" for="cv-delete">Delete a row, column or the table</label><select id="cv-delete" class="cv-style" title="Delete a row, column or the table">
+<option value="">Delete…</option><option value="delRow">Row</option><option value="delCol">Column</option><option value="delTable">Table</option></select>
+<label class="sr-only" for="cv-align">Column alignment</label><select id="cv-align" class="cv-style" title="Column alignment">
+<option value="">Align: none</option><option value="left">Align left</option><option value="center">Align center</option><option value="right">Align right</option></select>
 </div>
 <main class="cv-page"><div id="cv-editor" class="cv-editor"></div></main>
 <script src="${attr(asset("dist/canvas.js"))}"></script></body></html>`;

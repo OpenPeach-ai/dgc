@@ -14,6 +14,7 @@ html, body { height: 100%; }
 body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-text);
   font: 15px/1.7 var(--vscode-font-family, system-ui, sans-serif); display: flex; flex-direction: column; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+[hidden] { display: none !important; }
 
 .cv-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
   padding: 6px 12px; border-bottom: 1px solid var(--cv-line); background: var(--vscode-editor-background); }
@@ -33,6 +34,11 @@ body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-t
   border: 1px solid var(--cv-line); border-radius: 999px; background: transparent; color: var(--cv-text);
   font: 500 12px/1 var(--vscode-font-family, system-ui); cursor: pointer; }
 .cv-ask:hover { background: var(--cv-hover); }
+
+/* While you're in a table: its own row under the toolbar, three menus (Insert…, Delete…, Align). */
+.cv-table-bar { gap: 2px; padding: 4px 12px; }
+.cv-bar-label { margin-right: 6px; color: var(--cv-muted); font: 600 10px/1 var(--vscode-font-family, system-ui);
+  letter-spacing: .08em; text-transform: uppercase; }
 
 .cv-page { flex: 1; overflow-y: auto; }
 .cv-editor { max-width: 760px; margin: 0 auto; padding: 36px 48px 30vh; }
@@ -60,7 +66,41 @@ body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-t
 .cv-doc s { color: var(--cv-muted); }
 .cv-doc .ProseMirror-selectednode { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; border-radius: 4px; }
 
-/* A block kept as its own Markdown (a table, display maths): shown as a reply shows it, edited in Markdown. */
+/* Tables: GitHub's, so the first row is the header. Cells hold a line of text each. */
+.cv-doc table { width: 100%; border-collapse: collapse; font-size: .93em; }
+.cv-doc th, .cv-doc td { position: relative; min-width: 3em; padding: 6px 10px; border: 1px solid var(--cv-line);
+  text-align: left; vertical-align: top; }
+.cv-doc tr:first-child > th, .cv-doc tr:first-child > td { background: var(--cv-soft); font-weight: 600; }
+.cv-doc .selectedCell::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: var(--vscode-editor-selectionBackground, rgba(139, 124, 255, .3)); opacity: .45; }
+
+/* Checklists: a box you tick; a ticked item is crossed through. */
+.cv-doc li.cv-task { display: flex; align-items: flex-start; gap: .55em; margin-left: -1.35em; list-style: none; }
+.cv-task-box { flex: none; display: inline-flex; padding-top: .32em; user-select: none; }
+.cv-task-box input { width: 1em; height: 1em; margin: 0; accent-color: var(--cv-accent); cursor: pointer; }
+.cv-task-text { flex: 1; min-width: 0; }
+.cv-doc li.cv-task[data-checked="true"] > .cv-task-text { color: var(--cv-muted); text-decoration: line-through; }
+
+/* Maths you click to edit, and the box its TeX is written in (the result drawn under it as you type). */
+/* inline-block: the formula's own box covers all it draws (a fraction's pieces have gaps a click fell through). */
+.cv-math { display: inline-block; border-radius: 4px; cursor: pointer; }
+.cv-math:hover { background: var(--cv-hover); }
+.cv-math-block { display: block; padding: 2px 4px; }
+.cv-math-empty { padding: 0 6px; border: 1px dashed var(--cv-line); border-radius: 4px; color: var(--cv-muted); font-style: italic; }
+.cv-tex { position: fixed; z-index: 20; display: grid; gap: 6px; width: min(440px, calc(100vw - 16px)); padding: 8px;
+  border: 1px solid var(--vscode-editorWidget-border, var(--cv-line)); border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: var(--cv-text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); box-sizing: border-box; }
+.cv-tex-field { box-sizing: border-box; width: 100%; padding: 5px 7px; border: 1px solid var(--vscode-input-border, var(--cv-line));
+  border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  font: 13px/1.5 var(--vscode-editor-font-family, monospace); resize: vertical; }
+.cv-tex-field:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.cv-tex-preview { min-height: 1.6em; padding: 2px; overflow-x: auto; }
+.cv-tex-preview.md-math-display { margin: 0; }
+.cv-tex-hint { color: var(--cv-muted); font: 11px/1.3 var(--vscode-font-family, system-ui); }
+
+/* A block kept as its own Markdown (a table or display maths inside a list or quote): shown as a reply shows it,
+   edited in Markdown. */
 .cv-raw { position: relative; border-radius: 6px; }
 .cv-raw:hover { box-shadow: 0 0 0 1px var(--cv-line); }
 .cv-raw-body table { border-collapse: collapse; width: 100%; font-size: .93em; }

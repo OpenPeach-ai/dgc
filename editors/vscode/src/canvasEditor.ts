@@ -2,8 +2,10 @@
 // ProseMirror edits the document; canvasMarkdown.ts reads the file in and writes it back block by block. The
 // extension host (canvasDoc.ts) owns the TextDocument: it saves, keeps versions and applies the model's changes; this
 // page sends what you typed and shows what changed. Text only: nothing here turns the file's words into markup.
-import { EditorState, Plugin, PluginKey, TextSelection, NodeSelection } from "prosemirror-state";
+import { EditorState, Plugin, PluginKey, TextSelection, NodeSelection, type Command, type Transaction } from "prosemirror-state";
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
+import { tableEditing, goToNextCell, addRowAfter, addRowBefore, addColumnAfter, addColumnBefore, deleteRow, deleteColumn,
+         deleteTable, isInTable, selectedRect, TableMap } from "prosemirror-tables";
 import { history, undo, redo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, setBlockType, wrapIn, lift, chainCommands, exitCode } from "prosemirror-commands";
@@ -59,17 +61,161 @@ function loadKatex(): void {
   document.head.append(script);
 }
 
+// ---- maths: drawn with KaTeX; clicked (or Enter on it), its TeX in a box under it, drawn again as you type.
+
+let texOpen: { close(commit: boolean): void } | null = null;
+
+/** The TeX of a formula in a box under `anchor`, with the drawn result as you type. `done` gets the TeX to keep, or
+ *  null when you pressed Esc. A block takes several lines (Ctrl+Enter to finish); inline, Enter finishes. */
+function openTex(anchor: HTMLElement, tex: string, block: boolean, done: (tex: string | null) => void): void {
+  texOpen?.close(true);
+  loadKatex();
+  const box = document.createElement("div");
+  box.className = "cv-tex";
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", block ? "Edit the equation" : "Edit the formula");
+  const field = document.createElement(block ? "textarea" : "input") as HTMLInputElement | HTMLTextAreaElement;
+  field.className = "cv-tex-field";
+  field.value = tex;
+  field.spellcheck = false;
+  field.setAttribute("aria-label", "TeX");
+  field.placeholder = block ? "\\sum_{i=1}^{n} x_i" : "x^2 + y^2";
+  if (block) (field as HTMLTextAreaElement).rows = Math.min(8, Math.max(2, tex.split("\n").length + 1));
+  const preview = document.createElement("div");
+  const hint = document.createElement("div");
+  hint.className = "cv-tex-hint";
+  hint.textContent = block ? "Ctrl+Enter to finish · Esc to cancel" : "Enter to finish · Esc to cancel";
+  box.append(field, preview, hint);
+  document.body.append(box);
+  const draw = () => {
+    preview.className = "cv-tex-preview md-math" + (block ? " md-math-display" : "");
+    delete preview.dataset.drawn;
+    preview.dataset.tex = field.value;
+    preview.textContent = field.value || " ";
+    drawMath(box);
+  };
+  const place = () => {
+    const at = anchor.getBoundingClientRect();
+    box.style.left = `${Math.max(8, Math.min(at.left, innerWidth - box.offsetWidth - 8))}px`;
+    box.style.top = `${Math.min(at.bottom + 6, innerHeight - box.offsetHeight - 8)}px`;
+  };
+  let closed = false;
+  const close = (commit: boolean) => {
+    if (closed) return;
+    closed = true;
+    box.remove();
+    texOpen = null;
+    done(commit ? field.value.trim() : null);
+  };
+  field.addEventListener("input", () => { draw(); place(); });
+  field.addEventListener("keydown", (e) => {
+    const k = e as KeyboardEvent;
+    if (k.key === "Escape") { k.preventDefault(); close(false); }
+    else if (k.key === "Enter" && (!block || k.ctrlKey || k.metaKey)) { k.preventDefault(); close(true); }
+  });
+  field.addEventListener("blur", () => setTimeout(() => close(true), 0));
+  texOpen = { close };
+  draw(); place();
+  field.focus();
+  field.select();
+}
+
+/** A formula's node edited in place: the TeX kept (changed or not), or the node gone when it's emptied (or was new
+ *  and you pressed Esc). The cursor goes after it. */
+function finishTex(v: EditorView, getPos: () => number | undefined, type: any, tex: string | null): void {
+  const pos = getPos();
+  const node = pos == null ? null : v.state.doc.nodeAt(pos);
+  if (pos == null || !node || node.type !== type) return;
+  let tr = v.state.tr;
+  if (tex === null && node.attrs.tex) { v.focus(); return; }
+  if (!tex) tr = tr.delete(pos, pos + node.nodeSize);
+  else if (tex !== node.attrs.tex) tr = tr.setNodeMarkup(pos, null, { ...node.attrs, tex });
+  const after = tr.mapping.map(pos + (tex ? node.nodeSize : 0));
+  tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(after, tr.doc.content.size))));
+  v.dispatch(tr.scrollIntoView());
+  v.focus();
+}
+
 class MathView {
   dom: HTMLElement;
-  constructor(node: any) {
-    this.dom = document.createElement("span");
-    this.dom.className = "md-math" + (node.attrs.display ? " md-math-display" : "");
-    this.dom.dataset.tex = node.attrs.tex;
-    this.dom.textContent = node.attrs.open + node.attrs.tex + node.attrs.close;
-    this.dom.title = "Maths. Edit it in Markdown.";
-    queueMicrotask(() => drawMath(this.dom.parentNode || document));
+  constructor(private node: any, private v: EditorView, private getPos: () => number | undefined, private block: boolean) {
+    this.dom = document.createElement(block ? "div" : "span");
+    this.dom.className = block ? "cv-math cv-math-block" : "cv-math";
+    this.dom.contentEditable = "false";
+    this.dom.title = block ? "An equation. Click to edit it." : "A formula. Click to edit it.";
+    (this.dom as any).cvEdit = () => this.edit();
+    this.dom.addEventListener("mousedown", (e) => { e.preventDefault(); this.edit(); });
+    this.render();
   }
+  private render(): void {
+    const out = document.createElement(this.block ? "div" : "span");
+    const { tex, open, close, display } = this.node.attrs;
+    out.className = "md-math" + (this.block || display ? " md-math-display" : "") + (tex ? "" : " cv-math-empty");
+    out.dataset.tex = tex;
+    out.textContent = tex ? (open || "$$") + tex + (close || "$$") : (this.block ? "Equation" : "formula");
+    if (!tex) out.dataset.drawn = "1";
+    this.dom.replaceChildren(out);
+    queueMicrotask(() => drawMath(this.dom));
+  }
+  edit(): void {
+    openTex(this.dom, this.node.attrs.tex, this.block,
+            (tex) => finishTex(this.v, this.getPos, this.block ? nodes.math_block : nodes.math_inline, tex));
+  }
+  update(node: any): boolean {
+    if (node.type !== this.node.type) return false;
+    if (node.attrs !== this.node.attrs) { this.node = node; this.render(); }
+    return true;
+  }
+  selectNode() { this.dom.classList.add("ProseMirror-selectednode"); }
+  deselectNode() { this.dom.classList.remove("ProseMirror-selectednode"); }
+  stopEvent(event: Event) { return event.type === "mousedown"; }
   ignoreMutation() { return true; }
+}
+
+// ---- checklists: an item with a box you tick; the box isn't part of its text.
+
+class ListItemView {
+  dom: HTMLElement;
+  contentDOM: HTMLElement;
+  private box?: HTMLInputElement;
+  constructor(private node: any, v: EditorView, getPos: () => number | undefined) {
+    this.dom = document.createElement("li");
+    if (node.attrs.checked == null) { this.contentDOM = this.dom; return; }
+    this.dom.className = "cv-task";
+    this.dom.dataset.checked = String(node.attrs.checked);
+    const wrap = document.createElement("span");
+    wrap.className = "cv-task-box";
+    wrap.contentEditable = "false";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.tabIndex = -1;
+    box.checked = !!node.attrs.checked;
+    box.setAttribute("aria-label", "Done");
+    box.addEventListener("mousedown", (e) => e.preventDefault());
+    box.addEventListener("click", (e) => {
+      e.preventDefault();
+      const pos = getPos(), now = pos == null ? null : v.state.doc.nodeAt(pos);
+      if (pos == null || !now) return;
+      v.dispatch(v.state.tr.setNodeMarkup(pos, null, { ...now.attrs, checked: !now.attrs.checked }));
+    });
+    wrap.append(box);
+    this.contentDOM = document.createElement("div");
+    this.contentDOM.className = "cv-task-text";
+    this.dom.append(wrap, this.contentDOM);
+    this.box = box;
+  }
+  update(node: any): boolean {
+    if (node.type !== this.node.type || (node.attrs.checked == null) !== (this.node.attrs.checked == null)) return false;
+    this.node = node;
+    if (this.box) { this.box.checked = !!node.attrs.checked; this.dom.dataset.checked = String(node.attrs.checked); }
+    return true;
+  }
+  stopEvent(event: Event) { return !!this.box && event.target === this.box; }
+  ignoreMutation(m: MutationRecord | { type: "selection" }) {
+    if (!this.box || m.type === "selection") return false;
+    const target = (m as MutationRecord).target;
+    return target === this.box || target === this.box.parentNode || (m.type === "attributes" && target === this.dom);
+  }
 }
 
 class RawView {
@@ -106,6 +252,25 @@ const rules = inputRules({ rules: [
     return state.tr.replaceRangeWith($start.before(), $start.after(), nodes.horizontal_rule.create())
       .scrollIntoView();
   }),
+  // "[ ] " or "[x] " at the start of a list item: a checklist item.
+  new InputRule(/^\[([ xX]?)\]\s$/, (state, match, start, end) => {
+    const $start = state.doc.resolve(start), d = $start.depth - 1;
+    const item = d > 0 ? $start.node(d) : null;
+    if (item?.type !== nodes.list_item || $start.index(d) !== 0) return null;
+    return state.tr.delete(start, end).setNodeMarkup($start.before(d), null, { ...item.attrs, checked: /x/i.test(match[1]) });
+  }),
+  // $x^2$ as you type it (not "$5 and $10": a formula has a letter or a TeX sign in it).
+  new InputRule(/(?<![\\$])\$([^$\s](?:[^$]*[^$\s])?)\$$/, (state, match, start, end) => {
+    if (!/[A-Za-z\\^_{}=+]/.test(match[1]) || state.selection.$from.marks().some((m) => m.type === marks.code)) return null;
+    return state.tr.replaceWith(start, end, nodes.math_inline.create({ tex: match[1] }));
+  }),
+  // "$$ " on an empty line: an equation, opened to write.
+  new InputRule(/^\$\$\s$/, (state, _match, start) => {
+    const $start = state.doc.resolve(start);
+    if ($start.parent.type !== nodes.paragraph || $start.depth !== 1) return null;
+    setTimeout(() => (view.nodeDOM($start.before(1)) as any)?.cvEdit?.(), 0);
+    return state.tr.replaceRangeWith($start.before(1), $start.after(1), nodes.math_block.create());
+  }),
 ] });
 
 const hardBreak = chainCommands(exitCode, (state, dispatch) => {
@@ -113,12 +278,104 @@ const hardBreak = chainCommands(exitCode, (state, dispatch) => {
   return true;
 });
 
+// ---- tables: Tab to the next cell (a new row after the last), Enter to the cell below, tools while you're in one.
+
+/** Tab: the next cell; from the last, a new row and its first cell. */
+const nextCell: Command = (state, dispatch, v) => {
+  if (!isInTable(state)) return false;
+  if (goToNextCell(1)(state, dispatch)) return true;
+  if (dispatch && v) { addRowAfter(state, dispatch); goToNextCell(1)(v.state, dispatch); }
+  return true;
+};
+
+/** Enter in a table: the cell below (a table cell holds one line); from the last row, a new row. */
+const cellBelow: Command = (state, dispatch, v) => {
+  if (!isInTable(state)) return false;
+  if (!dispatch || !v) return true;
+  if (selectedRect(state).bottom >= selectedRect(state).map.height) addRowAfter(state, dispatch);
+  const rect = selectedRect(v.state);
+  const cell = rect.tableStart + rect.map.map[Math.min(rect.bottom, rect.map.height - 1) * rect.map.width + rect.left];
+  dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(cell + 1))).scrollIntoView());
+  return true;
+};
+
+/** A row or column deleted, the cursor stays in the table, in the nearest cell left (so its tools stay too). */
+function keepInTable(command: Command): Command {
+  return (state, dispatch, v) => {
+    if (!isInTable(state)) return false;
+    const before = selectedRect(state);
+    if (!command(state, dispatch, v)) return false;
+    if (!dispatch || !v || isInTable(v.state)) return true;
+    const table = v.state.doc.nodeAt(before.tableStart - 1);
+    if (!table || table.type !== nodes.table) return true;
+    const map = TableMap.get(table);
+    const cell = before.tableStart + map.map[Math.min(before.top, map.height - 1) * map.width + Math.min(before.left, map.width - 1)];
+    dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(cell + 1))));
+    return true;
+  };
+}
+
+/** Enter in a list: a new item; one split from a checklist item is a new, unticked one. */
+const splitItem: Command = (state, dispatch) => splitListItem(nodes.list_item)(state, dispatch && ((tr: Transaction) => {
+  const $at = tr.selection.$from;
+  for (let d = $at.depth; d > 0; d--) {
+    const node = $at.node(d);
+    if (node.type !== nodes.list_item) continue;
+    if (node.attrs.checked) tr.setNodeMarkup($at.before(d), null, { ...node.attrs, checked: false });
+    break;
+  }
+  dispatch(tr);
+}));
+
+/** The checklist items the selection is in (their own lines, not a list around them). */
+function itemsAt(state: EditorState): { pos: number; node: any }[] {
+  const { from, to } = state.selection, out: { pos: number; node: any }[] = [];
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type !== nodes.list_item || !node.firstChild) return;
+    const start = pos + 1, end = start + node.firstChild.nodeSize;
+    if (start <= to && end >= from) out.push({ pos, node });
+  });
+  return out;
+}
+
+/** Ctrl+Enter in a checklist item ticks it (or unticks it). */
+const tickItem: Command = (state, dispatch) => {
+  const [item] = itemsAt(state).slice(-1);
+  if (!item || item.node.attrs.checked == null) return false;
+  dispatch?.(state.tr.setNodeMarkup(item.pos, null, { ...item.node.attrs, checked: !item.node.attrs.checked }));
+  return true;
+};
+
+/** The toolbar's checklist: items become checklist items (a paragraph, a checklist), or back to plain bullets. */
+const checklist: Command = (state, dispatch) => {
+  let tr = state.tr;
+  if (!itemsAt(state).length) {
+    let wrapped: Transaction | undefined;
+    if (!wrapInList(nodes.bullet_list, { tight: true, bullet: "-" })(state, (t) => { wrapped = t; }) || !wrapped) return false;
+    tr = wrapped;
+  }
+  const items = itemsAt(state.apply(tr));
+  const plain = items.every((i) => i.node.attrs.checked != null);
+  for (const i of items) tr.setNodeMarkup(i.pos, null, { ...i.node.attrs, checked: plain ? null : (i.node.attrs.checked ?? false) });
+  dispatch?.(tr.scrollIntoView());
+  return true;
+};
+
 const keys = keymap({
   "Mod-z": undo, "Shift-Mod-z": redo, "Mod-y": redo, Backspace: undoInputRule,
   "Mod-b": toggleMark(marks.strong), "Mod-i": toggleMark(marks.em), "Mod-e": toggleMark(marks.code),
   "Mod-Shift-x": toggleMark(marks.strike), "Mod-k": () => { askLink(); return true; },
-  Enter: splitListItem(nodes.list_item), "Shift-Enter": hardBreak, "Mod-Enter": hardBreak,
-  Tab: sinkListItem(nodes.list_item), "Shift-Tab": liftListItem(nodes.list_item),
+  Enter: chainCommands(cellBelow, (state) => {
+    // On a formula or equation, Enter opens it to edit.
+    const sel = state.selection;
+    if (!(sel instanceof NodeSelection) || !(sel.node.type === nodes.math_inline || sel.node.type === nodes.math_block)) return false;
+    (view.nodeDOM(sel.from) as any)?.cvEdit?.();
+    return true;
+  }, splitItem),
+  "Shift-Enter": chainCommands(cellBelow, hardBreak), "Mod-Enter": chainCommands(tickItem, hardBreak),
+  Tab: chainCommands(nextCell, sinkListItem(nodes.list_item)),
+  "Shift-Tab": chainCommands(goToNextCell(-1), liftListItem(nodes.list_item)),
+  "Mod-Shift-9": checklist,
   "Mod-Alt-1": setBlockType(nodes.heading, { level: 1 }), "Mod-Alt-2": setBlockType(nodes.heading, { level: 2 }),
   "Mod-Alt-3": setBlockType(nodes.heading, { level: 3 }), "Mod-Alt-0": setBlockType(nodes.paragraph),
 });
@@ -183,7 +440,7 @@ const caret = new Plugin({
 });
 
 function state(doc: any): EditorState {
-  return EditorState.create({ doc, plugins: [caret, rules, keys, keymap(baseKeymap), history(), sync, flashing] });
+  return EditorState.create({ doc, plugins: [caret, rules, keys, keymap(baseKeymap), tableEditing(), history(), sync, flashing] });
 }
 
 /** The file as the host has it: the first time, or after the model (or another editor) changed it. */
@@ -225,11 +482,25 @@ function blockStyle(): string {
   return "p";
 }
 
+const tableBar = document.getElementById("cv-table-bar") as HTMLElement;
+const align = document.getElementById("cv-align") as HTMLSelectElement;
+const insertMenu = document.getElementById("cv-insert") as HTMLSelectElement;
+const deleteMenu = document.getElementById("cv-delete") as HTMLSelectElement;
+
 function paintBar(): void {
   if (!view) return;
   for (const button of Array.from(bar.querySelectorAll<HTMLButtonElement>("[data-mark]"))) {
     const on = markActive((marks as any)[button.dataset.mark!]);
     button.setAttribute("aria-pressed", String(on));
+  }
+  const items = itemsAt(view.state);
+  bar.querySelector('[data-do="checklist"]')?.setAttribute("aria-pressed", String(!!items.length && items.every((i) => i.node.attrs.checked != null)));
+  const inTable = isInTable(view.state);
+  tableBar.hidden = !inTable;
+  if (inTable) {
+    // The cell is the cursor's own text block (a cell holds a line of text).
+    const cell = view.state.selection.$from.parent;
+    align.value = cell.attrs.align || "";
   }
   style.value = blockStyle();
   const ask = document.getElementById("cv-ask") as HTMLButtonElement;
@@ -239,6 +510,52 @@ function paintBar(): void {
 function run(command: (state: EditorState, dispatch?: any, view?: EditorView) => boolean): void {
   command(view.state, view.dispatch, view);
   view.focus();
+}
+
+/** A new table (a header row and two rows, three columns) after the block you're in, or in place of an empty line. */
+function insertTable(): void {
+  run((s, d) => {
+    const cell = (header: boolean) => (header ? nodes.table_header : nodes.table_cell).createAndFill()!;
+    const row = (header: boolean) => nodes.table_row.create(null, [cell(header), cell(header), cell(header)]);
+    const table = nodes.table.create(null, [row(true), row(false), row(false)]);
+    const $from = s.selection.$from;
+    const empty = $from.depth === 1 && $from.parent.type === nodes.paragraph && !$from.parent.content.size;
+    const at = $from.depth ? (empty ? $from.before(1) : $from.after(1)) : s.doc.content.size;
+    const tr = empty ? s.tr.replaceWith(at, $from.after(1), table) : s.tr.insert(at, table);
+    tr.setSelection(TextSelection.near(tr.doc.resolve(at + 3)));
+    d?.(tr.scrollIntoView());
+    return true;
+  });
+}
+
+/** A column's alignment, on every cell in it (Markdown aligns a whole column). */
+function alignColumn(value: string): void {
+  run((s, d) => {
+    if (!isInTable(s)) return false;
+    const rect = selectedRect(s), tr = s.tr, seen = new Set<number>();
+    for (let row = 0; row < rect.map.height; row++) {
+      for (let col = rect.left; col < rect.right; col++) {
+        const pos = rect.tableStart + rect.map.map[row * rect.map.width + col];
+        if (seen.has(pos)) continue;
+        seen.add(pos);
+        const cell = tr.doc.nodeAt(pos);
+        if (cell) tr.setNodeMarkup(pos, null, { ...cell.attrs, align: value || null });
+      }
+    }
+    d?.(tr);
+    return true;
+  });
+}
+
+/** An equation: on an empty line, a block of its own; anywhere else, a formula in the line. Opened to write. */
+function insertEquation(): void {
+  const s = view.state, $from = s.selection.$from;
+  const line = $from.depth === 1 && $from.parent.type === nodes.paragraph && !$from.parent.content.size;
+  let tr: Transaction, pos: number;
+  if (line) { pos = $from.before(1); tr = s.tr.replaceWith(pos, $from.after(1), nodes.math_block.create()); }
+  else { tr = s.tr.replaceSelectionWith(nodes.math_inline.create()); pos = tr.selection.from - 1; }
+  view.dispatch(tr.scrollIntoView());
+  (view.nodeDOM(pos) as any)?.cvEdit?.();
 }
 
 function askLink(): void {
@@ -277,15 +594,28 @@ const actions: Record<string, () => void> = {
   ordered: () => run(chainCommands(liftListItem(nodes.list_item), wrapInList(nodes.ordered_list))),
   quote: () => run(chainCommands(lift, wrapIn(nodes.blockquote))),
   rule: () => run((s, d) => { d?.(s.tr.replaceSelectionWith(nodes.horizontal_rule.create()).scrollIntoView()); return true; }),
+  checklist: () => run(checklist),
+  table: insertTable,
+  equation: insertEquation,
+  rowAbove: () => run(addRowBefore), rowBelow: () => run(addRowAfter),
+  colLeft: () => run(addColumnBefore), colRight: () => run(addColumnAfter),
+  delRow: () => run(keepInTable(deleteRow)), delCol: () => run(keepInTable(deleteColumn)), delTable: () => run(deleteTable),
   ask, shortcuts: () => { flush(); host.postMessage({ type: "shortcuts" }); },
   markdown: () => { flush(); host.postMessage({ type: "markdown" }); },
 };
 
-bar.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).closest("button")) e.preventDefault(); });   // keep the selection
-bar.addEventListener("click", (e) => {
-  const button = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-do]");
-  if (button) actions[button.dataset.do!]?.();
-});
+for (const row of [bar, tableBar]) {
+  row.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).closest("button")) e.preventDefault(); });   // keep the selection
+  row.addEventListener("click", (e) => {
+    const button = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-do]");
+    if (button) actions[button.dataset.do!]?.();
+  });
+}
+align.addEventListener("change", () => alignColumn(align.value));
+// Insert… and Delete… are menus: the choice is done, and the menu shows its name again.
+for (const menu of [insertMenu, deleteMenu]) {
+  menu.addEventListener("change", () => { const does = menu.value; menu.value = ""; if (does) actions[does]?.(); });
+}
 style.addEventListener("change", () => {
   const v = style.value;
   run(v === "p" ? setBlockType(nodes.paragraph) : v === "code" ? setBlockType(nodes.code_block)
@@ -294,7 +624,12 @@ style.addEventListener("change", () => {
 
 view = new EditorView(document.getElementById("cv-editor") as HTMLElement, {
   state: state(source.doc),
-  nodeViews: { math_inline: (node) => new MathView(node), raw_block: (node) => new RawView(node) },
+  nodeViews: {
+    math_inline: (node, v, getPos) => new MathView(node, v, getPos, false),
+    math_block: (node, v, getPos) => new MathView(node, v, getPos, true),
+    list_item: (node, v, getPos) => new ListItemView(node, v, getPos),
+    raw_block: (node) => new RawView(node),
+  },
   attributes: { "aria-label": "Canvas", spellcheck: "true", class: "cv-doc" },
   handleDOMEvents: {
     // A link opens only on Ctrl/Cmd+click, through the host, which checks it; a plain click puts the cursor there.

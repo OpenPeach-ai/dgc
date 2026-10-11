@@ -2,18 +2,32 @@
 // B). The canvas file is shared: the model changes it with exact find-and-replace, versions are compared line by
 // line, and option A opens the same file as Markdown. So a top-level block you didn't touch is written back byte for
 // byte, with whatever followed it (blank lines, link definitions); only a block you changed, added or moved is
-// written fresh. Anything the editor's schema lacks (tables, HTML, display maths, a block holding one of them) is
-// kept as its own Markdown and shown rendered, never rewritten.
+// written fresh. Tables (GitHub's), maths and checklists (`- [ ]`) are the editor's own; anything else its schema
+// lacks (a table or display maths inside a list or quote, a footnote) is kept as its own Markdown and shown
+// rendered, never rewritten.
 import MarkdownIt from "markdown-it";
 import { Node, Schema } from "prosemirror-model";
 import { MarkdownParser, MarkdownSerializer, defaultMarkdownSerializer, schema as base } from "prosemirror-markdown";
+import { tableNodes } from "prosemirror-tables";
 import { addMath } from "./markdownMath";
 
 const baseNodes: any = base.spec.nodes, baseMarks: any = base.spec.marks;
 
+// A GitHub table cell holds one line of inline text; a column's alignment is on each of its cells.
+const tables = tableNodes({
+  tableGroup: "block", cellContent: "inline*",
+  cellAttributes: { align: { default: null,
+    getFromDOM: (dom: any) => (/^(left|center|right)$/.exec(dom.style?.textAlign || "") || [])[0] || null,
+    setDOMAttr: (value: any, attrs: any) => { if (value) attrs.style = `${attrs.style || ""}text-align: ${value};`; } } },
+});
+
 export const schema = new Schema({
   nodes: baseNodes
     .update("heading", { ...baseNodes.get("heading"), content: "inline*" })
+    // A checklist item (`- [ ]`, `- [x]`): checked is true or false; a plain item's is null.
+    .update("list_item", { ...baseNodes.get("list_item"), attrs: { checked: { default: null } },
+      toDOM: (node: Node) => ["li", node.attrs.checked == null ? {} : { "data-checked": String(node.attrs.checked) }, 0],
+      parseDOM: [{ tag: "li", getAttrs: (dom: any) => ({ checked: dom.hasAttribute("data-checked") ? dom.getAttribute("data-checked") === "true" : null }) }] })
     .update("bullet_list", { ...baseNodes.get("bullet_list"),
       attrs: { tight: { default: false }, bullet: { default: "-" } } })
     .update("horizontal_rule", { ...baseNodes.get("horizontal_rule"), attrs: { markup: { default: "---" } } })
@@ -22,6 +36,13 @@ export const schema = new Schema({
       toDOM: (node: Node) => ["div", { class: "cv-raw", "data-src": node.attrs.src }],
       parseDOM: [{ tag: "div.cv-raw", getAttrs: (dom: any) => ({ src: dom.getAttribute("data-src") || "" }) }],
     })
+    .addToEnd("math_block", {
+      group: "block", atom: true, selectable: true, draggable: false,
+      attrs: { tex: { default: "" }, open: { default: "$$" }, close: { default: "$$" } },
+      toDOM: (node: Node) => ["div", { class: "md-math md-math-display", "data-tex": node.attrs.tex }, node.attrs.open + node.attrs.tex + node.attrs.close],
+      parseDOM: [{ tag: "div.md-math", getAttrs: (dom: any) => ({ tex: dom.getAttribute("data-tex") || "" }) }],
+    })
+    .append(tables)
     .addToEnd("math_inline", {
       group: "inline", inline: true, atom: true,
       attrs: { tex: { default: "" }, display: { default: false }, open: { default: "$" }, close: { default: "$" } },
@@ -42,13 +63,45 @@ addMath(md);
 const BLOCK_TOKENS = new Set(["paragraph_open", "paragraph_close", "heading_open", "heading_close", "blockquote_open",
   "blockquote_close", "bullet_list_open", "bullet_list_close", "ordered_list_open", "ordered_list_close",
   "list_item_open", "list_item_close", "code_block", "fence", "hr", "inline"]);
+// A table or display maths is the editor's own only as a block of its own: inside a list or a quote its Markdown
+// would need that container's indent on every line, so there it's kept as written.
+const TOP_ONLY = new Set(["table_open", "table_close", "thead_open", "thead_close", "tbody_open", "tbody_close", "tr_open",
+  "tr_close", "th_open", "th_close", "td_open", "td_close", "math_block"]);
 const INLINE_TOKENS = new Set(["text", "softbreak", "hardbreak", "em_open", "em_close", "strong_open", "strong_close",
   "s_open", "s_close", "link_open", "link_close", "code_inline", "image", "math_inline"]);
 
 /** Whether the editor can hold this block's tokens as its own nodes. */
 function editable(tokens: any[]): boolean {
-  return tokens.every((t) => BLOCK_TOKENS.has(t.type)
+  const own = tokens[0]?.level === 0 && (tokens[0].type === "table_open" || tokens[0].type === "math_block");
+  return tokens.every((t) => (BLOCK_TOKENS.has(t.type) || (own && TOP_ONLY.has(t.type)))
     && (t.type !== "inline" || (t.children || []).every((c: any) => INLINE_TOKENS.has(c.type))));
+}
+
+/** GitHub's task list: an item whose text starts `[ ] ` or `[x] ` is a checklist item; the box isn't its text. */
+function taskItems(tokens: any[]): any[] {
+  for (let i = 0; i < tokens.length; i++) {
+    const item = tokens[i], para = tokens[i + 1], inline = tokens[i + 2];
+    if (item.type !== "list_item_open" || para?.type !== "paragraph_open" || inline?.type !== "inline") continue;
+    const m = /^\[([ xX])\](?:[ \t]+|$)/.exec(inline.content);
+    if (!m) continue;
+    let cut = m[0].length;
+    for (const child of inline.children || []) {
+      if (!cut) break;
+      if (child.type !== "text") { cut = -1; break; }
+      const take = Math.min(cut, child.content.length);
+      child.content = child.content.slice(take);
+      cut -= take;
+    }
+    if (cut !== 0) continue;
+    inline.content = inline.content.slice(m[0].length);
+    inline.children = (inline.children || []).filter((c: any) => c.type !== "text" || c.content);
+    item.meta = { ...(item.meta || {}), checked: m[1] !== " " };
+  }
+  return tokens;
+}
+
+function cellAlign(tok: any): string | null {
+  return (/text-align:\s*(left|center|right)/.exec(String(tok.attrGet("style") || "")) || [])[1] || null;
 }
 
 function listIsTight(tokens: any[], i: number): boolean {
@@ -60,14 +113,14 @@ function listIsTight(tokens: any[], i: number): boolean {
 const tokenizer = {
   parse(text: string, env: any) {
     const tokens = md.parse(text, env);
-    return editable(tokens) ? tokens : [{ type: "raw", content: text, nesting: 0, level: 0, children: null, attrGet: () => null }];
+    return editable(tokens) ? taskItems(tokens) : [{ type: "raw", content: text, nesting: 0, level: 0, children: null, attrGet: () => null }];
   },
 };
 
 const parser: any = new MarkdownParser(schema, tokenizer as any, {
   blockquote: { block: "blockquote" },
   paragraph: { block: "paragraph" },
-  list_item: { block: "list_item" },
+  list_item: { block: "list_item", getAttrs: (tok: any) => ({ checked: tok.meta?.checked ?? null }) },
   bullet_list: { block: "bullet_list", getAttrs: (tok: any, tokens: any[], i: number) => ({ tight: listIsTight(tokens, i), bullet: tok.markup || "-" }) },
   ordered_list: { block: "ordered_list", getAttrs: (tok: any, tokens: any[], i: number) => ({
     order: +tok.attrGet("start") || 1, tight: listIsTight(tokens, i) }) },
@@ -85,16 +138,57 @@ const parser: any = new MarkdownParser(schema, tokenizer as any, {
   code_inline: { mark: "code", noCloseToken: true },
   math_inline: { node: "math_inline", getAttrs: (tok: any) => ({ tex: tok.content, display: !!tok.meta?.display,
     open: tok.markup || "$", close: tok.info || tok.markup || "$" }) },
+  math_block: { node: "math_block", getAttrs: (tok: any) => ({ tex: String(tok.content).replace(/^\n+|\n+$/g, ""),
+    open: tok.markup || "$$", close: tok.info || "$$" }) },
+  table: { block: "table" },
+  thead: { ignore: true },
+  tbody: { ignore: true },
+  tr: { block: "table_row" },
+  th: { block: "table_header", getAttrs: (tok: any) => ({ align: cellAlign(tok) }) },
+  td: { block: "table_cell", getAttrs: (tok: any) => ({ align: cellAlign(tok) }) },
   raw: { node: "raw_block", getAttrs: (tok: any) => ({ src: tok.content }) },
 });
 // A line break inside a paragraph stays a line break (the default makes it a space, so an edited paragraph would
 // lose the lines it was written in).
 parser.tokenHandlers.softbreak = (state: any) => state.addText("\n");
 
-const serializer = new MarkdownSerializer({
+const RULE: Record<string, string> = { left: ":---", center: ":---:", right: "---:" };
+
+/** A table cell's Markdown: its inline text on one line, a pipe in it escaped (as GitHub needs, even in code). */
+function cellMarkdown(cell: Node): string {
+  const line = serializer.serialize(schema.topNodeType.create(null, [schema.nodes.paragraph.create(null, cell.content)]));
+  return line.replace(/\\\n/g, " ").replace(/\s*\n\s*/g, " ").replace(/(?<!\\)\|/g, "\\|").trim();
+}
+
+const serializer: MarkdownSerializer = new MarkdownSerializer({
   ...defaultMarkdownSerializer.nodes,
   raw_block(state: any, node: Node) { state.write(String(node.attrs.src).replace(/\n+$/, "")); state.closeBlock(node); },
   math_inline(state: any, node: Node) { state.write(node.attrs.open + node.attrs.tex + node.attrs.close); },
+  math_block(state: any, node: Node) {
+    state.write(`${node.attrs.open}\n${String(node.attrs.tex).replace(/^\n+|\n+$/g, "")}\n${node.attrs.close}`);
+    state.closeBlock(node);
+  },
+  list_item(state: any, node: Node) {
+    if (node.attrs.checked != null) state.write(node.attrs.checked ? "[x] " : "[ ] ");
+    state.renderContent(node);
+  },
+  // GitHub's table: the first row is its header; a column's alignment is its first cell's.
+  table(state: any, node: Node) {
+    const rows: string[][] = [], aligns: (string | null)[] = [];
+    node.forEach((row, _o, r) => {
+      const cells: string[] = [];
+      row.forEach((cell, _p, c) => { cells.push(cellMarkdown(cell)); if (r === 0) aligns[c] = cell.attrs.align; });
+      rows.push(cells);
+    });
+    const width = Math.max(1, ...rows.map((r) => r.length));
+    const line = (cells: string[]) => "| " + Array.from({ length: width }, (_, i) => cells[i] ?? "").join(" | ") + " |";
+    const rule = "| " + Array.from({ length: width }, (_, i) => RULE[aligns[i] || ""] || "---").join(" | ") + " |";
+    state.write([line(rows[0] || []), rule, ...rows.slice(1).map(line)].join("\n"));
+    state.closeBlock(node);
+  },
+  table_row() { /* written by its table */ },
+  table_cell() { /* written by its table */ },
+  table_header() { /* written by its table */ },
 }, {
   ...defaultMarkdownSerializer.marks,
   strike: { open: "~~", close: "~~", mixable: true, expelEnclosingWhitespace: true },

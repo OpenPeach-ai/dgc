@@ -214,6 +214,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   changed and is saved after a 1.2 s pause; the model's change is posted to the page and flashes as a decoration; Ask
   on a selection sends its lines in the file (`canvasAskAbout`). The maths rules moved to `src/markdownMath.ts` so
   the canvas bundle doesn't carry the code highlighter. Licenses in `licenses/PROSEMIRROR-LICENSES.txt`.
+- **Tables, maths and checklists edited in the formatted canvas** (they had opened in Markdown). A top-level GitHub
+  table is a prosemirror-tables table (1.8.5; cells hold a line of inline text; alignment per cell, written per
+  column), written back as `| … |` with its alignment row and pipes in cells escaped; Tab/Enter move between cells,
+  and a second toolbar row (shown in a table) adds and deletes rows and columns, aligns a column and deletes the
+  table, keeping the cursor in the table after a delete. Display maths is a `math_block` node (`$$`/`\[` kept,
+  written as fenced lines when changed); inline and display maths open a TeX box with the result drawn by KaTeX as
+  you type; input rules make `$…$` a formula (only with a letter or a TeX sign in it: `$5 and $10` stays text) and
+  `$$ ` an equation. GitHub task lists (`- [ ]`, `- [x]`) are list items with `checked`, read by a token pass that
+  takes the box off the item's text; a box ticks them; Enter splits a ticked item into an unticked one. A table or
+  display maths inside a list or quote stays a kept block (its lines carry the container's indent).
 - **Writing blocks in ChatDGC**, as ChatGPT has them: the prompt (`DRAFTS`) puts a draft the user will send as it is
   in its own ` ```email ` (Subject:, To:) or ` ```draft ` block; `chatdgc_draft` {conversation_id, message_id, original,
   text} edits one in place (answered by `chatdgc_message`; refused mid-turn, or when the block's words changed
