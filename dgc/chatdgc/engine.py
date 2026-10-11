@@ -120,7 +120,8 @@ CANVAS_CREATE_TOOL = {"type": "function", "function": {
     "name": "canvas_create",
     "description": (
         "Open a canvas beside the chat: a document or code the user and you will keep working on together. It opens in "
-        "an editor next to the chat, where the user can edit it too. Don't repeat its text in your reply."),
+        "an editor next to the chat, where the user can edit it too. Don't repeat its text in your reply. Not for a "
+        "tool to use right now (a calculator, a converter, a timer, a quiz): that's show_widget."),
     "parameters": {"type": "object", "properties": {
         "title": {"type": "string", "description": "A short name, like 'Goa trip plan' or 'clean_csv'."},
         "kind": {"type": "string", "enum": ["document", "code"]},
@@ -154,6 +155,22 @@ QUERY_DATA_TOOL = {"type": "function", "function": {
         "sql": {"type": "string", "description": "One SELECT (or WITH … SELECT) over those tables."}},
         "required": ["sql"]}}}
 MAX_QUERIES = 12
+# Interactive answers (ChatGPT's): a small self-contained HTML page the screen frames in a locked-down sandbox.
+WIDGET_TOOL = {"type": "function", "function": {
+    "name": "show_widget",
+    "description": (
+        "Show an interactive widget under your reply: one small self-contained HTML page (inline CSS and JS only) for "
+        "something to use right now: a calculator, a converter, a timer, a quiz, a small simulation or an interactive "
+        "diagram. It runs in a sandbox with no network and nothing loaded from anywhere (no libraries, fonts or images "
+        "from the web), and it can't see the chat. Use the CSS variables --bg, --text, --muted, --accent, --border and "
+        "--surface so it matches the editor's theme, and label every input. For these, use this rather than "
+        "canvas_create or make_file, however long the code, unless the user asks to keep or edit the code."),
+    "parameters": {"type": "object", "properties": {
+        "title": {"type": "string", "description": "A short name, like 'EMI calculator'."},
+        "html": {"type": "string", "description": "The page: HTML with its <style> and <script> inline."}},
+        "required": ["title", "html"]}}}
+MAX_WIDGET_CHARS = 200_000
+MAX_WIDGET_HISTORY_CHARS = 8_000
 MAX_CANVAS_HISTORY_CHARS = 40_000
 MAX_FILE_HISTORY_CHARS = 12_000   # of a made file, as the model reads it back (to change it, or to talk about it)
 # Before an answer that turns on facts: does it need the web first? (search "auto"; the model can still search.)
@@ -563,7 +580,7 @@ class ChatEngine:
 
     def send(self, chat_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
-             on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None,
+             on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
              cancel: threading.Event | None = None, answering: dict | None = None, study: bool | None = None,
              canvas_selection: dict | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
@@ -641,11 +658,11 @@ class ChatEngine:
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None,
                            reply_id, on_text, on_thinking, cancel, search=search, on_activity=on_activity,
                            on_compacted=on_compacted, on_question=on_question, on_images=on_images,
-                           on_action=on_action, on_file=on_file, on_canvas=on_canvas)
+                           on_action=on_action, on_file=on_file, on_canvas=on_canvas, on_widget=on_widget)
 
     def answer(self, chat_id: str, message_id: str, question: int, choice: str, *, model: str | None = None,
                thinking: str | None = None, search: str = "off", on_start=None, on_text=None, on_thinking=None,
-               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None,
+               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
                cancel: threading.Event | None = None) -> dict:
         """Answer the question a reply asked: the message the model wrote for it, with the choice in, sent as the
         user's. Only while that reply is the last thing said; after that it's an ordinary message to write."""
@@ -664,7 +681,7 @@ class ChatEngine:
         return self.send(chat_id, answered(asked[question], choice), model=model, thinking=thinking, search=search,
                          on_start=on_start, on_text=on_text, on_thinking=on_thinking, on_activity=on_activity,
                          on_compacted=on_compacted, on_question=on_question, on_images=on_images,
-                         on_action=on_action, on_file=on_file, on_canvas=on_canvas, cancel=cancel,
+                         on_action=on_action, on_file=on_file, on_canvas=on_canvas, on_widget=on_widget, cancel=cancel,
                          answering={"message": message_id, "question": question, "choice": choice})
 
     # -- deep research (research.py): a plan to edit or start, then rounds of reading, then a checked report
@@ -853,7 +870,7 @@ class ChatEngine:
 
     def edit(self, chat_id: str, message_id: str, text: str, *, model: str | None = None, thinking: str | None = None,
              search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None, on_compacted=None,
-             on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, cancel: threading.Event | None = None) -> dict:
+             on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None, cancel: threading.Event | None = None) -> dict:
         """Change a message you sent: a new version of the conversation from there, with a new reply. What it
         carried (files, and what a vision model saw in them) goes with it."""
         text = str(text or "")
@@ -877,11 +894,11 @@ class ChatEngine:
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
                            on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file, on_canvas=on_canvas)
+                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file, on_canvas=on_canvas, on_widget=on_widget)
 
     def regenerate(self, chat_id: str, message_id: str, *, model: str | None = None, thinking: str | None = None,
                    search: str = "off", on_start=None, on_text=None, on_thinking=None, on_activity=None,
-                   on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None,
+                   on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
                    cancel: threading.Event | None = None) -> dict:
         """Try a reply again (with another model or thinking level, if chosen): a new version from that reply on."""
         chat = self._chat(chat_id)
@@ -898,7 +915,7 @@ class ChatEngine:
         sees = self._sees(chat, cancel)
         return self._reply(chat, lambda c, room: self._history(c, search, sees=sees, room=room), None, reply_id,
                            on_text, on_thinking, cancel, search=search, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file, on_canvas=on_canvas)
+                           on_question=on_question, on_images=on_images, on_action=on_action, on_file=on_file, on_canvas=on_canvas, on_widget=on_widget)
 
     def version(self, chat_id: str, parent_id: str, index: int) -> dict:
         """Show another version at a point of the conversation (``parent_id``: the message before it, or "root")."""
@@ -972,7 +989,7 @@ class ChatEngine:
         return out
 
     def continue_reply(self, chat_id: str, message_id: str, *, on_start=None, on_text=None, on_thinking=None,
-                       on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None,
+                       on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
                        cancel: threading.Event | None = None) -> dict:
         """Carry on a reply the model stopped at its limit (or one that was stopped), in the same message."""
         chat = self._chat(chat_id)
@@ -989,7 +1006,7 @@ class ChatEngine:
         return self._reply(chat, lambda c, room: self._history(c, sees=sees, room=room)
                            + [{"role": "user", "content": CONTINUE}], chat["messages"][index], message_id, on_text,
                            on_thinking, cancel, on_activity=on_activity, on_compacted=on_compacted,
-                           on_question=on_question, on_action=on_action, on_file=on_file, on_canvas=on_canvas)
+                           on_question=on_question, on_action=on_action, on_file=on_file, on_canvas=on_canvas, on_widget=on_widget)
 
     def name(self, chat_id: str) -> dict | None:
         """Give a new chat a short name from its first exchange, as a chat app does. Only while it still has
@@ -1378,6 +1395,11 @@ class ChatEngine:
                 content += "\n\n" + _card_note(card)
             for meta in m.get("files") or [] if m["role"] == "assistant" else []:
                 content += "\n\n" + _made_note(meta, self._file(chat, str(meta.get("id") or "")))
+            for w in m.get("widgets") or [] if m["role"] == "assistant" else []:
+                code = str(w.get("html") or "")
+                content += (f"\n\n[You showed an interactive widget here, {w.get('title', '')}. Its page"
+                            + (f" (the first {MAX_WIDGET_HISTORY_CHARS:,} characters)" if len(code) > MAX_WIDGET_HISTORY_CHARS else "")
+                            + f":\n<<<\n{code[:MAX_WIDGET_HISTORY_CHARS]}\n>>>]")
             if m["role"] == "assistant" and m.get("queries"):
                 ran = [q["sql"] for q in m["queries"] if not q.get("error")][:6]
                 if ran:
@@ -1558,6 +1580,23 @@ class ChatEngine:
                 ops.append({"op": "saved", "id": fact["id"], "text": fact["text"]})
                 kept.append(fact["text"])
         return kept
+
+    # -- interactive answers
+
+    def _widget(self, call, widgets: list, at: int, on_widget) -> str:
+        """show_widget: kept on the reply and shown under it, framed in a sandbox by the screen."""
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        html, title = str(args.get("html") or ""), " ".join(str(args.get("title") or "").split())[:80] or "Interactive"
+        if not html.strip():
+            return "error: give the widget's page as html."
+        if len(html) > MAX_WIDGET_CHARS:
+            return f"error: a widget's page holds at most {MAX_WIDGET_CHARS:,} characters. Make it smaller."
+        widget = {"id": "wg_" + uuid.uuid4().hex[:16], "title": title, "html": html, "at": at, "created_at": now()}
+        widgets.append(widget)
+        if on_widget is not None:
+            on_widget(widget)
+        return (f"The widget {title} is shown under your reply. Say in a sentence or two what it does and how to use "
+                "it; don't paste its code.")
 
     # -- data analysis (data.py)
 
@@ -1934,7 +1973,7 @@ class ChatEngine:
         return "\n".join(lines)[:12_000]
 
     def _reply(self, chat, build, existing, reply_id, on_text, on_thinking, cancel, *, search: str = "off",
-               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None) -> dict:
+               on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None) -> dict:
         """One reply. ``build(chat, room)`` is what the model reads, for a window of ``room`` tokens: when it would
         fill more than COMPACT_AT of it, the older turns are summarized first (said on screen, never silent)."""
         model = chat.get("model") or None
@@ -1981,6 +2020,7 @@ class ChatEngine:
         canvases = [dict(c) for c in (existing or {}).get("canvases") or []]
         canvas_state = {"calls": 0, "any": bool(canvases) or bool(self._canvas_list(chat))}
         queries = [dict(q) for q in (existing or {}).get("queries") or []]
+        widgets = [dict(w) for w in (existing or {}).get("widgets") or []]
         tables = self._tables(chat) if name not in self._toolless else None
         plugins = self._plugins(chat) if name not in self._toolless else None
         plugins_now = plugins.pin() if plugins is not None else []
@@ -1993,6 +2033,7 @@ class ChatEngine:
             out += [MAKE_FILE_TOOL] if len(files) < MAX_FILES_PER_REPLY else []
             if tables is not None and tables.tables and len(queries) < MAX_QUERIES:
                 out += [QUERY_DATA_TOOL]
+            out += [WIDGET_TOOL] if not widgets else []
             if canvas_state["calls"] < MAX_CANVAS_CALLS:
                 out += [CANVAS_CREATE_TOOL] + ([CANVAS_EDIT_TOOL] if canvas_state["any"] else [])
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
@@ -2074,6 +2115,8 @@ class ChatEngine:
                                 on_question(question)
                     elif call.name in ("remember", "forget"):
                         told = self._memory_call(chat, call, memory_ops)
+                    elif call.name == "show_widget":
+                        told = self._widget(call, widgets, before + len("".join(streamed)), on_widget)
                     elif call.name == "query_data":
                         if on_activity is not None:
                             on_activity("analyzing", "the data")
@@ -2136,7 +2179,8 @@ class ChatEngine:
         try:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,
-                                       actions=actions, files=files, canvases=canvases, queries=queries)
+                                       actions=actions, files=files, canvases=canvases, queries=queries,
+                                       widgets=widgets)
             return message
         finally:
             if picturing is not None:
@@ -2146,7 +2190,7 @@ class ChatEngine:
 
     def _keep_reply(self, chat, existing, reply_id, model, client, text, thought_text, finish, failure, usage, counted,
                     sources, searches, questions, memory_ops, web_images, *, actions=None, files=None,
-                    canvases=None, queries=None) -> dict:
+                    canvases=None, queries=None, widgets=None) -> dict:
         """The reply as it ended, saved (with what it looked up, asked, remembered and showed)."""
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
@@ -2171,6 +2215,8 @@ class ChatEngine:
                 message["canvases"] = canvases
             if queries:
                 message["queries"] = queries
+            if widgets:
+                message["widgets"] = widgets
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -2193,6 +2239,8 @@ class ChatEngine:
                 message["canvases"] = canvases
             if queries:
                 message["queries"] = queries
+            if widgets:
+                message["widgets"] = widgets
             chat["messages"].append(message)
         if counted:
             message["counted"] = counted

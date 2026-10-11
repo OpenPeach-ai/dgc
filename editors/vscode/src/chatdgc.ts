@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { createHash } from "crypto";
 import { mkdirSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
@@ -73,12 +74,37 @@ export function chatTitle(text: string): string {
 }
 
 const CANVAS_ID = /^cv_[a-f0-9]{16}$/;
+
+/** A widget's page: the model's HTML under a policy that loads nothing from anywhere and runs only its own inline
+ *  code; network and peer-connection APIs gone before it runs; the theme's colours as CSS variables; and (framed)
+ *  its height told to the chat so the frame fits it. */
+export function widgetDocument(html: string, theme: unknown, framed = true): string {
+  const t = theme && typeof theme === "object" ? theme as Record<string, unknown> : {};
+  const color = (key: string, fallback: string) => {
+    const v = String(t[key] ?? "").trim();
+    return /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20})$/i.test(v) ? v : fallback;
+  };
+  const scheme = t.scheme === "light" ? "light" : "dark";
+  const vars = `--bg:${color("bg", scheme === "light" ? "#ffffff" : "#1e1e1e")};--text:${color("text", scheme === "light" ? "#1f2328" : "#cccccc")};`
+    + `--muted:${color("muted", "#8b949e")};--accent:${color("accent", "#7c3aed")};--border:${color("border", "#3c3c3c")};--surface:${color("surface", scheme === "light" ? "#f6f8fa" : "#252526")}`;
+  const guard = `(function(){for(const k of ["RTCPeerConnection","webkitRTCPeerConnection","RTCDataChannel","WebSocket","EventSource","Worker","SharedWorker","fetch","XMLHttpRequest"]){try{Object.defineProperty(window,k,{value:undefined,configurable:false,writable:false})}catch(e){}}`
+    + (framed ? `const tell=()=>parent.postMessage({dgcWidget:true,height:Math.ceil(document.documentElement.scrollHeight)},"*");addEventListener("load",tell);try{new ResizeObserver(tell).observe(document.documentElement)}catch(e){setInterval(tell,500)}` : "")
+    + `})();`;
+  // (Built, then returned: the chat page's tests find that page as the file's first `return` of a document.)
+  const page = `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>:root{${vars};color-scheme:${scheme}}html,body{margin:0;background:${framed ? "transparent" : "var(--bg)"};color:var(--text);font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}body{padding:${framed ? "4px 2px" : "16px"}}</style>
+<script>${guard}</script>
+</head><body>${html}</body></html>`;
+  return page;
+}
 const CANVAS_PATH = /^(?:\/|[A-Za-z]:\\).*[\\/]canvas[\\/](chat_[a-f0-9]{32})[\\/](cv_[a-f0-9]{16})[\\/][^\\/]+$/;
 const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 export function chatdgcDocument(asset: (name: string) => string, cspSource: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)}; frame-src ${attr(cspSource)};">
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
 <title>ChatDGC</title></head><body class="cd-blank">
 <header class="cd-head"><button type="button" id="cd-crumb" class="cd-crumb" hidden></button><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
@@ -458,7 +484,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   private options(): vscode.WebviewPanelOptions & vscode.WebviewOptions {
-    return { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] };
+    const widgets = this.widgetsDir();
+    return { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri, ...(widgets ? [widgets] : [])] };
+  }
+
+  // ---- interactive answers: a reply's ```widget (one self-contained HTML page), shown in a locked-down frame
+
+  /** Where widget pages are written, to be framed from the chat (a file of its own, so its own policy holds). */
+  private widgetsDir(): vscode.Uri | undefined {
+    const base = (this.context as any).globalStorageUri as vscode.Uri | undefined;
+    return base ? vscode.Uri.joinPath(base, "widgets") : undefined;
   }
 
   private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean, project = ""): void {
@@ -654,6 +689,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         return;
       }
+      case "chatdgc_widget":
+        // An interactive answer: its card shows under the reply in every tab on the chat.
+        if (ev.widget && typeof ev.widget === "object") for (const tab of showing(conversation)) this.post(tab, { type: "widgetShown", messageId: ev.message_id, widget: ev.widget });
+        return;
       case "chatdgc_made":
         // A file the reply made: its card shows under the reply in every tab on the chat.
         if (ev.file && typeof ev.file === "object") for (const tab of showing(conversation)) this.post(tab, { type: "made", messageId: ev.message_id, file: ev.file });
@@ -926,6 +965,32 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openProject":
         this.openProject(String(message.id || ""));
         return;
+      case "widget": {
+        // Written once per page (by its hash), then framed from the chat: sandboxed, no network, no VS Code.
+        const ref = String(message.ref || "").slice(0, 120), html = typeof message.html === "string" ? message.html : "";
+        const dir = this.widgetsDir();
+        if (!ref || !html || html.length > 200_000 || !dir) { this.post(tab, { type: "widgetReady", ref, src: "" }); return; }
+        const page = widgetDocument(html, message.theme);
+        const file = vscode.Uri.joinPath(dir, `${createHash("sha256").update(page).digest("hex").slice(0, 40)}.html`);
+        try {
+          await vscode.workspace.fs.createDirectory(dir);
+          await vscode.workspace.fs.writeFile(file, Buffer.from(page, "utf8"));
+          this.post(tab, { type: "widgetReady", ref, src: tab.panel.webview.asWebviewUri(file).toString() });
+        } catch {
+          this.post(tab, { type: "widgetReady", ref, src: "" });
+        }
+        return;
+      }
+      case "widgetOpen": {
+        // In a tab of its own: a webview with nothing but the page, under the same policy.
+        const html = typeof message.html === "string" ? message.html : "";
+        if (!html || html.length > 200_000) return;
+        const title = String(message.title || "Interactive").replace(/\s+/g, " ").trim().slice(0, 60) || "Interactive";
+        const panel = vscode.window.createWebviewPanel("dgc.chatdgcWidget", title, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
+                                                       { enableScripts: true, localResourceRoots: [] });
+        panel.webview.html = widgetDocument(html, message.theme, false);
+        return;
+      }
       case "saveImage": {
         // A chart as a PNG, drawn by the page: saved where you choose.
         const data = typeof message.data === "string" ? message.data : "";

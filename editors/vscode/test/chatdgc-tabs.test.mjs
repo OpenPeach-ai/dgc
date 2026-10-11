@@ -77,7 +77,8 @@ globalThis.__DGC_TEST_VSCODE = {
     get textDocuments() { return world.docs; },
     applyEdit: async (edit) => { for (const e of edit.edits) { const doc = world.docs.find((d) => d.uri.fsPath === e.uri.fsPath); if (doc) doc.text = e.text; } return true; },
     getConfiguration: () => ({ get: (key, fallback) => (key === "linkFavicons" && world.favicons !== undefined ? world.favicons : fallback) }),
-    fs: { writeFile: async (uri, bytes) => { world.written.push({ path: uri.fsPath, bytes: Buffer.from(bytes) }); },
+    fs: { writeFile: async (uri, bytes) => { world.written.push({ path: uri.fsPath ?? String(uri), bytes: Buffer.from(bytes) }); },
+      createDirectory: async () => undefined,
       stat: async (uri) => {
     if (world.dirs?.includes(uri.fsPath)) return { size: 0, type: 2 };
     if (world.missing?.includes(uri.fsPath)) throw new Error("ENOENT");
@@ -94,7 +95,7 @@ await build({
     builder.onLoad({ filter: /^vscode$/, namespace: "test" }, () => ({ contents: "module.exports = globalThis.__DGC_TEST_VSCODE;", loader: "js" }));
   } }],
 });
-const { ChatDGC, chatTitle, CHATDGC_EDITOR, CHATDGC_LIBRARY } = createRequire(import.meta.url)(bundle);
+const { ChatDGC, chatTitle, CHATDGC_EDITOR, CHATDGC_LIBRARY, widgetDocument } = createRequire(import.meta.url)(bundle);
 after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 
 const ID = (n) => `chat_${String(n).repeat(32).slice(0, 32)}`;
@@ -398,6 +399,46 @@ test("a chart saved as an image: only a PNG the page drew, written where you cho
   panel.say({ type: "saveImage", name: "x", data: "javascript:alert(1)" });
   await tick(); await tick();
   assert.equal(world.written.length, 1, "nothing but a PNG");
+});
+
+test("a widget's page: nothing loads from anywhere, its own code only, no network APIs, theme colours checked", () => {
+  const page = widgetDocument("<h1>EMI</h1><script>calc()</script>", { bg: "#1e1e1e", text: "red;}</style><script>alert(1)</script>", scheme: "light" });
+  assert.match(page, /content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'"/);
+  assert.ok(page.indexOf('"RTCPeerConnection"') < page.indexOf("<body>"), "network and peer connections gone before its code runs");
+  assert.match(page, /"fetch","XMLHttpRequest"/);
+  assert.match(page, /--bg:#1e1e1e;--text:#1f2328;/, "a colour that isn't one is never written into the page");
+  assert.doesNotMatch(page, /alert\(1\)/);
+  assert.match(page, /parent\.postMessage\(\{dgcWidget:true,height:/, "framed: it tells the chat its height");
+  assert.doesNotMatch(widgetDocument("x", {}, false), /parent\.postMessage/, "in a tab of its own, nothing to tell");
+  assert.match(page, /<body><h1>EMI<\/h1><script>calc\(\)<\/script><\/body>/);
+});
+
+test("a widget is written to a file of its own and framed; one too big, or with nowhere to write, isn't", async () => {
+  chat.open(ID(7));
+  let [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "EMI" });
+  panel.say({ type: "widget", ref: `${MSG(2)}:abc`, html: "<b>calc</b>", theme: {} });
+  await tick(); await tick();
+  assert.deepEqual(panel.last("widgetReady"), { type: "widgetReady", ref: `${MSG(2)}:abc`, src: "" }, "no storage folder: not framed");
+  const stored = new ChatDGC({ extensionUri: "ext", globalStorageUri: { scheme: "file", fsPath: "/g", path: "/g", toString: () => "file:///g" } });
+  stored.attach(host);
+  world.panels.length = 0;
+  stored.open(ID(8));
+  [panel] = world.panels;
+  panel.say({ type: "ready" });
+  stored.onEvent({ type: "chatdgc_opened", request_id: last("chatdgc_open").request_id, conversation: { id: ID(8), title: "EMI" }, messages: [], earlier: 0, busy: false });
+  panel.say({ type: "widget", ref: `${MSG(2)}:abc`, html: "<b>calc</b>", theme: {} });
+  await tick(); await tick(); await tick();
+  const ready = panel.last("widgetReady");
+  assert.match(String(ready.src), /widgets\/[0-9a-f]{40}\.html$/);
+  assert.match(world.written.at(-1).bytes.toString(), /<body><b>calc<\/b><\/body>/);
+  panel.say({ type: "widget", ref: `${MSG(2)}:big`, html: "x".repeat(200_001), theme: {} });
+  await tick();
+  assert.equal(panel.last("widgetReady").src, "");
+  panel.say({ type: "widgetOpen", html: "<b>calc</b>", title: "EMI calculator", theme: {} });
+  const tab = world.panels.at(-1);
+  assert.equal(tab.viewType, "dgc.chatdgcWidget");
+  assert.match(tab.webview.html, /default-src 'none'/);
 });
 
 test("a reload brings each chat back in its tab, once", async () => {

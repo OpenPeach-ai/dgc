@@ -173,7 +173,8 @@ class ChatMemoryTests(unittest.TestCase):
         system = self.world["requests"][-1]["system"]
         self.assertIn(f"- Is vegetarian (id {fact['id']})", system, "the next turn knows it")
         self.assertIn("- openpeach (/w/openpeach), 2026-10-09: Billing page", system, "and the user's projects")
-        self.assertIn("remember tool", system)
+        self.assertIn("Call remember only when they ask you to remember something that wasn't saved", system,
+                      "the check before a reply saves what they state; the tool is for 'remember that...'")
 
     def test_a_page_cant_plant_a_memory_nor_a_secret_be_kept(self):
         chat = self.engine.open()

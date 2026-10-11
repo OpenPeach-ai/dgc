@@ -62,10 +62,20 @@ CHARTS = (
     "two numbers. The chart shows its numbers too, so don't repeat them all in a table.\n")
 
 
+# Interactive answers (ChatGPT's): a small self-contained HTML page in a ```widget block, shown in a locked-down frame.
+WIDGETS = (
+    "- When the answer is better used than read (a calculator with inputs, a converter, a quiz, a timer, a small "
+    "simulation or an interactive diagram), show a widget with show_widget: one small self-contained HTML page. "
+    "Something they asked for to use right now is a widget, not a canvas or a file, however long its code, unless "
+    "they ask to keep or edit the code. Say in your reply what it does. At most one, and none for a plain "
+    "question.\n")
+
+
 # Canvas (ChatGPT's): a longer piece to keep working on together goes in an editor beside the chat.
 CANVAS = (
     "- When the user asks you to write something long (a blog post, an essay, an article, a report, a story, a speech, "
-    "a plan of more than a few lines, a program over about 40 lines) or asks for a canvas, write it in a canvas: call "
+    "a plan of more than a few lines, a program over about 40 lines) or asks for a canvas, write it in a canvas (but a "
+    "tool to use right now, like a calculator, a converter, a timer or a quiz, is a widget, below): call "
     "canvas_create with the whole text, and don't write it in your reply. It opens in an editor beside the chat, where "
     "they can edit it too; then say in a sentence or two what's in it. To change a canvas, use canvas_edit with small "
     "exact edits. Short answers, short code and drafts they'll send as they are stay in your reply.\n")
@@ -146,7 +156,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         # Main DGC's rule (dgc/presentation.py), as the founder decided for ChatDGC too.
         + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
-        + (ASK + CANVAS if ask else "")
+        + (ASK + CANVAS + WIDGETS if ask else "")
         + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "
             "Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING

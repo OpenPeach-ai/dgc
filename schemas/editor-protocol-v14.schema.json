@@ -5722,6 +5722,41 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chatdgc_widget"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "message_id": {
+              "type": "string"
+            },
+            "widget": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "conversation_id",
+            "message_id",
+            "widget"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chatdgc_research"
             },
             "seq": {

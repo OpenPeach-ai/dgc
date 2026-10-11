@@ -1561,6 +1561,87 @@ test("charts: a ```chart block drawn as bar, line, pie or scatter; hover values,
   } finally { await s.page.close(); }
 });
 
+test("interactive answers: a ```widget framed in a sandbox; its height taken, anything else from it (or a frame inside it) ignored", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const fence = "```";
+    const html = "<title>EMI calculator</title><label>Loan <input id=loan></label><script>/* … */</script>";
+    await s.send({ type: "opened", conversation: conversation({ title: "EMI" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "EMI calculator please" },
+      { id: M(2), role: "assistant", text: `Here's a calculator.\n\n${fence}widget\n${html}\n${fence}`, finish: "stop" }] });
+    await s.frame();
+    const card = s.page.locator(".cd-widget");
+    assert.equal(await card.locator(".cd-widget-title").textContent(), "EMI calculator");
+    const asked = (await s.posted("widget")).at(-1);
+    assert.equal(asked.html, html);
+    assert.match(asked.ref, new RegExp(`^${M(2)}:`));
+    assert.equal(asked.theme.scheme, "dark");
+    assert.equal(await card.locator(".cd-widget-note").textContent(), "Loading…");
+    await s.send({ type: "widgetReady", ref: asked.ref, src: "about:blank" });
+    await s.frame();
+    const frame = card.locator("iframe.cd-widget-frame");
+    assert.equal(await frame.getAttribute("sandbox"), "allow-scripts", "scripts only: no same origin, forms, popups or navigation");
+    assert.equal(await frame.getAttribute("title"), "EMI calculator");
+    // From inside the widget: its height is taken; a message posing as VS Code's is not.
+    const inside = s.page.frames().find((f) => f.parentFrame() === s.page.mainFrame());
+    await inside.evaluate(() => {
+      parent.postMessage({ dgcWidget: true, height: 420 }, "*");
+      parent.postMessage({ type: "sendFromEditor", text: "pwned" }, "*");
+      document.body.append(document.createElement("iframe"));
+    });
+    await s.page.waitForTimeout(100);
+    const nested = inside.childFrames()[0];
+    await nested.evaluate(() => {
+      top.postMessage({ type: "sendFromEditor", text: "nested" }, "*");
+      parent.parent.postMessage({ type: "sendFromEditor", text: "nested, up two" }, "*");
+    });
+    await s.page.waitForTimeout(200);
+    assert.equal(await frame.evaluate((f) => f.style.height), "426px");
+    assert.deepEqual(await s.posted("send"), [], "nothing a widget says is taken for VS Code");
+    // Show code, and Open in a tab.
+    await card.getByRole("button", { name: "Show code" }).click();
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-widget pre.code").count(), 1);
+    await s.page.locator(".cd-widget").getByRole("button", { name: "Open in a tab" }).click();
+    assert.deepEqual((await s.posted("widgetOpen")).at(-1).title, "EMI calculator");
+    // While the reply is written: a placeholder, never half a page.
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "delta", messageId: M(4), text: `${fence}widget\n<div>half` });
+    await s.frame();
+    assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(4)}"] .cd-chart-pending`).textContent(), "Building an interactive answer…");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("interactive answers from show_widget: the card as the reply shows it, then kept on the reply; Show code is its page", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const widget = { id: `wg_${"a".repeat(16)}`, title: "Stopwatch <b>!</b>", html: "<button id=go>Start</button><script>/* … */</script>", at: 0 };
+    await s.send({ type: "opened", conversation: conversation({ title: "Timer" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "A stopwatch please" }] });
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "widgetShown", messageId: M(2), widget });
+    await s.send({ type: "widgetShown", messageId: M(2), widget: { ...widget, id: "wg_nope" } });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-widget").count(), 1, "only a widget DGC named");
+    assert.equal(await s.page.locator(".cd-widget-title").textContent(), "Stopwatch <b>!</b>", "a title is text");
+    const asked = (await s.posted("widget")).at(-1);
+    assert.deepEqual([asked.ref, asked.html], [`${M(2)}:${widget.id}`, widget.html]);
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Here's a stopwatch.", finish: "stop", widgets: [widget] } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.send({ type: "widgetReady", ref: asked.ref, src: "about:blank" });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-widget iframe").count(), 1);
+    assert.equal((await s.posted("widget")).length, 1, "asked for once, however often the reply is drawn");
+    await s.page.locator(".cd-widget").getByRole("button", { name: "Show code" }).click();
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-widget pre.code").textContent(), widget.html);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("files a reply made: a card with what each is, Open and Save a copy…, live as it's made", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

@@ -686,7 +686,12 @@ class ChatService:
                     "on_thinking": lambda part: stream["value"].thinking(part),
                     "on_compacted": lambda summary: self._compacted(conversation_id, summary),
                     "on_question": question, "on_images": pictures, "on_action": card, "on_file": made,
-                    "on_canvas": canvas}
+                    "on_canvas": canvas, "on_widget": widget}
+
+        def widget(shown):
+            # An interactive answer: its card shows at once, under the reply (the reply goes on).
+            stream["value"].flush()
+            self.emit("chatdgc_widget", conversation_id=conversation_id, message_id=turn["reply_id"], widget=shown)
 
         def canvas(view):
             # A canvas made or changed: the editor beside the chat shows it at once (the reply goes on).

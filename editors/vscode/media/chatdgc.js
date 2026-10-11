@@ -134,7 +134,7 @@
     const html = md(message.text);
     if (html === null) node.textContent = message.text || ""; else node.innerHTML = html;
     cite(node, message.sources);
-    if (drafts) { draftBlocks(node, message, drafts.live); chartBlocks(node, drafts.live); }
+    if (drafts) { draftBlocks(node, message, drafts.live); chartBlocks(node, drafts.live); widgetBlocks(node, message, drafts.live); }
     return node;
   }
 
@@ -170,6 +170,89 @@
       box.append(item);
     }
     return box;
+  }
+
+  // ---- interactive answers (ChatGPT's): a reply's ```widget, one self-contained HTML page, framed by itself
+  // (sandboxed: no network, no VS Code, no way into this page). The host writes it to a file of its own, so its own
+  // policy holds, and the frame grows to the page's height as the page reports it.
+  const widgets = {};                      // ref -> {src, height, failed, asked}
+  const widgetFrames = new Map();          // ref -> the iframe showing it now
+  const hashOf = (text) => { let h = 5381; for (let i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0; return h.toString(36); };
+  function themeColors() {
+    const cs = getComputedStyle(document.body), v = (name) => cs.getPropertyValue(name).trim();
+    return { bg: cs.backgroundColor, text: cs.color, muted: v("--muted"), accent: v("--accent"), border: v("--border"),
+             surface: v("--surface"), scheme: document.body.classList.contains("vscode-light") ? "light" : "dark" };
+  }
+  function widgetTitle(html) {
+    const m = /<title>([^<]{1,80})<\/title>/i.exec(html) || /<h[1-3][^>]*>([^<]{1,80})</i.exec(html);
+    return (m?.[1] || "Interactive").replace(/\s+/g, " ").trim();
+  }
+  function widgetBlocks(node, message, live) {
+    for (const pre of node.querySelectorAll('pre.code[data-language="widget"]')) {
+      const html = decodeURIComponent(pre.querySelector(".copy[data-c]")?.dataset.c || "").replace(/\n$/, "");
+      pre.replaceWith(live ? el("div", "cd-chart-pending", "Building an interactive answer…")
+                           : widgetCard(message, html, { ref: `${message.id}:${hashOf(html)}`, title: widgetTitle(html), code: pre }));
+    }
+  }
+  function widgetCard(message, html, { ref, title, code: pre }) {
+    const box = el("div", "cd-widget");
+    box.dataset.ref = ref;
+    const head = el("div", "cd-widget-head");
+    head.append(icon("play-circle"), el("span", "cd-widget-kind", "Interactive"), el("span", "cd-widget-title", title));
+    const tools = el("span", "cd-widget-tools");
+    const tool = (label, onClick) => { const b = el("button", "cd-chart-tool", label); b.type = "button"; b.addEventListener("click", onClick); tools.append(b); return b; };
+    const codeShown = state.open.has(`widgetcode:${ref}`);
+    tool(codeShown ? "Hide code" : "Show code", () => {
+      if (state.open.has(`widgetcode:${ref}`)) state.open.delete(`widgetcode:${ref}`); else state.open.add(`widgetcode:${ref}`);
+      update(message.id);
+    });
+    tool("Open in a tab", () => vscode.postMessage({ type: "widgetOpen", html, title, theme: themeColors() }));
+    head.append(tools);
+    box.append(head);
+    const known = widgets[ref];
+    if (!known) {
+      widgets[ref] = { asked: true };
+      vscode.postMessage({ type: "widget", ref, html, theme: themeColors() });
+      setTimeout(() => { if (!widgets[ref]?.height && !widgets[ref]?.failed) { widgets[ref] = { ...widgets[ref], failed: true }; update(message.id); } }, 6000);
+    }
+    if (known?.src && !known.failed) {
+      const frame = document.createElement("iframe");
+      frame.className = "cd-widget-frame";
+      frame.setAttribute("sandbox", "allow-scripts");
+      frame.setAttribute("referrerpolicy", "no-referrer");
+      frame.title = title;
+      frame.style.height = `${known.height || 160}px`;
+      frame.src = known.src;
+      widgetFrames.set(ref, frame);
+      box.append(frame);
+    } else if (known?.failed) {
+      box.append(el("div", "cd-widget-note", "It can't be shown here. Open it in a tab, or see its code."));
+    } else {
+      box.append(el("div", "cd-widget-note", "Loading…"));
+    }
+    if (codeShown) {
+      if (pre) box.append(pre.cloneNode(true));
+      else { const code = el("pre", "code"); code.append(el("code", "", html)); box.append(code); }
+    }
+    return box;
+  }
+  /** The widget (or a frame inside one) a message came from, if any: such a message is never taken for the host's. */
+  function widgetOf(source) {
+    for (let w = source, i = 0; w && i < 12; i++) {
+      for (const [ref, frame] of widgetFrames) if (frame.contentWindow === w) return ref;
+      let up = null;
+      try { up = w.parent; } catch { return null; }
+      if (!up || up === w || up === window) return null;
+      w = up;
+    }
+    return null;
+  }
+  function widgetMessage(ref, data) {
+    if (!data || data.dgcWidget !== true) return;
+    const height = Math.max(60, Math.min(1400, Number(data.height) || 0)) + 6;
+    widgets[ref] = { ...widgets[ref], height };
+    const frame = widgetFrames.get(ref);
+    if (frame) frame.style.height = `${height}px`;
   }
 
   // ---- charts (ChatGPT's interactive charts): a ```chart block of JSON, drawn by chart.js
@@ -1044,6 +1127,11 @@
     { const strip = picturesStrip(message); if (strip) node.append(strip); }
     if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
     { const analysis = analysisNode(message); if (analysis) node.append(analysis); }
+    for (const w of Array.isArray(message.widgets) ? message.widgets : []) {
+      if (w && typeof w.html === "string" && /^wg_[a-f0-9]{16}$/.test(String(w.id || ""))) {
+        node.append(widgetCard(message, w.html, { ref: `${message.id}:${w.id}`, title: String(w.title || "Interactive").slice(0, 80) }));
+      }
+    }
     for (const file of Array.isArray(message.files) ? message.files : []) node.append(fileCard(message, file));
     for (const canvas of Array.isArray(message.canvases) ? message.canvases : []) node.append(canvasCard(canvas));
     for (const card of Array.isArray(message.actions) ? message.actions : []) node.append(actionCard(message, card, live));
@@ -1812,6 +1900,11 @@
 
   // ---- what the host says
   window.addEventListener("message", (event) => {
+    if (event.source && event.source !== window.parent && event.source !== window) {
+      // From a widget, or a frame inside one: only its height, and never as a message from VS Code.
+      const ref = widgetOf(event.source);
+      if (ref || event.data?.dgcWidget) { if (ref) widgetMessage(ref, event.data); return; }
+    }
     const msg = event.data || {};
     switch (msg.type) {
       case "opened": {
@@ -1928,6 +2021,24 @@
         }
         message.questions = [...(Array.isArray(message.questions) ? message.questions : []), msg.question];
         update(message.id);
+        return;
+      }
+      case "widgetShown": {
+        const w = msg.widget;
+        if (!w || typeof w.html !== "string" || !/^wg_[a-f0-9]{16}$/.test(String(w.id || ""))) return;
+        let message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message) { message = { id: msg.messageId, role: "assistant", text: "", thinking: "" }; state.messages.push(message); }
+        const list = Array.isArray(message.widgets) ? message.widgets.filter((x) => x.id !== w.id) : [];
+        message.widgets = [...list, w];
+        update(message.id);
+        return;
+      }
+      case "widgetReady": {
+        const ref = String(msg.ref || "");
+        if (!widgets[ref]) return;
+        widgets[ref] = { ...widgets[ref], src: typeof msg.src === "string" && msg.src ? msg.src : "", failed: !msg.src };
+        const id = ref.split(":")[0];
+        if (state.messages.some((m) => m.id === id)) update(id);
         return;
       }
       case "canvas": {

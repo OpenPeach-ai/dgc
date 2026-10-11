@@ -958,6 +958,9 @@ EVENT_FIELDS.update({
     # [{n, at, by (model or user), note, chars, path}], text?}. The finished reply carries a card per canvas it
     # touched in `canvases`: {id, title, kind, language, version, op (created or edited), at}.
     "chatdgc_canvas": {"conversation_id": _S(), "message_id": _S(False), "canvas": _O(), "request_id": _S(False)},
+    # An interactive answer a reply shows (show_widget): {id, title, html, at, created_at}. The screen frames the page
+    # in a sandbox with no network; the finished reply carries them in `widgets`.
+    "chatdgc_widget": {"conversation_id": _S(), "message_id": _S(), "widget": _O()},
     # Deep research as it goes: the reply's `research` now (status planning, planned, running, writing, checking,
     # done, stopped or failed; plan; notes by number, title and address; the latest activity; steers; check).
     "chatdgc_research": {"conversation_id": _S(), "message_id": _S(), "research": _O()},

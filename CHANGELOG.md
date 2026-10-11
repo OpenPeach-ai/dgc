@@ -88,6 +88,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **Interactive answers in ChatDGC** (Phase 8, part 5). A `show_widget` tool ({title, html}, once a reply) keeps a
+  small self-contained HTML page on the reply (`widgets`, new event `chatdgc_widget`); the extension writes it to a
+  file of its own under the extension's storage and the chat frames it with `sandbox="allow-scripts"`. The page's
+  policy loads nothing (`default-src 'none'`, inline script and style only), network and peer-connection APIs are
+  removed before its code runs, the chat's `frame-src` allows only extension resources, and the chat ignores any
+  message from a widget or a frame inside one except its height. Without tools, a ` ```widget ` block works the
+  same way. With deepseek-v4.1-flash, as a fenced block an EMI calculator or stopwatch went into a canvas or a file 5
+  of 6 times; as a tool, a widget 9 of 9 (self-contained and themed), none for a plain question.
 - **Data analysis and charts in ChatDGC** (Phase 8, part 4). `dgc/chatdgc/data.py` loads the chat's spreadsheets
   (attached, made, or in its project; CSV, TSV, each Excel sheet) into an in-memory SQLite database; a `query_data`
   tool runs one read-only SELECT (an authorizer allows reading and functions only; 5 seconds; 200 rows) with

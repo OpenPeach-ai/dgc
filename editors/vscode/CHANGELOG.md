@@ -52,6 +52,9 @@
 - **The Library.** **Library** in the side bar shows every file you attached in ChatDGC, by kind, searchable by
   name. Open where a file is, start a new chat with it, save a copy, add it to a project, or delete it. The
   paperclip lists your newest files before Upload.
+- **Interactive answers.** A calculator, converter, timer or quiz you use right in the reply, in a locked-down
+  frame (no network, no access to your chats or VS Code), in the editor's colours, with **Show code** and **Open in
+  a tab**.
 - **Data analysis and charts.** Attach a spreadsheet and ask about it: answers come from exact queries (open
   **Analyzed the data** to see them). Replies can draw bar, line, area, pie and scatter charts: hover for values,
   click the legend, **Data**, **Copy data** and **Save image**.
