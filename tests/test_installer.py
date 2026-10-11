@@ -843,9 +843,12 @@ class InterruptedBuilds(unittest.TestCase):
         def interrupted(sig: int) -> subprocess.CompletedProcess:
             marker.unlink(missing_ok=True)
             slow = dict(env, PATH=str(slow_dir) + os.pathsep + env["PATH"], DGC_TEST_SLOW_VENV=str(marker))
+            # Ctrl-C reaches the installer as it would a user's: a suite started in the background (`(nohup …
+            # &)`) inherits SIGINT ignored, which bash can't undo, so the build ran its full 300 s and finished.
             proc = subprocess.Popen(["bash", str(INSTALLER)], env=slow, cwd=str(home), text=True,
                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, start_new_session=True)
+                                    stderr=subprocess.STDOUT, start_new_session=True,
+                                    preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
             deadline = time.monotonic() + BUILD_TIMEOUT
             while not marker.exists() and proc.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.05)
