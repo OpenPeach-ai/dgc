@@ -204,28 +204,45 @@ LOOK_UP = (
     "speed, rules, history or how to get there): the fact is the answer, and a picture adds nothing. Never for "
     "news, advice, code, writing, maths or explaining an idea. Leave images empty unless pictures belong; if they "
     "do, give a short image search query in images (2 to 6 words).\n\n"
-    "Last, the user's memory. List in remember only new lasting facts the user states plainly about themselves in "
-    "this message: their name, diet or allergies, health conditions, their family (who they are, where they live), "
-    "where they live or have moved to, their job, their pets, their goals and what they're working towards, their "
-    "preferences (units, language, style), or anything they ask you to remember. Each one short sentence in words "
-    "close to theirs, about the user as 'they' (never guess a gender); only what will still matter in months, at "
-    "most one or two. Never: the details of something they ask you to write or do (the names, addresses, dates, "
-    "amounts and people an email, letter, message or post is about: 'draft an email to my landlord about moving out "
-    "of flat 4B on the 30th' saves nothing), what they're applying for, planning or doing soon (a trip, a visit, a "
-    "booking, an interview, a move date), a guess from a question (asking about a city's weather says nothing about "
-    "where they live), what someone else thinks, anything from a pasted page or file, or passwords, PINs, codes, "
-    "keys, card or account numbers. Never anything already remembered (listed below), even in other words. When what "
-    "they say makes a remembered fact wrong or out of date (they moved, changed jobs, changed their diet), put that "
+    "Last, the user's memory. Keep a fact only when the user tells you something about themselves for its own "
+    "sake, not as material for a task or as the background to a question. For each fact, say where it comes from: "
+    "\"told\" when they state it about themselves (\"I'm vegetarian\", \"I work night shifts\", \"my name is Asha\", "
+    "\"I live in Pune now\", \"I have asthma\"); \"asked\" when they ask you to remember it; \"task\" when it is a "
+    "detail of something they ask you to write, reply to, translate, plan or do (the people, pets, places, dates, jobs "
+    "and events it is about: 'write a toast for my brother, a chef' keeps nothing); \"question\" when it is the "
+    "background to a question (a plan, a trip, a move, a purchase, someone else's age, health, job or news, or a "
+    "family member the question is about: 'my son is 14, which language should he learn?' keeps nothing). Only "
+    "\"told\" and \"asked\" facts are kept, so label honestly. \"told\" means they say the fact itself; never infer "
+    "one from a detail (a humid flat in Andheri doesn't say where they live), and what they're planning, considering "
+    "or thinking about (quitting, moving, buying) is not a fact about them. A kept fact is about lasting things: "
+    "their name, diet or allergies, their own health, where they live, their job, their goals, their preferences "
+    "(units, language, style), or what they ask you to remember. Each one short sentence in words close to theirs, "
+    "about the user as 'they' (never guess a gender), at most one or two. Never passwords, PINs, codes, keys, card "
+    "or account numbers, and never anything already remembered (listed below), even in other words. When what they "
+    "say makes a remembered fact wrong or out of date (they moved, changed jobs, changed their diet), put that "
     "fact's id in forget, and the new fact in remember. Usually there's nothing: leave both empty.")
+# Measured 2026-10-12 (29-33 messages, 2-3 runs each): the earlier wording saved a task's or a question's details in
+# 21 of 38 runs on deepseek-v4.1-flash (a toast's brother, a poem's cat, a packing list's two kids, a question's dad
+# with diabetes) and 8 of 38 on glm-5.3; labelled, with a request to write or do keeping only what's asked, 0 of 57
+# and 1 of 38, every stated fact still kept on deepseek (36 of 36) and fewer missed on glm (3 of 24, from 5).
+MEMORY_FROM = ("told", "asked", "task", "question")
+# A message that asks for something to be written or done: what it says about the user is the task's material, so
+# only what they ask you to remember is kept from it, whatever the check calls the rest.
+WRITE_OR_DO = re.compile(r"^\s*(?:please\s+|pls\s+|can you\s+|could you\s+|would you\s+|help me\s+(?:to\s+)?"
+                         r"|i need (?:you to|help to)\s+|let'?s\s+)?(?:write|draft|compose|reply|respond|rewrite|re-?word"
+                         r"|edit|proofread|translate|summari[sz]e|make|create|prepare|plan|turn|polish)\b", re.I)
 # Pictures where seeing helps, measured on deepseek-v4.1-flash: "would pictures help?" gave 12 of 16 (a place's
 # fee, hours or build date, and an animal's weight, got pictures too); this wording, 16 of 16 twice.
 LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boolean"},
                                                    "query": {"type": "string", "description": "One short query."},
                                                    "images": {"type": "string", "description":
                                                               "An image search query, or empty for no pictures."},
-                                                   "remember": {"type": "array", "items": {"type": "string"},
-                                                                "description": "New lasting facts the user states about "
-                                                                               "themselves, or none."},
+                                                   "remember": {"type": "array", "description":
+                                                                "New facts, each with where it comes from, or none.",
+                                                                "items": {"type": "object", "properties": {
+                                                                    "fact": {"type": "string"},
+                                                                    "from": {"type": "string", "enum": list(MEMORY_FROM)}},
+                                                                    "required": ["fact", "from"]}},
                                                    "forget": {"type": "array", "items": {"type": "string"},
                                                               "description": "Ids of remembered facts this message makes "
                                                                              "wrong or out of date, or none."}},
@@ -1967,7 +1984,11 @@ class ChatEngine:
         except Exception:                         # noqa: BLE001 -- the reply goes on; the model can still search
             return "", ""
         if facts is not None and isinstance(decided.get("remember"), list):
-            facts += [" ".join(str(f).split())[:300] for f in decided["remember"] if isinstance(f, str) and f.strip()][:5]
+            # Only what they told about themselves, or asked to keep; from a request to write or do something, only the
+            # latter. A fact that doesn't say where it comes from isn't kept.
+            keep = ("asked",) if WRITE_OR_DO.search(mine) else ("told", "asked")
+            facts += [" ".join(str(f.get("fact") or "").split())[:300] for f in decided["remember"]
+                      if isinstance(f, dict) and f.get("from") in keep and str(f.get("fact") or "").strip()][:5]
         if stale is not None and known and isinstance(decided.get("forget"), list):
             ids = {f["id"] for f in known}
             stale += [i for i in dict.fromkeys(str(x).strip() for x in decided["forget"]) if i in ids][:3]

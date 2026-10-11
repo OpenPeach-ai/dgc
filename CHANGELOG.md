@@ -8,6 +8,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### ChatDGC
 
+- **Memory keeps only what you tell it about yourself.** The check before a reply says where each fact comes from
+  (you told it, you asked to keep it, a task's material, a question's background) and only the first two are kept;
+  a request to write or do something keeps only what you ask it to remember. Measured on deepseek-v4.1-flash, a
+  task's or a question's details were saved in 21 of 38 runs and now in none of 57, with every stated fact still
+  kept; on glm-5.3, 8 of 38 to 1 of 38.
 - **`dgc chat`: ChatDGC in the terminal.** `dgc chat` opens a chat you type into (`/new`, `/list`, `/open`,
   `/title`, `/export`, `/help`; Ctrl-C stops a reply); `dgc chat "question"` (or piped text) answers once and exits.
   Replies stream as they're written and end with their numbered sources. `--list [QUERY]`, `--resume ID`,

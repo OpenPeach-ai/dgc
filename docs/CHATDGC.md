@@ -96,11 +96,13 @@ research, files, data and charts, the canvas, memory, plugins and more. Voice co
   earlier messages…" when that happens; it is never done silently. An **Earlier messages summarized**
   divider shows the summary, and you can edit it. Every message stays in the chat for you. One file never
   takes more than 40% of the window; the model is told when it only got the first part.
-- **Memory.** ChatDGC remembers what you tell it about yourself: your name, the people you mention, what
-  you like, how you want things done, what you're working on. The quick check before each reply picks out
-  what you state about yourself, so a fact doesn't depend on the model remembering to save it (it runs with web
-  search off too). It keeps what will still matter in months, not the details of a task: drafting an email about
-  moving out on the 30th saves nothing, nor does asking about a city's weather. It sees what's remembered
+- **Memory.** ChatDGC remembers what you tell it about yourself: your name, your diet, your health, where you
+  live, your job, how you want things done. The quick check before each reply picks out what you state about
+  yourself, so a fact doesn't depend on the model remembering to save it (it runs with web search off too). It
+  keeps only what you say about yourself for its own sake, never the material of a task or the background of a
+  question: a toast for your brother the chef, a poem about your cat, a packing list for your two kids, "my dad
+  has diabetes, what snacks are safe?" or "we plan to move to the UK" save nothing, and nor does asking about a
+  city's weather. From a request to write or do something it keeps only what you ask it to remember. It sees what's remembered
   already, so nothing is saved twice in other words, and when you say something has changed ("I'm not vegetarian
   anymore", "I moved to Goa") the old fact goes. A reply that saved or removed something says so underneath,
   **Remembered: …** (with **Forget**) or **Forgot: …**. You can also say "remember that…" or "forget that…", or

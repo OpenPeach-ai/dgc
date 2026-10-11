@@ -154,8 +154,10 @@ class StatedFactsTests(Engine):
 
     def test_what_the_user_states_about_themselves_is_kept_only_from_their_words_and_never_a_secret(self):
         self.world["decide"] = {"needs_search": False, "query": "",
-                                "remember": ["They are vegetarian.", "They just moved to Bengaluru.", "Their PIN is 4471",
-                                             "They love cruises."]}
+                                "remember": [{"fact": "They are vegetarian.", "from": "told"},
+                                             {"fact": "They just moved to Bengaluru.", "from": "told"},
+                                             {"fact": "Their PIN is 4471", "from": "told"},
+                                             {"fact": "They love cruises.", "from": "told"}]}
         chat = self.engine.open()
         reply = self.engine.send(chat["id"], "I'm vegetarian and we just moved to Bengaluru. My PIN is 4471. Dinner ideas?",
                                  search="auto")
@@ -173,7 +175,7 @@ class StatedFactsTests(Engine):
         # Live (deepseek): "not vegetarian anymore" added a fact and left "They are vegetarian." (2 of 2); "my sister
         # Anya" saved a second sister fact. Shown what's remembered, it names the one to drop and adds nothing twice.
         old = self.engine.memory.add("They are vegetarian.")
-        self.world["decide"] = {"needs_search": False, "query": "", "remember": ["They eat fish now."],
+        self.world["decide"] = {"needs_search": False, "query": "", "remember": [{"fact": "They eat fish now.", "from": "told"}],
                                 "forget": [old["id"], "mem_000000000000"]}
         chat = self.engine.open()
         reply = self.engine.send(chat["id"], "Actually I'm not vegetarian anymore, I eat fish now.", search="auto")
@@ -184,8 +186,31 @@ class StatedFactsTests(Engine):
         self.assertIn("Removed from the user's memory, as this message outdates it (the reply shows it): They are vegetarian.",
                       self.world["answers"][-1]["system"])
 
+    def test_a_tasks_or_a_questions_details_are_not_kept_and_a_writing_request_keeps_only_what_is_asked(self):
+        # Measured live 2026-10-12: the unlabelled check kept a toast's brother, a poem's cat, a packing list's two kids
+        # and a question's dad with diabetes (21 of 38 runs on deepseek). Labelled, and with a request to write or do
+        # something keeping only what's asked, none (0 of 57), and every stated fact still kept.
+        chat = self.engine.open()
+        self.world["decide"] = {"needs_search": False, "query": "", "remember": [
+            {"fact": "Their dad has diabetes.", "from": "question"},
+            {"fact": "They have two kids.", "from": "task"},
+            {"fact": "They are vegetarian.", "from": "told"}]}
+        reply = self.engine.send(chat["id"], "My dad has diabetes, and I'm vegetarian. What snacks are safe for him?",
+                                 search="auto")
+        self.assertEqual([op["text"] for op in reply["memory"]], ["They are vegetarian."], "only what they told about themselves")
+        self.world["decide"] = {"needs_search": False, "query": "", "remember": [
+            {"fact": "They have three years of experience with Excel and SQL.", "from": "told"},
+            {"fact": "They prefer British spelling.", "from": "asked"}]}
+        reply = self.engine.send(chat["id"], "Write a cover letter for a data analyst job. I have three years of experience "
+                                 "with Excel and SQL. Remember that I prefer British spelling.", search="auto")
+        self.assertEqual([op["text"] for op in reply["memory"]], ["They prefer British spelling."],
+                         "a request to write something keeps only what they ask to keep")
+        self.world["decide"] = {"needs_search": False, "query": "", "remember": ["They live in Leeds."]}
+        self.assertNotIn("memory", self.engine.send(chat["id"], "I live in Leeds.", search="auto"),
+                         "a fact that doesn't say where it comes from isn't kept")
+
     def test_nothing_is_kept_with_memory_off_in_a_temporary_chat_or_past_three_a_reply(self):
-        self.world["decide"] = {"needs_search": False, "query": "", "remember": ["They are vegetarian."]}
+        self.world["decide"] = {"needs_search": False, "query": "", "remember": [{"fact": "They are vegetarian.", "from": "told"}]}
         self.config["memory"] = False
         chat = self.engine.open()
         self.assertNotIn("memory", self.engine.send(chat["id"], "I'm vegetarian.", search="auto"))
@@ -194,7 +219,8 @@ class StatedFactsTests(Engine):
         self.assertNotIn("memory", self.engine.send(temporary["id"], "I'm vegetarian.", search="auto"))
         self.assertEqual(self.engine.memory.facts(), [])
         self.world["decide"] = {"needs_search": False, "query": "",
-                                "remember": ["Their name is Priya.", "They are a nurse.", "They live in Leeds.", "They have a cat."]}
+                                "remember": [{"fact": f, "from": "told"} for f in
+                                             ("Their name is Priya.", "They are a nurse.", "They live in Leeds.", "They have a cat.")]}
         reply = self.engine.send(chat["id"], "I'm Priya, a nurse in Leeds, and I have a cat.", search="auto")
         self.assertEqual(len(reply["memory"]), 3, "at most three a reply, as the tool")
 
