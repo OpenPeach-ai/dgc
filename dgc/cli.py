@@ -2414,6 +2414,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "notes": "dgc notes [QUERY]                  what this project already learned; searches the trace",
     "usage": "dgc usage [--range today|7d|30d|month|all] [--json]   tokens counted on this machine, by model and day",
     "export-training": "dgc export-training [--help]       export sessions as scrubbed fine-tuning JSONL",
+    "chat": "dgc chat [QUESTION] [--resume ID] [--list [QUERY]] [--export ID [-o FILE]] [--model M] [--think L] [--search off|auto|on] [--temporary] [--file PATH] [--json]  ChatDGC in the terminal",
     "serve": "dgc serve                          headless JSON backend for editor front-ends (stdio)",
     "acp": "dgc acp                            Agent Client Protocol backend (JSON-RPC over stdio)",
     "protocol": "dgc protocol describe|validate     inspect or validate the editor/headless contract",
@@ -2469,6 +2470,10 @@ def main(argv: list[str] | None = None) -> int | None:
                     pips_parser().parse_args(raw_argv[1:])
                 except SystemExit as exc:
                     return int(exc.code or 0)
+            if raw_argv[0] == "chat":
+                from .chat_cli import parser as chat_parser
+                chat_parser().print_help()
+                return 0
             return _subcommand_help(raw_argv[0])
         if raw_argv[0] == "mcp":
             from .mcp_management import manage_mcp, USAGE
@@ -2557,6 +2562,13 @@ def main(argv: list[str] | None = None) -> int | None:
         if raw_argv[0] == "pips":
             from .pip_daemon import handle_command
             return handle_command(Config(), raw_argv[1:])
+        if raw_argv[0] == "chat":
+            # ChatDGC in the terminal: the editor's chats, its service in this process (dgc/chat_cli.py).
+            from .chat_cli import main as chat_main
+            cfg = Config()
+            for warning in cfg.credential_warnings:
+                print(f"warning: {warning}", file=sys.stderr)
+            return chat_main(cfg, raw_argv[1:])
         if raw_argv[0] == "protocol":
             # Contract discovery/validation is intentionally side-effect-free: no Config, update
             # check, model endpoint, session, or user-state access.
@@ -2575,7 +2587,7 @@ def main(argv: list[str] | None = None) -> int | None:
         allow_abbrev=False,
         prog="dgc", description="DGC — a coding-agent CLI for the models you run",
         epilog="commands: setup · doctor · help · update · export · export-training · usage · protocol · skills · plugin · mcp · "
-               "pips · serve · acp · bug  (dgc <command> --help for each)  ·  dgc -p '<task>' runs one task")
+               "pips · chat · serve · acp · bug  (dgc <command> --help for each)  ·  dgc -p '<task>' runs one task")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
     parser.add_argument("--think", choices=DELEGATED_THINK_LEVELS,

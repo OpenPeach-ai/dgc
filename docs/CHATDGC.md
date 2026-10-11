@@ -281,6 +281,14 @@ research, files, data and charts, the canvas, memory, plugins and more. Voice co
 - **Rename, pin, archive, delete.** Use the **⋯** button at the top of a chat. You can also delete a chat
   from the list. Pinned chats come first.
 
+## From the terminal and your code
+
+- **`dgc chat`.** The same chats in a terminal: `dgc chat` opens one you type into (`/help` lists its commands),
+  `dgc chat "question"` answers once, and `--list`, `--resume ID` and `--export ID` reach the rest. `--json` prints
+  a reply or the list for a script.
+- **The SDKs.** `DGC.chat()` in Python and `dgc.chat()` in TypeScript ask, stream, research and manage chats from
+  your program, on a backend of their own (see [SDK.md](SDK.md#chatdgc-dgcchat)).
+
 ## Where chats live
 
 Chats are stored in `~/.dgc/chat/`:

@@ -8,6 +8,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### ChatDGC
 
+- **`dgc chat`: ChatDGC in the terminal.** `dgc chat` opens a chat you type into (`/new`, `/list`, `/open`,
+  `/title`, `/export`, `/help`; Ctrl-C stops a reply); `dgc chat "question"` (or piped text) answers once and exits.
+  Replies stream as they're written and end with their numbered sources. `--list [QUERY]`, `--resume ID`,
+  `--export ID [-o FILE]`, `--model`, `--think`, `--search off|auto|on`, `--temporary`, `--file PATH` (up to ten)
+  and `--json`. The same chats as the editor's Chat tab; the service runs inside `dgc`, with no backend to start.
 - **A chat app inside DGC.** `dgc serve` answers a new `chatdgc_*` family of commands. Your chats have
   their own engine and store (`~/.dgc/chat/`), separate from Work sessions and Pips, and they are the
   same whatever folder DGC runs in. A reply is as long as your model allows; one cut at the model's limit,
