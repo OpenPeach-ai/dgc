@@ -54,6 +54,10 @@
   paperclip lists your newest files before Upload.
 - **ChatDGC has its own mark:** DGC's three slashes in a speech bubble, on its chat tabs, its project pages, the
   Library and the New Chat (ChatDGC) and Ask ChatDGC buttons, so a ChatDGC tab is never taken for a DGC session.
+- **ChatDGC's box, as main DGC's.** No purple ring around it; Search, Deep research and Study are plain buttons;
+  the context meter is main DGC's (its details laid out the same, with **Window size** from 8K to 1M); and one
+  button by Send names the model and opens a menu of the models with a **dial** for thinking: click a mark, drag,
+  or use the arrow keys.
 - **Maths in replies.** Formulas show typeset (KaTeX, loaded the first time one appears), not as raw `$…$`;
   dollar amounts and code are left alone, and Copy keeps the formula as written.
 - **Interactive answers.** A calculator, converter, timer or quiz to use right away: it opens in a tab beside the

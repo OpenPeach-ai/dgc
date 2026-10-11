@@ -9,7 +9,7 @@ import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
-import type { ChatDGC, ChatDGCHost } from "./chatdgc";
+import { CHATDGC_WINDOWS, type ChatDGC, type ChatDGCHost } from "./chatdgc";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
@@ -640,6 +640,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       chatdgcModels: () => this.chatdgcModels(),
       postHome: (message) => { if (this.home && this.webviewReady) this.post(message); },
       openSettings: (section) => this.openSettings(section),
+      chatdgcSetWindow: (preset) => {
+        const offered = (this.lastReadyEvent?.capabilities as any)?.chatdgc?.windows;
+        if (!CHATDGC_WINDOWS.includes(preset) || !Array.isArray(offered) || !offered.includes(preset)) return;
+        try {
+          this.ensureBackend().send(this.stateCommand("chatdgc-window", { type: "set_config", values: { chatdgc_window: preset } }));
+        } catch { /* not running: nothing to change */ }
+      },
       chatdgcOffers: () => {
         const offered = (this.lastReadyEvent?.capabilities as any)?.chatdgc;
         return offered && typeof offered === "object" ? offered : {};
@@ -6153,7 +6160,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (["default", "concise", "warm", "candid", "nerdy"].includes(String(v.chatdgc_personality || ""))) {
           values.chatdgc_personality = v.chatdgc_personality;
         }
-        if (["8k", "32k", "128k", "max"].includes(String(v.chatdgc_window || ""))) {
+        // A size its backend takes: an older CLI knows only 8k, 32k, 128k and max (it doesn't list them).
+        const offeredWindows = (this.lastReadyEvent?.capabilities as any)?.chatdgc?.windows;
+        const takes = Array.isArray(offeredWindows) ? offeredWindows : ["8k", "32k", "128k", "max"];
+        if (CHATDGC_WINDOWS.includes(String(v.chatdgc_window || "")) && takes.includes(String(v.chatdgc_window))) {
           values.chatdgc_window = v.chatdgc_window;
         }
         if (typeof v.chatdgc_followups === "boolean") { values.chatdgc_followups = v.chatdgc_followups; }

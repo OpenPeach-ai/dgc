@@ -162,9 +162,13 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual({k: asked[k] for k in values}, values)
         self.assertIsNone(event_error(asked))
         self.assertIn("chatdgc_personality", headless._LIVE_SAFE_CONFIG_KEYS)
-        for bad in ({"chatdgc_personality": "rude"}, {"chatdgc_about": "x" * 1501}):
+        for bad in ({"chatdgc_personality": "rude"}, {"chatdgc_about": "x" * 1501}, {"chatdgc_window": "48k"}, {"chatdgc_window": "2m"}):
             with self.subTest(bad=bad):
                 self.assertIsNone(headless._validated_config_values(bad, set())[0])
+        for size in ("8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"):
+            with self.subTest(size=size):
+                self.assertEqual(headless._validated_config_values({"chatdgc_window": size}, set())[0], {"chatdgc_window": size},
+                                 "every size main DGC offers")
 
 
 if __name__ == "__main__":

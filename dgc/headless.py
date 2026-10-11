@@ -26,6 +26,7 @@ from pathlib import Path
 
 from . import __version__
 from . import sessions as sessions_mod
+from .chatdgc.window import WINDOWS as CHATDGC_WINDOWS
 from .agent import Agent
 from .attachments import (MAX_EDITOR_IMAGE_TOTAL_BYTES, editor_image_mentions,
                           read_spooled_images, spool_root, validate_image_data_uris)
@@ -303,7 +304,7 @@ _CONFIG_ENUMS = {
     "tool_profile": frozenset({"standard", "adaptive", "full"}),
     "chatdgc_personality": frozenset({"default", "concise", "warm", "candid", "nerdy"}),
     # ChatDGC's context window: a preset, clamped to the model's real limit (dgc/chatdgc/window.py).
-    "chatdgc_window": frozenset({"8k", "32k", "128k", "max"}),
+    "chatdgc_window": frozenset(CHATDGC_WINDOWS),
     "thinking": frozenset({"off", "low", "medium", "high", "xhigh"}),
     "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
 }
@@ -2062,8 +2063,9 @@ class Backend:
             return {}
         # memory_*: one memory about the user (dgc/shared_memory.py), kept by the same process.
         # widget_report: chatdgc_open takes widget_reports, and chatdgc_widget_report is understood. widget_library:
-        # chatdgc_widgets is.
-        return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1}, "memory": {"version": 1}}
+        # chatdgc_widgets is. windows: the window presets chatdgc_window takes, and chatdgc_context is understood.
+        return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS)},
+                "memory": {"version": 1}}
 
     def _chats_capability(self) -> dict:
         """ready.capabilities.chats: offered only by a Host, and never when DGC_PROJECT_ROOT pins the

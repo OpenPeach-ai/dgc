@@ -99,6 +99,19 @@ class WindowTests(unittest.TestCase):
         self.talk(chat, "unknown")
         self.assertEqual(self.last_request()["window"], fit_window.FALLBACK_WINDOW, "never a guess of 128k")
 
+    def test_every_size_main_dgc_offers_is_a_preset(self):
+        self.assertEqual(list(fit_window.WINDOWS), ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"])
+        chat = self.engine.open()
+        Model.limit = 1_048_576
+        for preset, size in (("64k", 65536), ("256k", 262144), ("1m", 1_048_576)):
+            self.config["chatdgc_window"] = preset
+            self.talk(chat, preset)
+            self.assertEqual(self.last_request()["window"], size)
+        Model.limit = 200_000
+        self.config["chatdgc_window"] = "512k"
+        self.talk(chat, "bigger than the model")
+        self.assertEqual(self.last_request()["window"], 200_000, "the model's own limit still applies")
+
     def test_a_long_chat_is_summarized_before_it_overflows_and_says_so(self):
         chat = self.engine.open()
         long = "word " * 1200            # ~1,500 tokens each way

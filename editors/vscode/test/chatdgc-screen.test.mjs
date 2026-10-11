@@ -84,8 +84,12 @@ test("a new chat: the question and the box together, and a message goes out with
     assert.equal(await s.page.locator("#cd-send").isDisabled(), true, "nothing to send yet");
     assert.equal(await s.page.locator("#cd-model").inputValue(), "deepseek-v4.1-flash:cloud", "your model by default");
     assert.equal(await shown(s.page, "#cd-menu"), false, "nothing to rename until it has a message");
-    await s.page.locator("#cd-thinking").selectOption("high");
-    await s.page.locator("#cd-model").selectOption("qwen3:32b");
+    // As main DGC: one pill for the model and its thinking, opening a menu (the model, then the dial).
+    await s.page.locator("#cd-model-pill").click();
+    await s.page.locator(".cd-menu-row", { hasText: "qwen3:32b" }).click();
+    await s.page.locator(".cd-dial-face").focus();
+    for (let i = 0; i < 3; i++) await s.page.keyboard.press("ArrowRight");
+    await s.page.keyboard.press("Escape");
     await s.page.locator("#cd-input").fill("What's the capital of France?");
     await s.page.keyboard.press("Enter");
     assert.deepEqual(await s.posted("send"), [{ type: "send", text: "What's the capital of France?", model: "qwen3:32b", thinking: "high",
@@ -1023,6 +1027,86 @@ test("keyboard shortcuts, as ChatGPT has them, and the list of them", async (t) 
   } finally { await s.page.close(); }
 });
 
+test("the box as main DGC's: no accent ring, one pill for the model and a dial for thinking, the window's size in the meter", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "windows", presets: ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"] });
+    await s.send({ type: "opened", conversation: conversation({ thinking: "medium" }), earlier: 0, busy: false,
+      messages: [{ id: M(1), role: "user", text: "hi" }, { id: M(2), role: "assistant", text: "Hello.", finish: "stop" }] });
+    await s.send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "qwen3:32b"], current: "deepseek-v4.1-flash:cloud" });
+    await s.page.locator("#cd-input").focus();
+    const ring = await s.page.evaluate(() => {
+      const box = getComputedStyle(document.getElementById("cd-box")), probe = document.createElement("div");
+      probe.style.color = "var(--border-strong)"; document.body.append(probe);
+      const strong = getComputedStyle(probe).color; probe.remove();
+      return [box.borderTopColor, strong];
+    });
+    assert.equal(ring[0], ring[1], "focused, the box keeps its quiet border");
+    assert.equal(await s.page.locator("select:visible").count(), 0, "no dropdowns: the pill");
+    const pill = s.page.locator("#cd-model-pill");
+    assert.equal(await pill.locator("#cd-model-name").textContent(), "deepseek-v4.1-flash:cloud");
+    assert.equal(await pill.getAttribute("data-level"), "medium", "the chat's thinking");
+    assert.match(await pill.getAttribute("aria-label"), /^Model deepseek-v4\.1-flash:cloud, thinking Medium\./);
+    await pill.click();
+    const menu = s.page.locator("#cd-model-menu");
+    assert.equal(await menu.isVisible(), true);
+    assert.equal(await pill.getAttribute("aria-expanded"), "true");
+    assert.deepEqual(await menu.locator(".cd-menu-row").allInnerTexts(), ["deepseek-v4.1-flash:cloud", "qwen3:32b"]);
+    assert.equal(await menu.locator(".cd-menu-row.sel").getAttribute("aria-checked"), "true");
+    const dial = menu.locator(".cd-dial-face");
+    assert.deepEqual([await dial.getAttribute("role"), await dial.getAttribute("aria-valuenow"), await menu.locator(".cd-dial-level").textContent(),
+                      await menu.locator(".cd-dial-desc").textContent()], ["slider", "2", "Medium", "Thinks it through"]);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-composer-dial.png") });
+    // A click on a mark: that level.
+    const end = await dial.locator('.cd-dial-hit[data-level="4"]').boundingBox();
+    await s.page.mouse.click(end.x + end.width / 2, end.y + end.height / 2);
+    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "xhigh");
+    assert.equal(await menu.locator(".cd-dial-level").textContent(), "Extra high");
+    assert.equal(await pill.getAttribute("data-level"), "xhigh", "the pill's arc follows");
+    // A drag across it: the nearest mark as it goes.
+    const off = await dial.locator('.cd-dial-hit[data-level="0"]').boundingBox(), mid = await dial.locator('.cd-dial-hit[data-level="2"]').boundingBox();
+    await s.page.mouse.move(off.x + off.width / 2, off.y + off.height / 2);
+    await s.page.mouse.down();
+    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "off");
+    await s.page.mouse.move(mid.x + mid.width / 2, mid.y + mid.height / 2, { steps: 4 });
+    await s.page.mouse.up();
+    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "medium");
+    // Keys: step, ends.
+    await dial.focus();
+    await s.page.keyboard.press("End");
+    assert.equal(await dial.getAttribute("aria-valuetext"), "Extra high: Thinks longest: slowest, most careful");
+    await s.page.keyboard.press("Home");
+    await s.page.keyboard.press("ArrowUp");
+    assert.equal(await s.page.locator("#cd-thinking").inputValue(), "low");
+    await menu.locator(".cd-menu-row", { hasText: "qwen3:32b" }).click();
+    assert.equal(await s.page.locator("#cd-model").inputValue(), "qwen3:32b");
+    assert.equal(await pill.locator("#cd-model-name").textContent(), "qwen3:32b");
+    assert.equal(await menu.isVisible(), true, "still open, for thinking next");
+    await s.page.keyboard.press("Escape");
+    assert.equal(await menu.isHidden(), true);
+    assert.equal(await s.page.evaluate(() => document.activeElement?.id), "cd-model-pill", "back on the pill");
+    await pill.click();
+    await s.page.locator("#cd-log").click({ position: { x: 5, y: 5 } });
+    assert.equal(await menu.isHidden(), true, "a click elsewhere closes it");
+    // The window's size, in the meter's details, as main DGC's.
+    await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
+    await s.page.locator("#cd-context").click();
+    const size = s.page.locator("#cd-window-size");
+    assert.deepEqual(await size.locator("option").allTextContents(), ["8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "Model's maximum"]);
+    assert.equal(await size.inputValue(), "32k");
+    assert.match(await s.page.locator("#cd-context-pop").innerText(), /For every chat\. This model can take up to 262,144\./);
+    await size.selectOption("128k");
+    assert.deepEqual((await s.posted("window")).at(-1), { type: "window", preset: "128k" });
+    await s.page.locator("#cd-input").fill("Plan a trip");
+    await s.page.keyboard.press("Enter");
+    assert.deepEqual((await s.posted("send")).map((m) => [m.model, m.thinking]), [["qwen3:32b", "low"]], "the send reads what the pill chose");
+    await s.page.locator("#cd-context").click();
+    assert.equal(await s.page.locator("#cd-window-size").isDisabled(), true, "not while a reply is written");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("the context window: a meter that warns early, Compact now, the summary in place, and a chat carried over", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
@@ -1039,7 +1123,8 @@ test("the context window: a meter that warns early, Compact now, the summary in 
     await s.page.locator("#cd-context").click();
     const pop = s.page.locator("#cd-context-pop");
     assert.equal(await pop.isVisible(), true);
-    assert.match(await pop.innerText(), /30,000 of 32,768 tokens, as the model counted them/);
+    assert.match(await pop.innerText(), /CONTEXT WINDOW\s*30,000 \/ 32,768\s*92%/i, "laid out as main DGC's");
+    assert.match(await pop.innerText(), /2,768 free\s*as the model counted them/);
     assert.match(await pop.innerText(), /Window: 32k \(Settings → ChatDGC\)\. This model can take up to 262,144\./);
     await pop.getByText("Compact now").click();
     assert.equal((await s.posted("compact")).length, 1);

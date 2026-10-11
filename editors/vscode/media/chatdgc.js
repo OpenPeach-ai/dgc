@@ -45,7 +45,7 @@
   // Web search is always there, as in ChatGPT: the model looks things up whenever an answer depends on it. The
   // box's Search makes it search first, for the next message only; Settings -> Web search can turn it off.
   const searchMode = () => (state.searchFirst ? "on" : "auto");
-  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "",
+  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", windows: [],
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), searchFirst: false, planEditing: "", steerDraft: "", open: new Set(),
@@ -53,7 +53,9 @@
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
-  const LABEL = { off: "Thinking off", low: "Think: low", medium: "Think: medium", high: "Think: high", xhigh: "Think: extra high" };
+  // How much the model thinks first: what each level is called, and what it costs, as the dial says it.
+  const LEVELS = [["off", "Off", "Answers right away"], ["low", "Low", "Thinks briefly first"], ["medium", "Medium", "Thinks it through"],
+                  ["high", "High", "Thinks hard: slower, more careful"], ["xhigh", "Extra high", "Thinks longest: slowest, most careful"]];
 
   // ---- scrolling: follow the reply while the reader is at the bottom
   let pinned = true;
@@ -1597,7 +1599,6 @@
     const share = Math.min(1, c.used / c.window);
     const percent = Math.round(share * 100);
     $("cd-context-pct").textContent = `${percent}%`;
-    $("cd-ring-fill").style.strokeDasharray = `${(share * 50.27).toFixed(2)} 50.27`;
     button.dataset.level = share >= 0.85 ? "high" : share >= 0.7 ? "mid" : "low";
     button.title = `Context: ${c.used.toLocaleString()} of ${c.window.toLocaleString()} tokens`;
     button.setAttribute("aria-label", `Context window: ${percent}% used. Show details`);
@@ -1627,14 +1628,45 @@
     carry.disabled = state.busy || state.compacting || !state.messages.length || !!state.conversation?.temporary;
     carry.title = "Start a new chat that carries a summary of this one";
     carry.addEventListener("click", () => { vscode.postMessage({ type: "carry" }); state.compacting = true; render(); controls(); popover(); });
-    const actions = el("div", "cd-edit-actions"); actions.append(compact, carry);
-    pop.replaceChildren(
-      el("h3", "", `${Math.round(share * 100)}% of the context window`),
-      el("p", "cd-pop-lead", `${c.used.toLocaleString()} of ${c.window.toLocaleString()} tokens, ${c.source === "reported" ? "as the model counted them" : "estimated"}.`),
-      ...Object.entries(names).filter(([key]) => parts[key]).map(([key, label]) => line(label, Number(parts[key]).toLocaleString())),
-      el("p", "cd-pop-note", `Window: ${presets[c.preset] || c.preset} (Settings → ChatDGC)` + (c.limit ? `. This model can take up to ${c.limit.toLocaleString()}.` : ".")
-        + " Near the limit, older messages are summarized and the recent ones kept word for word."),
-      ...(why ? [why] : []), actions);
+    // As main DGC lays out its own: what's used of the window, a bar, what's left, then what fills it.
+    const head = el("div", "context-head"), named = el("div");
+    named.append(el("span", "context-kicker", "Context window"), el("strong", "", `${c.used.toLocaleString()} / ${c.window.toLocaleString()}`));
+    head.append(named, el("span", "cd-pop-pct", `${Math.round(share * 100)}%`));
+    const track = el("div", "context-track"), fill = el("span");
+    fill.style.width = `${(share * 100).toFixed(1)}%`;
+    track.append(fill);
+    const split = el("div", "context-split");
+    split.append(el("span", "", `${Math.max(0, c.window - c.used).toLocaleString()} free`), el("span", "", c.source === "reported" ? "as the model counted them" : "estimated"));
+    const rows = el("div", "cd-pop-rows");
+    rows.append(...Object.entries(names).filter(([key]) => parts[key]).map(([key, label]) => line(label, Number(parts[key]).toLocaleString())));
+    // The window's size, as main DGC's menu sets its own: here, for every chat (a backend that says which it takes).
+    const size = el("div", "context-size");
+    if (state.windows.length) {
+      const label = el("label", "context-kicker", "Window size");
+      label.htmlFor = "cd-window-size";
+      const pick = el("select", "context-size-select");
+      pick.id = "cd-window-size";
+      pick.title = "How much of the chat the model is sent, for every chat";
+      const names = { "1m": "1M", max: "Model's maximum" };
+      for (const preset of state.windows) {
+        const option = el("option", "", names[preset] || preset.toUpperCase());
+        option.value = preset;
+        pick.append(option);
+      }
+      pick.value = state.windows.includes(c.preset) ? c.preset : "";
+      pick.dataset.whileIdle = "1";                  // like Compact now: not while a reply is written
+      pick.disabled = state.busy || state.compacting;
+      pick.addEventListener("change", () => vscode.postMessage({ type: "window", preset: pick.value }));
+      const controls = el("div", "context-size-controls");
+      controls.append(pick);
+      size.append(label, controls);
+    }
+    const note = el("div", "context-last");
+    note.append(icon("history"), el("span", "", (state.windows.length ? "For every chat" : `Window: ${presets[c.preset] || c.preset} (Settings → ChatDGC)`)
+      + (c.limit ? `. This model can take up to ${c.limit.toLocaleString()}.` : ".")
+      + " Near the limit, older messages are summarized and the recent ones kept word for word."));
+    compact.className = "context-action"; carry.className = "context-action cd-pop-second";
+    pop.replaceChildren(head, track, split, rows, ...(state.windows.length ? [size] : []), note, ...(why ? [why] : []), compact, carry);
   }
   $("cd-context").addEventListener("click", () => {
     const pop = $("cd-context-pop");
@@ -1887,7 +1919,127 @@
     modelPick.value = current;
     modelPick.hidden = !ids.length;
     thinkingPick.value = state.thinking || state.conversation?.thinking || "off";
+    updatePill();
+    if (!modelMenu.hidden) renderModelMenu();
   }
+
+  // ---- the model and its thinking, as main DGC shows them: one pill (the model's name and a small arc for how much it
+  // thinks) opening a menu of the models and a dial for thinking. The selects underneath are what a send reads.
+  const pill = $("cd-model-pill"), modelMenu = $("cd-model-menu");
+  const SVG = "http://www.w3.org/2000/svg";
+  const levelOf = (value) => Math.max(0, LEVELS.findIndex(([v]) => v === value));
+  const svgEl = (tag, attrs) => { const n = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v)); return n; };
+  // The dial: a half circle, Off on the left to Extra high on the right, a mark for each level.
+  const DIAL = { cx: 60, cy: 58, r: 42 };
+  const angleOf = (level) => -180 + level * 45;
+  const at = (angle, r, cx = DIAL.cx, cy = DIAL.cy) => [cx + r * Math.cos(angle * Math.PI / 180), cy + r * Math.sin(angle * Math.PI / 180)];
+  const arc = (to, r, cx = DIAL.cx, cy = DIAL.cy) => {
+    const [x0, y0] = at(-180, r, cx, cy), [x1, y1] = at(to, r, cx, cy);
+    return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+  };
+  function updatePill() {
+    const level = levelOf(thinkingPick.value), name = modelPick.value;
+    pill.hidden = modelPick.hidden;
+    $("cd-model-name").textContent = name || "Choose a model";
+    $("cd-pill-arc-fill").setAttribute("d", level ? arc(angleOf(level), 6, 8, 9) : "");
+    pill.dataset.level = LEVELS[level][0];
+    pill.title = `${name || "No model"} · thinking: ${LEVELS[level][1]}. Click to change`;
+    pill.setAttribute("aria-label", `Model ${name || "not chosen"}, thinking ${LEVELS[level][1]}. Change model and thinking`);
+  }
+  function setThinking(level) {
+    const n = Math.max(0, Math.min(LEVELS.length - 1, level));
+    if (levelOf(thinkingPick.value) === n && thinkingPick.value === LEVELS[n][0]) return;
+    thinkingPick.value = LEVELS[n][0];
+    thinkingPick.dispatchEvent(new Event("change"));
+    updatePill();
+    showDial();
+  }
+  function dialNode() {
+    const box = el("div", "cd-dial");
+    const face = svgEl("svg", { viewBox: "0 0 120 66", class: "cd-dial-face", role: "slider", tabindex: "0", "aria-label": "Thinking",
+                                "aria-valuemin": 0, "aria-valuemax": LEVELS.length - 1 });
+    face.append(svgEl("path", { class: "cd-dial-track", d: arc(0, DIAL.r) }), svgEl("path", { class: "cd-dial-fill", d: "" }));
+    LEVELS.forEach((_, i) => {
+      const [x, y] = at(angleOf(i), DIAL.r);
+      const mark = svgEl("circle", { class: "cd-dial-mark", cx: x.toFixed(2), cy: y.toFixed(2), r: 2.4, "data-level": i });
+      const hit = svgEl("circle", { class: "cd-dial-hit", cx: x.toFixed(2), cy: y.toFixed(2), r: 10, "data-level": i });
+      face.append(mark, hit);
+    });
+    const needle = svgEl("g", { class: "cd-dial-needle" });
+    needle.append(svgEl("line", { x1: DIAL.cx, y1: DIAL.cy, x2: DIAL.cx + DIAL.r - 15, y2: DIAL.cy }), svgEl("circle", { cx: DIAL.cx, cy: DIAL.cy, r: 4 }));
+    face.append(needle);
+    // Click a mark, or drag round the dial: the nearest level. Arrow keys step it, Home and End go to the ends.
+    const pick = (e) => {
+      const box = face.getBoundingClientRect();
+      const x = (e.clientX - box.left) * 120 / box.width, y = (e.clientY - box.top) * 66 / box.height;
+      let angle = Math.atan2(y - DIAL.cy, x - DIAL.cx) * 180 / Math.PI;
+      if (angle > 0) angle = angle < 90 ? 0 : -180;               // below the dial: the nearer end
+      setThinking(Math.round((angle + 180) / 45));
+    };
+    face.addEventListener("pointerdown", (e) => { face.setPointerCapture?.(e.pointerId); pick(e); });
+    face.addEventListener("pointermove", (e) => { if (e.buttons & 1) pick(e); });
+    face.addEventListener("keydown", (e) => {
+      const n = levelOf(thinkingPick.value);
+      const to = { ArrowLeft: n - 1, ArrowDown: n - 1, ArrowRight: n + 1, ArrowUp: n + 1, Home: 0, End: LEVELS.length - 1 }[e.key];
+      if (to === undefined) return;
+      e.preventDefault(); e.stopPropagation();
+      setThinking(to);
+    });
+    const words = el("div", "cd-dial-words");
+    words.append(el("strong", "cd-dial-level", ""), el("span", "cd-dial-desc", ""), el("span", "cd-dial-hint", "Click a mark, drag, or use the arrow keys"));
+    box.append(face, words);
+    return box;
+  }
+  function showDial() {
+    const box = modelMenu.querySelector(".cd-dial");
+    if (!box) return;
+    const level = levelOf(thinkingPick.value), face = box.querySelector(".cd-dial-face");
+    face.setAttribute("aria-valuenow", level);
+    face.setAttribute("aria-valuetext", `${LEVELS[level][1]}: ${LEVELS[level][2]}`);
+    face.querySelector(".cd-dial-fill").setAttribute("d", level ? arc(angleOf(level), DIAL.r) : "");
+    face.querySelector(".cd-dial-needle").style.transform = `rotate(${angleOf(level)}deg)`;
+    for (const mark of face.querySelectorAll(".cd-dial-mark")) {
+      mark.classList.toggle("on", Number(mark.dataset.level) <= level && level > 0);
+      mark.classList.toggle("now", Number(mark.dataset.level) === level);
+    }
+    box.querySelector(".cd-dial-level").textContent = LEVELS[level][1];
+    box.querySelector(".cd-dial-desc").textContent = LEVELS[level][2];
+    box.dataset.level = LEVELS[level][0];
+  }
+  function renderModelMenu() {
+    const rows = [...modelPick.options].map((option) => {
+      const on = option.value === modelPick.value;
+      const row = el("button", `cd-menu-row${on ? " sel" : ""}`);
+      row.type = "button";
+      row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
+      row.append(icon("zap"), el("span", "cd-menu-name", option.value), ...(on ? [icon("check")] : []));
+      row.addEventListener("click", () => {
+        modelPick.value = option.value;
+        modelPick.dispatchEvent(new Event("change"));
+        updatePill(); renderModelMenu();
+        modelMenu.querySelector(".cd-menu-row.sel")?.focus();
+      });
+      return row;
+    });
+    modelMenu.replaceChildren(el("div", "cd-menu-kicker", "Model"), ...rows, el("div", "cd-menu-sep"), el("div", "cd-menu-kicker", "Thinking"), dialNode());
+    showDial();
+  }
+  function closeModelMenu(focusPill) {
+    if (modelMenu.hidden) return;
+    modelMenu.hidden = true;
+    pill.setAttribute("aria-expanded", "false");
+    if (focusPill) pill.focus();
+  }
+  pill.addEventListener("click", () => {
+    if (!modelMenu.hidden) { closeModelMenu(false); return; }
+    renderModelMenu();
+    modelMenu.hidden = false;
+    pill.setAttribute("aria-expanded", "true");
+    (modelMenu.querySelector(".cd-menu-row.sel") || modelMenu.querySelector(".cd-dial-face"))?.focus();
+  });
+  modelMenu.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeModelMenu(true); } });
+  // Where the click was, as it happened: choosing a model draws the menu again, so its row is gone by now.
+  document.addEventListener("click", (e) => { if (!e.composedPath().some((n) => n === modelMenu || n === pill)) closeModelMenu(false); });
 
   // ---- links and copy buttons inside rendered Markdown
   log.addEventListener("click", (e) => {
@@ -2201,6 +2353,11 @@
         state.defaultModel = typeof msg.current === "string" ? msg.current : "";
         fillModels();
         return;
+      case "windows":
+        // The window sizes its backend takes (none from an older one: the details then point to Settings).
+        state.windows = Array.isArray(msg.presets) ? msg.presets.filter((p) => typeof p === "string") : [];
+        if (!$("cd-context-pop").hidden) popover();
+        return;
       case "favicons":
         favicons = msg.on === true;
         render();
@@ -2295,7 +2452,6 @@
     if (handled) { e.preventDefault(); e.stopPropagation(); }
   }, true);
 
-  for (const [value, label] of Object.entries(LABEL)) { const option = thinkingPick.querySelector(`option[value="${value}"]`); if (option) option.textContent = label; }
   controls();
   vscode.postMessage({ type: "ready" });
 })();

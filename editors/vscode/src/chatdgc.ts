@@ -44,6 +44,8 @@ export interface ChatDGCHost {
   openSettings?(section: string): void;
   /** What its backend offers ChatDGC (ready.capabilities.chatdgc), or {} before it's ready. */
   chatdgcOffers?(): Record<string, unknown>;
+  /** ChatDGC's context window, for every chat: one of CHATDGC_WINDOWS its backend offers. */
+  chatdgcSetWindow?(preset: string): void;
 }
 
 interface Tab {
@@ -107,6 +109,8 @@ export function widgetFields(value: unknown): WidgetField[] | null {
 /** Which widget a tab shows, kept by VS Code with the tab so it opens again after a restart. */
 export type WidgetRef = { id: string; chat: string; title: string };
 export const CHATDGC_WIDGET = "dgc.chatdgcWidget";
+/** ChatDGC's context window presets, as main DGC's sizes run (a backend offers the ones it takes). */
+export const CHATDGC_WINDOWS = ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"];
 const WIDGET_ID = /^wg_[a-f0-9]{16}$/;
 
 /** A widget's page: the model's HTML under a policy that loads nothing from anywhere and runs only its own inline
@@ -193,15 +197,16 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <textarea id="cd-input" class="cd-input" rows="1" placeholder="Ask anything" maxlength="${MAX_TEXT}"></textarea>
 <div class="cd-tools">
 <button type="button" id="cd-attach" class="cd-icon" title="Attach files (or paste an image)" aria-label="Attach files"><span class="codicon codicon-attach" aria-hidden="true"></span></button>
-<label class="sr-only" for="cd-model">Model</label><select id="cd-model" class="cd-select" title="Model"></select>
-<label class="sr-only" for="cd-thinking">Thinking</label><select id="cd-thinking" class="cd-select" title="How much the model thinks first">
-<option value="off">Thinking off</option><option value="low">Think: low</option><option value="medium">Think: medium</option><option value="high">Think: high</option><option value="xhigh">Think: extra high</option></select>
+<span class="cd-picks" hidden><select id="cd-model" tabindex="-1" aria-hidden="true"></select><select id="cd-thinking" tabindex="-1" aria-hidden="true">
+<option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select></span>
 <button type="button" id="cd-websearch" class="cd-tool" aria-pressed="false" title="Search the web for this message. Without it, ChatDGC still searches whenever an answer depends on it"><span class="codicon codicon-globe" aria-hidden="true"></span><span>Search</span></button>
 <button type="button" id="cd-research" class="cd-tool" aria-pressed="false" title="Deep research: a plan to check, then many sources read, then a report with checked citations"><span class="codicon codicon-telescope" aria-hidden="true"></span><span>Deep research</span></button>
 <button type="button" id="cd-study" class="cd-tool" aria-pressed="false" title="Study: it teaches you step by step, asks you questions and quizzes you, instead of handing over answers. It stays on in this chat until you turn it off"><span class="codicon codicon-mortar-board" aria-hidden="true"></span><span>Study</span></button>
 <label id="cd-temp-toggle" class="cd-toggle" title="A temporary chat isn't saved or listed"><input type="checkbox" id="cd-temporary"> Temporary</label>
 <span class="cd-spacer"></span>
-<button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><svg class="cd-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="cd-ring-track" cx="10" cy="10" r="8"></circle><circle id="cd-ring-fill" class="cd-ring-fill" cx="10" cy="10" r="8"></circle></svg><span id="cd-context-pct">0%</span></button>
+<button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-pie-chart" aria-hidden="true"></span><span id="cd-context-pct">0%</span></button>
+<div class="cd-picker"><button type="button" id="cd-model-pill" class="cd-model-pill" aria-haspopup="dialog" aria-expanded="false" hidden><span id="cd-model-name" class="cd-model-name">Model</span><svg class="cd-pill-arc" viewBox="0 0 16 10" aria-hidden="true"><path class="cd-arc-track" d="M2 9 A6 6 0 0 1 14 9"></path><path id="cd-pill-arc-fill" class="cd-arc-fill" d=""></path></svg><span class="codicon codicon-chevron-up cd-model-chevron" aria-hidden="true"></span></button>
+<div id="cd-model-menu" class="cd-model-menu" role="dialog" aria-label="Model and thinking" hidden></div></div>
 <button type="submit" id="cd-send" class="cd-send" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
 <button type="button" id="cd-stop" class="cd-send cd-stop" title="Stop (Esc)" aria-label="Stop" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
 </div></form>
@@ -674,6 +679,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     panel.onDidDispose(() => { if (this.widgetPanels.get(key) === panel) { this.widgetPanels.delete(key); this.widgetPages.delete(key); } });
   }
 
+  /** The window presets the backend takes (ready.capabilities.chatdgc.windows); none from one that doesn't say. */
+  private windowPresets(): string[] {
+    try {
+      const offered = this.host?.chatdgcOffers?.()?.windows;
+      return Array.isArray(offered) ? CHATDGC_WINDOWS.filter((w) => offered.includes(w)) : [];
+    } catch { return []; }
+  }
+
   /** The backend keeps widgets for the Library (ready.capabilities.chatdgc.widget_library). */
   private widgetLibrary(): boolean {
     try { return Number(this.host?.chatdgcOffers?.()?.widget_library) >= 1; } catch { return false; }
@@ -1060,6 +1073,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         let favicons = true;
         try { favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) !== false; } catch { /* default */ }
         this.post(tab, { type: "favicons", on: favicons });
+        this.post(tab, { type: "windows", presets: this.windowPresets() });
+        return;
+      }
+      case "window": {
+        // The window's size, chosen in the meter's details: for every chat, then this chat's meter again.
+        const preset = String(message.preset || "");
+        if (!this.windowPresets().includes(preset)) return;
+        this.host?.chatdgcSetWindow?.(preset);
+        if (conversation) this.ask({ tab, kind: "context" }, { type: "chatdgc_context", conversation_id: conversation });
         return;
       }
       case "reopenNew":                      // the chat it held is gone (a temporary one after a restart)

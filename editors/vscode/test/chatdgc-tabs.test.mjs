@@ -108,6 +108,7 @@ beforeEach(() => {
   sent = [];
   host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" }, offers: { version: 1 },
     chatdgcOffers() { return this.offers; },
+    windows: [], chatdgcSetWindow(preset) { this.windows.push(preset); },
     chatdgcSend(cmd) { if (this.outcome === "sent") sent.push(cmd); return this.outcome; },
     async chatdgcModels() { return this.models; },
     postHome(message) { this.home.push(message); } };
@@ -605,6 +606,24 @@ test("the Library's widgets: listed for its page, opened beside you from their c
   library.say({ type: "widgets", query: "", offset: 0 });
   assert.deepEqual(library.last("widgetsOffered"), { type: "widgetsOffered", on: false });
   assert.equal(sent.length, before);
+});
+
+test("the window's size, chosen in a chat's meter: for every chat, its meter asked again; only sizes its backend takes", () => {
+  chat.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  assert.deepEqual(panel.last("windows"), { type: "windows", presets: [] }, "a backend that doesn't list them: none here");
+  panel.say({ type: "window", preset: "64k" });
+  assert.deepEqual(host.windows, []);
+  host.offers = { version: 1, windows: ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max", "2m"] };
+  panel.say({ type: "ready" });
+  assert.deepEqual(panel.last("windows").presets, ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"], "the ones this screen knows");
+  opened(panel, { id: ID(7), title: "Loan" });
+  panel.say({ type: "window", preset: "64k" });
+  assert.deepEqual(host.windows, ["64k"]);
+  assert.deepEqual({ ...last("chatdgc_context"), request_id: "" }, { type: "chatdgc_context", request_id: "", conversation_id: ID(7) });
+  for (const bad of ["2m", "48k", "", "max; rm"]) panel.say({ type: "window", preset: bad });
+  assert.deepEqual(host.windows, ["64k"], "never one it doesn't know");
 });
 
 test("a reload brings each chat back in its tab, once", async () => {

@@ -1,8 +1,8 @@
 """How much of the model's context window a chat fills, and keeping it inside.
 
 Small windows are how local chat fails: a 32k model fills up after a long document and a few dozen turns. So:
-  * the window is the model's real one (asked of the provider), capped by the preset in Settings -> ChatDGC
-    (8k, 32k, 128k, or the model's maximum) and sent with every request;
+  * the window is the model's real one (asked of the provider), capped by the preset chosen in the meter's details
+    or Settings -> ChatDGC (8k to 1m, as main DGC offers, or the model's maximum) and sent with every request;
   * what a chat takes is counted by the provider where it reports it, estimated otherwise;
   * before a reply that would pass COMPACT_AT of the window, the older turns become a summary and the recent
     ones stay word for word (KEEP_RECENT of the window, counted in tokens, not messages); the summary is shown,
@@ -11,7 +11,8 @@ Small windows are how local chat fails: a 32k model fills up after a long docume
 """
 from __future__ import annotations
 
-WINDOWS = {"8k": 8192, "32k": 32768, "128k": 131072, "max": 0}
+WINDOWS = {"8k": 8192, "16k": 16384, "32k": 32768, "64k": 65536, "128k": 131072, "256k": 262144, "512k": 524288,
+           "1m": 1048576, "max": 0}
 DEFAULT_WINDOW = "32k"
 FALLBACK_WINDOW = 32768          # a "max" the provider didn't report
 COMPACT_AT = 0.75                # of the window: past this before a reply, older turns are summarized

@@ -88,6 +88,18 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **ChatDGC's box, as main DGC's** (founder: the purple ring off, the model and thinking pickers and the context
+  meter as main DGC has them, thinking "something creative": he chose a dial). The box keeps its border on focus with
+  main DGC's shadow; the tools are borderless. The two native selects stay as what a send reads, hidden behind one
+  pill (the model's name, a 16px arc for the level) opening a menu: the models (menuitemradio) and a dial (an SVG
+  `role="slider"`: five marks on a half circle, a needle, click, drag or arrow keys, Home and End), each level with a
+  plain line of what it costs. The meter is main DGC's pie icon and percentage, and its details use main DGC's own
+  context classes, now with **Window size**: `chatdgc_window` takes 8k, 16k, 32k, 64k, 128k, 256k, 512k, 1m or max
+  (window.py's list, which the config check now reads), advertised as `ready.capabilities.chatdgc.windows` so the
+  screen and Settings offer only what the backend takes; choosing one sets it for every chat and asks for the chat's
+  meter again with a new `chatdgc_context` command. Two bugs the new tests caught before they shipped: choosing a
+  model closed the menu (the redrawn row was gone when the outside-click check ran: it now reads the event's path),
+  and the size picker stayed live while a reply was written.
 - **Maths in ChatDGC's replies.** The prompt always asked for LaTeX and nothing drew it, so every formula showed as
   raw `$E = P \cdot r…$`. `src/markdown.ts` gains an opt-in (`setMath`, off for main DGC's chat): `$…$`/`\(…\)`
   inline and `$$…$$`/`\[…\]` display become placeholders holding the TeX (pandoc's rule keeps "$5 and $10" text;

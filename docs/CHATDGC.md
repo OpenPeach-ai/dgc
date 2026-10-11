@@ -67,8 +67,11 @@ voice come in later phases.
   - Brave and Tavily need a key, which is kept in `~/.dgc/secrets.json` (owner-only), where `dgc setup`
     keeps it too.
   - SearXNG is a server you run.
-- **Model and thinking.** Each chat keeps the model and thinking level you choose, and gets them back
-  when you reopen it. The levels are off, low, medium, high and extra high; chats have no ultra mode. If
+- **Model and thinking.** As in main DGC, one button by Send names the model (a small arc beside it shows how much
+  it thinks) and opens a menu: the models, and a **dial** for thinking. Click a mark, drag round it, or step it with
+  the arrow keys: Off ("answers right away"), Low, Medium, High ("thinks hard: slower, more careful") or Extra high.
+  Each chat keeps the model and thinking level you choose, and gets them back when you reopen it; chats have no
+  ultra mode. If
   the model thought before answering, **Thought** above the reply opens what it thought.
 - **Long replies.** ChatDGC doesn't limit reply length; the model's own limit is the only one. If a reply
   stops at that limit, or you press Stop, the reply keeps what was written and shows **Continue**.
@@ -82,8 +85,9 @@ voice come in later phases.
     summarized (right after a summary), the details say so and the button waits for another exchange.
   - **Continue in a new chat:** a new chat starts with a summary of this one.
 
-  The window is the model's real one, capped by **Settings → ChatDGC → Window** (8k, 32k by default, 128k,
-  or the model's maximum), and it is sent with every request. Before a reply would fill more than 75% of
+  The window is the model's real one, capped by the size you choose (8K, 16K, 32K by default, 64K, 128K, 256K,
+  512K, 1M or the model's maximum, as main DGC offers): in the meter's details (**Window size**, for every chat) or
+  **Settings → ChatDGC → Window**. It is sent with every request. Before a reply would fill more than 75% of
   it, the older messages are summarized and the recent ones kept word for word. You see "Summarizing
   earlier messages…" when that happens; it is never done silently. An **Earlier messages summarized**
   divider shows the summary, and you can edit it. Every message stays in the chat for you. One file never

@@ -152,9 +152,10 @@ body.cd-blank .cd-fine { display: none; }
 .cd-notice { margin: 0 0 var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--err); border-radius: var(--r-md);
   background: var(--err-soft); color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 .cd-notice[data-kind="info"] { border-color: var(--border-strong); background: var(--surface2); }
+/* As main DGC's box: no accent ring around what you look at all day; the send button carries the accent. */
 .cd-box { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-2);
-  border: 1px solid var(--border-strong); border-radius: var(--r-2xl); background: var(--surface2); }
-.cd-box:focus-within { border-color: var(--accent); }
+  border: 1px solid var(--border-strong); border-radius: var(--r-2xl); background: var(--surface2); box-shadow: 0 7px 24px rgba(0,0,0,.18); }
+.cd-box:focus-within { border-color: var(--border-strong); }
 /* Attachments: chips in the box before sending, and on the message once sent. */
 .cd-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
 .cd-chip { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 100%; min-height: var(--control);
@@ -188,9 +189,54 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-input:focus-visible { outline: none; }
 .cd-input::placeholder { color: var(--muted); }
 .cd-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.cd-select { max-width: 220px; height: var(--control); padding: 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-full);
-  background: var(--surface); color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; text-overflow: ellipsis; }
-.cd-select:hover { border-color: var(--border-strong); }
+/* The model and its thinking, as main DGC's model control: the name, a small arc for thinking, a chevron. */
+.cd-picker { position: relative; display: inline-flex; min-width: 0; }
+.cd-model-pill { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 240px; min-width: 0; height: var(--control);
+  padding: 0 var(--sp-1) 0 var(--sp-2); border: 0; border-radius: var(--r-md); background: transparent; color: var(--text);
+  font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; transition: background .12s; }
+.cd-model-pill:hover, .cd-model-pill[aria-expanded="true"] { background: var(--surface); }
+.cd-model-pill:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-pill-arc { flex: none; width: 16px; height: 10px; }
+.cd-arc-track, .cd-arc-fill { fill: none; stroke-width: 2; stroke-linecap: round; }
+.cd-arc-track { stroke: var(--border-strong); }
+.cd-arc-fill { stroke: var(--accent-text, var(--accent)); }
+.cd-model-chevron { flex: none; color: var(--faint); font-size: var(--t-sm); }
+.cd-model-menu { position: absolute; right: 0; bottom: 100%; z-index: 20; margin-bottom: var(--sp-2);
+  width: min(300px, calc(100vw - 20px)); max-height: min(460px, calc(100vh - 120px)); overflow-y: auto; padding: var(--sp-1);
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
+.cd-menu-kicker { padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans);
+  letter-spacing: .1em; text-transform: uppercase; }
+.cd-menu-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-1) var(--sp-2); border: 0;
+  border-radius: var(--r-sm); background: transparent; color: var(--text); text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.3 var(--sans); }
+.cd-menu-row:hover { background: var(--surface2); }
+.cd-menu-row.sel { background: var(--sel); }
+.cd-menu-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.cd-menu-row > .codicon:first-child { color: var(--muted); }
+.cd-menu-row.sel > .codicon:first-child { color: var(--accent-text, var(--accent)); }
+.cd-menu-row > .codicon-check { margin-left: auto; color: var(--accent-text, var(--accent)); }
+.cd-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-menu-sep { height: 1px; margin: var(--sp-1) var(--sp-1); background: var(--border); }
+/* Thinking, as a dial: Off on the left, Extra high on the right; click a mark, drag, or step it with the arrow keys. */
+.cd-dial { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
+.cd-dial-face { flex: none; width: 120px; height: 66px; cursor: pointer; touch-action: none; border-radius: var(--r-md); }
+.cd-dial-face:focus { outline: none; }
+.cd-dial-face:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.cd-dial-track, .cd-dial-fill { fill: none; stroke-width: 7; stroke-linecap: round; }
+.cd-dial-track { stroke: var(--border-strong); }
+.cd-dial-fill { stroke: var(--accent-fill, var(--accent)); }
+.cd-dial-mark { fill: var(--faint); }
+.cd-dial-mark.on { fill: var(--text-strong); }
+.cd-dial-mark.now { fill: var(--text-strong); r: 4.6px; }
+.cd-dial-hit { fill: transparent; }
+.cd-dial-needle { transform-origin: 60px 58px; transition: transform .2s ease-out; }
+.cd-dial-needle line { stroke: var(--text-strong); stroke-width: 2.4; stroke-linecap: round; }
+.cd-dial-needle circle { fill: var(--text-strong); }
+.cd-dial-words { display: grid; gap: 3px; min-width: 0; }
+.cd-dial-level { color: var(--text-strong); font: var(--w-semi) var(--t-base)/1.2 var(--sans); }
+.cd-dial-desc { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-dial-hint { margin-top: 2px; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.3 var(--sans); }
+@media (prefers-reduced-motion: reduce) { .cd-dial-needle { transition: none; } }
 .cd-toggle { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
 .cd-toggle input { margin: 0; accent-color: var(--accent); }
 .cd-spacer { flex: 1 1 auto; }
@@ -206,10 +252,11 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 @media (max-width: 520px) {
   .cd-column { padding: 0 var(--sp-3); }
   .cd-bubble { max-width: 92%; }
-  .cd-select { max-width: 150px; }
+  .cd-model-pill { max-width: 160px; }
 }
 @media (forced-colors: active) {
-  .cd-bubble, .cd-box, .cd-select { border: 1px solid CanvasText; }
+  .cd-bubble, .cd-box, .cd-model-menu { border: 1px solid CanvasText; }
+  .cd-dial-fill, .cd-arc-fill { stroke: Highlight; }
   .cd-send, .cd-continue { forced-color-adjust: none; background: Highlight; color: HighlightText; }
 }
 
@@ -231,12 +278,14 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-meter:hover { background: var(--surface); color: var(--text); }
 .cd-meter[data-level="mid"] { --meter: var(--warn); color: var(--warn); }
 .cd-meter[data-level="high"] { --meter: var(--del-text); color: var(--del-text); }
-.cd-ring { width: 16px; height: 16px; transform: rotate(-90deg); }
-.cd-ring circle { fill: none; stroke-width: 2.6; }
-.cd-ring-track { stroke: var(--border-strong); }
-.cd-ring-fill { stroke: var(--meter); stroke-linecap: round; stroke-dasharray: 0 50.27; }
-.cd-pop { margin: 0 0 var(--sp-2) auto; width: min(360px, 100%); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border-strong);
-  border-radius: var(--r-xl); background: var(--surface); box-shadow: var(--shadow-2); }
+.cd-meter .codicon { font-size: var(--t-lg); }
+/* Its details, laid out as main DGC's context window menu (its own classes: context-head, -track, -split, -action). */
+.cd-pop { margin: 0 0 var(--sp-2) auto; width: min(300px, 100%); padding: var(--sp-3); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
+.cd-pop-pct { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1 var(--mono); font-variant-numeric: tabular-nums; }
+.cd-pop-rows { margin-top: var(--sp-2); }
+.cd-pop .context-split span + span { font-family: var(--sans); }
+.cd-pop .context-action + .context-action { margin-top: var(--sp-2); }
 .cd-pop h3 { margin: 0 0 var(--sp-1); color: var(--text-strong); font: var(--w-semi) var(--t-base)/1.3 var(--sans); }
 .cd-pop-lead, .cd-pop-note { margin: 0 0 var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
 .cd-pop-note { margin-top: var(--sp-2); }
@@ -255,12 +304,12 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 
 /* Deep research. The toggle in the box; then the reply's card: the plan (to edit or start), the reading as it
    happens, or how it went; the report below it; and the report on its own, full screen. */
+/* Search, Deep research, Study: borderless, as main DGC's footer buttons are; on, they wear the accent. */
 .cd-tool { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control); padding: 0 var(--sp-2);
-  border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface); color: var(--text);
-  font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
-.cd-tool:hover { border-color: var(--border-strong); }
-.cd-tool[aria-pressed="true"] { border-color: var(--accent-fill); background: color-mix(in srgb, var(--accent-fill) 16%, var(--surface));
-  color: var(--text-strong); }
+  border: 1px solid transparent; border-radius: var(--r-md); background: transparent; color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; transition: background .12s, color .12s; }
+.cd-tool:hover { background: var(--surface); color: var(--text); }
+.cd-tool[aria-pressed="true"] { background: color-mix(in srgb, var(--accent-fill) 18%, transparent); color: var(--accent-text, var(--text-strong)); }
 .cd-tool:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 .cd-research-chip { display: inline-flex; align-items: center; gap: var(--sp-1); align-self: flex-end; color: var(--muted);
   font: var(--w-med) var(--t-xs)/1.4 var(--sans); }

@@ -157,6 +157,14 @@ class ServiceTests(unittest.TestCase):
         return self.wire.wait(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended"
                               and f.get("request_id") == request_id)
 
+    def test_the_meter_asked_again_after_the_window_changed(self):
+        chat = self.new()
+        self.wire.wait(lambda f: f["type"] == "chatdgc_context")           # the one opening it sends
+        after = len(self.wire.frames)
+        self.service.dispatch({"type": "chatdgc_context", "request_id": "c1", "conversation_id": chat})
+        got = self.wire.wait(lambda f: f["type"] == "chatdgc_context" and f["seq"] >= after)
+        self.assertEqual((got["conversation_id"], got["preset"]), (chat, "32k"))
+
     def test_a_draft_edited_in_place_is_the_replys_from_then_on_but_never_mid_turn(self):
         chat = self.new()
         email = "Subject: Moving out\n\nDear Mr Rao,\n\nI'm leaving flat 4B on 30 November."
@@ -662,7 +670,8 @@ class HostTests(unittest.TestCase):
         self.fail(f"no matching frame: {self.frames()[-5:]}")
 
     def test_ready_offers_it(self):
-        self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1, "widget_library": 1})
+        self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1, "widget_library": 1,
+                          "windows": ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"]})
 
     def test_no_frame_carries_a_sessions_chat_id_even_with_several_sessions(self):
         self.host.dispatch({"type": "open_chat", "request_id": "oc", "cwd": str(self.tmp / "b")})

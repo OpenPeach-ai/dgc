@@ -850,6 +850,9 @@ COMMAND_FIELDS.update({
     # newest first (`query` part of its name); `get` one with its page (`conversation_id`, `widget_id`), to open it
     # again; `remove` deletes one (its page goes, the reply keeps its name, marked removed, and is sent again as
     # `chatdgc_message`). Answered by `chatdgc_widgets`.
+    # The context window's meter again, for a chat (after its window preset changed): answered by `chatdgc_context`.
+    # Offered with ready.capabilities.chatdgc.windows.
+    "chatdgc_context": {"request_id": _S(), "conversation_id": _S()},
     "chatdgc_widgets": {"request_id": _S(), "op": _f("string", enum=("list", "get", "remove")), "query": _S(False),
                         "limit": _I(False), "offset": _I(False), "conversation_id": _S(False), "widget_id": _S(False)},
     "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
