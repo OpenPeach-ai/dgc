@@ -829,6 +829,9 @@ COMMAND_FIELDS.update({
     # Plugins in chat: a reply's card (an action in one of the user's plugins) is decided with `chatdgc_action`: "run"
     # sends it now (with `arguments` as the user edited them), "dismiss" doesn't, "hand" sends it to the Personal
     # Pip `pip_id` (`chatdgc_pips` lists them). Answered by `chatdgc_action` with the card as it is now.
+    # Writing blocks: a draft in a reply (an ```email or ```draft block) the user edited in place. `original` is the
+    # block's words as shown; `text` replaces them. Answered by `chatdgc_message` with the reply as it is now.
+    "chatdgc_draft": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "original": _S(), "text": _S()},
     "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
                        "op": _f("string", enum=("run", "dismiss", "hand")), "arguments": _O(False), "pip_id": _S(False)},
     "chatdgc_pips": {"request_id": _S()},

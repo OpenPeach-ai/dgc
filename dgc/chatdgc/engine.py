@@ -331,6 +331,32 @@ class ChatEngine:
                 raise ChatEngineError("A temporary chat isn't kept, so it can't be in a project.")
         return self.store.move(chat_id, project_id)
 
+    # -- writing blocks: a draft (```email or ```draft) the user edits in place, as ChatGPT's writing blocks are
+
+    def edit_draft(self, chat_id: str, message_id: str, original: str, text: str) -> dict:
+        """The user's edit of a draft in a reply: the reply keeps their words where the draft was, and the model reads
+        them from then on. ``original`` is the draft as the screen showed it, so an edit of one that changed since
+        is refused rather than put somewhere else."""
+        chat = self._chat(chat_id)
+        message = next((m for m in chat["messages"] if m.get("id") == message_id and m.get("role") == "assistant"), None)
+        if message is None:
+            raise ChatEngineError("That reply isn't in this chat.")
+        text = str(text or "").replace("\r\n", "\n").strip("\n")
+        if not text.strip():
+            raise ChatEngineError("A draft can't be empty: delete what you don't want, not all of it.")
+        if len(text) > MAX_DRAFT_CHARS:
+            raise ChatEngineError(f"A draft holds at most {MAX_DRAFT_CHARS:,} characters.")
+        if re.search(r"(?m)^\s*(```|~~~)", text):
+            raise ChatEngineError("A draft can't have a line starting with ``` or ~~~.")
+        changed = _with_draft(message.get("text") or "", str(original or ""), text)
+        if changed is None:
+            raise ChatEngineError("That draft has changed since you started editing it. Edit it again.")
+        if len(changed) > MAX_TEXT:
+            raise ChatEngineError("That makes the reply too long to keep.")
+        message["text"] = changed
+        self._save(chat)
+        return message
+
     # -- the Library (store.library): every file you attached, to see, use again, keep elsewhere, or delete
 
     def library_file(self, ref: dict) -> tuple[dict, bytes, str | None]:
@@ -1906,6 +1932,34 @@ def _asked(question: dict) -> str:
     """A question as the model reads it back, in history and summaries."""
     return (f"\n\n[You asked the user, as a card with choices: {question.get('question', '')} Options: "
             + "; ".join(question.get("options") or []) + "; or their own answer.]\n\n")
+
+
+DRAFT_KINDS = ("email", "draft")
+MAX_DRAFT_CHARS = 50_000
+
+
+def _with_draft(markdown: str, original: str, text: str) -> str | None:
+    """``markdown`` with the first ```email / ```draft block whose words are ``original`` holding ``text`` instead
+    (indented as the fence is, inside a list), or None when no block has those words now."""
+    from markdown_it import MarkdownIt
+    want = original.replace("\r\n", "\n").strip("\n")
+    lines = markdown.split("\n")
+    for token in MarkdownIt("commonmark").parse(markdown):
+        if token.type != "fence" or not token.map:
+            continue
+        kind, content, label = token.info.strip().split(" ")[0].lower(), token.content, 0
+        first = content.split("\n", 1)
+        if not kind and first[0].strip().lower() in DRAFT_KINDS:
+            # The label on the line after the backticks: the model sometimes splits it, and the screen reads it so.
+            kind, content, label = first[0].strip().lower(), first[1] if len(first) > 1 else "", 1
+        if kind not in DRAFT_KINDS or content.strip("\n") != want:
+            continue
+        start, end = token.map
+        indent = re.match(r"\s*", lines[start]).group(0)
+        closed = end - 1 > start and lines[end - 1].strip().startswith(token.markup)
+        body = [(indent + line) if line else line for line in text.split("\n")]
+        return "\n".join(lines[:start + 1 + label] + body + lines[end - 1 if closed else end:])
+    return None
 
 
 def _made_note(meta: dict, found) -> str:

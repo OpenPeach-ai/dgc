@@ -44,6 +44,17 @@ MEMORY = (
     "announce saving: the reply shows it.\n")
 
 
+# Writing blocks (ChatGPT's): a draft the user will send as it is goes in its own fenced block, which the screen shows as
+# an email or a draft with Copy (plain text), Open in mail app, and Edit in place.
+DRAFTS = (
+    "- When you write something the user will send or post as it is (an email, a message, a letter, a social post, a "
+    "cover letter, a bio), put exactly that text in one fenced block and keep your own comments outside it. Open the "
+    "block with ```email (on that same line) for an email, then a Subject: line (and a To: line only when you know "
+    "the address), a blank line and the body; or with ```draft for anything else. Inside the block write plain text: "
+    "no Markdown marks such as ** or # headings, and a blank line between paragraphs. To change a draft, write the "
+    "whole block again.\n")
+
+
 # Study mode (ChatGPT's "Study and learn"): the chat teaches instead of answering, until the user turns it off. Its own
 # words, written for DGC: it finds the level first, goes a step at a time, makes them try, and checks with a quiz card.
 STUDY = (
@@ -114,8 +125,9 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         "- Use Markdown well: short paragraphs; headings only for long answers; lists and tables when they make "
         "something easier to read; code in fenced blocks with the language named; maths in LaTeX ($…$ or $$…$$).\n"
         "- When you're not sure, say so plainly rather than guessing. Never invent facts, quotes, links or numbers.\n"
+        + DRAFTS
         # Main DGC's rule (dgc/presentation.py), as the founder decided for ChatDGC too.
-        "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
+        + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
         + (ASK if ask else "")
         + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "

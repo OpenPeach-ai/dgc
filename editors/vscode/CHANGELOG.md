@@ -52,6 +52,10 @@
 - **The Library.** **Library** in the side bar shows every file you attached in ChatDGC, by kind, searchable by
   name. Open where a file is, start a new chat with it, save a copy, add it to a project, or delete it. The
   paperclip lists your newest files before Upload.
+- **Writing blocks.** A drafted email, message, letter or post comes in its own box: **Copy** (just the text, no
+  stars or hashes), **Open in mail app** (address, subject and text filled in), and **Edit** in place, which the
+  chat then works from. A reply's **Copy** now copies it as it reads: formatted in a mail app or document, clean
+  text elsewhere.
 - **Study mode.** **Study** in the box makes the chat a tutor until you turn it off: it asks what you know,
   teaches a step at a time, has you try, and checks with quick quizzes you answer with a click.
 - **Files ChatDGC makes.** Ask for a document, PDF, spreadsheet or slides and the reply comes with a card:

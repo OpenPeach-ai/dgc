@@ -149,7 +149,7 @@ class ChatService:
              "chatdgc_carry": self._carry, "chatdgc_branch": self._branch, "chatdgc_research": self._research,
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
-             "chatdgc_action": self._action, "chatdgc_pips": self._pips,
+             "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_draft": self._draft,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -343,6 +343,18 @@ class ChatService:
             self._projects_changed()
 
     # -- plugins: the user's choice on a card under a reply
+
+    def _draft(self, cmd: dict) -> None:
+        """A draft edited in place (ChatGPT's writing blocks): the reply as it is now, on every screen. Not while a
+        reply is being written in the chat: its save would put the old words back."""
+        conversation_id = cmd["conversation_id"]
+        with self._lock:
+            if conversation_id in self._turns:
+                raise ChatEngineError("Let the reply finish first.")
+        message = self.engine.edit_draft(conversation_id, cmd["message_id"], cmd["original"], cmd["text"])
+        marked = self._marked(self.engine.open(conversation_id), [message])[0]
+        self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked), request_id=cmd["request_id"])
+        self._changed(conversation_id, None)
 
     def _action(self, cmd: dict) -> None:
         """Send it now (as edited), don't, or hand it to a Pip. Sending holds the chat's turn slot, so no reply starts

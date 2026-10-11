@@ -88,6 +88,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **Writing blocks in ChatDGC**, as ChatGPT has them: the prompt (`DRAFTS`) puts a draft the user will send as it is
+  in its own ` ```email ` (Subject:, To:) or ` ```draft ` block; `chatdgc_draft` {conversation_id, message_id, original,
+  text} edits one in place (answered by `chatdgc_message`; refused mid-turn, or when the block's words changed
+  since). Real model (deepseek-v4.1-flash): emails 4 of 4 in their block with a subject and plain text, revisions
+  rewrite the whole block, other drafts 5 of 6 labelled (the screen also reads a label on the line after the
+  backticks), no block for a plain question. And main DGC's no-emoji rule: none in 12 replies that didn't ask; a
+  caption "with emojis" still gets them.
 - **Study mode in ChatDGC**, as ChatGPT's "Study and learn": `chatdgc_send` takes `study` (true on, false off,
   left out unchanged); the chat keeps it (`study` on the conversation) and its system prompt then adds `STUDY`
   (`dgc/chatdgc/prompt.py`): find the level first, one step at a time, end with something to try, hints before

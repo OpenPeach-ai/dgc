@@ -159,6 +159,15 @@ voice come in later phases.
     said yourself isn't held back.
   - A plugin whose sign-in only the editor holds can't be reached from a chat (as from a Pip): sign it in from
     Settings → Plugins.
+- **Writing blocks**, as ChatGPT has them: an email, a message, a letter or a post you'll send as it is comes in
+  its own box, apart from what ChatDGC says about it. An email shows who it's to and its subject on their own.
+  - **Copy** puts just the text on the clipboard: no stars, no hashes.
+  - **Open in mail app** starts a new email with the address, subject and text filled in (a long one's text goes
+    on the clipboard to paste, as mail links can't carry it).
+  - **Edit** changes it in place; the reply keeps your version, and ChatDGC works from it next.
+  - The reply's own **Copy** copies it as it reads: formatted when you paste into a mail app or a document, clean
+    text everywhere else.
+- **No emoji** unless you ask for them, as in the rest of DGC.
 - **Files it makes**, as ChatGPT hands you a report: ask for a document, a PDF, a spreadsheet or slides (or
   something that's plainly a file, like a CV or a budget to fill in) and the reply comes with a card: the
   file's name, kind, size and pages, with **Open** (in its own app; Markdown and CSV open in an editor tab) and
@@ -254,6 +263,7 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `chatdgc_compact` | `request_id`, `conversation_id` | `chatdgc_compacted` (`summary`) |
 | `chatdgc_summary` | `request_id`, `conversation_id`, `text` | `chatdgc_compacted` (marked `edited`) |
 | `chatdgc_carry` | `request_id`, `conversation_id` | `chatdgc_opened` for the new chat (its `conversation.carried`) |
+| `chatdgc_draft` | `request_id`, `conversation_id`, `message_id`, `original` (the draft's words as shown), `text` | `chatdgc_message` (the reply with the draft edited) |
 | `chatdgc_cancel` | `conversation_id`, `request_id?` | the turn ends `cancelled` |
 | `chatdgc_file` | `request_id`, `conversation_id`, `attachment_id` | `chatdgc_file` (`data`: an image as a `data:` URI up to 2.5 MB, or `error`) |
 | `chatdgc_update` | `request_id`, `conversation_id`, `title?`, `pinned?`, `archived?`, `delete?` | `chatdgc_changed` |

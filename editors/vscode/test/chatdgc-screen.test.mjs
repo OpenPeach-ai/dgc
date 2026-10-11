@@ -125,7 +125,8 @@ test("a reply streams in as Markdown; your words and its words never become mark
     await s.page.locator('.cd-assistant [aria-label="Copy"]').click();
     const asked = await s.posted();
     assert.deepEqual(asked.filter((m) => m.type === "openLink"), [{ type: "openLink", target: "https://example.com/paris" }]);
-    assert.deepEqual(asked.filter((m) => m.type === "copy").map((m) => m.text), ["const x = 1;\n", "**Paris** is the capital.\n\n```js\nconst x = 1;\n```\n\nSee [the docs](https://example.com/paris)."]);
+    assert.deepEqual(asked.filter((m) => m.type === "copy").map((m) => m.text), ["const x = 1;\n", "Paris is the capital.\n\nconst x = 1;\n\nSee the docs."],
+                     "a reply copies as it reads, with no ** or fences (a code block's own Copy keeps its code exactly)");
     assert.equal(await shown(s.page, "#cd-send"), true);
     assert.equal(await shown(s.page, "#cd-menu"), true, "a chat with messages can be renamed");
     assert.deepEqual(s.errors, []);
@@ -953,7 +954,7 @@ test("keyboard shortcuts, as ChatGPT has them, and the list of them", async (t) 
     await s.page.locator("#cd-title").click();
     await s.page.keyboard.press("Control+Shift+KeyC");
     await s.page.keyboard.press("Control+Shift+Semicolon");
-    assert.deepEqual((await s.posted("copy")).map((m) => m.text), ["First:\n\n```js\nconst a = 1;\n```\n\nSecond:\n\n```py\nb = 2\n```", "b = 2\n"]);
+    assert.deepEqual((await s.posted("copy")).map((m) => m.text), ["First:\n\nconst a = 1;\n\nSecond:\n\nb = 2", "b = 2\n"]);
     await s.page.keyboard.press("Shift+Escape");
     assert.equal(await s.page.evaluate(() => document.activeElement.id), "cd-input");
     await s.page.keyboard.press("Control+Shift+KeyO");
@@ -1367,6 +1368,79 @@ test("study mode: the chat's, on when it opens on, sent with each message, and o
     await s.page.locator("#cd-research").click();
     await study.click();
     assert.equal(await study.getAttribute("aria-pressed"), "false", "and off again");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("writing blocks: a draft reads as the email or message it is, with Copy, Open in mail app and Edit in place", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const email = "To: rao@example.com\nSubject: Moving out of 4B\n\nDear Mr Rao,\n\nI'm **leaving** on 30 November.";
+    const fence = "```";
+    const text = `Here it is, see [the notice rules](https://example.gov/notice).\n\n${fence}email\n${email}\n${fence}\n\nFor WhatsApp:\n\n`
+      + `${fence}\ndraft\nHey all, party at 7!\n${fence}\n\nAnd code:\n\n${fence}python\nprint(1)\n${fence}`;
+    await s.send({ type: "opened", conversation: conversation({ title: "Notice" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Draft my notice" }, { id: M(2), role: "assistant", text, finish: "stop" }] });
+    await s.frame();
+    const drafts = s.page.locator(".cd-draft");
+    assert.deepEqual(await drafts.evaluateAll((n) => n.map((x) => x.dataset.kind)), ["email", "draft"], "the label on its own line too");
+    assert.equal(await s.page.locator("pre.code").count(), 1, "code stays code");
+    const mail = drafts.first();
+    assert.equal(await mail.locator(".cd-draft-to").textContent(), "To: rao@example.com");
+    assert.equal(await mail.locator(".cd-draft-subject").textContent(), "Moving out of 4B");
+    assert.equal(await mail.locator(".cd-draft-body").textContent(), "Dear Mr Rao,\n\nI'm leaving on 30 November.", "no stray marks");
+    assert.equal(await mail.locator("b, strong").count(), 0, "words, never markup");
+    assert.deepEqual(await mail.locator(".cd-draft-tool").allInnerTexts(), ["Copy", "Open in mail app", "Edit"]);
+    assert.deepEqual(await drafts.nth(1).locator(".cd-draft-tool").allInnerTexts(), ["Copy", "Edit"], "a message has no mail app");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-writing-blocks.png") });
+    await mail.getByRole("button", { name: "Copy" }).click();
+    assert.equal((await s.posted("copy")).at(-1).text, "Dear Mr Rao,\n\nI'm leaving on 30 November.");
+    await mail.getByRole("button", { name: "Open in mail app" }).click();
+    assert.deepEqual((await s.posted("openMail")).at(-1), { type: "openMail", to: "rao@example.com", cc: "", bcc: "",
+                                                           subject: "Moving out of 4B", body: "Dear Mr Rao,\n\nI'm leaving on 30 November." });
+    // Edit in place: as it reads; Save sends the block's words, refused comes back to editing, saved is the reply's.
+    await mail.getByRole("button", { name: "Edit" }).click();
+    assert.equal(await mail.locator(".cd-draft-subject-input").inputValue(), "Moving out of 4B");
+    assert.equal(await mail.locator(".cd-draft-text").inputValue(), "Dear Mr Rao,\n\nI'm leaving on 30 November.");
+    await mail.locator(".cd-draft-text").fill("Dear Mr Rao,\n\nI'm leaving on 1 December.");
+    await mail.getByRole("button", { name: "Save" }).click();
+    const edited = "To: rao@example.com\nSubject: Moving out of 4B\n\nDear Mr Rao,\n\nI'm leaving on 1 December.";
+    assert.deepEqual((await s.posted("draftEdit")).at(-1), { type: "draftEdit", messageId: M(2), original: email, text: edited });
+    assert.equal(await mail.getByRole("button", { name: "Saving…" }).isDisabled(), true);
+    await s.send({ type: "error", message: "Let the reply finish first." });
+    await s.frame();
+    assert.equal(await mail.getByRole("button", { name: "Save" }).isDisabled(), false, "refused: still yours to save");
+    assert.equal(await mail.locator(".cd-draft-text").inputValue(), "Dear Mr Rao,\n\nI'm leaving on 1 December.");
+    await mail.getByRole("button", { name: "Save" }).click();
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: text.replace(email, edited), finish: "stop" } });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-draft-text").count(), 0, "saved: it reads again");
+    assert.equal(await s.page.locator(".cd-draft-body").first().textContent(), "Dear Mr Rao,\n\nI'm leaving on 1 December.");
+    assert.equal(await s.page.locator("#cd-announce").textContent(), "Draft saved.");
+    // The reply's Copy: clean text where there's no rich clipboard; formatted and clean where there is.
+    const replyCopy = s.page.locator(`.cd-assistant[data-id="${M(2)}"] .cd-actions button[aria-label="Copy"]`);
+    await replyCopy.click();
+    assert.equal((await s.posted("copy")).at(-1).text, "Here it is, see the notice rules.\n\nTo: rao@example.com\n\nMoving out of 4B\n\n"
+      + "Dear Mr Rao,\n\nI'm leaving on 1 December.\n\nFor WhatsApp:\n\nHey all, party at 7!\n\nAnd code:\n\nprint(1)", "no ** or #, no buttons");
+    await s.page.evaluate(() => {
+      window.ClipboardItem = class { constructor(parts) { this.parts = parts; } async getType(t) { return this.parts[t]; } };
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write: async ([item]) => {
+        window.__clip = { plain: await (await item.getType("text/plain")).text(), html: await (await item.getType("text/html")).text() }; } } });
+    });
+    const before = (await s.posted("copy")).length;
+    await replyCopy.click();
+    await s.page.waitForFunction(() => !!window.__clip);
+    const clip = await s.page.evaluate(() => window.__clip);
+    assert.equal((await s.posted("copy")).length, before, "the rich clipboard took it");
+    assert.match(clip.html, /<a href="https:\/\/example\.gov\/notice">the notice rules<\/a>/, "links stay links in a mail app");
+    assert.doesNotMatch(clip.html, /<button|cd-draft-tool|code-language/, "none of the screen's own controls");
+    assert.match(clip.plain, /^Here it is, see the notice rules\./);
+    // While a reply is still being written, its draft has no Edit yet.
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "delta", messageId: M(4), text: `${fence}email\nSubject: Again\n\nHello` });
+    await s.frame();
+    assert.deepEqual(await s.page.locator(`.cd-assistant[data-id="${M(4)}"] .cd-draft-tool`).allInnerTexts(), ["Copy", "Open in mail app"]);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

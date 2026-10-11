@@ -18,7 +18,7 @@
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), searchFirst: false, planEditing: "", steerDraft: "", open: new Set(),
-                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {} };
+                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {}, draftEdit: {} };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -129,12 +129,123 @@
     if (open) vscode.postMessage({ type: "openLink", target: open.dataset.url || "" });
   });
   let readerMessage = null;
-  function body(message) {
+  function body(message, drafts) {
     const node = el("div", "text cd-body");
     const html = md(message.text);
     if (html === null) node.textContent = message.text || ""; else node.innerHTML = html;
     cite(node, message.sources);
+    if (drafts) draftBlocks(node, message, drafts.live);
     return node;
+  }
+
+  // ---- writing blocks (ChatGPT's): a draft the user will send as it is, which the model writes in an ```email or
+  // ```draft block. It reads as the email it is, with Copy (plain text), Open in mail app, and Edit in place.
+  const DRAFT_KINDS = ["email", "draft"];
+  /** A rendered fence that is a draft: its kind and words. The label may sit on the line after the backticks. */
+  function draftOf(pre) {
+    const words = decodeURIComponent(pre.querySelector(".copy[data-c]")?.dataset.c || "").replace(/\n$/, "");
+    const kind = String(pre.dataset.language || "").toLowerCase();
+    if (DRAFT_KINDS.includes(kind)) return { kind, words };
+    const [first, ...rest] = words.split("\n");
+    if (kind === "text" && DRAFT_KINDS.includes(first.trim().toLowerCase())) return { kind: first.trim().toLowerCase(), words: rest.join("\n") };
+    return null;
+  }
+  function parseDraft(kind, words) {
+    const lines = String(words || "").replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
+    const head = {};
+    let i = 0;
+    if (kind === "email") {
+      for (; i < lines.length; i++) {
+        const m = /^(to|cc|bcc|subject)\s*:\s*(.*)$/i.exec(lines[i]);
+        if (!m) break;
+        head[m[1].toLowerCase()] = m[2].trim();
+      }
+      while (i < lines.length && !lines[i].trim()) i++;
+    }
+    return { to: head.to || "", cc: head.cc || "", bcc: head.bcc || "", subject: head.subject || "", body: lines.slice(i).join("\n") };
+  }
+  /** Back to the block's words, for an edit: an email's headers, a blank line, its body. */
+  function draftWords(kind, d) {
+    if (kind !== "email") return d.body;
+    return [d.to && `To: ${d.to}`, d.cc && `Cc: ${d.cc}`, d.bcc && `Bcc: ${d.bcc}`, `Subject: ${d.subject}`].filter(Boolean).join("\n")
+      + "\n\n" + d.body;
+  }
+  /** What goes on the clipboard or into a mail app: no ** or __ or heading marks, if the model left any. */
+  const plainDraft = (text) => String(text || "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1").replace(/^#{1,6} +/gm, "");
+  function draftBlocks(node, message, live) {
+    for (const pre of node.querySelectorAll("pre.code")) {
+      const found = draftOf(pre);
+      if (found) pre.replaceWith(draftBlock(message, found.kind, found.words, live));
+    }
+  }
+  function draftBlock(message, kind, words, live) {
+    const d = parseDraft(kind, words);
+    const key = `${message.id}\u0000${words}`;
+    const editing = state.draftEdit[key];
+    const box = el("div", "cd-draft");
+    box.dataset.kind = kind;
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", kind === "email" ? `Email draft${d.subject ? `: ${d.subject}` : ""}` : "Draft");
+    const head = el("div", "cd-draft-head");
+    head.append(icon(kind === "email" ? "mail" : "edit"), el("span", "cd-draft-kind", kind === "email" ? "Email" : "Draft"));
+    const tools = el("div", "cd-draft-tools");
+    const tool = (glyph, label, onClick) => {
+      const b = el("button", "cd-draft-tool");
+      b.type = "button"; b.title = label;
+      b.append(icon(glyph), el("span", "", label));
+      b.addEventListener("click", onClick);
+      return b;
+    };
+    if (!editing) {
+      tools.append(tool("copy", "Copy", () => vscode.postMessage({ type: "copy", text: plainDraft(d.body) })));
+      if (kind === "email") {
+        tools.append(tool("mail", "Open in mail app", () => vscode.postMessage({ type: "openMail", to: d.to, cc: d.cc, bcc: d.bcc,
+                                                                                 subject: plainDraft(d.subject), body: plainDraft(d.body) })));
+      }
+      if (!live && !message.partial) {
+        tools.append(tool("edit", "Edit", () => {
+          state.draftEdit[key] = { ...d, subject: plainDraft(d.subject), body: plainDraft(d.body) };   // as it reads
+          update(message.id);
+        }));
+      }
+    }
+    head.append(tools);
+    box.append(head);
+    if (kind === "email" && (d.to || d.cc)) box.append(el("div", "cd-draft-to", [d.to && `To: ${d.to}`, d.cc && `Cc: ${d.cc}`].filter(Boolean).join(" \u00b7 ")));
+    if (editing) {
+      const form = el("div", "cd-draft-form");
+      const id = `cd-draft-${message.id}-${box.dataset.kind}-${Math.abs([...words].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7))}`;
+      if (kind === "email") {
+        const label = el("label", "cd-field-label", "Subject");
+        const subject = el("input", "cd-field cd-draft-subject-input");
+        subject.id = `${id}-subject`; label.htmlFor = subject.id; subject.value = editing.subject; subject.dataset.keep = subject.id;
+        subject.addEventListener("input", () => { editing.subject = subject.value; });
+        form.append(label, subject);
+      }
+      const label = el("label", "cd-field-label", kind === "email" ? "Message" : "Draft");
+      const text = el("textarea", "cd-field cd-draft-text");
+      text.id = `${id}-body`; label.htmlFor = text.id; text.value = editing.body; text.dataset.keep = text.id;
+      text.rows = Math.min(18, Math.max(4, editing.body.split("\n").length + 1));
+      text.addEventListener("input", () => { editing.body = text.value; });
+      const buttons = el("div", "cd-draft-buttons");
+      const save = el("button", "cd-continue", editing.saving ? "Saving…" : "Save");
+      save.type = "button"; save.disabled = !!editing.saving;
+      save.addEventListener("click", () => {
+        if (!editing.body.trim()) { showNotice("A draft can't be empty.", "info"); return; }
+        editing.saving = true; update(message.id);
+        vscode.postMessage({ type: "draftEdit", messageId: message.id, original: words, text: draftWords(kind, editing) });
+      });
+      const cancel = el("button", "cd-edit-cancel", "Cancel");
+      cancel.type = "button"; cancel.disabled = !!editing.saving;
+      cancel.addEventListener("click", () => { delete state.draftEdit[key]; update(message.id); });
+      buttons.append(save, cancel);
+      form.append(label, text, buttons);
+      box.append(form);
+    } else {
+      if (kind === "email" && d.subject) box.append(el("div", "cd-draft-subject", plainDraft(d.subject)));
+      box.append(el("div", "cd-draft-body", plainDraft(d.body)));
+    }
+    return box;
   }
   /** What a reply saved to (or deleted from) the user's memory, each with Forget, and the way to all of it. */
   function memoryNote(message) {
@@ -166,7 +277,7 @@
   /** A reply's words, with each question it asked as a card where it asked it. */
   function replyParts(message, live) {
     const questions = Array.isArray(message.questions) ? message.questions : [];
-    if (!questions.length) return [body(message)];
+    if (!questions.length) return [body(message, { live })];
     const text = message.text || "";
     const parts = [];
     let done = 0;
@@ -174,11 +285,11 @@
       let at = Math.max(done, Math.min(text.length, Number(q.at) || 0));
       // Asked mid-sentence ("let's do it" [card] "."): the sentence's own punctuation stays with it, above the card.
       while (at < text.length && /[.,;:!?…)\]"'”’]/.test(text[at])) at++;
-      if (text.slice(done, at).trim()) parts.push(body({ ...message, text: text.slice(done, at) }));
+      if (text.slice(done, at).trim()) parts.push(body({ ...message, text: text.slice(done, at) }, { live }));
       parts.push(questionCard(message, q, i, live));
       done = at;
     });
-    if (text.slice(done).trim()) parts.push(body({ ...message, text: text.slice(done) }));
+    if (text.slice(done).trim()) parts.push(body({ ...message, text: text.slice(done) }, { live }));
     return parts;
   }
   const OTHER = "\u0000other";
@@ -318,6 +429,56 @@
     box.append(summary, text);
     if (live && !message.text) box.open = true;
     return box;
+  }
+  // ---- copying a reply: formatted for a mail app or a document, clean text for everywhere else (no ** or #)
+  /** A reply as it reads: its rendered blocks without the screen's own buttons, links as links. */
+  function readable(message) {
+    const node = body(message, { live: true });
+    node.querySelectorAll(".copy, .code-language, .cd-draft-tools, .cd-cite").forEach((n) => n.remove());
+    node.querySelectorAll("button.md-link").forEach((b) => {
+      const a = document.createElement("a");
+      a.href = b.dataset.target || ""; a.textContent = b.textContent;
+      b.replaceWith(a);
+    });
+    return node;
+  }
+  /** Plain text of rendered blocks: paragraphs apart, list items marked, tables by tab, a draft's subject first. */
+  function plainOf(node) {
+    const out = [];
+    const walk = (n, depth) => {
+      for (const child of n.children) {
+        const tag = child.tagName.toLowerCase();
+        if (tag === "p" || /^h[1-6]$/.test(tag) || tag === "blockquote" || child.classList.contains("cd-draft-subject")
+            || child.classList.contains("cd-draft-to")) out.push(child.innerText ?? child.textContent, "");
+        else if (child.classList.contains("cd-draft-body") || tag === "pre") out.push(child.textContent.replace(/\n$/, ""), "");
+        else if (tag === "ul" || tag === "ol") {
+          let n2 = Number(child.getAttribute("start")) || 1;
+          for (const li of child.children) {
+            const own = [...li.childNodes].filter((x) => !(x.nodeType === 1 && /^(UL|OL)$/.test(x.tagName))).map((x) => x.textContent).join("").trim();
+            out.push(`${"  ".repeat(depth)}${tag === "ol" ? `${n2++}.` : "-"} ${own}`);
+            for (const sub of li.children) if (/^(UL|OL)$/.test(sub.tagName)) walk({ children: [sub] }, depth + 1);
+          }
+          if (!depth) out.push("");
+        } else if (tag === "table") {
+          for (const row of child.querySelectorAll("tr")) out.push([...row.children].map((c) => c.textContent.trim()).join("\t"));
+          out.push("");
+        } else if (tag === "hr") out.push("");
+        else walk(child, depth);
+      }
+    };
+    walk(node, 0);
+    return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  async function copyReply(message) {
+    const node = readable(message);
+    const plain = plainOf(node), html = node.innerHTML;
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }),
+                                                            "text/plain": new Blob([plain], { type: "text/plain" }) })]);
+      announce("Copied.");
+    } catch {
+      vscode.postMessage({ type: "copy", text: plain });      // no rich clipboard here: the clean text, by the host
+    }
   }
   function action(icon, label, onClick) {
     const button = el("button", "cd-action");
@@ -841,7 +1002,7 @@
       const actions = el("div", "cd-actions");
       const versions = versionsControl(message);
       if (versions) actions.append(versions);
-      actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
+      actions.append(action("copy", "Copy", () => copyReply(message)));
       const again = action("refresh", "Try again", () => {
         vscode.postMessage({ type: "regenerate", messageId: message.id, model: modelPick.value || "",
                              thinking: thinkingPick.value || "", search: searchMode() });
@@ -1645,6 +1806,10 @@
         }
         const at = state.messages.findIndex((m) => m.id === message.id);
         if (at >= 0) state.messages[at] = message; else state.messages.push(message);
+        // A draft edit is saved once the reply comes back with it.
+        const saved = Object.keys(state.draftEdit).filter((k) => k.startsWith(`${message.id}\u0000`) && state.draftEdit[k].saving);
+        for (const k of saved) delete state.draftEdit[k];
+        if (saved.length) announce("Draft saved.");
         if (message.role === "user") { pinned = true; render(); } else update(message.id);
         return;
       }
@@ -1784,6 +1949,9 @@
           const busy = Object.keys(state.cardBusy); state.cardBusy = {};
           for (const m of state.messages) if ((m.actions || []).some((c) => busy.includes(c.id))) update(m.id);
         }
+        for (const [k, edit] of Object.entries(state.draftEdit)) {      // a draft's save refused: back to editing it
+          if (edit.saving) { edit.saving = false; update(k.split("\u0000")[0]); }
+        }
         { const panel = $("cd-project-panel");       // a save that was refused: the panel stays, to fix and save again
           if (panel?.dataset.saving) { delete panel.dataset.saving; const save = panel.querySelector('button[type="submit"]'); if (save) save.disabled = false; } }
         if (msg.opening && /doesn't exist/i.test(msg.message || "")) {
@@ -1900,7 +2068,7 @@
     if (mod && e.shiftKey && e.code === "KeyO") vscode.postMessage({ type: "newChat" });
     else if (mod && e.shiftKey && e.code === "KeyC") {
       const reply = lastReply();
-      if (reply) vscode.postMessage({ type: "copy", text: reply.text });
+      if (reply) copyReply(reply);
     } else if (mod && e.shiftKey && e.code === "Semicolon") {
       const blocks = [...log.querySelectorAll(".cd-assistant pre.code .copy[data-c]")];
       const last = blocks[blocks.length - 1];

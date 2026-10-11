@@ -157,6 +157,31 @@ class ServiceTests(unittest.TestCase):
         return self.wire.wait(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended"
                               and f.get("request_id") == request_id)
 
+    def test_a_draft_edited_in_place_is_the_replys_from_then_on_but_never_mid_turn(self):
+        chat = self.new()
+        email = "Subject: Moving out\n\nDear Mr Rao,\n\nI'm leaving flat 4B on 30 November."
+        self.model.script.append({"parts": [f"Here it is.\n\n```email\n{email}\n```\n\nCheck the date."]})
+        self.send(chat, "Draft my notice")
+        self.ended()
+        reply = self.wire.of("chatdgc_message")[-1]["message"]
+        edited = email.replace("Dear Mr Rao", "Dear Mr and Mrs Rao")
+        draft = {"type": "chatdgc_draft", "conversation_id": chat, "message_id": reply["id"], "original": email, "text": edited}
+        self.service.dispatch({**draft, "request_id": "d1"})
+        saved = self.wire.wait(lambda f: f["type"] == "chatdgc_message" and f.get("request_id") == "d1")["message"]
+        self.assertEqual(saved["text"], f"Here it is.\n\n```email\n{edited}\n```\n\nCheck the date.")
+        self.assertEqual(self.engine.open(chat)["messages"][-1]["text"], saved["text"], "kept: the model reads it next")
+        self.service.dispatch({**draft, "request_id": "d2"})          # the old words again: that block is gone
+        self.assertIn("changed since", self.wire.wait(lambda f: f["type"] == "chatdgc_error" and f.get("request_id") == "d2")["message"])
+        self.service.dispatch({**draft, "original": edited, "text": "```\nno", "request_id": "d3"})
+        self.assertIn("```", self.wire.wait(lambda f: f["type"] == "chatdgc_error" and f.get("request_id") == "d3")["message"])
+        self.service._turns[chat] = {"cancel": None, "reply_id": None, "thread": None}     # a reply being written
+        try:
+            self.service.dispatch({**draft, "original": edited, "request_id": "d4"})
+            self.assertEqual(self.wire.wait(lambda f: f["type"] == "chatdgc_error" and f.get("request_id") == "d4")["message"],
+                             "Let the reply finish first.")
+        finally:
+            del self.service._turns[chat]
+
     def test_a_turn_on_the_wire_in_order(self):
         chat = self.new()
         self.model.script.append({"thinking": ["Let me think."], "parts": ["Paris ", "is ", "the capital."]})

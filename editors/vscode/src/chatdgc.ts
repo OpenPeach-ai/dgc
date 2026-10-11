@@ -722,6 +722,37 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openProject":
         this.openProject(String(message.id || ""));
         return;
+      case "draftEdit": {
+        // A writing block edited in place: the block's words as shown, and what replaces them.
+        const messageId = String(message.messageId || "");
+        const original = typeof message.original === "string" ? message.original : "";
+        const text = typeof message.text === "string" ? message.text : "";
+        if (!conversation || !MESSAGE_ID.test(messageId) || !original || !text.trim() || original.length > 60_000 || text.length > 60_000) return;
+        this.ask({ tab, kind: "draft" }, { type: "chatdgc_draft", conversation_id: conversation, message_id: messageId, original, text });
+        return;
+      }
+      case "openMail": {
+        // An email draft into the user's mail app, as a new message with its fields filled in (RFC 6068). A body
+        // too long for a mailto link (some apps cut it near 2,000) goes on the clipboard instead, and says so.
+        const field = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
+        const to = field(message.to, 500).replace(/[\r\n]/g, " ").trim(), subject = field(message.subject, 500).replace(/[\r\n]/g, " ");
+        const body = field(message.body, 100_000);
+        const enc = (v: string) => encodeURIComponent(v.replace(/\r?\n/g, "\r\n"));
+        const head = [["cc", field(message.cc, 500)], ["bcc", field(message.bcc, 500)], ["subject", subject]]
+          .filter(([, v]) => v.trim()).map(([k, v]) => `${k}=${enc(v.replace(/[\r\n]/g, " "))}`);
+        let link = `mailto:${to.split(/\s*[,;]\s*/).filter(Boolean).map((a) => encodeURIComponent(a).replace(/%40/g, "@")).join(",")}`;
+        const full = [...head, ...(body ? [`body=${enc(body)}`] : [])];
+        const long = link.length + full.join("&").length > 1900;
+        const query = long ? head : full;
+        if (query.length) link += `?${query.join("&")}`;
+        if (long) {
+          await vscode.env.clipboard.writeText(body);
+          void vscode.window.showInformationMessage("The email is long for a mail link, so its text is on your clipboard: paste it into the new message.");
+        }
+        const opened = await vscode.env.openExternal(vscode.Uri.parse(link, true));
+        if (!opened) void vscode.window.showWarningMessage("No mail app opened. Use Copy and paste it into your email instead.");
+        return;
+      }
       case "fileOpen":
       case "fileSave": {
         // A file the reply made: saved where you choose, or into a folder of DGC's and opened in its own app (a

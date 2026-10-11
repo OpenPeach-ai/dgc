@@ -524,3 +524,21 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .cd-file-actions { display: flex; gap: 6px; flex: none; }
 .cd-file[data-removed] .cd-file-badge { opacity: .45; }
 @media (max-width: 420px) { .cd-file { flex-wrap: wrap; } .cd-file-actions { width: 100%; } }
+
+/* A writing block (ChatGPT's): a draft to send as it is, read as the email or message it is. */
+.cd-draft { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-3) 0; padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); }
+.cd-draft-head { display: flex; align-items: center; gap: var(--sp-2); color: var(--muted);
+  font: var(--w-semi) var(--t-xs, 11px)/1 var(--sans); text-transform: uppercase; letter-spacing: .06em; }
+.cd-draft-tools { display: flex; gap: var(--sp-1); margin-left: auto; text-transform: none; letter-spacing: 0; }
+.cd-draft-tool { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid transparent;
+  border-radius: var(--r-md); background: transparent; color: var(--text); font: var(--w-reg) var(--t-sm)/1.2 var(--sans); cursor: pointer; }
+.cd-draft-tool:hover { background: var(--surface2); border-color: var(--border); }
+.cd-draft-tool:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-draft-to { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
+.cd-draft-subject { font-weight: var(--w-semi); color: var(--text-strong); overflow-wrap: anywhere; }
+.cd-draft-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.cd-draft-form { display: flex; flex-direction: column; gap: var(--sp-1); }
+.cd-draft-text { resize: vertical; min-height: 96px; }
+.cd-draft-buttons { display: flex; gap: var(--sp-2); margin-top: var(--sp-1); }
+@media (max-width: 420px) { .cd-draft-tool span:last-child { display: none; } }

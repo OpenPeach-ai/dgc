@@ -250,6 +250,30 @@ test("links open only on the web; copy goes to the clipboard", async () => {
   assert.equal(world.clipboard, "Paris is the capital.");
 });
 
+test("writing blocks: an edit goes to the backend as words; Open in mail app is a mailto link with its fields", async () => {
+  chat.open(ID(5));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(5), title: "Notice" });
+  panel.say({ type: "draftEdit", messageId: MSG(2), original: "Subject: Hi\n\nHello", text: "Subject: Hi\n\nHello there" });
+  const sent = last("chatdgc_draft");
+  assert.deepEqual({ ...sent, request_id: "" }, { type: "chatdgc_draft", conversation_id: ID(5), message_id: MSG(2),
+                                                  original: "Subject: Hi\n\nHello", text: "Subject: Hi\n\nHello there", request_id: "" });
+  panel.say({ type: "draftEdit", messageId: "msg_nope", original: "a", text: "b" });
+  panel.say({ type: "draftEdit", messageId: MSG(2), original: "a", text: "  " });
+  assert.equal(last("chatdgc_draft").request_id, sent.request_id, "only a reply's draft, and never emptied");
+  panel.say({ type: "openMail", to: "rao@example.com, anya@example.com", cc: "", subject: "Moving out & deposit",
+              body: "Dear Mr Rao,\n\nI'm leaving." });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(world.opened, ["mailto:rao@example.com,anya@example.com?subject=Moving%20out%20%26%20deposit"
+    + "&body=Dear%20Mr%20Rao%2C%0D%0A%0D%0AI'm%20leaving."], "fields as RFC 6068 has them: CRLF line breaks");
+  world.opened.length = 0;
+  panel.say({ type: "openMail", to: "rao@example.com", subject: "Long", body: "word ".repeat(600) });
+  await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+  assert.deepEqual(world.opened, ["mailto:rao@example.com?subject=Long"], "too long for a link: the body isn't in it");
+  assert.equal(world.clipboard, "word ".repeat(600), "it's on the clipboard instead");
+  assert.match(world.infos.at(-1), /on your clipboard: paste it/);
+});
+
 test("a reload brings each chat back in its tab, once", async () => {
   chat.register();
   const { serializer } = world.serializers[0];
