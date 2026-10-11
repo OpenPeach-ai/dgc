@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from dgc.chatdgc import service as chat_service
-from dgc.chatdgc.engine import LOOK_UP, MAX_WIDGET_CHARS, ChatEngine
+from dgc.chatdgc.engine import LOOK_UP, MAX_WIDGET_CHARS, WIDGET_CHECK, WIDGET_NOT_MADE, ChatEngine
 from dgc.chatdgc.prompt import WIDGETS, system_prompt
 from dgc.chatdgc.service import ChatService
 from dgc.chatdgc.store import ChatStore
@@ -36,6 +36,10 @@ class Model:
         if str(messages[0]["content"]).startswith(LOOK_UP[:60]):
             return SimpleNamespace(content="", tool_calls=[ToolCall("lu", "search_first", {"needs_search": False, "query": ""})],
                                    finish_reason="stop", thinking="", usage={})
+        if messages[0]["content"] == WIDGET_CHECK:
+            self.world.setdefault("checked", []).append(messages[1]["content"])
+            return SimpleNamespace(content=self.world.get("verdict", "EMI 43,391 is right.\nVERDICT: OK"), tool_calls=[],
+                                   finish_reason="stop", thinking="", usage={"input_tokens": 100, "output_tokens": 7})
         self.world["read"].append({"messages": messages, "tools": [t["function"]["name"] for t in tools or []]})
         step = self.world["script"].pop(0) if self.world["script"] else {"parts": ["OK."]}
         for part in step.get("parts", []):
@@ -103,19 +107,62 @@ class Widgets(unittest.TestCase):
         self.assertEqual([w["id"] for w in shown], [widget["id"]] * 2, "the same widget, replaced")
         self.assertEqual((widget["html"], widget["title"]), (fixed, "EMI calculator"))
 
-    def test_a_widget_that_runs_is_checked_against_what_it_shows_and_kept_if_right(self):
+    def test_what_a_widget_shows_is_checked_in_a_call_of_its_own_never_in_the_reply(self):
         self.world["script"] += [{"calls": [("show_widget", {"title": "EMI", "html": PAGE})]},
-                                 {"parts": ["₹50,00,000 at 8.5% for 20 years is ₹43,391 a month: right."]}]
+                                 {"parts": ["It works out your monthly payment."]}]
         chat = self.engine.open()
         reply = self.engine.send(chat["id"], "EMI calculator please",
                                  on_widget=lambda w: {"shown": True, "text": "EMI\n\n ₹43,391", "errors": []})
-        self.assertIn("As it shows now, with its starting values: «EMI ₹43,391». Check that each figure is right for those "
-                      "values (work one out yourself)", self.told(1)[0])
+        self.assertEqual(self.world["checked"], ["Asked for: EMI calculator please\n\nThe widget, EMI, shows:\nEMI ₹43,391"])
+        self.assertEqual(self.told(1), ["The widget EMI is open in a tab beside the chat, with a card under your reply. "
+                                        "Say in a sentence or two what it does and how to use it; don't paste its code."],
+                         "right: nothing about the check, so nothing to narrate")
+        self.assertEqual(reply["usage"]["input_tokens"], 10 * 2 + 100, "the check's tokens are the reply's")
         self.assertEqual(len(reply["widgets"]), 1)
+
+    def test_a_check_that_finds_a_wrong_figure_has_it_fixed_once(self):
+        self.world["verdict"] = "Interest ÷ principal is 108%, labelled as a share of the total.\nVERDICT: WRONG: the share of the total payment is 52%, not 108%."
+        fixed = PAGE.replace("/* math */", "/* share of total */")
+        self.world["script"] += [{"calls": [("show_widget", {"title": "EMI", "html": PAGE})]},
+                                 {"calls": [("show_widget", {"title": "EMI", "html": fixed})]},
+                                 {"parts": ["It works out your monthly payment."]}]
+        chat = self.engine.open()
+        reply = self.engine.send(chat["id"], "EMI calculator please",
+                                 on_widget=lambda w: {"shown": True, "text": "108% of your total payment is interest", "errors": []})
+        self.assertIn("but a check of what it shows found: the share of the total payment is 52%, not 108%. It shows: «108% "
+                      "of your total payment is interest». Fix it: call show_widget again", self.told(1)[0])
+        self.assertEqual(len(self.world["checked"]), 1, "a fixed widget isn't checked again")
+        self.assertEqual(reply["widgets"][0]["html"], fixed)
+        self.assertNotIn("show_widget", self.world["read"][2]["tools"])
         self.world["script"] += [{"calls": [("show_widget", {"title": "EMI", "html": PAGE})]}, {"parts": ["Done."]}]
         self.engine.send(chat["id"], "Another", on_widget=lambda w: {"shown": False})
         self.assertTrue(self.told(-1)[0].startswith("The widget EMI is open in a tab beside the chat"),
                         "no tab showed it: nothing to check")
+        self.assertEqual(len(self.world["checked"]), 1)
+
+    def test_a_reply_that_says_a_widget_is_beside_the_chat_and_made_none_is_told_once_to_make_it(self):
+        shown = []
+        self.world["script"] += [{"parts": ["Compound interest is interest on interest. The widget beside the chat has sliders."]},
+                                 {"calls": [("show_widget", {"title": "Compound interest", "html": PAGE})]},
+                                 {"parts": ["Drag the sliders."]}]
+        chat = self.engine.open()
+        reply = self.engine.send(chat["id"], "Explain compound interest with a slider", on_widget=shown.append)
+        said = self.world["read"][1]["messages"]
+        at = said.index({"role": "user", "content": WIDGET_NOT_MADE})
+        self.assertEqual(said[at - 1], {"role": "assistant", "content": "Compound interest is interest on interest. The "
+                                                                       "widget beside the chat has sliders."})
+        self.assertEqual(len(reply["widgets"]), 1)
+        self.assertTrue(reply["text"].endswith("Drag the sliders."))
+        # Said again and still made none: told once only, so the reply ends.
+        self.world["script"] += [{"parts": ["The widget is beside the chat."]}, {"parts": ["The widget beside the chat."]}]
+        before = len(self.world["read"])
+        self.engine.send(chat["id"], "And for a loan?", on_widget=shown.append)
+        self.assertEqual(len(self.world["read"]) - before, 2)
+        # Without the claim, or with a widget made, nothing is said.
+        self.world["script"] += [{"parts": ["Compound interest is interest on interest."]}]
+        before = len(self.world["read"])
+        self.engine.send(chat["id"], "Just explain it", on_widget=shown.append)
+        self.assertEqual(len(self.world["read"]) - before, 1)
 
     def test_an_empty_or_huge_page_is_refused(self):
         self.world["script"] += [{"calls": [("show_widget", {"title": "x", "html": " "}), ("show_widget", {"title": "y", "html": "x" * (MAX_WIDGET_CHARS + 1)})]},
@@ -191,7 +238,9 @@ class OnTheWire(unittest.TestCase):
 
     def test_what_the_widget_shows_reaches_the_model_in_the_same_reply(self):
         told, _ = self.turn(True, {"shown": True, "text": "Monthly EMI ₹43,391", "errors": [7]})
-        self.assertIn("As it shows now, with its starting values: «Monthly EMI ₹43,391».", told)
+        self.assertEqual(self.world["checked"], ["Asked for: EMI please\n\nThe widget, EMI, shows:\nMonthly EMI ₹43,391"],
+                         "checked, and an error that isn't text is no error")
+        self.assertTrue(told.startswith("The widget EMI is open in a tab beside the chat"))
         self.assertNotIn("chatdgc_error", [f["type"] for f in self.wire.frames])
 
     def test_a_screen_that_doesnt_tell_is_never_waited_for(self):

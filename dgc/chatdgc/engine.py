@@ -174,6 +174,19 @@ WIDGET_TOOL = {"type": "function", "function": {
 MAX_WIDGET_CHARS = 200_000
 MAX_WIDGET_HISTORY_CHARS = 8_000
 WIDGET_REPORT_SHOWN = 2_500        # of what an open widget shows, as the model reads it to check it
+# A widget's figures are checked in a call of their own, never streamed: asked to check them in the reply, the model
+# wrote its working there ("Check: r = 0.085/12 …") in 5 of 10 replies, even when told not to.
+WIDGET_CHECK = (
+    "You check a small calculator or tool someone built for a user. You get what the user asked for and everything it "
+    "shows with its starting values. Work out one or two of its figures yourself from those values, showing your "
+    "working, and check that every label says what its number is (a share of a total can't be over 100%; a total is "
+    "the sum of its parts). Then end with one line: VERDICT: OK, or VERDICT: WRONG: what's wrong, in one sentence.")
+# A reply that says a widget is beside the chat, when it made none (deepseek, 1 of 7 compound-interest replies).
+WIDGET_CLAIM = re.compile(
+    r"\b(?:widget|calculator|stopwatch|timer|converter|quiz|simulator|simulation|explorer|sliders?)\b[^.\n]{0,120}?"
+    r"\b(?:beside|next to|alongside)\s+(?:the|this|our)\s+chat\b|\bthe\s+widget\b", re.I)
+WIDGET_NOT_MADE = ("[You said there's a widget beside the chat, but you didn't make one, so there is none. Call "
+                   "show_widget now with it. After it, write at most one short sentence; don't repeat your reply.]")
 MAX_CANVAS_HISTORY_CHARS = 40_000
 MAX_FILE_HISTORY_CHARS = 12_000   # of a made file, as the model reads it back (to change it, or to talk about it)
 # Before an answer that turns on facts: does it need the web first? (search "auto"; the model can still search.)
@@ -1586,7 +1599,7 @@ class ChatEngine:
 
     # -- interactive answers
 
-    def _widget(self, call, widgets: list, at: int, on_widget, state: dict) -> str:
+    def _widget(self, call, widgets: list, at: int, on_widget, state: dict, check=None) -> str:
         """show_widget: kept on the reply (a card under it) and opened in a locked-down tab beside the chat. When the
         screen tells what it shows, the model checks it with that, and may fix it once (the same widget, replaced)."""
         args = call.arguments if isinstance(call.arguments, dict) else {}
@@ -1616,15 +1629,32 @@ class ChatEngine:
                 return (f"The fixed widget {title} still fails: {' | '.join(errors)}. It shows: «{shows}». Tell the user "
                         "it may not work, and why.")
             return f"The widget {title} is fixed. It shows: «{shows}». {done}"
-        state["fix"] = True
         if errors:
+            state["fix"] = True
             return (f"The widget {title} opened in a tab beside the chat, but its code failed: {' | '.join(errors)}. "
                     f"It shows: «{shows}». Fix it: call show_widget again with the whole corrected page (it replaces "
                     "this one).")
-        return (f"The widget {title} is open in a tab beside the chat, with a card under your reply. As it shows now, "
-                f"with its starting values: «{shows}». Check that each figure is right for those values (work one out "
-                "yourself) and that every label says what its number is. If something's wrong, call show_widget again "
-                f"with the whole corrected page (it replaces this one). If it's right, {done[0].lower() + done[1:]}")
+        wrong = check(title, shows) if check is not None else None
+        if wrong:
+            state["fix"] = True
+            return (f"The widget {title} opened in a tab beside the chat, but a check of what it shows found: {wrong} It "
+                    f"shows: «{shows}». Fix it: call show_widget again with the whole corrected page (it replaces this "
+                    "one), and don't mention the check.")
+        return f"The widget {title} is open in a tab beside the chat, with a card under your reply. {done}"
+
+    def _check_widget(self, client, asked: str, title: str, shows: str, state: dict, thinking, cancel) -> str | None:
+        """What's wrong with a widget's figures, from a call of its own (its usage is the reply's), or None."""
+        try:
+            result = client.chat([{"role": "system", "content": WIDGET_CHECK},
+                                  {"role": "user", "content": f"Asked for: {asked[:2000]}\n\nThe widget, {title}, shows:\n{shows}"}],
+                                 tools=None, reasoning_effort=thinking, on_text=None, on_thinking=None, cancel=cancel)
+        except Exception:                      # noqa: BLE001 -- a check that can't run passes the widget as it is
+            return None
+        state["usage"] = _add_usage(state.get("usage") or {}, dict(getattr(result, "usage", {}) or {}))
+        verdicts = re.findall(r"VERDICT:\s*(OK|WRONG)\b[:\s-]*(.*)", str(getattr(result, "content", "") or ""))
+        if not verdicts or verdicts[-1][0] != "WRONG":
+            return None
+        return verdicts[-1][1].strip()[:300] or "a figure is wrong."
 
     # -- data analysis (data.py)
 
@@ -2050,6 +2080,7 @@ class ChatEngine:
         queries = [dict(q) for q in (existing or {}).get("queries") or []]
         widgets = [dict(w) for w in (existing or {}).get("widgets") or []]
         widget_state = {"calls": len(widgets), "fix": False}
+        nudged = {"widget": False}
         tables = self._tables(chat) if name not in self._toolless else None
         plugins = self._plugins(chat) if name not in self._toolless else None
         plugins_now = plugins.pin() if plugins is not None else []
@@ -2124,6 +2155,14 @@ class ChatEngine:
                 usage = _add_usage(usage, spent)
                 counted = int(spent.get("input_tokens") or 0) + int(spent.get("output_tokens") or 0)
                 calls = list(getattr(result, "tool_calls", None) or [])
+                if (not calls and tools is not None and not widgets and not nudged["widget"]
+                        and any(t["function"]["name"] == "show_widget" for t in tools)
+                        and WIDGET_CLAIM.search("".join(streamed)) and not (cancel is not None and cancel.is_set())):
+                    # It said there's a widget, and made none: once, it's told to make it.
+                    nudged["widget"] = True
+                    messages.append({"role": "assistant", "content": str(getattr(result, "content", "") or "")})
+                    messages.append({"role": "user", "content": WIDGET_NOT_MADE})
+                    continue
                 if not calls or tools is None or (cancel is not None and cancel.is_set()):
                     break
                 asked = {"role": "assistant", "content": str(getattr(result, "content", "") or ""),
@@ -2145,7 +2184,11 @@ class ChatEngine:
                     elif call.name in ("remember", "forget"):
                         told = self._memory_call(chat, call, memory_ops)
                     elif call.name == "show_widget":
-                        told = self._widget(call, widgets, before + len("".join(streamed)), on_widget, widget_state)
+                        asked_for = next((str(m.get("text") or "") for m in reversed(chat["messages"]) if m["role"] == "user"), "")
+                        told = self._widget(call, widgets, before + len("".join(streamed)), on_widget, widget_state,
+                                            check=lambda title, shows: self._check_widget(client, asked_for, title, shows,
+                                                                                          widget_state, thinking, cancel))
+                        usage = _add_usage(usage, widget_state.pop("usage", None) or {})
                     elif call.name == "query_data":
                         if on_activity is not None:
                             on_activity("analyzing", "the data")

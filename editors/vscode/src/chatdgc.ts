@@ -136,7 +136,15 @@ export function widgetDocument(html: string, fields?: WidgetField[]): string {
     + `else if(t!=="file"&&t!=="checkbox"&&t!=="radio"&&typeof s.v==="string"){f.value=s.v;done.push(f)}});`
     + `done.forEach(function(f){f.dispatchEvent(new Event("input",{bubbles:true}));f.dispatchEvent(new Event("change",{bubbles:true}))})}catch(e){}}`
     + `addEventListener("load",function(){setTimeout(function(){if(saved.length)restore();setTimeout(function(){`
-    + `post({type:"report",text:String(document.body&&document.body.innerText||"").slice(0,4000),errors:errors.slice(0,3)})},700)},0)});`
+    // What it shows, its fields as they're set first (a page's text has no box's value, and lists a menu's every
+    // choice): a check of its figures read a monthly-compounding widget as a yearly one without them.
+    + `function named(f){return String((f.labels&&f.labels[0]&&f.labels[0].innerText)||f.getAttribute("aria-label")||f.placeholder||f.name||f.id||kind(f))`
+    + `.replace(/\\s+/g," ").trim().slice(0,60)}`
+    + `function valued(f){var t=kind(f);return f.tagName==="SELECT"?(f.selectedOptions[0]?f.selectedOptions[0].text:""):t==="checkbox"||t==="radio"?`
+    + `(f.checked?"on":"off"):String(f.value==null?"":f.value)}`
+    + `var b=document.getElementById("dgc-widget-error"),t=String(document.body&&document.body.innerText||"");if(b)t=t.replace(b.textContent,"");`
+    + `var set=controls().filter(function(f){return kind(f)!=="hidden"&&kind(f)!=="file"}).slice(0,40).map(function(f){return named(f)+": "+valued(f).slice(0,80)}).join("\\n");`
+    + `post({type:"report",text:((set?"Fields:\\n"+set+"\\n\\nPage:\\n":"")+t).slice(0,4000),errors:errors.slice(0,3)})},700)},0)});`
     + `})();`;
   // (Built, then returned: the chat page's tests find that page as the file's first `return` of a document.)
   const page = `<!doctype html><html><head><meta charset="utf-8">
