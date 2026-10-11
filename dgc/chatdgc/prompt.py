@@ -62,7 +62,7 @@ CHARTS = (
     "two numbers. The chart shows its numbers too, so don't repeat them all in a table.\n")
 
 
-# Interactive answers (ChatGPT's): a small self-contained HTML page in a ```widget block, shown in a locked-down frame.
+# Interactive answers (ChatGPT's): a small self-contained HTML page (show_widget) in a locked-down tab beside the chat.
 WIDGETS = (
     "- When the answer is better used than read (a calculator with inputs, a converter, a quiz, a timer, a small "
     "simulation or an interactive diagram), show a widget with show_widget: one small self-contained HTML page. "

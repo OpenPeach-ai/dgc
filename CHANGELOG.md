@@ -89,13 +89,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
 - **Interactive answers in ChatDGC** (Phase 8, part 5). A `show_widget` tool ({title, html}, once a reply) keeps a
-  small self-contained HTML page on the reply (`widgets`, new event `chatdgc_widget`); the extension writes it to a
-  file of its own under the extension's storage and the chat frames it with `sandbox="allow-scripts"`. The page's
-  policy loads nothing (`default-src 'none'`, inline script and style only), network and peer-connection APIs are
-  removed before its code runs, the chat's `frame-src` allows only extension resources, and the chat ignores any
-  message from a widget or a frame inside one except its height. Without tools, a ` ```widget ` block works the
-  same way. With deepseek-v4.1-flash, as a fenced block an EMI calculator or stopwatch went into a canvas or a file 5
-  of 6 times; as a tool, a widget 9 of 9 (self-contained and themed), none for a plain question.
+  small self-contained HTML page on the reply (`widgets`, new event `chatdgc_widget`); the extension opens it in a
+  webview tab of its own beside the chat (the chat keeps focus), one tab a widget, and the card under the reply has
+  **Open** and **Show code**. Not inline: VS Code serves nothing to a frame inside a webview (checked live), and a
+  `srcdoc`/`data:`/`blob:` frame runs no script there. The widget's webview has scripts but no local resource roots
+  and no message handler; its page policy loads nothing (`default-src 'none'`, inline script and style only), and
+  network and peer-connection APIs are removed before its code runs. The chat page's own policy is unchanged.
+  Without tools, a ` ```widget ` block becomes the same card, and opens on **Open**. With deepseek-v4.1-flash, as
+  a fenced block an EMI calculator or stopwatch went into a canvas or a file 5 of 6 times; as a tool, a widget 9 of 9
+  (self-contained and themed), none for a plain question.
 - **Data analysis and charts in ChatDGC** (Phase 8, part 4). `dgc/chatdgc/data.py` loads the chat's spreadsheets
   (attached, made, or in its project; CSV, TSV, each Excel sheet) into an in-memory SQLite database; a `query_data`
   tool runs one read-only SELECT (an authorizer allows reading and functions only; 5 seconds; 200 rows) with

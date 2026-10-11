@@ -54,7 +54,7 @@ globalThis.__DGC_TEST_VSCODE = {
   QuickPickItemKind: { Separator: -1 },
   env: { clipboard: { writeText: async (text) => { world.clipboard = text; } }, openExternal: async (uri) => { world.opened.push(uri.toString()); return true; } },
   window: {
-    createWebviewPanel(viewType, title) { const panel = fakePanel(viewType, title); world.panels.push(panel); return panel; },
+    createWebviewPanel(viewType, title, show, options) { const panel = Object.assign(fakePanel(viewType, title), { show, options }); world.panels.push(panel); return panel; },
     registerWebviewPanelSerializer(viewType, serializer) { world.serializers.push({ viewType, serializer }); return { dispose() {} }; },
     showWarningMessage: async (message) => { world.warnings.push(String(message)); return world.answer; },
     showQuickPick: async (items) => {
@@ -401,44 +401,52 @@ test("a chart saved as an image: only a PNG the page drew, written where you cho
   assert.equal(world.written.length, 1, "nothing but a PNG");
 });
 
-test("a widget's page: nothing loads from anywhere, its own code only, no network APIs, theme colours checked", () => {
-  const page = widgetDocument("<h1>EMI</h1><script>calc()</script>", { bg: "#1e1e1e", text: "red;}</style><script>alert(1)</script>", scheme: "light" });
+test("a widget's page: nothing loads from anywhere, its own code only, no network APIs, the editor's colours", () => {
+  const page = widgetDocument("<h1>EMI</h1><script>calc()</script>");
   assert.match(page, /content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'"/);
   assert.ok(page.indexOf('"RTCPeerConnection"') < page.indexOf("<body>"), "network and peer connections gone before its code runs");
   assert.match(page, /"fetch","XMLHttpRequest"/);
-  assert.match(page, /--bg:#1e1e1e;--text:#1f2328;/, "a colour that isn't one is never written into the page");
-  assert.doesNotMatch(page, /alert\(1\)/);
-  assert.match(page, /parent\.postMessage\(\{dgcWidget:true,height:/, "framed: it tells the chat its height");
-  assert.doesNotMatch(widgetDocument("x", {}, false), /parent\.postMessage/, "in a tab of its own, nothing to tell");
+  assert.match(page, /--bg:var\(--vscode-editor-background\);--text:var\(--vscode-editor-foreground\);/, "it follows the theme as it changes");
+  assert.doesNotMatch(page, /postMessage|acquireVsCodeApi/, "nothing to say to anyone");
   assert.match(page, /<body><h1>EMI<\/h1><script>calc\(\)<\/script><\/body>/);
 });
 
-test("a widget is written to a file of its own and framed; one too big, or with nowhere to write, isn't", async () => {
+test("a widget opens in a tab of its own beside the chat, once; Open shows that tab again, or a ```widget's page", () => {
   chat.open(ID(7));
-  let [panel] = world.panels;
+  const [panel] = world.panels;
   panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "EMI" });
-  panel.say({ type: "widget", ref: `${MSG(2)}:abc`, html: "<b>calc</b>", theme: {} });
-  await tick(); await tick();
-  assert.deepEqual(panel.last("widgetReady"), { type: "widgetReady", ref: `${MSG(2)}:abc`, src: "" }, "no storage folder: not framed");
-  const stored = new ChatDGC({ extensionUri: "ext", globalStorageUri: { scheme: "file", fsPath: "/g", path: "/g", toString: () => "file:///g" } });
-  stored.attach(host);
-  world.panels.length = 0;
-  stored.open(ID(8));
-  [panel] = world.panels;
-  panel.say({ type: "ready" });
-  stored.onEvent({ type: "chatdgc_opened", request_id: last("chatdgc_open").request_id, conversation: { id: ID(8), title: "EMI" }, messages: [], earlier: 0, busy: false });
-  panel.say({ type: "widget", ref: `${MSG(2)}:abc`, html: "<b>calc</b>", theme: {} });
-  await tick(); await tick(); await tick();
-  const ready = panel.last("widgetReady");
-  assert.match(String(ready.src), /widgets\/[0-9a-f]{40}\.html$/);
-  assert.match(world.written.at(-1).bytes.toString(), /<body><b>calc<\/b><\/body>/);
-  panel.say({ type: "widget", ref: `${MSG(2)}:big`, html: "x".repeat(200_001), theme: {} });
-  await tick();
-  assert.equal(panel.last("widgetReady").src, "");
-  panel.say({ type: "widgetOpen", html: "<b>calc</b>", title: "EMI calculator", theme: {} });
+  const WG = `wg_${"b".repeat(16)}`;
+  const widget = { id: WG, title: "EMI calculator", html: "<b>calc</b>", at: 0 };
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget });
+  assert.deepEqual(panel.last("widgetShown"), { type: "widgetShown", messageId: MSG(2), widget }, "its card under the reply");
   const tab = world.panels.at(-1);
-  assert.equal(tab.viewType, "dgc.chatdgcWidget");
-  assert.match(tab.webview.html, /default-src 'none'/);
+  assert.equal(world.panels.length, 2);
+  assert.deepEqual([tab.viewType, tab.title, tab.show], ["dgc.chatdgcWidget", "EMI calculator", { viewColumn: -2, preserveFocus: true }],
+                   "beside the chat, which keeps focus");
+  assert.deepEqual(tab.options, { enableScripts: true, localResourceRoots: [] }, "scripts, and no file of yours");
+  assert.match(tab.webview.html, /<body><b>calc<\/b><\/body>/);
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget });
+  panel.say({ type: "widgetOpen", id: WG, html: "<b>anything</b>", title: "x" });
+  assert.equal(world.panels.length, 2, "one tab a widget");
+  assert.equal(tab.revealed, 2);
+  // Not one DGC named, or too big: nothing.
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget: { ...widget, id: "wg_nope" } });
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget: { ...widget, id: `wg_${"c".repeat(16)}`, html: "x".repeat(200_001) } });
+  panel.say({ type: "widgetOpen", html: "x".repeat(200_001), title: "Big" });
+  assert.equal(world.panels.length, 2);
+  // A ```widget in a reply: its page, opened by Open (with focus), once.
+  panel.say({ type: "widgetOpen", html: "<i>fence</i>", title: "Tip calculator" });
+  panel.say({ type: "widgetOpen", html: "<i>fence</i>", title: "Tip calculator" });
+  const fenced = world.panels.at(-1);
+  assert.equal(world.panels.length, 3);
+  assert.deepEqual([fenced.title, fenced.show.preserveFocus, fenced.revealed], ["Tip calculator", false, 1]);
+  // Closed: Open opens it again.
+  tab.dispose();
+  panel.say({ type: "widgetOpen", id: WG, html: "<b>calc</b>", title: "EMI calculator" });
+  assert.equal(world.panels.length, 4);
+  // A chat no tab shows: its card waits on the reply; no tab of its own.
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(9), message_id: MSG(2), widget: { ...widget, id: `wg_${"d".repeat(16)}` } });
+  assert.equal(world.panels.length, 4);
 });
 
 test("a reload brings each chat back in its tab, once", async () => {

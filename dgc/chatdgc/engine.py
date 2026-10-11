@@ -155,11 +155,11 @@ QUERY_DATA_TOOL = {"type": "function", "function": {
         "sql": {"type": "string", "description": "One SELECT (or WITH … SELECT) over those tables."}},
         "required": ["sql"]}}}
 MAX_QUERIES = 12
-# Interactive answers (ChatGPT's): a small self-contained HTML page the screen frames in a locked-down sandbox.
+# Interactive answers (ChatGPT's): a small self-contained HTML page, in a locked-down tab of its own beside the chat.
 WIDGET_TOOL = {"type": "function", "function": {
     "name": "show_widget",
     "description": (
-        "Show an interactive widget under your reply: one small self-contained HTML page (inline CSS and JS only) for "
+        "Show an interactive widget, in a tab beside the chat: one small self-contained HTML page (inline CSS and JS only) for "
         "something to use right now: a calculator, a converter, a timer, a quiz, a small simulation or an interactive "
         "diagram. It runs in a sandbox with no network and nothing loaded from anywhere (no libraries, fonts or images "
         "from the web), and it can't see the chat. Use the CSS variables --bg, --text, --muted, --accent, --border and "
@@ -1584,7 +1584,7 @@ class ChatEngine:
     # -- interactive answers
 
     def _widget(self, call, widgets: list, at: int, on_widget) -> str:
-        """show_widget: kept on the reply and shown under it, framed in a sandbox by the screen."""
+        """show_widget: kept on the reply (a card under it) and opened in a locked-down tab beside the chat."""
         args = call.arguments if isinstance(call.arguments, dict) else {}
         html, title = str(args.get("html") or ""), " ".join(str(args.get("title") or "").split())[:80] or "Interactive"
         if not html.strip():
@@ -1595,8 +1595,8 @@ class ChatEngine:
         widgets.append(widget)
         if on_widget is not None:
             on_widget(widget)
-        return (f"The widget {title} is shown under your reply. Say in a sentence or two what it does and how to use "
-                "it; don't paste its code.")
+        return (f"The widget {title} is open in a tab beside the chat, with a card under your reply. Say in a sentence "
+                "or two what it does and how to use it; don't paste its code.")
 
     # -- data analysis (data.py)
 

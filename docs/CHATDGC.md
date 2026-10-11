@@ -172,9 +172,11 @@ voice come in later phases.
   pie or scatter chart from numbers it has (never made-up ones). Hover for a value, click the legend to hide a
   series, **Data** for the numbers as a table, **Copy data** (CSV) and **Save image** (PNG).
 - **Interactive answers**, as ChatGPT has them: when something is better used than read (a loan calculator, a
-  converter, a timer, a quiz, a small simulation), the reply shows a widget you use right there. It's a small page
-  in a locked-down frame: no network, nothing loaded from anywhere, no access to the chat or VS Code, and it can't
-  navigate away. It takes the editor's colours. **Show code** shows its page; **Open in a tab** opens it on its own.
+  converter, a timer, a quiz, a small simulation), the reply makes a widget, and it opens in a tab beside the chat
+  (as a canvas does; the chat keeps focus). It's a small page that runs on its own: no network, nothing loaded from
+  anywhere, no access to your chats, files or VS Code. It takes the editor's colours. A card under the reply names
+  it: **Open** shows it again, **Show code** shows its page. (VS Code runs nothing in a frame inside the chat, so a
+  widget can't sit inside the reply itself.)
 - **Canvas**, as ChatGPT has it: for a longer piece you'll keep working on (an essay, a plan, a report, a program),
   or when you ask for one, ChatDGC opens a canvas: a real file in an editor beside the chat. You both work on it.
   - **You edit it** like any file; what you typed is what ChatDGC reads next (it's saved before your message goes).

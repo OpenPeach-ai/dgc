@@ -615,7 +615,7 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 .cd-analysis-error { color: var(--vscode-errorForeground, #f14c4c); font-size: var(--t-sm); }
 .cd-analysis-more { color: var(--muted); font-size: var(--t-sm); }
 
-/* An interactive answer: a widget in its own locked-down frame, with Show code and Open in a tab. */
+/* An interactive answer: the card for a widget that opens in its own locked-down tab, with Open and Show code. */
 .cd-widget { margin: var(--sp-3) 0; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface);
   overflow: hidden; max-width: 760px; }
 .cd-widget-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border);
@@ -623,6 +623,5 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 .cd-widget-kind { text-transform: uppercase; letter-spacing: .06em; font-weight: var(--w-semi); }
 .cd-widget-title { color: var(--text-strong); font-weight: var(--w-semi); overflow-wrap: anywhere; }
 .cd-widget-tools { display: flex; gap: var(--sp-1); margin-left: auto; flex: none; }
-.cd-widget-frame { display: block; width: 100%; border: 0; background: transparent; min-height: 60px; }
 .cd-widget-note { padding: 12px; color: var(--muted); font-size: var(--t-sm); }
 .cd-widget pre.code { margin: 0; border-radius: 0; border-top: 1px solid var(--border); max-height: 360px; overflow: auto; }

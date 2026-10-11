@@ -63,7 +63,7 @@ class Widgets(unittest.TestCase):
         self.assertIn("show_widget", self.world["read"][0]["tools"])
         self.assertNotIn("show_widget", self.world["read"][1]["tools"], "one a reply")
         told = [m["content"] for m in self.world["read"][1]["messages"] if m["role"] == "tool"]
-        self.assertIn("The widget EMI calculator is shown under your reply", told[0])
+        self.assertIn("The widget EMI calculator is open in a tab beside the chat, with a card under your reply", told[0])
         self.world["script"] += [{"parts": ["Done."]}]
         self.engine.send(chat["id"], "Add a tenure slider.")
         history = "\n".join(str(m["content"]) for m in self.world["read"][-1]["messages"])
