@@ -429,6 +429,20 @@ class SdkTests(unittest.TestCase):
             again = restored.run("What did I just ask you to do? Do not edit files.", timeout=60)
             self.assertEqual(again.status, "completed")
 
+    def test_context_breakdown_against_the_real_backend(self):
+        """session.context_breakdown() through a real dgc serve: the answer comes back to its request (live run
+        2026-10-11: the CLI dropped the request_id, so a correlated ask waited out its timeout)."""
+        with self._client() as dgc:
+            session = dgc.session(cwd=self.work, permissions={"mode": "auto", "unhandled": "deny"})
+            self.assertEqual(session.run("Summarize README. Do not edit files.", timeout=60).status, "completed")
+            got = session.context_breakdown()
+        ids = [part.id for part in got.parts]
+        self.assertIn("messages", ids)
+        self.assertIn("system_prompt", ids)
+        self.assertEqual(sum(part.tokens for part in got.parts), got.used)
+        self.assertGreater(got.window, got.used)
+        self.assertEqual(got.source, "estimated")
+
     def test_resume_runs_in_the_mode_it_asked_for(self):
         # DGC 0.47.0 reopens a transcript in the mode it last ran in when that asks no less than
         # the mode it replaces, so a session saved in plan and resumed asking for auto ran in

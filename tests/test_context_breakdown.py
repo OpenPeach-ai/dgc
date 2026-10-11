@@ -92,5 +92,27 @@ class MainDGC(unittest.TestCase):
         self.assertEqual(sum(c["tokens"] for c in got["categories"]), agent.estimate_tokens(), "what waits isn't counted")
 
 
+class OnTheWire(unittest.TestCase):
+    def test_the_answer_carries_the_request_id_the_side_bar_waits_for(self):
+        """Live run 2026-10-11: the side bar asks with a request_id (correlated_state_requests) and waits for that id;
+        a command outside _OPTIONALLY_CORRELATED_COMMANDS dropped it, so the menu never got its parts."""
+        from test_protocol_v14 import fixture_config
+        from dgc.headless import Backend
+        with tempfile.TemporaryDirectory(prefix="dgc-breakdown-wire-") as directory:
+            backend = Backend(fixture_config(Path(directory)))
+            events = []
+            try:
+                backend.em = type("Em", (), {"emit": lambda self, kind, **fields: events.append({"type": kind, **fields})})()
+                backend.start()
+                backend._dispatch({"type": "context_breakdown", "request_id": "ctx-breakdown-1"})
+            finally:
+                backend.agent.mcp.stop_all()
+        ready = next(e for e in events if e["type"] == "ready")
+        self.assertTrue(ready["capabilities"]["correlated_state_requests"] and ready["capabilities"]["context_breakdown"])
+        answer = next(e for e in events if e["type"] == "context_breakdown")
+        self.assertEqual(answer.get("request_id"), "ctx-breakdown-1")
+        self.assertIsNone(event_error({"seq": 0, **answer}))
+
+
 if __name__ == "__main__":
     unittest.main()

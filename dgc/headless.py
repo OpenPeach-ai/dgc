@@ -250,7 +250,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "fork_session", "list_checkpoints", "rewind", "list_retained_tasks",
-    "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config", "clear_todos",
+    "resolve_retained_task", "compact", "context_breakdown", "list_artifacts", "stop_artifact", "set_config", "clear_todos",
     "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
