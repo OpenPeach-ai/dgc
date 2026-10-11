@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { mkdirSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
+import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
 
 /**
  * ChatDGC in the editor: a chat tab of its own (one conversation each) and the home's Chat list.
@@ -183,6 +184,14 @@ export function widgetDocument(html: string, fields?: WidgetField[], ref?: Widge
 const CANVAS_PATH = /^(?:\/|[A-Za-z]:\\).*[\\/]canvas[\\/](chat_[a-f0-9]{32})[\\/](cv_[a-f0-9]{16})[\\/][^\\/]+$/;
 const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
+/** The file a tab shows, as text or formatted (the canvas's own editor), or undefined. */
+function canvasTabPath(tab: vscode.Tab): string | undefined {
+  const input = tab.input;
+  if (input instanceof vscode.TabInputText) return input.uri.fsPath;
+  if (input instanceof vscode.TabInputCustom && input.viewType === CANVAS_DOC_VIEW) return input.uri.fsPath;
+  return undefined;
+}
+
 export function chatdgcDocument(asset: (name: string) => string, cspSource: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
@@ -248,6 +257,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private readonly requests = new Map<string, Asker>();
   private seq = 0;
   private host?: ChatDGCHost;
+  private canvasDocs?: CanvasDocEditor;
   private homeQuery = "";
   private homeShown = HOME_FIRST;
   private homeHeld = false;
@@ -262,7 +272,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     // A widget's tab open when VS Code closed comes back as it was (its page from the chat, its fields as left).
     const widgets = vscode.window.registerWebviewPanelSerializer(CHATDGC_WIDGET, {
       deserializeWebviewPanel: async (panel: vscode.WebviewPanel, state: any) => this.restoreWidget(panel, state) });
-    return { dispose: () => { chats.dispose(); widgets.dispose(); } };
+    // A document canvas opens formatted (Canvas option B), over the same file the Markdown editor opens.
+    this.canvasDocs = new CanvasDocEditor(this.context.extensionUri, {
+      canvasOf: (path) => this.canvasOf(path),
+      canvasAskAbout: (conversation, canvas, text, start, end) => this.canvasAskAbout(conversation, canvas, text, start, end),
+      canvasShortcut: () => this.canvasShortcut(),
+    });
+    const docs = this.canvasDocs.register();
+    return { dispose: () => { chats.dispose(); widgets.dispose(); docs.dispose(); } };
   }
 
   /** A conversation in a tab of its own (or the tab it is already in); "" starts a new chat. */
@@ -338,9 +355,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           if (await vscode.workspace.applyEdit(edit)) await open.save();
         }
       }
-      const shown = vscode.window.visibleTextEditors.some((e) => e.document.uri.fsPath === uri.fsPath);
+      // Shown already, formatted or as Markdown, it stays as it is; a document opens formatted, code in the editor.
+      const shown = vscode.window.tabGroups.all.some((g) => g.activeTab && canvasTabPath(g.activeTab) === uri.fsPath);
       if (!shown || focus) {
-        await vscode.window.showTextDocument(uri, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: !focus, preview: false });
+        const options = { viewColumn: vscode.ViewColumn.Beside, preserveFocus: !focus, preview: false };
+        const open = vscode.window.tabGroups.all.flatMap((g) => g.tabs).find((t) => canvasTabPath(t) === uri.fsPath);
+        if (open?.input instanceof vscode.TabInputText) await vscode.window.showTextDocument(uri, { ...options, viewColumn: open.group.viewColumn });
+        else if (/\.md$/i.test(path)) await vscode.commands.executeCommand("vscode.openWith", uri, CANVAS_DOC_VIEW, open ? { ...options, viewColumn: open.group.viewColumn } : options);
+        else await vscode.window.showTextDocument(uri, options);
       }
     } catch (err: any) {
       void vscode.window.showWarningMessage(`The canvas couldn't be opened: ${String(err?.message || err)}`);
@@ -353,6 +375,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   /** Before a message goes, a canvas's unsaved typing is saved: the model reads the file. */
   private async saveCanvases(conversation: string): Promise<void> {
+    this.canvasDocs?.flush();
     for (const doc of vscode.workspace.textDocuments) {
       if (doc.isDirty && this.canvasOf(doc.uri.fsPath)?.conversation === conversation) {
         try { await doc.save(); } catch { /* it goes as it was */ }
@@ -360,15 +383,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     }
   }
 
-  /** The canvas in front of you, for its commands. */
-  private canvasHere(): { editor: vscode.TextEditor; conversation: string; canvas: string } | undefined {
+  /** The canvas in front of you, for its commands: in the Markdown or code editor, or formatted (no text editor). */
+  private canvasHere(): { path: string; editor?: vscode.TextEditor; conversation: string; canvas: string } | undefined {
     const editor = vscode.window.activeTextEditor;
-    const found = editor ? this.canvasOf(editor.document.uri.fsPath) : undefined;
-    if (!editor || !found) {
+    const path = this.canvasDocs?.active()?.uri.fsPath ?? (editor ? editor.document.uri.fsPath : "");
+    const found = path ? this.canvasOf(path) : undefined;
+    if (!found) {
       void vscode.window.showInformationMessage("Open a ChatDGC canvas first: ask a chat for a document or code to work on together.");
       return undefined;
     }
-    return { editor, ...found };
+    return { path, editor: this.canvasDocs?.active() ? undefined : editor, ...found };
   }
 
   /** A message to the canvas's chat, as if typed there: its tab opens (or shows), and the page sends it. */
@@ -382,27 +406,47 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     if (fresh) (fresh.waitingSend ??= []).push(message);
   }
 
-  /** Ask ChatDGC about the selected part of a canvas (the line the cursor is on, with nothing selected). */
+  /** Ask ChatDGC about the selected part of a canvas (the line the cursor is on, with nothing selected). Formatted,
+   *  the page finds the selection's lines and asks (canvasAskAbout). */
   async canvasAsk(): Promise<void> {
     const here = this.canvasHere();
     if (!here) return;
+    if (!here.editor) { this.canvasDocs?.askSelection(); return; }
     const sel = here.editor.selection, doc = here.editor.document;
     const text = doc.getText(sel.isEmpty ? doc.lineAt(sel.active.line).range : sel);
     if (!text.trim()) { void vscode.window.showInformationMessage("Select the part of the canvas to ask about."); return; }
+    const first = sel.isEmpty ? sel.active.line : sel.start.line;
+    const last = sel.isEmpty ? sel.active.line : (sel.end.character === 0 && sel.end.line > sel.start.line ? sel.end.line - 1 : sel.end.line);
+    await this.canvasAskAbout(here.conversation, here.canvas, text, first + 1, last + 1);
+  }
+
+  /** Ask about lines `start`–`end` (1-based) of a canvas: what to change or know, then it goes from the chat's tab. */
+  async canvasAskAbout(conversation: string, canvas: string, text: string, start: number, end: number): Promise<void> {
     const ask = await vscode.window.showInputBox({ title: "Ask ChatDGC about the selection", prompt: "What should change, or what do you want to know?",
                                                     placeHolder: "Make this friendlier", ignoreFocusOut: true });
     if (!ask?.trim()) return;
+    await this.saveCanvases(conversation);
+    this.sendFromCanvas(conversation, ask.trim(), { canvas_id: canvas, start_line: start, end_line: end, text: text.slice(0, 20_000) });
+  }
+
+  /** The canvas in front, the other way: formatted to Markdown, or Markdown to formatted. */
+  async canvasSwitch(formatted: boolean): Promise<void> {
+    const here = this.canvasHere();
+    if (!here || !/\.md$/i.test(here.path)) return;
     await this.saveCanvases(here.conversation);
-    const first = sel.isEmpty ? sel.active.line : sel.start.line;
-    const last = sel.isEmpty ? sel.active.line : (sel.end.character === 0 && sel.end.line > sel.start.line ? sel.end.line - 1 : sel.end.line);
-    this.sendFromCanvas(here.conversation, ask.trim(), { canvas_id: here.canvas, start_line: first + 1, end_line: last + 1, text: text.slice(0, 20_000) });
+    const uri = vscode.Uri.file(here.path);
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    await vscode.commands.executeCommand("vscode.openWith", uri, formatted ? CANVAS_DOC_VIEW : "default", vscode.window.tabGroups.activeTabGroup.viewColumn);
+    // In the same group VS Code swaps the editor in place, and the old tab is gone; one left beside it is closed.
+    const left = tab && vscode.window.tabGroups.all.some((g) => g.tabs.includes(tab)) && tab !== vscode.window.tabGroups.activeTabGroup.activeTab;
+    if (left && canvasTabPath(tab) === here.path) await vscode.window.tabGroups.close(tab, true).then(undefined, () => undefined);
   }
 
   /** ChatGPT's canvas shortcuts, for a document or for code. */
   async canvasShortcut(): Promise<void> {
     const here = this.canvasHere();
     if (!here) return;
-    const code = !/\.md$/i.test(here.editor.document.uri.fsPath);
+    const code = !/\.md$/i.test(here.path);
     const items: [string, string][] = code
       ? [["Review the code", "Review the code in the canvas and suggest improvements as comments in it."],
          ["Add comments", "Add clear comments to the code in the canvas."],
@@ -464,7 +508,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const here = this.canvasHere();
     if (!here) return;
     await this.saveCanvases(here.conversation);
-    const file = here.editor.document.uri.fsPath, name = file.split(/[\\/]/).pop() || "canvas";
+    const file = here.path, name = file.split(/[\\/]/).pop() || "canvas";
     const code = !/\.md$/i.test(file);
     const format = code ? { label: "The code file", format: "file", ext: name.split(".").pop() || "txt" }
       : await vscode.window.showQuickPick([{ label: "Word document (.docx)", format: "docx", ext: "docx" }, { label: "PDF", format: "pdf", ext: "pdf" },
@@ -478,12 +522,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                          format: format.format, path: target.fsPath });
   }
 
-  /** The canvas commands show in an editor's title bar and menus when the file in front is a canvas. */
+  /** The canvas commands show in an editor's title bar and menus when the file in front is a canvas, in the Markdown
+   *  or code editor or formatted (dgc.chatdgcCanvasFormatted says which, for the switch between them). */
   canvasContext(): vscode.Disposable {
-    const set = (editor?: vscode.TextEditor) => void vscode.commands.executeCommand("setContext", "dgc.chatdgcCanvas",
-      !!(editor && this.canvasOf(editor.document.uri.fsPath)));
-    set(vscode.window.activeTextEditor);
-    return vscode.window.onDidChangeActiveTextEditor(set);
+    const set = () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+      const path = tab ? canvasTabPath(tab) : undefined;
+      const canvas = !!(path && this.canvasOf(path));
+      void vscode.commands.executeCommand("setContext", "dgc.chatdgcCanvas", canvas);
+      void vscode.commands.executeCommand("setContext", "dgc.chatdgcCanvasFormatted", canvas && tab?.input instanceof vscode.TabInputCustom);
+    };
+    set();
+    return vscode.Disposable.from(vscode.window.onDidChangeActiveTextEditor(set), vscode.window.tabGroups.onDidChangeTabs(set),
+                                  vscode.window.tabGroups.onDidChangeTabGroups(set), ...(this.canvasDocs ? [this.canvasDocs.onDidChangeActive(set)] : []));
   }
 
   /** A made file, written where DGC opens files: in its own app, or a Markdown or CSV file in an editor tab. */

@@ -11002,6 +11002,7 @@ def test_extension_vsix_guard():
         "extension/media/chart.js",
         "extension/media/library.js",
         "extension/media/breakdown.js",
+        "extension/media/canvas.css",
         "extension/media/dgc-tab-light.svg",
         "extension/media/dgc-tab-dark.svg",
         "extension/media/chatdgc-tab-light.svg",
@@ -11011,6 +11012,7 @@ def test_extension_vsix_guard():
         "extension/media/pips/plush.js",
         "extension/media/pips/wordmark.css",
         "extension/media/pips/plush-bodies.webp",
+        "extension/dist/canvas.js",
         "extension/dist/pips.js",
         "extension/dist/pips.css",
         "extension/dist/pipComputer.js",
@@ -11039,9 +11041,10 @@ def test_extension_vsix_guard():
         "extension/dist/katex/fonts/KaTeX_Typewriter-Regular.woff2",
         "extension/licenses/NOVNC-LICENSES.txt",
         "extension/licenses/KATEX-LICENSE.txt",
+        "extension/licenses/PROSEMIRROR-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 155)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 158)
     # The diagram renderer is the one member allowed past the general size ceiling, and the only
     # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
     # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real

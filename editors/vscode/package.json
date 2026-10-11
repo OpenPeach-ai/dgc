@@ -50,6 +50,18 @@
     "onWebviewPanel:dgc.chatdgcWidget"
   ],
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "dgc.chatdgcCanvasDoc",
+        "displayName": "ChatDGC Canvas (formatted)",
+        "selector": [
+          {
+            "filenamePattern": "**/canvas/chat_*/cv_*/*.md"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -137,6 +149,18 @@
         "title": "Download Canvas…",
         "category": "DGC",
         "icon": "$(desktop-download)"
+      },
+      {
+        "command": "dgc.chatdgcCanvasMarkdown",
+        "title": "Open Canvas as Markdown",
+        "category": "DGC",
+        "icon": "$(markdown)"
+      },
+      {
+        "command": "dgc.chatdgcCanvasFormatted",
+        "title": "Open Canvas Formatted",
+        "category": "DGC",
+        "icon": "$(preview)"
       },
       {
         "command": "dgc.newParallelChat",
@@ -365,6 +389,16 @@
           "command": "dgc.chatdgcCanvasDownload",
           "when": "dgc.chatdgcCanvas",
           "group": "navigation@3"
+        },
+        {
+          "command": "dgc.chatdgcCanvasMarkdown",
+          "when": "dgc.chatdgcCanvasFormatted",
+          "group": "navigation@4"
+        },
+        {
+          "command": "dgc.chatdgcCanvasFormatted",
+          "when": "dgc.chatdgcCanvas && !dgc.chatdgcCanvasFormatted && resourceExtname == .md",
+          "group": "navigation@4"
         }
       ],
       "explorer/context": [
@@ -397,6 +431,14 @@
         {
           "command": "dgc.chatdgcCanvasDownload",
           "when": "dgc.chatdgcCanvas"
+        },
+        {
+          "command": "dgc.chatdgcCanvasMarkdown",
+          "when": "dgc.chatdgcCanvasFormatted"
+        },
+        {
+          "command": "dgc.chatdgcCanvasFormatted",
+          "when": "dgc.chatdgcCanvas && !dgc.chatdgcCanvasFormatted"
         },
         {
           "command": "dgc.selectModel",
@@ -701,12 +743,25 @@
     "markdown-it": "15.0.1",
     "mermaid": "^12.0.0",
     "ovsx": "1.2.0",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-history": "1.5.1",
+    "prosemirror-inputrules": "1.5.1",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-markdown": "1.13.8",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-schema-list": "1.5.1",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-transform": "1.12.2",
+    "prosemirror-view": "1.42.6",
     "typescript": "^5.4.0"
   },
   "overrides": {
     "lodash-es": "^4.18.1",
     "ovsx": {
       "@vscode/vsce": "$@vscode/vsce"
+    },
+    "prosemirror-markdown": {
+      "markdown-it": "$markdown-it"
     }
   },
   "dgcCliVersion": "0.48.0"

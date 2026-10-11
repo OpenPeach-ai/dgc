@@ -123,7 +123,7 @@ STATIC_MEMBERS = {
     "extension/licenses/MARKDOWN-LICENSES.txt": "licenses/MARKDOWN-LICENSES.txt",
     "extension/licenses/MERMAID-LICENSES.txt": "licenses/MERMAID-LICENSES.txt",
     "extension/licenses/LUCIDE-LICENSES.txt": "licenses/LUCIDE-LICENSES.txt",
-    # ChatDGC (its page, charts, Library and tab marks), the session tabs' marks, Pips (their cards, plush art, the
+    # ChatDGC (its page, charts, Library, tab marks and formatted canvas), the session tabs' marks, Pips (their cards, plush art, the
     # computer's screen) and KaTeX (maths in ChatDGC's replies: its script, stylesheet and WOFF2 fonts, built from
     # the katex package into dist/katex/).
     "extension/media/chatdgc.js": "media/chatdgc.js",
@@ -131,6 +131,7 @@ STATIC_MEMBERS = {
     "extension/media/chart.js": "media/chart.js",
     "extension/media/library.js": "media/library.js",
     "extension/media/breakdown.js": "media/breakdown.js",
+    "extension/media/canvas.css": "media/canvas.css",
     "extension/media/dgc-tab-light.svg": "media/dgc-tab-light.svg",
     "extension/media/dgc-tab-dark.svg": "media/dgc-tab-dark.svg",
     "extension/media/chatdgc-tab-light.svg": "media/chatdgc-tab-light.svg",
@@ -140,6 +141,7 @@ STATIC_MEMBERS = {
     "extension/media/pips/plush.js": "media/pips/plush.js",
     "extension/media/pips/wordmark.css": "media/pips/wordmark.css",
     "extension/media/pips/plush-bodies.webp": "media/pips/plush-bodies.webp",
+    "extension/dist/canvas.js": "dist/canvas.js",
     "extension/dist/pips.js": "dist/pips.js",
     "extension/dist/pips.css": "dist/pips.css",
     "extension/dist/pipComputer.js": "dist/pipComputer.js",
@@ -168,6 +170,7 @@ STATIC_MEMBERS = {
     "extension/dist/katex/fonts/KaTeX_Typewriter-Regular.woff2": "dist/katex/fonts/KaTeX_Typewriter-Regular.woff2",
     "extension/licenses/NOVNC-LICENSES.txt": "licenses/NOVNC-LICENSES.txt",
     "extension/licenses/KATEX-LICENSE.txt": "licenses/KATEX-LICENSE.txt",
+    "extension/licenses/PROSEMIRROR-LICENSES.txt": "licenses/PROSEMIRROR-LICENSES.txt",
 }
 GENERATED_MEMBERS = {
     "[Content_Types].xml",

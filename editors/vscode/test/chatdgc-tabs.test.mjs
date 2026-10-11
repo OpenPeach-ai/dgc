@@ -21,7 +21,7 @@ class Emitter {
 }
 
 const world = { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
-                chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [] };
+                chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [], tabs: [], changes: new Emitter() };
 function fakePanel(viewType, title) {
   const disposed = new Emitter(), received = new Emitter();
   const panel = {
@@ -38,7 +38,12 @@ function fakePanel(viewType, title) {
   };
   return panel;
 }
+class TabInputText { constructor(uri) { this.uri = uri; } }
+class TabInputCustom { constructor(uri, viewType) { this.uri = uri; this.viewType = viewType; } }
 globalThis.__DGC_TEST_VSCODE = {
+  TabInputText, TabInputCustom,
+  EventEmitter: Emitter,
+  Disposable: { from: (...items) => ({ dispose() { for (const i of items) i?.dispose?.(); } }) },
   Uri: { joinPath: (...parts) => ({ toString: () => parts.map((p) => String(p?.toString?.() ?? p)).join("/") }),
     file: (p) => ({ scheme: "file", fsPath: p, path: p, toString: () => `file://${p}` }),
     parse: (value) => {
@@ -72,10 +77,29 @@ globalThis.__DGC_TEST_VSCODE = {
     get visibleTextEditors() { return world.visible; },
     get activeTextEditor() { return world.active; },
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
+    registerCustomEditorProvider: (viewType, provider) => { world.customEditors = { viewType, provider }; return { dispose() {} }; },
+    // One editor group, its tabs world.tabs (the last one in front).
+    tabGroups: {
+      get all() { const group = { viewColumn: 1, tabs: world.tabs, get activeTab() { return world.tabs.at(-1); } }; for (const t of world.tabs) t.group = group; return [group]; },
+      get activeTabGroup() { return this.all[0]; },
+      onDidChangeTabs: () => ({ dispose() {} }), onDidChangeTabGroups: () => ({ dispose() {} }),
+      close: async (tab) => { world.tabs = world.tabs.filter((t) => t !== tab); return true; },
+    },
   },
   workspace: {
     get textDocuments() { return world.docs; },
-    applyEdit: async (edit) => { for (const e of edit.edits) { const doc = world.docs.find((d) => d.uri.fsPath === e.uri.fsPath); if (doc) doc.text = e.text; } return true; },
+    // A range's ends are offsets (the fake documents' positionAt is the identity); changes are announced as VS Code does.
+    applyEdit: async (edit) => {
+      for (const e of edit.edits) {
+        const doc = world.docs.find((d) => d.uri.fsPath === e.uri.fsPath);
+        if (!doc) continue;
+        doc.text = doc.text.slice(0, e.range.start) + e.text + doc.text.slice(e.range.end);
+        doc.isDirty = true;
+        world.changes.fire({ document: doc, contentChanges: [e] });
+      }
+      return true;
+    },
+    onDidChangeTextDocument: (listener) => world.changes.event(listener),
     getConfiguration: () => ({ get: (key, fallback) => (key === "linkFavicons" && world.favicons !== undefined ? world.favicons : fallback) }),
     fs: { writeFile: async (uri, bytes) => { world.written.push({ path: uri.fsPath ?? String(uri), bytes: Buffer.from(bytes) }); },
       createDirectory: async () => undefined,
@@ -104,7 +128,7 @@ let chat, host, sent;
 beforeEach(() => {
   Object.assign(world, { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
                          chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [],
-                         shown: [], visible: [], active: undefined, docs: [], commands: [], choose: undefined, written: [] });
+                         shown: [], visible: [], active: undefined, docs: [], commands: [], choose: undefined, written: [], tabs: [] });
   sent = [];
   host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" }, offers: { version: 1 },
     chatdgcOffers() { return this.offers; },
@@ -301,7 +325,10 @@ const doc = (path, text, dirty = false) => ({ uri: { fsPath: path, path }, text,
   positionAt: (n) => n, lineAt: (line) => ({ range: { picked: `line ${line}` } }) });
 const tick = () => new Promise((r) => setImmediate(r));
 
+const formattedOpens = () => world.commands.filter((c) => c[0] === "vscode.openWith" && c[2] === "dgc.chatdgcCanvasDoc");
+
 test("canvas: a reply's canvas opens beside the chat; a change goes in as an edit and is saved; never a file elsewhere", async () => {
+  chat.register();
   chat.open(ID(7));
   const [panel] = world.panels;
   panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "Trip" });
@@ -309,16 +336,18 @@ test("canvas: a reply's canvas opens beside the chat; a change goes in as an edi
   const view = { id: CV, title: "Plan", kind: "document", language: "markdown", version: 1, path, op: "created", text: "# Plan" };
   chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(2), canvas: view });
   await tick();
-  assert.deepEqual(world.shown, [{ path, options: { viewColumn: -2, preserveFocus: true, preview: false } }], "beside the chat, which keeps focus");
+  assert.deepEqual(formattedOpens().map((c) => [c[1].fsPath, c[3]]), [[path, { viewColumn: -2, preserveFocus: true, preview: false }]],
+                   "a document opens formatted (Canvas option B), beside the chat, which keeps focus");
+  assert.deepEqual(world.shown, [], "not in the Markdown editor");
   assert.deepEqual(panel.last("canvas"), { type: "canvas", messageId: MSG(2), canvas: { id: CV, title: "Plan", kind: "document",
                                                                                     language: "markdown", version: 1, op: "created" } });
   const open = doc(path, "# Plan");
-  world.docs = [open]; world.visible = [{ document: open }];
+  world.docs = [open]; world.tabs = [{ input: new TabInputCustom({ fsPath: path }, "dgc.chatdgcCanvasDoc") }];
   chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(4), canvas: { ...view, version: 2, op: "edited", text: "# Plan\n\nMore" } });
   await tick(); await tick();
   assert.equal(open.text, "# Plan\n\nMore", "the reply's change, as an edit of the open document");
   assert.equal(open.saved, 1);
-  assert.equal(world.shown.length, 1, "already in view: not opened again");
+  assert.equal(formattedOpens().length, 1, "already in view: not opened again");
   open.isDirty = true;
   chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(6), canvas: { ...view, version: 3, text: "Other" } });
   await tick();
@@ -329,7 +358,17 @@ test("canvas: a reply's canvas opens beside the chat; a change goes in as an edi
     chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(8), canvas: { ...view, path: elsewhere, text: undefined } });
   }
   await tick();
-  assert.equal(world.shown.length, 1, "only this chat's own canvas files");
+  assert.equal(formattedOpens().length + world.shown.length, 1, "only this chat's own canvas files");
+  // Switched to Markdown, it stays Markdown when the next change lands; a code canvas opens in the code editor.
+  world.tabs = [{ input: new TabInputText({ fsPath: path }) }, { input: { viewType: "x" } }];
+  chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(10), canvas: { ...view, text: undefined } });
+  await tick();
+  assert.deepEqual(world.shown.map((s) => [s.path, s.options.viewColumn]), [[path, 1]], "shown again in its Markdown tab");
+  const code = canvasFile(ID(7), "app.py");
+  chat.onEvent({ type: "chatdgc_canvas", conversation_id: ID(7), message_id: MSG(12), canvas: { ...view, kind: "code", path: code, text: undefined } });
+  await tick();
+  assert.equal(world.shown.at(-1).path, code);
+  assert.equal(formattedOpens().length, 1);
 });
 
 test("canvas: Ask ChatDGC about a selection sends from the chat's tab, saved first; sends forward only a real selection", async () => {
@@ -354,6 +393,96 @@ test("canvas: Ask ChatDGC about a selection sends from the chat's tab, saved fir
   world.active = { document: doc("/home/u/notes.md", "x"), selection: world.active.selection };
   await chat.canvasAsk();
   assert.match(world.infos.at(-1), /Open a ChatDGC canvas first/, "not a canvas: says so");
+});
+
+test("canvas, formatted: typing goes in as the part that changed and saves on a pause; Ask carries its lines; the model's change reaches the page", async () => {
+  chat.register();
+  chat.open(ID(7));
+  const [chatPanel] = world.panels;
+  chatPanel.say({ type: "ready" }); opened(chatPanel, { id: ID(7), title: "Trip" });
+  const path = canvasFile(ID(7));
+  const file = doc(path, "# Plan\n\nDay one.\n");
+  world.docs = [file];
+  const page = fakePanel("dgc.chatdgcCanvasDoc", "Plan.md");
+  page.active = true; page.viewColumn = 2; page.onDidChangeViewState = () => ({ dispose() {} });
+  await world.customEditors.provider.resolveCustomTextEditor(file, page);
+  assert.match(page.webview.html, /dist\/canvas\.js/);
+  assert.equal(page.webview.options.enableScripts, true);
+  page.say({ type: "ready" });
+  assert.deepEqual(page.last("doc"), { type: "doc", text: "# Plan\n\nDay one.\n", external: false });
+  page.say({ type: "edit", text: "# Plan\n\nDay one, by the sea.\n" });
+  await tick();
+  assert.equal(file.text, "# Plan\n\nDay one, by the sea.\n");
+  assert.equal(page.webview.posted.filter((m) => m.type === "doc").length, 1, "its own typing isn't sent back");
+  assert.equal(file.saved, 0, "saved once you pause, not on every key");
+  await new Promise((r) => setTimeout(r, 1300));
+  assert.equal(file.saved, 1);
+  // The model's change (as chatdgc.ts applies it) reaches the page, to show and flash.
+  await globalThis.__DGC_TEST_VSCODE.workspace.applyEdit({ edits: [{ uri: file.uri, range: { start: 0, end: file.text.length }, text: "# Plan\n\nDay one.\n\nDay two.\n" }] });
+  assert.deepEqual(page.last("doc"), { type: "doc", text: "# Plan\n\nDay one.\n\nDay two.\n", external: true });
+  // Ask from the page: what to ask, then it goes from the chat's tab with the lines it covers.
+  world.input = "Make it livelier";
+  page.say({ type: "ask", text: "Day two.", start_line: 5, end_line: 5 });
+  await tick(); await tick();
+  assert.deepEqual(chatPanel.last("sendFromEditor"), { type: "sendFromEditor", text: "Make it livelier",
+    canvasSelection: { canvas_id: CV, start_line: 5, end_line: 5, text: "Day two." } });
+  page.say({ type: "ask", text: "x", start_line: 0, end_line: 1 });
+  await tick();
+  assert.equal(chatPanel.webview.posted.filter((m) => m.type === "sendFromEditor").length, 1, "never lines that aren't there");
+  // The page's words without their Markdown aren't in the file: the model gets the lines as the file has them.
+  file.text = "# Plan\n\n**For** eight years, Bangalore was home.\n";
+  page.say({ type: "ask", text: "For eight years, Bangalore was home.", start_line: 3, end_line: 3 });
+  await tick(); await tick();
+  assert.equal(chatPanel.last("sendFromEditor").canvasSelection.text, "**For** eight years, Bangalore was home.");
+  // The title bar's Ask, formatted: the page is asked for its selection.
+  world.tabs = [{ input: new TabInputCustom({ fsPath: path }, "dgc.chatdgcCanvasDoc") }];
+  await chat.canvasAsk();
+  assert.deepEqual(page.last("askSelection"), { type: "askSelection" });
+  // As Markdown: the same file in the text editor, where it was.
+  page.say({ type: "markdown" });
+  await tick(); await tick();
+  assert.deepEqual(world.commands.find((c) => c[0] === "vscode.openWith" && c[2] === "default")?.slice(1).map((v) => v?.fsPath ?? v), [path, "default", 2]);
+  assert.equal(page.disposedCount, 1);
+  // A file that isn't a canvas never opens formatted (no script runs).
+  const other = fakePanel("dgc.chatdgcCanvasDoc", "notes.md");
+  other.onDidChangeViewState = () => ({ dispose() {} });
+  await world.customEditors.provider.resolveCustomTextEditor(doc("/home/u/notes.md", "x"), other);
+  assert.equal(other.webview.options.enableScripts, false);
+  assert.match(other.webview.html, /Only a ChatDGC document canvas opens formatted/);
+});
+
+test("canvas: Markdown and formatted switch in place; a tab VS Code already swapped out is never closed again", async () => {
+  chat.register();
+  const path = canvasFile(ID(7));
+  world.docs = [doc(path, "# Plan\n")];
+  world.tabs = [{ input: new TabInputCustom({ fsPath: path }, "dgc.chatdgcCanvasDoc") }];
+  let closed = 0;
+  globalThis.__DGC_TEST_VSCODE.window.tabGroups.close = async () => { closed++; throw new Error("Tab close: Invalid tab not found!"); };
+  world.commands.length = 0;
+  // The formatted page in front: CanvasDocEditor.active() needs its panel; the tab alone says formatted here.
+  const page = fakePanel("dgc.chatdgcCanvasDoc", "Plan.md");
+  page.active = true; page.viewColumn = 1; page.onDidChangeViewState = () => ({ dispose() {} });
+  await world.customEditors.provider.resolveCustomTextEditor(world.docs[0], page);
+  // As VS Code does: opening the same file in the same group swaps the editor, and the old tab object is gone.
+  const execute = globalThis.__DGC_TEST_VSCODE.commands.executeCommand;
+  globalThis.__DGC_TEST_VSCODE.commands.executeCommand = async (...args) => {
+    if (args[0] === "vscode.openWith") world.tabs = [{ input: args[2] === "default" ? new TabInputText(args[1]) : new TabInputCustom(args[1], args[2]) }];
+    return execute(...args);
+  };
+  after(() => { globalThis.__DGC_TEST_VSCODE.commands.executeCommand = execute; });
+  await chat.canvasSwitch(false);
+  assert.deepEqual(world.commands.map((c) => [c[0], c[1].fsPath, c[2], c[3]]), [["vscode.openWith", path, "default", 1]]);
+  assert.equal(closed, 0, "swapped in place: nothing to close, and no error");
+  page.active = false;
+  world.tabs = [{ input: new TabInputText({ fsPath: path }) }];
+  world.active = { document: world.docs[0], selection: { isEmpty: true, active: { line: 0 } } };
+  await chat.canvasSwitch(true);
+  assert.deepEqual(world.commands.at(-1).slice(2, 4), ["dgc.chatdgcCanvasDoc", 1]);
+  world.active = { document: doc("/home/u/notes.md", "x") };
+  world.tabs = [];
+  world.commands.length = 0;
+  await chat.canvasSwitch(true);
+  assert.equal(world.commands.length, 0, "not a canvas: nothing opens");
 });
 
 test("canvas: versions compare in VS Code's diff or come back; Download saves a Word copy", async () => {

@@ -75,6 +75,11 @@
   chat. Edit it yourself; ChatDGC reads your version and changes it with small edits you can undo. Select a part and
   choose **Ask ChatDGC About This**; the title bar has shortcuts, **Canvas Versions…** (compare or bring back) and
   **Download Canvas…** (Word, PDF, Markdown, or the code file).
+- **A canvas document opens formatted**, as ChatGPT shows it: a page with headings, lists, tables and maths drawn, and
+  a toolbar (style, bold, italic, strikethrough, code, link, lists, quote, divider, **Ask ChatDGC** on a selection,
+  shortcuts). Type Markdown shortcuts as you would (`# `, `- `, `> `). It saves itself when you pause, and what
+  ChatDGC changes lights up as it lands. **Open Canvas as Markdown** shows the same file as text, and **Open Canvas
+  Formatted** brings the page back; only the parts you changed are rewritten. Code canvases open in the code editor.
 - **Writing blocks.** A drafted email, message, letter or post comes in its own box: **Copy** (just the text, no
   stars or hashes), **Open in mail app** (address, subject and text filled in), and **Edit** in place, which the
   chat then works from. A reply's **Copy** now copies it as it reads: formatted in a mail app or document, clean

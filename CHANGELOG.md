@@ -205,6 +205,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   `chatdgc_canvas` (get, restore, export through made.py), `chatdgc_send` `canvas_selection` (a part of a canvas the
   message is about; kept as `canvas` on the message), the reply's `canvases` cards, `chatdgc_activity` `canvas`.
   Branches copy a chat's canvases; deleting a chat deletes them.
+- **The formatted canvas (Canvas option B)**: a document canvas opens in a custom text editor
+  (`dgc.chatdgcCanvasDoc`, `src/canvasDoc.ts`) over the same `.md` TextDocument, so save, versions, the model's
+  edits and the title-bar commands are unchanged. ProseMirror (`src/canvasEditor.ts`, `dist/canvas.js`) edits it;
+  `src/canvasMarkdown.ts` reads the file block by block and writes it back with every untouched top-level block (and
+  what followed it: blank lines, link definitions) byte for byte, so the model's exact find-and-replace still finds
+  its text; tables and display maths stay their own Markdown, drawn. Typing goes to the host as the one range that
+  changed and is saved after a 1.2 s pause; the model's change is posted to the page and flashes as a decoration; Ask
+  on a selection sends its lines in the file (`canvasAskAbout`). The maths rules moved to `src/markdownMath.ts` so
+  the canvas bundle doesn't carry the code highlighter. Licenses in `licenses/PROSEMIRROR-LICENSES.txt`.
 - **Writing blocks in ChatDGC**, as ChatGPT has them: the prompt (`DRAFTS`) puts a draft the user will send as it is
   in its own ` ```email ` (Subject:, To:) or ` ```draft ` block; `chatdgc_draft` {conversation_id, message_id, original,
   text} edits one in place (answered by `chatdgc_message`; refused mid-turn, or when the block's words changed

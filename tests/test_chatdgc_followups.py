@@ -103,7 +103,8 @@ class FollowUps(unittest.TestCase):
         self.addCleanup(service.close, 2.0)
         self.world["next"] = ["How do I bake my first loaf?"]
         service.dispatch({"type": "chatdgc_open", "request_id": "o"})
-        chat_id = frames[-1]["conversation"]["id"]
+        # The opened frame, not the last one: opening also refreshes the meter on a thread, which can land first.
+        chat_id = next(f for f in reversed(frames) if f["type"] == "chatdgc_opened")["conversation"]["id"]
         service.dispatch({"type": "chatdgc_send", "request_id": "s", "conversation_id": chat_id, "text": "Starter?"})
         import time
         for _ in range(500):

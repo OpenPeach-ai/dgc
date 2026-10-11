@@ -33,9 +33,16 @@ globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
       closeListeners.push(listener);
       return { dispose() { closeListeners.splice(closeListeners.indexOf(listener), 1); } };
     },
-    // ChatDGC's canvas commands show only for a canvas file: activation sets that context and follows the editor.
+    // ChatDGC's canvas commands show only for a canvas file: activation sets that context and follows the editor
+    // and the tabs (a canvas open formatted is a custom editor, with no text editor in front).
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
+    registerCustomEditorProvider: () => ({ dispose() {} }),
+    tabGroups: { all: [], activeTabGroup: { activeTab: undefined }, onDidChangeTabs: () => ({ dispose() {} }),
+                 onDidChangeTabGroups: () => ({ dispose() {} }) },
   },
+  TabInputText: class {}, TabInputCustom: class {},
+  EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} dispose() {} },
+  Disposable: { from: (...items) => ({ dispose() { for (const i of items) i?.dispose?.(); } }) },
   ProgressLocation: { Notification: 15 },
   commands: {
     registerCommand: (name, callback) => {

@@ -83,6 +83,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.chatdgcCanvasShortcut", () => chatdgc.canvasShortcut()),
     vscode.commands.registerCommand("dgc.chatdgcCanvasVersions", () => chatdgc.canvasVersions()),
     vscode.commands.registerCommand("dgc.chatdgcCanvasDownload", () => chatdgc.canvasDownload()),
+    vscode.commands.registerCommand("dgc.chatdgcCanvasMarkdown", () => chatdgc.canvasSwitch(false)),
+    vscode.commands.registerCommand("dgc.chatdgcCanvasFormatted", () => chatdgc.canvasSwitch(true)),
     vscode.commands.registerCommand("dgc.newParallelChat", () => { tabs.open(""); }),
     vscode.commands.registerCommand("dgc.newChatInFolder", () => chat().newChatInFolder()),
     vscode.commands.registerCommand("dgc.switchChat", () => chat().pickChat()),

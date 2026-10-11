@@ -196,6 +196,13 @@ voice come in later phases.
   itself.)
 - **Canvas**, as ChatGPT has it: for a longer piece you'll keep working on (an essay, a plan, a report, a program),
   or when you ask for one, ChatDGC opens a canvas: a real file in an editor beside the chat. You both work on it.
+  - **A document opens formatted**, as a page (headings, lists, tables, maths drawn), with a toolbar: text style,
+    bold, italic, strikethrough, code, link, lists, quote, divider, **Ask ChatDGC**, shortcuts, and **Open as
+    Markdown**. Markdown shortcuts work as you type (`# `, `- `, `1. `, `> `, three backticks, `---`). It's the same
+    `.md` file: **Open Canvas as Markdown** / **Open Canvas Formatted** switch between the two, and a block you didn't
+    touch is written back exactly as it was (only what you changed is rewritten), so ChatDGC's edits and the
+    versions stay exact. A table or display maths shows drawn and is edited in Markdown. It saves itself when you
+    pause; what ChatDGC changes lights up as it lands. Code opens in the code editor.
   - **You edit it** like any file; what you typed is what ChatDGC reads next (it's saved before your message goes).
   - **ChatDGC changes it** with small exact edits, so the rest stays as you left it; each change shows in the
     editor as an edit you can undo. A card in the reply says it made or changed it, with **Open**.

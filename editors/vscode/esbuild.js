@@ -97,6 +97,12 @@ async function main() {
     minify: production, sourcemap: false,
   });
   await esbuild.build({
+    // ChatDGC's formatted canvas: ProseMirror over the canvas's Markdown (src/canvasDoc.ts hosts it).
+    entryPoints: ["src/canvasEditor.ts"], bundle: true, format: "iife",
+    platform: "browser", target: "chrome108", outfile: "dist/canvas.js",
+    minify: production, sourcemap: false,
+  });
+  await esbuild.build({
     // An ES module: noVNC (the computer's screen) uses top-level await.
     entryPoints: ["src/pipComputerClient.js"], bundle: true, format: "esm",
     platform: "browser", target: "chrome108", outfile: "dist/pipComputer.js",

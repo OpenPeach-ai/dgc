@@ -1,0 +1,94 @@
+/* ChatDGC's formatted canvas (src/canvasEditor.ts): ChatGPT's canvas, a page of writing in the editor's own colours,
+   with a quiet row of formatting buttons above it. Only VS Code's theme variables, so it reads in every theme. */
+:root {
+  color-scheme: light dark;
+  --cv-text: var(--vscode-editor-foreground, #e6e6e6);
+  --cv-muted: var(--vscode-descriptionForeground, #9a9a9a);
+  --cv-line: var(--vscode-editorWidget-border, var(--vscode-panel-border, rgba(128, 128, 128, .28)));
+  --cv-soft: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, .12));
+  --cv-hover: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .16));
+  --cv-accent: var(--vscode-textLink-foreground, #8b7cff);
+  --cv-flash: var(--vscode-editor-findMatchHighlightBackground, rgba(139, 124, 255, .22));
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--vscode-editor-background); color: var(--cv-text);
+  font: 15px/1.7 var(--vscode-font-family, system-ui, sans-serif); display: flex; flex-direction: column; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.cv-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+  padding: 6px 12px; border-bottom: 1px solid var(--cv-line); background: var(--vscode-editor-background); }
+.cv-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: var(--cv-muted); cursor: pointer; }
+.cv-btn:hover { background: var(--cv-hover); color: var(--cv-text); }
+.cv-btn[aria-pressed="true"] { background: var(--cv-hover); color: var(--cv-text); }
+.cv-btn:focus-visible, .cv-ask:focus-visible, .cv-style:focus-visible, .cv-raw-edit:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.cv-style { height: 28px; margin-right: 2px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--cv-text); font: 500 12px/1 var(--vscode-font-family, system-ui); cursor: pointer; }
+.cv-style:hover { background: var(--cv-hover); }
+.cv-style option { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); }
+.cv-sep { width: 1px; height: 18px; margin: 0 6px; background: var(--cv-line); }
+.cv-spacer { flex: 1; }
+.cv-ask { display: inline-flex; align-items: center; gap: 6px; height: 28px; margin-right: 4px; padding: 0 10px;
+  border: 1px solid var(--cv-line); border-radius: 999px; background: transparent; color: var(--cv-text);
+  font: 500 12px/1 var(--vscode-font-family, system-ui); cursor: pointer; }
+.cv-ask:hover { background: var(--cv-hover); }
+
+.cv-page { flex: 1; overflow-y: auto; }
+.cv-editor { max-width: 760px; margin: 0 auto; padding: 36px 48px 30vh; }
+@media (max-width: 600px) { .cv-editor { padding: 24px 18px 30vh; } }
+.cv-doc { outline: none; white-space: pre-wrap; word-wrap: break-word; caret-color: var(--cv-accent); }
+.cv-doc > * + * { margin-top: .85em; }
+.cv-doc p { margin: 0; }
+.cv-doc h1, .cv-doc h2, .cv-doc h3, .cv-doc h4 { margin: 1.3em 0 .2em; line-height: 1.3; font-weight: 650; text-wrap: balance; }
+.cv-doc > h1:first-child, .cv-doc > h2:first-child { margin-top: 0; }
+.cv-doc h1 { font-size: 1.85em; }
+.cv-doc h2 { font-size: 1.4em; }
+.cv-doc h3 { font-size: 1.15em; }
+.cv-doc ul, .cv-doc ol { margin: 0; padding-left: 1.6em; }
+.cv-doc li + li { margin-top: .25em; }
+.cv-doc li > p { margin: 0; }
+.cv-doc blockquote { margin: 0; padding: .1em 0 .1em 1em; border-left: 3px solid var(--cv-line); color: var(--cv-muted); }
+.cv-doc hr { border: 0; border-top: 1px solid var(--cv-line); margin: 1.6em 0; }
+.cv-doc code { padding: .1em .35em; border-radius: 4px; background: var(--cv-soft);
+  font: .88em/1.5 var(--vscode-editor-font-family, monospace); }
+.cv-doc pre { margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--cv-soft); overflow-x: auto;
+  font: 13px/1.55 var(--vscode-editor-font-family, monospace); white-space: pre; }
+.cv-doc pre code { padding: 0; background: none; font: inherit; }
+.cv-doc a, .cv-doc .cv-link { color: var(--cv-accent); text-decoration: underline; text-underline-offset: 2px; cursor: text; }
+.cv-doc img { max-width: 100%; }
+.cv-doc s { color: var(--cv-muted); }
+.cv-doc .ProseMirror-selectednode { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; border-radius: 4px; }
+
+/* A block kept as its own Markdown (a table, display maths): shown as a reply shows it, edited in Markdown. */
+.cv-raw { position: relative; border-radius: 6px; }
+.cv-raw:hover { box-shadow: 0 0 0 1px var(--cv-line); }
+.cv-raw-body table { border-collapse: collapse; width: 100%; font-size: .93em; }
+.cv-raw-body th, .cv-raw-body td { padding: 6px 10px; border: 1px solid var(--cv-line); text-align: left; vertical-align: top; }
+.cv-raw-body th { background: var(--cv-soft); font-weight: 600; }
+.cv-raw-body p { margin: 0; }
+.cv-raw-body .cv-img { color: var(--cv-muted); font-style: italic; }
+.cv-raw-edit { position: absolute; top: -12px; right: 0; padding: 2px 8px; border: 1px solid var(--cv-line); border-radius: 999px;
+  background: var(--vscode-editor-background); color: var(--cv-muted); font: 500 11px/1.4 var(--vscode-font-family, system-ui);
+  cursor: pointer; opacity: 0; transition: opacity .12s; }
+.cv-raw:hover .cv-raw-edit, .cv-raw-edit:focus-visible { opacity: 1; }
+
+/* Maths, drawn with KaTeX once it loads (the TeX as written until then). */
+.md-math-display { display: block; margin: .6em 0; text-align: center; overflow-x: auto; overflow-y: hidden; }
+.md-math .katex { font-size: 1.08em; }
+.md-math .katex-error { color: var(--vscode-errorForeground, #f14c4c); }
+
+/* What the model just changed, lit up as it lands. */
+.cv-flash { animation: cv-flash 1.8s ease-out; border-radius: 4px; }
+@keyframes cv-flash { from { background: var(--cv-flash); box-shadow: 0 0 0 4px var(--cv-flash); } to { background: transparent; box-shadow: 0 0 0 4px transparent; } }
+@media (prefers-reduced-motion: reduce) { .cv-flash { animation: none; outline: 2px solid var(--cv-flash); } .cv-raw-edit { transition: none; } }
+
+/* ProseMirror's own rules, as its stylesheet has them (prosemirror-view/style/prosemirror.css). */
+.ProseMirror { position: relative; word-wrap: break-word; white-space: pre-wrap; white-space: break-spaces;
+  -webkit-font-variant-ligatures: none; font-variant-ligatures: none; font-feature-settings: "liga" 0; }
+.ProseMirror pre { white-space: pre-wrap; }
+.ProseMirror li { position: relative; }
+.ProseMirror-hideselection *::selection { background: transparent; }
+.ProseMirror-hideselection { caret-color: transparent; }
+.ProseMirror [draggable][contenteditable=false] { user-select: text; }
+.ProseMirror-separator { display: inline !important; border: none !important; margin: 0 !important; }
