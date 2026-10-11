@@ -173,7 +173,6 @@ html[data-chat-place="tab"] #phead :is(#btn-pips, #chat-add-folder) { display:no
 #sessions-host .session-row { display:flex; align-items:center; gap:var(--sp-2); min-width:0; padding:var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
   border:1px solid transparent; border-radius:var(--r-md); cursor:default; user-select:none; }
 #sessions-host .session-row:hover { background:var(--surface2); }
-#sessions-host .session-row[data-selected] { background:var(--surface2); border-color:var(--border-strong); }
 #sessions-host .session-row:focus-visible { outline:1px solid var(--vscode-focusBorder, var(--accent)); outline-offset:-1px; }
 #sessions-host .session-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
 /* A session is known by its first words: two lines of them, not one. */

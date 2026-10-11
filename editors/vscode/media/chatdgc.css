@@ -198,7 +198,31 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
   background: transparent; color: var(--text-strong); font: var(--w-reg) calc(var(--t-chat) + 1px)/1.55 var(--sans); }
 .cd-input:focus-visible { outline: none; }
 .cd-input::placeholder { color: var(--muted); }
-.cd-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+/* One row however narrow the box. Below 640px the tools keep their icons and drop their words (each keeps its name
+   for a screen reader, and its tooltip), so the meter, the model and Send hold their places on the right; the model's
+   name gives way last, cut short. A container query: the box is as narrow as the editor group, not the window. */
+.cd-box { container: cd-box / inline-size; }
+.cd-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.cd-tools > * { flex: none; }
+.cd-tools > .cd-picker { flex: 0 1 auto; min-width: 0; }
+.cd-tools > .cd-spacer { flex: 1 1 0; min-width: 0; }
+/* (.codicon[class*='codicon-'] sets display itself: these say which, at its weight.) */
+.cd-toggle > .codicon.cd-toggle-icon { display: none; }
+@container cd-box (max-width: 640px) {
+  .cd-tool { width: var(--control); padding: 0; justify-content: center; }
+  .cd-tool .cd-tool-label, .cd-toggle .cd-tool-label { display: none; }
+  .cd-toggle > .codicon.cd-toggle-icon { display: inline-block; }
+}
+/* Narrower still: the model keeps its arc and chevron (its name is the pill's tooltip and heads its menu)... */
+@container cd-box (max-width: 420px) {
+  .cd-tools { gap: var(--sp-1); }
+  .cd-model-name { display: none; }
+}
+/* ...and the meter its pie. */
+@container cd-box (max-width: 340px) {
+  .cd-tools { gap: 2px; }
+  #cd-context-pct { display: none; }
+}
 /* The model and its thinking, as main DGC's model control: the name, a small arc for thinking, a chevron. */
 .cd-picker { position: relative; display: inline-flex; min-width: 0; }
 .cd-model-pill { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 240px; min-width: 0; height: var(--control);
@@ -245,7 +269,8 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-dial-needle circle { fill: var(--text-strong); }
 .cd-dial-words { display: grid; gap: 3px; min-width: 0; }
 .cd-dial-level { color: var(--text-strong); font: var(--w-semi) var(--t-base)/1.2 var(--sans); }
-.cd-dial-desc { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+/* Room for two lines whichever level is chosen ("Thinks hard: slower, more careful" wraps), so the menu never jumps. */
+.cd-dial-desc { min-height: 2.8em; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .cd-dial-hint { margin-top: 2px; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.3 var(--sans); }
 @media (prefers-reduced-motion: reduce) { .cd-dial-needle { transition: none; } }
 .cd-toggle { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }

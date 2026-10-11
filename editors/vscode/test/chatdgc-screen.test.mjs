@@ -104,6 +104,90 @@ test("a new chat: the question and the box together, and a message goes out with
   } finally { await s.page.close(); }
 });
 
+test("a click collapses the thinking while it still thinks, even when a delta redraws the reply between press and release", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "message", message: { id: M(1), role: "user", text: "Plan a week in Goa" } });
+    await s.send({ type: "delta", messageId: M(2), thinking: "First the beaches. " });
+    await s.frame();
+    const box = s.page.locator(".cd-assistant details.cd-thinking"), label = s.page.locator(".cd-thinking-label");
+    assert.equal(await box.getAttribute("open"), "", "open while it thinks");
+    // A press, a streamed delta that redraws the reply, then the release: one click, as a reader makes it mid-stream.
+    const at = await label.boundingBox();
+    await s.page.mouse.move(at.x + 20, at.y + at.height / 2);
+    await s.page.mouse.down();
+    await s.send({ type: "delta", messageId: M(2), thinking: "Then the forts. " });
+    await s.frame();
+    await s.page.mouse.up();
+    await s.frame();
+    assert.equal(await box.getAttribute("open"), null, "collapsed by that click");
+    for (const piece of ["Then the food. ", "Then the monsoon. "]) { await s.send({ type: "delta", messageId: M(2), thinking: piece }); await s.frame(); }
+    assert.equal(await box.getAttribute("open"), null, "and it stays collapsed while the thinking keeps coming");
+    assert.equal(await s.page.locator(".cd-thought").textContent(), "First the beaches. Then the forts. Then the food. Then the monsoon. ",
+                 "the words kept up all the same");
+    await label.focus();
+    await s.page.keyboard.press("Enter");
+    await s.send({ type: "delta", messageId: M(2), text: "Day 1: the beaches." });
+    await s.frame();
+    assert.equal(await box.getAttribute("open"), "", "opened again from the keyboard: the reader's choice, over its usual closing when the answer starts");
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Day 1: the beaches.", thinking: "First the beaches.", finish: "stop" } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.frame();
+    assert.match(await label.textContent(), /^Thought$/);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("with no click, the thinking is open while it thinks and closes when the answer starts", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "delta", messageId: M(2), thinking: "Hmm." });
+    await s.frame();
+    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), "");
+    await s.send({ type: "delta", messageId: M(2), text: "Yes." });
+    await s.frame();
+    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), null);
+  } finally { await s.page.close(); }
+});
+
+test("however narrow the editor, the prompt box keeps one row: the tools turn to icons, the meter, model and Send hold their places", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const width of [1100, 640, 460, 340]) {
+    const s = await openScreen({ width, height: 700 });
+    try {
+      await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+      await s.send({ type: "models", ids: ["qwen3.6-35b-a3b-instruct-long-name:cloud"], current: "qwen3.6-35b-a3b-instruct-long-name:cloud" });
+      await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
+      await s.frame();
+      const got = await s.page.evaluate(() => {
+        const box = (sel) => { const n = document.querySelector(sel); if (!n || n.hidden || !n.offsetWidth) return null; const r = n.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+        const parts = ["#cd-attach", "#cd-websearch", "#cd-research", "#cd-study", "#cd-temp-toggle", "#cd-context", "#cd-model-pill", "#cd-send"].map((sel) => [sel, box(sel)]).filter(([, b]) => b);
+        const tools = document.querySelector(".cd-tools").getBoundingClientRect();
+        const words = [...document.querySelectorAll(".cd-tools .cd-tool-label")].filter((n) => n.offsetWidth).length;
+        return { parts, tools: { l: tools.left, r: tools.right }, words, sideways: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth };
+      });
+      const at = Object.fromEntries(got.parts);
+      const rows = new Set(got.parts.map(([, b]) => Math.round((b.t + b.b) / 2)));
+      assert.ok(Math.max(...rows) - Math.min(...rows) <= 2, `${width}px: one row, not wrapped (${[...rows]})`);
+      for (const [sel, b] of got.parts) assert.ok(b.l >= got.tools.l - 1 && b.r <= got.tools.r + 1, `${width}px: ${sel} inside the box`);
+      assert.ok(at["#cd-send"].l > at["#cd-model-pill"].r && at["#cd-model-pill"].l > at["#cd-context"].r, `${width}px: meter, model, then Send`);
+      assert.ok(at["#cd-send"].r >= got.tools.r - 2, `${width}px: Send ends the row`);
+      assert.equal(got.sideways, 0);
+      if (width >= 1100) assert.ok(got.words >= 3, "wide: Search, Deep research and Study say their names");
+      if (width <= 460) assert.equal(got.words, 0, `${width}px: icons only`);
+      assert.equal(await s.page.locator("#cd-research").getAttribute("aria-label"), "Deep research", "an icon still has its name");
+      if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-box-${width}.png`) });
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  }
+});
+
 test("a reply streams in as Markdown; your words and its words never become markup", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
@@ -210,6 +294,38 @@ test("it fits a narrow editor and a wide one, in both themes", async (t) => {
       assert.deepEqual(s.errors, []);
     } finally { await s.page.close(); }
   }
+});
+
+test("the home shows Chat | Work at once when ChatDGC was here last time; a CLI without it takes them away", async (t) => {
+  if (skipOrFail(t)) return;
+  const { html, mainJs, markdownJs } = panelHtml();
+  const page = await browser.newPage({ viewport: { width: 380, height: 760 } });
+  try {
+    await page.setContent(html, { waitUntil: "load" });
+    await page.evaluate(([mjs, mdjs]) => {
+      document.documentElement.dataset.chatPlace = "home";
+      document.documentElement.dataset.chatdgcSeen = "1";
+      window.__posted = []; window.__state = undefined;
+      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state,
+                                         setState(s) { window.__state = s; } });
+      window.DgcPips = { mount: () => ({ setVisible() {}, navigate() {} }) };
+      eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
+      eval(mjs);
+    }, [mainJs, markdownJs]);
+    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+    await send({ type: "sessions_list", items: [{ id: "20261006-101500-a1", name: "Fix login", when: "2026-10-06 10:15", count: 4 }], searchable: true });
+    assert.deepEqual([await shown(page, "#home-tabs"), await shown(page, "#chats-home"), await shown(page, "#work-home")], [true, true, false],
+                     "the tabs, before the backend has said anything");
+    assert.equal(await page.locator("#chats-status").textContent(), "Loading your chats…");
+    assert.equal(await page.locator("#sessions-title").textContent(), "Work");
+    assert.equal(await page.locator("#sessions-search").getAttribute("placeholder"), "Search chats and sessions");
+    await send({ type: "chatdgc_list", available: true, total: 0, items: [] });
+    assert.match(await page.locator("#chats-status").textContent(), /^No chats yet/, "its answer replaces the wait");
+    await send({ type: "chatdgc_list", available: false });
+    assert.deepEqual([await shown(page, "#home-tabs"), await shown(page, "#chats-home"), await shown(page, "#sessions-list")], [false, false, true],
+                     "a CLI with no ChatDGC: the sessions, as before");
+    assert.equal(await page.locator("#sessions-title").textContent(), "Sessions");
+  } finally { await page.close(); }
 });
 
 test("the home: Chat and Work as tabs (a long list never hides the other), one search over both", async (t) => {
@@ -1025,6 +1141,33 @@ test("keyboard shortcuts, as ChatGPT has them, and the list of them", async (t) 
     if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-keys.png") });
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+test("the thinking menu keeps its height at every level, though some levels' words take two lines", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const width of [900, 420]) {
+    const s = await openScreen({ width });
+    try {
+      await s.send({ type: "opened", conversation: conversation({ thinking: "off" }), earlier: 0, busy: false, messages: [] });
+      await s.send({ type: "models", ids: ["deepseek-v4.1-flash:cloud", "qwen3:32b"], current: "deepseek-v4.1-flash:cloud" });
+      await s.frame();
+      await s.page.locator("#cd-model-pill").click();
+      const menu = s.page.locator("#cd-model-menu");
+      await menu.locator(".cd-dial-face").focus();
+      await s.page.keyboard.press("Home");
+      const seen = [];
+      for (let level = 0; level < 5; level++) {
+        if (level) await s.page.keyboard.press("ArrowUp");
+        await s.frame();
+        const box = await menu.boundingBox(), lines = await menu.locator(".cd-dial-desc").evaluate((n) => Math.round(n.scrollHeight / parseFloat(getComputedStyle(n).lineHeight)));
+        seen.push([await menu.locator(".cd-dial-level").textContent(), Math.round(box.height), Math.round(box.y), lines]);
+      }
+      assert.equal(new Set(seen.map(([, h]) => h)).size, 1, `${width}px: one height for every level: ${JSON.stringify(seen)}`);
+      assert.equal(new Set(seen.map(([, , y]) => y)).size, 1, `${width}px: and the menu's top never moves`);
+      if (width === 420) assert.ok(seen.some(([, , , lines]) => lines === 2), "at this width a description does wrap: the case this guards");
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  }
 });
 
 test("the box as main DGC's: no accent ring, one pill for the model and a dial for thinking, the window's size in the meter", async (t) => {

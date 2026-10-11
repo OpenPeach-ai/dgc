@@ -217,7 +217,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .topbar-icon::-webkit-details-marker{display:none}
 .pip-pill{justify-self:center;display:inline-flex;align-items:center;gap:8px;padding:3px 14px 3px 5px;max-width:100%;min-width:0;font-weight:600}
 .pip-pill .avatar{width:28px;height:27px;flex:none}
-.pip-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-pill>span:not(.avatar){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pip-pill small{color:var(--muted);font-weight:400;white-space:nowrap}
 .topbar-actions{display:flex;gap:6px;align-items:center}
 .pip-menu{position:relative;margin:0}

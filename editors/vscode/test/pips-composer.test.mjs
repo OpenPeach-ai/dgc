@@ -126,3 +126,14 @@ test('a Personal Pip\'s context menu shows its window part by part, as text, and
  for(const none of [null,{...parts,window:4096}]){const old=setup({api:45,jobs:[personal]});await old.select('a');await old.drain({get_pip_chat_context:context(none)});old.click('#chat-context-toggle');
   const plain=old.d.querySelector('.composer-context-menu');assert.equal(plain.querySelector('.bd'),null,'none sent, or one that doesn\'t fit its window');assert.ok(plain.querySelector('.ctx-track'));assert.match(plain.querySelector('.ctx-split').textContent,/2 recent messages/);}
 });
+
+test('the Pip in a chat\'s header is never clipped when it hops: only its name is cut to fit',async()=>{
+ const browser=await chromium.launch({args:['--headless=new','--no-sandbox']});
+ try{
+  const page=await browser.newPage({viewport:{width:320,height:200}});
+  const css=readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');
+  await page.setContent(`<style>${css}</style><div class="pip-topbar"><button>Back</button><div class="pip-pill"><span class="avatar"><span class="dgc-plush"><svg class="dgc-plush-rig"></svg></span></span><span>A Pip with a name far too long to fit in its header</span><small>Working</small></div><button>More</button></div>`);
+  const got=await page.evaluate(()=>{const o=s=>getComputedStyle(document.querySelector(s)).overflow;return{avatar:o('.pip-pill .avatar'),body:o('.pip-pill .dgc-plush'),name:o('.pip-pill>span:not(.avatar)')};});
+  assert.deepEqual(got,{avatar:'visible',body:'visible',name:'hidden'},'the name\'s ellipsis must not clip the Pip, whose drawing is spans too');
+ }finally{await browser.close();}
+});

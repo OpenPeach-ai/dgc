@@ -290,6 +290,29 @@ test("the Sessions list marks the sessions open in tabs, and one open in a tab c
     "the list shows what is left");
 });
 
+test("the side bar remembers that its backend offered ChatDGC, so the next window's home shows Chat | Work at once", () => {
+  const seen = new Map();
+  const ctx = context();
+  ctx.globalState = { get: (key) => seen.get(key), async update(key, value) { seen.set(key, value); } };
+  const sidebar = new DgcViewProvider(ctx);
+  const tabs = new SessionTabs(ctx, sidebar, (init) => quiet(new DgcViewProvider(ctx, init)));
+  sidebar.useSessionsHome(tabs);
+  const backend = recordingBackend();
+  quiet(sidebar, backend);
+  sidebar.webviewReady = true;
+  sidebar.useChatDGC({ attach() {}, backendReady() {}, onEvent() {}, homeRefresh() {}, backendLost() {} });
+  const webview = { cspSource: "vscode-resource:", asWebviewUri: (uri) => uri };
+  assert.doesNotMatch(sidebar.html(webview), /data-chatdgc-seen/, "never seen: the tabs wait for the backend");
+  sidebar.lastReadyEvent = { type: "ready", capabilities: { chatdgc: { version: 1 } } };
+  sidebar.finishSessionHandshake(backend);
+  assert.equal(seen.get("dgc.chatdgcSeen.v1"), true);
+  assert.match(sidebar.html(webview), /data-chat-place="home" data-chatdgc-seen="1"/);
+  sidebar.lastReadyEvent = { type: "ready", capabilities: {} };
+  sidebar.finishSessionHandshake(backend);
+  assert.equal(seen.get("dgc.chatdgcSeen.v1"), false, "a CLI without ChatDGC: not next time either");
+  assert.doesNotMatch(sidebar.html(webview), /data-chatdgc-seen/);
+});
+
 test("the side bar's own chat starts empty, and its messages open sessions in tabs", async () => {
   const { sidebar, tabs } = windowWith();
   world.workspaceState.set("dgc.activeSession.v1", { scope: sidebar.draftScope(), id: "remembered", saved: true });

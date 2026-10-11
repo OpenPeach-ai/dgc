@@ -560,13 +560,21 @@
     document.body.append(panel);
     close.focus();
   }
+  // Open while it thinks, closed once it answers -- unless the reader chose, by a click: kept for that reply.
+  const thinkingChosen = new Map();
   function thinkingBlock(message, live) {
     const box = el("details", "cd-thinking");
     const summary = el("summary", "cd-thinking-label", live ? "Thinking…" : "Thought");
     const text = el("div", "cd-thought");
     text.textContent = message.thinking || "";
     box.append(summary, text);
-    if (live && !message.text) box.open = true;
+    box.dataset.id = message.id || "";
+    box.open = thinkingChosen.has(message.id) ? thinkingChosen.get(message.id) : live && !message.text;
+    // It opens and closes on the press, not the click: a reply that streams redraws every delta, and Chromium drops a
+    // click whose pressed element was moved in between. Enter and Space still come as a click (detail 0).
+    const toggle = () => { box.open = !box.open; thinkingChosen.set(message.id, box.open); };
+    summary.addEventListener("pointerdown", (e) => { if (e.button === 0) toggle(); });
+    summary.addEventListener("click", (e) => { e.preventDefault(); if (e.detail === 0) toggle(); });
     return box;
   }
   // ---- copying a reply: formatted for a mail app or a document, clean text for everywhere else (no ** or #)
@@ -1727,9 +1735,16 @@
         const old = log.querySelector(`.cd-msg[data-id="${CSS.escape(each)}"]`);
         if (!message) continue;
         const fresh = messageNode(message);
-        // Keep an open thinking box open, and a closed one closed, across redraws.
+        // The same thinking box, its words and label brought up to date: its open or closed, and the reader's place in it.
         const was = old?.querySelector("details.cd-thinking"), now = fresh.querySelector("details.cd-thinking");
-        if (was && now && was.dataset.touched) { now.open = was.open; now.dataset.touched = "1"; }
+        if (was && now) {
+          const label = was.querySelector(".cd-thinking-label"), words = was.querySelector(".cd-thought");
+          const newLabel = now.querySelector(".cd-thinking-label").textContent, newWords = now.querySelector(".cd-thought").textContent;
+          if (label.textContent !== newLabel) label.textContent = newLabel;
+          if (words.textContent !== newWords) words.textContent = newWords;
+          if (was.open !== now.open) was.open = now.open;
+          now.replaceWith(was);
+        }
         // A field you're typing in (marked data-keep) keeps the keys and the caret: research redraws as it goes.
         const typing = old && old.contains(document.activeElement) ? document.activeElement : null;
         const key = typing?.dataset?.keep;
@@ -1748,7 +1763,6 @@
       follow();
     });
   }
-  log.addEventListener("toggle", (e) => { if (e.target.matches?.("details.cd-thinking")) e.target.dataset.touched = "1"; }, true);
 
   // ---- the composer
   function controls() {

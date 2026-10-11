@@ -82,15 +82,17 @@ test("the side bar opens on the project's sessions, not on a chat", async (t) =>
   } finally { await s.page.close(); }
 });
 
-test("Open in Editor, a double-click and Enter open a session in a tab; a click only selects it", async (t) => {
+test("a click, Open in Editor and Enter open a session in a tab, as a chat opens in the Chat tab; nothing stays selected", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openPage();
   try {
     await s.page.click(".session-row:nth-child(2) .session-name");
-    assert.deepEqual(await s.posted(), [], "a single click opens nothing");
-    assert.equal(await s.page.evaluate(() => document.querySelector(".session-row:nth-child(2)").hasAttribute("data-selected")), true, "it selects the row");
+    assert.deepEqual(await s.posted(), [{ type: "openSessionInEditor", id: "20261006-091200-b2", title: "Visits page alignment" }], "a click opens it");
+    assert.equal(await s.page.evaluate(() => document.querySelectorAll(".session-row[data-selected]").length), 0, "and no row stays highlighted");
+    await s.clear();
     await s.page.dblclick(".session-row:nth-child(2) .session-name");
-    assert.deepEqual(await s.posted(), [{ type: "openSessionInEditor", id: "20261006-091200-b2", title: "Visits page alignment" }]);
+    assert.deepEqual(await s.posted(), [{ type: "openSessionInEditor", id: "20261006-091200-b2", title: "Visits page alignment" }],
+                     "a double-click opens it once, not twice");
     await s.clear();
     await s.page.click(".session-row:nth-child(1) .session-open");
     assert.deepEqual(await s.posted(), [{ type: "openSessionInEditor", id: "20261006-101500-a1", title: "ok, so my this directory runs my Company's ERP at app.ton" }],
@@ -115,16 +117,13 @@ test("Open in Editor, a double-click and Enter open a session in a tab; a click 
   } finally { await s.page.close(); }
 });
 
-test("a refreshed list keeps the selection and the keyboard where they were", async (t) => {
+test("a refreshed list keeps the keyboard where it was", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openPage();
   try {
-    await s.page.click(".session-row:nth-child(2) .session-name");
     await s.page.focus(".session-row:nth-child(2)");
     await s.send({ type: "sessions_list", items: [ITEMS[1], ITEMS[0]], error: "" });
-    const after = await s.page.evaluate(() => ({ selected: document.querySelector(".session-row[data-selected]")?.dataset.id,
-      focused: document.activeElement?.dataset?.id }));
-    assert.deepEqual(after, { selected: "20261006-091200-b2", focused: "20261006-091200-b2" });
+    assert.equal(await s.page.evaluate(() => document.activeElement?.dataset?.id), "20261006-091200-b2");
     await s.page.evaluate(() => window.dispatchEvent(new Event("focus")));
     assert.equal(await s.page.evaluate(() => window.__posted.some((m) => m.type === "sessionsList")), true,
       "coming back to the side bar asks again: sessions also start from the terminal");

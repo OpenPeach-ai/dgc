@@ -87,6 +87,9 @@ const CHAT_SLOTS_COALESCE_MS = 120;
 /** How often the editor checks whether a Pip needs you (pipsAttention.ts). */
 const PIPS_ATTENTION_MS = 60_000;
 const PIPS_ATTENTION_KEY = "dgc.pipsAttention.v1";
+/** Whether the side bar's last backend offered ChatDGC: the next window shows Chat | Work at once, not when its
+ *  backend has started (seconds, with the user's MCP servers and plugins starting first). */
+const CHATDGC_SEEN_KEY = "dgc.chatdgcSeen.v1";
 
 interface InterruptedTurnMark {
   scope?: string; id?: string; turnId?: string; at?: number;
@@ -1387,6 +1390,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.nativeSettingsReady = false;
     be.completeHandshake();
     this.chatdgc?.backendReady();
+    if (this.chatdgc) {
+      const offered = !!(this.lastReadyEvent?.capabilities as any)?.chatdgc;
+      if (this.context.globalState.get<boolean>(CHATDGC_SEEN_KEY) !== offered) void this.context.globalState.update(CHATDGC_SEEN_KEY, offered);
+    }
     // A new backend (first start, crash recovery) owns the truth about this chat's agents: its
     // snapshot replaces whatever the webview marked stopped when the old one exited.
     if (this.lastReadyEvent?.capabilities?.agents) {
@@ -6763,8 +6770,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Where this page is (#3): "home" is the side bar's Sessions home, "tab" a session's editor tab
     // (its key and saved session go in the webview's state, which is what restores it after a reload).
     const place = this.tab ? "tab" : this.home ? "home" : "chat";
+    const chatdgcSeen = place === "home" && this.context.globalState.get<boolean>(CHATDGC_SEEN_KEY) === true ? ` data-chatdgc-seen="1"` : "";
     const tabAttrs = this.tab ? ` data-tab-key="${this.tab.key}" data-tab-session="${this.currentSessionSaved ? this.currentSessionId : this.tab.session}"` : "";
-    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}" data-chat-place="${place}"${tabAttrs}><head>
+    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}" data-chat-place="${place}"${tabAttrs}${chatdgcSeen}><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">

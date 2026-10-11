@@ -638,10 +638,6 @@
   }
   const sessionTitle = (item) => item.name || item.preview || "Untitled session";
   function openSession(item) { vscode.postMessage({ type: "openSessionInEditor", id: item.id, title: sessionTitle(item) }); }
-  function selectSession(row) {
-    for (const other of $("sessions-list").querySelectorAll(".session-row[data-selected]")) delete other.dataset.selected;
-    row.dataset.selected = "";
-  }
   function sessionButton(cls, codicon, onClick) {
     const button = el("button", cls); button.type = "button";
     const glyph = el("span", `codicon codicon-${codicon}`); glyph.setAttribute("aria-hidden", "true");
@@ -667,7 +663,6 @@
   function renderSessions(msg) {
     const list = $("sessions-list"), status = $("sessions-status");
     const items = Array.isArray(msg.items) ? msg.items : [];
-    const selected = list.querySelector(".session-row[data-selected]")?.dataset.id;
     const focused = document.activeElement?.closest?.(".session-row")?.dataset.id;
     list.replaceChildren();
     // Thousands of sessions: a search over names, first messages and everything said, and Load more.
@@ -705,8 +700,8 @@
       remove.title = item.open ? "Close its tab to delete this session" : "Delete this session";
       remove.setAttribute("aria-label", `Delete session: ${title}`);
       row.append(main, open, remove);
-      row.onclick = () => selectSession(row);
-      row.ondblclick = () => openSession(item);
+      // A click opens it, as a chat in the Chat tab opens: the second click of a double-click opens nothing more.
+      row.onclick = (e) => { if (e.detail < 2) openSession(item); };
       row.onkeydown = (e) => {
         if (e.target !== row) return;
         if (e.key === "Enter") { e.preventDefault(); openSession(item); }
@@ -714,10 +709,9 @@
         else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
           const next = e.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
-          if (next) { selectSession(next); next.focus(); }
+          if (next) next.focus();
         }
       };
-      if (item.id === selected) row.dataset.selected = "";
       list.append(row);
       if (item.id === focused) row.focus();
     }
@@ -804,7 +798,7 @@
     remove.setAttribute("aria-label", `Delete chat: ${title}`);
     row.append(main, remove);
     const openIt = () => vscode.postMessage({ type: "chatdgcOpen", id: item.id });
-    row.onclick = openIt;
+    row.onclick = (e) => { if (e.detail < 2) openIt(); };
     row.onkeydown = (e) => {
       if (e.target !== row) return;
       if (e.key === "Enter") { e.preventDefault(); openIt(); }
@@ -888,7 +882,7 @@
       const count = el("span", "project-count"); count.textContent = String(project.chats || 0);
       row.append(toggle, folder, name, count);
       const openIt = () => vscode.postMessage({ type: "chatdgcProjectOpen", id });
-      row.onclick = openIt;
+      row.onclick = (e) => { if (e.detail < 2) openIt(); };
       row.onkeydown = (e) => {
         if (e.target !== row) return;
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openIt(); }
@@ -939,6 +933,16 @@
       if (tabbed) { panel.setAttribute("role", "tabpanel"); panel.setAttribute("aria-labelledby", `home-tab-${name}`); }
       else { panel.removeAttribute("role"); panel.setAttribute("aria-labelledby", name === "chat" ? "chats-title" : "sessions-title"); }
     }
+  }
+  // ChatDGC was here last time: Chat | Work show at once, rather than when this window's backend has started. Its
+  // answer still decides (renderChats): a CLI without ChatDGC takes the tabs away again.
+  if (chatPlace === "home" && document.documentElement.dataset.chatdgcSeen === "1") {
+    chatsAvailable = true;
+    homeTabs();
+    $("sessions-title").textContent = "Work";
+    const status = $("chats-status"), search = $("sessions-search");
+    if (status) { status.textContent = "Loading your chats…"; status.hidden = false; }
+    if (search) { search.hidden = false; search.placeholder = "Search chats and sessions"; search.setAttribute("aria-label", "Search your chats and this project's sessions"); }
   }
   function showHomeTab(name, focus = false) {
     homeTab = name === "work" ? "work" : "chat";
