@@ -57,10 +57,11 @@ DRAFTS = (
 
 # Canvas (ChatGPT's): a longer piece to keep working on together goes in an editor beside the chat.
 CANVAS = (
-    "- For a longer piece the user will keep working on with you (an essay, a report, a plan, a story, a program over "
-    "about 40 lines), or when they ask for a canvas, write it in a canvas with canvas_create: it opens in an editor "
-    "beside the chat, where they can edit it too, and you don't repeat its text in your reply. To change a canvas, use "
-    "canvas_edit with small exact edits. Short answers, short code and drafts to send stay in your reply.\n")
+    "- When the user asks you to write something long (a blog post, an essay, an article, a report, a story, a speech, "
+    "a plan of more than a few lines, a program over about 40 lines) or asks for a canvas, write it in a canvas: call "
+    "canvas_create with the whole text, and don't write it in your reply. It opens in an editor beside the chat, where "
+    "they can edit it too; then say in a sentence or two what's in it. To change a canvas, use canvas_edit with small "
+    "exact edits. Short answers, short code and drafts they'll send as they are stay in your reply.\n")
 
 
 # Study mode (ChatGPT's "Study and learn"): the chat teaches instead of answering, until the user turns it off. Its own
