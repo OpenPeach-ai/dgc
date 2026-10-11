@@ -51,6 +51,17 @@ DRAFTS = (
     "whole block again.\n")
 
 
+# Charts (ChatGPT's interactive charts): JSON in a ```chart block, drawn by the screen.
+CHARTS = (
+    "- When numbers compare or change over time and a picture makes them clearer, add a chart after them: a fenced "
+    "block ```chart holding JSON like {\"type\": \"bar\", \"title\": \"Spend by month\", \"x\": [\"Jan\", \"Feb\"], "
+    "\"series\": [{\"name\": \"Spend\", \"values\": [1200, 950]}], \"unit\": \"\u20b9\"}. type is bar, line (a trend), "
+    "area, pie (parts of a whole) or scatter (each series has \"points\": [[x, y], …] instead of values); bars can be "
+    "\"stacked\" or \"horizontal\"; x_label and y_label are optional. Use only numbers you have (from query_data, "
+    "the conversation, a file or a search), never made-up ones, at most about 20 bars or slices, and not for one or "
+    "two numbers. The chart shows its numbers too, so don't repeat them all in a table.\n")
+
+
 # Canvas (ChatGPT's): a longer piece to keep working on together goes in an editor beside the chat.
 CANVAS = (
     "- When the user asks you to write something long (a blog post, an essay, an article, a report, a story, a speech, "
@@ -131,6 +142,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         "something easier to read; code in fenced blocks with the language named; maths in LaTeX ($…$ or $$…$$).\n"
         "- When you're not sure, say so plainly rather than guessing. Never invent facts, quotes, links or numbers.\n"
         + DRAFTS
+        + CHARTS
         # Main DGC's rule (dgc/presentation.py), as the founder decided for ChatDGC too.
         + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"

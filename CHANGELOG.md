@@ -88,6 +88,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **Data analysis and charts in ChatDGC** (Phase 8, part 4). `dgc/chatdgc/data.py` loads the chat's spreadsheets
+  (attached, made, or in its project; CSV, TSV, each Excel sheet) into an in-memory SQLite database; a `query_data`
+  tool runs one read-only SELECT (an authorizer allows reading and functions only; 5 seconds; 200 rows) with
+  `median`, `stdev`, `variance`, `corr` and math functions added. The tables (columns, types, first rows) are in the
+  model's instructions; the reply keeps its `queries` ({sql, columns, rows, count, more | error}), shown as
+  "Analyzed the data". Charts are ` ```chart ` JSON blocks ({type: bar | line | area | pie | scatter, title, x,
+  series, unit, stacked, horizontal}) the screen draws (`media/chart.js`, SVG, no library). `chatdgc_activity` gains
+  `analyzing`. With deepseek-v4.1-flash on a 69-row expense sheet: the right SQL every time, monthly and category
+  charts holding the queried numbers 4 of 4, and exact figures in the reply once results were shown in full (6
+  significant digits had turned 44,662.76 into 44,662.8).
 - **ChatDGC memory saves less, and keeps itself current.** The check before a reply now sees what's remembered (ids
   and facts) and returns `forget` for facts a message outdates, removed with the reply's `memory` op `forgot`; its
   rules leave out a task's details (an email's recipient, date or flat), plans and guesses. It runs whenever memory

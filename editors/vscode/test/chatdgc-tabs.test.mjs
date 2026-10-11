@@ -77,7 +77,8 @@ globalThis.__DGC_TEST_VSCODE = {
     get textDocuments() { return world.docs; },
     applyEdit: async (edit) => { for (const e of edit.edits) { const doc = world.docs.find((d) => d.uri.fsPath === e.uri.fsPath); if (doc) doc.text = e.text; } return true; },
     getConfiguration: () => ({ get: (key, fallback) => (key === "linkFavicons" && world.favicons !== undefined ? world.favicons : fallback) }),
-    fs: { stat: async (uri) => {
+    fs: { writeFile: async (uri, bytes) => { world.written.push({ path: uri.fsPath, bytes: Buffer.from(bytes) }); },
+      stat: async (uri) => {
     if (world.dirs?.includes(uri.fsPath)) return { size: 0, type: 2 };
     if (world.missing?.includes(uri.fsPath)) throw new Error("ENOENT");
     return { size: world.sizes[uri.fsPath] ?? 1, type: 1 };
@@ -102,7 +103,7 @@ let chat, host, sent;
 beforeEach(() => {
   Object.assign(world, { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
                          chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [],
-                         shown: [], visible: [], active: undefined, docs: [], commands: [], choose: undefined });
+                         shown: [], visible: [], active: undefined, docs: [], commands: [], choose: undefined, written: [] });
   sent = [];
   host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" },
     chatdgcSend(cmd) { if (this.outcome === "sent") sent.push(cmd); return this.outcome; },
@@ -381,6 +382,22 @@ test("canvas: versions compare in VS Code's diff or come back; Download saves a 
   await chat.canvasDownload();
   assert.deepEqual({ ...last("chatdgc_canvas"), request_id: "" }, { type: "chatdgc_canvas", conversation_id: ID(7), canvas_id: CV,
                                                                     op: "export", format: "docx", path: "/tmp/out/Plan.docx", request_id: "" });
+});
+
+test("a chart saved as an image: only a PNG the page drew, written where you chose", async () => {
+  chat.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(7), title: "Spend" });
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  world.saveTo = { scheme: "file", fsPath: "/tmp/out/Spend.png", path: "/tmp/out/Spend.png" };
+  panel.say({ type: "saveImage", name: "Spend by month", data: `data:image/png;base64,${png.toString("base64")}` });
+  await tick(); await tick();
+  assert.match(String(world.saveAsked.defaultUri), /Spend by month\.png$/);
+  assert.deepEqual(world.written.map((w) => [w.path, [...w.bytes]]), [["/tmp/out/Spend.png", [...png]]]);
+  panel.say({ type: "saveImage", name: "x", data: "data:text/html;base64,PHNjcmlwdD4=" });
+  panel.say({ type: "saveImage", name: "x", data: "javascript:alert(1)" });
+  await tick(); await tick();
+  assert.equal(world.written.length, 1, "nothing but a PNG");
 });
 
 test("a reload brings each chat back in its tab, once", async () => {

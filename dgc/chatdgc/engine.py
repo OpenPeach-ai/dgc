@@ -17,6 +17,7 @@ from typing import Callable
 from ..editor_protocol import CHATDGC_THINKING as THINKING
 from . import attachments as attached
 from . import canvas as chat_canvas
+from . import data as chat_data
 from . import plugins as chat_plugins
 from . import window as fit_window
 from . import research
@@ -142,6 +143,17 @@ CANVAS_EDIT_TOOL = {"type": "function", "function": {
         "note": {"type": "string", "description": "A few words on what changed, for its versions."}},
         "required": ["id"]}}}
 MAX_CANVAS_CALLS = 8
+# Data analysis (data.py): the chat's spreadsheets as SQLite tables, asked with one read-only SELECT at a time.
+QUERY_DATA_TOOL = {"type": "function", "function": {
+    "name": "query_data",
+    "description": (
+        "Ask the chat's spreadsheets (the tables listed in your instructions) one read-only SQLite SELECT, for exact "
+        "answers: totals, counts, groups, trends, top items, medians. Never estimate from the rows you were shown. "
+        "Functions beyond SQLite's: median(x), stdev(x), variance(x), corr(x, y), sqrt, ln, log10, exp, pow."),
+    "parameters": {"type": "object", "properties": {
+        "sql": {"type": "string", "description": "One SELECT (or WITH … SELECT) over those tables."}},
+        "required": ["sql"]}}}
+MAX_QUERIES = 12
 MAX_CANVAS_HISTORY_CHARS = 40_000
 MAX_FILE_HISTORY_CHARS = 12_000   # of a made file, as the model reads it back (to change it, or to talk about it)
 # Before an answer that turns on facts: does it need the web first? (search "auto"; the model can still search.)
@@ -235,6 +247,7 @@ class ChatEngine:
         # Plugins (plugins.py): a reply's session, and what sends a card's action (tests stand in for both).
         self._plugins_factory = plugins
         self._canvases = chat_canvas.Canvases(self.store.root / "canvas")
+        self._data: dict[tuple, chat_data.Data] = {}           # a chat's tables, by the files they came from
         self._temporary_canvases = chat_canvas.Canvases.temporary()
         self._plugin_runner = plugin_runner or (lambda card, arguments: chat_plugins.run(self.config, card, arguments))
         self._taints: dict[str, object] = {}
@@ -1307,6 +1320,7 @@ class ChatEngine:
             ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless,
             memory=self._remembered(chat), study=bool(chat.get("study")))
         instructions += self._canvas_context(chat)
+        instructions += self._data_context(chat)
         project, project_pictures = self._project_of(chat), []
         if project:
             told, _, project_pictures = self._project_context(chat, project, room, sees)
@@ -1364,6 +1378,10 @@ class ChatEngine:
                 content += "\n\n" + _card_note(card)
             for meta in m.get("files") or [] if m["role"] == "assistant" else []:
                 content += "\n\n" + _made_note(meta, self._file(chat, str(meta.get("id") or "")))
+            if m["role"] == "assistant" and m.get("queries"):
+                ran = [q["sql"] for q in m["queries"] if not q.get("error")][:6]
+                if ran:
+                    content += "\n\n[You queried the chat's data here: " + " ; ".join(" ".join(q.split())[:300] for q in ran) + "]"
             for card in m.get("canvases") or [] if m["role"] == "assistant" else []:
                 content += f"\n\n[You {card.get('op', 'edited')} the canvas {card.get('title', '')} ({card.get('id', '')}) here.]"
             if m["role"] == "assistant" and m.get("draft_edited"):
@@ -1540,6 +1558,79 @@ class ChatEngine:
                 ops.append({"op": "saved", "id": fact["id"], "text": fact["text"]})
                 kept.append(fact["text"])
         return kept
+
+    # -- data analysis (data.py)
+
+    def _tabular_files(self, chat: dict) -> list[tuple[str, str, bytes]]:
+        """The chat's spreadsheets: attached, made by it, or in its project (newest attachments first): (key, name, bytes)."""
+        found, seen = [], set()
+        for m in reversed(chat["messages"]):
+            for meta in [*(m.get("attachments") or []), *(m.get("files") or [])]:
+                ident, name = str(meta.get("id") or ""), str(meta.get("name") or "")
+                if ident in seen or meta.get("removed") or not chat_data.tabular(name):
+                    continue
+                seen.add(ident)
+                got = self._file(chat, ident)
+                if got is not None:
+                    found.append((ident, name, got[0]))
+        project = self._project_of(chat)
+        for meta in (project or {}).get("files") or []:
+            name, ident = str(meta.get("name") or ""), str(meta.get("id") or "")
+            if chat_data.tabular(name) and ident not in seen:
+                try:
+                    raw, _ = self.store.get_project_file(project["id"], ident)
+                except ChatStoreError:
+                    continue
+                found.append((ident, name, raw))
+        return found[:12]
+
+    def _tables(self, chat: dict) -> chat_data.Data | None:
+        """The chat's spreadsheets loaded as tables, kept while the same files are in it (a few chats at a time)."""
+        files = self._tabular_files(chat)
+        if not files:
+            return None
+        key = (chat["id"], tuple(ident for ident, _, _ in files))
+        with self._lock:
+            held = self._data.get(key)
+        if held is not None:
+            return held
+        made = chat_data.Data([(name, raw) for _, name, raw in files])
+        with self._lock:
+            for old in [k for k in self._data if k[0] == chat["id"]]:
+                self._data.pop(old).close()
+            self._data[key] = made
+            while len(self._data) > 6:
+                self._data.pop(next(iter(self._data))).close()
+        return made
+
+    def _data_context(self, chat: dict) -> str:
+        try:
+            tables = self._tables(chat)
+        except Exception:                          # noqa: BLE001 -- a file that won't load never stops the chat
+            return ""
+        if tables is None or not tables.tables:
+            return ""
+        return ("\n\nThe chat's spreadsheets, as tables you can ask with query_data (SQLite, read-only, one SELECT "
+                "at a time). For any number about them (a total, a count, an average, a share, a change, the biggest), "
+                "query it, in one query with all the numbers you'll state, and quote them as returned (rounded only for "
+                "display). Never estimate from the rows you were shown, and never do the arithmetic yourself:\n"
+                + tables.describe())
+
+    def _query(self, tables: chat_data.Data | None, call, queries: list) -> str:
+        """query_data: the answer as a table for the model, and the query kept on the reply (shown as Analyzed)."""
+        sql = str((call.arguments or {}).get("sql") or "") if isinstance(call.arguments, dict) else ""
+        if tables is None or not tables.tables:
+            return "error: this chat has no spreadsheets to query."
+        try:
+            result = tables.query(sql)
+        except chat_data.DataError as exc:
+            queries.append({"sql": sql[:4000], "error": str(exc)})
+            return f"error: {exc}"
+        queries.append({"sql": sql[:4000], "columns": result["columns"],
+                        "rows": [[v if isinstance(v, (int, float)) or v is None else str(v)[:200] for v in row]
+                                 for row in result["rows"][:20]],
+                        "count": len(result["rows"]), "more": result["more"]})
+        return chat_data.as_table(result)
 
     # -- canvas (canvas.py)
 
@@ -1889,6 +1980,8 @@ class ChatEngine:
         files = [dict(f) for f in (existing or {}).get("files") or []]
         canvases = [dict(c) for c in (existing or {}).get("canvases") or []]
         canvas_state = {"calls": 0, "any": bool(canvases) or bool(self._canvas_list(chat))}
+        queries = [dict(q) for q in (existing or {}).get("queries") or []]
+        tables = self._tables(chat) if name not in self._toolless else None
         plugins = self._plugins(chat) if name not in self._toolless else None
         plugins_now = plugins.pin() if plugins is not None else []
 
@@ -1898,6 +1991,8 @@ class ChatEngine:
             out = [SEARCH_TOOL] if search != "off" and len(searches) < MAX_SEARCHES else []
             out += [ASK_TOOL] if not questions else []
             out += [MAKE_FILE_TOOL] if len(files) < MAX_FILES_PER_REPLY else []
+            if tables is not None and tables.tables and len(queries) < MAX_QUERIES:
+                out += [QUERY_DATA_TOOL]
             if canvas_state["calls"] < MAX_CANVAS_CALLS:
                 out += [CANVAS_CREATE_TOOL] + ([CANVAS_EDIT_TOOL] if canvas_state["any"] else [])
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
@@ -1979,6 +2074,10 @@ class ChatEngine:
                                 on_question(question)
                     elif call.name in ("remember", "forget"):
                         told = self._memory_call(chat, call, memory_ops)
+                    elif call.name == "query_data":
+                        if on_activity is not None:
+                            on_activity("analyzing", "the data")
+                        told = self._query(tables, call, queries)
                     elif call.name in ("canvas_create", "canvas_edit"):
                         if on_activity is not None:
                             named = (call.arguments or {}).get("title") if isinstance(call.arguments, dict) else ""
@@ -2037,7 +2136,7 @@ class ChatEngine:
         try:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,
-                                       actions=actions, files=files, canvases=canvases)
+                                       actions=actions, files=files, canvases=canvases, queries=queries)
             return message
         finally:
             if picturing is not None:
@@ -2047,7 +2146,7 @@ class ChatEngine:
 
     def _keep_reply(self, chat, existing, reply_id, model, client, text, thought_text, finish, failure, usage, counted,
                     sources, searches, questions, memory_ops, web_images, *, actions=None, files=None,
-                    canvases=None) -> dict:
+                    canvases=None, queries=None) -> dict:
         """The reply as it ended, saved (with what it looked up, asked, remembered and showed)."""
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
@@ -2070,6 +2169,8 @@ class ChatEngine:
                 message["files"] = files
             if canvases:
                 message["canvases"] = canvases
+            if queries:
+                message["queries"] = queries
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -2090,6 +2191,8 @@ class ChatEngine:
                 message["files"] = files
             if canvases:
                 message["canvases"] = canvases
+            if queries:
+                message["queries"] = queries
             chat["messages"].append(message)
         if counted:
             message["counted"] = counted

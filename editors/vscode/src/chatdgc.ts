@@ -114,7 +114,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -926,6 +926,24 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "openProject":
         this.openProject(String(message.id || ""));
         return;
+      case "saveImage": {
+        // A chart as a PNG, drawn by the page: saved where you choose.
+        const data = typeof message.data === "string" ? message.data : "";
+        const found = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(data);
+        if (!found || data.length > 20_000_000) return;
+        const name = String(message.name || "chart.png").replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ").trim().slice(0, 80) || "chart.png";
+        const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir());
+        const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.joinPath(folder, /\.png$/i.test(name) ? name : `${name}.png`),
+                                                            saveLabel: "Save", filters: { "PNG image": ["png"] } });
+        if (!target) return;
+        try {
+          await vscode.workspace.fs.writeFile(target, Buffer.from(found[1], "base64"));
+          void vscode.window.showInformationMessage(`Saved ${target.path.split("/").pop()}.`);
+        } catch (err: any) {
+          void vscode.window.showErrorMessage(`The image couldn't be saved: ${String(err?.message || err)}`);
+        }
+        return;
+      }
       case "canvasOpen": {
         const canvasId = String(message.canvasId || "");
         if (!conversation || !CANVAS_ID.test(canvasId)) return;

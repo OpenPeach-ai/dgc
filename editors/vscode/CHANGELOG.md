@@ -52,6 +52,9 @@
 - **The Library.** **Library** in the side bar shows every file you attached in ChatDGC, by kind, searchable by
   name. Open where a file is, start a new chat with it, save a copy, add it to a project, or delete it. The
   paperclip lists your newest files before Upload.
+- **Data analysis and charts.** Attach a spreadsheet and ask about it: answers come from exact queries (open
+  **Analyzed the data** to see them). Replies can draw bar, line, area, pie and scatter charts: hover for values,
+  click the legend, **Data**, **Copy data** and **Save image**.
 - **Canvas.** A longer piece you'll work on together (an essay, a plan, a program) opens in an editor beside the
   chat. Edit it yourself; ChatDGC reads your version and changes it with small edits you can undo. Select a part and
   choose **Ask ChatDGC About This**; the title bar has shortcuts, **Canvas Versions…** (compare or bring back) and

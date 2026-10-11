@@ -134,8 +134,57 @@
     const html = md(message.text);
     if (html === null) node.textContent = message.text || ""; else node.innerHTML = html;
     cite(node, message.sources);
-    if (drafts) draftBlocks(node, message, drafts.live);
+    if (drafts) { draftBlocks(node, message, drafts.live); chartBlocks(node, drafts.live); }
     return node;
+  }
+
+  /** The queries a reply ran on the chat's spreadsheets (ChatGPT's "View analysis"): each SQL and what it returned. */
+  function analysisNode(message) {
+    const queries = Array.isArray(message.queries) ? message.queries.filter((q) => q && typeof q.sql === "string") : [];
+    if (!queries.length) return null;
+    const box = el("details", "cd-analysis");
+    if (state.open.has(`analysis:${message.id}`)) box.open = true;
+    box.addEventListener("toggle", () => { if (box.open) state.open.add(`analysis:${message.id}`); else state.open.delete(`analysis:${message.id}`); });
+    const summary = el("summary", "cd-analysis-summary");
+    summary.append(icon("table"), el("span", "", `Analyzed the data \u00b7 ${queries.length} ${queries.length === 1 ? "query" : "queries"}`));
+    box.append(summary);
+    for (const q of queries) {
+      const item = el("div", "cd-analysis-item");
+      const code = el("pre", "cd-analysis-sql");
+      code.textContent = q.sql;
+      item.append(code);
+      if (q.error) item.append(el("div", "cd-analysis-error", q.error));
+      else if (Array.isArray(q.columns) && Array.isArray(q.rows)) {
+        const table = el("table", "cd-analysis-table"), head = el("tr");
+        for (const c of q.columns) head.append(el("th", "", String(c)));
+        table.append(head);
+        for (const row of q.rows.slice(0, 20)) {
+          const tr = el("tr");
+          for (const v of Array.isArray(row) ? row : []) tr.append(el("td", typeof v === "number" ? "num" : "", v === null ? "" : String(v)));
+          table.append(tr);
+        }
+        item.append(table);
+        const count = Number(q.count) || 0;
+        if (q.more || count > 20) item.append(el("div", "cd-analysis-more", q.more ? `More than ${count} rows; the first 20 shown.` : `${count} rows; the first 20 shown.`));
+      }
+      box.append(item);
+    }
+    return box;
+  }
+
+  // ---- charts (ChatGPT's interactive charts): a ```chart block of JSON, drawn by chart.js
+  function chartBlocks(node, live) {
+    if (!window.DgcChart) return;
+    for (const pre of node.querySelectorAll('pre.code[data-language="chart"]')) {
+      let spec = null;
+      try { spec = JSON.parse(decodeURIComponent(pre.querySelector(".copy[data-c]")?.dataset.c || "")); } catch { spec = null; }
+      const chart = spec && window.DgcChart.render(spec, {
+        copy: (text) => vscode.postMessage({ type: "copy", text }),
+        save: (name, data) => (data ? vscode.postMessage({ type: "saveImage", name, data }) : showNotice("The chart couldn't be made into an image.", "info")),
+      });
+      if (chart) pre.replaceWith(chart);
+      else if (live) pre.replaceWith(el("div", "cd-chart-pending", "Drawing a chart…"));   // its JSON is still coming
+    }
   }
 
   // ---- writing blocks (ChatGPT's): a draft the user will send as it is, which the model writes in an ```email or
@@ -434,7 +483,8 @@
   /** A reply as it reads: its rendered blocks without the screen's own buttons, links as links. */
   function readable(message) {
     const node = body(message, { live: true });
-    node.querySelectorAll(".copy, .code-language, .cd-draft-tools, .cd-cite").forEach((n) => n.remove());
+    node.querySelectorAll(".copy, .code-language, .cd-draft-tools, .cd-cite, .cd-chart-tools, .cd-chart-legend, .cd-chart-tip").forEach((n) => n.remove());
+    node.querySelectorAll(".cd-chart-table").forEach((t) => { t.hidden = false; });      // a chart pastes as its numbers
     node.querySelectorAll("button.md-link").forEach((b) => {
       const a = document.createElement("a");
       a.href = b.dataset.target || ""; a.textContent = b.textContent;
@@ -993,12 +1043,13 @@
     if (message.thinking) node.append(thinkingBlock(message, live));
     { const strip = picturesStrip(message); if (strip) node.append(strip); }
     if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
+    { const analysis = analysisNode(message); if (analysis) node.append(analysis); }
     for (const file of Array.isArray(message.files) ? message.files : []) node.append(fileCard(message, file));
     for (const canvas of Array.isArray(message.canvases) ? message.canvases : []) node.append(canvasCard(canvas));
     for (const card of Array.isArray(message.actions) ? message.actions : []) node.append(actionCard(message, card, live));
     const doing = live && state.searching[message.id];
     if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
-      ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "making" ? `Making ${doing.text || "the file"}…` : doing.kind === "canvas" ? `Writing in the canvas ${doing.text}…` : doing.kind === "compacting"
+      ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "making" ? `Making ${doing.text || "the file"}…` : doing.kind === "canvas" ? `Writing in the canvas ${doing.text}…` : doing.kind === "analyzing" ? "Analyzing the data…" : doing.kind === "compacting"
       ? "Summarizing earlier messages to fit the context window…" : `Searching the web for “${doing.text}”…`));
     else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
@@ -1822,7 +1873,7 @@
           state.compacting = true; render(); controls();        // Compact now, or a summary for a new chat
           return;
         }
-        if (["searching", "looking", "compacting", "plugin", "making", "canvas"].includes(msg.kind) && msg.messageId) {
+        if (["searching", "looking", "compacting", "plugin", "making", "canvas", "analyzing"].includes(msg.kind) && msg.messageId) {
           state.searching[msg.messageId] = { kind: msg.kind, text: String(msg.text || "") };
           if (!state.messages.some((m) => m.id === msg.messageId)) state.messages.push({ id: msg.messageId, role: "assistant", text: "", thinking: "" });
           update(msg.messageId);

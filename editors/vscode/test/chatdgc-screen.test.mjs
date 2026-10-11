@@ -39,7 +39,7 @@ function screenHtml() {
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/chatdgc.css"), "utf8");
-  const js = readFileSync(join(root, "media/chatdgc.js"), "utf8");
+  const js = readFileSync(join(root, "media/chart.js"), "utf8") + "\n" + readFileSync(join(root, "media/chatdgc.js"), "utf8");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   cached = { html: doc.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${own}</style></head>`), js, markdownJs };
@@ -1486,6 +1486,76 @@ test("canvas: a card where the reply made or changed one (Open), a message from 
     await s.frame();
     assert.equal((await s.posted("send")).length, 1, "not while a reply is being written");
     assert.match(await s.page.locator("#cd-notice").textContent(), /Let the reply finish first/);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("charts: a ```chart block drawn as bar, line, pie or scatter; hover values, legend, Data, Copy data, Save image", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900, height: 1400 });
+  try {
+    const fence = "```";
+    const bar = { type: "bar", title: "Spend by month <b>2026</b>", x: ["Jan", "Feb", "Mar"], unit: "₹",
+                  series: [{ name: "Food", values: [1200, 950, 1100] }, { name: "Travel", values: [400, "3,400", null] }] };
+    const line = { type: "line", title: "Weight", x: ["W1", "W2", "W3", "W4"], series: [{ name: "kg", values: [82, 81.4, 80.9, 80.2] }] };
+    const pie = { type: "pie", title: "Where it goes", x: ["Rent", "Food", "Other"], series: [{ name: "Share", values: [60, 25, 15] }], unit: "%" };
+    const scatter = { type: "scatter", title: "Price vs size", series: [{ name: "Flats", points: [[50, 40], [80, 65], [120, 90]] }] };
+    const text = [bar, line, pie, scatter].map((c) => `${fence}chart\n${JSON.stringify(c)}\n${fence}`).join("\n\n")
+      + `\n\nBroken:\n\n${fence}chart\n{"type": "bar", "x": [\n${fence}`;
+    await s.send({ type: "opened", conversation: conversation({ title: "Spend" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Chart my spend" }, { id: M(2), role: "assistant", text, finish: "stop" }] });
+    await s.frame();
+    const charts = s.page.locator(".cd-chart");
+    assert.deepEqual(await charts.evaluateAll((n) => n.map((x) => x.dataset.type)), ["bar", "line", "pie", "scatter"]);
+    assert.equal(await s.page.locator('pre.code[data-language="chart"]').count(), 1, "JSON that won't read stays as it was written");
+    const first = charts.first();
+    assert.equal(await first.locator(".cd-chart-title").textContent(), "Spend by month <b>2026</b>", "a title is text");
+    assert.equal(await first.locator("rect.cd-chart-mark").count(), 5, "3 + 2 bars: a gap where there's no number");
+    assert.deepEqual(await first.locator(".cd-chart-key").allInnerTexts(), ["Food", "Travel"]);
+    assert.equal(await charts.nth(2).locator("path.cd-chart-mark").count(), 3, "a slice each");
+    assert.equal(await charts.nth(3).locator("circle.cd-chart-mark").count(), 3);
+    if (process.env.DGC_SHOTS) {
+      for (let i = 0; i < 4; i++) await charts.nth(i).screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-chart-${i + 1}.png`) });
+    }
+    // Hover: the value, with its unit.
+    await first.locator("rect.cd-chart-mark").nth(3).hover();
+    assert.equal(await first.locator(".cd-chart-tip").textContent(), "Jan · Travel: ₹400");
+    // The legend hides a series (never the last one shown).
+    await first.locator(".cd-chart-key", { hasText: "Travel" }).click();
+    assert.equal(await first.locator("rect.cd-chart-mark").count(), 3);
+    await first.locator(".cd-chart-key", { hasText: "Food" }).click();
+    assert.equal(await first.locator("rect.cd-chart-mark").count(), 3, "one series always stays");
+    await first.locator(".cd-chart-key", { hasText: "Travel" }).click();
+    // Data, Copy data, Save image.
+    await first.getByRole("button", { name: "Data", exact: true }).click();
+    assert.deepEqual(await first.locator(".cd-chart-table tr").allInnerTexts(), ["\tFood\tTravel", "Jan\t₹1,200\t₹400",
+                                                                                "Feb\t₹950\t₹3,400", "Mar\t₹1,100\t"]);
+    await first.getByRole("button", { name: "Copy data" }).click();
+    assert.equal((await s.posted("copy")).at(-1).text, ",Food,Travel\nJan,1200,400\nFeb,950,3400\nMar,1100,");
+    await first.getByRole("button", { name: "Save image" }).click();
+    await s.page.waitForFunction(() => window.__posted.some((m) => m.type === "saveImage"), null, { timeout: 5000 });
+    const saved = (await s.posted("saveImage")).at(-1);
+    assert.match(saved.name, /^Spend by month .*2026.*\.png$/);
+    assert.match(saved.data, /^data:image\/png;base64,/);
+    // What the reply ran on the spreadsheets: shut, then each SQL and its rows.
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text, finish: "stop", queries: [
+      { sql: "SELECT category, SUM(amount) FROM expenses GROUP BY category", columns: ["category", "SUM(amount)"],
+        rows: [["Rent", 25000], ["<b>Food</b>", 2050.5]], count: 2, more: false },
+      { sql: "DROP TABLE expenses", error: "Only one SELECT query at a time." }] } });
+    await s.frame();
+    const analysis = s.page.locator(".cd-analysis");
+    assert.equal(await analysis.locator(".cd-analysis-summary").textContent(), "Analyzed the data · 2 queries");
+    assert.equal(await analysis.evaluate((d) => d.open), false, "shut until asked");
+    await analysis.locator(".cd-analysis-summary").click();
+    assert.deepEqual(await analysis.locator(".cd-analysis-sql").allTextContents(),
+                     ["SELECT category, SUM(amount) FROM expenses GROUP BY category", "DROP TABLE expenses"]);
+    assert.deepEqual(await analysis.locator(".cd-analysis-table tr").allInnerTexts(), ["category\tSUM(amount)", "Rent\t25000", "<b>Food</b>\t2050.5"]);
+    assert.equal(await analysis.locator(".cd-analysis-error").textContent(), "Only one SELECT query at a time.");
+    // While the reply is written, a chart whose JSON is still coming says so instead of showing half of it.
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "delta", messageId: M(4), text: `${fence}chart\n{"type": "line", "x": ["a",` });
+    await s.frame();
+    assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(4)}"] .cd-chart-pending`).textContent(), "Drawing a chart…");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

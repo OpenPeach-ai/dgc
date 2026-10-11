@@ -4229,7 +4229,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "compacting",
         "plugin",
         "making",
-        "canvas"
+        "canvas",
+        "analyzing"
       ]
     },
     "text": {

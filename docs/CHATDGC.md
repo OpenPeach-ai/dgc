@@ -163,6 +163,14 @@ voice come in later phases.
     said yourself isn't held back.
   - A plugin whose sign-in only the editor holds can't be reached from a chat (as from a Pip): sign it in from
     Settings → Plugins.
+- **Data analysis**, as ChatGPT has it: attach a spreadsheet (CSV, TSV or Excel; each sheet is a table) and ask
+  about it. ChatDGC answers with exact numbers by asking the data in SQL, read-only and in memory, rather than
+  reading rows by eye: totals, groups, monthly trends, averages, medians, spreads and correlations. Nothing it
+  writes runs as a program or can change a file. **Analyzed the data** under the reply shows each query and what it
+  returned. Spreadsheets in the chat's project, and ones ChatDGC made, count too.
+- **Charts**, as ChatGPT's interactive charts: where numbers compare or change, a reply can draw a bar, line, area,
+  pie or scatter chart from numbers it has (never made-up ones). Hover for a value, click the legend to hide a
+  series, **Data** for the numbers as a table, **Copy data** (CSV) and **Save image** (PNG).
 - **Canvas**, as ChatGPT has it: for a longer piece you'll keep working on (an essay, a plan, a report, a program),
   or when you ask for one, ChatDGC opens a canvas: a real file in an editor beside the chat. You both work on it.
   - **You edit it** like any file; what you typed is what ChatDGC reads next (it's saved before your message goes).
