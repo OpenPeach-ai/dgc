@@ -409,3 +409,40 @@ test('ChatDGC: follow-ups under a reply, on unless this switch turns them off, s
   y.click('[data-nav=chatdgc]');
   assert.equal(y.d.querySelector('#chatdgc_followups').disabled, true, 'an older CLI: shown, not changeable');
 });
+
+test('Settings -> Voice lists each model with its size and licence; Install shows its progress, then Use and Remove',()=>{
+  const x=setup();
+  const last=()=>JSON.parse(JSON.stringify(x.sent.at(-1)));   // the page's own object, from its window
+  x.click('[data-nav=voice]');
+  assert.deepEqual(x.sent.filter(m=>m.type==='getVoice').length,1,'it asks for the models once');
+  assert.match(x.d.querySelector('main').textContent,/Reading your voice models/);
+  const model=(id,role,name,size,licence,extra={})=>({id,role,name,summary:name+' summary',languages:'English',licence,size,installed:false,in_use:false,installing:null,...extra});
+  const models=[model('moonshine-base-en','dictation','Moonshine',111266225,'MIT'),model('nemotron-3.5-asr','dictation','Nemotron 3.5',475271763,'NVIDIA Open Model (OpenMDW-1.1)'),
+                model('kitten-mini-en','read_aloud','Kitten',67547594,'Apache-2.0'),model('pocket-tts','read_aloud','Pocket TTS',98336520,'Non-commercial use only')];
+  x.message({type:'event',event:{type:'voice_state',runtime:{installed:false,size_mb:50},models,dictation:'',read_aloud:''}});
+  const text=x.d.querySelector('main').textContent;
+  for(const want of ['Dictation','Read aloud','Moonshine','Nemotron 3.5','475 MB','Licence: Non-commercial use only','voice engine (about 50 MB)']) assert.match(text,new RegExp(want.replace(/[()]/g,'\\$&')),want);
+  x.click('[data-voice-install="nemotron-3.5-asr"]');
+  assert.deepEqual(last(),{type:'voiceInstall',id:'nemotron-3.5-asr'});
+  x.message({type:'event',event:{type:'voice_state',runtime:{installed:false,size_mb:50},models:models.map(m=>m.id==='nemotron-3.5-asr'?{...m,installing:{stage:'starting',done:0,total:m.size}}:m),dictation:'',read_aloud:''}});
+  x.message({type:'event',event:{type:'voice_progress',id:'nemotron-3.5-asr',stage:'download',done:120000000,total:475271763}});
+  const bar=x.d.querySelector('[data-voice-model="nemotron-3.5-asr"] [role=progressbar]');
+  assert.equal(bar.getAttribute('aria-valuenow'),'25');
+  assert.match(x.d.querySelector('[data-voice-model="nemotron-3.5-asr"]').textContent,/Downloading 120 MB of 475 MB/);
+  x.click('[data-voice-cancel="nemotron-3.5-asr"]');
+  assert.deepEqual(last(),{type:'voiceCancel',id:'nemotron-3.5-asr'},'Cancel works on the row the progress redrew');
+  x.message({type:'event',event:{type:'voice_error',request_id:'settings-voice-1',code:'cancelled',message:'Stopped.',id:'nemotron-3.5-asr'}});
+  assert.equal(x.d.querySelector('.banner.error'),null,'a cancel is not an error');
+  const installed=models.map(m=>m.id==='moonshine-base-en'?{...m,installed:true,in_use:true}:m.id==='nemotron-3.5-asr'?{...m,installed:true}:m);
+  x.message({type:'event',event:{type:'voice_state',runtime:{installed:true,size_mb:50},models:installed,dictation:'moonshine-base-en',read_aloud:''}});
+  assert.match(x.d.querySelector('[data-voice-model="moonshine-base-en"]').textContent,/In use/);
+  assert.doesNotMatch(x.d.querySelector('main').textContent,/voice engine \(about/,'the engine is there: no note');
+  x.click('[data-voice-use="nemotron-3.5-asr"]');
+  assert.deepEqual(last(),{type:'voiceUse',id:'nemotron-3.5-asr',role:'dictation'});
+  x.click('[data-voice-remove="moonshine-base-en"]');
+  assert.deepEqual(last(),{type:'voiceRemove',id:'moonshine-base-en'});
+  x.message({type:'event',event:{type:'voice_error',request_id:'settings-voice-2',message:'Kitten didn\'t download correctly (its checksum doesn\'t match); try again.',id:'kitten-mini-en'}});
+  assert.match(x.d.querySelector('.banner.error').textContent,/checksum/);
+  x.message({type:'voice_unavailable',message:'Update the DGC CLI to use voice.'});
+  assert.match(x.d.querySelector('.banner.error').textContent,/Update the DGC CLI/);
+});

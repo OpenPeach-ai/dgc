@@ -48,3 +48,6 @@ body.vscode-high-contrast{--line:#888;--border-strong:#fff;--muted:#ddd}
 /* A field holding a text box (ChatDGC's custom instructions) stacks: the words above, the box the full width below. */
 .field:has(>textarea){flex-direction:column;align-items:stretch;gap:8px}.field>textarea{width:100%;min-height:84px;resize:vertical;line-height:1.5}
 .memory-facts .row{gap:12px}.memory-edit input,.memory-add input{flex:1;min-width:0}.memory-add{border-bottom:0}.memory-danger{color:#ffc4bf}.memory-danger:hover{background:#3a2626}
+.voice-model .copy .summary{white-space:normal}.voice-model .actions{justify-content:flex-end}.voice-in-use{padding:6px 10px;border-radius:999px;background:#23324a;color:#a9c8ff;font-size:12px;font-weight:500}.voice-installing{display:grid;grid-template-columns:150px auto auto;align-items:center;gap:10px}.voice-progress{height:6px;border-radius:999px;background:#353535;overflow:hidden}.voice-progress span{display:block;height:100%;border-radius:inherit;background:var(--blue);transition:width .25s ease}.voice-said{color:var(--muted);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+@media(max-width:620px){.voice-model{flex-wrap:wrap}.voice-model .actions{width:100%;justify-content:flex-start}.voice-installing{grid-template-columns:1fr auto}.voice-installing .voice-said{grid-column:1/-1;grid-row:2}}
+

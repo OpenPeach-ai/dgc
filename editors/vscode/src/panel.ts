@@ -3205,7 +3205,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // duplicate skill name, a full follow-up queue) as a red MCP-server banner over a page that
     // was working, where it then outlived leaving the section.
     const settingsRejection = ev.type === "command_rejected" && SETTINGS_REJECTIONS.includes(String(ev.command || ""));
-    if (this.settingsEditor && (settingsRejection || ["config", "usage_report", "pip_usage_report", "mcp_servers", "memory_state"].includes(ev.type))) {
+    // Voice: the page's own state and progress, and only its own errors (a chat's dictation reports its own).
+    const settingsVoice = ["voice_state", "voice_progress"].includes(ev.type)
+      || (ev.type === "voice_error" && String((ev as any).request_id || "").startsWith("settings-voice"));
+    if (this.settingsEditor && (settingsRejection || settingsVoice || ["config", "usage_report", "pip_usage_report", "mcp_servers", "memory_state"].includes(ev.type))) {
       const managed = ev.type === "mcp_servers" ? new Map(this.managedMcpServers().map((m) => [m.name, m])) : null;
       // The form shows a server's own OAuth app (its public client id and port); never its secret.
       const event = managed && Array.isArray((ev as any).items) ? { ...ev, items: (ev as any).items.map((item: any) => {
@@ -5884,6 +5887,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       } else if (!be.send({ type: "get_usage", request_id: requestId, range })) {
         this.settingsEditor?.webview.postMessage({ type: "usage_unavailable", requestId,
           message: "DGC could not ask its backend for token usage. Try Refresh." });
+      }
+    } else if (["getVoice", "voiceInstall", "voiceCancel", "voiceRemove", "voiceUse"].includes(msg?.type)) {
+      // Settings -> Voice: the models that dictate and read aloud, on the side bar's process (dgc/voice).
+      const say = (message: string) => this.settingsEditor?.webview.postMessage({ type: "voice_unavailable", message });
+      if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.voice) {
+        say("Update the DGC CLI to use voice.");
+        return;
+      }
+      const id = typeof msg.id === "string" && /^[a-z0-9][a-z0-9.-]{0,63}$/.test(msg.id) ? msg.id : "";
+      const role = msg.role === "dictation" || msg.role === "read_aloud" ? msg.role : "";
+      let cmd: { type: string } & Record<string, unknown> | null = null;
+      if (msg.type === "getVoice") cmd = { type: "voice_models" };
+      else if (msg.type === "voiceInstall" && id) cmd = { type: "voice_install", id };
+      else if (msg.type === "voiceCancel" && id) cmd = { type: "voice_cancel", id };
+      else if (msg.type === "voiceRemove" && id) cmd = { type: "voice_remove", id };
+      else if (msg.type === "voiceUse" && id && role) cmd = { type: "voice_use", id, role };
+      if (cmd && !be.send({ ...cmd, request_id: this.nextRequestId("settings-voice") } as Parameters<DgcBackend["send"]>[0])) {
+        say("DGC couldn't reach its backend. Try again.");
       }
     } else if (["getMemory", "memoryAdd", "memoryEdit", "memoryForget", "memoryClear", "memoryProject", "memorySwitch"].includes(msg?.type)) {
       // Settings -> Memory: one memory about the user, kept by the side bar's process (dgc/shared_memory.py).
