@@ -115,6 +115,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   figure matched its formula (9 of 9), no reply mentioned the check, and the check flagged 3 of 13 clean widgets, one
   a real mislabelled total and two wrongly (each cost one rewrite, still right). Its fields are kept as you type (the
   60 newest widgets, in VS Code's storage) and put back when it opens again, so its own code reruns on them.
+  **In the Library, and back after a restart.** The Library has a **Widgets** tab: `chatdgc_widgets` lists every
+  widget a reply made (`op: "list"`, newest first, by name; index version 5 adds a `widgets` table, filled in once
+  for an older index), gets one with its page (`get`) or deletes one (`remove`: its page goes, the reply keeps its
+  name marked `removed`, is sent again as `chatdgc_message`, and the model reads that the user deleted it; refused
+  mid-reply). Offered as `ready.capabilities.chatdgc.widget_library`. A widget's tab names its widget and chat in
+  its webview state, so VS Code keeps it across a restart; a serializer for `dgc.chatdgcWidget` asks for its page
+  once the backend is up (a deleted one closes).
   Without tools, a ` ```widget ` block becomes the same card, and opens on **Open**. With deepseek-v4.1-flash, as
   a fenced block an EMI calculator or stopwatch went into a canvas or a file 5 of 6 times; as a tool, a widget 9 of 9
   (self-contained and themed), none for a plain question.

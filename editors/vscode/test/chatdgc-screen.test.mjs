@@ -694,6 +694,54 @@ test("the Library: every file you attached, by kind, searched by name, each with
   } finally { await page.close(); }
 });
 
+test("the Library's widgets: a tab of their own once the backend keeps them, each to open beside you, see its chat, or delete", async (t) => {
+  if (skipOrFail(t)) return;
+  const { html, js } = libraryHtml();
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await page.setContent(html, { waitUntil: "load" });
+    await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
+    await page.evaluate((code) => {
+      window.__posted = []; window.__state = undefined;
+      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
+      eval(code);
+    }, js);
+    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
+    await send({ type: "library", files: [], total: 0, next: null, counts: {} });
+    assert.equal(await page.locator("#lib-views").isHidden(), true, "not before the backend says it keeps them");
+    await send({ type: "widgetsOffered", on: true });
+    assert.deepEqual(await page.locator(".lib-view").allTextContents(), ["Files", "Widgets"]);
+    await page.locator(".lib-view", { hasText: "Widgets" }).click();
+    assert.deepEqual((await posted("widgets")).at(-1), { type: "widgets", query: "", offset: 0 });
+    assert.equal(await page.evaluate(() => window.__state?.view), "widgets", "remembered");
+    assert.equal(await page.locator("#lib-search").getAttribute("placeholder"), "Search widgets");
+    assert.equal(await page.locator("#lib-kinds").isHidden(), true);
+    assert.match(await page.locator("#lib-about").textContent(), /^Every calculator, timer or quiz ChatDGC made for you/);
+    const w = { chat_id: `chat_${"a".repeat(32)}`, id: `wg_${"1".repeat(16)}`, message_id: M(2), title: "EMI <b>calculator</b>",
+                created_at: new Date().toISOString(), chat_title: "Home loan" };
+    await send({ type: "widgets", widgets: [w], total: 1, next: null });
+    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ["EMI <b>calculator</b>"], "a name is words");
+    assert.equal(await page.locator(".lib-meta").textContent(), "Interactive · in “Home loan” · Today");
+    if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library-widgets.png") });
+    for (const label of ["Open it beside you", "Open the chat it's in", "Delete the widget"]) await page.locator(`button[aria-label="${label}"]`).click();
+    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => m.widget))).map((m) => [m.type, m.widget.id]),
+                     [["widgetOpen", w.id], ["widgetChat", w.id], ["widgetRemove", w.id]]);
+    await page.locator("#lib-search").fill("tip");
+    await page.waitForTimeout(400);
+    assert.deepEqual((await posted("widgets")).at(-1), { type: "widgets", query: "tip", offset: 0 });
+    await send({ type: "widgets", widgets: [], total: 0, next: null });
+    assert.equal(await page.locator("#lib-status").textContent(), "No widget named like “tip”.");
+    // A backend that no longer keeps them: back to the files.
+    await send({ type: "widgetsOffered", on: false });
+    assert.equal(await page.locator("#lib-views").isHidden(), true);
+    assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "", kind: "", offset: 0 });
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test("plugins in chat: a card for each change, Send it now as edited, Hand it to a Pip first for something recurring, Don't", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
@@ -1687,6 +1735,23 @@ test("a widget's page in a browser: put back as you left it (its code reruns), s
     const state = await page.evaluate(() => window.__posted.filter((m) => m.type === "state").at(-1));
     assert.deepEqual(state.fields, [{ i: 0, id: "bill", v: "1000" }, { i: 1, id: "", v: "20" }, { i: 2, id: "round", c: true }]);
   } finally { await page.close(); }
+});
+
+test("a widget deleted from the Library: its card keeps its name and says so, with nothing to open or show", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation({ title: "Timer" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "A stopwatch please" },
+      { id: M(2), role: "assistant", text: "Here's a stopwatch.", finish: "stop", widgets: [{ id: `wg_${"a".repeat(16)}`, title: "Stopwatch", removed: true, at: 0 }] }] });
+    await s.frame();
+    const card = s.page.locator(".cd-widget");
+    assert.equal(await card.locator(".cd-widget-title").textContent(), "Stopwatch");
+    assert.equal(await card.locator(".cd-widget-note").textContent(), "Deleted from your Library");
+    assert.equal(await card.locator("button").count(), 0);
+    assert.equal(await card.locator(".cd-file[data-removed]").count(), 1);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
 });
 
 test("files a reply made: a card with what each is, Open and Save a copy…, live as it's made", async (t) => {

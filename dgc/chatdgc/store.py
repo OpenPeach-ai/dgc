@@ -32,8 +32,8 @@ MAX_TEXT = 1_000_000                 # one message, in characters: a reply can b
 MAX_CHAT_BYTES = 32 * 1024 * 1024    # one chat file
 MAX_LIST = 200
 MAX_BODY = 1_000_000                 # characters of a chat kept for search
-INDEX_VERSION = 4                    # 2: what was said is searched too (body, body_fts); 3: the Library (files);
-                                     # 4: files ChatDGC made (files.made)
+INDEX_VERSION = 5                    # 2: what was said is searched too (body, body_fts); 3: the Library (files);
+                                     # 4: files ChatDGC made (files.made); 5: its widgets (widgets)
 PROJECT_ID = re.compile(r"proj_[a-f0-9]{32}\Z")
 MAX_PROJECTS = 200
 MAX_PROJECT_NAME = 80
@@ -165,6 +165,10 @@ class ChatStore:
             except sqlite3.OperationalError as exc:      # another process added it between the look and the add
                 if "duplicate column" not in str(exc):
                     raise
+        db.execute("""CREATE TABLE IF NOT EXISTS widgets (
+            chat_id TEXT NOT NULL, id TEXT NOT NULL, message_id TEXT NOT NULL, title TEXT NOT NULL,
+            created_at TEXT NOT NULL, PRIMARY KEY(chat_id, id))""")
+        db.execute("CREATE INDEX IF NOT EXISTS widgets_order ON widgets(created_at)")
         db.execute("CREATE TABLE IF NOT EXISTS body (id TEXT PRIMARY KEY, text TEXT NOT NULL DEFAULT '')")
         try:
             db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5(id UNINDEXED, text, "
@@ -219,6 +223,26 @@ class ChatStore:
         db.executemany("INSERT OR REPLACE INTO files(chat_id,id,message_id,name,kind,mime,size,chars,created_at,made) "
                        "VALUES(?,?,?,?,?,?,?,?,?,?)", self._files_of(chat))
 
+    @staticmethod
+    def _widgets_of(chat: dict) -> list[tuple]:
+        """A chat's widgets (in every version of it), for the Library: rows of the widgets table."""
+        tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
+        rows, seen = [], set()
+        for m in [*chat.get("messages", []), *(m for tail in tails for m in tail)]:
+            for w in (m.get("widgets") or []) if isinstance(m, dict) else []:
+                ident = str(w.get("id") or "") if isinstance(w, dict) else ""
+                if not ident or ident in seen or w.get("removed"):
+                    continue
+                seen.add(ident)
+                rows.append((chat["id"], ident, str(m.get("id") or ""), str(w.get("title") or "Interactive")[:120],
+                             str(w.get("created_at") or m.get("created_at") or chat.get("created_at") or "")))
+        return rows
+
+    def _put_widgets(self, db, chat: dict) -> None:
+        db.execute("DELETE FROM widgets WHERE chat_id=?", (chat["id"],))
+        db.executemany("INSERT OR REPLACE INTO widgets(chat_id,id,message_id,title,created_at) VALUES(?,?,?,?,?)",
+                       self._widgets_of(chat))
+
     def _catch_up(self, db) -> None:
         """An index from before what was said was searched (2), or before the Library (3): read each chat once and
         fill it in."""
@@ -231,6 +255,7 @@ class ChatStore:
                 continue
             self._put_body(db, chat)
             self._put_files(db, chat)
+            self._put_widgets(db, chat)
             db.execute("UPDATE chats SET project=? WHERE id=?", (str(chat.get("project") or ""), chat["id"]))
         db.execute(f"PRAGMA user_version = {INDEX_VERSION}")
 
@@ -323,6 +348,7 @@ class ChatStore:
                         int(chat.get("archived", False)), preview, len(chat["messages"]), str(chat.get("project") or "")))
             self._put_body(db, chat)
             self._put_files(db, chat)
+            self._put_widgets(db, chat)
 
     def create(self, *, model: str | None = None, thinking: str | None = None, title: str = "New chat",
                chat_id: str | None = None, project: str | None = None) -> dict:
@@ -429,6 +455,7 @@ class ChatStore:
             with self._index() as db:
                 db.execute("DELETE FROM chats WHERE id=?", (chat_id,))
                 db.execute("DELETE FROM files WHERE chat_id=?", (chat_id,))
+                db.execute("DELETE FROM widgets WHERE chat_id=?", (chat_id,))
                 db.execute("DELETE FROM body WHERE id=?", (chat_id,))
                 if self._fts:
                     db.execute("DELETE FROM body_fts WHERE id=?", (chat_id,))
@@ -502,6 +529,61 @@ class ChatStore:
                     pass
             self._write(chat)
         return chat
+
+    # -- widgets in the Library: every interactive answer, to open again or delete
+
+    def widgets(self, *, query: str = "", limit: int = 60, offset: int = 0) -> dict:
+        """Every widget a reply made, in every chat (archived ones too), the newest first; ``query`` part of its name."""
+        if type(limit) is not int or not 1 <= limit <= MAX_LIST or type(offset) is not int or offset < 0:
+            raise ChatStoreError(f"Ask for 1–{MAX_LIST} widgets at a time.")
+        text = " ".join(str(query or "").split())[:200].casefold()
+        self._ensure()
+        with self._index() as db:
+            self._catch_up(db)
+            rows = db.execute("SELECT w.chat_id, w.id, w.message_id, w.title, w.created_at, c.title, c.project "
+                              "FROM widgets w JOIN chats c ON c.id = w.chat_id").fetchall()
+        names = {p["id"]: p.get("name", "") for p in self._read_projects()}
+        items = [{"chat_id": r[0], "id": r[1], "message_id": r[2], "title": r[3], "created_at": r[4], "chat_title": r[5],
+                  **({"project_id": r[6], "project_name": names[r[6]]} if r[6] in names else {})} for r in rows]
+        if text:
+            items = [i for i in items if text in i["title"].casefold()]
+        items.sort(key=lambda i: (i["created_at"] or "", i["id"]), reverse=True)
+        page = items[offset:offset + limit]
+        return {"widgets": page, "total": len(items),
+                "next_offset": offset + len(page) if offset + len(page) < len(items) else None}
+
+    @staticmethod
+    def _widget_in(chat: dict, widget_id: str) -> tuple[dict, dict] | None:
+        tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
+        for m in [*chat["messages"], *(m for tail in tails for m in tail)]:
+            for w in m.get("widgets") or []:
+                if isinstance(w, dict) and w.get("id") == widget_id:
+                    return m, w
+        return None
+
+    def widget(self, chat_id: str, widget_id: str) -> dict:
+        """One widget, with its page: to open it again."""
+        found = self._widget_in(self.get(chat_id), widget_id)
+        if found is None or found[1].get("removed"):
+            raise ChatStoreError("That widget isn't there any more.")
+        return {**found[1], "message_id": found[0].get("id", "")}
+
+    def remove_widget(self, chat_id: str, widget_id: str) -> dict:
+        """Delete a widget, from the Library: its page goes; the reply keeps its name, marked removed. The message."""
+        with self._locked():
+            chat = self.get(chat_id)
+            removed = None
+            tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
+            for m in [*chat["messages"], *(m for tail in tails for m in tail)]:
+                for w in m.get("widgets") or []:
+                    if isinstance(w, dict) and w.get("id") == widget_id:
+                        w.pop("html", None)
+                        w["removed"] = True
+                        removed = removed or m
+            if removed is None:
+                raise ChatStoreError("That widget isn't in this chat.")
+            self._write(chat)
+        return removed
 
     # -- projects (ChatGPT's): chats, files and instructions together
 

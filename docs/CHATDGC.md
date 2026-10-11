@@ -177,8 +177,10 @@ voice come in later phases.
   anywhere, no access to your chats, files or VS Code. It takes the editor's colours. Once it's open, ChatDGC sees
   what it shows and checks its figures; if one is wrong, or its code failed, it fixes it once, in the same tab. (If
   it still fails, a bar in it says so.) It opens again as you left it: what you typed in it is kept on this computer
-  (for the 60 widgets you used last). A card under the reply names it: **Open** shows it again, **Show code** shows
-  its page. (VS Code runs nothing in a frame inside the chat, so a widget can't sit inside the reply itself.)
+  (for the 60 widgets you used last), and a widget's tab that was open when VS Code closed comes back with it. A card
+  under the reply names it: **Open** shows it again, **Show code** shows its page; every widget is also in the
+  Library, under **Widgets**. (VS Code runs nothing in a frame inside the chat, so a widget can't sit inside the reply
+  itself.)
 - **Canvas**, as ChatGPT has it: for a longer piece you'll keep working on (an essay, a plan, a report, a program),
   or when you ask for one, ChatDGC opens a canvas: a real file in an editor beside the chat. You both work on it.
   - **You edit it** like any file; what you typed is what ChatDGC reads next (it's saved before your message goes).
@@ -230,7 +232,9 @@ voice come in later phases.
   new chat with it attached, be saved as a copy, be added to a project, or be deleted: the chat it was in keeps
   its name, marked as deleted, and its model is told it's no longer there. The paperclip lists your newest
   Library files before **Upload files…**; a file attached from the Library is a copy, so the chat keeps it even
-  if the original goes.
+  if the original goes. **Widgets** lists every widget ChatDGC made, in every chat, newest first, searched by name:
+  open one beside you, open the chat it's in, or delete it (its tab closes, and its card in the chat says it was
+  deleted).
 - **Custom instructions and personality.** **Settings → ChatDGC** sets what ChatDGC should know about you and
   how it should respond (up to 1,500 characters each), and its personality: Default, Concise, Warm, Candid
   or Nerdy. Every chat uses them from its next reply; Work and your Pips don't.

@@ -46,7 +46,8 @@
   "activationEvents": [
     "onView:dgc.chat",
     "onWebviewPanel:dgc.chatEditor",
-    "onWebviewPanel:dgc.chatdgcEditor"
+    "onWebviewPanel:dgc.chatdgcEditor",
+    "onWebviewPanel:dgc.chatdgcWidget"
   ],
   "contributes": {
     "viewsContainers": {

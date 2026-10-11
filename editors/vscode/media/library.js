@@ -1,5 +1,6 @@
 // The Library (ChatGPT's): every file attached in ChatDGC, in every chat and project, newest first. Search by name,
 // show one kind, and for each: open where it is, use it in a new chat, save a copy, add it to a project, delete it.
+// And its widgets (a backend that keeps them says so): every interactive answer, to open beside you again or delete.
 // Names are the user's words: text nodes only. Images are asked of the backend by id, as the chat screen asks.
 (function () {
   const vscode = acquireVsCodeApi();
@@ -13,7 +14,10 @@
   const saved = (() => { try { return vscode.getState() || {}; } catch { return {}; } })();
   const ORIGINS = [["", "All"], ["uploaded", "Uploaded"], ["made", "Made by ChatDGC"]];
   const state = { query: "", kind: KINDS.some(([k]) => k === saved.kind) ? saved.kind : "", files: [], total: 0, next: null, counts: {},
-                  origin: ORIGINS.some(([o]) => o === saved.origin) ? saved.origin : "", origins: {}, loading: true, asking: 0 };
+                  origin: ORIGINS.some(([o]) => o === saved.origin) ? saved.origin : "", origins: {}, loading: true, asking: 0,
+                  view: saved.view === "widgets" ? "widgets" : "files", offered: false, widgets: [], widgetsNext: null };
+  const ABOUT = { files: "Every file you attached in ChatDGC or it made for you, in every chat and project. Temporary chats keep none.",
+                  widgets: "Every calculator, timer or quiz ChatDGC made for you, in every chat. Open one beside you, or delete it." };
   const images = new Map();
   const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
   function when(stamp) {
@@ -28,10 +32,48 @@
   function ask(offset = 0) {
     state.loading = true; state.asking = offset;       // a later page adds to the list; a new search replaces it
     status();
+    if (state.view === "widgets") { vscode.postMessage({ type: "widgets", query: state.query, offset }); return; }
     vscode.postMessage({ type: "list", query: state.query, kind: state.kind, ...(state.origin ? { origin: state.origin } : {}), offset });
+  }
+  function views() {
+    // Files and Widgets, as tabs; Widgets only once the backend says it keeps them.
+    const bar = $("lib-views");
+    bar.hidden = !state.offered;
+    bar.replaceChildren();
+    if (!state.offered) return;
+    for (const [view, label] of [["files", "Files"], ["widgets", "Widgets"]]) {
+      const tab = el("button", "lib-view", label);
+      tab.type = "button";
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", String(state.view === view));
+      tab.addEventListener("click", () => show(view));
+      bar.append(tab);
+    }
+  }
+  function show(view) {
+    if (state.view === view) return;
+    state.view = view; state.query = ""; $("lib-search").value = "";
+    state.files = []; state.widgets = [];
+    try { vscode.setState({ ...(vscode.getState() || {}), view }); } catch {}
+    place();
+    render();
+    ask();
+  }
+  function place() {
+    const widgets = state.view === "widgets";
+    $("lib-about").textContent = ABOUT[state.view];
+    $("lib-search").placeholder = widgets ? "Search widgets" : "Search files";
+    $("lib-search").setAttribute("aria-label", widgets ? "Search your widgets by name" : "Search your files by name");
+    $("lib-list").setAttribute("aria-label", widgets ? "Your widgets" : "Your files");
   }
   function status() {
     const line = $("lib-status");
+    if (state.view === "widgets") {
+      line.textContent = state.loading && !state.widgets.length ? "Loading…" : state.widgets.length ? ""
+        : state.query ? `No widget named like “${state.query}”.` : "Calculators, timers and quizzes ChatDGC makes for you show here.";
+      line.hidden = !line.textContent;
+      return;
+    }
     line.textContent = state.loading && !state.files.length ? "Loading…"
       : state.files.length ? "" : state.query ? `No file named like “${state.query}”.`
       : state.kind ? `No ${KINDS.find(([k]) => k === state.kind)[1].toLowerCase()} yet.`
@@ -119,11 +161,30 @@
     item.append(preview(file), main, actions);
     return item;
   }
+  function widgetRow(w) {
+    const item = el("li", "lib-row");
+    const main = el("div", "lib-main");
+    main.append(el("span", "lib-name", w.title || "Interactive"));
+    const where = `in “${w.chat_title || "a chat"}”` + (w.project_name ? ` · ${w.project_name}` : "");
+    main.append(el("span", "lib-meta", ["Interactive", where, when(w.created_at)].filter(Boolean).join(" · ")));
+    const actions = el("div", "lib-actions");
+    actions.append(
+      action("play", "Open it beside you", () => vscode.postMessage({ type: "widgetOpen", widget: w })),
+      action("comment-discussion", "Open the chat it's in", () => vscode.postMessage({ type: "widgetChat", widget: w })),
+      action("trash", "Delete the widget", () => vscode.postMessage({ type: "widgetRemove", widget: w })));
+    const box = el("span", "lib-preview");
+    box.append(icon("play-circle"));
+    item.append(box, main, actions);
+    return item;
+  }
   function render() {
-    origins();
-    kinds();
-    $("lib-list").replaceChildren(...state.files.map(row));
-    $("lib-more").hidden = state.next === null || state.next === undefined;
+    views();
+    const widgets = state.view === "widgets";
+    $("lib-origins").hidden = true; $("lib-kinds").hidden = widgets;
+    if (!widgets) { origins(); kinds(); }
+    $("lib-list").replaceChildren(...(widgets ? state.widgets.map(widgetRow) : state.files.map(row)));
+    const next = widgets ? state.widgetsNext : state.next;
+    $("lib-more").hidden = next === null || next === undefined;
     status();
   }
   let timer = 0;
@@ -131,7 +192,7 @@
     clearTimeout(timer);
     timer = setTimeout(() => { state.query = e.target.value.trim(); state.files = []; ask(); }, 250);
   });
-  $("lib-more").addEventListener("click", () => ask(state.files.length));
+  $("lib-more").addEventListener("click", () => ask(state.view === "widgets" ? state.widgets.length : state.files.length));
   window.addEventListener("message", (event) => {
     const msg = event.data;
     if (!msg || typeof msg !== "object") return;
@@ -143,6 +204,17 @@
       state.origins = msg.origins && typeof msg.origins === "object" ? msg.origins : {};
       state.loading = false;
       render();
+    } else if (msg.type === "widgets") {
+      const widgets = Array.isArray(msg.widgets) ? msg.widgets : [];
+      state.widgets = state.asking ? [...state.widgets, ...widgets] : widgets;
+      state.widgetsNext = msg.next ?? null;
+      state.loading = false;
+      render();
+    } else if (msg.type === "widgetsOffered") {
+      const was = state.offered;
+      state.offered = msg.on === true;
+      if (!state.offered && state.view === "widgets") show("files");        // as if Files were chosen
+      else { if (state.offered && !was && state.view === "widgets") ask(); render(); }
     } else if (msg.type === "refresh") {
       ask();                                        // the list stays on screen until the new one comes
     } else if (msg.type === "image") {
@@ -158,6 +230,7 @@
       const line = $("lib-status"); line.textContent = String(msg.message || "Something went wrong."); line.hidden = false;
     }
   });
+  place();
   vscode.postMessage({ type: "ready", kind: state.kind });
   status();
 }());

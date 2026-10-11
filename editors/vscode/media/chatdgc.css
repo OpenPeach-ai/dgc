@@ -443,6 +443,13 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .lib-search { width: min(320px, 100%); }
 .lib-about { margin: 0; color: var(--muted); font-size: var(--t-xs); }
 .lib-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Files and Widgets: the Library's two lists, as tabs. */
+.lib-views { display: flex; gap: var(--sp-3); border-bottom: 1px solid var(--border); }
+.lib-view { padding: 6px 2px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none;
+  color: var(--muted); font: inherit; font-weight: var(--w-semi); cursor: pointer; }
+.lib-view:hover { color: var(--text); }
+.lib-view[aria-selected="true"] { color: var(--text-strong); border-bottom-color: var(--accent); }
+.lib-view:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 .lib-kind { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border: 1px solid var(--border-strong);
   border-radius: var(--r-full); background: transparent; color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
 .lib-kind:hover { color: var(--text); border-color: var(--text); }

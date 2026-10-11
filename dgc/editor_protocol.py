@@ -846,6 +846,12 @@ COMMAND_FIELDS.update({
     # in the same reply. Nothing answers it.
     "chatdgc_widget_report": {"request_id": _S(), "conversation_id": _S(), "widget_id": _S(), "shown": _B(),
                               "text": _S(False), "errors": _A(False)},
+    # Widgets in the Library (offered as ready.capabilities.chatdgc.widget_library): `list` every widget a reply made,
+    # newest first (`query` part of its name); `get` one with its page (`conversation_id`, `widget_id`), to open it
+    # again; `remove` deletes one (its page goes, the reply keeps its name, marked removed, and is sent again as
+    # `chatdgc_message`). Answered by `chatdgc_widgets`.
+    "chatdgc_widgets": {"request_id": _S(), "op": _f("string", enum=("list", "get", "remove")), "query": _S(False),
+                        "limit": _I(False), "offset": _I(False), "conversation_id": _S(False), "widget_id": _S(False)},
     "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
                        "op": _f("string", enum=("run", "dismiss", "hand")), "arguments": _O(False), "pip_id": _S(False)},
     "chatdgc_pips": {"request_id": _S()},
@@ -969,6 +975,12 @@ EVENT_FIELDS.update({
     # An interactive answer a reply shows (show_widget): {id, title, html, at, created_at}. The screen frames the page
     # in a sandbox with no network; the finished reply carries them in `widgets`.
     "chatdgc_widget": {"conversation_id": _S(), "message_id": _S(), "widget": _O()},
+    # The answer to chatdgc_widgets: for list, {widgets: [{chat_id, chat_title, project_id?, project_name?, id,
+    # message_id, title, created_at}], total, next_offset}; for get, the widget {id, title, html, at, created_at,
+    # message_id}; for remove, the conversation and widget it removed.
+    "chatdgc_widgets": {"request_id": _S(), "op": _S(), "widgets": _A(False), "total": _I(False),
+                        "next_offset": _f("integer", "null", required=False), "conversation_id": _S(False),
+                        "widget_id": _S(False), "widget": _O(False)},
     # Deep research as it goes: the reply's `research` now (status planning, planned, running, writing, checking,
     # done, stopped or failed; plan; notes by number, title and address; the latest activity; steers; check).
     "chatdgc_research": {"conversation_id": _S(), "message_id": _S(), "research": _O()},

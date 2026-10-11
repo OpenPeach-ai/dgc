@@ -155,7 +155,7 @@ class ChatService:
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
              "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_draft": self._draft,
-             "chatdgc_canvas": self._canvas, "chatdgc_widget_report": self._widget_report,
+             "chatdgc_canvas": self._canvas, "chatdgc_widget_report": self._widget_report, "chatdgc_widgets": self._widgets,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
@@ -214,6 +214,31 @@ class ChatService:
         waiting["report"] = {"shown": bool(cmd.get("shown")), "text": str(cmd.get("text") or "")[:WIDGET_REPORT_CHARS],
                              "errors": errors}
         waiting["event"].set()
+
+    def _widgets(self, cmd: dict) -> None:
+        """Widgets in the Library: listed, one with its page (to open it again), or one deleted."""
+        op, request_id = cmd["op"], cmd["request_id"]
+        if op == "list":
+            found = self.engine.store.widgets(query=cmd.get("query", ""), limit=cmd.get("limit", 60),
+                                              offset=cmd.get("offset", 0))
+            self.emit("chatdgc_widgets", request_id=request_id, op=op, **found)
+            return
+        conversation_id, widget_id = str(cmd.get("conversation_id") or ""), str(cmd.get("widget_id") or "")
+        if not conversation_id or not widget_id:
+            raise ChatEngineError("Say which chat and which widget.")
+        if op == "get":
+            self.emit("chatdgc_widgets", request_id=request_id, op=op, conversation_id=conversation_id,
+                      widget_id=widget_id, widget=self.engine.store.widget(conversation_id, widget_id))
+            return
+        with self._lock:                              # remove: a reply's save would put it back
+            if conversation_id in self._turns:
+                raise ChatEngineError("Let the reply finish first.")
+        message = self.engine.store.remove_widget(conversation_id, widget_id)
+        self.emit("chatdgc_widgets", request_id=request_id, op=op, conversation_id=conversation_id, widget_id=widget_id)
+        chat = self.engine.open(conversation_id)
+        if any(m.get("id") == message.get("id") for m in chat.get("messages") or []):
+            self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(self._marked(chat, [message])[0]))
+        self._changed(conversation_id, None)
 
     def _context(self, conversation_id: str) -> None:
         """What the chat takes of its window, said on the wire (the model's limit may be asked of the provider)."""

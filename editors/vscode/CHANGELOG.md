@@ -56,8 +56,9 @@
   Library and the New Chat (ChatDGC) and Ask ChatDGC buttons, so a ChatDGC tab is never taken for a DGC session.
 - **Interactive answers.** A calculator, converter, timer or quiz to use right away: it opens in a tab beside the
   chat, locked down (no network, no access to your chats or VS Code), in the editor's colours. ChatDGC checks what it
-  shows once it's open and fixes it if it's wrong; if its code still fails, it says so. It opens again as you left it.
-  A card under the reply has **Open** and **Show code**.
+  shows once it's open and fixes it if it's wrong; if its code still fails, it says so. It opens again as you left it,
+  and a widget open when VS Code closed comes back. A card under the reply has **Open** and **Show code**, and the
+  Library's **Widgets** tab lists them all, to open again or delete.
 - **Data analysis and charts.** Attach a spreadsheet and ask about it: answers come from exact queries (open
   **Analyzed the data** to see them). Replies can draw bar, line, area, pie and scatter charts: hover for values,
   click the legend, **Data**, **Copy data** and **Save image**.

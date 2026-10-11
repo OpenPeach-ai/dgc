@@ -2061,8 +2061,9 @@ class Backend:
         if getattr(self, "_host", None) is None:
             return {}
         # memory_*: one memory about the user (dgc/shared_memory.py), kept by the same process.
-        # widget_report: chatdgc_open takes widget_reports, and chatdgc_widget_report is understood.
-        return {"chatdgc": {"version": 1, "widget_report": 1}, "memory": {"version": 1}}
+        # widget_report: chatdgc_open takes widget_reports, and chatdgc_widget_report is understood. widget_library:
+        # chatdgc_widgets is.
+        return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1}, "memory": {"version": 1}}
 
     def _chats_capability(self) -> dict:
         """ready.capabilities.chats: offered only by a Host, and never when DGC_PROJECT_ROOT pins the

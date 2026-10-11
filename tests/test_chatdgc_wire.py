@@ -662,7 +662,7 @@ class HostTests(unittest.TestCase):
         self.fail(f"no matching frame: {self.frames()[-5:]}")
 
     def test_ready_offers_it(self):
-        self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1})
+        self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1, "widget_library": 1})
 
     def test_no_frame_carries_a_sessions_chat_id_even_with_several_sessions(self):
         self.host.dispatch({"type": "open_chat", "request_id": "oc", "cwd": str(self.tmp / "b")})

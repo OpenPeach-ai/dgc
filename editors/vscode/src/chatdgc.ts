@@ -67,7 +67,8 @@ interface Tab {
   waitingAttach?: Record<string, unknown>[];
 }
 
-type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string };
+type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string;
+               widgetPanel?: vscode.WebviewPanel };
 
 export function chatTitle(text: string): string {
   const flat = String(text || "").replace(/\s+/g, " ").trim();
@@ -77,14 +78,17 @@ export function chatTitle(text: string): string {
 
 const CANVAS_ID = /^cv_[a-f0-9]{16}$/;
 
-/** A widget's page: the model's HTML under a policy that loads nothing from anywhere and runs only its own inline
- *  code; network and peer-connection APIs gone before it runs; the theme's colours as CSS variables. */
 /** A widget's field as its page keeps it: by its place among the page's fields (and its id when it has one), a value
  *  or, for a checkbox or radio button, whether it's checked. */
 export type WidgetField = { i: number; id: string; v?: string; c?: boolean };
 const WIDGET_STATE_KEY = "dgc.chatdgcWidgetFields";
 const MAX_WIDGET_STATES = 60;
 const MAX_WIDGET_FIELDS = 200;
+
+export function widgetName(title: unknown): string {
+  return String(title || "Interactive").replace(/\s+/g, " ").trim().slice(0, 60) || "Interactive";
+}
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 /** A widget page's fields as it said them, or null: anything else in it is dropped, and too much is refused. */
 export function widgetFields(value: unknown): WidgetField[] | null {
@@ -100,7 +104,16 @@ export function widgetFields(value: unknown): WidgetField[] | null {
   return JSON.stringify(out).length <= 64_000 ? out : null;
 }
 
-export function widgetDocument(html: string, fields?: WidgetField[]): string {
+/** Which widget a tab shows, kept by VS Code with the tab so it opens again after a restart. */
+export type WidgetRef = { id: string; chat: string; title: string };
+export const CHATDGC_WIDGET = "dgc.chatdgcWidget";
+const WIDGET_ID = /^wg_[a-f0-9]{16}$/;
+
+/** A widget's page: the model's HTML under a policy that loads nothing from anywhere and runs only its own inline
+ *  code; network and peer-connection APIs gone before it runs; the theme's colours as CSS variables. */
+export function widgetDocument(html: string, fields?: WidgetField[], ref?: WidgetRef): string {
+  // JSON in an inline script: nothing in it can close the script or end a line.
+  const inline = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
   // The editor's own colours (a webview has them as --vscode-* variables), so it follows the theme as it changes. They
   // win over a page's own (a model often writes light ones, and prefers-color-scheme in a webview is the system's,
   // not VS Code's); color-scheme follows VS Code's theme too, for the form controls.
@@ -130,7 +143,8 @@ export function widgetDocument(html: string, fields?: WidgetField[]): string {
     + `return t==="checkbox"||t==="radio"?{i:i,id:id,c:!!f.checked}:{i:i,id:id,v:String(f.value==null?"":f.value).slice(0,2000)}})}`
     + `var timer=0;function changed(){clearTimeout(timer);timer=setTimeout(function(){post({type:"state",fields:snap()})},300)}`
     + `addEventListener("input",changed,true);addEventListener("change",changed,true);`
-    + `var saved=${JSON.stringify(fields || []).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")};`
+    + `var saved=${inline(fields || [])};`
+    + (ref ? `try{if(api)api.setState({dgcWidget:${inline(ref)}})}catch(e){}` : "")
     + `function restore(){try{var list=controls(),done=[];saved.forEach(function(s){var f=(s.id&&document.getElementById(s.id))||list[s.i];`
     + `if(!f||list.indexOf(f)<0)return;var t=kind(f);if(typeof s.c==="boolean"){if(t==="checkbox"||t==="radio"){f.checked=s.c;done.push(f)}}`
     + `else if(t!=="file"&&t!=="checkbox"&&t!=="radio"&&typeof s.v==="string"){f.value=s.v;done.push(f)}});`
@@ -207,11 +221,12 @@ export function libraryDocument(asset: (name: string) => string, cspSource: stri
 <title>Library</title></head><body class="lib-body">
 <main class="lib"><header class="lib-head"><h1 class="lib-title"><span class="codicon codicon-library" aria-hidden="true"></span>Library</h1>
 <label class="sr-only" for="lib-search">Search your files by name</label><input id="lib-search" class="cd-field lib-search" type="search" placeholder="Search files" maxlength="200" autocomplete="off"></header>
-<p class="lib-about">Every file you attached in ChatDGC or it made for you, in every chat and project. Temporary chats keep none.</p>
+<div id="lib-views" class="lib-views" role="tablist" aria-label="Show" hidden></div>
+<p id="lib-about" class="lib-about">Every file you attached in ChatDGC or it made for you, in every chat and project. Temporary chats keep none.</p>
 <div id="lib-origins" class="lib-kinds" role="toolbar" aria-label="Show files" hidden></div>
 <div id="lib-kinds" class="lib-kinds" role="toolbar" aria-label="Show"></div>
 <p id="lib-status" class="lib-status" role="status"></p>
-<ul id="lib-list" class="lib-list" aria-label="Your files"></ul>
+<ul id="lib-list" class="lib-list" aria-label="Your files" role="tabpanel"></ul>
 <button type="button" id="lib-more" class="cd-edit-cancel lib-more" hidden>Show more</button></main>
 <script src="${attr(asset("media/library.js"))}"></script></body></html>`;
 }
@@ -231,7 +246,11 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   attach(host: ChatDGCHost): void { this.host = host; }
 
   register(): vscode.Disposable {
-    return vscode.window.registerWebviewPanelSerializer(CHATDGC_EDITOR, this);
+    const chats = vscode.window.registerWebviewPanelSerializer(CHATDGC_EDITOR, this);
+    // A widget's tab open when VS Code closed comes back as it was (its page from the chat, its fields as left).
+    const widgets = vscode.window.registerWebviewPanelSerializer(CHATDGC_WIDGET, {
+      deserializeWebviewPanel: async (panel: vscode.WebviewPanel, state: any) => this.restoreWidget(panel, state) });
+    return { dispose: () => { chats.dispose(); widgets.dispose(); } };
   }
 
   /** A conversation in a tab of its own (or the tab it is already in); "" starts a new chat. */
@@ -467,8 +486,38 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   private async fromLibrary(panel: vscode.WebviewPanel, message: any): Promise<void> {
     const ref = this.libraryRef(message?.file);
+    const widget = message?.widget && WIDGET_ID.test(String(message.widget.id || "")) && CONVERSATION_ID.test(String(message.widget.chat_id || ""))
+      ? { id: String(message.widget.id), chat: String(message.widget.chat_id), title: widgetName(message.widget.title) } : undefined;
     switch (message?.type) {
+      case "widgets": {
+        void panel.webview.postMessage({ type: "widgetsOffered", on: this.widgetLibrary() });
+        if (!this.widgetLibrary()) return;
+        const offset = Number.isInteger(message.offset) && message.offset >= 0 ? message.offset : 0;
+        this.libraryAsk(panel, "widgets", { type: "chatdgc_widgets", op: "list", ...(typeof message.query === "string" && message.query.trim()
+          ? { query: message.query.slice(0, 200) } : {}), limit: 60, offset });
+        return;
+      }
+      case "widgetOpen":
+        if (widget) {
+          const open = this.widgetPanels.get(widget.id);
+          if (open) open.reveal(undefined, false);
+          else this.libraryAsk(panel, "widgetGet", { type: "chatdgc_widgets", op: "get", conversation_id: widget.chat, widget_id: widget.id });
+        }
+        return;
+      case "widgetChat":
+        if (widget) this.open(widget.chat);
+        return;
+      case "widgetRemove": {
+        if (!widget) return;
+        const DELETE = "Delete";
+        const choice = await vscode.window.showWarningMessage(
+          `Delete the widget “${widget.title}”? Its card stays in the chat, marked as deleted. This can't be undone.`, { modal: true }, DELETE);
+        if (choice === DELETE) this.libraryAsk(panel, "widgetRemove", { type: "chatdgc_widgets", op: "remove", conversation_id: widget.chat, widget_id: widget.id });
+        return;
+      }
       case "ready":
+        void panel.webview.postMessage({ type: "widgetsOffered", on: this.widgetLibrary() });
+        // falls through: the files are asked for as a list is
       case "list": {
         const kind = LIBRARY_KINDS.has(String(message.kind)) ? String(message.kind) : "";
         const offset = Number.isInteger(message.offset) && message.offset >= 0 ? message.offset : 0;
@@ -586,10 +635,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     void Promise.resolve(this.context.globalState?.update(WIDGET_STATE_KEY, Object.fromEntries(newest))).catch(() => {});
   }
 
-  private showWidget(id: string, html: string, title: string, focus: boolean): void {
+  private showWidget(id: string, html: string, title: string, focus: boolean, chat = ""): void {
     // One tab a widget: by its id, or (a ```widget block in a reply has none) by its page.
     const key = id || "page:" + createHash("sha256").update(html).digest("hex");
-    const name = String(title || "Interactive").replace(/\s+/g, " ").trim().slice(0, 60) || "Interactive";
+    const name = widgetName(title);
     const open = this.widgetPanels.get(key);
     if (open) {
       if (this.widgetPages.get(key) !== html) {
@@ -597,14 +646,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.keepWidgetState(key, null);
         this.widgetPages.set(key, html);
         open.title = name;
-        open.webview.html = widgetDocument(html);
+        open.webview.html = widgetDocument(html, undefined, id && chat ? { id, chat, title: name } : undefined);
       }
       open.reveal(undefined, !focus);
       return;
     }
-    const panel = vscode.window.createWebviewPanel("dgc.chatdgcWidget", name, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: !focus },
+    const panel = vscode.window.createWebviewPanel(CHATDGC_WIDGET, name, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: !focus },
                                                    { enableScripts: true, localResourceRoots: [] });
-    panel.webview.html = widgetDocument(html, this.widgetStates()[key]?.fields);
+    this.adoptWidget(panel, key, id, chat, html, name);
+  }
+
+  private adoptWidget(panel: vscode.WebviewPanel, key: string, id: string, chat: string, html: string, name: string): void {
+    panel.title = name;
+    panel.webview.html = widgetDocument(html, this.widgetStates()[key]?.fields, id && chat ? { id, chat, title: name } : undefined);
     this.widgetPanels.set(key, panel);
     this.widgetPages.set(key, html);
     panel.webview.onDidReceiveMessage((message: any) => {
@@ -619,6 +673,40 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     });
     panel.onDidDispose(() => { if (this.widgetPanels.get(key) === panel) { this.widgetPanels.delete(key); this.widgetPages.delete(key); } });
   }
+
+  /** The backend keeps widgets for the Library (ready.capabilities.chatdgc.widget_library). */
+  private widgetLibrary(): boolean {
+    try { return Number(this.host?.chatdgcOffers?.()?.widget_library) >= 1; } catch { return false; }
+  }
+
+  private readonly widgetRestores: { panel: vscode.WebviewPanel; id: string; chat: string }[] = [];
+
+  /** A widget's tab VS Code kept across a restart: its page asked of the chat it's in, once the backend is up. */
+  restoreWidget(panel: vscode.WebviewPanel, state: any): void {
+    const ref = state?.dgcWidget;
+    const id = String(ref?.id || ""), chat = String(ref?.chat || "");
+    if (!WIDGET_ID.test(id) || !CONVERSATION_ID.test(chat) || this.widgetPanels.has(id)) { panel.dispose(); return; }
+    panel.webview.options = { enableScripts: true, localResourceRoots: [] };
+    panel.webview.html = widgetDocument(`<p style="color:var(--muted)">Opening ${escapeHtml(widgetName(ref?.title))}…</p>`, undefined,
+                                        { id, chat, title: widgetName(ref?.title) });
+    this.widgetRestores.push({ panel, id, chat });
+    panel.onDidDispose(() => { const at = this.widgetRestores.findIndex((r) => r.panel === panel); if (at >= 0) this.widgetRestores.splice(at, 1); });
+    this.restoreWidgets();
+  }
+
+  private restoreWidgets(): void {
+    for (const waiting of [...this.widgetRestores]) {
+      const offers = this.host?.chatdgcOffers?.() || {};
+      if (!("version" in offers)) return;                // not ready yet: backendReady asks again
+      this.widgetRestores.splice(this.widgetRestores.indexOf(waiting), 1);
+      if (!this.widgetLibrary()) { waiting.panel.dispose(); continue; }
+      const requestId = this.nextId("widgetRestore");
+      this.requests.set(requestId, { kind: "widgetRestore", widgetPanel: waiting.panel });
+      const outcome = this.host?.chatdgcSend({ type: "chatdgc_widgets", request_id: requestId, op: "get", conversation_id: waiting.chat, widget_id: waiting.id });
+      if (outcome !== "sent") { this.requests.delete(requestId); this.widgetRestores.push(waiting); return; }
+    }
+  }
+
 
   private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean, project = ""): void {
     panel.iconPath = this.chatdgcIcon();
@@ -668,6 +756,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       void this.models(tab);
     }
     if (this.homeHeld) { this.homeHeld = false; this.homeRefresh(); }
+    this.restoreWidgets();
   }
 
   /** The side bar's process went away: a reply in progress there has stopped. */
@@ -743,6 +832,28 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         void asker?.libraryPanel?.webview.postMessage({ type: "library", files: Array.isArray(ev.files) ? ev.files : [], total: Number(ev.total) || 0,
           next: ev.next_offset ?? null, counts: ev.counts && typeof ev.counts === "object" ? ev.counts : {},
           origins: ev.origins && typeof ev.origins === "object" ? ev.origins : {} });
+        return;
+      }
+      case "chatdgc_widgets": {
+        if (asker) this.requests.delete(requestId);
+        if (asker?.kind === "widgets") {
+          void asker.libraryPanel?.webview.postMessage({ type: "widgets", widgets: Array.isArray(ev.widgets) ? ev.widgets : [],
+                                                         total: Number(ev.total) || 0, next: ev.next_offset ?? null });
+          return;
+        }
+        const w = ev.widget && typeof ev.widget === "object" ? ev.widget : null;
+        const chat = String(ev.conversation_id || "");
+        if (asker?.kind === "widgetGet" && w && WIDGET_ID.test(String(w.id || "")) && typeof w.html === "string") {
+          this.showWidget(w.id, w.html, String(w.title || ""), true, chat);
+        } else if (asker?.kind === "widgetRestore" && asker.widgetPanel && w && WIDGET_ID.test(String(w.id || "")) && typeof w.html === "string") {
+          if (this.widgetPanels.has(w.id)) asker.widgetPanel.dispose();
+          else this.adoptWidget(asker.widgetPanel, w.id, w.id, chat, w.html, widgetName(w.title));
+        } else if (asker?.kind === "widgetRemove") {
+          const id = String(ev.widget_id || "");
+          this.widgetPanels.get(id)?.dispose();
+          this.keepWidgetState(id, null);
+          void asker.libraryPanel?.webview.postMessage({ type: "changed" });
+        }
         return;
       }
       case "chatdgc_library_file": {
@@ -822,7 +933,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         for (const tab of showing(conversation)) this.post(tab, { type: "widgetShown", messageId: ev.message_id, widget: w });
         // The reply waits to hear what it shows (from its page, once open), or at once that no tab shows the chat.
         if (this.reportsWidgets() && typeof conversation === "string" && conversation) this.widgetWaiting.set(w.id, conversation);
-        if (showing(conversation).length) this.showWidget(w.id, w.html, String(w.title || ""), false);
+        if (showing(conversation).length) this.showWidget(w.id, w.html, String(w.title || ""), false, conversation);
         else this.widgetReport(w.id, { shown: false });
         return;
       }
@@ -915,6 +1026,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const message = String(ev.message || "ChatDGC hit an error.");
         const waiting = this.createWaiting.get(requestId);
         if (waiting) { this.createWaiting.delete(requestId); waiting(""); }
+        if (asker?.kind === "widgetRestore") { asker.widgetPanel?.dispose(); return; }       // deleted since: no tab
         if (asker?.libraryPanel) { void asker.libraryPanel.webview.postMessage({ type: "error", message }); return; }
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.([]); return; }
         if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
@@ -1103,7 +1215,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         const html = typeof message.html === "string" ? message.html : "";
         if (!html || html.length > 200_000) return;
         const id = /^wg_[a-f0-9]{16}$/.test(String(message.id || "")) ? String(message.id) : "";
-        this.showWidget(id, html, String(message.title || ""), true);
+        this.showWidget(id, html, String(message.title || ""), true, conversation || "");
         return;
       }
       case "saveImage": {

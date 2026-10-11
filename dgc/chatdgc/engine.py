@@ -1412,6 +1412,9 @@ class ChatEngine:
             for meta in m.get("files") or [] if m["role"] == "assistant" else []:
                 content += "\n\n" + _made_note(meta, self._file(chat, str(meta.get("id") or "")))
             for w in m.get("widgets") or [] if m["role"] == "assistant" else []:
+                if w.get("removed"):
+                    content += f"\n\n[You showed an interactive widget here, {w.get('title', '')}; the user has deleted it.]"
+                    continue
                 code = str(w.get("html") or "")
                 content += (f"\n\n[You showed an interactive widget here, {w.get('title', '')}. Its page"
                             + (f" (the first {MAX_WIDGET_HISTORY_CHARS:,} characters)" if len(code) > MAX_WIDGET_HISTORY_CHARS else "")

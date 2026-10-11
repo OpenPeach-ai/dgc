@@ -95,7 +95,7 @@ await build({
     builder.onLoad({ filter: /^vscode$/, namespace: "test" }, () => ({ contents: "module.exports = globalThis.__DGC_TEST_VSCODE;", loader: "js" }));
   } }],
 });
-const { ChatDGC, chatTitle, CHATDGC_EDITOR, CHATDGC_LIBRARY, widgetDocument } = createRequire(import.meta.url)(bundle);
+const { ChatDGC, chatTitle, CHATDGC_EDITOR, CHATDGC_LIBRARY, CHATDGC_WIDGET, widgetDocument } = createRequire(import.meta.url)(bundle);
 after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 
 const ID = (n) => `chat_${String(n).repeat(32).slice(0, 32)}`;
@@ -523,6 +523,88 @@ test("ChatDGC's tabs wear its own mark, the speech bubble, so they aren't taken 
   const command = manifest.contributes.commands.find((c) => c.command === "dgc.newChatDGC");
   assert.deepEqual(command.icon, { light: "media/chatdgc-tab-light.svg", dark: "media/chatdgc-tab-dark.svg" });
   for (const theme of ["light", "dark"]) assert.match(readFileSync(join(root, `media/chatdgc-tab-${theme}.svg`), "utf8"), /aria-label="ChatDGC"/);
+});
+
+test("a widget's tab open when VS Code closed comes back with its page; a deleted one doesn't; it waits for the backend", async () => {
+  host.offers = {};                                   // starting
+  const reg = chat.register();
+  assert.deepEqual(world.serializers.map((x) => x.viewType), [CHATDGC_EDITOR, CHATDGC_WIDGET]);
+  const { serializer } = world.serializers[1];
+  const WG = `wg_${"7".repeat(16)}`, other = `wg_${"8".repeat(16)}`;
+  const kept = fakePanel(CHATDGC_WIDGET, "EMI"), gone = fakePanel(CHATDGC_WIDGET, "Old"), junk = fakePanel(CHATDGC_WIDGET, "x");
+  await serializer.deserializeWebviewPanel(kept, { dgcWidget: { id: WG, chat: ID(7), title: "EMI calculator" } });
+  await serializer.deserializeWebviewPanel(gone, { dgcWidget: { id: other, chat: ID(7), title: "Old" } });
+  await serializer.deserializeWebviewPanel(junk, { dgcWidget: { id: "wg_x", chat: "../etc" } });
+  assert.equal(junk.disposedCount, 1, "nothing it can name: closed");
+  assert.match(kept.webview.html, /Opening EMI calculator…/);
+  assert.match(kept.webview.html, /api\.setState\(\{dgcWidget:\{"id":"wg_7{16}","chat":"chat_7{32}","title":"EMI calculator"\}\}\)/,
+               "still named, should VS Code close again first");
+  assert.equal(last("chatdgc_widgets"), undefined, "not before the backend is up");
+  host.offers = { version: 1, widget_library: 1 };
+  chat.backendReady();
+  const asks = sent.filter((c) => c.type === "chatdgc_widgets");
+  assert.deepEqual(asks.map((c) => [c.op, c.widget_id, c.conversation_id]), [["get", WG, ID(7)], ["get", other, ID(7)]]);
+  chat.onEvent({ type: "chatdgc_widgets", request_id: asks[0].request_id, op: "get", conversation_id: ID(7), widget_id: WG,
+                 widget: { id: WG, title: "EMI calculator", html: "<b>EMI</b>", at: 0, message_id: MSG(2) } });
+  assert.match(kept.webview.html, /<body><b>EMI<\/b><\/body>/);
+  assert.equal(kept.disposedCount, 0);
+  chat.onEvent({ type: "chatdgc_error", request_id: asks[1].request_id, message: "That widget isn't there any more." });
+  assert.equal(gone.disposedCount, 1, "deleted since: no tab");
+  assert.deepEqual(world.errors, [], "and no error said for it");
+  // Shown from its card again: the same tab.
+  chat.onEvent({ type: "chatdgc_widget", conversation_id: ID(7), message_id: MSG(2), widget: { id: WG, title: "EMI calculator", html: "<b>EMI</b>", at: 0 } });
+  assert.equal(world.panels.filter((x) => x.viewType === CHATDGC_WIDGET).length, 0, "no new tab");
+  reg.dispose();
+});
+
+test("the Library's widgets: listed for its page, opened beside you from their chat, deleted with their tab closed", async () => {
+  host.offers = { version: 1, widget_library: 1 };
+  chat.openLibrary();
+  const [library] = world.panels;
+  library.say({ type: "ready" });
+  assert.deepEqual(library.last("widgetsOffered"), { type: "widgetsOffered", on: true });
+  library.say({ type: "widgets", query: "emi", offset: 0 });
+  const listed = last("chatdgc_widgets");
+  assert.deepEqual({ ...listed, request_id: "" }, { type: "chatdgc_widgets", request_id: "", op: "list", query: "emi", limit: 60, offset: 0 });
+  const W = { chat_id: ID(7), id: `wg_${"5".repeat(16)}`, title: "EMI", message_id: MSG(2), created_at: "2026-10-11T10:00:00Z", chat_title: "Loan" };
+  chat.onEvent({ type: "chatdgc_widgets", request_id: listed.request_id, op: "list", widgets: [W], total: 1, next_offset: null });
+  assert.deepEqual(library.last("widgets"), { type: "widgets", widgets: [W], total: 1, next: null });
+  library.say({ type: "widgetOpen", widget: W });
+  const get = last("chatdgc_widgets");
+  assert.deepEqual([get.op, get.conversation_id, get.widget_id], ["get", ID(7), W.id]);
+  chat.onEvent({ type: "chatdgc_widgets", request_id: get.request_id, op: "get", conversation_id: ID(7), widget_id: W.id,
+                 widget: { id: W.id, title: "EMI", html: "<i>emi</i>", at: 0, message_id: MSG(2) } });
+  const tab = world.panels.at(-1);
+  assert.deepEqual([tab.viewType, tab.title, tab.show.preserveFocus], [CHATDGC_WIDGET, "EMI", false]);
+  assert.match(tab.webview.html, /"chat":"chat_7{32}"/, "it knows its chat, to come back after a restart");
+  library.say({ type: "widgetOpen", widget: W });
+  assert.equal(tab.revealed, 1, "open already: shown, not asked for");
+  library.say({ type: "widgetOpen", widget: { ...W, chat_id: "chat_../../x" } });
+  assert.equal(last("chatdgc_widgets").request_id, get.request_id, "a widget it can't name: nothing");
+  world.answer = undefined;
+  library.say({ type: "widgetRemove", widget: W });
+  await tick();
+  assert.match(world.warnings.at(-1), /^Delete the widget “EMI”\? Its card stays in the chat, marked as deleted\./);
+  assert.equal(last("chatdgc_widgets").op, "get", "not without a yes");
+  world.answer = "Delete";
+  library.say({ type: "widgetRemove", widget: W });
+  await tick();
+  const remove = last("chatdgc_widgets");
+  assert.deepEqual([remove.op, remove.conversation_id, remove.widget_id], ["remove", ID(7), W.id]);
+  chat.onEvent({ type: "chatdgc_widgets", request_id: remove.request_id, op: "remove", conversation_id: ID(7), widget_id: W.id });
+  assert.equal(tab.disposedCount, 1, "its tab closes");
+  assert.deepEqual(library.last("changed"), { type: "changed" });
+  library.say({ type: "widgetChat", widget: W });
+  const chatTab = world.panels.at(-1);
+  assert.equal(chatTab.viewType, CHATDGC_EDITOR);
+  chatTab.say({ type: "ready" });
+  assert.equal(last("chatdgc_open").conversation_id, ID(7), "its chat, in a tab of its own");
+  // A backend that doesn't keep widgets: the page is told, and asked nothing.
+  host.offers = { version: 1 };
+  const before = sent.length;
+  library.say({ type: "widgets", query: "", offset: 0 });
+  assert.deepEqual(library.last("widgetsOffered"), { type: "widgetsOffered", on: false });
+  assert.equal(sent.length, before);
 });
 
 test("a reload brings each chat back in its tab, once", async () => {

@@ -187,7 +187,7 @@
                            : widgetCard(message, html, { ref: `${message.id}:${hashOf(html)}`, title: widgetTitle(html), code: pre }));
     }
   }
-  function widgetCard(message, html, { ref, title, id = "", code: pre }) {
+  function widgetCard(message, html, { ref, title, id = "", code: pre, removed = false }) {
     // Laid out as a file or canvas card is: what it is, then Show code and Open; its page below when shown.
     const box = el("div", "cd-widget");
     box.dataset.ref = ref;
@@ -196,6 +196,15 @@
     row.setAttribute("aria-label", `Interactive: ${title}`);
     const mark = el("span", "cd-file-badge cd-widget-badge");
     mark.append(icon("play-circle"));
+    if (removed) {
+      // Deleted from the Library: its name stays, as a deleted file's does; nothing to open or show.
+      row.dataset.removed = "";
+      const gone = el("div", "cd-file-words");
+      gone.append(el("strong", "cd-file-name cd-widget-title", title), el("small", "cd-file-meta cd-widget-note", "Deleted from your Library"));
+      row.append(mark, gone);
+      box.append(row);
+      return box;
+    }
     const words = el("div", "cd-file-words");
     words.append(el("strong", "cd-file-name cd-widget-title", title),
                  el("small", "cd-file-meta cd-widget-note", "Interactive \u00b7 opens in a tab beside the chat, with no network and nothing from your chats or VS Code"));
@@ -1093,8 +1102,9 @@
     if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
     { const analysis = analysisNode(message); if (analysis) node.append(analysis); }
     for (const w of Array.isArray(message.widgets) ? message.widgets : []) {
-      if (w && typeof w.html === "string" && /^wg_[a-f0-9]{16}$/.test(String(w.id || ""))) {
-        node.append(widgetCard(message, w.html, { ref: `${message.id}:${w.id}`, id: w.id, title: String(w.title || "Interactive").slice(0, 80) }));
+      if (w && /^wg_[a-f0-9]{16}$/.test(String(w.id || "")) && (typeof w.html === "string" || w.removed === true)) {
+        node.append(widgetCard(message, w.removed ? "" : w.html, { ref: `${message.id}:${w.id}`, id: w.id, title: String(w.title || "Interactive").slice(0, 80),
+                                                                   removed: w.removed === true }));
       }
     }
     for (const file of Array.isArray(message.files) ? message.files : []) node.append(fileCard(message, file));

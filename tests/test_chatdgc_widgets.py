@@ -261,5 +261,76 @@ class OnTheWire(unittest.TestCase):
         self.assertEqual([f.get("request_id") for f in errors], ["bad"], "a late one is dropped; one without shown, refused")
 
 
+class InTheLibrary(unittest.TestCase):
+    """Every widget a reply made, in the Library: listed, opened again from its page, or deleted."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="chatdgc-widgets-library-")
+        self.addCleanup(temp.cleanup)
+        self.folder = Path(temp.name)
+        self.world, self.wire = {"script": [], "read": []}, Wire()
+        config = SimpleNamespace(base_url="", api_key="", model="chat-model", get=lambda key, default=None: default)
+        self.engine = ChatEngine(config, ChatStore(self.folder / "chat"), searcher=lambda q: [],
+                                 memory=SharedMemory(self.folder / "memory"), projects=lambda hidden: [],
+                                 client_factory=lambda model: Model(self.world), plugins=lambda chat, said, taint: None)
+        self.service = ChatService(self.wire.emit, config, engine=self.engine)
+        self.addCleanup(self.service.close, 2.0)
+
+    def made(self, title, temporary=False):
+        chat = self.engine.open(temporary=temporary)
+        self.world["script"] += [{"calls": [("show_widget", {"title": title, "html": f"<b>{title}</b>"})]}, {"parts": ["Done."]}]
+        reply = self.engine.send(chat["id"], f"{title} please", search="off")
+        return chat["id"], reply
+
+    def ask(self, request_id, **fields):
+        self.service.dispatch({"type": "chatdgc_widgets", "request_id": request_id, **fields})
+        return [f for f in self.wire.frames if f.get("request_id") == request_id][-1]
+
+    def test_listed_newest_first_found_by_name_opened_again_and_deleted(self):
+        emi_chat, emi = self.made("EMI calculator")
+        self.made("Stopwatch")
+        self.made("Scratch", temporary=True)
+        listed = self.ask("l", op="list")
+        self.assertEqual([w["title"] for w in listed["widgets"]], ["Stopwatch", "EMI calculator"], "temporary chats keep none")
+        self.assertEqual((listed["total"], listed["next_offset"]), (2, None))
+        self.assertEqual([w["title"] for w in self.ask("q", op="list", query="emi")["widgets"]], ["EMI calculator"])
+        first = listed["widgets"][1]
+        self.assertEqual((first["chat_id"], first["message_id"], first["chat_title"]), (emi_chat, emi["id"], "EMI calculator please"))
+        wid = emi["widgets"][0]["id"]
+        got = self.ask("g", op="get", conversation_id=emi_chat, widget_id=wid)
+        self.assertEqual((got["widget"]["html"], got["widget"]["message_id"]), ("<b>EMI calculator</b>", emi["id"]))
+        gone = self.ask("r", op="remove", conversation_id=emi_chat, widget_id=wid)
+        self.assertEqual((gone["type"], gone["widget_id"]), ("chatdgc_widgets", wid))
+        resent = [f for f in self.wire.frames if f["type"] == "chatdgc_message"][-1]["message"]
+        kept = {k: v for k, v in emi["widgets"][0].items() if k != "html"}
+        self.assertEqual(resent["widgets"], [{**kept, "removed": True}], "its card says so, on every screen; its page is gone")
+        self.assertEqual([w["title"] for w in self.ask("l2", op="list")["widgets"]], ["Stopwatch"])
+        self.assertEqual(self.ask("g2", op="get", conversation_id=emi_chat, widget_id=wid)["type"], "chatdgc_error")
+        self.world["script"] += [{"parts": ["OK."]}]
+        self.engine.send(emi_chat, "Thanks", search="off")
+        history = "\n".join(str(m["content"]) for m in self.world["read"][-1]["messages"])
+        self.assertIn("[You showed an interactive widget here, EMI calculator; the user has deleted it.]", history)
+        self.assertNotIn("<b>EMI calculator</b>", history)
+
+    def test_not_deleted_mid_reply_and_an_older_index_catches_up(self):
+        chat_id, reply = self.made("Tip calculator")
+        wid = reply["widgets"][0]["id"]
+        with self.service._lock:
+            self.service._turns[chat_id] = {}
+        try:
+            self.assertEqual(self.ask("r", op="remove", conversation_id=chat_id, widget_id=wid)["message"], "Let the reply finish first.")
+        finally:
+            with self.service._lock:
+                del self.service._turns[chat_id]
+        import sqlite3
+        db = sqlite3.connect(self.folder / "chat" / "index.sqlite3")
+        db.execute("DELETE FROM widgets")
+        db.execute("PRAGMA user_version = 4")
+        db.commit()
+        db.close()
+        self.assertEqual([w["title"] for w in self.ask("l", op="list")["widgets"]], ["Tip calculator"])
+        self.assertEqual(self.ask("x", op="list", limit=0)["type"], "chatdgc_error")
+
+
 if __name__ == "__main__":
     unittest.main()
