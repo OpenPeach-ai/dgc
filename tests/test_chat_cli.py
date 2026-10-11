@@ -110,6 +110,16 @@ class ChatCliTests(unittest.TestCase):
         self.assertEqual(out.getvalue(), "· Searching the web: IRA rules\n")
 
     def test_the_chat_you_type_into(self):
+        # In this process, so its ~/.dgc is patched where dgc.config keeps it (fixed when it was first imported, which
+        # in a full run was long before this test set HOME).
+        from unittest.mock import patch
+        from dgc import config as config_module
+        user = self.home / ".dgc"
+        patches = [patch.object(config_module, name, value) for name, value in
+                   (("USER_HOME", user), ("USER_CONFIG", user / "config.json"), ("USER_SECRETS", user / "secrets.json"))]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
         old = os.environ.get("HOME")
         os.environ["HOME"] = str(self.home)
         try:
