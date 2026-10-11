@@ -188,14 +188,18 @@
     }
   }
   function widgetCard(message, html, { ref, title, id = "", code: pre }) {
+    // Laid out as a file or canvas card is: what it is, then Show code and Open; its page below when shown.
     const box = el("div", "cd-widget");
     box.dataset.ref = ref;
-    const head = el("div", "cd-widget-head");
-    head.append(icon("play-circle"), el("span", "cd-widget-kind", "Interactive"), el("span", "cd-widget-title", title));
-    const tools = el("span", "cd-widget-tools");
-    const open = el("button", "cd-continue cd-widget-open", "Open");
-    open.type = "button";
-    open.addEventListener("click", () => vscode.postMessage({ type: "widgetOpen", ...(id ? { id } : {}), html, title }));
+    const row = el("div", "cd-file cd-widget-card");
+    row.setAttribute("role", "group");
+    row.setAttribute("aria-label", `Interactive: ${title}`);
+    const mark = el("span", "cd-file-badge cd-widget-badge");
+    mark.append(icon("play-circle"));
+    const words = el("div", "cd-file-words");
+    words.append(el("strong", "cd-file-name cd-widget-title", title),
+                 el("small", "cd-file-meta cd-widget-note", "Interactive \u00b7 opens in a tab beside the chat, with no network and nothing from your chats or VS Code"));
+    const buttons = el("div", "cd-file-actions");
     const codeShown = state.open.has(`widgetcode:${ref}`);
     const show = el("button", "cd-chart-tool", codeShown ? "Hide code" : "Show code");
     show.type = "button";
@@ -203,9 +207,12 @@
       if (state.open.has(`widgetcode:${ref}`)) state.open.delete(`widgetcode:${ref}`); else state.open.add(`widgetcode:${ref}`);
       update(message.id);
     });
-    tools.append(show, open);
-    head.append(tools);
-    box.append(head, el("div", "cd-widget-note", "It opens in a tab beside the chat, where it runs on its own: no network, and nothing from your chats or VS Code."));
+    const open = el("button", "cd-continue cd-widget-open", "Open");
+    open.type = "button";
+    open.addEventListener("click", () => vscode.postMessage({ type: "widgetOpen", ...(id ? { id } : {}), html, title }));
+    buttons.append(show, open);
+    row.append(mark, words, buttons);
+    box.append(row);
     if (codeShown) {
       if (pre) box.append(pre.cloneNode(true));
       else { const code = el("pre", "code"); code.append(el("code", "", html)); box.append(code); }

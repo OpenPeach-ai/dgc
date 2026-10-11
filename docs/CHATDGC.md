@@ -174,8 +174,9 @@ voice come in later phases.
 - **Interactive answers**, as ChatGPT has them: when something is better used than read (a loan calculator, a
   converter, a timer, a quiz, a small simulation), the reply makes a widget, and it opens in a tab beside the chat
   (as a canvas does; the chat keeps focus). It's a small page that runs on its own: no network, nothing loaded from
-  anywhere, no access to your chats, files or VS Code. It takes the editor's colours. A card under the reply names
-  it: **Open** shows it again, **Show code** shows its page. (VS Code runs nothing in a frame inside the chat, so a
+  anywhere, no access to your chats, files or VS Code. It takes the editor's colours. If its code fails, a bar in it
+  says so (ask ChatDGC to fix it). A card under the reply names it: **Open** shows it again, **Show code** shows its
+  page. (VS Code runs nothing in a frame inside the chat, so a
   widget can't sit inside the reply itself.)
 - **Canvas**, as ChatGPT has it: for a longer piece you'll keep working on (an essay, a plan, a report, a program),
   or when you ask for one, ChatDGC opens a canvas: a real file in an editor beside the chat. You both work on it.

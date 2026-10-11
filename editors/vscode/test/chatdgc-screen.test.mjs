@@ -3,7 +3,9 @@
 // would receive. Everything a person or a model wrote must arrive as text or inert Markdown, never markup.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
@@ -1616,6 +1618,47 @@ test("interactive answers from show_widget: the card as the reply shows it, then
     assert.equal(await s.page.locator(".cd-widget pre.code").textContent(), widget.html);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+// The widget's own page, as the extension builds it (VS Code itself isn't needed to build it).
+let widgetDocument;
+function widgetPage() {
+  if (widgetDocument) return widgetDocument;
+  const dir = mkdtempSync(join(tmpdir(), "dgc-widget-page-"));
+  writeFileSync(join(dir, "vscode.cjs"), "module.exports = {};");
+  buildSync({ entryPoints: [join(root, "src/chatdgc.ts")], bundle: true, format: "cjs", platform: "node", target: "node18",
+    outfile: join(dir, "chatdgc.cjs"), alias: { vscode: join(dir, "vscode.cjs") }, logLevel: "silent" });
+  ({ widgetDocument } = createRequire(import.meta.url)(join(dir, "chatdgc.cjs")));
+  return widgetDocument;
+}
+
+test("a widget's page in a browser: the editor's colours win over its own, an error shows in it, no network", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await browser.newPage({ viewport: { width: 500, height: 400 } });
+  try {
+    const own = `<style>:root{--bg:#ffffff;--text:#111111}@media (prefers-color-scheme: light){:root{--bg:#fefefe}}
+      body{background:var(--bg);color:var(--text)}</style><h1>EMI</h1><input id=a value=1><output id=o></output>
+      <script>var el={a:document.getElementById("a")};el.a.addEventListener("input",function(){el.out.textContent="x"});
+      document.getElementById("o").textContent=[typeof fetch,typeof XMLHttpRequest,typeof WebSocket,typeof RTCPeerConnection].join();</script>`;
+    await page.emulateMedia({ colorScheme: "light" });      // the system's, as a webview has it, while VS Code's theme is dark
+    await page.setContent(widgetPage()(own), { waitUntil: "load" });
+    await page.evaluate(() => {        // what VS Code puts on a webview's page
+      document.documentElement.style.setProperty("--vscode-editor-background", "rgb(31, 31, 31)");
+      document.documentElement.style.setProperty("--vscode-editor-foreground", "rgb(204, 204, 204)");
+      document.body.dataset.vscodeThemeKind = "vscode-dark";
+    });
+    const look = () => page.evaluate(() => [getComputedStyle(document.body).backgroundColor, getComputedStyle(document.body).color,
+                                             getComputedStyle(document.documentElement).colorScheme]);
+    assert.deepEqual(await look(), ["rgb(31, 31, 31)", "rgb(204, 204, 204)", "dark"], "the editor's, not the page's own light ones");
+    assert.equal(await page.locator("#o").textContent(), "undefined,undefined,undefined,undefined");
+    assert.equal(await page.locator("#dgc-widget-error").count(), 0, "nothing failed yet");
+    await page.locator("#a").fill("2");
+    assert.match(await page.locator("#dgc-widget-error").textContent(),
+                 /^This widget hit an error, so it may not work: Uncaught TypeError: .*'textContent'\)\. Ask ChatDGC to fix it\.$/);
+    assert.equal(await page.locator("#dgc-widget-error").getAttribute("role"), "alert");
+    await page.evaluate(() => { document.body.dataset.vscodeThemeKind = "vscode-light"; });
+    assert.equal((await look())[2], "light", "its controls follow a light theme");
+  } finally { await page.close(); }
 });
 
 test("files a reply made: a card with what each is, Open and Save a copy…, live as it's made", async (t) => {

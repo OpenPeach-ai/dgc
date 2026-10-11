@@ -406,7 +406,9 @@ test("a widget's page: nothing loads from anywhere, its own code only, no networ
   assert.match(page, /content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'"/);
   assert.ok(page.indexOf('"RTCPeerConnection"') < page.indexOf("<body>"), "network and peer connections gone before its code runs");
   assert.match(page, /"fetch","XMLHttpRequest"/);
-  assert.match(page, /--bg:var\(--vscode-editor-background\);--text:var\(--vscode-editor-foreground\);/, "it follows the theme as it changes");
+  assert.match(page, /--bg:var\(--vscode-editor-background\)!important;--text:var\(--vscode-editor-foreground\)!important;/,
+               "it follows the theme as it changes, over the page's own");
+  assert.match(page, /:root:has\(>body\[data-vscode-theme-kind="vscode-dark"\]\),[^{]*\{color-scheme:dark\}/);
   assert.doesNotMatch(page, /postMessage|acquireVsCodeApi/, "nothing to say to anyone");
   assert.match(page, /<body><h1>EMI<\/h1><script>calc\(\)<\/script><\/body>/);
 });

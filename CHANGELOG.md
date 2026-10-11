@@ -94,7 +94,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   **Open** and **Show code**. Not inline: VS Code serves nothing to a frame inside a webview (checked live), and a
   `srcdoc`/`data:`/`blob:` frame runs no script there. The widget's webview has scripts but no local resource roots
   and no message handler; its page policy loads nothing (`default-src 'none'`, inline script and style only), and
-  network and peer-connection APIs are removed before its code runs. The chat page's own policy is unchanged.
+  network and peer-connection APIs are removed before its code runs. The chat page's own policy is unchanged. The
+  editor's colours win over a page's own (`!important` theme variables, and `color-scheme` from VS Code's theme kind:
+  in a webview `prefers-color-scheme` is the system's, so a model's light-by-default page came out white on a dark
+  editor), and an uncaught error shows as a bar in the widget, so a broken one doesn't just sit showing dashes. Each
+  widget the real model wrote was then run in Chromium in that page: before telling it the variables are already set
+  and that every element its script uses must exist, 1 of 2 live widgets threw on every input and 1 of 2 brought its
+  own light colours; after, 9 of 9 ran, changed when used, and used the editor's colours.
   Without tools, a ` ```widget ` block becomes the same card, and opens on **Open**. With deepseek-v4.1-flash, as
   a fenced block an EMI calculator or stopwatch went into a canvas or a file 5 of 6 times; as a tool, a widget 9 of 9
   (self-contained and themed), none for a plain question.

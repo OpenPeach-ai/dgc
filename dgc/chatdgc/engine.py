@@ -162,8 +162,10 @@ WIDGET_TOOL = {"type": "function", "function": {
         "Show an interactive widget, in a tab beside the chat: one small self-contained HTML page (inline CSS and JS only) for "
         "something to use right now: a calculator, a converter, a timer, a quiz, a small simulation or an interactive "
         "diagram. It runs in a sandbox with no network and nothing loaded from anywhere (no libraries, fonts or images "
-        "from the web), and it can't see the chat. Use the CSS variables --bg, --text, --muted, --accent, --border and "
-        "--surface so it matches the editor's theme, and label every input. For these, use this rather than "
+        "from the web), and it can't see the chat. The CSS variables --bg, --text, --muted, --accent, --border and "
+        "--surface are already set to the editor's theme: use them, and don't define them yourself or use "
+        "prefers-color-scheme. Label every input, and make sure the script runs: every element it uses must be in the "
+        "page with that id. For these, use this rather than "
         "canvas_create or make_file, however long the code, unless the user asks to keep or edit the code."),
     "parameters": {"type": "object", "properties": {
         "title": {"type": "string", "description": "A short name, like 'EMI calculator'."},

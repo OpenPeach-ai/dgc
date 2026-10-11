@@ -78,17 +78,31 @@ const CANVAS_ID = /^cv_[a-f0-9]{16}$/;
 /** A widget's page: the model's HTML under a policy that loads nothing from anywhere and runs only its own inline
  *  code; network and peer-connection APIs gone before it runs; the theme's colours as CSS variables. */
 export function widgetDocument(html: string): string {
-  // The editor's own colours (a webview has them as --vscode-* variables), so it follows the theme as it changes.
-  const vars = "--bg:var(--vscode-editor-background);--text:var(--vscode-editor-foreground);--muted:var(--vscode-descriptionForeground);"
-    + "--accent:var(--vscode-button-background);--border:var(--vscode-panel-border,var(--vscode-widget-border,#80808059));"
-    + "--surface:var(--vscode-sideBar-background,var(--vscode-editorWidget-background))";
+  // The editor's own colours (a webview has them as --vscode-* variables), so it follows the theme as it changes. They
+  // win over a page's own (a model often writes light ones, and prefers-color-scheme in a webview is the system's,
+  // not VS Code's); color-scheme follows VS Code's theme too, for the form controls.
+  const vars = "--bg:var(--vscode-editor-background)!important;--text:var(--vscode-editor-foreground)!important;"
+    + "--muted:var(--vscode-descriptionForeground)!important;--accent:var(--vscode-button-background)!important;"
+    + "--border:var(--vscode-panel-border,var(--vscode-widget-border,#80808059))!important;"
+    + "--surface:var(--vscode-sideBar-background,var(--vscode-editorWidget-background))!important";
+  const kind = (k: string) => `:root:has(>body[data-vscode-theme-kind="${k}"])`;
+  const scheme = `${kind("vscode-light")},${kind("vscode-high-contrast-light")}{color-scheme:light}`
+    + `${kind("vscode-dark")},${kind("vscode-high-contrast")}{color-scheme:dark}`;
   const guard = `(function(){for(const k of ["RTCPeerConnection","webkitRTCPeerConnection","RTCDataChannel","WebSocket","EventSource","Worker","SharedWorker","fetch","XMLHttpRequest"]){try{Object.defineProperty(window,k,{value:undefined,configurable:false,writable:false})}catch(e){}}`
+    // A widget whose code fails says so, in the widget (to no one else): otherwise it just sits there showing dashes.
+    + `function bar(m){try{var b=document.getElementById("dgc-widget-error");if(!b){b=document.createElement("div");b.id="dgc-widget-error";`
+    + `b.setAttribute("role","alert");b.style.cssText="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;padding:8px 12px;`
+    + `font:12px/1.4 system-ui,sans-serif;background:var(--vscode-inputValidation-errorBackground,#5a1d1d);color:var(--vscode-foreground,#fff);`
+    + `border-top:1px solid var(--vscode-inputValidation-errorBorder,#be1100)";(document.body||document.documentElement).appendChild(b)}`
+    + `b.textContent="This widget hit an error, so it may not work: "+String(m||"unknown error").slice(0,240).replace(/\\.?$/,".")+" Ask ChatDGC to fix it."}catch(e){}}`
+    + `addEventListener("error",function(e){if(e&&e.message)bar(e.message)});`
+    + `addEventListener("unhandledrejection",function(e){var r=e&&e.reason;bar(r&&r.message||r)});`
     + `})();`;
   // (Built, then returned: the chat page's tests find that page as the file's first `return` of a document.)
   const page = `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>:root{${vars}}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}body{padding:16px}</style>
+<style>:root{${vars}}${scheme}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}body{padding:16px}</style>
 <script>${guard}</script>
 </head><body>${html}</body></html>`;
   return page;
