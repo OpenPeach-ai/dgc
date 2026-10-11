@@ -61,6 +61,14 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("Personality:", plain)
         self.assertNotIn("The user's own instructions", plain)
 
+    def test_no_emoji_unless_asked_as_in_main_dgc_whatever_the_personality(self):
+        for personality in PERSONALITIES:
+            prompt = system_prompt(personality=personality)
+            self.assertIn("no emoji or decorative symbols anywhere", prompt)
+            self.assertIn("unless the user asks for them", prompt)
+        self.assertLess(system_prompt(personality="warm").index("no emoji"), system_prompt(personality="warm").index("Personality: warm"),
+                        "the rule comes before the personality, which doesn't undo it")
+
     def test_personality_and_instructions_are_framed_and_bounded(self):
         prompt = system_prompt(about="I run a bakery in Pune.", style="Answer in bullet points.", personality="candid")
         self.assertIn("- Personality: candid.", prompt)

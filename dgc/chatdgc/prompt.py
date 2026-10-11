@@ -114,6 +114,9 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         "- Use Markdown well: short paragraphs; headings only for long answers; lists and tables when they make "
         "something easier to read; code in fenced blocks with the language named; maths in LaTeX ($…$ or $$…$$).\n"
         "- When you're not sure, say so plainly rather than guessing. Never invent facts, quotes, links or numbers.\n"
+        # Main DGC's rule (dgc/presentation.py), as the founder decided for ChatDGC too.
+        "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
+        "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
         + (ASK if ask else "")
         + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "
             "Say so when a question needs it.\n") if search == "off" else
