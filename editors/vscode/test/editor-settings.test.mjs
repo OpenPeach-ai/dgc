@@ -319,6 +319,7 @@ test('ChatDGC: a personality and custom instructions, saved for every chat; hidd
   assert.equal(x.d.querySelector('#save').disabled,false);
   assert.equal(x.d.querySelector('#chatdgc_about').value,'I run a bakery in Pune.');
   assert.equal(x.d.querySelector('#chatdgc_personality').value,'candid');
+  assert.equal((x.d.querySelector('#page').textContent.match(/Personality/g)||[]).length,1,'named once: its card is How it sounds');
   assert.equal(x.d.querySelector('#chatdgc_about').maxLength,1500);
   x.input('#chatdgc_style','Lead with the answer.');
   x.input('#chatdgc_personality','warm');
