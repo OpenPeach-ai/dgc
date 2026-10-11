@@ -137,7 +137,12 @@ class WebTests(Engine):
         last = self.world["answers"][-1]
         self.assertNotIn("web_search", last["tools"], "off in Settings: nothing goes online, whatever the box says")
         self.assertIn("can't browse the web", last["system"])
-        self.assertEqual(len(self.world["looked"]), 1, "and no check either")
+        self.assertEqual(len(self.world["looked"]), 2, "the check still runs, for memory")
+        self.assertNotIn("searches", self.engine.open(chat["id"])["messages"][-1], "but nothing goes online")
+        self.assertNotIn("images", self.engine.open(chat["id"])["messages"][-1], "and no pictures")
+        self.config["memory"] = False
+        self.engine.send(chat["id"], "and again", search="on")
+        self.assertEqual(len(self.world["looked"]), 2, "web search and memory both off: no check at all")
         with self.assertRaisesRegex(ChatEngineError, "web search is off in Settings"):
             self.engine.research_plan(chat["id"], "Research this")
 
@@ -163,6 +168,21 @@ class StatedFactsTests(Engine):
                       "They just moved to Bengaluru.", told)
         again = self.engine.send(chat["id"], "Still vegetarian, by the way.", search="auto")
         self.assertNotIn("memory", again, "already known: nothing new to show")
+
+    def test_the_check_sees_whats_remembered_and_a_fact_the_message_outdates_goes(self):
+        # Live (deepseek): "not vegetarian anymore" added a fact and left "They are vegetarian." (2 of 2); "my sister
+        # Anya" saved a second sister fact. Shown what's remembered, it names the one to drop and adds nothing twice.
+        old = self.engine.memory.add("They are vegetarian.")
+        self.world["decide"] = {"needs_search": False, "query": "", "remember": ["They eat fish now."],
+                                "forget": [old["id"], "mem_000000000000"]}
+        chat = self.engine.open()
+        reply = self.engine.send(chat["id"], "Actually I'm not vegetarian anymore, I eat fish now.", search="auto")
+        self.assertIn(f"Remembered about the user now (id: fact):\n{old['id']}: They are vegetarian.", self.world["looked"][-1])
+        self.assertEqual([(op["op"], op["text"]) for op in reply["memory"]],
+                         [("forgot", "They are vegetarian."), ("saved", "They eat fish now.")], "an id it made up is ignored")
+        self.assertEqual([f["text"] for f in self.engine.memory.facts()], ["They eat fish now."])
+        self.assertIn("Removed from the user's memory, as this message outdates it (the reply shows it): They are vegetarian.",
+                      self.world["answers"][-1]["system"])
 
     def test_nothing_is_kept_with_memory_off_in_a_temporary_chat_or_past_three_a_reply(self):
         self.world["decide"] = {"needs_search": False, "query": "", "remember": ["They are vegetarian."]}

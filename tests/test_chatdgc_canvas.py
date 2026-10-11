@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from dgc.chatdgc import canvas as chat_canvas
-from dgc.chatdgc.engine import ChatEngine
+from dgc.chatdgc.engine import LOOK_UP, ChatEngine
 from dgc.chatdgc.service import ChatService
 from dgc.chatdgc.store import ChatStore
 from dgc.editor_protocol import event_error
@@ -85,6 +85,9 @@ class Model:
         return 32768
 
     def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None, cancel=None):
+        if str(messages[0]["content"]).startswith(LOOK_UP[:60]):       # the check before a reply: nothing to look up
+            return SimpleNamespace(content="", tool_calls=[ToolCall("lu", "search_first", {"needs_search": False, "query": ""})],
+                                   finish_reason="stop", thinking="", usage={})
         self.world["read"].append({"messages": messages, "tools": [t["function"]["name"] for t in tools or []]})
         step = self.world["script"].pop(0) if self.world["script"] else {"parts": ["OK."]}
         for part in step.get("parts", []):

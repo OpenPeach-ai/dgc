@@ -185,7 +185,8 @@ class QuestionTests(unittest.TestCase):
         self.addCleanup(setattr, Model, "chat", original)
         with self.assertRaises(ChatEngineError):
             self.engine.send(chat["id"], "hi")
-        self.assertEqual(len(self.world["requests"]), 1)
+        replies = [r for r in self.world["requests"] if [t["function"]["name"] for t in r["tools"] or []] != ["search_first"]]
+        self.assertEqual(len(replies), 1, "the reply isn't tried again (the check before it, for memory, failing too)")
         self.assertEqual(self.engine._toolless, set())
 
 

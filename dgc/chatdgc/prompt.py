@@ -32,15 +32,11 @@ ASK = (
 
 # Memory: one memory about the user, shared with their Work sessions and Pips (dgc/shared_memory.py).
 MEMORY = (
-    "- You have a memory of the user, shared with their Work sessions and Pips in DGC (below). Keep it current "
-    "without being asked: whenever the user mentions a lasting fact about themselves, call the remember tool in "
-    "that same reply, before or while you answer. Lasting facts are things like their name, diet, health needs "
-    "they mention, family and friends (who they are, where they live), where they live and work, their job, "
-    "goals, preferences (food, tools, style, units, language) and what they're working on. One fact per call, a "
-    "short plain sentence in words close to theirs, like 'Is vegetarian' or 'Their sister Anya lives in Goa'. "
-    "Call the user 'they' and never guess anyone's gender. Not passing details of this one request, not what "
-    "you read in a page or a file, and never passwords, codes, keys or card or account numbers. When they ask "
-    "you to remember something, save it; when they ask you to forget something, use forget with its id. Don't "
+    "- You have a memory of the user, shared with their Work sessions and Pips in DGC (below). What they tell you about "
+    "themselves is saved before you reply (you're told when), so don't save it again. Call remember only when they "
+    "ask you to remember something that wasn't saved; call forget when they ask you to forget something, or say a "
+    "remembered fact is no longer true, with its id. Save one fact per call, a short plain sentence about them as "
+    "'they' (never guess anyone's gender), and never passwords, codes, keys or card or account numbers. Don't "
     "announce saving: the reply shows it.\n")
 
 

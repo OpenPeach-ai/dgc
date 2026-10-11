@@ -88,6 +88,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
+- **ChatDGC memory saves less, and keeps itself current.** The check before a reply now sees what's remembered (ids
+  and facts) and returns `forget` for facts a message outdates, removed with the reply's `memory` op `forgot`; its
+  rules leave out a task's details (an email's recipient, date or flat), plans and guesses. It runs whenever memory
+  is on, web search off too (then with no search and no pictures), and the model's own `remember` is for "remember
+  that…" only. With deepseek-v4.1-flash, 11 cases twice: a landlord email saved 2–3 facts, now none; a birthday
+  message duplicated a sister, now nothing; a weather question guessed a city once, now never; "not vegetarian
+  anymore" left the old fact 2 of 2, now replaces it 2 of 2; real facts (diet, health, family, a new job) still saved.
 - **Canvas in ChatDGC** (`dgc/chatdgc/canvas.py`), as ChatGPT has it: tools `canvas_create` and `canvas_edit` (exact
   find-and-replace edits, each found once, or a rewrite); the canvas is a file under `~/.dgc/chat/canvas/<chat>/<id>/`
   that the editor opens beside the chat, read fresh every turn (the user's edits become a version of theirs first),

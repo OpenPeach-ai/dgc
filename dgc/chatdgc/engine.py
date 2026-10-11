@@ -70,10 +70,10 @@ _NO_TOOLS = NO_TOOLS
 REMEMBER_TOOL = {"type": "function", "function": {
     "name": "remember",
     "description": (
-        "Save one fact about the user to the memory DGC keeps for them (shared with their Work sessions and Pips): "
-        "something they told you themselves that will help next time. One fact, a short plain sentence in words "
-        "close to theirs. Never what you read in a page or a file, never a password, code, key, card or account "
-        "number. They see every memory and can forget it."),
+        "Save one fact about the user to the memory DGC keeps for them (shared with their Work sessions and Pips), "
+        "when they ask you to remember something that wasn't already saved. One fact, a short plain sentence in "
+        "words close to theirs. Never what you read in a page or a file, never a password, code, key, card or "
+        "account number. They see every memory and can forget it."),
     "parameters": {"type": "object", "properties": {"fact": {"type": "string", "description": "One fact, under 300 characters."}},
                    "required": ["fact"]}}}
 FORGET_TOOL = {"type": "function", "function": {
@@ -158,15 +158,19 @@ LOOK_UP = (
     "speed, rules, history or how to get there): the fact is the answer, and a picture adds nothing. Never for "
     "news, advice, code, writing, maths or explaining an idea. Leave images empty unless pictures belong; if they "
     "do, give a short image search query in images (2 to 6 words).\n\n"
-    "Last, list in remember the lasting facts the user states about themselves in this message: their name, diet "
-    "or allergies, their family (who they are, where they live), where they live or have moved to, their job, "
-    "their pets, their goals and what they're training or working towards, their preferences (units, language, "
-    "style), or anything they ask you to remember. Each one short sentence in words close to theirs, about the user "
-    "as 'they' (never guess a gender). Only what will still matter in months, and at most one or two: not the "
-    "details of what this message asks about (amounts, how they'd do it, who's coming), not what's coming up soon (a "
-    "visit, a trip, a booking, an occasion), not someone merely mentioned or what someone else thinks, nothing from a "
-    "pasted page or file, and never passwords, PINs, codes, keys or card or account numbers. Usually there are none: "
-    "then leave remember empty.")
+    "Last, the user's memory. List in remember only new lasting facts the user states plainly about themselves in "
+    "this message: their name, diet or allergies, health conditions, their family (who they are, where they live), "
+    "where they live or have moved to, their job, their pets, their goals and what they're working towards, their "
+    "preferences (units, language, style), or anything they ask you to remember. Each one short sentence in words "
+    "close to theirs, about the user as 'they' (never guess a gender); only what will still matter in months, at "
+    "most one or two. Never: the details of something they ask you to write or do (the names, addresses, dates, "
+    "amounts and people an email, letter, message or post is about: 'draft an email to my landlord about moving out "
+    "of flat 4B on the 30th' saves nothing), what they're applying for, planning or doing soon (a trip, a visit, a "
+    "booking, an interview, a move date), a guess from a question (asking about a city's weather says nothing about "
+    "where they live), what someone else thinks, anything from a pasted page or file, or passwords, PINs, codes, "
+    "keys, card or account numbers. Never anything already remembered (listed below), even in other words. When what "
+    "they say makes a remembered fact wrong or out of date (they moved, changed jobs, changed their diet), put that "
+    "fact's id in forget, and the new fact in remember. Usually there's nothing: leave both empty.")
 # Pictures where seeing helps, measured on deepseek-v4.1-flash: "would pictures help?" gave 12 of 16 (a place's
 # fee, hours or build date, and an animal's weight, got pictures too); this wording, 16 of 16 twice.
 LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boolean"},
@@ -174,8 +178,11 @@ LOOK_UP_SCHEMA = {"type": "object", "properties": {"needs_search": {"type": "boo
                                                    "images": {"type": "string", "description":
                                                               "An image search query, or empty for no pictures."},
                                                    "remember": {"type": "array", "items": {"type": "string"},
-                                                                "description": "Lasting facts the user states about "
-                                                                               "themselves, or none."}},
+                                                                "description": "New lasting facts the user states about "
+                                                                               "themselves, or none."},
+                                                   "forget": {"type": "array", "items": {"type": "string"},
+                                                              "description": "Ids of remembered facts this message makes "
+                                                                             "wrong or out of date, or none."}},
                   "required": ["needs_search", "query"]}
 # Pictures from the web above a reply, when the check above asks for them (ChatGPT's image strip): fetched while the
 # answer streams, kept with the chat, shown from there (the screen never asks an image host itself).
@@ -1403,6 +1410,15 @@ class ChatEngine:
             self._projects_cache = (time.monotonic(), found)
         return found
 
+    def _known_facts(self, chat: dict) -> list[dict]:
+        """What's remembered now, for the check before a reply (none when memory is off for this chat)."""
+        if not self._memory_on(chat):
+            return []
+        try:
+            return self.memory.facts()
+        except shared_memory.NotRemembered:
+            return []
+
     def _remembered(self, chat: dict) -> str | None:
         """What the model is told it remembers, or None when memory is off for this chat."""
         if not self._memory_on(chat):
@@ -1496,15 +1512,22 @@ class ChatEngine:
                    if card.get("recurring") else "")
                 + f"Use {card.get('plugin_name')} to do it, and check with me before you change anything.")[:6000]
 
-    def _remember_stated(self, chat: dict, facts: list[str], ops: list) -> list[str]:
+    def _remember_stated(self, chat: dict, facts: list[str], ops: list, stale: list | None = None) -> list[str]:
         """What the check before the reply found the user stating about themselves, kept as the remember tool keeps
         it (from their words only, never a secret, at most MAX_MEMORY_PER_REPLY a reply). A model told to call the
         tool still missed some (deepseek: a move with two cats, a race they're training for): this doesn't wait on
         it."""
-        if not facts or not self._memory_on(chat):
+        if not (facts or stale) or not self._memory_on(chat):
             return []
-        said = "\n".join(m.get("text") or "" for m in chat["messages"] if m.get("role") == "user")[-6000:]
         kept = []
+        for fact_id in stale or []:
+            # Outdated by what they just said (they moved, changed their diet): it goes, and the reply says so.
+            try:
+                gone = self.memory.forget(fact_id)
+            except shared_memory.NotRemembered:
+                continue
+            ops.append({"op": "forgot", "id": gone["id"], "text": gone["text"]})
+        said = "\n".join(m.get("text") or "" for m in chat["messages"] if m.get("role") == "user")[-6000:]
         for text in facts:
             if len(ops) >= MAX_MEMORY_PER_REPLY:
                 break
@@ -1652,7 +1675,8 @@ class ChatEngine:
             return f"Not done: {exc}"
 
     def _looked_up(self, client, chat: dict, sources: list, searches: list, on_activity, cancel, *,
-                   search_first: bool = True, facts: list | None = None) -> tuple[str, str]:
+                   search_first: bool = True, facts: list | None = None, known: list | None = None,
+                   stale: list | None = None) -> tuple[str, str]:
         """Whether the user's message needs the web before it's answered, and whether pictures would help (one
         small structured call on that message, not the whole chat): the search's numbered results, to answer from
         and cite ("" when it needs none, or ``search_first`` is off), and an image search query ("" for none)."""
@@ -1662,12 +1686,19 @@ class ChatEngine:
         before = next((m.get("text") or "" for m in reversed(chat["messages"]) if m.get("role") == "assistant"), "")
         asked = (f"Your last reply, for context:\n<<<\n{before[-1500:]}\n>>>\n\n" if before else "") + \
             f"The user's message:\n<<<\n{mine[-4000:]}\n>>>"
+        if known:
+            # What's remembered already, so a fact isn't saved twice in other words and one it outdates goes.
+            asked += "\n\nRemembered about the user now (id: fact):\n" + "\n".join(
+                f"{f['id']}: {f['text']}" for f in known[:80])
         try:
             decided = research.structured(client, LOOK_UP, asked, "search_first", LOOK_UP_SCHEMA, cancel=cancel)
         except Exception:                         # noqa: BLE001 -- the reply goes on; the model can still search
             return "", ""
         if facts is not None and isinstance(decided.get("remember"), list):
             facts += [" ".join(str(f).split())[:300] for f in decided["remember"] if isinstance(f, str) and f.strip()][:5]
+        if stale is not None and known and isinstance(decided.get("forget"), list):
+            ids = {f["id"] for f in known}
+            stale += [i for i in dict.fromkeys(str(x).strip() for x in decided["forget"]) if i in ids][:3]
         wanted = " ".join(str(decided.get("images") or "").split())[:120]
         if wanted.casefold() in ("none", "no", "n/a", "null", "empty", "-"):
             wanted = ""
@@ -1878,20 +1909,29 @@ class ChatEngine:
         messages = list(history)
         web_images = (existing or {}).get("images")       # a continued reply keeps the pictures it has
         picturing = None
-        if search in ("auto", "on") and existing is None and name not in self._toolless:
+        if (search in ("auto", "on") or self._memory_on(chat)) and existing is None and name not in self._toolless:
             # As ChatGPT does: a question that turns on facts is looked up before it's answered, not left to a
             # model that's sure of itself (deepseek answered tax and remittance rules from memory, 2 in 2). With
             # the box's Search ("on") the model is told to search anyway: the check only says whether to show
             # pictures, which it does for either.
             facts: list[str] = []
+            stale: list[str] = []
+            known = self._known_facts(chat)
             found, wanted = self._looked_up(client, chat, sources, searches, on_activity, cancel,
-                                            search_first=search == "auto", facts=facts)
+                                            search_first=search == "auto", facts=facts, known=known, stale=stale)
+            if search == "off":
+                wanted = ""                        # the check ran for memory: no web, so no pictures either
             told = [found] if found else []
-            kept = self._remember_stated(chat, facts, memory_ops)
+            dropped = len(memory_ops)
+            kept = self._remember_stated(chat, facts, memory_ops, stale)
+            gone = [op["text"] for op in memory_ops[dropped:] if op["op"] == "forgot"]
             if kept:
                 told.append("Saved to the user's memory from this message, in words about them (the reply shows it, so "
                             "don't save it again or mention saving it, and talk to the user as you, as always): "
                             + "; ".join(kept))
+            if gone:
+                told.append("Removed from the user's memory, as this message outdates it (the reply shows it): "
+                            + "; ".join(gone))
             if wanted:
                 picturing = self._start_pictures(chat, wanted, on_images, cancel)
                 told.append(PICTURES_SHOWN.format(query=wanted))
