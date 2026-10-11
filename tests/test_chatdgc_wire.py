@@ -170,6 +170,10 @@ class ServiceTests(unittest.TestCase):
         saved = self.wire.wait(lambda f: f["type"] == "chatdgc_message" and f.get("request_id") == "d1")["message"]
         self.assertEqual(saved["text"], f"Here it is.\n\n```email\n{edited}\n```\n\nCheck the date.")
         self.assertEqual(self.engine.open(chat)["messages"][-1]["text"], saved["text"], "kept: the model reads it next")
+        self.assertTrue(saved["draft_edited"])
+        history = self.engine._history(self.engine.open(chat))
+        self.assertIn("Dear Mr and Mrs Rao", history[-1]["content"])
+        self.assertIn("The user edited the draft in this reply themselves", history[-1]["content"], "so it works from theirs")
         self.service.dispatch({**draft, "request_id": "d2"})          # the old words again: that block is gone
         self.assertIn("changed since", self.wire.wait(lambda f: f["type"] == "chatdgc_error" and f.get("request_id") == "d2")["message"])
         self.service.dispatch({**draft, "original": edited, "text": "```\nno", "request_id": "d3"})

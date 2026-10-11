@@ -354,6 +354,7 @@ class ChatEngine:
         if len(changed) > MAX_TEXT:
             raise ChatEngineError("That makes the reply too long to keep.")
         message["text"] = changed
+        message["draft_edited"] = True
         self._save(chat)
         return message
 
@@ -1313,6 +1314,10 @@ class ChatEngine:
                 content += "\n\n" + _card_note(card)
             for meta in m.get("files") or [] if m["role"] == "assistant" else []:
                 content += "\n\n" + _made_note(meta, self._file(chat, str(meta.get("id") or "")))
+            if m["role"] == "assistant" and m.get("draft_edited"):
+                # Without this, "make it shorter" went back to the date the user had first asked for (live run).
+                content += ("\n\n[The user edited the draft in this reply themselves: the words above are theirs now. "
+                            "Work from their version, keeping what they changed.]")
             if m["role"] == "assistant" and (m.get("images") or {}).get("items"):
                 content += (f"\n\n[Shown above this reply: pictures from a web image search for "
                             f"\"{m['images'].get('query', '')}\".]")
