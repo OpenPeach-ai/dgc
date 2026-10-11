@@ -1027,6 +1027,21 @@ test("the context window: a meter that warns early, Compact now, the summary in 
   } finally { await s.page.close(); }
 });
 
+test("a question asked mid-sentence: the sentence keeps its full stop above the card, never a lone one below", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const text = "So let's just do it.\n\nPick one.";
+    const question = { at: "So let's just do it".length, question: "₹500 at 10% for 2 years?", options: ["₹605", "₹600"], prompt: "My answer: {answer}." };
+    await s.send({ type: "opened", conversation: conversation({ title: "Quiz" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Quiz me" }, { id: M(2), role: "assistant", text, finish: "stop", questions: [question] }] });
+    await s.frame();
+    const bodies = await s.page.locator(`.cd-assistant[data-id="${M(2)}"] > .cd-body`).allInnerTexts();
+    assert.deepEqual(bodies.map((b) => b.trim()), ["So let's just do it.", "Pick one."]);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("a question in the answer: a card where it was asked, Continue sends the choice, and then it shows it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

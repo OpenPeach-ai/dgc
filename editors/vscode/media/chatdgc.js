@@ -171,7 +171,9 @@
     const parts = [];
     let done = 0;
     questions.map((q, i) => [q, i]).sort((a, b) => (Number(a[0].at) || 0) - (Number(b[0].at) || 0)).forEach(([q, i]) => {
-      const at = Math.max(done, Math.min(text.length, Number(q.at) || 0));
+      let at = Math.max(done, Math.min(text.length, Number(q.at) || 0));
+      // Asked mid-sentence ("let's do it" [card] "."): the sentence's own punctuation stays with it, above the card.
+      while (at < text.length && /[.,;:!?…)\]"'”’]/.test(text[at])) at++;
       if (text.slice(done, at).trim()) parts.push(body({ ...message, text: text.slice(done, at) }));
       parts.push(questionCard(message, q, i, live));
       done = at;
