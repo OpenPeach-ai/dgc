@@ -2051,6 +2051,8 @@ class Backend:
                           # field on `ready` is fatal to a client that has not opted in -- the SDK
                           # refuses the whole event with "ready has an undeclared field".
                           "image_spool": True, "image_spool_dir": str(self._image_spool()),
+                          # context_breakdown is understood: what fills the window, part by part.
+                          "context_breakdown": 1,
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
                           "session_policy": self._session_policy_capability(),
                           **self._chats_capability(), **self._chatdgc_capability()},
@@ -5708,6 +5710,16 @@ class Backend:
                 self.em.emit("error", message=f"Could not {action} retained task {task_id}: "
                              f"{result.error or result.status}.{conflicts}")
             self._emit_retained_tasks(request_id)
+        elif t == "context_breakdown":
+            # What fills the window, part by part, scaled to what the meter shows (its estimate).
+            try:
+                threshold = float(self.config.get("compact_threshold", 0.85))
+            except (AttributeError, TypeError, ValueError):
+                threshold = 0.85
+            if not math.isfinite(threshold) or threshold <= 0:
+                threshold = 0.85
+            self.em.emit("context_breakdown", **self.agent.context_breakdown(self._context_window_size(), threshold),
+                         **_request_fields(request_id))
         elif t == "compact":
             if not self.agent.maybe_compact(force=True, trigger="manual", notify=False):
                 self.em.emit("command_rejected", command=t, reason="compaction_failed",

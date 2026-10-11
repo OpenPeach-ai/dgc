@@ -4,7 +4,7 @@
  */
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
-import { DGCCommandRejectedError, DGCConfigError, DGCError, DGCRuntimeError, DGCTimeoutError } from "./errors.ts";
+import { DGCCommandRejectedError, DGCConfigError, DGCError, DGCRuntimeError, DGCTimeoutError, DGCUnsupportedError } from "./errors.ts";
 import type { Frame, Transport } from "./transport.ts";
 import { longTimer } from "./transport.ts";
 import { assertSupported, extractJson, validate as validateSchema } from "./schema.ts";
@@ -17,7 +17,7 @@ import { resolvePermission, type Policy } from "./policy.ts";
 import { Pips } from "./pips.ts";
 import type { StateLock } from "./state.ts";
 import type {
-  AbortSignalLike, AgentInfo, Artifact, Denial, Checkpoint, McpInputResponse, PermissionAction, PermissionRequest, Pricing,
+  AbortSignalLike, AgentInfo, Artifact, Denial, Checkpoint, ContextBreakdown, ContextPart, McpInputResponse, PermissionAction, PermissionRequest, Pricing,
   QuestionRequest, RunEvent, RunOptions, RunResult, RunStatus, SandboxStatus, SessionInfo,
   SessionOptions, TaskItem, ToolRecord, VerificationResult,
 } from "./types.ts";
@@ -566,6 +566,25 @@ export class Session {
   async listSessions(): Promise<SessionInfo[]> {
     const event = await this.request({ type: "list_sessions", request_id: newId("sessions") }, "sessions");
     return rowsToSessions(event.items);
+  }
+
+  /** What fills this session's context window, part by part, as DGC's meter shows it: messages, tool results, the
+   *  system prompt, tools one by one (built-in and MCP), memory, skills, and the room kept and free. Needs a DGC CLI
+   *  that offers it (`capabilities.context_breakdown`). */
+  async contextBreakdown(): Promise<ContextBreakdown> {
+    if (!this.capabilities.context_breakdown) throw new DGCUnsupportedError("This DGC CLI can't break its context window down; update it (dgc update).");
+    const event = await this.request({ type: "context_breakdown", request_id: newId("ctx") }, "context_breakdown");
+    const part = (row: unknown): ContextPart => {
+      const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+      const items = (Array.isArray(r.items) ? r.items : []).filter((i) => i && typeof i === "object")
+        .map((i) => ({ name: String((i as Record<string, unknown>).name || ""), tokens: Number((i as Record<string, unknown>).tokens || 0) }));
+      return { id: String(r.id || ""), label: String(r.label || ""), tokens: Number(r.tokens || 0), items };
+    };
+    return { window: Number(event.window || 0), used: Number(event.used || 0),
+             source: event.source === "reported" ? "reported" : "estimated", compactAt: Number(event.compact_at || 0),
+             parts: (Array.isArray(event.categories) ? event.categories : []).map(part),
+             buffer: Number(event.buffer || 0), free: Number(event.free || 0),
+             deferred: (Array.isArray(event.deferred) ? event.deferred : []).map(part) };
   }
 
   async listCheckpoints(): Promise<Checkpoint[]> {

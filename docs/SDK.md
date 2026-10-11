@@ -286,6 +286,14 @@ Conversations and checkpoints:
 - `history()` → `dict` — the current conversation's replayable items.
 - `list_checkpoints()` → `list[Checkpoint]`; `rewind(index)` → `dict` — restore files and
   conversation to a checkpoint.
+- `context_breakdown()` → `ContextBreakdown` — what fills the context window, part by part, as DGC's meter shows it:
+  `window`, `used`, `source` (`"reported"` by the model, else `"estimated"`), `compact_at`, `parts` biggest first
+  (`ContextPart`: `id`, `label`, `tokens`, `items` of `ContextItem` `name`/`tokens`: each tool, MCP tools as
+  `server · tool`, each skill, memory by file), `buffer` (the room kept before compaction), `free`, and `deferred`
+  (MCP tools found by a search when needed: they take no room yet). Part ids: `messages`, `tool_results`,
+  `system_prompt`, `system_tools`, `mcp_tools`, `memory`, `skills`, `plugins`. A CLI without
+  `capabilities["context_breakdown"]` raises `DGCUnsupportedError`. TypeScript: `session.contextBreakdown()`
+  (`compactAt`).
 - `fork(name=None)` → `dict` — continue in a new conversation that shares the history so far.
 - `new_session()` → `dict`; `name_session(name)` → `dict`.
 - `bind_identity()` — refresh `session_path` once this session's transcript exists.

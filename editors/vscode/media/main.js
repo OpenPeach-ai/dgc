@@ -1033,6 +1033,7 @@
   let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false;
   let curWorkers = 4;
   let lastConfig = null;
+  let contextBreakdown = null;      // what fills the window, part by part (context_breakdown), once asked for
   let contextState = { used: 0, size: 0, input_tokens: 0, output_tokens: 0,
     cached_input_tokens: 0, reasoning_tokens: 0, requests: 0, compact_threshold: .85 };
   let lastCompaction = null, compacting = false;
@@ -1099,6 +1100,12 @@
     $("ctx-usage").textContent = `${fmtTokens(contextState.input_tokens)} in · ` +
       `${fmtTokens(contextState.output_tokens)} out · ${fmtTokens(contextState.requests)} requests`;
     syncContextSizeControl();
+    // What fills the window, part by part (as Claude's Usage sheet), once the backend has counted it: its bar and its
+    // list take the place of the single bar and the free/auto line.
+    const parts = contextBreakdown && window.DgcBreakdown ? window.DgcBreakdown.render(contextBreakdown) : null;
+    $("ctx-breakdown").replaceChildren(...(parts ? [parts] : []));
+    $("ctx-breakdown").hidden = !parts;
+    for (const plain of [$("ctxmenu").querySelector(".context-track"), $("ctxmenu").querySelector(".context-split")]) if (plain) plain.hidden = !!parts;
     $("ctx-compact").disabled = compacting;
     $("ctx-compact").textContent = compacting ? "Compacting…" : "Compact now";
     if (lastCompaction) {
@@ -1150,6 +1157,7 @@
     if (!menu.hidden) { hideContextMenu(); return; }
     hideModelMenu(); hideModeMenu(); hideAgentsMenu(); renderContextMenu();
     menu.hidden = false; $("btn-ctx").setAttribute("aria-expanded", "true");
+    vscode.postMessage({ type: "contextBreakdown" });            // what fills it, part by part, as it opens
     $("ctx-compact").focus();
   }
   function effortLabel(value, subscription = curSubscription) {
@@ -4875,6 +4883,7 @@
       case "context": {
         contextState = { ...contextState, ...ev };
         renderContext();
+        if (!$("ctxmenu").hidden) vscode.postMessage({ type: "contextBreakdown" });     // the parts, as the window changes
         break;
       }
       case "history":
@@ -7292,6 +7301,10 @@
     }
     else if (msg.type === "goal_control_state" && msg.state === "error") {
       sysLine(String(msg.error || "DGC could not change the goal state."), true);
+    }
+    else if (msg.type === "contextBreakdown") {
+      contextBreakdown = msg.breakdown && typeof msg.breakdown === "object" ? msg.breakdown : null;
+      if (!$("ctxmenu").hidden) renderContextMenu();
     }
     else if (msg.type === "compact_state") {
       compacting = msg.state === "working";

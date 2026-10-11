@@ -8511,6 +8511,26 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "context_breakdown"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "list_artifacts"
             },
             "chat_id": {

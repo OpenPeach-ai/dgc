@@ -172,6 +172,15 @@ export type SessionInfo = {
 };
 
 export type Checkpoint = { index: number; preview: string; files: number };
+/** One thing inside a part of the context window: a tool, a file, a skill. */
+export type ContextItem = { name: string; tokens: number };
+/** A part of what fills the context window: messages, tool results, the system prompt, tools, memory... */
+export type ContextPart = { id: string; label: string; tokens: number; items: ContextItem[] };
+/** What fills the session's context window, part by part (biggest first), as DGC's meter shows it. `source` is
+ *  "reported" when the model counted its last request; `buffer` is the room kept before compaction (past
+ *  `compactAt`), `free` what's left besides; `deferred` is what isn't sent until needed and takes no room yet. */
+export type ContextBreakdown = { window: number; used: number; source: "reported" | "estimated"; compactAt: number;
+  parts: ContextPart[]; buffer: number; free: number; deferred: ContextPart[] };
 
 export type RunEvent = {
   type: string;

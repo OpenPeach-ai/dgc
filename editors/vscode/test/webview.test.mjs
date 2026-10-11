@@ -2896,6 +2896,31 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   assert.deepEqual(errors, []);
 });
 
+test("what fills the window, part by part, in the context menu: asked for as it opens, drawn in place of the single bar", () => {
+  const { doc, send, posted, errors } = makeDom();
+  send({ type: "event", event: { type: "context", used: 9000, size: 32768, compact_threshold: .85, compact_at: 27852,
+    input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, requests: 0 } });
+  doc.getElementById("btn-ctx").click();
+  assert.equal(posted.at(-1).type, "contextBreakdown", "asked for as the menu opens");
+  assert.equal(doc.getElementById("ctx-breakdown").hidden, true, "until it comes: the menu as it was");
+  send({ type: "contextBreakdown", breakdown: { window: 32768, used: 9000, source: "estimated", compact_at: 27852, buffer: 4916, free: 18852,
+    categories: [{ id: "system_tools", label: "Tools", tokens: 4000, items: [{ name: "task", tokens: 400 }, { name: "Docs \u00b7 read", tokens: 160 }] },
+                 { id: "tool_results", label: "Tool results", tokens: 3000 }, { id: "messages", label: "Messages", tokens: 2000 }],
+    deferred: [{ id: "mcp_deferred", label: "MCP tools found when needed", tokens: 2400 }] } });
+  const box = doc.getElementById("ctx-breakdown");
+  assert.equal(box.hidden, false);
+  assert.equal(doc.querySelector("#ctxmenu .context-track").hidden, true, "its bar takes the single bar's place");
+  assert.deepEqual([...box.querySelectorAll(".bd-label")].map((n) => n.textContent),
+                   ["Tools2", "Tool results", "Messages", "Kept free for summarizing", "Free space", "MCP tools found when needed"]);
+  assert.deepEqual([...box.querySelectorAll(".bd-item-name")].map((n) => n.textContent), ["task", "Docs \u00b7 read"]);
+  assert.equal(box.querySelector('.bd-row[data-id="deferred"] .bd-share').textContent, "\u2014", "what waits takes no share");
+  const asked = posted.filter((m) => m.type === "contextBreakdown").length;
+  send({ type: "event", event: { type: "context", used: 9500, size: 32768, compact_threshold: .85, compact_at: 27852,
+    input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, requests: 1 } });
+  assert.equal(posted.filter((m) => m.type === "contextBreakdown").length, asked + 1, "asked again as the window changes, while open");
+  assert.deepEqual(errors, []);
+});
+
 test("the context pill and compaction round-trip through the webview", () => {
   // The settings half of this test drove the in-panel settings dialog, which is gone; the tab
   // has its own coverage in editor-settings.test.mjs. The context pill and compaction below

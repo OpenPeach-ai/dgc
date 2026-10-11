@@ -1627,6 +1627,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** What fills the session's window, part by part, for the context menu (a CLI that counts it). A breakdown that
+   *  can't be had leaves the menu as it was. */
+  private async contextBreakdown(): Promise<void> {
+    if (!(this.lastReadyEvent?.capabilities as any)?.context_breakdown) return;
+    try {
+      const ev: any = await this.requestState(this.ensureBackend(), "ctx-breakdown", { type: "context_breakdown" },
+                                              "context_breakdown", 15000);
+      this.post({ type: "contextBreakdown", breakdown: { window: ev.window, used: ev.used, source: ev.source, compact_at: ev.compact_at,
+        buffer: ev.buffer, free: ev.free, categories: Array.isArray(ev.categories) ? ev.categories : [],
+        ...(Array.isArray(ev.deferred) ? { deferred: ev.deferred } : {}) } });
+    } catch { /* the menu keeps its own lines */ }
+  }
+
   /** Stop one monitor (or "all"). The backend signals it at once and reaps it in the background;
    * the `monitors` answer and the later monitor_ended event reach the webview as ordinary events. */
   private async stopMonitor(id: string): Promise<void> {
@@ -4910,6 +4923,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "resume": this.resume(); break;
       case "new": this.newSession(); break;
       case "compact": void this.compactContext(); break;
+      case "contextBreakdown": void this.contextBreakdown(); break;
       case "clear": this.ensureBackend().send(
         this.stateCommand("session-clear", { type: "clear_session" })); break;
       case "rewind": this.rewind(); break;
@@ -6728,6 +6742,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
     const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
     const pipsScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.js"));
+    const breakdownScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "breakdown.js"));
     const pipSetupStyle = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "pip-setup-cards.css"));
     const pipsStyle = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.css"));
     // Mermaid is fetched by the webview only when a diagram is actually rendered, so its ~5MB is
@@ -6873,6 +6888,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           <div class="context-head"><div><span class="context-kicker">Context window</span><strong id="ctx-used">0 / 0</strong></div><span id="ctx-pct">0%</span></div>
           <div class="context-track" aria-hidden="true"><span id="ctx-fill"></span></div>
           <div class="context-split"><span id="ctx-free">0 free</span><span id="ctx-auto">auto at 85%</span></div>
+          <div id="ctx-breakdown" hidden></div>
           <div class="context-size">
             <label for="ctx-size" class="context-kicker">Window size</label>
             <div class="context-size-controls">
@@ -6923,6 +6939,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="followup-hint" hidden></div>
 </footer>
 <script nonce="${nonce}" src="${markdown}"></script>
+<script nonce="${nonce}" src="${breakdownScript}"></script>
 <script nonce="${nonce}" src="${pipsScript}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;

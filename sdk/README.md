@@ -44,6 +44,7 @@ same rules for state, policy, sandbox, timeouts, usage and errors; its times are
 | Resume | `client.resume(session_id, ...)` or `latest=True` | `await client.resume({ sessionId } \| { latest: true })` |
 | Fork | `session.fork(name)` | `await session.fork(name)` |
 | Checkpoints | `session.list_checkpoints()` / `rewind(index)` | `session.listCheckpoints()` / `rewind(index)` |
+| What fills the context window | `session.context_breakdown()` | `session.contextBreakdown()` |
 | Run | `session.run(prompt)` | `await session.run(prompt)` |
 | Stream | `session.stream(prompt)` | `for await (const event of session.stream(prompt))` |
 | Cancel | `handle.cancel()` / `session.cancel()` | `handle.cancel()` / `session.cancel()` / `{ signal }` / leaving `for await` |

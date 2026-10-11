@@ -203,6 +203,39 @@ class Checkpoint:
 
 
 @dataclass(frozen=True)
+class ContextItem:
+    """One thing inside a part of the context window: a tool, a file, a skill."""
+    name: str
+    tokens: int = 0
+
+
+@dataclass(frozen=True)
+class ContextPart:
+    """A part of what fills the context window: messages, tool results, the system prompt, tools, memory..."""
+    id: str
+    label: str
+    tokens: int = 0
+    items: tuple[ContextItem, ...] = ()
+
+
+@dataclass(frozen=True)
+class ContextBreakdown:
+    """What fills the session's context window, part by part (biggest first), as DGC's meter shows it.
+
+    ``source`` is ``"reported"`` when the model counted its last request, else ``"estimated"``. ``buffer`` is the room
+    kept before the session is compacted (past ``compact_at`` tokens), ``free`` what's left besides; ``deferred`` lists
+    what isn't sent until it's needed (MCP tools found by a search), which takes no room yet."""
+    window: int
+    used: int
+    source: str
+    compact_at: int
+    parts: tuple[ContextPart, ...] = ()
+    buffer: int = 0
+    free: int = 0
+    deferred: tuple[ContextPart, ...] = ()
+
+
+@dataclass(frozen=True)
 class SessionInfo:
     id: str
     path: str

@@ -40,9 +40,11 @@ def _scaled(categories: list[dict], to: int) -> list[dict]:
     return out
 
 
-def build(window: int, categories: list[dict], *, compact_at: float, reported: int = 0,
+def build(window: int, categories: list[dict], *, compact_at: float, reported: int = 0, total: int = 0,
           deferred: list[dict] | None = None) -> dict:
-    """The breakdown of a window of `window` tokens, compacted past `compact_at` of it (a share, 0..1)."""
+    """The breakdown of a window of `window` tokens, compacted past `compact_at` of it (a share, 0..1). `reported`: the
+    model's own count of the last request; `total`: an estimate the surface already shows (its meter), so the parts
+    add up to the same number. Either scales the pieces; only `reported` makes the source "reported"."""
     window = max(0, int(window or 0))
     kept = [c for c in categories if c.get("tokens", 0) > 0]
     for c in kept:
@@ -50,9 +52,9 @@ def build(window: int, categories: list[dict], *, compact_at: float, reported: i
             c["items"] = sorted((i for i in c["items"] if i["tokens"] > 0), key=lambda i: (-i["tokens"], i["name"]))[:MAX_ITEMS]
             if not c["items"]:
                 del c["items"]
-    reported = max(0, int(reported or 0))
-    if reported:
-        kept = _scaled(kept, reported)
+    reported, total = max(0, int(reported or 0)), max(0, int(total or 0))
+    if reported or total:
+        kept = _scaled(kept, reported or total)
     kept.sort(key=lambda c: -c["tokens"])
     used = sum(c["tokens"] for c in kept)
     at = int(window * min(1.0, max(0.0, float(compact_at))))
@@ -60,6 +62,7 @@ def build(window: int, categories: list[dict], *, compact_at: float, reported: i
     free = max(0, window - used - buffer)
     out = {"window": window, "used": used, "source": "reported" if reported else "estimated", "compact_at": at,
            "categories": kept, "buffer": buffer, "free": free}
-    if deferred:
-        out["deferred"] = [d for d in deferred if d.get("tokens", 0) > 0]
+    waiting = [d for d in deferred or [] if d.get("tokens", 0) > 0]
+    if waiting:
+        out["deferred"] = waiting
     return out

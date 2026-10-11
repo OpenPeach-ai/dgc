@@ -721,6 +721,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(False),
     },
     "compact": {"request_id": _S(False)},
+    # What fills this session's context window, part by part (offered as ready.capabilities.context_breakdown):
+    # answered by `context_breakdown` (with no conversation_id: that's a ChatDGC chat's).
+    "context_breakdown": {"request_id": _S(False)},
     "list_artifacts": {"request_id": _S(False)},
     "stop_artifact": {"id": _S(), "request_id": _S(False)},
     # v14: ``values`` may carry thinking_inline (bool) and thinking_inline_max_chars (int 0..1000).

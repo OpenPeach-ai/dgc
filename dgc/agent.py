@@ -10497,6 +10497,74 @@ class Agent(GoalLifecycle):
             chars += len(json.dumps(tools, default=str))
         return chars // 4
 
+    def context_breakdown(self, window: int, compact_at: float) -> dict:
+        """What fills this session's window, part by part, as Claude's Usage sheet shows it (dgc/context_breakdown.py):
+        the conversation and the tool results in it, the system prompt by its sections (memory, skills, plugins and
+        the rest), the tools it's offered (built-in, and MCP by server, each), and the MCP tools kept back until a
+        search finds them. Each piece counted as the client counts a request, then scaled to estimate_tokens(), the
+        number the meter shows, so the two always agree."""
+        from . import context_breakdown as breakdown
+        size = lambda value: len(json.dumps(value, default=str)) // 4          # noqa: E731 -- the client's own ratio
+        messages = list(self.messages)
+        system = messages[0].get("content") if messages and messages[0].get("role") == "system" else ""
+        groups = {"system_prompt": 0, "memory": 0, "skills": 0, "plugins": 0}
+        memory_items, skill_items = [], []
+        for section in re.split(r"(?m)^(?=# )", system if isinstance(system, str) else ""):
+            if not section:
+                continue
+            head = section.split("\n", 1)[0][2:].strip().lower() if section.startswith("# ") else ""
+            n = size(section)
+            if head == "memory":
+                groups["memory"] += n
+                for part in re.split(r"(?m)^(?=## )", section)[1:]:
+                    memory_items.append((part.split("\n", 1)[0][3:].split("(")[0].strip()[:80] or "Memory", size(part)))
+            elif head in ("skills", "explicitly selected skills"):
+                groups["skills"] += n
+                skill_items += [(line[2:].split(":", 1)[0].strip()[:80], size(line))
+                                for line in section.splitlines() if line.startswith("- ")]
+            elif head == "installed plugins":
+                groups["plugins"] += n
+            else:
+                groups["system_prompt"] += n
+        tools = self._tool_schemas() if bool(getattr(self.client, "tools_supported", False)) else []
+        routes = getattr(self.mcp, "_routes", {}) or {}
+        built_in, mcp = [], []
+        for schema in tools:
+            name = str(schema.get("function", {}).get("name") or "")
+            if name.startswith("mcp__"):
+                server, original = routes.get(name, (name.split("__")[1] if name.count("__") >= 2 else "MCP", name))
+                mcp.append((f"{server} \u00b7 {original}", size(schema)))
+            else:
+                built_in.append((name, size(schema)))
+        offered = {str(t.get("function", {}).get("name") or "") for t in tools}
+        try:
+            every = self.mcp.tool_schemas() if self.mode != "plan" else []
+        except Exception:                      # noqa: BLE001 -- a catalog that can't be read defers nothing
+            every = []
+        deferred = sum(size(t) for t in every if str(t.get("function", {}).get("name") or "") not in offered)
+        conversation, results = 0, 0
+        estimate = getattr(self.client, "estimate_input_tokens", None)
+        for m in messages[1:] if messages and messages[0].get("role") == "system" else messages:
+            n = estimate([m]) if callable(estimate) else size(m)
+            if m.get("role") == "tool":
+                results += n
+            else:
+                conversation += n
+        cats = [breakdown.category("messages", "Messages", conversation),
+                breakdown.category("tool_results", "Tool results", results),
+                breakdown.category("system_prompt", "System prompt", groups["system_prompt"]),
+                breakdown.category("system_tools", "Tools", sum(n for _, n in built_in), built_in),
+                breakdown.category("mcp_tools", "MCP tools", sum(n for _, n in mcp), mcp),
+                breakdown.category("memory", "Memory", groups["memory"], memory_items),
+                breakdown.category("skills", "Skills", groups["skills"], skill_items),
+                breakdown.category("plugins", "Plugins", groups["plugins"])]
+        try:
+            total = self.estimate_tokens()
+        except Exception:                      # noqa: BLE001 -- the pieces as counted, then
+            total = 0
+        return breakdown.build(window, cats, compact_at=compact_at, total=total,
+                               deferred=[breakdown.category("mcp_deferred", "MCP tools found when needed", deferred)])
+
     def _mechanical_prune(self, aggressive: bool = False) -> bool:
         """Tier-1 context relief (no LLM): cap stale tool-result bodies so a few huge outputs
         can't dominate the window. Protects the system message and the most-recent quarter of

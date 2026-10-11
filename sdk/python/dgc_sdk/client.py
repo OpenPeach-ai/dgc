@@ -28,7 +28,7 @@ from .policy import (
 from .runtime import RuntimeSpec, discover_runtime, isolated_env, runtime_for_argv
 from .session import RunHandle, Session, _Completed, _new_id
 from .types import (
-    AgentInfo, Artifact, Checkpoint, Goal, HookInfo, McpServerInfo, Monitor, OnMcpInput,
+    AgentInfo, Artifact, Checkpoint, ContextBreakdown, Goal, HookInfo, McpServerInfo, Monitor, OnMcpInput,
     OnPermission, OnPlan, OnQuestion, PermissionMode, PermissionPolicy, PermissionRule,
     RunEvent, RunResult, SandboxPolicy, SandboxStatus, SessionInfo, SkillInfo, TaskItem,
     ToolSpec,
@@ -772,6 +772,10 @@ class AsyncSession:
 
     async def delete_session(self, path: str) -> list[SessionInfo]:
         return await asyncio.to_thread(self._sync.delete_session, path)
+
+    async def context_breakdown(self) -> ContextBreakdown:
+        """What fills the session's context window, part by part (see Session.context_breakdown)."""
+        return await asyncio.to_thread(self._sync.context_breakdown)
 
     async def list_checkpoints(self) -> list[Checkpoint]:
         return await asyncio.to_thread(self._sync.list_checkpoints)

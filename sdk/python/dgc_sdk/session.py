@@ -24,11 +24,11 @@ from .wire.client import DGCClient, DGCClientError, DGCEventTimeout
 
 from ._mcp_bridge import ToolHub
 from .errors import (
-    DGCCommandRejectedError, DGCConfigError, DGCRuntimeError, DGCTimeoutError, public_error,
+    DGCCommandRejectedError, DGCConfigError, DGCRuntimeError, DGCTimeoutError, DGCUnsupportedError, public_error,
 )
 from .schema import assert_supported, extract_json, validate as validate_schema
 from .types import (
-    AgentInfo, Artifact, Checkpoint, Denial, FileChange, Goal, HookInfo, McpInputRequest,
+    AgentInfo, Artifact, Checkpoint, ContextBreakdown, ContextItem, ContextPart, Denial, FileChange, Goal, HookInfo, McpInputRequest,
     McpInputResponse,
     McpServerInfo, Monitor, OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionAction,
     PermissionRequest, PermissionRule, PlanRequest, Question, QuestionAnswer, QuestionOption,
@@ -851,6 +851,26 @@ class Session:
                                          message_count=int(row.get("count") or 0),
                                          when=str(row.get("when") or "")))
         return items
+
+    def context_breakdown(self) -> ContextBreakdown:
+        """What fills this session's context window, part by part, as DGC's meter shows it: messages, tool results, the
+        system prompt, tools one by one (built-in and MCP), memory, skills, and the room kept and free. Needs a DGC CLI
+        that offers it (``capabilities["context_breakdown"]``)."""
+        if not self.capabilities.get("context_breakdown"):
+            raise DGCUnsupportedError("This DGC CLI can't break its context window down; update it (dgc update).")
+        event = self._request({"type": "context_breakdown", "request_id": _new_id("ctx")}, "context_breakdown")
+
+        def part(row) -> ContextPart:
+            items = tuple(ContextItem(name=str(i.get("name") or ""), tokens=int(i.get("tokens") or 0))
+                          for i in row.get("items") or [] if isinstance(i, dict))
+            return ContextPart(id=str(row.get("id") or ""), label=str(row.get("label") or ""),
+                               tokens=int(row.get("tokens") or 0), items=items)
+        return ContextBreakdown(
+            window=int(event.get("window") or 0), used=int(event.get("used") or 0),
+            source=str(event.get("source") or "estimated"), compact_at=int(event.get("compact_at") or 0),
+            parts=tuple(part(r) for r in event.get("categories") or [] if isinstance(r, dict)),
+            buffer=int(event.get("buffer") or 0), free=int(event.get("free") or 0),
+            deferred=tuple(part(r) for r in event.get("deferred") or [] if isinstance(r, dict)))
 
     def list_checkpoints(self) -> list[Checkpoint]:
         event = self._request({"type": "list_checkpoints", "request_id": _new_id("ck")},
