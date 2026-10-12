@@ -2095,8 +2095,9 @@ class Backend:
         # context_breakdown: chatdgc_context_breakdown is, answered by context_breakdown.
         # voice: the voice_* commands (dgc/voice), offered with ChatDGC: a Host's, the same in every folder.
         # voice_replies: chatdgc_send takes `voice` (spoken in voice mode: the reply is asked to sound like speech).
+        # question_forms: a reply's card may hold several questions, and chatdgc_answer takes `choices` for it.
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
-                            "context_breakdown": 1, "voice_replies": 1},
+                            "context_breakdown": 1, "voice_replies": 1, "question_forms": 1},
                 "memory": {"version": 1}, "voice": {"version": 1}}
 
     def _chats_capability(self) -> dict:

@@ -30,6 +30,11 @@
     while it speaks.
 - **Voice offered once:** the first time DGC starts with voice available and nothing installed, a notification
   offers to set it up.
+- **Voice mode has nothing to look at**, as ChatGPT's: a spoken reply makes no canvas, file, widget or question
+  card. Typing again brings them back.
+- **Several questions in one card.** When the model needs a few things to go on, ChatDGC asks up to four questions
+  in one card, numbered, the first answer of each chosen until you change it, and one button in the model's words
+  (**Build my plan**) sends them all.
 - **A Pip's page shows what it keeps in your one memory** (Pips API 46), and Forget there forgets it everywhere.
 - **Chat, above Work.** The side bar lists your chats above this project's sessions (now **Work**), with
   one search over both. **New chat** (or **DGC: New Chat (ChatDGC)**) opens a chat in an editor tab of
@@ -182,6 +187,9 @@
 
 ### Fixed
 
+- **A link to a file with its line is a link.** `[README.md](README.md:1)` in a reply showed as raw text: a bare file
+  name followed by a colon looked like a web address's scheme. The line comes off first now, so it opens README.md
+  at line 1; `javascript:`, `command:` and the like are still refused, digits or not.
 - **A Pip's plugin action shows its Allow card again.** Since every plugin turned on became every Pip's, what a
   Pip wanted to do in a plugin showed only as an "App action for you to check" row: the chat no longer knew
   which plugin the action's server belonged to. It finds it by the server now, with Allow, Always allow

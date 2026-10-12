@@ -43,26 +43,42 @@ SEARCH_TOOL = {"type": "function", "function": {
 # A question in the answer, as ChatGPT puts one: a card with choices where the model asked it. It doesn't wait:
 # the model carries on, and the choice comes back as the user's next message, which the model wrote ahead
 # (`prompt`, with {answer} where the choice goes). Kept on the reply (`questions`), answered by a message that
-# says so (`answers`), so it survives a reload, a restart and every version.
+# says so (`answers`), so it survives a reload, a restart and every version. When it needs a few things at once, a
+# card holds up to four questions answered together (ChatGPT's form), sent with one button (`submit`).
 ASK_TOOL = {"type": "function", "function": {
     "name": "ask_user",
     "description": (
-        "Put one multiple-choice question to the user inside your answer, as a card they answer with a click. "
-        "For when what you'd say next depends on something only they know, and a few answers cover it. It "
-        "doesn't wait: the card appears where you are in your answer, you carry on writing, and their choice "
-        "comes back as their next message. Don't also write the question or its options in your text."),
+        "Ask the user inside your answer, as a card they answer with clicks: one multiple-choice question, or, when "
+        "you need a few things at once, up to four questions they answer together and send with one button. For "
+        "when what you'd say next depends on something only they know, and a few answers cover each question. It "
+        "doesn't wait: the card appears where you are in your answer, you carry on writing, and their answers come "
+        "back as their next message. Don't also write the questions or their options in your text."),
     "parameters": {"type": "object", "properties": {
-        "question": {"type": "string", "description": "The question, in one short sentence."},
-        "options": {"type": "array", "items": {"type": "string"}, "description": (
-            "2 to 6 answers, a few words each. A box for their own answer is always added: don't add 'Other'.")},
+        "questions": {"type": "array", "description": (
+            "One question, or up to four answered together. Put the likeliest answer first: in a card of several, "
+            "it's chosen until they change it."),
+            "items": {"type": "object", "properties": {
+                "question": {"type": "string", "description": "The question, in one short sentence."},
+                "options": {"type": "array", "items": {"type": "string"}, "description": (
+                    "2 to 6 answers, a few words each. A one-question card adds a box for their own answer: don't "
+                    "add 'Other'.")}},
+                "required": ["question", "options"]}},
         "prompt": {"type": "string", "description": (
-            "The message their choice sends, written as the user, with {answer} where the choice goes, saying "
-            "what they want from you next. Example: 'The funds come from {answer}. Please analyse the routes "
-            "open to me.'")}},
-        "required": ["question", "options", "prompt"]}}}
+            "The message their answers send, written as the user, saying what they want from you next. With one "
+            "question, put {answer} where the choice goes: 'The funds come from {answer}. Please analyse the routes "
+            "open to me.' With several, their answers are added under it, one a line.")},
+        "submit": {"type": "string", "description": (
+            "With several questions: the button's words, saying what you'll do with their answers, like 'Build my "
+            "plan'.")}},
+        "required": ["questions", "prompt"]}}}
 ASKED = ("Shown to the user as a card under what you've written so far, with your options and a box for their own "
          "answer. Carry on with the rest of your answer; don't answer the question for them. Their choice comes "
          "back as their next message.")
+ASKED_FORM = ("Shown to the user as one card of {n} questions under what you've written so far, each with your "
+              "options. Carry on with the rest of your answer; don't answer them for them. Their answers come back "
+              "together as their next message.")
+MAX_FORM_QUESTIONS = 4
+MAX_SUBMIT_CHARS = 60
 MAX_OPTIONS = 6
 MAX_QUESTION_CHARS, MAX_OPTION_CHARS, MAX_PROMPT_CHARS, MAX_CHOICE_CHARS = 300, 160, 1000, 500
 _OTHER = re.compile(r"(?i)(other|something else|none of (these|the above))(\s+\w+)?\W*")
@@ -84,6 +100,8 @@ FORGET_TOOL = {"type": "function", "function": {
     "parameters": {"type": "object", "properties": {"id": {"type": "string", "description": "The memory's id, mem_…"}},
                    "required": ["id"]}}}
 MAX_MEMORY_PER_REPLY = 3
+# What only shows on the screen: a spoken turn's reply (voice mode) makes none of it.
+_SEEN_ONLY = frozenset({"ask_user", "make_file", "show_widget", "canvas_create", "canvas_edit"})
 # Files ChatDGC makes (made.py), as ChatGPT hands you report.docx: the model says what the file says, DGC lays it out,
 # and a card under the reply opens or saves it. It's in the Library too, marked as made.
 MAKE_FILE_TOOL = {"type": "function", "function": {
@@ -696,7 +714,8 @@ class ChatEngine:
                            on_compacted=on_compacted, on_question=on_question, on_images=on_images,
                            on_action=on_action, on_file=on_file, on_canvas=on_canvas, on_widget=on_widget)
 
-    def answer(self, chat_id: str, message_id: str, question: int, choice: str, *, model: str | None = None,
+    def answer(self, chat_id: str, message_id: str, question: int, choice: str, *, choices: list | None = None,
+               model: str | None = None,
                thinking: str | None = None, search: str = "off", on_start=None, on_text=None, on_thinking=None,
                on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
                cancel: threading.Event | None = None) -> dict:
@@ -711,14 +730,29 @@ class ChatEngine:
             raise ChatEngineError("That question isn't in this reply.")
         if index != len(chat["messages"]) - 1:
             raise ChatEngineError("The conversation has moved on since that question: write your answer as a message.")
-        choice = " ".join(str(choice or "").split())[:MAX_CHOICE_CHARS]
-        if not choice:
-            raise ChatEngineError("Choose an answer first.")
-        return self.send(chat_id, answered(asked[question], choice), model=model, thinking=thinking, search=search,
+        card = asked[question]
+        form = card.get("questions") if isinstance(card.get("questions"), list) and len(card["questions"]) > 1 else None
+        if form is not None and choices is not None:
+            # A card of several questions, answered together: one answer each, in order.
+            if not isinstance(choices, list) or len(choices) != len(form):
+                raise ChatEngineError("Answer every question on the card first.")
+            choices = [" ".join(str(c or "").split())[:MAX_CHOICE_CHARS] for c in choices]
+            if not all(choices):
+                raise ChatEngineError("Answer every question on the card first.")
+            choice = choices[0]
+        else:
+            # One question -- or a card of several from a screen that shows only its first.
+            choice = " ".join(str(choice or "").split())[:MAX_CHOICE_CHARS]
+            if not choice:
+                raise ChatEngineError("Choose an answer first.")
+            choices = [choice] if form is not None else None
+        answering = {"message": message_id, "question": question, "choice": choice,
+                     **({"choices": choices} if choices is not None else {})}
+        return self.send(chat_id, answered(card, choice, choices), model=model, thinking=thinking, search=search,
                          on_start=on_start, on_text=on_text, on_thinking=on_thinking, on_activity=on_activity,
                          on_compacted=on_compacted, on_question=on_question, on_images=on_images,
                          on_action=on_action, on_file=on_file, on_canvas=on_canvas, on_widget=on_widget, cancel=cancel,
-                         answering={"message": message_id, "question": question, "choice": choice})
+                         answering=answering)
 
     # -- deep research (research.py): a plan to edit or start, then rounds of reading, then a checked report
 
@@ -2086,21 +2120,38 @@ class ChatEngine:
 
     @staticmethod
     def _question(call, questions: list, at: int) -> tuple[str, dict | None]:
-        """One ask_user call: (what the model is told, the question to show, or None when there isn't one)."""
+        """One ask_user call: (what the model is told, the card to show, or None when there isn't one). A card of one
+        question keeps the shape every version reads ({at, question, options, prompt}); a card of several adds
+        `questions` and `submit`, and carries its first as `question` / `options` too, so an older screen shows that
+        one rather than nothing."""
         if questions:
-            return "Not shown: one question per reply, and this one already has it. Carry on with your answer.", None
+            return "Not shown: one card per reply, and this one already has it. Carry on with your answer.", None
         args = call.arguments if isinstance(call.arguments, dict) else {}
-        question = " ".join(str(args.get("question") or "").split())[:MAX_QUESTION_CHARS]
-        options: list[str] = []
-        for item in args.get("options") if isinstance(args.get("options"), list) else []:
-            text = " ".join(str(item).split())[:MAX_OPTION_CHARS]
-            # "Other" is the card's own box for their answer.
-            if text and not _OTHER.fullmatch(text) and text.casefold() not in (o.casefold() for o in options):
-                options.append(text)
-        if not question or len(options) < 2:
+        asked = args.get("questions") if isinstance(args.get("questions"), list) else []
+        if not asked and ("question" in args or "options" in args):
+            asked = [{"question": args.get("question"), "options": args.get("options")}]   # the one-question shape
+        kept: list[dict] = []
+        for item in asked:
+            if not isinstance(item, dict):
+                continue
+            question = " ".join(str(item.get("question") or "").split())[:MAX_QUESTION_CHARS]
+            options: list[str] = []
+            for option in item.get("options") if isinstance(item.get("options"), list) else []:
+                text = " ".join(str(option).split())[:MAX_OPTION_CHARS]
+                # "Other" is the card's own box for their answer (and means nothing without one).
+                if text and not _OTHER.fullmatch(text) and text.casefold() not in (o.casefold() for o in options):
+                    options.append(text)
+            if question and len(options) >= 2:
+                kept.append({"question": question, "options": options[:MAX_OPTIONS]})
+        if not kept:
             return "Not shown: a question needs its words and at least two options. Carry on with your answer.", None
         prompt = str(args.get("prompt") or "").strip()[:MAX_PROMPT_CHARS]
-        return ASKED, {"at": at, "question": question, "options": options[:MAX_OPTIONS], "prompt": prompt}
+        card = {"at": at, **kept[0], "prompt": prompt}
+        if len(kept) == 1:
+            return ASKED, card
+        kept = kept[:MAX_FORM_QUESTIONS]
+        submit = " ".join(str(args.get("submit") or "").split())[:MAX_SUBMIT_CHARS]
+        return ASKED_FORM.format(n=len(kept)), {**card, "questions": kept, **({"submit": submit} if submit else {})}
 
     def _web_search(self, call, sources: list, searches: list, on_activity, *, guard=None) -> str:
         """One web_search call: run it, number its results after the reply's earlier ones, say them as data. ``guard``
@@ -2197,16 +2248,21 @@ class ChatEngine:
         plugins = self._plugins(chat) if name not in self._toolless else None
         plugins_now = plugins.pin() if plugins is not None else []
 
+        # Voice mode, as ChatGPT's: a spoken turn's reply is heard, not looked at, so it gets no question card, file,
+        # widget or canvas (and its instructions offer none); typing again brings them back.
+        spoken = bool((self._last_user(chat) or {}).get("voice"))
+
         def offered():
             if name in self._toolless:
                 return None
             out = [SEARCH_TOOL] if search != "off" and len(searches) < MAX_SEARCHES else []
-            out += [ASK_TOOL] if not questions else []
-            out += [MAKE_FILE_TOOL] if len(files) < MAX_FILES_PER_REPLY else []
+            out += [ASK_TOOL] if not questions and not spoken else []
+            out += [MAKE_FILE_TOOL] if len(files) < MAX_FILES_PER_REPLY and not spoken else []
             if tables is not None and tables.tables and len(queries) < MAX_QUERIES:
                 out += [QUERY_DATA_TOOL]
-            out += [WIDGET_TOOL] if not widgets or (widget_state["fix"] and widget_state["calls"] < 2) else []
-            if canvas_state["calls"] < MAX_CANVAS_CALLS:
+            if not spoken:
+                out += [WIDGET_TOOL] if not widgets or (widget_state["fix"] and widget_state["calls"] < 2) else []
+            if canvas_state["calls"] < MAX_CANVAS_CALLS and not spoken:
                 out += [CANVAS_CREATE_TOOL] + ([CANVAS_EDIT_TOOL] if canvas_state["any"] else [])
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
                 out += [REMEMBER_TOOL, FORGET_TOOL]
@@ -2287,7 +2343,10 @@ class ChatEngine:
                     asked["_responses_output"] = result.provider_items
                 messages.append(asked)
                 for call in calls:
-                    if call.name == "ask_user":
+                    if spoken and call.name in _SEEN_ONLY:
+                        told = ("Not done: this is voice mode, and nothing can be shown. Say it, or say you can make it "
+                                "once they're back to typing.")
+                    elif call.name == "ask_user":
                         told, question = self._question(call, questions, before + len("".join(streamed)))
                         if question is not None:
                             questions.append(question)
@@ -2434,9 +2493,25 @@ class ChatEngine:
         return message
 
 
-def answered(question: dict, choice: str) -> str:
-    """The message a choice sends: the one the model wrote for it, with the choice where it said."""
+def answered(question: dict, choice: str, choices: list | None = None) -> str:
+    """The message a choice sends: the one the model wrote for it, with the choice where it said. A card of several
+    questions sends that message with each question and its answer under it, one a line."""
     prompt = question.get("prompt") or ""
+    form = question.get("questions") if isinstance(question.get("questions"), list) else None
+    if form and len(form) > 1 and choices:
+        lines = []
+        for item, picked in zip(form, choices):
+            asked = str(item.get("question") or "").strip()
+            lines.append(f"{asked} {picked}" if asked.endswith(("?", ":")) else f"{asked}: {picked}")
+        block = "\n".join(lines)
+        mark = next((m for m in ("{answers}", "{answer}") if m in prompt), None)
+        if mark is None:
+            return (prompt.strip() + "\n\n" if prompt.strip() else "") + block
+        # A message written with a place for the answer (as for one question): the answers go there, one a line --
+        # once, not joined there and listed again under it (deepseek wrote "…from India: {answer}", 2026-10-12).
+        head, _, tail = prompt.partition(mark)
+        tail = tail.replace("{answers}", "").replace("{answer}", "").strip()
+        return "\n\n".join(part for part in (head.strip(), block, tail) if part)
     if "{answer}" in prompt:
         return prompt.replace("{answer}", choice)
     return f"{question.get('question', '')} {choice}." + (f" {prompt}" if prompt else "")
@@ -2455,6 +2530,11 @@ def with_questions(message: dict, show: Callable[[dict], str]) -> str:
 
 def _asked(question: dict) -> str:
     """A question as the model reads it back, in history and summaries."""
+    form = question.get("questions") if isinstance(question.get("questions"), list) else None
+    if form and len(form) > 1:
+        return ("\n\n[You asked the user, as one card of questions answered together: "
+                + " ".join(f"{n}. {q.get('question', '')} Options: " + "; ".join(q.get("options") or []) + "."
+                           for n, q in enumerate(form, 1)) + "]\n\n")
     return (f"\n\n[You asked the user, as a card with choices: {question.get('question', '')} Options: "
             + "; ".join(question.get("options") or []) + "; or their own answer.]\n\n")
 
@@ -2500,8 +2580,10 @@ def _made_note(meta: dict, found) -> str:
 
 
 def _exported(question: dict) -> str:
-    return ("\n\n> **" + question.get("question", "") + "**\n>\n"
-            + "\n".join(f"> - {o}" for o in question.get("options") or []) + "\n\n")
+    form = question.get("questions") if isinstance(question.get("questions"), list) and len(question["questions"]) > 1 \
+        else [question]
+    return "".join("\n\n> **" + (f"{n}. " if len(form) > 1 else "") + str(q.get("question", "")) + "**\n>\n"
+                   + "\n".join(f"> - {o}" for o in q.get("options") or []) for n, q in enumerate(form, 1)) + "\n\n"
 
 
 def _heard(chat: dict, messages: list) -> str:

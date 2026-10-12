@@ -1292,8 +1292,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           const choice = typeof message.choice === "string" ? message.choice.trim() : "";
           const question = Number(message.question);
           if (!choice || choice.length > 500 || !Number.isInteger(question) || question < 0 || question > 50) return;
+          // A card of several questions answers them all at once, to a CLI that takes that (question_forms).
+          const choices = message.choices === undefined ? null : message.choices;
+          if (choices !== null && !(Array.isArray(choices) && choices.length >= 2 && choices.length <= 4
+                                    && choices.every((c: unknown) => typeof c === "string" && !!c.trim() && c.length <= 500))) return;
+          const forms = Number(this.host?.chatdgcOffers?.()?.question_forms) >= 1;
           this.ask({ tab, kind: "send" }, { type: "chatdgc_answer", conversation_id: conversation, message_id: message.messageId,
-                                            question, choice, ...chosen });
+                                            question, choice, ...(choices && forms ? { choices: choices.map((c: string) => c.trim()) } : {}),
+                                            ...chosen });
         } else {
           this.ask({ tab, kind: "fork" }, { type: "chatdgc_regenerate", conversation_id: conversation,
                                             message_id: message.messageId, ...chosen });

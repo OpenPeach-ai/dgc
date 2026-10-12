@@ -7343,6 +7343,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": true
     },
+    "choices": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
     "model": {
       "types": [
         "string"

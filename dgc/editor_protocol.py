@@ -898,8 +898,10 @@ COMMAND_FIELDS.update({
     # Answer the question a reply asked (`question`: its index in the reply's `questions`) with `choice` (one of
     # its options, or the user's own words): the message the model wrote for it is sent as the user's, carrying
     # `answers: {message, question, choice}`, and a turn follows. Only while that reply is the last message.
+    # A card of several questions (ready.capabilities.chatdgc.question_forms) is answered with `choices`, one for
+    # each question in order; `choice` is the first.
     "chatdgc_answer": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "question": _I(),
-                       "choice": _S(), "model": _S(False),
+                       "choice": _S(), "choices": _A(False), "model": _S(False),
                        "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
                        "search": _f("string", required=False, enum=CHATDGC_SEARCH)},
     # Write the chat to `path` (an absolute path the user chose): Markdown, the conversation as shown; or JSON, the

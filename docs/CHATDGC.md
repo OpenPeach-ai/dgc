@@ -46,6 +46,8 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
     mode.
   - **What it needs:** a dictation model and a voice, both from Settings → Voice. Pips have it too. Nothing
     records while it speaks, so the reply never comes back as your words.
+  - **Nothing to look at:** as in ChatGPT's voice mode, a spoken reply makes no canvas, file, chart, widget or
+    question card. Ask for one and it says it can once you're back to typing.
 - **Files, images and long pastes.** Use the paperclip to attach up to ten files to a message, or paste an
   image or a long piece of text (more than 5,000 characters) into the box. You can send a message with only
   files.
@@ -164,8 +166,12 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   ask you inside its answer. A card shows the question with a few answers to pick from and a **Something
   else** box for your own. The answer goes on below the card. **Continue** sends a message the model wrote
   for that question, with your choice filled in. You can answer while that reply is the last thing said;
-  afterwards the card shows what you chose, or **Not answered**. One question per reply. Models that can't
+  afterwards the card shows what you chose, or **Not answered**. One card per reply. Models that can't
   use tools answer without asking.
+  - **Several questions at once:** when the model needs a few things to go on, one card holds up to four
+    questions, numbered, as ChatGPT asks them. The first answer of each is chosen until you change it, and one
+    button, in the model's words (**Build my plan**), sends them all: its message with each question and your
+    answer under it, one a line.
 - **Edit and try again.** **Edit** under a message you sent changes it; **Try again** under a reply asks
   for another one, with whatever model and thinking level the box is set to. Either way, the old version
   stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own

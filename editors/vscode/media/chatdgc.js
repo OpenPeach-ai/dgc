@@ -436,6 +436,7 @@
    *  wrote for it, with your choice in. Answerable while the reply is the last thing said; then it shows what you
    *  chose, or that you moved on. What you pick survives the reply re-drawing as it streams. */
   function questionCard(message, q, index, live) {
+    if (Array.isArray(q.questions) && q.questions.length > 1) return formCard(message, q, q.questions, index, live);
     const key = `${message.id}:${index}`;
     const at = state.messages.findIndex((m) => m.id === message.id);
     const next = at >= 0 ? state.messages[at + 1] : undefined;
@@ -494,6 +495,59 @@
       state.busy = true; controls(); sync();
     });
     sync();
+    return card;
+  }
+  /** A card of several questions answered together, as ChatGPT asks them: numbered, each with its options and the
+   *  first chosen until you change it, and one button, in the model's words, that sends them all. Answerable while
+   *  the reply is the last thing said; then it shows what was sent, or that you moved on. */
+  function formCard(message, q, form, index, live) {
+    const key = `${message.id}:${index}`;
+    const at = state.messages.findIndex((m) => m.id === message.id);
+    const next = at >= 0 ? state.messages[at + 1] : undefined;
+    const answers = next?.role === "user" && next.answers?.message === message.id && Number(next.answers.question) === index
+      ? next.answers : null;
+    const sent = answers ? (Array.isArray(answers.choices) ? answers.choices : [answers.choice]).map((c) => String(c ?? "")) : null;
+    const open = !next && !live;
+    const options = (item) => (Array.isArray(item?.options) ? item.options : []).map(String);
+    const pick = state.picks[key] || (state.picks[key] = { values: form.map((item) => options(item)[0] || "") });
+    const card = el("form", "cd-question cd-form");
+    card.dataset.state = sent ? "answered" : next ? "passed" : "open";
+    form.forEach((item, n) => {
+      const group = el("div", "cd-form-q");
+      const title = el("p", "cd-question-text", `${n + 1}. ${String(item?.question || "")}`);
+      title.id = `cd-q-${message.id}-${index}-${n}`;
+      group.append(title);
+      const list = el("div", "cd-options");
+      list.setAttribute("role", "radiogroup");
+      list.setAttribute("aria-labelledby", title.id);
+      for (const option of options(item)) {
+        const row = el("label", "cd-option");
+        const radio = el("input");
+        radio.type = "radio"; radio.name = `cd-f-${message.id}-${index}-${n}`; radio.value = option;
+        radio.checked = sent ? sent[n] === option : open && pick.values[n] === option;
+        radio.disabled = !open;
+        radio.addEventListener("change", () => { pick.values[n] = option; });
+        row.append(radio, el("span", "", option));
+        list.append(row);
+      }
+      group.append(list);
+      card.append(group);
+    });
+    if (open) {
+      const go = el("button", "cd-continue cd-question-go", String(q.submit || "") || "Continue");
+      go.type = "submit";
+      go.disabled = state.busy || state.compacting;
+      card.append(go);
+    } else card.append(el("p", "cd-question-note", sent ? "Answered" : next ? "Not answered" : "Answer when the reply finishes"));
+    card.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const values = pick.values.map((v) => String(v || "").trim());
+      if (!open || values.some((v) => !v) || state.busy || state.compacting) return;
+      vscode.postMessage({ type: "answer", messageId: message.id, question: index, choice: values[0], choices: values,
+                           model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode() });
+      state.busy = true; controls();
+      for (const control of card.querySelectorAll("input, button")) control.disabled = true;
+    });
     return card;
   }
   /** A summary as the model wrote it: models write Markdown even when asked for plain text. */

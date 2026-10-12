@@ -1704,6 +1704,53 @@ test("a question in the answer: a card where it was asked, Continue sends the ch
   } finally { await s.page.close(); }
 });
 
+test("a card of several questions, as ChatGPT asks them: numbered, the first answers chosen, one button sends them all", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const form = { at: 22, question: "Who should own it?", options: ["Only me", "Jointly"], prompt: "Build my plan.",
+      submit: "Build my family remittance plan", questions: [
+        { question: "Who should own it?", options: ["Only me", "Jointly"] },
+        { question: "Which relatives could contribute?", options: ["Spouse and/or parents", "Brothers and/or sisters", "Adult children"] },
+        { question: "Where in the UK is the property?", options: ["England, including London", "Scotland", "Wales"] }] };
+    await s.send({ type: "opened", conversation: conversation({ title: "London" }), earlier: 0, busy: false,
+                   messages: [{ id: M(1), role: "user", text: "Can my family fund my flat?" }] });
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "delta", messageId: M(2), text: "Decide who owns it first." });
+    await s.send({ type: "question", messageId: M(2), question: form });
+    await s.frame();
+    const card = s.page.locator(".cd-question");
+    assert.equal(await card.getAttribute("class"), "cd-question cd-form");
+    assert.deepEqual(await card.locator(".cd-question-text").allTextContents(),
+                     ["1. Who should own it?", "2. Which relatives could contribute?", "3. Where in the UK is the property?"]);
+    assert.equal(await card.locator(".cd-other").count(), 0, "no box of its own: they can write in the chat");
+    assert.equal(await card.locator("input:checked").count(), 0, "nothing chosen while it's still answering");
+    assert.equal(await card.locator(".cd-question-note").textContent(), "Answer when the reply finishes");
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Decide who owns it first.", finish: "stop", questions: [form] } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    assert.deepEqual(await card.locator("input:checked").evaluateAll((n) => n.map((x) => x.value)),
+                     ["Only me", "Spouse and/or parents", "England, including London"], "the first answer of each, until changed");
+    await card.getByText("Brothers and/or sisters").click();
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });       // the chat redraws: what you picked stays
+    assert.equal(await card.getByLabel("Brothers and/or sisters").isChecked(), true);
+    if (process.env.DGC_SHOTS) await card.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-question-form.png") });
+    await card.getByRole("button", { name: "Build my family remittance plan" }).click();
+    const [answer] = await s.posted("answer");
+    assert.deepEqual([answer.question, answer.choice, answer.choices],
+                     [0, "Only me", ["Only me", "Brothers and/or sisters", "England, including London"]]);
+    assert.equal(await s.page.locator("#cd-send").isDisabled(), true, "it's answering now");
+    await s.send({ type: "message", message: { id: M(3), role: "user", text: "Build my plan.\n\nWho should own it? Only me",
+      answers: { message: M(2), question: 0, choice: "Only me", choices: ["Only me", "Brothers and/or sisters", "Wales"] } } });
+    await s.frame();
+    assert.equal(await card.getAttribute("data-state"), "answered");
+    assert.deepEqual(await card.locator("input:checked").evaluateAll((n) => n.map((x) => x.value)),
+                     ["Only me", "Brothers and/or sisters", "Wales"], "it shows what was sent");
+    assert.equal(await card.locator("input:not(:disabled)").count(), 0);
+    assert.equal(await card.locator(".cd-question-note").textContent(), "Answered");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("deep research: the toggle, a plan that counts down, editing it, the reading as it goes, the report and its reader", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

@@ -285,7 +285,9 @@ class ChatService:
 
     def _occupied(self, cmd: dict, work) -> None:
         """Work on a chat that takes a while (a summary is a model request): in the chat's turn slot, on a thread
-        of its own, so nothing else runs in that chat meanwhile and Stop ends it."""
+        of its own, so nothing else runs in that chat meanwhile and Stop ends it. What ``work`` returns, if it's
+        callable, runs once the chat is free again: a screen that acts on the news at once (Edit the summary just
+        made) is never told the chat is still answering."""
         conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
         self.engine.open(conversation_id)
         cancel = threading.Event()
@@ -297,10 +299,11 @@ class ChatService:
             slot = self._turns[conversation_id] = {"cancel": cancel, "reply_id": None, "thread": None}
 
         def run():
+            after = None
             try:
                 self.emit("chatdgc_activity", conversation_id=conversation_id, message_id=request_id[:64],
                           kind="compacting", text="")
-                work(cancel)
+                after = work(cancel)
             except (ChatEngineError, ChatStoreError) as exc:
                 self._error(str(exc), request_id, conversation_id)
             except Exception as exc:                  # noqa: BLE001
@@ -310,14 +313,23 @@ class ChatService:
                 with self._lock:
                     if self._turns.get(conversation_id) is slot:
                         del self._turns[conversation_id]
+            if callable(after):
+                try:
+                    after()
+                except Exception as exc:              # noqa: BLE001
+                    self._error(f"ChatDGC hit an error: {' '.join(str(exc).split())[:300] or type(exc).__name__}",
+                                request_id, conversation_id)
         slot["thread"] = threading.Thread(target=run, daemon=True, name=f"dgc-chatdgc-work-{conversation_id[5:13]}")
         slot["thread"].start()
 
     def _compact_now(self, cmd: dict) -> None:
         def work(cancel):
             summary = self.engine.compact(cmd["conversation_id"], cancel=cancel)
-            self._compacted(cmd["conversation_id"], summary, cmd["request_id"])
-            self._context(cmd["conversation_id"])
+
+            def said():                             # once the chat is free: its summary can be edited at once
+                self._compacted(cmd["conversation_id"], summary, cmd["request_id"])
+                self._context(cmd["conversation_id"])
+            return said
         self._occupied(cmd, work)
 
     def _carry(self, cmd: dict) -> None:
@@ -624,7 +636,7 @@ class ChatService:
     def _answer(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.answer(cmd["conversation_id"], cmd["message_id"], cmd["question"], cmd["choice"],
-                                      model=cmd.get("model"), thinking=cmd.get("thinking"),
+                                      choices=cmd.get("choices"), model=cmd.get("model"), thinking=cmd.get("thinking"),
                                       search=cmd.get("search", "auto"), on_start=on_start, on_activity=activity,
                                       cancel=cancel, **stream_for())
         self._start(cmd, run)

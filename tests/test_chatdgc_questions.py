@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from dgc.chatdgc import engine as engine_module
-from dgc.chatdgc.engine import ASKED, ChatEngine, ChatEngineError
+from dgc.chatdgc.engine import ASKED, ASKED_FORM, ChatEngine, ChatEngineError
 from dgc.chatdgc.store import ChatStore
 from dgc.shared_memory import SharedMemory
 from dgc.llm import ToolCall
@@ -144,7 +144,7 @@ class QuestionTests(unittest.TestCase):
         self.assertEqual(len(reply["questions"]), 1)
         told = [m["content"] for m in self.world["requests"][-1]["messages"] if m["role"] == "tool"]
         self.assertEqual(told[0], ASKED)
-        self.assertIn("one question per reply", told[1])
+        self.assertIn("one card per reply", told[1])
         for bad in ({"question": "", "options": ["a", "b"]}, {"question": "Which?", "options": ["only one", "Other"]},
                     {"question": "Which?", "options": "a, b"}, {"question": "Which?", "options": ["Same", "same"]}):
             with self.subTest(bad=bad):
@@ -190,10 +190,107 @@ class QuestionTests(unittest.TestCase):
         self.assertEqual(self.engine._toolless, set())
 
 
+PLAN = {"questions": [
+    {"question": "Who should legally own the UK property?",
+     "options": ["Only me — 100% ownership", "Jointly with contributing relatives", "I am open to either structure"]},
+    {"question": "Which relatives could contribute?",
+     "options": ["Spouse and/or parents", "Brothers and/or sisters", "Adult children", "Other"]},
+    {"question": "Where did the family members' funds originate?",
+     "options": ["Savings, salary or business income in India", "Investments being sold in India"]},
+    {"question": "Where in the UK is the property?", "options": ["England, including London", "Scotland", "Wales"]},
+    {"question": "A fifth?", "options": ["a", "b"]}],
+    "prompt": "Please build my family remittance plan from these answers.", "submit": "Build my family remittance plan"}
+
+
+class FormTests(unittest.TestCase):
+    """A card of several questions answered together (ChatGPT's form): up to four, numbered on the card, each with
+    its options; one button with the model's words sends the message it wrote with every answer under it."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="chatdgc-forms-")
+        self.addCleanup(temp.cleanup)
+        self.store = ChatStore(Path(temp.name) / "chat")
+        self.world = {"requests": [], "script": []}
+        self.engine = ChatEngine(Config(), self.store, client_factory=lambda model: Model(model or "chat-model", self.world),
+                                 memory=SharedMemory(Path(temp.name) / "memory"), projects=lambda hidden: [])
+
+    def asked(self, args=PLAN):
+        chat = self.engine.open()
+        self.world["script"] += [{"parts": ["Before you choose how many relatives, decide who owns it."],
+                                  "calls": [("ask_user", args)]},
+                                 {"parts": ["My preferred approach is written approval first."]}]
+        shown = []
+        reply = self.engine.send(chat["id"], "Can my family send money for my London flat?", on_question=shown.append)
+        return chat, reply, shown
+
+    def test_a_card_of_several_questions_is_kept_whole_and_the_model_is_told(self):
+        chat, reply, shown = self.asked()
+        card = reply["questions"][0]
+        self.assertEqual(shown, [card])
+        self.assertEqual([q["question"] for q in card["questions"]], [q["question"] for q in PLAN["questions"][:4]],
+                         "four at most: the fifth is dropped")
+        self.assertEqual(card["questions"][1]["options"], ["Spouse and/or parents", "Brothers and/or sisters", "Adult children"],
+                         "a bare 'Other' means nothing on a card with no box for it")
+        self.assertEqual(card["submit"], "Build my family remittance plan")
+        self.assertEqual((card["question"], card["options"]), (PLAN["questions"][0]["question"], PLAN["questions"][0]["options"]),
+                         "its first question on its own too: an older screen shows that one, not nothing")
+        told = next(m["content"] for m in self.world["requests"][-1]["messages"] if m["role"] == "tool")
+        self.assertEqual(told, ASKED_FORM.format(n=4))
+
+    def test_one_button_sends_every_answer_under_the_message_the_model_wrote(self):
+        chat, reply, _ = self.asked()
+        picks = ["Only me — 100% ownership", "Spouse and/or parents", "Savings, salary or business income in India",
+                 "England, including London"]
+        self.engine.answer(chat["id"], reply["id"], 0, picks[0], choices=picks)
+        mine = self.store.get(chat["id"])["messages"][-2]
+        self.assertEqual(mine["text"], "Please build my family remittance plan from these answers.\n\n"
+                                       "Who should legally own the UK property? Only me — 100% ownership\n"
+                                       "Which relatives could contribute? Spouse and/or parents\n"
+                                       "Where did the family members' funds originate? Savings, salary or business income in India\n"
+                                       "Where in the UK is the property? England, including London")
+        self.assertEqual(mine["answers"], {"message": reply["id"], "question": 0, "choice": picks[0], "choices": picks})
+        said = next(m["content"] for m in self.world["requests"][-1]["messages"] if m["role"] == "assistant")
+        self.assertIn("[You asked the user, as one card of questions answered together: 1. Who should legally own the "
+                      "UK property? Options: Only me — 100% ownership; Jointly with contributing relatives; I am open "
+                      "to either structure. 2. Which relatives", said)
+
+    def test_every_question_needs_its_answer_and_an_older_screen_answers_the_first(self):
+        chat, reply, _ = self.asked()
+        for choices in (["a", "b"], ["a", "b", "c", ""], "abcd", ["a", "b", "c", "d", "e"]):
+            with self.subTest(choices=choices), self.assertRaisesRegex(ChatEngineError, "Answer every question"):
+                self.engine.answer(chat["id"], reply["id"], 0, "a", choices=choices)
+        self.engine.answer(chat["id"], reply["id"], 0, "Jointly with contributing relatives")
+        mine = self.store.get(chat["id"])["messages"][-2]
+        self.assertEqual(mine["text"], "Please build my family remittance plan from these answers.\n\n"
+                                       "Who should legally own the UK property? Jointly with contributing relatives")
+        self.assertEqual(mine["answers"]["choices"], ["Jointly with contributing relatives"])
+
+    def test_one_good_question_is_an_ordinary_card_and_the_export_numbers_several(self):
+        chat, reply, _ = self.asked({"questions": [PLAN["questions"][0], {"question": "", "options": ["a", "b"]}],
+                                     "prompt": "I want {answer}."})
+        self.assertNotIn("questions", reply["questions"][0], "one question: the shape every version reads")
+        told = next(m["content"] for m in self.world["requests"][-1]["messages"] if m["role"] == "tool")
+        self.assertEqual(told, ASKED)
+        chat, reply, _ = self.asked()
+        exported = self.engine.export(chat["id"], "markdown")
+        self.assertIn("> **1. Who should legally own the UK property?**\n>\n> - Only me — 100% ownership", exported)
+        self.assertIn("> **4. Where in the UK is the property?**", exported)
+
 class AnsweredTextTests(unittest.TestCase):
     def test_the_choice_goes_where_the_model_said(self):
         self.assertEqual(engine_module.answered({"prompt": "I'm {answer}; what next?"}, "a student"),
                          "I'm a student; what next?")
+
+    def test_a_cards_answers_go_where_the_model_said_once(self):
+        card = {"questions": [{"question": "Status?"}, {"question": "How will the money come"}],
+                "prompt": "Here are my details: {answer} Please advise."}
+        self.assertEqual(engine_module.answered(card, "Citizen", ["Citizen", "A loan"]),
+                         "Here are my details:\n\nStatus? Citizen\nHow will the money come: A loan\n\nPlease advise.",
+                         "where it said, one a line: not joined there and listed again under it")
+        self.assertEqual(engine_module.answered({**card, "prompt": "Please advise."}, "Citizen", ["Citizen", "A loan"]),
+                         "Please advise.\n\nStatus? Citizen\nHow will the money come: A loan")
+        self.assertEqual(engine_module.answered({**card, "prompt": "{answers}"}, "Citizen", ["Citizen", "A loan"]),
+                         "Status? Citizen\nHow will the money come: A loan")
 
 
 if __name__ == "__main__":

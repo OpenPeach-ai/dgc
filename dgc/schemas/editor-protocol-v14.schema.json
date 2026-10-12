@@ -9949,6 +9949,9 @@
             "choice": {
               "type": "string"
             },
+            "choices": {
+              "type": "array"
+            },
             "model": {
               "type": "string"
             },

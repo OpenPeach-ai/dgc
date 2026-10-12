@@ -20,6 +20,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **Spoken replies:** in voice mode, a message sent by voice asks for an answer that sounds like speech: a few short
   sentences, no tables or headings, with an offer to go into detail. Without this, a long Markdown plan took five
   minutes to read aloud. `chatdgc_send` takes `voice`, offered as `ready.capabilities.chatdgc.voice_replies`.
+  - **Nothing to look at, as ChatGPT's voice mode:** a spoken turn isn't offered `ask_user`, `make_file`,
+    `show_widget` or the canvas tools, nor told about them or about charts; one called anyway is refused. Typing
+    again brings them back.
+- **Compact now, then Edit at once:** "compacted" was said while the chat was still busy recounting its window, so
+  editing the new summary straight away was refused as "still answering". It's said once the chat is free.
+- **A card of several questions:** `ask_user` takes `questions` (up to four, each with its options) and `submit`, the
+  button's words, as ChatGPT's form does. The card is kept on the reply with its first question as `question` /
+  `options` too, so an older screen shows that one. `chatdgc_answer` takes `choices`, one per question, offered as
+  `ready.capabilities.chatdgc.question_forms`; the message sent is the model's own with each question and its
+  answer under it.
 - **Bytes, fixed in `dgc serve`'s redaction:** speech, screenshots, images fetched later and a Pip computer's screen
   travel as base64, and about once a megabyte that holds a run the AWS-key pattern (case-insensitive) redacted. The
   audio arrived corrupt and never played; an image or the screen stream could break the same way. Base64 bytes now

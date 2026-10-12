@@ -41,7 +41,14 @@ test("Markdown URLs reject executable schemes and ambiguous network paths", () =
   for (const value of ["javascript:alert(1)", "command:workbench.action.terminal.new",
     "data:text/html,hello", "file:///etc/passwd", "//example.com/x", "\\\\server\\share",
     "https://user:password@example.com", "java%73cript:alert(1)", "https://exa\nmple.com",
-    "a%00.txt", "broken%ZZ", "#heading"]) assert.equal(linkTarget(value), undefined, value);
+    "a%00.txt", "broken%ZZ", "#heading", "javascript:1", "command:1", "data:12", "vscode:1", "file:2",
+    "java%73cript:1", "mailto:a@b.c", "#L12"]) assert.equal(linkTarget(value), undefined, value);
+  // A bare file name with its line (no folder): "README.md:" looked like a scheme, so the link stayed raw text.
+  assert.deepEqual(linkTarget("README.md:1"), { kind: "file", target: "README.md", line: 1 });
+  assert.deepEqual(linkTarget("Makefile:3:7"), { kind: "file", target: "Makefile", line: 3 });
+  assert.deepEqual(linkTarget("setup.py#L40"), { kind: "file", target: "setup.py", line: 40 });
+  assert.match(render("[README.md](README.md:1) has one heading."), /<button type="button" class="md-link" data-link-kind="file" data-target="README.md"/);
+  assert.ok(!render("[README.md](README.md:1)").includes("](README.md:1)"), "never left as raw Markdown");
   assert.deepEqual(linkTarget("/project/My%20File.ts:17"),
     { kind: "file", target: "/project/My File.ts", line: 17 });
   assert.deepEqual(linkTarget("src/file.ts#L42C3"), { kind: "file", target: "src/file.ts", line: 42 });

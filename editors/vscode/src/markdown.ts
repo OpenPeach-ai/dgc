@@ -37,12 +37,16 @@ export function linkTarget(value: string): LinkTarget | undefined {
   }
   let path: string;
   try { path = decodeURIComponent(value); } catch { return; }
-  if (/[\u0000-\u001f\u007f]/.test(path) || /^(?:[a-z][a-z\d+.-]*:|\/\/|\\\\)/i.test(path)
-      && !/^[A-Za-z]:[\\/]/.test(path)) return;
+  // A scheme that runs or reads something is refused whatever follows it, digits too ("javascript:1").
+  if (/^(?:javascript|vbscript|data|file|command|vscode[\w.+-]*|about|blob):/i.test(path)) return;
   if (!path || path.startsWith("#") || path.includes("?")) return;
+  // A file and its line, as models write them (README.md:12, a.ts:3:7, a.py#L40). The line comes off first, so a
+  // bare name like "README.md:" isn't read as a scheme and left as raw text.
   const location = /(?::(\d+)(?::\d+)?|#L(\d+)(?:C\d+)?)$/.exec(path);
   const line = location ? Number(location[1] || location[2]) : undefined;
   if (location) path = path.slice(0, location.index);
+  if (/[\u0000-\u001f\u007f]/.test(path) || /^(?:[a-z][a-z\d+.-]*:|\/\/|\\\\)/i.test(path)
+      && !/^[A-Za-z]:[\\/]/.test(path)) return;
   return path ? { kind: "file", target: path,
     ...(line && Number.isSafeInteger(line) ? { line } : {}) } : undefined;
 }

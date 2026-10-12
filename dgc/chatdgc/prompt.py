@@ -24,10 +24,10 @@ SEARCH_CITING = (
 
 ASK = (
     "- When what you'd say next depends on something only the user knows (their situation, which of a few paths "
-    "they mean) and a few answers cover it, you can put one question to them with the ask_user tool. It shows as "
-    "a card with your options right where you call it, and you carry on writing. Answer what you can first; ask "
-    "at most once, never about what you could reasonably assume or look up, and don't write the question or its "
-    "options in your text as well.\n")
+    "they mean) and a few answers cover it, you can ask them with the ask_user tool: one question, or up to four in "
+    "one card when you need a few things at once to go on. It shows as a card with your options right where you "
+    "call it, and you carry on writing. Answer what you can first; one card a reply, never about what you could "
+    "reasonably assume or look up, and don't write the questions or their options in your text as well.\n")
 
 
 # Memory: one memory about the user, shared with their Work sessions and Pips (dgc/shared_memory.py).
@@ -86,9 +86,10 @@ CANVAS = (
 VOICE = (
     "\nThe user spoke this message in voice mode, and your reply will be read aloud to them. Answer the way you would "
     "speak: a few short, natural sentences (about 60 words), leading with what matters. No headings, tables, lists, "
-    "code, links or citations; say numbers as words would read. Don't open a canvas, make a file or draw a chart "
-    "unless they ask for one. Offer to go into more detail instead of giving it all, unless they ask for the full "
-    "detail.\n")
+    "code, links or citations; say numbers as words would read. Voice mode has nothing to look at: no canvas, file, "
+    "chart, widget or question card. If they ask for one, say you can make it once they're back to typing, and if "
+    "you need to know something, just ask it. Offer to go into more detail instead of giving it all, unless they ask "
+    "for the full detail.\n")
 
 
 # Study mode (ChatGPT's "Study and learn"): the chat teaches instead of answering, until the user turns it off. Its own
@@ -162,11 +163,11 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         "something easier to read; code in fenced blocks with the language named; maths in LaTeX ($…$ or $$…$$).\n"
         "- When you're not sure, say so plainly rather than guessing. Never invent facts, quotes, links or numbers.\n"
         + DRAFTS
-        + CHARTS
+        + ("" if voice else CHARTS)
         # Main DGC's rule (dgc/presentation.py), as the founder decided for ChatDGC too.
         + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
-        + (ASK + CANVAS + WIDGETS if ask else "")
+        + (ASK + CANVAS + WIDGETS if ask and not voice else "")
         + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "
             "Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING

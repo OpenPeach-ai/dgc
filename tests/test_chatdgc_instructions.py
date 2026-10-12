@@ -139,6 +139,47 @@ class VoiceReplyTests(unittest.TestCase):
         self.assertNotIn("voice", [m for m in store.get(chat["id"])["messages"] if m["role"] == "user"][-1])
 
 
+    def test_a_spoken_turn_is_offered_nothing_to_look_at_and_typing_brings_it_back(self):
+        """As ChatGPT's voice mode: a spoken turn gets no question card, file, widget or canvas -- not offered, not
+        described, and refused if a model calls one anyway -- and a typed message after it has them all again."""
+        offered, told = [], []
+
+        class Client:
+            model = "m"
+
+            def __init__(self):
+                self.rounds = 0
+
+            def chat(self, messages, tools=None, **_):
+                if looked_up(messages):
+                    return no_look_up()
+                offered.append({t["function"]["name"] for t in tools or []})
+                told.append(messages[0]["content"])
+                if messages[-1].get("role") == "user":   # the first round: call a canvas, as deepseek did by voice
+                    return SimpleNamespace(content="", finish_reason="tool_calls", usage={}, thinking="", tool_calls=[
+                        SimpleNamespace(id="c1", name="canvas_create", arguments={"title": "Lisbon", "kind": "document", "content": "# Plan"})])
+                return SimpleNamespace(content="Saturday is the beach, Sunday the museums.", finish_reason="stop",
+                                       usage={}, thinking="", tool_calls=[])
+        config = SimpleNamespace(base_url="", api_key="", model="m", data={})
+        config.get = lambda key, default=None: config.data.get(key, default)
+        store = ChatStore(Path(tempfile.mkdtemp()))
+        client = Client()
+        engine = ChatEngine(config, store, client_factory=lambda model: client,
+                            memory=SharedMemory(Path(tempfile.mkdtemp()) / "memory"), projects=lambda hidden: [])
+        chat = engine.open()
+        reply = engine.send(chat["id"], "Plan a weekend in Lisbon for two.", voice=True)
+        seen = {"ask_user", "make_file", "show_widget", "canvas_create", "canvas_edit"}
+        self.assertFalse(offered[0] & seen, offered[0])
+        for line in ("canvas_create", "show_widget", "ask_user", "```chart"):
+            self.assertNotIn(line, told[0], "nor described")
+        self.assertIn("Voice mode has nothing to look at", told[0])
+        self.assertFalse(reply.get("canvases"), "a canvas called anyway is not made")
+        self.assertEqual(engine._canvas_list(store.get(chat["id"])), [])
+        offered.clear(); told.clear()
+        engine.send(chat["id"], "Now put the full plan in a canvas.")
+        self.assertTrue({"ask_user", "make_file", "show_widget", "canvas_create"} <= offered[0], "typed: all back")
+        self.assertIn("canvas_create", told[0])
+
 class SettingsTests(unittest.TestCase):
     def setUp(self):
         tmp = Path(tempfile.mkdtemp(prefix="dgc-search-settings-")).resolve()

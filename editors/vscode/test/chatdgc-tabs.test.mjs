@@ -1267,6 +1267,28 @@ test("dictation: each tab's box speaks for itself to the window's dictation; a c
   assert.deepEqual(released, [ownerB, ownerA]);
 });
 
+test("a card of several questions answers them all at once, only to a backend that takes it", () => {
+  chat.open(ID(10));
+  const [panel] = world.panels.slice(-1);
+  panel.say({ type: "ready" }); opened(panel, { id: ID(10), title: "x" });
+  const picks = ["Only me", "Spouse and/or parents", "Savings in India", "England"];
+  const saved = host.offers;
+  try {
+    host.offers = { version: 1 };
+    panel.say({ type: "answer", messageId: MSG(2), question: 0, choice: picks[0], choices: picks });
+    assert.equal(last("chatdgc_answer").choices, undefined, "an older backend: the field it would refuse isn't sent");
+    assert.equal(last("chatdgc_answer").choice, "Only me", "it answers the first, as its own screen would");
+    host.offers = { version: 1, question_forms: 1 };
+    const before = sent.length;
+    for (const bad of [["one"], [...picks, "a fifth"], ["a", ""], ["a", 2], ["a", "x".repeat(501)], "a,b"]) {
+      panel.say({ type: "answer", messageId: MSG(2), question: 0, choice: "a", choices: bad });
+    }
+    assert.equal(sent.length, before, "nothing that isn't a card's answers is sent");
+    panel.say({ type: "answer", messageId: MSG(2), question: 0, choice: picks[0], choices: [" Only me ", ...picks.slice(1)] });
+    assert.deepEqual([last("chatdgc_answer").choice, last("chatdgc_answer").choices], ["Only me", picks]);
+  } finally { host.offers = saved; }
+});
+
 test("a message spoken in voice mode goes as spoken only to a backend that offers voice replies", () => {
   chat.open(ID(7));
   const [panel] = world.panels.slice(-1);

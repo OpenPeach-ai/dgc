@@ -87,6 +87,12 @@ body.cd-blank .cd-fine { display: none; }
 .cd-question .cd-other::placeholder { color: var(--muted); }
 .cd-question-go { justify-self: stretch; padding: var(--sp-1) var(--sp-3); font-size: var(--t-sm); }
 .cd-question-note { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+/* A card of several questions (ChatGPT's form): numbered groups, a hairline between them, one button under all. */
+.cd-form { gap: 0; }
+.cd-form-q { display: grid; gap: var(--sp-2); min-width: 0; padding: var(--sp-3) 0; }
+.cd-form-q:first-child { padding-top: 0; }
+.cd-form-q + .cd-form-q { border-top: 1px solid var(--border); }
+.cd-form > .cd-question-go, .cd-form > .cd-question-note { margin-top: var(--sp-2); }
 
 /* Sources, as ChatGPT shows them: a pill with the site where a fact is cited (its card on hover), a Sources
    button under the reply with the sites' favicons, and a panel beside the conversation listing them all. */
