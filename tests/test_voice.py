@@ -7,8 +7,10 @@ archives (DGC_VOICE_TEST_ARCHIVES, a folder of the catalog's .tar.bz2 files); wi
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import io
+import json
 import os
 import re
 import shutil
@@ -305,3 +307,102 @@ class RealEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SetupOfferTests(unittest.TestCase):
+    """`dgc setup` offers voice as its last question: offered, not packed into DGC."""
+
+    class Manager:
+        def __init__(self, installed=(), fail=None):
+            self.installed, self.fail, self.calls = set(installed), fail, []
+
+        def state(self):
+            return {"models": [{"id": m["id"], "installed": m["id"] in self.installed} for m in catalog.MODELS]}
+
+        def install(self, model_id, progress):
+            self.calls.append(model_id)
+            if self.fail == model_id:
+                raise VoiceError("The download was cut short.")
+            for stage, done in (("runtime", 0), ("download", 1), ("verify", 1), ("unpack", 1), ("done", 1)):
+                progress(stage, done, 1)
+            self.installed.add(model_id)
+
+    def offer(self, answer="y", **kw):
+        from rich.console import Console
+        from dgc.cli import offer_voice
+        out, asked = io.StringIO(), []
+
+        def ask(prompt):
+            asked.append(prompt)
+            return answer
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = offer_voice(Console(file=out, width=200), ask=ask, **kw)
+        return result, asked, out.getvalue()
+
+    def test_yes_installs_a_model_to_listen_with_and_a_voice_to_answer_in(self):
+        manager = self.Manager()
+        result, asked, said = self.offer("y", manager=manager, interactive=True)
+        self.assertTrue(result)
+        self.assertEqual(manager.calls, ["moonshine-base-en", "kitten-mini-en"])
+        self.assertEqual(len(asked), 1)
+        self.assertIn("one-time download of about 229 MB", asked[0])     # 111 + 68 MB, and the 50 MB engine
+        self.assertIn("press the microphone in any DGC chat", said)
+
+    def test_no_installs_nothing_and_says_where_voice_is(self):
+        manager = self.Manager()
+        result, _, said = self.offer("", manager=manager, interactive=True)
+        self.assertFalse(result)
+        self.assertEqual(manager.calls, [])
+        self.assertIn("Settings → Voice", said)
+
+    def test_not_asked_without_a_terminal_or_once_voice_is_installed(self):
+        for kw in ({"interactive": False, "manager": self.Manager()},
+                   {"interactive": True, "manager": self.Manager(installed={"nemotron-3.5-asr"})}):
+            result, asked, _ = self.offer("y", **kw)
+            self.assertFalse(result)
+            self.assertEqual(asked, [], kw)
+
+    def test_a_failed_download_says_so_and_where_to_try_again(self):
+        manager = self.Manager(fail="moonshine-base-en")
+        result, _, said = self.offer("yes", manager=manager, interactive=True)
+        self.assertFalse(result)
+        self.assertEqual(manager.calls, ["moonshine-base-en"], "nothing more after a failure")
+        self.assertIn("The download was cut short.", said)
+        self.assertIn("Settings → Voice", said)
+
+
+class WireTests(unittest.TestCase):
+    """The speech crosses dgc serve's redaction intact: a megabyte of base64 holds a run like "+akIA" and 12 letters
+    about once, which the AWS key pattern (case-insensitive) turned into [REDACTED] -- the page couldn't decode it,
+    and nothing played. Everything else is still redacted."""
+
+    def test_base64_speech_passes_intact_and_every_other_field_is_still_redacted(self):
+        from dgc.headless import sanitize_event
+        from dgc.redaction import redact_text
+        audio = "QUJD" * 1000 + "+akIA1234567890abcdefGH/" + "AAAA" * 75      # valid base64, as a reading's piece is
+        base64.b64decode(audio, validate=True)
+        self.assertNotEqual(redact_text(audio), audio, "the plain redactor corrupts it")
+        event = {"type": "voice_audio", "seq": 3, "request_id": "voice-speak-1", "part": 0, "audio": audio, "sample_rate": 24000, "done": False}
+        self.assertEqual(sanitize_event(event, []), event)
+        self.assertEqual(sanitize_event({**event, "request_id": "has AKIA1234567890ABCDEF"}, [])["request_id"], "has [REDACTED]",
+                         "the event's other fields are redacted")
+        self.assertEqual(sanitize_event({"type": "voice_audio", "audio": "token=AKIA1234567890ABCDEF"}, [])["audio"],
+                         "token=[REDACTED]", "what isn't base64 is redacted, in the audio field too")
+        self.assertEqual(sanitize_event({"type": "voice_text", "text": "my key is AKIA1234567890ABCDEF"}, [])["text"],
+                         "my key is [REDACTED]", "what was said is redacted")
+        self.assertEqual(sanitize_event({"type": "voice_audio", "audio": "c2VjcmV0"}, ["c2VjcmV0"])["audio"], "c2VjcmV0",
+                         "speech that happens to equal a saved secret is still speech")
+
+    def test_a_long_reading_reaches_the_wire_whole(self):
+        """dgc serve's own writer, as it runs: pieces of a long reading decode back to the PCM."""
+        from dgc.headless import sanitize_event
+        from dgc.protocol import Emitter
+        out = io.StringIO()
+        emitter = Emitter(out, sanitizer=lambda e: sanitize_event(e, ["sk-test-1234567890abcd"]))
+        rng = __import__("random").Random(7)
+        pcm = bytes(rng.getrandbits(8) for _ in range(3 * (1 << 20)))
+        for at in range(0, len(pcm), 1 << 20):
+            emitter.emit("voice_audio", request_id="s1", part=at >> 20, audio=base64.b64encode(pcm[at:at + (1 << 20)]).decode(),
+                         sample_rate=24000, done=False)
+        events = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(b"".join(base64.b64decode(e["audio"], validate=True) for e in events), pcm)

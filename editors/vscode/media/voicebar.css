@@ -18,8 +18,10 @@
 .dgc-voicebar .vb-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 4px;
   font-size: 12px; line-height: 1.2; text-align: center; color: var(--vscode-descriptionForeground, #9a9a9a); pointer-events: none; }
 .dgc-voicebar .vb-status:empty { display: none; }
-/* Starting and writing it down: words in place of the waveform. Not hearing anything: the words over a dimmed line. */
+/* Starting, writing it down and thinking: words in place of the waveform. Not hearing anything: the words over a
+   dimmed line. */
 .dgc-voicebar[data-state="writing"] .vb-wave, .dgc-voicebar[data-state="writing"] .vb-time,
+.dgc-voicebar[data-state="thinking"] .vb-wave, .dgc-voicebar[data-state="thinking"] .vb-time,
 .dgc-voicebar[data-state="starting"] .vb-time { visibility: hidden; }
 .dgc-voicebar[data-state="starting"] .vb-wave { opacity: .5; }
 .dgc-voicebar[data-quiet] .vb-wave { opacity: .25; }
@@ -37,3 +39,23 @@
   .dgc-voicebar .vb-btn, .dgc-voicebar .vb-send { forced-color-adjust: none; background: ButtonFace; color: ButtonText; border: 1px solid ButtonText; }
   .dgc-voicebar .vb-wave { color: CanvasText; }
 }
+
+/* Read aloud (media/readaloud.js): a reply's speaker shows Stop while it reads; loading, the Stop breathes. */
+/* (:is() lifts these over the icon font's own display rule, which a codicon carries at equal weight.) */
+[data-read-aloud] :is(.ra-stop, .codicon.ra-stop) { display: none; }
+[data-read-aloud][data-reading] :is(.ra-play, .codicon.ra-play) { display: none; }
+[data-read-aloud][data-reading] :is(.ra-stop, .codicon.ra-stop) { display: inline-block; }
+[data-read-aloud][data-reading] { color: var(--vscode-textLink-foreground, #A78BFA); }
+[data-read-aloud][data-reading="loading"] .ra-stop { animation: ra-breathe 1.1s ease-in-out infinite; }
+@keyframes ra-breathe { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { [data-read-aloud][data-reading="loading"] .ra-stop { animation: none; } }
+
+/* Voice mode: the waveform is the accent's colour while the reply speaks; the turn button is Done (a tick) while it
+   listens and Stop while it speaks. */
+.dgc-voicebar[data-variant="conversation"][data-state="speaking"] .vb-wave { color: #A78BFA; }
+.dgc-voicebar .vb-phase { min-width: 4.6em; text-align: right; }
+.dgc-voicebar .vb-turn .vb-icon-done { display: inline-flex; }
+.dgc-voicebar .vb-turn .vb-icon-stop { display: none; }
+.dgc-voicebar[data-state="speaking"] .vb-turn .vb-icon-done { display: none; }
+.dgc-voicebar[data-state="speaking"] .vb-turn .vb-icon-stop { display: inline-flex; }
+.dgc-voicebar .vb-turn[data-busy] :is(.vb-icon-done, .vb-icon-stop) { visibility: hidden; }

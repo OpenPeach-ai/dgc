@@ -72,6 +72,32 @@ _MAX_PIPS_REQUEST_BYTES = 32768
 _MAX_PIPS_PENDING = 16
 
 
+# Fields that carry bytes as base64 -- the voice's speech, a Pip computer's screen, an image a tool viewed (a data URI,
+# in a step or fetched later): redacting them as text corrupts them -- a run like "akIa" followed by 12 letters, which
+# a megabyte of base64 holds about once, matches the AWS key pattern (it is case-insensitive) and becomes [REDACTED]
+# -- and can't hide anything, since they are bytes, not words. Only a value that is base64 (or an image's base64 data
+# URI) and nothing else, or a list of nothing but those, is passed as it is; anything else in the field is redacted
+# like every other field.
+_BINARY_EVENT_FIELDS = {"voice_audio": ("audio",), "pip_desktop_data": ("data",), "tool_images": ("images",),
+                        "image": ("image",)}
+_BASE64 = re.compile(r"(?:data:image/[A-Za-z0-9.+-]+;base64,)?[A-Za-z0-9+/]*={0,2}\Z")
+
+
+def _only_bytes(value) -> bool:
+    if isinstance(value, str):
+        return bool(_BASE64.match(value))
+    return isinstance(value, list) and all(isinstance(item, str) and _BASE64.match(item) for item in value)
+
+
+def sanitize_event(event: dict, secrets) -> dict:
+    """An event as it may go on the wire: every string redacted, but for its own base64 bytes."""
+    binary = {key: event[key] for key in _BINARY_EVENT_FIELDS.get(event.get("type"), ())
+              if _only_bytes(event.get(key))}
+    out = redact_value({key: value for key, value in event.items() if key not in binary}, secrets)
+    out.update(binary)
+    return out
+
+
 def _bounded_pips_command(cmd):
     """Bound and detach editor data before handing it to an asynchronous worker."""
     from .workspace_registry import RegistryError
@@ -209,7 +235,7 @@ _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under
 RETIRE_REQUEST_PREFIX = "retire-"
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # The Pips control contract this backend speaks: the ready handshake and every pips_status say it.
-PIPS_API_VERSION = 45
+PIPS_API_VERSION = 46
 
 
 def _pips_platform_supported() -> bool:
@@ -1914,7 +1940,7 @@ class Backend:
             # Standalone: this backend is the whole process and owns its wire.
             self.em = HistoryEmitter(
                 sys.stdout, validator=event_error,
-                sanitizer=lambda event: redact_value(event, secret_values(self.config)))
+                sanitizer=lambda event: sanitize_event(event, secret_values(self.config)))
             registry = PendingRequests()
         else:
             # One chat of a Host: its view of the process's one wire and one id space.
@@ -2068,8 +2094,9 @@ class Backend:
         # chatdgc_widgets is. windows: the window presets chatdgc_window takes, and chatdgc_context is understood.
         # context_breakdown: chatdgc_context_breakdown is, answered by context_breakdown.
         # voice: the voice_* commands (dgc/voice), offered with ChatDGC: a Host's, the same in every folder.
+        # voice_replies: chatdgc_send takes `voice` (spoken in voice mode: the reply is asked to sound like speech).
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
-                            "context_breakdown": 1},
+                            "context_breakdown": 1, "voice_replies": 1},
                 "memory": {"version": 1}, "voice": {"version": 1}}
 
     def _chats_capability(self) -> dict:
@@ -7113,7 +7140,7 @@ class Host:
         threading.Thread(target=close, daemon=True, name=f"dgc-close-{chat_id}").start()
 
     def _sanitize(self, event):
-        return redact_value(event, self._secret_values())
+        return sanitize_event(event, self._secret_values())
 
     def voice(self):
         """Voice: the models in Settings -> Voice models, dictation and reading aloud (dgc/voice)."""

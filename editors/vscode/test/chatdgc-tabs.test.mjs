@@ -229,7 +229,8 @@ test("commands wait for a process that is starting, and an older CLI says so", a
   host.outcome = "sent";
   host.models = { ids: ["qwen3:32b", "fixture"], current: "fixture" };
   chat.backendReady();
-  assert.deepEqual(sent.map((c) => c.type), ["chatdgc_open", "chatdgc_projects"], "sent once it was ready, each once");
+  assert.deepEqual(sent.map((c) => c.type), ["chatdgc_open", "chatdgc_projects", "chatdgc_list", "chatdgc_projects"],
+                   "the tab's held commands sent once it was ready, each once; then the home's list, asked afresh");
   await new Promise((r) => setImmediate(r));
   assert.deepEqual(panel.last("models"), { type: "models", ids: ["qwen3:32b", "fixture"], current: "fixture" },
                    "a tab opened before the backend was ready gets its models then, so the picker shows the model");
@@ -1264,4 +1265,18 @@ test("dictation: each tab's box speaks for itself to the window's dictation; a c
   a.dispose();
   await tick();
   assert.deepEqual(released, [ownerB, ownerA]);
+});
+
+test("a message spoken in voice mode goes as spoken only to a backend that offers voice replies", () => {
+  chat.open(ID(7));
+  const [panel] = world.panels.slice(-1);
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(7), title: "Talk" });
+  panel.say({ type: "send", text: "What should I cook?", voice: true });
+  assert.equal(last("chatdgc_send").voice, undefined, "an older backend: the field it would refuse isn't sent");
+  host.offers = { version: 1, voice_replies: 1 };
+  panel.say({ type: "send", text: "And dessert?", voice: true });
+  assert.equal(last("chatdgc_send").voice, true);
+  panel.say({ type: "send", text: "Typed.", voice: "yes" });
+  assert.equal(last("chatdgc_send").voice, undefined, "only true");
 });

@@ -43,7 +43,8 @@ const feed = (page, from, speech, ms) => page.evaluate(([from, speech, ms]) => n
   let t = 0;
   const timer = setInterval(() => {
     t += 100;
-    const levels = speech ? [0.06 + 0.08 * Math.abs(Math.sin(t / 90)), 0.1 + 0.05 * Math.abs(Math.cos(t / 70))] : [0.0005, 0.0004];
+    // Silence here is a microphone the system withholds (it reads all but nothing): what the warning is for.
+    const levels = speech ? [0.06 + 0.08 * Math.abs(Math.sin(t / 90)), 0.1 + 0.05 * Math.abs(Math.cos(t / 70))] : [0.0001, 0.0002];
     window.postMessage({ type: "micLevels", ...(from ? { from } : {}), levels }, "*");
     if (t >= ms) { clearInterval(timer); setTimeout(done, 250); }
   }, 100);
@@ -124,14 +125,15 @@ async function mainPage(width = 520) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.setContent(skeleton.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${voicebarCss}</style></head>`), { waitUntil: "load" });
-  await page.evaluate(([vb, mjs, mdjs]) => {
+  await page.evaluate(([vb, ra, mjs, mdjs]) => {
     window.__posted = [];
     window.acquireVsCodeApi = () => ({ postMessage(m) { window.__posted.push(m); }, getState: () => undefined, setState() {} });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(vb);
+    eval(ra);
     eval(mjs);
     window.postMessage({ type: "session_ready", sessionId: "s1" }, "*");
-  }, [voicebarJs, mainJs, markdownJs]);
+  }, [voicebarJs, readFileSync(join(root, "media/readaloud.js"), "utf8"), mainJs, markdownJs]);
   const posted = (type) => page.evaluate((type) => window.__posted.filter((m) => m.type === type), type);
   // Delivered at once (a posted message arrives later, and a check right after would race it).
   const say = (m) => page.evaluate((m) => window.dispatchEvent(new MessageEvent("message", { data: m })), m);
@@ -207,20 +209,19 @@ test("main DGC's chat: the microphone beside Send; while it records the footer i
 
 // ---- Pips ----------------------------------------------------------------------------------------------------
 
-test("Pips, in the side bar's shadow root: the same microphone, the same bar in place of the controls, the words into the Pip's box", async (t) => {
-  if (skipOrFail(t)) return;
+/** A Pip's chat in the side bar's shadow root, answering its requests as the runner does; `messages` saved. */
+async function pipsPage(messages = []) {
   const client = (await build({ entryPoints: [join(root, "src/pipsClient.js")], bundle: true, write: false, format: "iife", loader: { ".css": "empty" } })).outputFiles[0].text;
   const css = ["src/pips.css", "src/pipsTranscript.css", "media/voicebar.css"].map((f) => readFileSync(join(root, f), "utf8").replace(/^@import[^;]+;/gm, "")).join("\n");
   const page = await browser.newPage({ viewport: { width: 520, height: 700 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  try {
-    await page.route("**/*", (route) => route.request().isNavigationRequest()
+  await page.route("**/*", (route) => route.request().isNavigationRequest()
       ? route.fulfill({ contentType: "text/html", body: '<style>html,body{margin:0;height:100%;background:#1f1f1f}#host{width:100%;height:100%}</style><div id="host"></div>' })
       : route.abort());
-    await page.goto("https://pips-voice.invalid/");
-    await page.addScriptTag({ content: client });
-    await page.evaluate((css) => {
+  await page.goto("https://pips-voice.invalid/");
+  await page.addScriptTag({ content: client });
+  await page.evaluate(([css, messages]) => {
       window.__posted = [];
       window.setInterval = (fn) => { window.__pipPoll = fn; return 1; };
       const ws = { id: "ws", name: "Project" };
@@ -233,8 +234,16 @@ test("Pips, in the side bar's shadow root: the same microphone, the same bar in 
       const result = (r) => ({ list_workspaces: { workspaces: [ws], current_workspace_id: "ws" }, list_pip_types: { types }, list_pips: { pips: [pip] }, list_pip_setups: { setups: [] },
         get_workspace_context: { context: { workspace_id: "ws", revision: 0, entries: [] } }, get_pip_runner: { runner }, get_pip: { pip }, list_pip_runs: { runs: [] },
         list_pip_models: { default_model: "local-default", models: [{ id: "model-a", name: "Local A" }], connection: "configured" },
-        list_pip_messages: { pip_id: "a", workspace_id: "ws", messages: [], next_before_id: null, active_run: null, history_context_omitted_count: 0, chat_controls: controls },
-        send_pip_message: { message: { id: "u1", pip_id: "a", workspace_id: "ws", role: "user", text: r.text, created_at: "2026-10-12T10:00:00Z", status: "succeeded" } } }[r.type]);
+        list_pip_messages: { pip_id: "a", workspace_id: "ws", messages: window.__messages.slice(), next_before_id: null, active_run: null, history_context_omitted_count: 0, chat_controls: controls },
+        send_pip_message: r.type === "send_pip_message" ? said(r.text) : null }[r.type]);
+      // The Pip answers what it's sent (window.__answer), as its runner would by the next read.
+      window.__messages = messages.slice();
+      const said = (text) => {
+        const n = window.__messages.length + 1, message = { id: `u${n}`, pip_id: "a", workspace_id: "ws", role: "user", text, run_id: `run-${n}`, model: "local-default", created_at: "2026-10-12T10:00:00Z", status: "succeeded" };
+        window.__messages.push(message);
+        if (window.__answer) window.__messages.push({ id: `a${n}`, pip_id: "a", workspace_id: "ws", role: "assistant", text: window.__answer, run_id: `run-${n}`, model: "local-default", created_at: "2026-10-12T10:00:01Z", status: "succeeded" });
+        return { message, run: { id: `run-${n}`, pip_id: "a", status: "succeeded" } };
+      };
       const shadow = document.getElementById("host").attachShadow({ mode: "open" });
       let receive;
       window.__receive = (m) => receive(m);
@@ -243,11 +252,18 @@ test("Pips, in the side bar's shadow root: the same microphone, the same bar in 
           if (msg.type === "pipsReady") receive({ type: "pipsConnection", apiVersion: 24, generation: 1, connected: true, supported: true, enabled: true });
           else if (msg.type === "pipsRequest") { const answer = result(msg.request); if (answer !== undefined) receive({ type: "pipsReply", id: msg.id, ok: true, result: answer }); }
         }); } });
-    }, css);
-    await page.locator("[data-job=a]").click();
-    await page.locator("#chatText").waitFor({ state: "visible" });
-    const posted = (type) => page.evaluate((type) => window.__posted.filter((m) => m.type === type), type);
-    const say = (m) => page.evaluate((m) => window.__receive(m), m);
+  }, [css, messages]);
+  await page.locator("[data-job=a]").click();
+  await page.locator("#chatText").waitFor({ state: "visible" });
+  const posted = (type) => page.evaluate((type) => window.__posted.filter((m) => m.type === type), type);
+  const say = (m) => page.evaluate((m) => window.__receive(m), m);
+  return { page, posted, say, errors };
+}
+
+test("Pips, in the side bar's shadow root: the same microphone, the same bar in place of the controls, the words into the Pip's box", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page, posted, say, errors } = await pipsPage();
+  try {
     assert.equal(await page.locator("#chat-mic").isVisible(), true, "a microphone beside Send");
     await page.locator("#chatText").fill("Remind me at four");
     await page.locator("#chatText").evaluate((el) => el.setSelectionRange(9, 9));   // after "Remind me"
@@ -280,6 +296,184 @@ test("Pips, in the side bar's shadow root: the same microphone, the same bar in 
     await page.locator("#chatText").press("Escape");
     assert.deepEqual((await posted("micCancel")).at(-1), { type: "micCancel", from: "pips" });
     assert.equal(await page.locator("#chat-model").count(), 1);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+// ---- read aloud ------------------------------------------------------------------------------------------------
+const readaloudJs = readFileSync(join(root, "media/readaloud.js"), "utf8");
+/** Half a second of a 220 Hz tone at 24 kHz, as base64 16-bit PCM: what DGC's process sends a sentence as. */
+const tone = (seconds = 0.5, rate = 24000) => {
+  const n = Math.round(rate * seconds), b = Buffer.alloc(n * 2);
+  for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 220 * i / rate) * 8000), i * 2);
+  return b.toString("base64");
+};
+
+test("read aloud: the speaker starts it, each piece plays as it arrives, the button shows Stop while it reads, and it ends by itself", async (t) => {
+  if (skipOrFail(t)) return;
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.setContent(`<style>${voicebarCss}</style>
+      <button data-read-aloud="m1" id="r1"><span class="ra-play">▶</span><span class="ra-stop">■</span></button>
+      <button data-read-aloud="m2" id="r2"><span class="ra-play">▶</span><span class="ra-stop">■</span></button>`);
+    await page.addScriptTag({ content: readaloudJs });
+    await page.evaluate(() => {
+      window.__posted = []; window.__ended = []; window.__errors = [];
+      window.R = DgcReadAloud.create({ post: (m) => window.__posted.push(m) });
+      R.onEnd((id, why) => window.__ended.push([id, why]));
+      R.onError((text, kind) => window.__errors.push([text, kind]));
+      for (const b of document.querySelectorAll("[data-read-aloud]")) b.addEventListener("click", () => R.toggle(b.dataset.readAloud, "Text of " + b.dataset.readAloud));
+    });
+    const posted = () => page.evaluate(() => window.__posted);
+    const btn = (id) => page.locator(`#${id}`);
+    await btn("r1").click();
+    assert.deepEqual(await posted(), [{ type: "speakStart", id: "m1", text: "Text of m1" }]);
+    assert.equal(await btn("r1").getAttribute("data-reading"), "loading");
+    assert.equal(await btn("r1").getAttribute("aria-label"), "Stop reading");
+    assert.equal(await btn("r1").locator(".ra-stop").isVisible(), true);
+    assert.equal(await btn("r2").getAttribute("data-reading"), null);
+    const say = (m) => page.evaluate((m) => R.receive(m), m);
+    await say({ type: "speak", id: "m1", state: "loading" });
+    await say({ type: "speakAudio", id: "m1", part: 0, audio: tone(0.4), rate: 24000, done: false });
+    assert.equal(await btn("r1").getAttribute("data-reading"), "playing");
+    await page.waitForTimeout(150);
+    assert.ok(await page.evaluate(() => R.level()) > 0.05, "the speech is audible while it plays (its level is what voice mode draws)");
+    await say({ type: "speakAudio", id: "m1", part: 1, audio: tone(0.3), rate: 24000, done: false });
+    await say({ type: "speakAudio", id: "m1", part: 2, audio: "", rate: 0, done: true });
+    assert.equal(await btn("r1").getAttribute("data-reading"), "playing", "the queued pieces still play after the last arrives");
+    await page.waitForFunction(() => window.__ended.length === 1, null, { timeout: 3000 });
+    assert.deepEqual(await page.evaluate(() => window.__ended), [["m1", "ended"]]);
+    assert.equal(await btn("r1").getAttribute("data-reading"), null);
+    assert.equal(await btn("r1").getAttribute("aria-label"), "Read aloud");
+
+    // Pressing it again while it reads stops it; another reply's speaker takes over from the first.
+    await btn("r1").click();
+    await say({ type: "speakAudio", id: "m1", part: 0, audio: tone(2), rate: 24000, done: false });
+    await btn("r2").click();
+    const tail = (await posted()).slice(-3);
+    assert.deepEqual(tail, [{ type: "speakStart", id: "m1", text: "Text of m1" }, { type: "speakStop" }, { type: "speakStart", id: "m2", text: "Text of m2" }]);
+    assert.equal(await btn("r1").getAttribute("data-reading"), null);
+    assert.equal(await btn("r2").getAttribute("data-reading"), "loading");
+    await say({ type: "speakAudio", id: "m1", part: 1, audio: tone(1), rate: 24000, done: false });
+    assert.equal(await btn("r2").getAttribute("data-reading"), "loading", "the first reply's late audio is ignored");
+    await btn("r2").click();
+    assert.deepEqual((await posted()).at(-1), { type: "speakStop" });
+    assert.equal(await btn("r2").getAttribute("data-reading"), null);
+
+    // No voice chosen: the host says why, as information; the button goes back.
+    await btn("r1").click();
+    await say({ type: "speak", id: "m1", state: "idle", kind: "info", error: "Choose a voice for reading aloud in Settings → Voice, then press Read aloud again." });
+    assert.deepEqual((await page.evaluate(() => window.__errors)).at(-1), ["Choose a voice for reading aloud in Settings → Voice, then press Read aloud again.", "info"]);
+    assert.equal(await btn("r1").getAttribute("data-reading"), null);
+  } finally { await context.close(); }
+});
+
+test("read aloud in DGC's chat: the speaker under the answer asks for that answer's words, from this box", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page, posted, say, errors } = await mainPage();
+  try {
+    const event = (e) => say({ type: "event", event: e });
+    await event({ type: "turn_start", turn_id: "t1", prompt: "plan Lisbon", kind: "prompt" });
+    await event({ type: "text_delta", text: "## Lisbon\n\nTwo days: **Belém** and the beach." });
+    await event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+    await event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, final_message_id: "t1:1" });
+    const speaker = page.locator(".response-actions .ract-read");
+    assert.equal(await speaker.count(), 1, "a speaker beside Copy");
+    assert.equal(await speaker.getAttribute("aria-label"), "Read aloud");
+    await speaker.click();
+    const start = (await posted("speakStart")).at(-1);
+    assert.equal(start.from, "chat");
+    assert.match(start.text, /Two days: \*\*Belém\*\* and the beach\./, "the answer's words (DGC's process strips the Markdown)");
+    await say({ type: "speak", from: "chat", id: start.id, state: "loading" });
+    assert.equal(await speaker.getAttribute("data-reading"), "loading");
+    await say({ type: "speak", from: "pips", id: start.id, state: "idle", error: "not this box's" });
+    assert.equal(await speaker.getAttribute("data-reading"), "loading", "the Pips box's reading is none of this one's");
+    await speaker.click();
+    assert.deepEqual((await posted("speakStop")).at(-1), { type: "speakStop", from: "chat" });
+    assert.equal(await speaker.getAttribute("data-reading"), null);
+    await speaker.click();
+    await say({ type: "speak", from: "chat", id: start.id, state: "idle", kind: "info", error: "Choose a voice for reading aloud in Settings → Voice, then press Read aloud again." });
+    assert.match(await page.locator("#log").innerText(), /Choose a voice for reading aloud/);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test("read aloud in Pips: the speaker under a Pip's reply asks for its words, from the Pips box, and survives the Pips' redraws", async (t) => {
+  if (skipOrFail(t)) return;
+  const reply = { id: "r1", pip_id: "a", workspace_id: "ws", role: "assistant", text: "Your dentist is **Tuesday at four**.", run_id: "run-1", model: "local-default", created_at: "2026-10-12T10:00:00Z", status: "succeeded" };
+  const { page, posted, say, errors } = await pipsPage([reply]);
+  try {
+    const speaker = page.locator('[data-read-aloud="r1"]');
+    await speaker.waitFor({ state: "visible" });
+    await speaker.click();
+    assert.deepEqual((await posted("speakStart")).at(-1), { type: "speakStart", id: "r1", text: "Your dentist is **Tuesday at four**.", from: "pips" });
+    await say({ type: "speak", from: "pips", id: "r1", state: "loading" });
+    assert.equal(await speaker.getAttribute("data-reading"), "loading");
+    await page.locator("#chatText").fill("redraw");   // Pips redraw the whole box as you type
+    assert.equal(await page.locator('[data-read-aloud="r1"]').getAttribute("data-reading"), "loading");
+    await say({ type: "speak", from: "chat", id: "r1", state: "idle" });
+    assert.equal(await page.locator('[data-read-aloud="r1"]').getAttribute("data-reading"), "loading", "the main chat's reading is none of this box's");
+    await page.locator('[data-read-aloud="r1"]').click();
+    assert.deepEqual((await posted("speakStop")).at(-1), { type: "speakStop", from: "pips" });
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test("voice mode in Pips: in place of Send while the box is empty; a spoken turn goes to the Pip and its answer is read aloud", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page, posted, say, errors } = await pipsPage();
+  try {
+    await page.evaluate(() => { window.__answer = "Your dentist is Tuesday at four."; });
+    const talk = page.locator("#chat-voicemode");
+    assert.equal(await talk.isVisible(), true, "the empty box offers voice mode");
+    await page.locator("#chatText").fill("typed");
+    assert.equal(await talk.count(), 0, "a word typed, and it's Send again");
+    await page.locator("#chatText").fill("");
+    await page.locator("#chat-voicemode").click();
+    assert.deepEqual((await posted("voiceCheck")).at(-1), { type: "voiceCheck", from: "pips" });
+    const bar = page.locator('[data-voicebar="pips-talk"]');
+    assert.equal(await bar.isVisible(), true);
+    await say({ type: "voiceReady", from: "pips", dictation: true, readAloud: true });
+    assert.deepEqual((await posted("micStart")).at(-1), { type: "micStart", from: "pips" });
+    await say({ type: "mic", from: "pips", state: "recording" });
+    assert.equal(await bar.getAttribute("data-state"), "listening");
+    for (const v of [...Array(5).fill(0.002), ...Array(8).fill(0.1), ...Array(16).fill(0.002)]) {
+      await say({ type: "micLevels", from: "pips", levels: [v, v] }); await page.waitForTimeout(100);
+      if ((await posted("micStop")).length) break;
+    }
+    assert.deepEqual((await posted("micStop")).at(-1), { type: "micStop", mode: "send", from: "pips" });
+    await say({ type: "mic", from: "pips", state: "idle", text: "When is my dentist?", mode: "send" });
+    await page.waitForFunction(() => window.__posted.some((m) => m.type === "speakStart"), null, { timeout: 5000 });
+    const sent = (await posted("pipsRequest")).filter((m) => m.request.type === "send_pip_message");
+    assert.equal(sent.at(-1).request.text, "When is my dentist?");
+    const start = (await posted("speakStart")).at(-1);
+    assert.equal(start.text, "Your dentist is Tuesday at four.");
+    assert.equal(start.from, "pips");
+    assert.equal(await page.locator('[data-voicebar="pips-talk"]').getAttribute("data-state"), "speaking");
+    await page.locator('[data-voicebar="pips-talk"] [data-voice-action="end"]').click();
+    assert.deepEqual((await posted("speakStop")).at(-1), { type: "speakStop", from: "pips" });
+    assert.equal(await page.locator("#chat-model").count(), 1, "the controls are back");
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test("the side bar: every voice message for the Pips box (mic, levels, speech, voice mode's check) reaches it, and none of the chat's", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page, say, errors } = await mainPage();
+  try {
+    // Pips as main.js mounts them in the side bar, with a stand-in for the Pips app that records what it hears.
+    await page.evaluate(() => {
+      window.__heard = [];
+      window.DgcPips = { mount(options) { options.onMessage((m) => window.__heard.push(`${m.type}:${m.from}`)); return { setVisible() {}, dispose() {} }; } };
+    });
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipsOpen" } })));
+    const types = ["voiceReady", "mic", "micLevels", "speak", "speakAudio"];
+    for (const type of types) {
+      await say({ type, from: "pips", state: "idle", levels: [0.1], id: "x", dictation: true, readAloud: true });
+      await say({ type, from: "chat", state: "idle", levels: [0.1], id: "x", dictation: true, readAloud: true });
+    }
+    assert.deepEqual(await page.evaluate(() => window.__heard), types.map((type) => `${type}:pips`));
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });

@@ -57,6 +57,8 @@ TOOL_ICON = {
     "todo": _g("#", "#"),
     "skill": _g("✦", "*"),
     "save_memory": _g("✎", "~"),
+    "remember": _g("✎", "~"),
+    "forget": _g("✎", "~"),
     "present_plan": _g("▸", ">"),
     "propose_options": _g("▸", ">"),
 }

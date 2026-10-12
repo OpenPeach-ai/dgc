@@ -8,6 +8,25 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### ChatDGC
 
+- **One memory, written everywhere.** Work sessions and Pips now add to the memory ChatDGC keeps, under the same
+  rules: only what you typed (never a file, a page or a tool's output), facts not a task's details, at most three a
+  turn.
+  - **In a Work session:** `remember` and `forget` (no approval card; a rule can still deny them). They aren't
+    offered to sub-agents, or when memory is off.
+  - **In a Pip's chat:** a Pip's note goes into the shared memory, tagged with the Pip and the reply. Its page and
+    the reply show it, and Forget there forgets it everywhere. With memory off, a note stays the Pip's own.
+  - **Pips API 46:** `list_pip_notes`, `add_pip_note` and `forget_pip_note` take `shared: true`, so a page can list
+    and forget the shared facts too. A page that doesn't ask never sees a `mem_` id.
+- **Spoken replies:** in voice mode, a message sent by voice asks for an answer that sounds like speech: a few short
+  sentences, no tables or headings, with an offer to go into detail. Without this, a long Markdown plan took five
+  minutes to read aloud. `chatdgc_send` takes `voice`, offered as `ready.capabilities.chatdgc.voice_replies`.
+- **Bytes, fixed in `dgc serve`'s redaction:** speech, screenshots, images fetched later and a Pip computer's screen
+  travel as base64, and about once a megabyte that holds a run the AWS-key pattern (case-insensitive) redacted. The
+  audio arrived corrupt and never played; an image or the screen stream could break the same way. Base64 bytes now
+  pass intact, in the standalone backend too; everything else is redacted as before.
+- **Voice offered at setup:** `dgc setup` ends by offering voice: a one-time download of about 229 MB (Moonshine for
+  dictation, Kitten for reading aloud), run on this computer. It's asked only at a terminal, and only when no voice
+  model is installed yet.
 - **Voice models on your own computer.** `dgc serve` installs and runs speech models for dictation (Moonshine Base,
   English, 111 MB; NVIDIA Nemotron 3.5, many languages, 475 MB) and for reading replies aloud (Kitten, Pocket TTS).
   - **What it uses:** sherpa-onnx, in an environment of its own under `~/.dgc/voice`.

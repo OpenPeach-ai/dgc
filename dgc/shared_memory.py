@@ -142,13 +142,23 @@ class SharedMemory:
             self._write(data)
             return fact
 
-    def remember(self, text: str, *, said: str, surface: str, where: str = "") -> dict:
-        """A fact a model proposed: kept only when it comes from what the user said."""
+    def remember(self, text: str, *, said: str, surface: str, where: str = "", pip: str = "", run: str = "") -> dict:
+        """A fact a model proposed: kept only when it comes from what the user said. A Pip's says which Pip
+        and which of its replies kept it (`pip`, `run`), so its page and that reply show it."""
         text = clean(text)
         if not grounded(text, said):
             raise NotRemembered("Not remembered: that isn't something you said.")
-        return self._keep(text, {"surface": surface if surface in SURFACES else "chat", "where": str(where)[:200],
-                                 "said": " ".join(str(said).split())[-300:]})
+        source = {"surface": surface if surface in SURFACES else "chat", "where": str(where)[:200],
+                  "said": " ".join(str(said).split())[-300:]}
+        if pip:
+            source["pip"] = str(pip)[:100]
+        if run:
+            source["run"] = str(run)[:100]
+        return self._keep(text, source)
+
+    def from_pip(self, pip_id: str) -> list[dict]:
+        """The facts a Pip kept, newest first."""
+        return [f for f in reversed(self.facts()) if isinstance(f.get("source"), dict) and f["source"].get("pip") == pip_id]
 
     def add(self, text: str) -> dict:
         """A fact you typed on the Memory page."""

@@ -108,8 +108,8 @@ _COMMAND_ARGS = {
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
     "get_pip_computers": set(), "update_pip_computers": set(), "reset_pip_computer": {"pip_id"}, "list_pip_apps": set(),
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
-    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit"}, "list_pip_notes": {"pip_id"}, "add_pip_note": {"pip_id", "text"},
-    "forget_pip_note": {"pip_id", "note_id", "all"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
+    "list_pip_plugin_uses": set(), "list_pip_attention": {"limit"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
+    "forget_pip_note": {"pip_id", "note_id", "all", "shared"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
     "set_plugin_permission": {"plugin", "level"},
     "forget_pip_site": {"pip_id", "site"}, "get_pip_chat_context": {"pip_id", "context_size"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
@@ -3873,14 +3873,19 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 from . import pip_notes
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "A Pip's notes about you are on this computer only.")
+                # `shared` (API 46): the page also lists, and forgets, what this Pip kept in the user's one memory.
+                if 'shared' in request and request['shared'] is not True:
+                    raise RegistryError('invalid_request', 'shared is true, or left out.')
+                shared = request.get('shared') is True
                 if command == 'list_pip_notes':
-                    result = pip_notes.listing(registry, pip_id)
+                    result = pip_notes.listing(registry, pip_id, shared)
                 elif command == 'add_pip_note':
-                    result = pip_notes.add(registry, config, pip_id, request.get('text'), actor)
+                    result = pip_notes.add(registry, config, pip_id, request.get('text'), actor, shared=shared)
                 else:
                     if 'all' in request and request['all'] is not True:
                         raise RegistryError('invalid_request', 'all is true, or left out.')
-                    result = pip_notes.forget(registry, pip_id, request.get('note_id'), actor, everything=request.get('all') is True)
+                    result = pip_notes.forget(registry, pip_id, request.get('note_id'), actor,
+                                              everything=request.get('all') is True, shared=shared)
             elif command in ('list_pip_routines', 'add_pip_routine', 'update_pip_routine', 'delete_pip_routine', 'decide_pip_routine'):
                 # A Personal Pip's routines (pip_routines): the user's own changes apply directly.
                 from . import pip_routines

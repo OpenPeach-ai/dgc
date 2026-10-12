@@ -9714,6 +9714,9 @@
             "model": {
               "type": "string"
             },
+            "voice": {
+              "type": "boolean"
+            },
             "thinking": {
               "type": "string",
               "enum": [

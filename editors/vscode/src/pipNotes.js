@@ -1,8 +1,11 @@
 // What a Personal Pip remembers about you (pip_notes, Pips API 44): notes it kept from your own words in
 // its chat, and ones you added. Every one shows on its page with Forget; Forget deletes it for good. Under
 // a reply that kept a note, the chat says so, with Forget right there. Words are the user's: text only.
+// From Pips API 46 what it keeps goes in your one memory in DGC (mem_ ids), which ChatDGC and Work read too:
+// it shows here the same way, and Forget forgets it everywhere.
 
-const NOTE = /^pipnote_[a-f0-9]{32}$/;
+const NOTE = /^(?:pipnote_[a-f0-9]{32}|mem_[a-f0-9]{12})$/;
+const everywhere = n => n.id.startsWith('mem_');
 
 export function notesPage(value, pip) {
   const fail = () => { throw new Error('What it remembers didn’t load. Refresh to try again.'); };
@@ -18,7 +21,7 @@ export function notesPage(value, pip) {
 export function notesMarkup(notes, {esc, busy = false, error = '', pipName = 'It', adding = '', confirmAll = false}) {
   const off = busy ? ' disabled' : '';
   if (!notes) return `<section class="pip-page-group" aria-label="What it remembers"><h3 class="pip-page-label">What it remembers</h3>${error ? `<p class="error" role="alert">${esc(error)}</p>` : '<p class="muted" role="status">Loading…</p>'}</section>`;
-  const rows = notes.map(n => `<li class="pip-page-row static note-row"><span class="row-words"><span>${esc(n.text)}</span><small>${n.source === 'you' ? 'You added this' : 'From your chat'}</small></span>`
+  const rows = notes.map(n => `<li class="pip-page-row static note-row"><span class="row-words"><span>${esc(n.text)}</span><small>${n.source === 'you' ? 'You added this' : everywhere(n) ? 'From your chat · in your memory everywhere in DGC' : 'From your chat'}</small></span>`
     + `<button type="button" class="quiet pill" data-note-forget="${esc(n.id)}" aria-label="Forget: ${esc(n.text)}"${off}>Forget</button></li>`).join('');
   const all = notes.length > 1 ? (confirmAll
     ? `<span class="note-confirm">Forget all ${notes.length}? <button type="button" class="quiet pill danger-text" data-note-forget-all="yes"${off}>Forget all</button><button type="button" class="quiet pill" data-note-forget-all="no"${off}>Keep them</button></span>`
@@ -36,6 +39,6 @@ export function notesMarkup(notes, {esc, busy = false, error = '', pipName = 'It
 export function keptMarkup(notes, runId, {esc, busy = false}) {
   const kept = (notes || []).filter(n => n.source === 'chat' && n.run_id && n.run_id === runId);
   if (!kept.length) return '';
-  return `<div class="memory-kept" role="note" aria-label="Remembered">${kept.map(n => `<span class="memory-kept-item"><span aria-hidden="true">✓</span> Remembered: ${esc(n.text)} `
+  return `<div class="memory-kept" role="note" aria-label="Remembered">${kept.map(n => `<span class="memory-kept-item"><span aria-hidden="true">✓</span> Remembered: ${esc(n.text)}${everywhere(n) ? ' <small>(everywhere in DGC)</small>' : ''} `
     + `<button type="button" class="link" data-note-forget="${esc(n.id)}" aria-label="Forget: ${esc(n.text)}"${busy ? ' disabled' : ''}>Forget</button></span>`).join('')}</div>`;
 }

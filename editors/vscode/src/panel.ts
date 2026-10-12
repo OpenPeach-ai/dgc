@@ -10,7 +10,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
-import { Dictation, MIC_MESSAGES, VOICE_EXTENSION, VoiceClient, type DictationOwner } from "./voice";
+import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VOICE_EXTENSION, VoiceClient, type DictationOwner } from "./voice";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
@@ -91,6 +91,10 @@ const PIPS_ATTENTION_KEY = "dgc.pipsAttention.v1";
 /** Whether the side bar's last backend offered ChatDGC: the next window shows Chat | Work at once, not when its
  *  backend has started (seconds, with the user's MCP servers and plugins starting first). */
 const CHATDGC_SEEN_KEY = "dgc.chatdgcSeen.v1";
+/** Voice was offered once (the editor's first run with a CLI that has it): never again, whatever was answered. */
+const VOICE_OFFERED_KEY = "dgc.voiceOffered.v1";
+/** What voice costs to turn on, as `dgc setup` says it: Moonshine (111 MB) and Kitten (68 MB), with the engine. */
+const VOICE_OFFER_MB = 229;
 
 interface InterruptedTurnMark {
   scope?: string; id?: string; turnId?: string; at?: number;
@@ -576,8 +580,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private home = false;
   /** ChatDGC (chatdgc.ts): only the side bar's provider has it. */
   private chatdgc?: ChatDGC;
-  /** Dictation for every message box in the window: the side bar's, made the first time a box asks for it. */
+  /** Dictation and reading aloud for every message box in the window: the side bar's, made when a box first asks. */
   private dictation?: Dictation;
+  private readAloud?: ReadAloud;
   /** This chat's box, and (in the side bar) the Pips box beside it, as dictation knows them: one page, so each says
    *  which box a mic message is for. */
   private readonly micChat: DictationOwner = { post: (message) => this.post({ ...message, from: "chat" }) };
@@ -662,8 +667,33 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return offered && typeof offered === "object" ? offered : {};
       },
       dictation: () => this.dictationService(),
+      readAloud: () => this.readAloudService(),
     };
     chat.attach(host);
+  }
+
+  /** The editor's first run with voice: offered once, a moment after DGC is up, unless a model is already there. */
+  private offerVoiceOnce(): void {
+    if (this.tab || this.voiceOffer || this.context.globalState.get<boolean>(VOICE_OFFERED_KEY)) return;
+    if (!(this.lastReadyEvent?.capabilities as any)?.voice) return;
+    this.voiceOffer = setTimeout(async () => {
+      if (this.context.globalState.get<boolean>(VOICE_OFFERED_KEY)) return;
+      const state = await this.dictationService().client.models();
+      if ("error" in state) { this.voiceOffer = undefined; return; }               // asked again next start
+      void this.context.globalState.update(VOICE_OFFERED_KEY, true);
+      if (state.models.some((m: any) => m?.installed)) return;
+      const choice = await vscode.window.showInformationMessage(
+        `Talk to DGC instead of typing, and hear replies read aloud? Voice runs on your own computer: a one-time download of about ${VOICE_OFFER_MB} MB.`,
+        "Set up voice", "Not now");
+      if (choice === "Set up voice") this.openSettings("voice");
+    }, 6000);
+  }
+  private voiceOffer?: ReturnType<typeof setTimeout>;
+
+  /** Reading aloud for the window, on the same voice client as dictation. */
+  readAloudService(): ReadAloud {
+    if (this.tab) return this.tab.host.readAloudService();
+    return this.readAloud ??= new ReadAloud(this.dictationService().client);
   }
 
   /** Dictation for the window: a session tab uses the side bar's, whose process carries voice. */
@@ -1428,6 +1458,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.chatdgc) {
       const offered = !!(this.lastReadyEvent?.capabilities as any)?.chatdgc;
       if (this.context.globalState.get<boolean>(CHATDGC_SEEN_KEY) !== offered) void this.context.globalState.update(CHATDGC_SEEN_KEY, offered);
+      this.offerVoiceOnce();
     }
     // A new backend (first start, crash recovery) owns the truth about this chat's agents: its
     // snapshot replaces whatever the webview marked stopped when the old one exited.
@@ -3811,10 +3842,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "micStart":
       case "micStop":
-      case "micCancel": {
+      case "micCancel":
+      case "voiceCheck": {
         // The chat's box, or the Pips box beside it in the side bar: the page says which.
         const owner = msg.from === "pips" && !this.tab ? this.micPips : this.micChat;
         await this.dictationService().handle(owner, msg);
+        return;
+      }
+      case "speakStart":
+      case "speakStop": {
+        const owner = msg.from === "pips" && !this.tab ? this.micPips : this.micChat;
+        await this.readAloudService().handle(owner, msg);
         return;
       }
       case "pipsReady":
@@ -3826,9 +3864,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       case "webviewReady": {
         this.webviewReady = true;
+        // The home's chats, asked for now its page can hear the answer (one that came before was dropped).
+        if (this.home) this.chatdgc?.homeRefresh();
         // A reloaded page: a recording its boxes started went with the page that showed it.
         this.dictationService().release(this.micChat);
-        if (!this.tab) this.dictationService().release(this.micPips);
+        this.readAloudService().release(this.micChat);
+        if (!this.tab) { this.dictationService().release(this.micPips); this.readAloudService().release(this.micPips); }
         this.repaintFromBackend();
         const actions = this.pendingWebviewActions.splice(0);
         for (const action of actions) { action(); }
@@ -5756,7 +5797,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (this.sessionReady) this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
       }, true);
       this.pipsEditor.attach(message => this.post(message));
-      this.pipsEditor.useDictation(() => this.dictationService());
+      this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;
@@ -6778,8 +6819,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   dispose(): void {
     if (this.pipsAttentionTimer) { clearInterval(this.pipsAttentionTimer); this.pipsAttentionTimer = undefined; }
     // A tab's box lets go of a recording it started; the side bar's dictation goes with the window.
-    if (this.tab) this.tab.host.dictationService().release(this.micChat);
-    else this.dictation?.dispose();
+    if (this.voiceOffer) clearTimeout(this.voiceOffer);
+    if (this.tab) { this.tab.host.dictationService().release(this.micChat); this.tab.host.readAloudService().release(this.micChat); }
+    else { this.readAloud?.release(this.micChat); this.readAloud?.release(this.micPips); this.dictation?.dispose(); }
     // Note first, dispose the channel after: a panel teardown is one of the three things that can
     // end a turn, and it is the one the user never sees.
     this.backendNote("[extension: panel disposed — stopping the backend]");
@@ -6833,6 +6875,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // The voice bar: what the box shows while you dictate, the same here, in ChatDGC and in Pips.
     const voicebarCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "voicebar.css"));
     const voicebarJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "voicebar.js"));
+    const readAloudJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "readaloud.js"));
     // `https:` in img-src is what lets a favicon load beside a link the user typed, and it is
     // the same allowance Codex ships. It is NOT what keeps model output from phoning home: the
     // markdown renderer never emits an <img> for model content -- it turns every image into a
@@ -7029,6 +7072,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${breakdownScript}"></script>
 <script nonce="${nonce}" src="${pipsScript}"></script>
 <script nonce="${nonce}" src="${voicebarJs}"></script>
+<script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;
   }

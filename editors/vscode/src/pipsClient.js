@@ -6,6 +6,8 @@ import './pipsTranscript.css';
 import '../media/breakdown.js'; // window.DgcBreakdown: the context window part by part, as main DGC and ChatDGC draw it
 import '../media/voicebar.js';  // window.DgcVoiceBar: the box while you dictate, as main DGC and ChatDGC show it
 import '../media/voicebar.css';
+import '../media/readaloud.js'; // window.DgcReadAloud: a reply read aloud, as main DGC and ChatDGC play it
+import '../media/voicemode.js'; // window.DgcVoiceMode: a spoken conversation, as ChatDGC has it
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
@@ -62,6 +64,17 @@ S.connectorDrafts=[];S.connectorDraftError="";let connectorDraftSeq=0;
 // Dictation: 'idle' | 'starting' | 'recording' | 'writing'. The voice bar's controller keeps the waveform; it looks in
 // this box's root (a shadow root in the side bar) for the bar each render draws.
 S.mic='idle';const voiceBar=window.DgcVoiceBar?window.DgcVoiceBar.create('pips',root):null;
+// Read aloud: the speaker under a Pip's reply. The page is redrawn often: each new speaker shows what's being read.
+const reader=window.DgcReadAloud?window.DgcReadAloud.create({post:m=>vscode.postMessage({...m,from:'pips'}),within:root}):null;
+reader?.onError((text,kind)=>{if(kind==='info')S.notice=text;else S.error=text;render();});
+// Voice mode (media/voicemode.js): a spoken conversation with the Pip. Its bar draws itself into each render.
+const talkBar=window.DgcVoiceBar?window.DgcVoiceBar.create('pips-talk',root):null;
+const voiceMode=talkBar&&reader&&window.DgcVoiceMode?window.DgcVoiceMode.create({bar:talkBar,reader,
+  post:m=>vscode.postMessage({...m,from:'pips'}),
+  deliver:text=>{micCaret=null;draft.chatText='';dictatedToPip(text,true);},
+  messages:()=>S.messages,
+  show:()=>render(),
+  notify:(text,kind)=>{if(kind==='info')S.notice=text;else S.error=text;render();}}):null;
 function micShow(next,action=''){S.mic=['starting','recording','writing'].includes(next)?next:'idle';voiceBar?.state(S.mic,action);}
 function micCancel(){micShow('idle');render();vscode.postMessage({type:'micCancel',from:'pips'});$('chatText')?.focus();}
 /** What was said, at the caret of the Pip's box, spaced from its neighbours; then sent, when Send stopped it. */
@@ -261,6 +274,7 @@ async function loadChatContext(){
 }
 function chatControlsMarkup(canSend,busy){
  // Dictating: the bottom row is the voice bar (media/voicebar.js), which draws itself into whatever is rendered here.
+ if(voiceMode?.active)return `<div class="composer-controls pip-voice">${talkBar.markup('conversation')}</div>`;
  if(S.mic!=='idle')return `<div class="composer-controls pip-voice">${voiceBar?voiceBar.markup():''}</div>`;
  const locked=archived()||!usable()||S.busy,current=S.pip.model_choice?.mode==='model'?S.pip.model_choice.model:'',shownModel=current||S.defaultModel||'Same as DGC',selected=current?'model:'+current:'default',available=S.apiVersion>=24&&!!S.chatControls,o=available?chosenChatOptions():null;
  const unavailable=`<p class="composer-unavailable">${S.apiVersion<24?'Update DGC to change these settings.':'These settings didn’t load. Refresh, then send.'}</p>`;
@@ -273,7 +287,9 @@ function chatControlsMarkup(canSend,busy){
  const ctx=o&&S.chatContext&&S.chatContext.context_size===o.context_size?S.chatContext:null,pct=ctx?Math.min(100,Math.round(ctx.used_tokens/ctx.context_size*100)):null;
  const meter=ctx?`<div class="ctx-head"><div><span class="ctx-kicker">Context window</span><strong>${ctx.used_tokens.toLocaleString('en-US')} / ${ctx.context_size.toLocaleString('en-US')}</strong></div><span class="ctx-pct">${pct}%</span></div>${ctx.breakdown?`<div class="pip-ctx-breakdown" data-sig="${esc(ctx.breakdown.used+':'+ctx.breakdown.categories.map(c=>c.id+'='+c.tokens).join(','))}"></div>`:`<div class="ctx-track" aria-hidden="true"><span style="width:${pct}%"></span></div><div class="ctx-split"><span>${Math.max(0,ctx.context_size-ctx.used_tokens).toLocaleString('en-US')} free</span><span>${ctx.recent_messages} recent message${ctx.recent_messages===1?'':'s'}${ctx.summarized_messages?` · ${ctx.summarized_messages} in its brief`:''}</span></div>`}`:`<div class="ctx-head"><div><span class="ctx-kicker">Context window</span></div></div>`;
  const contextMenu=S.composerPanel==='context'?`<section class="composer-model-menu composer-context-menu" role="dialog" aria-label="Context window">${meter}${o?`<div class="composer-context-size"><label for="chat-context">Window size</label><select id="chat-context" aria-label="Context for next reply" title="Context budget for the next reply only."${locked?' disabled':''}>${sizes.map(n=>`<option value="${n}"${o.context_size===n?' selected':''}>${n===1048576?'1M':n%1024===0?n/1024+'K':n.toLocaleString()}</option>`).join('')}</select></div>${composerNote(`Applies to the next reply. Pips supports 2,048–${S.chatControls.context_max.toLocaleString()} tokens; main DGC requests ${S.chatControls.inherited_context_size.toLocaleString()}. ${S.chatControls.context_note}`)}${continuityMarkup()}`:unavailable}</section>`:'';
- const action=busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${composerIcon('stop')}</button>`:`<button type="submit" class="chat-send${canSend&&(draft.chatText.trim()||canAttachImages()&&(pendingImages().length||pendingFiles().length))?' ready':''}" aria-label="Send message" title="Send message"${canSend?'':' disabled'}>${composerIcon('up')}</button>`;
+ // An empty box offers voice mode where Send is, as ChatGPT does; a word typed, and it's Send again.
+ const offerVoice=!!voiceMode&&!busy&&canSend&&!draft.chatText.trim()&&!(canAttachImages()&&(pendingImages().length||pendingFiles().length));
+ const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${composerIcon('stop')}</button>`:`<button type="submit" class="chat-send${canSend&&(draft.chatText.trim()||canAttachImages()&&(pendingImages().length||pendingFiles().length))?' ready':''}" aria-label="Send message" title="Send message"${canSend?'':' disabled'}>${composerIcon('up')}</button>`;
  return `${modelMenu}${contextMenu}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button><button type="button" id="chat-permissions" class="composer-chip" title="${personalPip()?`What ${esc(S.pip.name)} can do`:'Read-only Pip chat · captured source tools only'}" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(shownModel)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
@@ -354,6 +370,7 @@ async function loadMessages(more=false){
     if(more){if(page.next_before_id===before||page.messages.some(m=>S.messages.some(p=>p.id===m.id)))throw new Error('Conversation history did not advance. Refresh before retrying.');S.messages=[...page.messages,...S.messages].slice(-200);S.messageCursor=page.next_before_id;}
     else{const existing=new Map(S.messages.map((m,i)=>[m.id,i]));const next=[...S.messages];for(const m of page.messages){if(existing.has(m.id))next[existing.get(m.id)]=m;else next.push(m);}if(!S.messagesLoaded)S.messageCursor=page.next_before_id;S.messages=next.slice(-200);}
     S.messagesLoaded=true;S.messagesError='';S.chatActiveRun=page.active_run;S.omitted=page.history_context_omitted_count;S.continuity=chatContinuity(page.continuity,id,S.workspace.id);
+    if(!more)voiceMode?.check(!!page.active_run);
     if(!page.active_run){streamSeq++;streamLoading=false;S.stream=null;}else if(!S.stream||S.stream.runId!==page.active_run.id){streamSeq++;streamLoading=false;S.stream={runId:page.active_run.id,cursor:0,text:'',limited:false,error:'',truncated:false};}
     if(page.active_run)void loadChatStream();
     if(!more)void loadReplyStats();
@@ -1474,13 +1491,15 @@ S.notes=null;S.notesPip='';S.notesError='';let notesSeq=0,notesBusy=false,noteCo
 async function loadNotes(){
  if(remoteHost||S.apiVersion<44||!personalPip()||!usable())return;
  const token=scope(),pip=S.selected,sequence=++notesSeq;
- try{const notes=notesPage(await send('list_pip_notes',{pip_id:pip}),pip);if(token!==scope()||sequence!==notesSeq||S.selected!==pip)return;
+ try{const notes=notesPage(await send('list_pip_notes',{pip_id:pip,...sharedNotes()}),pip);if(token!==scope()||sequence!==notesSeq||S.selected!==pip)return;
   const before=S.notesPip===pip?JSON.stringify(S.notes):'';S.notes=notes;S.notesPip=pip;S.notesError='';if(JSON.stringify(notes)!==before)render();}
  catch(error){if(token===scope()&&sequence===notesSeq){S.notesError=errorText(error);render();}}
 }
+// Pips API 46: a Pip's page lists, and forgets, what it kept in your one memory in DGC too (mem_ ids).
+function sharedNotes(){return S.apiVersion>=46?{shared:true}:{};}
 async function noteCall(type,fields,notice){
  if(notesBusy||!usable()||!personalPip())return;const token=scope(),pip=S.selected;notesBusy=true;S.notesError='';render();
- try{const notes=notesPage(await send(type,{pip_id:pip,...fields}),pip);if(token!==scope()||S.selected!==pip)return;S.notes=notes;S.notesPip=pip;S.notice=notice();}
+ try{const notes=notesPage(await send(type,{pip_id:pip,...fields,...sharedNotes()}),pip);if(token!==scope()||S.selected!==pip)return;S.notes=notes;S.notesPip=pip;S.notice=notice();}
  catch(error){if(token===scope())S.notesError=errorText(error);}
  finally{notesBusy=false;if(token===scope())render();}
 }
@@ -1653,6 +1672,7 @@ function render() {
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
   avatarObserver?.disconnect();
   $('app').innerHTML=markup;
+  reader?.sync();talkBar?.refresh();voiceBar?.refresh();
   const parts=document.querySelector('.pip-ctx-breakdown');if(parts&&S.chatContext?.breakdown&&window.DgcBreakdown)parts.replaceChildren(window.DgcBreakdown.render(S.chatContext.breakdown));
   for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose&&(old.dataset.tint||'')===(node.dataset.tint||''))node.replaceWith(old);}
   observeAvatars();fitChatInput();hydrateMessageImages();
@@ -2373,7 +2393,9 @@ function updateDraft(event) {
   const key=event.target.dataset?.draft;if(!(key in draft))return;draft[key]=event.target.type==='checkbox'?event.target.checked:event.target.value;
   if(key==='noteAdd'){const add=document.querySelector('#note-add-form button[type=submit]');if(add)add.disabled=notesBusy||!usable()||!draft.noteAdd.trim();}
   if(key==='outcomeSession'){outcomeInspectSeq++;outcomeInspection=null;outcomeInspecting=false;outcomeSessionsError='';}
-  if(key==='chatText'&&S.selected){chatDrafts.set(S.selected,draft.chatText);rememberView();fitChatInput();}if(key==='chatModelSearch')render();
+  if(key==='chatText'&&S.selected){chatDrafts.set(S.selected,draft.chatText);rememberView();fitChatInput();
+    // The box emptied or got its first word: voice mode and Send trade places (the caret is kept across the redraw).
+    if(voiceMode&&!!$('chat-voicemode')===!!draft.chatText.trim()){const at=event.target.selectionStart;render();const box=$('chatText');if(box){box.focus();box.setSelectionRange(at,at);}}}if(key==='chatModelSearch')render();
   if(key==='sourceMode'||key==='sourceReason')S.sourceDirty=true;
   if(key==='pipModel')S.modelDirty=true;
   if((key==='pipPageName'||key==='pipPageTitle')&&!pageNameDirty){pageNameDirty=true;render();}
@@ -2507,6 +2529,9 @@ document.addEventListener('pointerover',event=>{
 });
 document.addEventListener('click',event=>{
   if(S.composerPanel&&!event.target.closest?.('.composer-model-menu,#chat-model,#chat-context-toggle')){S.composerPanel='';render();}
+  if(event.target.closest?.('#chat-voicemode')){S.error='';voiceMode?.start();return;}
+  const talkAction=event.target.closest?.('[data-voicebar="pips-talk"] [data-voice-action]')?.dataset.voiceAction;
+  if(talkAction){voiceMode?.action(talkAction);return;}
   if(event.target.closest?.('#chat-mic')&&S.mic==='idle'){const box=$('chatText');micCaret=box?[box.selectionStart,box.selectionEnd]:null;S.error='';micShow('starting');render();vscode.postMessage({type:'micStart',from:'pips'});return;}
   const voiceAction=event.target.closest?.('[data-voice-action]')?.dataset.voiceAction;
   if(voiceAction==='cancel'){micCancel();return;}
@@ -2523,6 +2548,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.chatActivity){void toggleChatActivity(target.dataset.chatActivity);return;}
   if(target.dataset.chatAction){
     const m=S.messages.find(m=>m.id===target.dataset.messageId);if(!m)return;
+    if(target.dataset.chatAction==='read'){reader?.toggle(m.id,m.text);return;}
     if(target.dataset.chatAction==='copy'){vscode.postMessage({type:'copy',text:m.text});target.innerHTML=transcriptIcon('check')+'<span class="sr-only">Copied</span>';target.title='Copied';target.setAttribute('aria-label','Copied');const status=target.parentElement.querySelector('.copy-feedback');if(status)status.textContent='Copied';return;}
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id);if(!prompt||archived()||!usable())return;
     if(draft.chatText.trim()&&draft.chatText!==prompt.text){S.notice='You have an unsent message in the box. Send or copy it first, then edit this one.';render();return;}
@@ -2901,6 +2927,7 @@ async function enable(){
 document.addEventListener('keydown',event=>{
   if(!S.review&&event.target.id==='chatModelSearch'&&event.key==='Enter'){event.preventDefault();return;}
   if(!S.review&&S.composerPanel){if(event.key==='Escape'){event.preventDefault();const target=S.composerPanel==='context'?'chat-context-toggle':'chat-model';S.composerPanel='';render();$(target)?.focus();return;}if(['ArrowUp','ArrowDown'].includes(event.key)&&event.target.closest?.('.composer-model-options')){event.preventDefault();const items=[...document.querySelectorAll('[data-chat-model]:not(:disabled)')],at=items.indexOf(event.target);items[(at+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}}
+  if(event.key==='Escape'&&voiceMode?.active){event.preventDefault();voiceMode.end();return;}
   if(event.key==='Escape'&&(S.mic==='recording'||S.mic==='starting')){event.preventDefault();micCancel();return;}
   if(!S.review&&event.target.id==='chatText'&&event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();void sendChat();return;}
   if(!S.review)return;
@@ -2912,7 +2939,9 @@ document.addEventListener('keydown',event=>{
 });
 const stopMessages=options.onMessage(message=>{
   if(disposed||!record(message))return;
+  if((message.type==='voiceReady'||message.type==='mic'||message.type==='micLevels')&&message.from==='pips'&&voiceMode?.receive(message))return;
   if(message.type==='micLevels'&&message.from==='pips'){voiceBar?.push(message.levels);return;}
+  if((message.type==='speak'||message.type==='speakAudio')&&message.from==='pips'){reader?.receive(message);return;}
   if(message.type==='mic'&&message.from==='pips'){
     const was=S.mic;micShow(message.state,message.mode==='send'?'send':'stop');
     if(message.error){if(message.kind==='info')S.notice=String(message.error);else S.error=String(message.error);}

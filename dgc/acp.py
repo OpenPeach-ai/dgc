@@ -40,6 +40,7 @@ _KIND = {  # DGC tool -> ACP tool-call kind
     "monitor": "execute", "monitor_stop": "execute",
     "web_fetch": "fetch", "web_search": "fetch",
     "todo": "think", "task": "think", "skill": "other", "save_memory": "other",
+    "remember": "other", "forget": "other",
 }
 # ACP plan entries know pending | in_progress | completed; a blocked step is shown as pending.
 _TODO_STATUS = {"pending": "pending", "in_progress": "in_progress", "done": "completed",

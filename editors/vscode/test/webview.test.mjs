@@ -2896,7 +2896,7 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   assert.deepEqual(errors, []);
 });
 
-test("what fills the window, part by part, in the context menu: asked for as it opens, drawn in place of the single bar", () => {
+test("what fills the window, part by part, in the context menu: asked for as it opens, drawn in place of the single bar", async () => {
   const { doc, send, posted, errors } = makeDom();
   send({ type: "event", event: { type: "context", used: 9000, size: 32768, compact_threshold: .85, compact_at: 27852,
     input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, requests: 0 } });
@@ -2914,10 +2914,17 @@ test("what fills the window, part by part, in the context menu: asked for as it 
                    ["Tools2", "Tool results", "Messages", "Kept free for summarizing", "Free space", "MCP tools found when needed"]);
   assert.deepEqual([...box.querySelectorAll(".bd-item-name")].map((n) => n.textContent), ["task", "Docs \u00b7 read"]);
   assert.equal(box.querySelector('.bd-row[data-id="deferred"] .bd-share').textContent, "\u2014", "what waits takes no share");
+  const details = box.querySelector(".bd-details");
+  assert.equal(details.open, false, "the parts are folded at first, under Details");
+  assert.deepEqual([...details.querySelectorAll(".bd-toggle > span")].map((n) => n.textContent), ["Details", "18.9k free"]);
+  details.open = true;
+  await new Promise((resolve) => setTimeout(resolve, 0));        // the toggle event is queued, as in a browser
   const asked = posted.filter((m) => m.type === "contextBreakdown").length;
   send({ type: "event", event: { type: "context", used: 9500, size: 32768, compact_threshold: .85, compact_at: 27852,
     input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, requests: 1 } });
   assert.equal(posted.filter((m) => m.type === "contextBreakdown").length, asked + 1, "asked again as the window changes, while open");
+  assert.notEqual(box.querySelector(".bd-details"), details, "drawn again");
+  assert.equal(box.querySelector(".bd-details").open, true, "and what was opened stays open");
   assert.deepEqual(errors, []);
 });
 

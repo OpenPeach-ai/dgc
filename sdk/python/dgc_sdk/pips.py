@@ -219,9 +219,9 @@ COMMAND_FIELDS = {
     'decline_pip_plugin': frozenset({'pip_id', 'grant_id'}),
     'list_pip_plugin_uses': frozenset(),
     'list_pip_attention': frozenset({'limit'}),
-    'list_pip_notes': frozenset({'pip_id'}),
-    'add_pip_note': frozenset({'pip_id', 'text'}),
-    'forget_pip_note': frozenset({'pip_id', 'note_id', 'all'}),
+    'list_pip_notes': frozenset({'pip_id', 'shared'}),
+    'add_pip_note': frozenset({'pip_id', 'text', 'shared'}),
+    'forget_pip_note': frozenset({'pip_id', 'note_id', 'all', 'shared'}),
     'list_pip_sites': frozenset({'pip_id'}),
     'set_pip_careful': frozenset({'pip_id', 'on'}),
     'set_plugin_permission': frozenset({'level', 'plugin'}),
@@ -562,6 +562,8 @@ class Pips:
             raise DGCUnsupportedError("Reviewed lifecycle revisions require a runtime advertising Pips API 16 or newer")
         if set(values) - COMMAND_FIELDS[command]:
             raise DGCConfigError("Unknown or reserved Pip parameter")
+        if command in ('list_pip_notes', 'add_pip_note', 'forget_pip_note') and 'shared' in values and version < 46:
+            raise DGCUnsupportedError("A Pip's notes in the one shared memory require Pips API 46 or newer")
         if (command == 'propose_pip_update' and isinstance(values.get('changes'), dict)
                 and 'app_plan' in values['changes'] and version < 28):
             raise DGCUnsupportedError('Reviewed personal app reads require Pips API 28 or newer')

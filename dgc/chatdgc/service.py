@@ -602,7 +602,7 @@ class ChatService:
         def run(cancel, on_start, stream_for, activity):
             return self.engine.send(cmd["conversation_id"], cmd["text"], model=cmd.get("model"),
                                     thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
-                                    attachments=cmd.get("attachments"), study=cmd.get("study"),
+                                    attachments=cmd.get("attachments"), study=cmd.get("study"), voice=cmd.get("voice") is True,
                                     canvas_selection=cmd.get("canvas_selection"),
                                     on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
         self._start(cmd, run)

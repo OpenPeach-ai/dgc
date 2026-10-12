@@ -2351,6 +2351,17 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .bd-share { color: var(--faint); font: var(--w-reg) var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
 .bd-count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: var(--sp-1); padding: 0 4px;
   border-radius: var(--r-full); background: var(--surface2); color: var(--muted); font: var(--w-semi) 10px/1 var(--sans); }
+.bd-details > .bd-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  margin-top: var(--sp-2); padding: 3px 0; list-style: none; cursor: pointer; border-radius: var(--r-sm); color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1.3 var(--sans); }
+.bd-details > .bd-toggle::-webkit-details-marker { display: none; }
+.bd-details > .bd-toggle:hover { color: var(--text-strong); }
+.bd-details > .bd-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.bd-toggle-label::before { content: "\203A"; display: inline-block; width: 10px; margin-right: var(--sp-2); text-align: center;
+  transition: transform .12s; }
+.bd-details[open] > .bd-toggle .bd-toggle-label::before { transform: rotate(90deg); }
+.bd-toggle-free { color: var(--faint); font: var(--w-reg) var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; }
+.bd-details > .bd-list { margin-top: 2px; }
 .bd-more > summary { list-style: none; cursor: pointer; border-radius: var(--r-sm); }
 .bd-more > summary::-webkit-details-marker { display: none; }
 .bd-more > summary:hover { background: var(--surface2); }
@@ -2380,7 +2391,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .bd [data-id="free"], .bd [data-id="deferred"] { --bd-c: var(--border); }
 #ctx-breakdown .bd { margin-top: var(--sp-2); }
 .bd [data-id="free"] .bd-label, .bd [data-id="deferred"] .bd-label, .bd [data-id="buffer"] .bd-label { color: var(--muted); }
-@media (prefers-reduced-motion: reduce) { .bd-more > summary .bd-label::after { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .bd-more > summary .bd-label::after, .bd-toggle-label::before { transition: none; } }
 @media (forced-colors: active) { .bd-seg, .bd-dot { forced-color-adjust: none; border: 1px solid CanvasText; } }
 
 /* Dictation: while it records, the voice bar (media/voicebar.css) takes the footer's place. */

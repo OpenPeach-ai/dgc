@@ -4,7 +4,7 @@ import { mkdirSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
-import type { Dictation, DictationOwner } from "./voice";
+import type { Dictation, DictationOwner, ReadAloud } from "./voice";
 
 /**
  * ChatDGC in the editor: a chat tab of its own (one conversation each) and the home's Chat list.
@@ -51,6 +51,8 @@ export interface ChatDGCHost {
   /** Dictation for every message box (src/voice.ts): recorded on the computer you're at, written down by the model
    *  Settings -> Voice chose. One box records at a time. */
   dictation?(): Dictation | undefined;
+  /** Reading a reply aloud, one at a time across the window. */
+  readAloud?(): ReadAloud | undefined;
 }
 
 
@@ -231,6 +233,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div class="cd-picker"><button type="button" id="cd-model-pill" class="cd-model-pill" aria-haspopup="dialog" aria-expanded="false" hidden><span id="cd-model-name" class="cd-model-name">Model</span><svg class="cd-pill-arc" viewBox="0 0 16 10" aria-hidden="true"><path class="cd-arc-track" d="M2 9 A6 6 0 0 1 14 9"></path><path id="cd-pill-arc-fill" class="cd-arc-fill" d=""></path></svg><span class="codicon codicon-chevron-up cd-model-chevron" aria-hidden="true"></span></button>
 <div id="cd-model-menu" class="cd-model-menu" role="dialog" aria-label="Model and thinking" hidden></div></div>
 <button type="button" id="cd-mic" class="cd-icon cd-mic" title="Dictate" aria-label="Dictate"><span class="codicon codicon-mic" aria-hidden="true"></span></button>
+<button type="button" id="cd-voicemode" class="cd-send cd-voicemode" title="Voice mode: talk with ChatDGC" aria-label="Voice mode" hidden><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>
 <button type="submit" id="cd-send" class="cd-send" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
 <button type="button" id="cd-stop" class="cd-send cd-stop" title="Stop (Esc)" aria-label="Stop" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button></div>
 </div><div id="cd-voice" class="cd-voice"></div></form>
@@ -239,7 +242,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -796,6 +799,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       this.tabs.delete(tab);
       for (const [id, asker] of this.requests) { if (asker.tab === tab) this.requests.delete(id); }
       this.host?.dictation?.()?.release(tab.mic);
+      this.host?.readAloud?.()?.release(tab.mic);
     });
     panel.webview.onDidReceiveMessage((message) => { void this.fromTab(tab, message); });
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
@@ -836,7 +840,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       // A tab opened before the backend was ready asked for models too early: its picker showed nothing chosen.
       void this.models(tab);
     }
-    if (this.homeHeld) { this.homeHeld = false; this.homeRefresh(); }
+    // The home's list, asked again whatever happened before: an answer that came while the side bar's page wasn't
+    // ready to hear it (or a request turned away mid-start) would otherwise leave the home without its Chat tab.
+    this.homeHeld = false;
+    if (this.host) this.homeRefresh();
     // A tab that loaded before the backend was up was told of no window sizes: now it knows them.
     for (const tab of this.tabs) this.post(tab, { type: "windows", presets: this.windowPresets() });
     this.restoreWidgets();
@@ -1145,6 +1152,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         // The webview (re)loaded: it shows what this tab holds, or a new chat. A recording it started is gone with
         // the page that showed it.
         this.host?.dictation?.()?.release(tab.mic);
+        this.host?.readAloud?.()?.release(tab.mic);
         this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(conversation ? { conversation_id: conversation } : {}),
                                           ...(!conversation && tab.temporary ? { temporary: true } : {}),
                                           ...(!conversation && tab.project ? { project: tab.project } : {}) });
@@ -1256,6 +1264,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                           ...(model ? { model } : {}), ...(thinking ? { thinking } : {}),
                                           ...(search ? { search } : {}),
                                           ...(typeof message.study === "boolean" ? { study: message.study } : {}),
+                                          // Spoken in voice mode, on a backend that knows it: the reply is to sound like speech.
+                                          ...(message.voice === true && this.host?.chatdgcOffers?.()?.voice_replies === 1 ? { voice: true } : {}),
                                           ...(selection ? { canvas_selection: selection } : {}),
                                           ...(attachments.length ? { attachments } : {}) });
         return;
@@ -1521,10 +1531,18 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "micStart":
       case "micStop":
-      case "micCancel": {
+      case "micCancel":
+      case "voiceCheck": {
         const dictation = this.host?.dictation?.();
         if (!dictation) { this.post(tab, { type: "mic", state: "idle", error: "Update the DGC CLI to use voice." }); return; }
         await dictation.handle(tab.mic, message);
+        return;
+      }
+      case "speakStart":
+      case "speakStop": {
+        const reader = this.host?.readAloud?.();
+        if (!reader) { this.post(tab, { type: "speak", id: String(message.id || ""), state: "idle", error: "Update the DGC CLI to use voice." }); return; }
+        await reader.handle(tab.mic, message);
         return;
       }
       case "openMemory":

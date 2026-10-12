@@ -1368,7 +1368,7 @@
   const TOOL_ICON = {
     read_file: "book-open", glob: "search", grep: "search", repo_map: "folder-tree",
     code_intel: "braces", git_diff: "file-diff", write_file: "file-plus", create_file: "file-plus",
-    edit_file: "pencil", apply_patch: "pencil", multi_edit: "pencil", save_memory: "bookmark",
+    edit_file: "pencil", apply_patch: "pencil", multi_edit: "pencil", save_memory: "bookmark", remember: "bookmark", forget: "bookmark",
     bash: "square-terminal", bash_output: "square-terminal", bash_kill: "square-terminal", python: "code",
     web_search: "globe", web_fetch: "globe", browser: "globe", view_image: "image",
     present_plan: "clipboard-list", present_document: "file-text", propose_options: "circle-help",
@@ -1420,6 +1420,7 @@
     write_file: ["Writing", "Wrote"], create_file: ["Creating", "Created"],
     edit_file: ["Editing", "Edited"], multi_edit: ["Editing", "Edited"],
     apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
+    remember: ["Remembering", "Remembered"], forget: ["Forgetting", "Forgot"],
     bash: ["Running", "Ran"], bash_output: ["Checking process", "Checked process"], bash_kill: ["Stopping process", "Stopped process"],
     grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],
     view_image: ["Viewing image", "Viewed image"], browser: ["Using browser", "Used browser"],
@@ -3280,6 +3281,13 @@
     });
   }
 
+  // ---- read aloud: the speaker under a reply (media/readaloud.js). In the side bar the Pips box has its own.
+  // (var: a transcript restored before this line runs reads it as not-yet-made rather than throwing.)
+  var replySeq = 0;
+  var reader = window.DgcReadAloud ? window.DgcReadAloud.create({ post: (m) => vscode.postMessage({ ...m, from: "chat" }) }) : null;
+  reader?.onError((text, kind) => sysLine(text, kind !== "info"));
+  if (reader) new MutationObserver(() => reader.sync()).observe(log, { childList: true, subtree: true });
+
   function responseActions(textEl, prompt, partial = false) {
     const actions = el("div", "response-actions");
     if (partial) actions.classList.add("partial");
@@ -3289,6 +3297,14 @@
       actions.appendChild(b); return b;
     };
     add("copy", "copy", partial ? "Copy what was written" : "Copy response");
+    if (reader) {
+      // Read aloud, in the voice Settings -> Voice chose (media/readaloud.js).
+      const read = el("button", "ract ract-read",
+        '<span class="codicon codicon-unmute ra-play" aria-hidden="true"></span><span class="codicon codicon-debug-stop ra-stop" aria-hidden="true"></span>');
+      read.type = "button"; read.title = "Read aloud"; read.setAttribute("aria-label", "Read aloud"); read.setAttribute("aria-pressed", "false");
+      read.dataset.act = "read"; read.dataset.readAloud = textEl.dataset.readId ||= `reply-${++replySeq}`;
+      actions.appendChild(read);
+    }
     if (!partial) {
       // Ratings are toggles, so they carry aria-pressed: without it a screen reader announces
       // "Good response, button" whether or not the rating is already applied, and gives no hint
@@ -3310,6 +3326,7 @@
       if (!button) return;
       const act = button.dataset.act;
       if (act === "copy") { vscode.postMessage({ type: "copy", text: body() }); flashAction(button, "check"); return; }
+      if (act === "read") { reader?.toggle(button.dataset.readAloud, body()); return; }
       if (act === "up" || act === "down") {
         const on = button.classList.contains("on");
         actions.querySelectorAll(".ract-up, .ract-down").forEach((b) => {
@@ -7219,9 +7236,10 @@
 
   window.addEventListener("message", (e) => {
     const msg = e.data;
-    if (msg.type === "mic" || msg.type === "micLevels") {
-      // This page's own box, or the Pips box beside it (in the side bar's Pips view).
-      if (msg.from === "chat") onMic(msg);
+    if (["mic", "micLevels", "speak", "speakAudio", "voiceReady"].includes(msg.type)) {
+      // This page's own box, or the Pips box beside it (in the side bar's Pips view). (voiceReady answers voice mode,
+      // which only the Pips box has here.)
+      if (msg.from === "chat") { if (msg.type.startsWith("speak")) reader?.receive(msg); else if (msg.type !== "voiceReady") onMic(msg); }
       else if (msg.from === "pips") for (const listener of pipsListeners) listener(msg);
       return;
     }

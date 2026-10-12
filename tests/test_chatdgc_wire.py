@@ -681,7 +681,8 @@ class HostTests(unittest.TestCase):
 
     def test_ready_offers_it(self):
         self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1, "widget_library": 1,
-                          "windows": ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"], "context_breakdown": 1})
+                          "windows": ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"], "context_breakdown": 1,
+                          "voice_replies": 1})
 
     def test_no_frame_carries_a_sessions_chat_id_even_with_several_sessions(self):
         self.host.dispatch({"type": "open_chat", "request_id": "oc", "cwd": str(self.tmp / "b")})

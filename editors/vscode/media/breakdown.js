@@ -2,7 +2,13 @@
 // with its tokens and its share of the window, a part's tools or files one by one under it, then the room kept free
 // before the chat is compacted, and what's free. ChatDGC, main DGC and Pips draw it alike (dgc/context_breakdown.py
 // makes the list). Text only: a label or a name is never markup.
+//
+// The parts are folded under Details at first: the bar and what's free show at a glance, the list on a click. What
+// was opened stays open while the page lives, since the meter redraws as a reply streams in.
 (function () {
+  let listOpen = false;
+  const partsOpen = new Set();
+  const remember = (details, onToggle) => details.addEventListener("toggle", () => onToggle(details.open));
   const fmt = (n) => {
     const v = Math.max(0, Number(n) || 0);
     if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
@@ -49,6 +55,8 @@
       if (Array.isArray(c.items) && c.items.length) {
         // A part with things in it (tools, files): opened, each with its own tokens.
         const more = el("details", "bd-more");
+        more.open = partsOpen.has(c.id);
+        remember(more, (open) => { if (open) partsOpen.add(c.id); else partsOpen.delete(c.id); });
         const summary = el("summary", "");
         summary.append(line);
         line.querySelector(".bd-label").append(el("span", "bd-count", String(c.items.length)));
@@ -65,7 +73,13 @@
     if (b?.buffer) list.append(row("buffer", "Kept free for summarizing", b.buffer, size));
     list.append(row("free", "Free space", b?.free, size));
     for (const d of Array.isArray(b?.deferred) ? b.deferred : []) list.append(row("deferred", d.label, d.tokens, size, "—"));
-    box.append(bar, list);
+    const details = el("details", "bd-details");
+    details.open = listOpen;
+    remember(details, (open) => { listOpen = open; });
+    const toggle = el("summary", "bd-toggle");
+    toggle.append(el("span", "bd-toggle-label", "Details"), el("span", "bd-toggle-free", `${fmt(b?.free)} free`));
+    details.append(toggle, list);
+    box.append(bar, details);
     return box;
   }
 

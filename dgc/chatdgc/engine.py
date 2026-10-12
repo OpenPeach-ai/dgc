@@ -616,7 +616,7 @@ class ChatEngine:
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
              on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
              cancel: threading.Event | None = None, answering: dict | None = None, study: bool | None = None,
-             canvas_selection: dict | None = None) -> dict:
+             canvas_selection: dict | None = None, voice: bool = False) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
@@ -660,6 +660,8 @@ class ChatEngine:
         for item in prepared:
             self._keep_file(chat, item)
         mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now()}
+        if voice is True:
+            mine["voice"] = True             # spoken in voice mode: its reply is read aloud, so it sounds like speech
         if prepared:
             mine["attachments"] = [item["meta"] for item in prepared]
         if answering:
@@ -1436,6 +1438,10 @@ class ChatEngine:
         return {**breakdown.build(room, cats, compact_at=fit_window.COMPACT_AT, reported=reported),
                 "limit": limit, "preset": self._preset()}
 
+    @staticmethod
+    def _last_user(chat: dict) -> dict | None:
+        return next((m for m in reversed(chat.get("messages") or []) if m.get("role") == "user"), None)
+
     def _history(self, chat: dict, search: str = "off", sees: bool = True, room: int = 0) -> list[dict]:
         """What the model reads: ChatDGC's instructions and the conversation. Earlier thinking never goes back;
         an earlier reply's sources do, as a list under it, so a follow-up can ask about [2]. A message's files
@@ -1449,7 +1455,8 @@ class ChatEngine:
             style=str(config.get("chatdgc_style", "") or ""),
             personality=str(config.get("chatdgc_personality", "default") or "default"),
             ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless,
-            memory=self._remembered(chat), study=bool(chat.get("study")))
+            memory=self._remembered(chat), study=bool(chat.get("study")),
+            voice=bool((self._last_user(chat) or {}).get("voice")))
         instructions += self._canvas_context(chat)
         instructions += self._data_context(chat)
         project, project_pictures = self._project_of(chat), []

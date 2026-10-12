@@ -36,6 +36,8 @@ interface Waiter { resolve(ev: any): void; timer: ReturnType<typeof setTimeout>;
 export class VoiceClient {
   private seq = 0;
   private readonly waiting = new Map<string, Waiter>();
+  /** Reading aloud: each request's audio, as it comes (voice_audio, and a voice_error naming it). */
+  private readonly streams = new Map<string, (ev: any) => void>();
   private recording = false;
 
   constructor(private readonly deps: VoiceDeps) {}
@@ -49,6 +51,12 @@ export class VoiceClient {
   /** Every voice_* event with a request id this client sent; true when it was one. */
   onEvent(ev: any): boolean {
     const id = typeof ev?.request_id === "string" ? ev.request_id : "";
+    const stream = id ? this.streams.get(id) : undefined;
+    if (stream && (ev?.type === "voice_audio" || ev?.type === "voice_error")) {
+      if (ev.type === "voice_error" || ev.done === true) this.streams.delete(id);
+      stream(ev);
+      return true;
+    }
     const waiter = id ? this.waiting.get(id) : undefined;
     if (!waiter || !["voice_state", "voice_text", "voice_error"].includes(ev?.type)) return false;
     this.waiting.delete(id);
@@ -71,6 +79,15 @@ export class VoiceClient {
       return sent;
     }
     return promise;
+  }
+
+  /** What's installed and chosen (voice_state), or why it can't be asked. */
+  async models(): Promise<any> {
+    const state = this.ask({ type: "voice_models", request_id: this.nextId("models") }, STATE_TIMEOUT_MS);
+    if (state === "old_cli") return { error: "Update the DGC CLI to use voice." };
+    if (state === "starting") return { error: "DGC is starting; try again in a moment." };
+    const ev = await state;
+    return ev?.type === "voice_state" ? ev : { error: String(ev?.message || "Voice isn't available.") };
   }
 
   /** Starts recording, or says why it can't: no dictation model yet opens Settings -> Voice to choose one. */
@@ -141,6 +158,24 @@ export class VoiceClient {
     }
   }
 
+  /** Reads `text` aloud on DGC's process: `onAudio` hears each voice_audio (16-bit mono PCM, base64) and a
+   *  voice_error naming it. Returns the request's id, or why it couldn't start. */
+  speak(text: string, onAudio: (ev: any) => void): { requestId: string } | { error: "starting" | "old_cli" } {
+    const requestId = this.nextId("speak");
+    this.streams.set(requestId, onAudio);
+    const sent = this.deps.send({ type: "voice_speak", request_id: requestId, text });
+    if (sent !== "sent") { this.streams.delete(requestId); return { error: sent }; }
+    return { requestId };
+  }
+
+  /** Stops reading `requestId` aloud: nothing more is made. */
+  stopSpeaking(requestId: string): void {
+    if (!this.streams.delete(requestId)) return;
+    this.deps.send({ type: "voice_stop", request_id: requestId });
+  }
+
+  openSettings(section: string): void { this.deps.openSettings(section); }
+
   /** Drops the recording: nothing is kept or sent. */
   async cancel(): Promise<void> {
     if (!this.recording) return;
@@ -161,7 +196,7 @@ export interface DictationOwner {
 
 /** What a box's page sends: micStart, micStop {mode: "insert" | "send"}, micCancel. */
 export type MicMessage = { type: "micStart" } | { type: "micStop"; mode?: string } | { type: "micCancel" };
-export const MIC_MESSAGES = ["micStart", "micStop", "micCancel"];
+export const MIC_MESSAGES = ["micStart", "micStop", "micCancel", "voiceCheck"];
 
 /**
  * Dictation for every message box in the window -- DGC's chats, ChatDGC's and Pips': one microphone, so one box
@@ -177,12 +212,25 @@ export class Dictation {
 
   /** One of a page's mic messages, from the box `owner` speaks for. */
   async handle(owner: DictationOwner, message: any): Promise<void> {
+    if (message?.type === "voiceCheck") return this.check(owner);
     if (message?.type === "micStart") return this.start(owner);
     if (message?.type === "micStop") return this.stop(owner, message.mode === "send" ? "send" : "insert");
     if (message?.type === "micCancel") return this.cancel(owner);
   }
 
   isRecording(owner?: DictationOwner): boolean { return owner ? this.owner === owner : !!this.owner; }
+
+  /** Voice mode's first question: is there a model to write down what's said, and a voice to answer in? Either
+   *  missing opens Settings -> Voice. */
+  async check(owner: DictationOwner): Promise<void> {
+    const state = await this.client.models();
+    if ("error" in state) { owner.post({ type: "voiceReady", dictation: false, readAloud: false, message: state.error }); return; }
+    const installed = (id: string) => !!id && state.models.some((m: any) => m?.id === id && m.installed);
+    const dictation = installed(state.dictation), readAloud = installed(state.read_aloud);
+    if (!dictation || !readAloud) this.client.openSettings("voice");
+    owner.post({ type: "voiceReady", dictation, readAloud,
+                 ...(dictation && readAloud ? {} : { message: `Voice mode needs ${!dictation && !readAloud ? "a dictation model and a voice" : !dictation ? "a dictation model" : "a voice for reading aloud"}: choose ${!dictation && !readAloud ? "them" : "one"} in Settings → Voice, then start voice mode again.` }) });
+  }
 
   private async start(owner: DictationOwner): Promise<void> {
     if (this.owner) {
@@ -250,5 +298,79 @@ export class Dictation {
     this.stopPolling();
     this.owner = undefined;
     this.client.dispose();
+  }
+}
+
+/** What a box's page sends to read a reply aloud: speakStart {id, text}, speakStop. */
+export const SPEAK_MESSAGES = ["speakStart", "speakStop"];
+/** The most of a reply read aloud (DGC's process reads the first 6,000 characters of it). */
+const MAX_SPEAK_TEXT = 20_000;
+
+/**
+ * Reading aloud for every box in the window: one reply at a time, read by the voice Settings -> Voice chose. The
+ * box's page gets {type: "speak", id, state} and the audio as it's made ({type: "speakAudio", id, audio, rate, done})
+ * to play itself, so the sound comes from the computer you're at, as the waveform's microphone does.
+ */
+export class ReadAloud {
+  private owner?: DictationOwner;
+  private id = "";
+  private requestId = "";
+
+  constructor(private readonly client: VoiceClient) {}
+
+  async handle(owner: DictationOwner, message: any): Promise<void> {
+    if (message?.type === "speakStart") this.start(owner, String(message.id || "").slice(0, 200), String(message.text || ""));
+    else if (message?.type === "speakStop") this.stop(owner);
+  }
+
+  isReading(owner?: DictationOwner): boolean { return owner ? this.owner === owner : !!this.owner; }
+
+  private start(owner: DictationOwner, id: string, text: string): void {
+    this.halt();                                   // one reply at a time: another stops
+    if (!text.trim()) { owner.post({ type: "speak", id, state: "idle", error: "There's nothing to read in this reply." }); return; }
+    this.owner = owner;
+    this.id = id;
+    owner.post({ type: "speak", id, state: "loading" });
+    const started = this.client.speak(text.slice(0, MAX_SPEAK_TEXT), (ev) => {
+      if (this.owner !== owner || this.id !== id) return;
+      if (ev.type === "voice_error") {
+        this.owner = undefined; this.requestId = "";
+        if (ev.code === "no_model") {
+          this.client.openSettings("voice");
+          owner.post({ type: "speak", id, state: "idle", kind: "info",
+                       error: "Choose a voice for reading aloud in Settings → Voice, then press Read aloud again." });
+        } else owner.post({ type: "speak", id, state: "idle", error: String(ev.message || "Reading aloud failed.") });
+        return;
+      }
+      owner.post({ type: "speakAudio", id, part: ev.part, audio: String(ev.audio || ""), rate: Number(ev.sample_rate) || 0, done: ev.done === true });
+      if (ev.done === true) { this.owner = undefined; this.requestId = ""; }
+    });
+    if ("error" in started) {
+      this.owner = undefined;
+      owner.post({ type: "speak", id, state: "idle",
+                   error: started.error === "old_cli" ? "Update the DGC CLI to use voice." : "DGC is starting; try again in a moment." });
+      return;
+    }
+    this.requestId = started.requestId;
+  }
+
+  /** Stops what's being read, and tells the box that asked for it. */
+  private halt(): void {
+    const owner = this.owner, id = this.id;
+    if (!owner) return;
+    this.client.stopSpeaking(this.requestId);
+    this.owner = undefined; this.requestId = "";
+    owner.post({ type: "speak", id, state: "idle" });
+  }
+
+  private stop(owner: DictationOwner): void {
+    if (this.owner === owner) this.halt();
+  }
+
+  /** A box that went away: what it was reading stops. */
+  release(owner: DictationOwner): void {
+    if (this.owner !== owner) return;
+    this.client.stopSpeaking(this.requestId);
+    this.owner = undefined; this.requestId = "";
   }
 }

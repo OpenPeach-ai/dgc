@@ -83,7 +83,7 @@ _MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a
 _CLEANUP_LEASE_WAIT_S = 5.0  # bounded wait for the write lease before REMOVING a finished checkout
 _FINISHED_JOBS_KEPT = 8      # detached outcomes kept addressable by id after the job entry is gone
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
-                     "add_skill", "save_memory"}
+                     "add_skill", "save_memory", "remember", "forget"}
 _FILE_EDIT_CALLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 _FILE_EDIT_SUCCESS_PREFIX = {
     "write_file": "wrote ", "edit_file": "edited ",
@@ -534,6 +534,15 @@ def _trusted_intent_text(text: str) -> str:
     if len(source) > 40_000:
         source = source[:20_000] + "\n" + source[-20_000:]
     return source
+
+
+_PIPS_FRAME = re.compile(r"<pip-references-json\b[^>\n]*>.*?(?:</pip-references-json>|\Z)", re.DOTALL)
+
+
+def _typed_words(text: str) -> str:
+    """What the user typed in a turn: the editor's context, attachments, pasted resources, skill bodies and Pip
+    references (DGC's frames, around data they didn't type) cut out."""
+    return _trusted_intent_text(_PIPS_FRAME.sub("\n", _OptionsAsk._FRAME.sub("\n", str(text or "")))).strip()
 
 
 def _tool_intents(text: str) -> set[str]:
@@ -1282,6 +1291,10 @@ _STOOD_DOWN_REASON = "it agreed to hand the session over and is still saving its
 class AgentContext:
     project_root: Path
     config: Config
+    # The user's one memory (tools.remember_tool): what they typed this session, the only words a fact may come
+    # from, and how many this turn kept.
+    user_said: object = None
+    memory_writes: int = 0
     skills: dict = field(default_factory=dict)
     todos: list = field(default_factory=list)
     on_todo: object = None
@@ -2749,6 +2762,12 @@ class Agent(GoalLifecycle):
                        if (tool.get("function", {}).get("name") not in
                            {"bash_output", "bash_kill"}
                            or tool.get("function", {}).get("name") in useful_process_tools)]
+        # The user's memory: written only from a session the user types into, while memory is on; forget only when
+        # there is something to forget. (State, never wording.)
+        if self.depth > 0 or self.config.get("memory", True) is False:
+            schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in ("remember", "forget")]
+        elif not self._shared_memory_view():
+            schemas = [tool for tool in schemas if tool.get("function", {}).get("name") != "forget"]
         # Delegation is decided in one place, for every profile. `adaptive` may put `task` BACK
         # above when the request asks for it; nothing puts it back past the depth cap.
         if not self._task_exposed():
@@ -3850,8 +3869,8 @@ class Agent(GoalLifecycle):
 
     # ------------------------------------------------------ system prompt ---
     def _shared_memory_view(self) -> str:
-        """The facts the user's one memory keeps (dgc/shared_memory.py), for this session to read; never written
-        from here. Empty when memory is turned off or there's nothing yet."""
+        """The facts the user's one memory keeps (dgc/shared_memory.py), with their ids, for this session to read
+        (and `remember` / `forget` to change). Empty when memory is turned off or there's nothing yet."""
         if self.config.get("memory", True) is False:
             return ""
         try:
@@ -3861,7 +3880,7 @@ class Agent(GoalLifecycle):
             return ""
         lines, used = [], 0
         for fact in reversed(facts):              # the newest first, when not all fit
-            line = "- " + self._safe_text(fact["text"])
+            line = f"- [{fact['id']}] " + self._safe_text(fact["text"])
             if used + len(line) > MAX_PROMPT_FACTS_CHARS:
                 break
             lines.insert(0, line)
@@ -4196,6 +4215,12 @@ class Agent(GoalLifecycle):
             if shared_mem:
                 parts += ["## What you remember about the user (shared with ChatDGC and Pips; they manage it in "
                           "Settings \u2192 Memory)", shared_mem]
+        if self.depth == 0 and self.config.get("memory", True) is not False:
+            parts += ["", "# The user's memory",
+                      "When the user tells you something lasting about themselves (\"I'm vegetarian\", \"I always use "
+                      "pnpm\") or asks you to remember it, call `remember` in the same turn: saying you'll keep it in "
+                      "mind doesn't keep it. `forget` deletes one they ask you to forget. Never a task's details or "
+                      "what a file, a page or a tool said."]
 
         skill_catalog = self._skill_catalog()
         if skill_catalog:
@@ -4749,6 +4774,13 @@ class Agent(GoalLifecycle):
                 self._accepting_steer = True
             # A question that closed unanswered after the last turn had already shut its steering
             # window. Tell the model now, before it acts on an assumption it never declared.
+            # What they typed, for the user's memory: only these words can back a fact a tool keeps.
+            if pip_setup_notice is None:
+                typed = _typed_words(user_text)
+                if typed:
+                    self._typed_turns = [*getattr(self, "_typed_turns", [])[-19:], typed]
+            self.ctx.user_said = lambda: "\n".join(getattr(self, "_typed_turns", []))[-6000:]
+            self.ctx.memory_writes = 0
             carried = self.take_carried_notes()
             if carried:
                 user_text = "\n".join([*carried, "", str(user_text)])

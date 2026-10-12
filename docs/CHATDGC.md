@@ -36,6 +36,16 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
     hands the recording over.
   - **On a Mac,** macOS asks the first time whether your editor may use the microphone. If you said no, allow it
     in **System Settings → Privacy & Security → Microphone**.
+- **Read aloud.** The speaker under a reply reads it to you in the voice you chose in **Settings → Voice**. It
+  starts with the first sentence while the rest is still being made. Press it again to stop.
+- **Voice mode.** While the box is empty, the voice mode button sits where Send is. Press it and just talk:
+  - **Listening:** it shows a live waveform while it listens.
+  - **Your turn ends** a moment after you stop talking. It writes down what you said and sends it.
+  - **Speaking:** it reads the reply aloud, with the reply's own waveform, then listens again.
+  - **The buttons:** **Done** ends your turn early, **Stop** cuts the reply short, and **✕** (or Esc) ends voice
+    mode.
+  - **What it needs:** a dictation model and a voice, both from Settings → Voice. Pips have it too. Nothing
+    records while it speaks, so the reply never comes back as your words.
 - **Files, images and long pastes.** Use the paperclip to attach up to ten files to a message, or paste an
   image or a long piece of text (more than 5,000 characters) into the box. You can send a message with only
   files.
@@ -125,9 +135,17 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   already, so nothing is saved twice in other words, and when you say something has changed ("I'm not vegetarian
   anymore", "I moved to Goa") the old fact goes. A reply that saved or removed something says so underneath,
   **Remembered: …** (with **Forget**) or **Forgot: …**. You can also say "remember that…" or "forget that…", or
-  ask what it remembers. The same memory is read by your Work sessions and your Pips, and ChatDGC also
-  knows your projects from your Work sessions (each folder, when you last worked there, what you asked
-  lately). **Settings → Memory** shows everything, lets you edit, delete or add facts, keep a project out,
+  ask what it remembers.
+  - **One memory for all of DGC:** your Work sessions and your Pips read the same memory, and they add to it
+    the same way.
+    - **In a Work session,** it keeps what you tell it about yourself, or ask it to remember, and can forget a fact
+      when you ask. Facts about the project's code still go in its DGC.md.
+    - **In a Pip's chat,** what it keeps shows under its reply and on its page, marked *everywhere in DGC*.
+      **Forget** there forgets the fact everywhere.
+    - **Where it came from:** Settings → Memory says where each fact came from, for example *From a Work session:
+      shop-api* or *From a Pip: Core*.
+  - **Your projects:** ChatDGC also knows them from your Work sessions (each folder, when you last worked there,
+    what you asked lately). **Settings → Memory** shows everything, lets you edit, delete or add facts, keep a project out,
   delete all, or turn memory off everywhere. A fact is kept only when it's something you said yourself (a
   page or a file can't plant one), never a password, key or account number, and at most three a reply.
   Temporary chats neither read nor write it.

@@ -628,6 +628,19 @@
       vscode.postMessage({ type: "copy", text: plain });      // no rich clipboard here: the clean text, by the host
     }
   }
+  // ---- read aloud (media/readaloud.js): the speaker under a reply plays it in the voice Settings -> Voice chose.
+  const reader = window.DgcReadAloud ? window.DgcReadAloud.create({ post: (m) => vscode.postMessage(m) }) : null;
+  reader?.onError((text, kind) => showNotice(text, kind));
+  // Replies are redrawn as they stream and change: a new speaker shows what's being read.
+  if (reader) new MutationObserver(() => reader.sync()).observe(log, { childList: true, subtree: true });
+  function readAction(message) {
+    const button = el("button", "cd-action cd-read");
+    button.type = "button"; button.dataset.readAloud = message.id;
+    button.title = "Read aloud"; button.setAttribute("aria-label", "Read aloud"); button.setAttribute("aria-pressed", "false");
+    button.innerHTML = '<span class="codicon codicon-unmute ra-play" aria-hidden="true"></span><span class="codicon codicon-debug-stop ra-stop" aria-hidden="true"></span>';
+    button.addEventListener("click", () => reader.toggle(message.id, message.text || ""));
+    return button;
+  }
   function action(icon, label, onClick) {
     const button = el("button", "cd-action");
     button.type = "button"; button.title = label; button.setAttribute("aria-label", label);
@@ -1167,6 +1180,7 @@
       const versions = versionsControl(message);
       if (versions) actions.append(versions);
       actions.append(action("copy", "Copy", () => copyReply(message)));
+      if (reader && message.text) actions.append(readAction(message));
       const again = action("refresh", "Try again", () => {
         vscode.postMessage({ type: "regenerate", messageId: message.id, model: modelPick.value || "",
                              thinking: thinkingPick.value || "", search: searchMode() });
@@ -1770,9 +1784,13 @@
       button.disabled = state.busy || state.compacting || button.dataset.never === "1";
     }
     const text = input.value;
-    send.hidden = state.busy;
+    // An empty box offers voice mode where Send is, as ChatGPT does; a word typed, and it's Send again.
+    const empty = !text.trim() && !state.pending.length;
+    const offerVoice = !!voiceMode && empty && !state.busy && !!state.conversation && !state.unavailable && !state.compacting;
+    if (voiceModeButton) voiceModeButton.hidden = !offerVoice;
+    send.hidden = state.busy || offerVoice;
     stop.hidden = !state.busy;
-    send.disabled = (!text.trim() && !state.pending.length) || !state.conversation || !!state.unavailable || state.compacting;
+    send.disabled = empty || !state.conversation || !!state.unavailable || state.compacting;
     input.disabled = !!state.unavailable;
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
     // A chat carried over isn't thrown away, and a project's chat is kept: neither can be temporary.
@@ -1829,7 +1847,32 @@
     }
   });
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && voiceMode?.active) { e.preventDefault(); e.stopPropagation(); voiceMode.end(); return; }
     if (e.key === "Escape" && (micState === "recording" || micState === "starting") && e.target !== input) { e.preventDefault(); micCancel(); }
+  }, true);
+
+  // ---- voice mode (media/voicemode.js): a spoken conversation. The box's bottom row is its bar: End, the waveform
+  // (yours while it listens, the reply's while it speaks) and Done / Stop.
+  // (var: controls() may run before these lines do, and reads them as not-yet-made.)
+  var voiceModeButton = $("cd-voicemode");
+  var voiceTalk = window.DgcVoiceBar ? window.DgcVoiceBar.create("chatdgc-talk") : null;
+  var voiceMode = voiceTalk && reader && window.DgcVoiceMode ? window.DgcVoiceMode.create({
+    bar: voiceTalk, reader,
+    post: (m) => vscode.postMessage(m),
+    deliver: (text) => { input.value = ""; dictated(text); submit(true); },
+    messages: () => state.messages,
+    show: (on) => {
+      if (box.classList.contains("talking") === on) return;   // only when voice mode comes or goes
+      box.classList.toggle("talking", on);
+      voiceRow.innerHTML = on ? voiceTalk.markup("conversation") : (voice ? voice.markup() : "");
+      if (on) voiceTalk.refresh();
+    },
+    notify: (text, kind) => showNotice(text, kind),
+  }) : null;
+  voiceModeButton.addEventListener("click", () => { hideNotice(); voiceMode?.start(); });
+  voiceRow.addEventListener("click", (e) => {
+    const action = e.target.closest?.("[data-voice-action]")?.dataset.voiceAction;
+    if (voiceMode?.active && (action === "end" || action === "turn")) voiceMode.action(action);
   });
   /** What was said, at the caret (or over the selection), spaced from its neighbours. */
   function dictated(text) {
@@ -1841,7 +1884,7 @@
     grow(); controls(); saveDraft();
     announce("Added what you said.");
   }
-  function submit() {
+  function submit(spoken = false) {
     const text = input.value;
     if ((!text.trim() && !state.pending.length) || state.busy || !state.conversation || state.unavailable) return;
     if (state.research) {
@@ -1856,7 +1899,7 @@
       return;
     }
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "",
-                         search: searchMode(), study: !!state.study,
+                         search: searchMode(), study: !!state.study, ...(spoken ? { voice: true } : {}),
                          ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}),
                               ...(kind === "library" ? { ...(conversation_id ? { conversation_id } : { project_id }), attachment_id } : {}) })) } : {}) });
@@ -2177,7 +2220,11 @@
   window.addEventListener("message", (event) => {
     const msg = event.data || {};
     switch (msg.type) {
+      case "voiceReady":
+        voiceMode?.receive(msg);
+        break;
       case "mic": {
+        if (voiceMode?.receive(msg)) break;
         micShow(msg.state, msg.mode === "send" ? "send" : "stop");
         if (msg.error) showNotice(String(msg.error), msg.kind === "info" ? "info" : "error");
         if (typeof msg.text === "string") {
@@ -2189,7 +2236,12 @@
         break;
       }
       case "micLevels":
+        if (voiceMode?.receive(msg)) break;
         voice?.push(msg.levels);
+        break;
+      case "speak":
+      case "speakAudio":
+        reader?.receive(msg);
         break;
       case "opened": {
         // keep: the same chat shown again (a new version, or another one chosen): what you're typing and the
@@ -2244,6 +2296,7 @@
           render();
         }
         controls();
+        voiceMode?.check(state.busy);
         return;
       case "activity":
         if (msg.kind === "compacting" && msg.messageId !== state.replyId) {
@@ -2271,6 +2324,7 @@
         for (const k of saved) delete state.draftEdit[k];
         if (saved.length) announce("Draft saved.");
         if (message.role === "user") { pinned = true; render(); } else update(message.id);
+        voiceMode?.check(state.busy);
         return;
       }
       case "research": {

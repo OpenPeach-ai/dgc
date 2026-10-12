@@ -2220,6 +2220,53 @@ def run_export_training(argv: list[str]) -> int:
     return 0
 
 
+# Voice is offered at setup, not packed into DGC (docs/CHATDGC.md): a model to write down what you say and a voice to
+# read replies aloud, downloaded once and run on this computer. Settings -> Voice in the editor has every choice.
+SETUP_VOICE = ("moonshine-base-en", "kitten-mini-en")
+
+
+def offer_voice(console, *, manager=None, ask=input, interactive=None) -> bool:
+    """The setup's last question: turn on voice? Installs SETUP_VOICE on a yes. Asked only at a terminal, and only
+    when no voice model is installed yet. True when voice was turned on."""
+    from .voice import catalog
+    from .voice.manager import VoiceError, VoiceManager
+    if not (sys.stdin.isatty() if interactive is None else interactive):
+        return False
+    manager = manager or VoiceManager()
+    try:
+        if any(m["installed"] for m in manager.state()["models"]):
+            return False
+    except Exception:                               # noqa: BLE001 -- an unreadable voice folder: don't ask
+        return False
+    models = [catalog.model(m) for m in SETUP_VOICE]
+    size_mb = sum(m["size"] for m in models) / 1e6 + catalog.RUNTIME["size_mb"]
+    console.print("\n  [bold]Voice[/bold]  talk to DGC in the editor, and hear replies read aloud")
+    answer = ask(f"  turn on voice? a one-time download of about {size_mb:.0f} MB, run on this computer [y/N] › ").strip().lower()
+    if answer not in ("y", "yes"):
+        console.print("  voice: any time, in the editor's Settings → Voice", markup=False, highlight=False)
+        return False
+    for m in models:
+        last = [0.0]
+
+        def progress(stage: str, done: int, total: int, name=m["name"]) -> None:
+            now = time.monotonic()
+            if stage == "download" and total and now - last[0] < 0.5 and done < total:
+                return
+            last[0] = now
+            said = {"runtime": "installing the voice engine", "download": f"downloading {done / 1e6:.0f} of {total / 1e6:.0f} MB",
+                    "verify": "checking it", "unpack": "unpacking", "done": "done"}.get(stage, stage)
+            print(f"\r  {name}: {said}\033[K", end="", flush=True)
+        try:
+            manager.install(m["id"], progress)
+            print()
+        except VoiceError as exc:
+            print()
+            console.print(f"  voice: {exc} — try again in the editor's Settings → Voice", markup=False, highlight=False)
+            return False
+    console.print("  voice is on: press the microphone in any DGC chat", markup=False, highlight=False)
+    return True
+
+
 def run_setup(config: Config) -> None:
     """`dgc setup` — interactive first-run wizard: pick a provider, key, model, context."""
     from .llm import LLMClient
@@ -2333,6 +2380,7 @@ def run_setup(config: Config) -> None:
         config.set("search_api_key", getpass(f"  API key for {meta['label']} › ").strip())
     if meta["needs_url"]:
         config.set("search_url", input(f"  base URL for {meta['label']} › ").strip())
+    offer_voice(c)
     c.print(f"\n  [bold green]saved[/bold green] → {_markup_literal(USER_CONFIG)}")
     c.print(f"  endpoint {terminal_safe_text(config.base_url)}  ·  "
             f"model {terminal_safe_text(config.model)}  ·  "

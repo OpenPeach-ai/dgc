@@ -51,6 +51,7 @@ DISPLAY = {
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "browser": "Browser",
     "todo": "Todo", "notes": "Notes", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
+    "remember": "Remember", "forget": "Forget",
     "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
     "present_plan": "PresentPlan", "present_document": "PresentDocument", "propose_options": "ProposeOptions",
     "ask_user": "AskUser", "artifact": "Artifact",
@@ -78,7 +79,7 @@ RULE_ARG = {
     "web_fetch": "url", "web_search": "query", "skill": "name", "add_skill": "url",
     "browser": "url",
     "mcp_search": "query", "mcp_call": "name",
-    "save_memory": "scope", "artifact": "path", "task": "description", "notes": "query",
+    "save_memory": "scope", "remember": "fact", "forget": "id", "artifact": "path", "task": "description", "notes": "query",
     "external_directory": "path",
 }
 
@@ -101,7 +102,11 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    # `close_task` is in STOP_TOOLS below instead -- monitor_stop's exact case.
                    # NEITHER may join DISPLAY, for the reason above: no rule can name them, and
                    # `deny: Task` stays the off switch (with no children, neither is offered).
-                   "message_task", "pips_context", "use_pips"}
+                   "message_task", "pips_context", "use_pips",
+                   # The user's one memory, as ChatDGC and Pips keep it: no card. Only what the user typed can be
+                   # kept, the tool card says what was, and Settings -> Memory forgets it. A rule can still deny
+                   # them by name (Remember, Forget).
+                   "remember", "forget"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
 # still wins.

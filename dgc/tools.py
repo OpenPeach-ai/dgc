@@ -452,9 +452,15 @@ TOOL_SCHEMAS = [
         "`skill` tool.",
         {"url": {"type": "string", "description": "URL to the SKILL.md (raw or a github.com/.../SKILL.md link)"},
          "name": {"type": "string", "description": "Optional name; inferred from the skill if omitted"}}, ["url"]),
-    _fn("save_memory", "Save a durable fact/preference to DGC.md memory.",
+    _fn("save_memory", "Save a durable fact about this project or how to work in it to DGC.md. A fact about the "
+        "user goes in `remember`.",
         {"memory": {"type": "string"},
          "scope": {"type": "string", "enum": ["project", "user"], "default": "project"}}, ["memory"]),
+    _fn("remember", "Keep one lasting fact about the user, shared with ChatDGC and their Pips: a short sentence "
+        "close to their words.",
+        {"fact": {"type": "string"}}, ["fact"]),
+    _fn("forget", "Forget a fact about the user, by its mem_ id, when they ask.",
+        {"id": {"type": "string"}}, ["id"]),
     _fn("present_plan", "Plan mode only: present the finished implementation plan for user approval.",
         {"plan": {"type": "string", "description": "The full plan, markdown"}}, ["plan"]),
     _fn("present_document", "Show a Markdown plan, research report or document as a readable browser "
@@ -4145,6 +4151,43 @@ def save_memory(args: dict, ctx) -> str:
     return f"memory saved to {path}"
 
 
+# The user's one memory (dgc/shared_memory.py), from a Work session: the same rules as ChatDGC's -- only what the
+# user typed in this session can be kept (a file, page or tool output can't plant a fact), at most three a turn.
+MAX_MEMORY_PER_TURN = 3
+
+
+def remember_tool(args: dict, ctx) -> str:
+    from .shared_memory import NotRemembered, SharedMemory
+    if (getattr(ctx, "config", None) or {}).get("memory", True) is False:
+        return "Memory is off: nothing was saved."
+    if getattr(ctx, "memory_writes", 0) >= MAX_MEMORY_PER_TURN:
+        return "Not saved: a turn keeps at most three memories."
+    said = getattr(ctx, "user_said", None)
+    said = said() if callable(said) else ""
+    try:
+        store = SharedMemory()
+        known = {f["id"] for f in store.facts()}
+        fact = store.remember(str(args.get("fact") or ""), said=said, surface="work",
+                              where=Path(str(getattr(ctx, "project_root", "") or "")).name)
+    except NotRemembered as exc:
+        return f"Not saved: {exc}"
+    if fact["id"] in known:
+        return f"Already remembered ({fact['id']})."
+    ctx.memory_writes = getattr(ctx, "memory_writes", 0) + 1
+    return f"Remembered ({fact['id']}): {fact['text']}"
+
+
+def forget_tool(args: dict, ctx) -> str:
+    from .shared_memory import NotRemembered, SharedMemory
+    if (getattr(ctx, "config", None) or {}).get("memory", True) is False:
+        return "Memory is off: nothing was deleted."
+    try:
+        fact = SharedMemory().forget(str(args.get("id") or ""))
+    except NotRemembered as exc:
+        return f"Not done: {exc}"
+    return f"Forgotten: {fact['text']}"
+
+
 def monitor_tool(args: dict, ctx) -> str:
     hub = getattr(ctx, "monitors", None)
     if hub is None:
@@ -4398,7 +4441,7 @@ EXECUTORS = {
     "web_fetch": web_fetch,
     "web_search": web_search, "browser": browser_tool,
     "todo": todo, "notes": notes_tool, "skill": skill_tool, "add_skill": add_skill,
-    "save_memory": save_memory,
+    "save_memory": save_memory, "remember": remember_tool, "forget": forget_tool,
 }
 
 

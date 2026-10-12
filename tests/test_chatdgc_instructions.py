@@ -107,6 +107,38 @@ class EngineTests(unittest.TestCase):
         self.assertIn("Personality: concise", calls[-1])
 
 
+class VoiceReplyTests(unittest.TestCase):
+    """Voice mode: a spoken message is marked, and its reply is asked to sound like speech (a few sentences, nothing
+    to look at), since it will be read aloud; a typed message after it gets the usual answer."""
+
+    def test_a_spoken_message_asks_for_a_spoken_reply_and_a_typed_one_does_not(self):
+        from dgc.chatdgc.prompt import VOICE
+        calls = []
+
+        class Client:
+            model = "m"
+
+            def chat(self, messages, **_):
+                if looked_up(messages):
+                    return no_look_up()
+                calls.append(messages[0]["content"])
+                return SimpleNamespace(content="ok", finish_reason="stop", usage={}, thinking="", tool_calls=[])
+        config = SimpleNamespace(base_url="", api_key="", model="m", data={})
+        config.get = lambda key, default=None: config.data.get(key, default)
+        store = ChatStore(Path(tempfile.mkdtemp()))
+        engine = ChatEngine(config, store, client_factory=lambda model: Client(),
+                            memory=SharedMemory(Path(tempfile.mkdtemp()) / "memory"), projects=lambda hidden: [])
+        chat = engine.open()
+        engine.send(chat["id"], "Plan a weekend in Lisbon for two.", voice=True)
+        self.assertIn(VOICE, calls[-1])
+        self.assertIn("No headings, tables, lists", calls[-1])
+        saved = [m for m in store.get(chat["id"])["messages"] if m["role"] == "user"]
+        self.assertTrue(saved[-1].get("voice"), "the message keeps that it was spoken")
+        engine.send(chat["id"], "Now give me the full day-by-day plan with times.")
+        self.assertNotIn(VOICE, calls[-1], "typed again: the usual answer")
+        self.assertNotIn("voice", [m for m in store.get(chat["id"])["messages"] if m["role"] == "user"][-1])
+
+
 class SettingsTests(unittest.TestCase):
     def setUp(self):
         tmp = Path(tempfile.mkdtemp(prefix="dgc-search-settings-")).resolve()

@@ -122,6 +122,8 @@ test('a Personal Pip\'s context menu shows its window part by part, as text, and
  assert.equal(menu.querySelector('b'),null,'a label is text, never markup');
  assert.deepEqual([...menu.querySelectorAll('.bd-item-name')].map(e=>e.textContent),['draft_email','remember'],'its tools one by one');
  assert.equal(menu.querySelector('.ctx-track'),null,'the bar is the breakdown now');
+ assert.equal(menu.querySelector('.bd-details').open,false,'the parts are folded at first, under Details');
+ assert.deepEqual([...menu.querySelectorAll('.bd-toggle > span')].map(e=>e.textContent),['Details','3.9k free']);
  assert.match(menu.querySelector('.ctx-head').textContent,/3,100 \/ 8,192/);
  for(const none of [null,{...parts,window:4096}]){const old=setup({api:45,jobs:[personal]});await old.select('a');await old.drain({get_pip_chat_context:context(none)});old.click('#chat-context-toggle');
   const plain=old.d.querySelector('.composer-context-menu');assert.equal(plain.querySelector('.bd'),null,'none sent, or one that doesn\'t fit its window');assert.ok(plain.querySelector('.ctx-track'));assert.match(plain.querySelector('.ctx-split').textContent,/2 recent messages/);}

@@ -11634,7 +11634,9 @@ def test_benchmark_integrity():
                            # Pips are on, but their tools load through use_pips: only it ships.
                            "pips_context", "pips_setup", "pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip",
                            "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action",
-                           "pause_pip", "resume_pip", "attach_pip_to_session"}
+                           "pause_pip", "resume_pip", "attach_pip_to_session",
+                           # The user's memory is empty in a fresh home: nothing to forget, so no `forget`.
+                           "forget"}
         # Measured at 6,402 on 0.46.0 (6,383 before it; 6,376 on 0.45.0; 6,222 before `show_file`,
         # whose Environment line's timezone is 7 of them). The ceiling is a bloat gate, not a
         # target -- it earned its keep on 0.44.0, where `show_file`'s first description cost 206
@@ -11654,12 +11656,17 @@ def test_benchmark_integrity():
         # demand through `use_pips` instead, which costs 115 (6,561 measured). 6,600 keeps the
         # same small headroom above it. Offering to make recurring work a Pip costs one sentence on
         # `use_pips` (6,581); what Pips can and cannot do travels with their tools instead.
-        _PROBE_TOKEN_CEILING = 6600
+        #
+        # 0.48.0 again: Work sessions now add to the user's one memory (`remember`), as ChatDGC and Pips do -- the gap
+        # the shared-memory plan recorded. Its description is one line and its guidance one short section: the
+        # concrete trigger stays, because without it the model said "I'll keep that in mind" and kept nothing (live,
+        # 2026-10-12). Together they measured 6,754, from 6,985 before trimming; 6,800 keeps the same small headroom.
+        _PROBE_TOKEN_CEILING = 6800
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"
               and set(_prompt_probe.get("active_skills") or []) == _bundled_skill_names
-              and len(_prompt_probe.get("tools", [])) == 24
+              and len(_prompt_probe.get("tools", [])) == 25
               and ({tool.get("name") for tool in _prompt_probe.get("tools", [])}
                    == {t["function"]["name"] for t in _options_tool_schemas} - _probe_withheld)
               and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < _PROBE_TOKEN_CEILING
@@ -11705,7 +11712,7 @@ def test_benchmark_integrity():
                 _unguarded_names = {tool.get("name") for tool in _PS.run_probe().get("tools", [])}
         check("benchmark probe never offers questions",
               _PS._QuietUI.non_interactive is True
-              and len(_guarded_probe.get("tools", [])) == 24
+              and len(_guarded_probe.get("tools", [])) == 25
               and "propose_options" not in {tool.get("name") for tool in _guarded_probe.get("tools", [])}
               and "propose_options" in _unguarded_names
               and 0 < _guarded_probe.get("estimated_wire_tokens", 0) < _PROBE_TOKEN_CEILING,

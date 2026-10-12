@@ -21,7 +21,7 @@ export type PipReadParams = {
   list_pip_plugins: { pip_id: string };
   list_pip_plugin_uses: Record<string, never>;
   list_pip_attention: { limit?: number };
-  list_pip_notes: { pip_id: string };
+  list_pip_notes: { pip_id: string; shared?: true };
   list_pip_sites: { pip_id: string };
   get_pip_chat_context: { pip_id: string; context_size?: number };
   get_pips_limit: Record<string, never>;
@@ -111,8 +111,8 @@ export type PipMutationParams = {
   disconnect_pip_app_link: { pip_id: string; link_id: string };
   finish_pip_computer_check: { pip_id: string };
   allow_pip_plugin: { pip_id: string; grant_id: string };
-  add_pip_note: { pip_id: string; text: string };
-  forget_pip_note: { pip_id: string; note_id?: string; all?: true };
+  add_pip_note: { pip_id: string; text: string; shared?: true };
+  forget_pip_note: { pip_id: string; note_id?: string; all?: true; shared?: true };
   set_pip_careful: { pip_id: string; on: boolean };
   set_plugin_permission: { plugin: string; level: "always_ask" | "any_changes" | "important" | "never_ask" };
   forget_pip_site: { pip_id: string; site: string };
@@ -196,9 +196,9 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   decline_pip_plugin: ["pip_id", "grant_id"],
   list_pip_plugin_uses: [],
   list_pip_attention: ["limit"],
-  list_pip_notes: ["pip_id"],
-  add_pip_note: ["pip_id", "text"],
-  forget_pip_note: ["pip_id", "note_id", "all"],
+  list_pip_notes: ["pip_id", "shared"],
+  add_pip_note: ["pip_id", "text", "shared"],
+  forget_pip_note: ["pip_id", "note_id", "all", "shared"],
   list_pip_sites: ["pip_id"],
   set_pip_careful: ["pip_id", "on"],
   set_plugin_permission: ["level", "plugin"],
@@ -710,6 +710,9 @@ export class Pips {
       throw new DGCUnsupportedError("Reviewed lifecycle revisions require a runtime advertising Pips API 16 or newer");
     }
     if (Object.keys(values).some((key) => !COMMAND_FIELDS[command].includes(key))) throw new DGCConfigError("Unknown or reserved Pip parameter");
+    if (["list_pip_notes", "add_pip_note", "forget_pip_note"].includes(command) && Object.hasOwn(values, "shared")
+      && (this.caps.pips_api_version as number) < 46)
+      throw new DGCUnsupportedError("A Pip's notes in the one shared memory require Pips API 46 or newer");
     if (command === "propose_pip_update" && values.changes && typeof values.changes === "object"
       && Object.hasOwn(values.changes, "app_plan") && (this.caps.pips_api_version as number) < 28) {
       throw new DGCUnsupportedError("Reviewed personal app reads require Pips API 28 or newer");

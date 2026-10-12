@@ -81,6 +81,16 @@ CANVAS = (
     "exact edits. Short answers, short code and drafts they'll send as they are stay in your reply.\n")
 
 
+# Voice mode: the message was spoken and the reply will be read aloud, so it should sound like speech, as ChatGPT's
+# voice answers do -- a few sentences, nothing to look at -- unless the user asks for the detail.
+VOICE = (
+    "\nThe user spoke this message in voice mode, and your reply will be read aloud to them. Answer the way you would "
+    "speak: a few short, natural sentences (about 60 words), leading with what matters. No headings, tables, lists, "
+    "code, links or citations; say numbers as words would read. Don't open a canvas, make a file or draw a chart "
+    "unless they ask for one. Offer to go into more detail instead of giving it all, unless they ask for the full "
+    "detail.\n")
+
+
 # Study mode (ChatGPT's "Study and learn"): the chat teaches instead of answering, until the user turns it off. Its own
 # words, written for DGC: it finds the level first, goes a step at a time, makes them try, and checks with a quiz card.
 STUDY = (
@@ -134,7 +144,7 @@ def _instructions(about: str, style: str) -> str:
 
 def system_prompt(*, now: datetime | None = None, timezone_name: str = "", search: str = "off", about: str = "",
                   style: str = "", personality: str = "default", ask: bool = True, memory: str | None = None,
-                  study: bool = False) -> str:
+                  study: bool = False, voice: bool = False) -> str:
     """``memory``: None when memory is off (or a temporary chat); otherwise what's remembered ("" for nothing yet)."""
     other = ("you don't see other chats; what you know about the user from them is your memory, below"
              if memory is not None else "remember other chats")
@@ -164,6 +174,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         + (MEMORY if memory is not None else "")
         + PERSONALITIES.get(personality, "")
         + (STUDY if study else "")
+        + (VOICE if voice else "")
         + _instructions(about, style)
         + (f"\n{memory}\n" if memory else "")
         + f"\nIt is {when} for the user."

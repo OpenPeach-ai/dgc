@@ -7111,6 +7111,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "voice": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
     "thinking": {
       "types": [
         "string"

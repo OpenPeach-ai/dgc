@@ -1408,5 +1408,56 @@ class HistoryScaleTests(unittest.TestCase):
         self.assertLess(with_images, without * 3 + 0.05, (with_images, without))
 
 
+
+class BytesCrossTheWireIntactTests(unittest.TestCase):
+    """An image's base64 crosses dgc serve's redaction whole: a megabyte of base64 holds a run like "+akIA" and 12
+    letters about once, which the AWS key pattern (case-insensitive) turned into [REDACTED] -- a screenshot, an image
+    fetched later or a Pip computer's screen arrived corrupt. Everything else is still redacted."""
+
+    RUN = "+akIA1234567890abcdefGH/"                      # what the redactor took for a key
+
+    def uri(self) -> str:
+        body = base64.b64encode(png(64, 64, b"\x00" * 3000)).decode() + self.RUN + "AAAA"
+        base64.b64decode(body, validate=True)
+        return "data:image/png;base64," + body
+
+    def test_a_step_s_images_a_fetched_image_and_a_pip_screen_pass_intact(self):
+        from dgc.headless import sanitize_event
+        from dgc.redaction import redact_text
+        uri = self.uri()
+        self.assertNotEqual(redact_text(uri), uri, "the plain redactor corrupts it")
+        screen = base64.b64encode(b"\x00" * 3000).decode() + self.RUN + "AAAA"
+        for event in ({"type": "tool_images", "call_id": "c1", "images": [uri, ""], "caption": "",
+                       "items": [{"ref": "img_" + "a" * 32}, {"ref": "img_" + "b" * 32}]},
+                      {"type": "image", "request_id": "r1", "ref": "img_" + "a" * 32, "image": uri, "mime": "image/png"},
+                      {"type": "pip_desktop_data", "pip_id": "pip_1", "data": screen}):
+            self.assertEqual(sanitize_event(event, []), event, event["type"])
+
+    def test_what_isn_t_only_bytes_is_still_redacted(self):
+        from dgc.headless import sanitize_event
+        key = "AKIA1234567890ABCDEF"
+        out = sanitize_event({"type": "tool_images", "call_id": "c1", "images": [self.uri(), f"token={key}"],
+                              "caption": f"see {key}"}, [])
+        self.assertNotIn(key, json.dumps(out), "a list with anything but bytes in it is redacted, caption too")
+        self.assertEqual(sanitize_event({"type": "image", "request_id": "r1", "ref": "x", "image": f"data:text/plain,{key}"},
+                                        [])["image"], "data:text/plain,[REDACTED]", "only an image's base64 data URI passes")
+        self.assertEqual(sanitize_event({"type": "pip_desktop_closed", "pip_id": "p", "reason": f"x {key}"}, [])["reason"],
+                         "x [REDACTED]", "other events' fields are redacted as before")
+
+    def test_a_standalone_backend_s_own_writer_sends_a_screenshot_whole(self):
+        """dgc serve's own writer, as it runs (a backend that is the whole process): it decodes back to the PNG."""
+        uri = self.uri()
+        with tempfile.TemporaryDirectory(prefix="dgc-bytes-wire-") as directory:
+            out = io.StringIO()
+            with patch("sys.stdout", out):
+                backend = Backend(fixture_config(Path(directory)))
+            try:
+                backend.em.emit("tool_images", call_id="c1", images=[uri], caption="")
+            finally:
+                backend.agent.mcp.stop_all()
+        sent = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(next(e for e in sent if e["type"] == "tool_images")["images"], [uri])
+
+
 if __name__ == "__main__":
     unittest.main()

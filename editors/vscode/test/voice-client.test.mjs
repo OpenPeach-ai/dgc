@@ -23,13 +23,13 @@ await build({
     builder.onLoad({ filter: /^vscode$/, namespace: "test" }, () => ({ contents: "module.exports = globalThis.__DGC_TEST_VSCODE;", loader: "js" }));
   } }],
 });
-const { VoiceClient, Dictation, PIECE_BYTES, VOICE_EXTENSION, LEVEL_POLL_MS } = createRequire(import.meta.url)(bundle);
+const { VoiceClient, Dictation, ReadAloud, PIECE_BYTES, VOICE_EXTENSION, LEVEL_POLL_MS } = createRequire(import.meta.url)(bundle);
 after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 
 const MODELS = (installed) => [{ id: "moonshine-base-en", role: "dictation", installed }, { id: "kitten-mini-en", role: "read_aloud", installed: false }];
 
 /** A `dgc serve` that answers voice_* as dgc/voice/service.py does. */
-function world({ installed = true, chosen = "moonshine-base-en", hears = "book a table for two", recorder, sendAnswer = "sent" } = {}) {
+function world({ installed = true, chosen = "moonshine-base-en", voice = "", voiceInstalled = false, hears = "book a table for two", recorder, sendAnswer = "sent" } = {}) {
   const w = { sent: [], settings: [], offered: [], executed: [], uploads: new Map(), client: null };
   const answer = (ev) => setTimeout(() => w.client.onEvent(ev), 5);
   w.client = new VoiceClient({
@@ -37,7 +37,8 @@ function world({ installed = true, chosen = "moonshine-base-en", hears = "book a
       w.sent.push(cmd);
       if (sendAnswer !== "sent") return sendAnswer;
       assert.ok(JSON.stringify(cmd).length < 4 * 1024 * 1024, "every command inside the 4 MB a command may be");
-      if (cmd.type === "voice_models") answer({ type: "voice_state", request_id: cmd.request_id, runtime: { installed }, models: MODELS(installed), dictation: chosen, read_aloud: "" });
+      if (cmd.type === "voice_models") answer({ type: "voice_state", request_id: cmd.request_id, runtime: { installed },
+        models: MODELS(installed).map((m) => m.role === "read_aloud" ? { ...m, installed: voiceInstalled } : m), dictation: chosen, read_aloud: voice });
       if (cmd.type === "voice_transcribe") {
         const up = w.uploads.get(cmd.request_id) || { next: 0, bytes: 0 };
         assert.equal(cmd.part, up.next, "pieces in order");
@@ -210,4 +211,84 @@ test("cancel, a page that went away, and a DGC Voice too old to say how loud it 
   assert.equal(page.said.at(-1).kind, "info");
   assert.equal(d2.isRecording(), false);
   dictation.dispose(); d2.dispose();
+});
+
+// ---- ReadAloud: one reply at a time, its audio to the box that asked --------------------------------------------
+
+test("read aloud: the audio goes to the box that asked, piece by piece; another reply stops the first; no voice opens Settings", async () => {
+  const w = world();
+  const reader = new ReadAloud(w.client);
+  const chat = box("chat"), pips = box("pips");
+  await reader.handle(chat, { type: "speakStart", id: "m1", text: "## Hello\n\nTwo sentences here." });
+  const cmd = w.sent.at(-1);
+  assert.equal(cmd.type, "voice_speak");
+  assert.equal(cmd.text, "## Hello\n\nTwo sentences here.");
+  assert.deepEqual(chat.said, [{ type: "speak", id: "m1", state: "loading" }]);
+  w.client.onEvent({ type: "voice_audio", request_id: cmd.request_id, part: 0, audio: "AAAA", sample_rate: 24000, done: false });
+  w.client.onEvent({ type: "voice_audio", request_id: cmd.request_id, part: 1, audio: "", sample_rate: 0, done: true });
+  assert.deepEqual(chat.said.slice(1), [
+    { type: "speakAudio", id: "m1", part: 0, audio: "AAAA", rate: 24000, done: false },
+    { type: "speakAudio", id: "m1", part: 1, audio: "", rate: 0, done: true }]);
+  assert.equal(reader.isReading(), false, "done: nothing is being read");
+
+  // A second reply, from another box, while the first is still being read: the first stops, and is told.
+  await reader.handle(chat, { type: "speakStart", id: "m2", text: "Long reply." });
+  const first = w.sent.at(-1).request_id;
+  await reader.handle(pips, { type: "speakStart", id: "p1", text: "Pip reply." });
+  assert.deepEqual(w.sent.slice(-2).map((c) => [c.type, c.request_id === first]), [["voice_stop", true], ["voice_speak", false]]);
+  assert.deepEqual(chat.said.at(-1), { type: "speak", id: "m2", state: "idle" });
+  w.client.onEvent({ type: "voice_audio", request_id: first, part: 0, audio: "BBBB", sample_rate: 24000, done: false });
+  assert.equal(chat.said.filter((m) => m.type === "speakAudio" && m.id === "m2").length, 0, "the stopped reply's late audio goes nowhere");
+
+  // Stop from the box reading; a stop from another box does nothing.
+  await reader.handle(chat, { type: "speakStop" });
+  assert.equal(reader.isReading(pips), true);
+  await reader.handle(pips, { type: "speakStop" });
+  assert.equal(w.sent.at(-1).type, "voice_stop");
+  assert.deepEqual(pips.said.at(-1), { type: "speak", id: "p1", state: "idle" });
+
+  // No voice chosen: DGC's process says so; Settings -> Voice opens, and the box is told why, as information.
+  await reader.handle(chat, { type: "speakStart", id: "m3", text: "Hello." });
+  w.client.onEvent({ type: "voice_error", request_id: w.sent.at(-1).request_id, code: "no_model", message: "No voice model for reading aloud is installed yet." });
+  assert.deepEqual(w.settings, ["voice"]);
+  assert.equal(chat.said.at(-1).kind, "info");
+  assert.match(chat.said.at(-1).error, /Settings → Voice/);
+
+  // Nothing to read; a CLI without voice.
+  await reader.handle(chat, { type: "speakStart", id: "m4", text: "   " });
+  assert.match(chat.said.at(-1).error, /nothing to read/);
+  const old = world({ sendAnswer: "old_cli" }), oldReader = new ReadAloud(old.client), page = box("p");
+  await oldReader.handle(page, { type: "speakStart", id: "x", text: "Hi" });
+  assert.equal(page.said.at(-1).error, "Update the DGC CLI to use voice.");
+
+  // A box that went away: what it was reading stops, without a word to it.
+  await reader.handle(chat, { type: "speakStart", id: "m5", text: "Hello again." });
+  const said = chat.said.length;
+  reader.release(chat);
+  assert.equal(w.sent.at(-1).type, "voice_stop");
+  assert.equal(chat.said.length, said);
+});
+
+test("voice mode's first question: a model to listen with and a voice to answer in; either missing opens Settings -> Voice", async () => {
+  const both = world({ voice: "kitten-mini-en", voiceInstalled: true });
+  const page = box("page");
+  await new Dictation(both.client).handle(page, { type: "voiceCheck" });
+  assert.deepEqual(page.said, [{ type: "voiceReady", dictation: true, readAloud: true }]);
+  assert.deepEqual(both.settings, []);
+
+  const noVoice = world({});
+  const p2 = box("p2");
+  await new Dictation(noVoice.client).handle(p2, { type: "voiceCheck" });
+  assert.equal(p2.said[0].readAloud, false);
+  assert.match(p2.said[0].message, /needs a voice for reading aloud/);
+  assert.deepEqual(noVoice.settings, ["voice"]);
+
+  const neither = world({ installed: false });
+  const p3 = box("p3");
+  await new Dictation(neither.client).handle(p3, { type: "voiceCheck" });
+  assert.match(p3.said[0].message, /needs a dictation model and a voice/);
+
+  const old = world({ sendAnswer: "old_cli" }), p4 = box("p4");
+  await new Dictation(old.client).handle(p4, { type: "voiceCheck" });
+  assert.deepEqual(p4.said[0], { type: "voiceReady", dictation: false, readAloud: false, message: "Update the DGC CLI to use voice." });
 });

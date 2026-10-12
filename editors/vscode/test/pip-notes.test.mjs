@@ -92,3 +92,19 @@ test('a reply that kept a note says so under it, with Forget right there; nothin
  assert.equal(old.d.querySelector('[aria-label="What it remembers"]'),null);
  assert.equal(old.requests('list_pip_notes').length,0,'an older CLI is never asked');
 });
+
+test('Pips API 46: what it keeps goes in your one memory; its page and the reply show it, marked everywhere, and Forget forgets it everywhere',async()=>{
+ const M1='mem_'+'a'.repeat(12);
+ const reply={id:'a1',pip_id:PIP,workspace_id:PW,role:'assistant',text:'Noted.',run_id:RUN,status:'succeeded',model:'m',created_at:now};
+ const x=setup({apiVersion:46,notes:[note(M1,'Is vegetarian'),note(N2,'Works from home on Fridays',{source:'you',run_id:null})],messages:[reply]});
+ await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('list_pip_notes').at(-1).request)),{type:'list_pip_notes',pip_id:PIP,shared:true},'it asks for them');
+ assert.match(x.d.querySelector('.memory-kept').textContent,/Remembered: Is vegetarian \(everywhere in DGC\) Forget/);
+ x.click('[data-tab="job"]');await x.drain();
+ assert.match(x.d.querySelector('[aria-label="What it remembers"]').textContent,/Is vegetarian.*in your memory everywhere in DGC.*Works from home on Fridays.*You added this/);
+ x.click(`[data-note-forget="${M1}"]`);await flush();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('forget_pip_note').at(-1).request)),{type:'forget_pip_note',pip_id:PIP,note_id:M1,shared:true});
+ // A page on API 45 never asks, so never sees a mem_ id.
+ const older=setup({apiVersion:45});await openPage(older);
+ assert.deepEqual(JSON.parse(JSON.stringify(older.requests('list_pip_notes').at(-1).request)),{type:'list_pip_notes',pip_id:PIP});
+});

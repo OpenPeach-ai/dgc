@@ -14,6 +14,7 @@ Forget deletes the note; nothing keeps a copy. A Pip keeps at most 60; the oldes
 """
 from __future__ import annotations
 
+import json
 import re
 import uuid
 
@@ -79,7 +80,8 @@ def check_text(text, config=None) -> str:
 
 def schema() -> dict:
     return {"type": "function", "function": {"name": TOOL, "description": (
-        "Keep a short note about the user for later chats and tasks: something they told you in their own "
+        "Keep a short note about the user for later chats and tasks (it joins the memory DGC keeps for them, "
+        "which their other chats in DGC read too): something they told you in their own "
         "words in their message just now that will help next time (their name, who people are, what they like or dislike, "
         "how they want things done, places and routines). One fact per note, in a short plain sentence, "
         "like 'Prefers vegetarian food' or 'Sam is their sister'; call the user 'they' and never guess anyone's "
@@ -132,13 +134,47 @@ def commit(store, run, result, config=None) -> None:
     said = user_turn(store.registry, run)
     if said is None:
         return
+    shared = _shared_memory_on(config)
     for text in candidates:
         try:
             text = check_text(text, config)
         except RegistryError:
             continue
-        if supported(text, said):
-            _insert(store.registry, run["pip_id"], run["workspace_id"], text, "chat", run["id"])
+        if not supported(text, said):
+            continue
+        # The user's one memory, shared with ChatDGC and Work, while it's on; a note of this Pip's only when it isn't.
+        if shared and _share(store.registry, run, text, said):
+            continue
+        _insert(store.registry, run["pip_id"], run["workspace_id"], text, "chat", run["id"])
+
+
+def _shared_memory_on(config) -> bool:
+    """Whether the user's memory is on (Settings -> Memory). Read from their saved settings when no config is
+    given: the supervisor that saves a reply has none of its own."""
+    if config is not None:
+        return config.get("memory", True) is not False
+    from .config import USER_CONFIG, _read_config_payload
+    try:
+        return (_read_config_payload(USER_CONFIG) or {}).get("memory", True) is not False
+    except Exception:                               # noqa: BLE001 -- unreadable settings: a note of the Pip's own
+        return False
+
+
+def _share(registry, run, text, said) -> bool:
+    """Kept in the user's one memory, tagged with this Pip and this reply (its page and the reply show it). False
+    when it can't be (the memory is full or can't be read): then it stays a note of this Pip's, as before."""
+    from . import shared_memory
+    row = registry.db.execute("SELECT v.definition FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND "
+                              "v.version=p.current_version WHERE p.id=?", (run["pip_id"],)).fetchone()
+    try:
+        name = str((json.loads(row["definition"]) if row else {}).get("name") or "")
+    except (TypeError, ValueError):
+        name = ""
+    try:
+        shared_memory.SharedMemory().remember(text, said=said, surface="pip", where=name, pip=run["pip_id"], run=run["id"])
+        return True
+    except (shared_memory.NotRemembered, OSError):
+        return False
 
 
 def user_turn(registry, run) -> str | None:
@@ -193,27 +229,67 @@ def _projection(row) -> dict:
     return {"id": row["id"], "text": row["text"], "source": row["source"], "run_id": row["run_id"], "created_at": row["created_at"]}
 
 
-def listing(registry, pip_id) -> dict:
+def _when(stamp):
+    from datetime import datetime, timezone
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _shared_facts(pip_id) -> list[dict]:
+    """What this Pip kept in the user's one memory, as notes: the same shape, a mem_ id."""
+    from . import shared_memory
+    try:
+        facts = shared_memory.SharedMemory().from_pip(pip_id)
+    except (shared_memory.NotRemembered, OSError):
+        return []
+    return [{"id": f["id"], "text": f["text"], "source": "chat", "run_id": f["source"].get("run") or None,
+             "created_at": f.get("created_at") or utc_now()} for f in facts]
+
+
+def listing(registry, pip_id, shared: bool = False) -> dict:
+    """Its notes, newest first; with `shared`, what it kept in the user's one memory too (a page that knows mem_
+    ids asks for them: an older one would refuse the whole list)."""
     _personal(registry, pip_id)
     rows = registry.db.execute("SELECT * FROM pip_notes WHERE pip_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                                (pip_id, MAX_NOTES)).fetchall()
-    return {"pip_id": pip_id, "notes": [_projection(r) for r in rows], "max": MAX_NOTES}
+    notes = [_projection(r) for r in rows]
+    if shared:
+        # By time, not text: the two stores write it differently ("…:05Z" against "…:05.120Z").
+        notes = sorted(notes + _shared_facts(pip_id), key=lambda n: _when(n["created_at"]), reverse=True)[:MAX_NOTES]
+    return {"pip_id": pip_id, "notes": notes, "max": MAX_NOTES}
 
 
-def add(registry, config, pip_id, text, actor) -> dict:
+def add(registry, config, pip_id, text, actor, *, shared: bool = False) -> dict:
     if actor not in LOCAL:
         raise RegistryError("local_only", "Add notes on this computer.")
     workspace_id = _personal(registry, pip_id)
     text = check_text(text, config)
     with registry.transaction():
         _insert(registry, pip_id, workspace_id, text, "you")
-    return listing(registry, pip_id)
+    return listing(registry, pip_id, shared)
 
 
-def forget(registry, pip_id, note_id, actor, *, everything=False) -> dict:
+def forget(registry, pip_id, note_id, actor, *, everything=False, shared: bool = False) -> dict:
+    """Forget a note, or something this Pip kept in the user's one memory (a mem_ id, gone everywhere); all of
+    them, with `everything`."""
+    from . import shared_memory
     if actor not in LOCAL:
         raise RegistryError("local_only", "Forget notes on this computer.")
     _personal(registry, pip_id)
+    # (An older page doesn't see them, so its Forget all leaves them be.)
+    if (everything and shared) or (not everything and isinstance(note_id, str) and shared_memory.FACT_ID.fullmatch(note_id)):
+        mine = {f["id"] for f in _shared_facts(pip_id)}
+        if not everything and note_id not in mine:
+            raise RegistryError("not_found", "That memory is already gone.")
+        for fact_id in (mine if everything else {note_id}):
+            try:
+                shared_memory.SharedMemory().forget(fact_id)
+            except shared_memory.NotRemembered:
+                pass                               # gone already: what it should be
+        if not everything:
+            return listing(registry, pip_id, shared)
     with registry.transaction():
         if everything:
             registry.db.execute("DELETE FROM pip_notes WHERE pip_id=?", (pip_id,))
@@ -222,7 +298,7 @@ def forget(registry, pip_id, note_id, actor, *, everything=False) -> dict:
                 raise RegistryError("invalid_request", "Choose one note.")
             if registry.db.execute("DELETE FROM pip_notes WHERE id=? AND pip_id=?", (note_id, pip_id)).rowcount == 0:
                 raise RegistryError("not_found", "That note is already gone.")
-    return listing(registry, pip_id)
+    return listing(registry, pip_id, shared)
 
 
 # --------------------------------------------------------------------------- what a run is given

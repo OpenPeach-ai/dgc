@@ -41,7 +41,7 @@ function screenHtml() {
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
-  const js = ["chart.js", "breakdown.js", "voicebar.js", "chatdgc.js"].map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n");
+  const js = ["chart.js", "breakdown.js", "voicebar.js", "readaloud.js", "voicemode.js", "chatdgc.js"].map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   cached = { html: doc.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${own}</style></head>`), js, markdownJs };
@@ -190,6 +190,12 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
         continue;
       }
       await s.frame();
+      // An empty box offers voice mode where Send is (as ChatGPT does); the row is measured with a word typed, so
+      // Send shows, and voice mode must have sat in exactly that place.
+      const voice = await s.page.evaluate(() => { const n = document.querySelector("#cd-voicemode"); if (!n || n.hidden || !n.offsetWidth) return null; const r = n.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; });
+      assert.ok(voice, `${width}px: an empty box offers voice mode`);
+      await s.page.locator("#cd-input").fill("Hi");
+      await s.frame();
       const got = await s.page.evaluate(() => {
         const box = (sel) => { const n = document.querySelector(sel); if (!n || n.hidden || !n.offsetWidth) return null; const r = n.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
         const parts = ["#cd-attach", "#cd-websearch", "#cd-research", "#cd-study", "#cd-temp-toggle", "#cd-context", "#cd-model-pill", "#cd-mic", "#cd-send"].map((sel) => [sel, box(sel)]).filter(([, b]) => b);
@@ -209,6 +215,7 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
       assert.ok(at["#cd-send"].l > at["#cd-mic"].r && at["#cd-mic"].l > at["#cd-model-pill"].r && at["#cd-model-pill"].l > at["#cd-context"].r,
                 `${width}px: meter, model, microphone, then Send`);
       assert.ok(at["#cd-send"].r >= got.tools.r - 2, `${width}px: Send ends the row`);
+      assert.ok(["l", "r", "t", "b"].every((k) => Math.abs(voice[k] - at["#cd-send"][k]) <= 1), `${width}px: voice mode sat where Send is`);
       assert.equal(got.sideways, 0);
       assert.deepEqual(got.spills, [], `${width}px: nothing spills out of its place`);
       if (width >= 1100) assert.ok(got.words >= 3, "wide: Search, Deep research and Study say their names");
@@ -266,6 +273,7 @@ test("dictation: the voice bar while it records; Stop writes it down at the care
     assert.deepEqual((await s.posted("micStop")).at(-1), { type: "micStop", mode: "send" });
     await s.send({ type: "mic", state: "idle", text: "Book the hotel too.", mode: "send" });
     assert.equal((await s.posted("send")).at(-1)?.text, "Plan a trip for two people to Lisbon Book the hotel too.");
+    assert.equal((await s.posted("send")).at(-1)?.voice, undefined, "dictated into the box and sent: a typed message, read on screen");
 
     // Esc cancels: from the box, or anywhere on the page.
     await mic.click();
@@ -301,6 +309,124 @@ test("dictation: the voice bar while it records; Stop writes it down at the care
   } finally { await s.page.close(); }
 });
 
+test("read aloud: a speaker under each reply asks for that reply's words; it shows Stop while it reads", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900 });
+  try {
+    await s.send({ type: "opened", conversation: conversation({ title: "Lisbon" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Plan Lisbon" },
+      { id: M(2), role: "assistant", text: "## Two days\n\nBelém, then the **beach**.", model: "qwen3:32b" }] });
+    const speaker = s.page.locator(`[data-read-aloud="${M(2)}"]`);
+    assert.equal(await speaker.count(), 1, "one speaker, under the reply");
+    assert.equal(await s.page.locator(`.cd-user [data-read-aloud]`).count(), 0, "not under your own message");
+    await speaker.click();
+    assert.deepEqual((await s.posted("speakStart")).at(-1), { type: "speakStart", id: M(2), text: "## Two days\n\nBelém, then the **beach**." });
+    await s.send({ type: "speak", id: M(2), state: "loading" });
+    assert.equal(await speaker.getAttribute("data-reading"), "loading");
+    assert.equal(await speaker.getAttribute("aria-label"), "Stop reading");
+    // The reply redrawn (a version stepped, an edit elsewhere): the new speaker still shows it's reading.
+    await s.send({ type: "message", conversation_id: ID, message: { id: M(2), role: "assistant", text: "## Two days\n\nBelém, then the **beach**.", model: "qwen3:32b" } });
+    assert.equal(await s.page.locator(`[data-read-aloud="${M(2)}"]`).getAttribute("data-reading"), "loading");
+    await s.page.locator(`[data-read-aloud="${M(2)}"]`).click();
+    assert.deepEqual((await s.posted("speakStop")).at(-1), { type: "speakStop" });
+    await s.page.locator(`[data-read-aloud="${M(2)}"]`).click();
+    await s.send({ type: "speak", id: M(2), state: "idle", kind: "info", error: "Choose a voice for reading aloud in Settings → Voice, then press Read aloud again." });
+    assert.match(await s.page.locator("#cd-notice").textContent(), /Choose a voice for reading aloud/);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("voice mode: in place of Send while the box is empty; it listens, ends your turn when you stop, sends it, speaks the reply, and listens again", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900 });
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    const talk = s.page.locator("#cd-voicemode"), sendBtn = s.page.locator("#cd-send");
+    assert.equal(await talk.isVisible(), true, "the empty box offers voice mode");
+    assert.equal(await sendBtn.isVisible(), false);
+    await s.page.locator("#cd-input").fill("typed");
+    assert.equal(await talk.isVisible(), false, "a word typed, and it's Send again");
+    assert.equal(await sendBtn.isVisible(), true);
+    await s.page.locator("#cd-input").fill("");
+
+    await talk.click();
+    assert.equal((await s.posted("voiceCheck")).length, 1, "first: is there a model to listen with and a voice to answer in?");
+    const bar = s.page.locator('#cd-voice [data-voicebar="chatdgc-talk"]');
+    assert.equal(await bar.isVisible(), true);
+    assert.equal(await s.page.locator(".cd-tools").isVisible(), false);
+    await s.send({ type: "voiceReady", dictation: true, readAloud: true });
+    assert.equal((await s.posted("micStart")).length, 1, "then it listens");
+    await s.send({ type: "mic", state: "recording" });
+    assert.equal(await bar.getAttribute("data-state"), "listening");
+    assert.equal(await bar.locator("[data-voice-phase]").textContent(), "Listening");
+    // The room, then speech, then quiet: the turn ends by itself.
+    for (const v of [...Array(5).fill(0.002), ...Array(10).fill(0.09), ...Array(16).fill(0.002)]) {
+      await s.send({ type: "micLevels", levels: [v, v] });
+      await s.page.waitForTimeout(100);
+      if ((await s.posted("micStop")).length) break;
+    }
+    assert.deepEqual((await s.posted("micStop")).at(-1), { type: "micStop", mode: "send" }, "a moment of quiet after speech ends the turn");
+    assert.equal(await bar.getAttribute("data-state"), "writing");
+    await s.send({ type: "mic", state: "writing", mode: "send" });
+    await s.send({ type: "mic", state: "idle", text: "What should I cook tonight?", mode: "send" });
+    assert.equal((await s.posted("send")).at(-1)?.text, "What should I cook tonight?", "what was said is sent");
+    assert.equal((await s.posted("send")).at(-1)?.voice, true, "as spoken: its reply is asked to sound like speech");
+    assert.equal(await bar.getAttribute("data-state"), "thinking");
+    assert.equal(await bar.locator("[data-voice-status]").textContent(), "Thinking…");
+
+    // The reply comes, finishes, and is read aloud.
+    await s.send({ type: "turn", state: "started", replyId: M(8) });
+    await s.send({ type: "message", conversation_id: ID, message: { id: M(7), role: "user", text: "What should I cook tonight?" } });
+    await s.send({ type: "message", conversation_id: ID, message: { id: M(8), role: "assistant", text: "Try a **spinach** dal." } });
+    assert.equal((await s.posted("speakStart")).length, 0, "not while the reply is still coming");
+    await s.send({ type: "turn", state: "finished", replyId: M(8) });
+    assert.deepEqual((await s.posted("speakStart")).at(-1), { type: "speakStart", id: M(8), text: "Try a **spinach** dal." });
+    assert.equal(await bar.getAttribute("data-state"), "speaking");
+    assert.equal(await bar.locator("[data-voice-phase]").textContent(), "Speaking");
+    assert.equal(await bar.locator('[data-voice-action="turn"]').getAttribute("aria-label"), "Stop speaking");
+    const tone = (sec) => { const n = Math.round(24000 * sec), b = Buffer.alloc(n * 2); for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin(i / 10) * 9000), i * 2); return b.toString("base64"); };
+    await s.send({ type: "speak", id: M(8), state: "loading" });
+    await s.send({ type: "speakAudio", id: M(8), part: 0, audio: tone(0.6), rate: 24000, done: false });
+    await s.send({ type: "speakAudio", id: M(8), part: 1, audio: "", rate: 0, done: true });
+    await s.page.waitForFunction(() => window.__posted.filter((m) => m.type === "micStart").length === 2, null, { timeout: 4000 });
+    assert.equal(await bar.getAttribute("data-state"), "starting", "the reply read, it listens again");
+
+    // Stop cuts the reply short and listens; End ends it all.
+    await s.send({ type: "mic", state: "recording" });
+    for (const v of [...Array(5).fill(0.002), ...Array(8).fill(0.09), ...Array(16).fill(0.002)]) {
+      await s.send({ type: "micLevels", levels: [v, v] }); await s.page.waitForTimeout(100);
+      if ((await s.posted("micStop")).length === 2) break;
+    }
+    await s.send({ type: "mic", state: "idle", text: "And dessert?", mode: "send" });
+    await s.send({ type: "turn", state: "started", replyId: M(9) });
+    await s.send({ type: "message", conversation_id: ID, message: { id: M(9), role: "assistant", text: "Kheer, slowly." } });
+    await s.send({ type: "turn", state: "finished", replyId: M(9) });
+    await s.send({ type: "speakAudio", id: M(9), part: 0, audio: tone(3), rate: 24000, done: false });
+    await bar.locator('[data-voice-action="turn"]').click();
+    assert.deepEqual((await s.posted("speakStop")).at(-1), { type: "speakStop" });
+    assert.equal((await s.posted("micStart")).length, 3, "cut short: your turn");
+    await s.send({ type: "mic", state: "recording" });
+    await bar.locator('[data-voice-action="end"]').click();
+    assert.equal((await s.posted("micCancel")).length, 1);
+    assert.equal(await s.page.locator(".cd-tools").isVisible(), true, "the box is back");
+    assert.equal(await talk.isVisible(), true);
+
+    // Without a voice to answer in, it says so and doesn't start.
+    await talk.click();
+    await s.send({ type: "voiceReady", dictation: true, readAloud: false, message: "Voice mode needs a voice for reading aloud: choose one in Settings → Voice, then start voice mode again." });
+    assert.match(await s.page.locator("#cd-notice").textContent(), /needs a voice for reading aloud/);
+    assert.equal(await s.page.locator(".cd-tools").isVisible(), true);
+    assert.equal((await s.posted("micStart")).length, 3, "nothing recorded");
+    // Esc ends it too.
+    await talk.click();
+    await s.send({ type: "voiceReady", dictation: true, readAloud: true });
+    await s.send({ type: "mic", state: "recording" });
+    await s.page.keyboard.press("Escape");
+    assert.equal((await s.posted("micCancel")).length, 2);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("a reply streams in as Markdown; your words and its words never become markup", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
@@ -330,7 +456,11 @@ test("a reply streams in as Markdown; your words and its words never become mark
     assert.deepEqual(asked.filter((m) => m.type === "openLink"), [{ type: "openLink", target: "https://example.com/paris" }]);
     assert.deepEqual(asked.filter((m) => m.type === "copy").map((m) => m.text), ["const x = 1;\n", "Paris is the capital.\n\nconst x = 1;\n\nSee the docs."],
                      "a reply copies as it reads, with no ** or fences (a code block's own Copy keeps its code exactly)");
-    assert.equal(await shown(s.page, "#cd-send"), true);
+    assert.equal(await shown(s.page, "#cd-send"), false, "the box is empty: voice mode is offered where Send is");
+    assert.equal(await shown(s.page, "#cd-voicemode"), true);
+    await s.page.locator("#cd-input").fill("And Rome?");
+    assert.equal(await shown(s.page, "#cd-send"), true, "a word typed, and it's Send again");
+    assert.equal(await shown(s.page, "#cd-voicemode"), false);
     assert.equal(await shown(s.page, "#cd-menu"), true, "a chat with messages can be renamed");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
@@ -1416,6 +1546,15 @@ test("what fills the window, in the meter's details: a bar a colour a part, each
     assert.equal(await pop.locator(".bd").count(), 0, "another chat's: not this one's");
     await s.send({ type: "breakdown", conversation: ID, breakdown });
     assert.equal(await pop.locator(".bd-seg").count(), 4, "three parts and the summarizing room");
+    // Folded at first: the bar and what's free at a glance, the parts on a click.
+    assert.equal(await pop.locator(".bd-details").evaluate((d) => d.open), false, "the parts are folded at first");
+    assert.equal(await pop.locator(".bd-bar").isVisible(), true);
+    assert.equal(await pop.locator(".bd-list").isVisible(), false);
+    assert.deepEqual(await pop.locator(".bd-toggle > span").allTextContents(), ["Details", "15.4k free"]);
+    if (process.env.DGC_SHOTS) await pop.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-context-folded.png") });
+    await pop.locator(".bd-toggle").click();
+    assert.equal(await pop.locator(".bd-list").isVisible(), true, "a click shows them");
+    if (process.env.DGC_SHOTS) await pop.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-context-open.png") });
     assert.deepEqual(await pop.locator(".bd-list > .bd-row .bd-label, .bd-list > details .bd-label").allTextContents(),
                      ["Messages", "Tools2", "System prompt", "Kept free for summarizing", "Free space"]);
     assert.deepEqual(await pop.locator('.bd-row[data-id="messages"] .bd-num, .bd-row[data-id="messages"] .bd-share').allTextContents(), ["5.2k", "15.9%"]);
@@ -1424,8 +1563,12 @@ test("what fills the window, in the meter's details: a bar a colour a part, each
     assert.deepEqual(await pop.locator(".bd-item-name").allTextContents(), ["make_file", "<b>x</b>"], "names are words");
     assert.equal(await pop.locator(".bd-item b").count(), 0);
     assert.match(await pop.locator(".bd-bar").getAttribute("aria-label"), /^28\.1% of the context window used: Messages 5\.2k, Tools 3\.1k, System prompt 900$/);
+    const drawn = await pop.locator(".bd").elementHandle();
     await s.send({ type: "context", window: 32768, limit: 262144, used: 9300, preset: "32k", source: "reported", parts: { conversation: 9300 }, compactable: true });
     assert.equal((await s.posted("breakdown")).length, 2, "asked again as the window changes, while it's open");
+    assert.equal(await drawn.evaluate((n) => n.isConnected), false, "the details were drawn again");
+    assert.equal(await pop.locator(".bd-list").isVisible(), true, "and what was opened stayed open: a meter redrawn as a reply streams never folds under the reader");
+    assert.equal(await pop.locator(".bd-item-name").first().isVisible(), true, "the tools too");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

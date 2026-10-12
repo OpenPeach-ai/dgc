@@ -443,6 +443,14 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .composer-context-menu .bd-num{color:var(--vscode-foreground);font:600 11px/1 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;text-align:right}
 .composer-context-menu .bd-share{color:var(--muted);font:400 11px/1 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;text-align:right}
 .composer-context-menu .bd-count{display:inline-grid;place-items:center;min-width:16px;height:16px;margin-left:4px;padding:0 4px;border-radius:999px;background:var(--vscode-badge-background,var(--line));color:var(--vscode-badge-foreground,var(--muted));font:600 10px/1 var(--vscode-font-family,system-ui)}
+.composer-context-menu .bd-details>.bd-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding:3px 0;list-style:none;cursor:pointer;border-radius:4px;color:var(--muted);font:500 11px/1.3 var(--vscode-font-family,system-ui)}
+.composer-context-menu .bd-details>.bd-toggle::-webkit-details-marker{display:none}
+.composer-context-menu .bd-details>.bd-toggle:hover{color:var(--vscode-foreground)}
+.composer-context-menu .bd-details>.bd-toggle:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:1px}
+.composer-context-menu .bd-toggle-label::before{content:"\203A";display:inline-block;width:10px;margin-right:8px;text-align:center;transition:transform .12s}
+.composer-context-menu .bd-details[open]>.bd-toggle .bd-toggle-label::before{transform:rotate(90deg)}
+.composer-context-menu .bd-toggle-free{color:var(--muted);font:400 11px/1 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
+.composer-context-menu .bd-details>.bd-list{margin-top:2px}
 .composer-context-menu .bd-more{margin:0}
 .composer-context-menu .bd-more>summary{list-style:none;cursor:pointer;border-radius:4px;line-height:inherit;color:inherit}
 .composer-context-menu .bd-more>summary::-webkit-details-marker{display:none}
@@ -465,7 +473,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .composer-context-menu .bd [data-id="buffer"]{--bd-c:repeating-linear-gradient(135deg,var(--muted) 0 2px,transparent 2px 4px)}
 .composer-context-menu .bd [data-id="free"]{--bd-c:var(--line)}
 .composer-context-menu .bd [data-id="free"] .bd-label,.composer-context-menu .bd [data-id="buffer"] .bd-label{color:var(--muted)}
-@media(prefers-reduced-motion:reduce){.composer-context-menu .bd-more>summary .bd-label::after{transition:none}}
+@media(prefers-reduced-motion:reduce){.composer-context-menu .bd-more>summary .bd-label::after,.composer-context-menu .bd-toggle-label::before{transition:none}}
 @media(forced-colors:active){.composer-context-menu .bd-seg,.composer-context-menu .bd-dot{forced-color-adjust:none;border:1px solid CanvasText}}
 .composer-ctx-pct{font-size:11px;font-variant-numeric:tabular-nums}
 /* DGC's working row: (time · ↓ tokens) after what the Pip is doing; and what each reply took. */

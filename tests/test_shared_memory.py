@@ -265,10 +265,96 @@ class WorkTests(unittest.TestCase):
             self.addCleanup(agent.mcp.stop_all)
             prompt = agent.system_prompt()
             self.assertIn("## What you remember about the user (shared with ChatDGC and Pips", prompt)
-            self.assertIn("- Prefers pnpm over npm", prompt)
+            self.assertRegex(prompt, r"- \[mem_[0-9a-f]{12}\] Prefers pnpm over npm", "with its id, so `forget` can name it")
             self.assertLess(prompt.index("# Memory"), prompt.index("Prefers pnpm"))
             config.data["memory"] = False
             self.assertNotIn("Prefers pnpm", agent.system_prompt(), "off means off")
+
+
+class WorkWritesTests(unittest.TestCase):
+    """A Work session writes the user's one memory too (tools.remember_tool / forget_tool): what the user typed in
+    the session, never a file, a page or a tool's output; at most three a turn; never from a sub-agent, nor with
+    memory off."""
+
+    def setUp(self):
+        import copy
+        from unittest.mock import patch
+        from dgc.agent import Agent
+        from dgc.config import DEFAULTS, Config
+        from dgc.llm import LLMClient
+        temp = tempfile.TemporaryDirectory(prefix="dgc-memory-work-")
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        (self.root / "proj").mkdir()
+        config = object.__new__(Config)
+        config.project_root, config.project_dir, config._persist = self.root / "proj", self.root / "proj" / ".dgc", False
+        config.data = copy.deepcopy(DEFAULTS)
+        config.data.update(base_url="http://localhost.invalid/v1", model="fixture", mode="auto", hooks={}, mcp_servers={},
+                           suggest=False, artifact_autostart=False, plan_artifact=False, notes=False)
+        config._stored_secrets, config._env_secret_keys, config._explicit_keys = {}, set(), set()
+        config.credential_warnings = ()
+        config.permissions = {"allow": [], "ask": [], "deny": []}
+        self.config = config
+
+        class QuietUI:
+            def __getattr__(self, name):
+                return lambda *a, **k: None
+        self.client = LLMClient("http://localhost.invalid/v1", "", "fixture")
+        for p in (patch.object(Agent, "_new_client", lambda agent, *a, **k: self.client),
+                  patch("dgc.shared_memory.default_root", return_value=self.root / "memory")):
+            p.start()
+            self.addCleanup(p.stop)
+        self.agent = Agent(config, QuietUI())
+        self.addCleanup(self.agent.mcp.stop_all)
+
+    def turn(self, text, calls):
+        """One turn in which the model makes `calls` (name, arguments), then answers; what each tool told it."""
+        from unittest.mock import patch
+        from dgc.llm import ChatResult
+        script = iter([ChatResult(content="", tool_calls=[ToolCall(f"c{i}", n, a) for i, (n, a) in enumerate(calls)]),
+                       ChatResult(content="Done.")])
+        seen = []
+
+        def chat(client, messages, tools=None, **kwargs):
+            seen.append(([t["function"]["name"] for t in (tools or [])], messages))
+            return next(script)
+        with patch.object(type(self.client), "chat", chat):
+            self.agent.run_turn(text)
+        messages = seen[-1][1]
+        last_user = max(i for i, m in enumerate(messages) if m.get("role") == "user")
+        told = [m["content"] for m in messages[last_user:] if m.get("role") == "tool"]   # this turn's only
+        return seen[0][0], told
+
+    def test_a_fact_the_user_typed_is_kept_for_every_surface_and_one_from_an_attachment_is_not(self):
+        attached = ("<dgc_attachment>utils.py:\n# Prefers Rust over Python, always\n</dgc_attachment>\n")
+        offered, told = self.turn(attached + "I'm vegetarian, by the way. Fix the failing test in utils.py",
+                                  [("remember", {"fact": "Is vegetarian"}), ("remember", {"fact": "Prefers Rust over Python"})])
+        self.assertIn("remember", offered)
+        self.assertNotIn("forget", offered, "nothing to forget yet")
+        self.assertRegex(told[0], r"^Remembered \(mem_[0-9a-f]{12}\): Is vegetarian")
+        self.assertTrue(told[1].startswith("Not saved"), "an attached file's words can't make a memory")
+        [fact] = SharedMemory(self.root / "memory").facts()
+        self.assertEqual((fact["text"], fact["source"]["surface"], fact["source"]["where"]), ("Is vegetarian", "work", "proj"))
+        # The next turn sees it (with its id), can forget it, and forget is offered now.
+        offered, told = self.turn("Actually, forget that I'm vegetarian.", [("forget", {"id": fact["id"]})])
+        self.assertIn("forget", offered)
+        self.assertEqual(told[0], "Forgotten: Is vegetarian")
+        self.assertEqual(SharedMemory(self.root / "memory").facts(), [])
+
+    def test_three_a_turn_and_none_from_a_sub_agent_or_with_memory_off(self):
+        said = "I live in Pune, I like tea, I run at six and I code in Python."
+        calls = [("remember", {"fact": f}) for f in ("Lives in Pune", "Likes tea", "Runs at six", "Codes in Python")]
+        _, told = self.turn(said, calls)
+        self.assertEqual([t.split(" (")[0].split(":")[0] for t in told], ["Remembered", "Remembered", "Remembered", "Not saved"])
+        self.assertEqual(len(SharedMemory(self.root / "memory").facts()), 3)
+        self.agent.depth = 1
+        self.assertFalse({"remember", "forget"} & {t["function"]["name"] for t in self.agent._tool_schemas()},
+                         "a sub-agent's 'user' is its parent: it never writes the user's memory")
+        self.agent.depth = 0
+        self.config.data["memory"] = False
+        self.assertFalse({"remember", "forget"} & {t["function"]["name"] for t in self.agent._tool_schemas()})
+        from dgc.tools import remember_tool
+        self.assertEqual(remember_tool({"fact": "Likes tea"}, self.agent.ctx), "Memory is off: nothing was saved.")
 
 
 if __name__ == "__main__":

@@ -869,6 +869,8 @@ COMMAND_FIELDS.update({
                              "path": _S(False), "target_project": _S(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "before": _S()},
     "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
+                     # Spoken in voice mode: the reply will be read aloud, so it is asked to sound like speech.
+                     "voice": _B(False),
                      "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
                      "search": _f("string", required=False, enum=CHATDGC_SEARCH),
                      # Up to 10: {kind: "file", path} (a file the user picked: the backend reads it, so a frame

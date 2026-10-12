@@ -19,6 +19,18 @@
     `pw-record` or `parecord` on Linux.
   - **Silent recordings:** a recording that is digitally silent is reported as a microphone the system withheld
     (macOS records zeros without permission), never sent as speech.
+- **Read aloud.** A speaker under every reply, in DGC's chat, ChatDGC and Pips. The reply's voice plays as each
+  sentence is made, and the speaker shows Stop while it reads. One reply is read at a time.
+- **Voice mode, in ChatDGC and Pips.** While the box is empty, voice mode sits where Send is, as in ChatGPT. It
+  listens with a live waveform, and when you stop talking it writes it down and sends it. It reads the reply
+  aloud, then listens again.
+  - **When your turn ends:** after about 1.2 seconds of quiet, measured against the room's own hum.
+  - **Its buttons:** Done ends your turn early, Stop cuts the reply short, and ✕ (or Esc) ends voice mode.
+  - **What it needs:** a dictation model and a voice; without them it opens Settings → Voice. Nothing records
+    while it speaks.
+- **Voice offered once:** the first time DGC starts with voice available and nothing installed, a notification
+  offers to set it up.
+- **A Pip's page shows what it keeps in your one memory** (Pips API 46), and Forget there forgets it everywhere.
 - **Chat, above Work.** The side bar lists your chats above this project's sessions (now **Work**), with
   one search over both. **New chat** (or **DGC: New Chat (ChatDGC)**) opens a chat in an editor tab of
   its own. Replies stream as Markdown, with code, tables and links that open only when you click them.
@@ -71,6 +83,8 @@
   Library and the New Chat (ChatDGC) and Ask ChatDGC buttons, so a ChatDGC tab is never taken for a DGC session.
 - **What fills the window.** ChatDGC's meter details show it as Claude's Usage sheet does: a bar a colour a part,
   each part's tokens and share, every tool listed with its own, the room kept for summarizing and the free space.
+  The parts fold under **Details** at first, with the bar and what's free shown at a glance. Main DGC's and a Pip's
+  context menus fold the same way, and what you open stays open as the meter updates.
 - **A welcome for the time of day.** A new chat greets you under ChatDGC's mark with a line that fits the hour.
 - **ChatDGC's box, as main DGC's.** No purple ring around it; Search, Deep research and Study are plain buttons;
   the context meter is main DGC's (its details laid out the same, with **Window size** from 8K to 1M); and one

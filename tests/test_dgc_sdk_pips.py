@@ -46,6 +46,16 @@ def session(wire=None, caps=None, **kwargs):
 
 
 class PipsSDKTests(unittest.TestCase):
+    def test_api46_a_pip_s_notes_in_the_shared_memory_require_new_runtime(self):
+        wire=Wire();old=session(wire,caps={**CAPS,'pips_api_version':45})
+        with self.assertRaisesRegex(DGCUnsupportedError,'API 46'):old.pips.read('list_pip_notes',{'pip_id':'pip_test','shared':True})
+        with self.assertRaisesRegex(DGCUnsupportedError,'API 46'):old.pips.mutate('forget_pip_note',{'pip_id':'pip_test','note_id':'mem_'+'a'*12,'shared':True},approved=True)
+        self.assertEqual(wire.calls,[],"nothing reaches an older runtime, which would refuse the field")
+        self.assertEqual(old.pips.read('list_pip_notes',{'pip_id':'pip_test'})['request']['type'],'list_pip_notes',"without it, as before")
+        current=session(caps={**CAPS,'pips_api_version':46})
+        self.assertIs(current.pips.read('list_pip_notes',{'pip_id':'pip_test','shared':True})['request']['shared'],True)
+        self.assertIs(current.pips.mutate('add_pip_note',{'pip_id':'pip_test','text':'Likes tea','shared':True},approved=True)['request']['shared'],True)
+
     def test_api38_calendar_guests_and_repeat_require_new_runtime(self):
         from tests.test_pip_calendar_series import EXT
         args={'source_run_id':'run_test','server':'composio','connection_digest':'a'*64,'account':'ca_test','schema_digest':'b'*64,'event':EXT,'request_key':'series'}
