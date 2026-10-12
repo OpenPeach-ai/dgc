@@ -218,7 +218,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <footer class="cd-foot"><div class="cd-column">
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>
 <div id="cd-context-pop" class="cd-pop" role="dialog" aria-label="Context window" hidden></div>
-<form id="cd-box" class="cd-box"><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul><label for="cd-input" class="sr-only">Message ChatDGC</label>
+<form id="cd-box" class="cd-box"><div id="cd-queue" class="cd-queue" role="region" aria-label="Queued messages" hidden></div><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul><label for="cd-input" class="sr-only">Message ChatDGC</label>
 <textarea id="cd-input" class="cd-input" rows="1" placeholder="Ask anything" maxlength="${MAX_TEXT}"></textarea>
 <div class="cd-tools">
 <button type="button" id="cd-attach" class="cd-icon" title="Attach files (or paste an image)" aria-label="Attach files"><span class="codicon codicon-attach" aria-hidden="true"></span></button>

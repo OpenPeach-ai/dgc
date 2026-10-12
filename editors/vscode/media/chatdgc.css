@@ -307,6 +307,20 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-send:disabled { background: var(--border-strong); color: var(--faint); cursor: default; }
 .cd-stop { background: var(--text-strong); color: var(--bg); }
 .cd-stop:hover { background: var(--text); }
+/* While it answers, Send (now "queue") sits just before Stop, not halfway along the row. */
+#cd-send:not([hidden]) + #cd-stop { margin-left: var(--sp-1); }
+/* Messages waiting their turn (Codex's queue): above the box's text, one line each, in the order they'll go. */
+.cd-queue { display: grid; gap: 2px; padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
+.cd-queue-head { margin: 0; color: var(--muted); font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
+.cd-queue-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; max-height: 132px; overflow-y: auto; }
+.cd-queue-item { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; border-radius: var(--r-sm);
+  color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.cd-queue-item:hover { background: var(--surface); }
+.cd-queue-mark { flex: none; color: var(--faint); }
+.cd-queue-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-queue-files { flex: none; padding: 0 5px; border-radius: var(--r-full); background: var(--surface); color: var(--muted);
+  font: var(--w-semi) 10px/16px var(--sans); }
+.cd-queue-item .cd-icon { flex: none; width: 22px; height: 22px; }
 .cd-fine { margin: var(--sp-2) 0 0; text-align: center; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 
 @media (max-width: 520px) {

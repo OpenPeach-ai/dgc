@@ -32,6 +32,10 @@
   offers to set it up.
 - **Voice mode has nothing to look at**, as ChatGPT's: a spoken reply makes no canvas, file, widget or question
   card. Typing again brings them back.
+- **Send while it answers, as Codex queues it.** In ChatDGC a message sent while a reply is being written (or while
+  it summarizes) waits above the box and goes by itself when the reply finishes, one a reply, in order. Edit or ✕
+  on each; ↑ in an empty box takes back the last. Stop, or a reply that fails, sends none of them: they come back
+  to the box.
 - **Several questions in one card.** When the model needs a few things to go on, ChatDGC asks up to four questions
   in one card, numbered, the first answer of each chosen until you change it, and one button in the model's words
   (**Build my plan**) sends them all.

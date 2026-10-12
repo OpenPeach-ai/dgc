@@ -172,6 +172,11 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
     questions, numbered, as ChatGPT asks them. The first answer of each is chosen until you change it, and one
     button, in the model's words (**Build my plan**), sends them all: its message with each question and your
     answer under it, one a line.
+- **Send while it answers.** Type your next message while a reply is still being written (or while it
+  summarizes) and press Enter, or the Send arrow beside Stop: it waits above the box, as Codex queues one, and
+  goes by itself when the reply finishes, then the next after that one's reply. **Edit** puts a waiting message
+  back in the box, and ↑ in an empty box takes back the last one; **✕** removes it. **Stop** (or a reply that
+  fails) sends none of them: they all come back to the box, in order, for you to send or change.
 - **Edit and try again.** **Edit** under a message you sent changes it; **Try again** under a reply asks
   for another one, with whatever model and thinking level the box is set to. Either way, the old version
   stays: **‹ 2 / 3 ›** steps between versions of the conversation from that point. A version that has its own

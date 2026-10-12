@@ -1751,6 +1751,97 @@ test("a card of several questions, as ChatGPT asks them: numbered, the first ans
   } finally { await s.page.close(); }
 });
 
+test("Codex's queue: what you send while it answers waits above the box and goes when the reply finishes; Stop gives it all back", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const sends = async () => (await s.posted("send")).map((m) => m.text);
+    const box = s.page.locator("#cd-input"), queue = s.page.locator("#cd-queue");
+    await s.send({ type: "opened", conversation: conversation(), messages: [{ id: M(1), role: "user", text: "Plan a trip." }], earlier: 0, busy: false });
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    assert.equal(await queue.isHidden(), true, "nothing queued: no queue");
+    assert.equal(await s.page.locator("#cd-send").isHidden(), true, "an empty box while it answers: Stop only");
+    await box.fill("And the budget?");
+    assert.deepEqual([await s.page.locator("#cd-send").isVisible(), await s.page.locator("#cd-stop").isVisible()], [true, true],
+                     "something typed: Send, to queue it, beside Stop");
+    assert.equal(await s.page.locator("#cd-send").getAttribute("aria-label"), "Queue message");
+    await box.press("Enter");
+    await box.fill("And the weather?");
+    await s.page.locator("#cd-send").click();
+    assert.deepEqual(await sends(), [], "nothing is sent while it answers");
+    assert.equal(await box.inputValue(), "");
+    assert.deepEqual([await s.page.locator("#cd-send").isHidden(), await s.page.locator("#cd-stop").isVisible()], [true, true],
+                     "queued, the box is empty again: Stop only");
+    assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["And the budget?", "And the weather?"]);
+    assert.match(await queue.locator(".cd-queue-head").textContent(), /^2 queued/);
+    if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-queue.png") });
+    // Up in an empty box takes back the last one (Codex's "edit last queued message"); Enter queues it again.
+    await box.press("ArrowUp");
+    assert.equal(await box.inputValue(), "And the weather?");
+    assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["And the budget?"]);
+    await box.fill("And the weather in May?"); await box.press("Enter");
+    // The reply finishes: the first goes, and the next waits for its reply.
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    assert.deepEqual(await sends(), ["And the budget?"]);
+    assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["And the weather in May?"]);
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "turn", state: "ended", replyId: M(4) });
+    assert.deepEqual(await sends(), ["And the budget?", "And the weather in May?"], "one a reply, in order");
+    assert.equal(await queue.isHidden(), true);
+    // Stop: the reply ends and nothing queued goes after it -- it's all back in the box, in order, for you.
+    await s.send({ type: "turn", state: "started", replyId: M(6) });
+    await box.fill("One"); await box.press("Enter");
+    await box.fill("Two"); await box.press("Enter");
+    await box.fill("Still typing");
+    await s.page.locator("#cd-stop").click();
+    assert.equal((await s.posted("stop")).length, 1);
+    await s.send({ type: "turn", state: "ended", replyId: M(6) });
+    assert.equal((await sends()).length, 2, "Stop: nothing queued is sent");
+    assert.equal(await box.inputValue(), "One\n\nTwo\n\nStill typing");
+    assert.equal(await queue.isHidden(), true);
+    // A reply that fails: the same -- what waited is yours again.
+    await box.fill("");
+    await s.send({ type: "turn", state: "started", replyId: M(8) });
+    await box.fill("Three"); await box.press("Enter");
+    await s.send({ type: "error", message: "The model is not reachable." });
+    await s.send({ type: "turn", state: "ended", replyId: M(8) });
+    assert.equal((await sends()).length, 2);
+    assert.equal(await box.inputValue(), "Three");
+    // Edit and Remove on a row.
+    await box.fill("");
+    await s.send({ type: "turn", state: "started", replyId: M(9) });
+    for (const words of ["Keep me", "Drop me", "Change me"]) { await box.fill(words); await box.press("Enter"); }
+    await queue.getByRole("button", { name: "Remove queued message 2" }).click();
+    await queue.getByRole("button", { name: "Edit queued message 2" }).click();
+    assert.equal(await box.inputValue(), "Change me");
+    assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["Keep me"]);
+    // Kept with the chat: shown again on a reload while it answers; with nothing running, back in the box instead.
+    const saved = await s.page.evaluate(() => window.__state[`queue:chat_${"a".repeat(32)}`]);
+    assert.deepEqual(saved.map((q) => q.text), ["Keep me"]);
+    await s.send({ type: "opened", conversation: conversation(), messages: [{ id: M(1), role: "user", text: "Plan a trip." }], earlier: 0, busy: false });
+    assert.equal(await queue.isHidden(), true);
+    assert.match(await box.inputValue(), /^Keep me/, "never sent on its own after a reload");
+    assert.equal((await sends()).length, 2);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("Codex's queue while it summarizes: a message sent during Compact now goes once the summary is in", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [{ id: M(1), role: "user", text: "hi" }, { id: M(2), role: "assistant", text: "Hello.", finish: "stop" }], earlier: 0, busy: false });
+    await s.send({ type: "activity", kind: "compacting", messageId: "c1", text: "" });
+    await s.page.locator("#cd-input").fill("Now the next step?");
+    await s.page.locator("#cd-input").press("Enter");
+    assert.deepEqual(await s.posted("send"), [], "not while it summarizes");
+    assert.deepEqual(await s.page.locator("#cd-queue .cd-queue-text").allTextContents(), ["Now the next step?"]);
+    await s.send({ type: "compacted", summary: { text: "Said hello.", upto: M(2) } });
+    assert.deepEqual((await s.posted("send")).map((m) => m.text), ["Now the next step?"], "the summary is in: it goes");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("deep research: the toggle, a plan that counts down, editing it, the reading as it goes, the report and its reader", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

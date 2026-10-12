@@ -1842,9 +1842,14 @@
     const empty = !text.trim() && !state.pending.length;
     const offerVoice = !!voiceMode && empty && !state.busy && !!state.conversation && !state.unavailable && !state.compacting;
     if (voiceModeButton) voiceModeButton.hidden = !offerVoice;
-    send.hidden = state.busy || offerVoice;
+    // While it answers, Send stays beside Stop for what you've typed: it queues it (Codex's queue).
+    const queueing = busyNow() && !empty;
+    send.hidden = offerVoice || (busyNow() && empty);
     stop.hidden = !state.busy;
-    send.disabled = empty || !state.conversation || !!state.unavailable || state.compacting;
+    send.disabled = empty || !state.conversation || !!state.unavailable;
+    const sendLabel = queueing ? "Queue: sends when the reply finishes" : "Send";
+    if (send.title !== sendLabel) { send.title = sendLabel; send.setAttribute("aria-label", queueing ? "Queue message" : "Send"); }
+    send.classList.toggle("cd-queueing", queueing);
     input.disabled = !!state.unavailable;
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
     // A chat carried over isn't thrown away, and a project's chat is kept: neither can be temporary.
@@ -1862,10 +1867,16 @@
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
     else if (e.key === "Escape" && (micState === "recording" || micState === "starting")) { e.preventDefault(); e.stopPropagation(); micCancel(); }
-    else if (e.key === "Escape" && state.busy) { e.preventDefault(); vscode.postMessage({ type: "stop" }); }
+    else if (e.key === "Escape" && state.busy) { e.preventDefault(); stopReply(); }
+    else if (e.key === "ArrowUp" && !input.value && !state.pending.length && queued().length && !e.isComposing) {
+      e.preventDefault();                       // the last queued message, back to the box to change it
+      const taken = queued().pop(); saveQueue(); queueView(); giveBack(taken);
+    }
   });
   $("cd-box").addEventListener("submit", (e) => { e.preventDefault(); submit(); });
-  stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+  /** Stop: the reply ends where it is, and nothing queued goes after it. */
+  function stopReply() { state.stopping = true; vscode.postMessage({ type: "stop" }); }
+  stop.addEventListener("click", stopReply);
 
   // ---- dictation: the microphone beside Send records on the computer you're at (DGC Voice). While it records, the
   // box's bottom row is the voice bar (media/voicebar.js): Cancel, the live waveform and time, Stop (what you said
@@ -1940,30 +1951,124 @@
   }
   function submit(spoken = false) {
     const text = input.value;
-    if ((!text.trim() && !state.pending.length) || state.busy || !state.conversation || state.unavailable) return;
-    if (state.research) {
-      if (state.pending.length) { showNotice("Deep research reads the web: send files without it, or turn it off.", "info"); return; }
-      if (!text.trim()) return;
-      vscode.postMessage({ type: "research", text, model: modelPick.value || "", thinking: thinkingPick.value || "" });
-      state.lastSent = { text, research: true, pending: [] };
-      input.value = ""; grow(); saveDraft();
-      researchMode(false);
+    if ((!text.trim() && !state.pending.length) || !state.conversation || state.unavailable) return;
+    if (state.research && state.pending.length) { showNotice("Deep research reads the web: send files without it, or turn it off.", "info"); return; }
+    if (state.research && !text.trim()) return;
+    const item = { text, research: !!state.research, model: modelPick.value || "", thinking: thinkingPick.value || "",
+                   search: searchMode(), study: !!state.study, pending: state.pending, searchFirst: state.searchFirst };
+    input.value = ""; grow(); saveDraft();
+    state.pending = []; chips();
+    if (state.research) researchMode(false);
+    searchFirst(false);
+    // While it's answering (or summarizing), the message waits its turn, as Codex queues one: it goes when the
+    // reply finishes. Voice mode never gets here busy -- it waits for the reply itself.
+    if (busyNow()) { enqueue(item); controls(); return; }
+    dispatch(item, spoken);
+  }
+  /** Sends one message the box held (now, or when its turn came). */
+  function dispatch(item, spoken = false) {
+    if (item.research) {
+      vscode.postMessage({ type: "research", text: item.text, model: item.model, thinking: item.thinking });
+      state.lastSent = { text: item.text, research: true, pending: [] };
       state.planAsked = true; state.busy = true;
       hideNotice(); controls();
       return;
     }
-    vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "",
-                         search: searchMode(), study: !!state.study, ...(spoken ? { voice: true } : {}),
-                         ...(state.pending.length ? { attachments: state.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
+    vscode.postMessage({ type: "send", text: item.text, model: item.model, thinking: item.thinking,
+                         search: item.search, study: item.study, ...(spoken ? { voice: true } : {}),
+                         ...(item.pending.length ? { attachments: item.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}),
                               ...(kind === "library" ? { ...(conversation_id ? { conversation_id } : { project_id }), attachment_id } : {}) })) } : {}) });
-    state.lastSent = { text, research: false, pending: state.pending, searchFirst: state.searchFirst };
-    searchFirst(false);
-    input.value = ""; grow(); saveDraft();
-    state.pending = []; chips();
+    state.lastSent = { text: item.text, research: false, pending: item.pending, searchFirst: item.searchFirst };
     state.busy = true;        // until the turn says otherwise: no second send in the meantime
     hideNotice();
     controls();
+  }
+
+  // ---- the queue (Codex's): messages sent while it's answering wait above the box, in order. When the reply
+  // finishes, the first goes, and the next when that one's reply finishes. Stop, or a reply that failed, sends
+  // none of them: they all come back to the box, as Codex gives them back, for you to decide. Kept per chat with
+  // the draft, so a reload doesn't lose them (they come back to the box then, never sent on their own).
+  const MAX_QUEUED = 10;
+  const queueKey = (id) => `queue:${id || "new"}`;
+  const busyNow = () => state.busy || state.compacting;
+  function queued() {
+    const id = state.conversation?.id || "new";
+    if (state.queueFor !== id) {
+      state.queueFor = id;
+      try { const saved = (vscode.getState() || {})[queueKey(id)]; state.queue = Array.isArray(saved) ? saved : []; } catch { state.queue = []; }
+    }
+    return state.queue;
+  }
+  function saveQueue() {
+    try {
+      // Pasted images and long pastes stay in memory only: the state a webview keeps is small.
+      const light = queued().map((item) => ({ ...item, pending: item.pending.filter((p) => !p.data) }));
+      vscode.setState({ ...(vscode.getState() || {}), [queueKey(state.queueFor)]: light.length ? light : undefined });
+    } catch {}
+  }
+  function enqueue(item) {
+    const list = queued();
+    if (list.length >= MAX_QUEUED) {
+      giveBack(item);
+      showNotice(`${MAX_QUEUED} messages are already waiting: send them first, or remove one.`, "info");
+      return;
+    }
+    list.push(item); saveQueue(); queueView();
+    announce(`Queued: it goes when the reply finishes${list.length > 1 ? `, after ${list.length - 1} more` : ""}.`);
+  }
+  /** One queued message back in the box, below anything typed there. */
+  function giveBack(item) {
+    const typed = input.value.trim();
+    input.value = typed ? `${typed}\n\n${item.text}` : item.text;
+    state.pending = [...state.pending, ...item.pending]; chips();
+    if (item.research && !typed) researchMode(true);
+    grow(); saveDraft(); controls();
+  }
+  /** Every queued message back in the box, in order, after Stop or a reply that failed. */
+  function restoreQueue() {
+    const list = queued().splice(0);
+    if (!list.length) return;
+    const typed = input.value.trim();
+    input.value = [...list.map((item) => item.text.trim()), ...(typed ? [typed] : [])].filter(Boolean).join("\n\n");
+    state.pending = [...list.flatMap((item) => item.pending), ...state.pending]; chips();
+    grow(); saveDraft(); saveQueue(); queueView(); controls();
+    announce(list.length === 1 ? "The queued message is back in the box." : `The ${list.length} queued messages are back in the box.`);
+  }
+  /** The reply finished: the next queued message goes. */
+  function sendNext() {
+    if (busyNow() || state.unavailable || !state.conversation) return;
+    const list = queued();
+    if (!list.length) return;
+    const item = list.shift(); saveQueue(); queueView();
+    dispatch(item);
+  }
+  function queueView() {
+    const box = $("cd-queue");
+    const list = queued();
+    box.hidden = !list.length;
+    if (!list.length) { box.replaceChildren(); return; }
+    const head = el("p", "cd-queue-head", list.length === 1 ? "Queued: sends when the reply finishes" : `${list.length} queued: each sends when the reply before it finishes`);
+    const rows = el("ol", "cd-queue-list");
+    list.forEach((item, i) => {
+      const row = el("li", "cd-queue-item");
+      const words = item.text.trim().replace(/\s+/g, " ") || item.pending.map((p) => p.name).join(", ");
+      const text = el("span", "cd-queue-text", (item.research ? "Deep research: " : "") + words);
+      text.title = item.text;
+      const files = item.pending.length ? el("span", "cd-queue-files", `+${item.pending.length}`) : null;
+      if (files) files.title = item.pending.map((p) => p.name).join(", ");
+      const edit = el("button", "cd-icon cd-queue-edit");
+      edit.type = "button"; edit.title = "Edit: back to the box"; edit.setAttribute("aria-label", `Edit queued message ${i + 1}`);
+      edit.append(icon("edit"));
+      edit.addEventListener("click", () => { const [taken] = queued().splice(i, 1); saveQueue(); queueView(); giveBack(taken); input.focus(); });
+      const remove = el("button", "cd-icon cd-queue-remove");
+      remove.type = "button"; remove.title = "Remove"; remove.setAttribute("aria-label", `Remove queued message ${i + 1}`);
+      remove.append(icon("close"));
+      remove.addEventListener("click", () => { queued().splice(i, 1); saveQueue(); queueView(); input.focus(); });
+      row.append(el("span", "cd-queue-mark", "\u21b3"), text, ...(files ? [files] : []), edit, remove);
+      rows.append(row);
+    });
+    box.replaceChildren(head, rows);
   }
   const researchToggle = $("cd-research");
   /** Deep research for the next message: a plan first, then the reading. Off again once it's sent. */
@@ -2317,7 +2422,13 @@
         $("cd-title").textContent = state.conversation?.title || "New chat";
         vscode.setState({ ...(vscode.getState() || {}), conversation: state.conversation?.id || "",
                           temporary: !!state.conversation?.temporary });
-        if (!keep) restoreDraft();
+        if (!keep) {
+          restoreDraft();
+          // This chat's queue: shown while it answers (it drains when the reply ends); found after a reload with
+          // nothing running, it's back in the box rather than sent on its own.
+          queueView();
+          if (!state.busy && queued().length) restoreQueue();
+        }
         hideNotice();
         fillModels();
         if (!keep) pinned = true;
@@ -2340,6 +2451,7 @@
       case "turn":
         if (msg.state === "started") {
           state.busy = true; state.replyId = msg.replyId || ""; state.lastSent = null;
+          state.stopping = false; state.failed = false;
           if (!state.messages.some((m) => m.id === state.replyId)) {
             // A continued reply already exists; a new one appears now, empty, and fills in.
           }
@@ -2351,6 +2463,12 @@
         }
         controls();
         voiceMode?.check(state.busy);
+        if (msg.state !== "started") {
+          // What waited goes now -- unless you stopped it or it failed: then it's back in the box for you.
+          const held = state.stopping || state.failed;
+          state.stopping = false; state.failed = false;
+          if (held) restoreQueue(); else sendNext();
+        }
         return;
       case "activity":
         if (msg.kind === "compacting" && msg.messageId !== state.replyId) {
@@ -2550,7 +2668,8 @@
         if (msg.project && typeof msg.project === "object") { upsertProject(msg.project); if (isProjectPage()) render(); else crumb(); }
         return;
       }
-      case "error":
+      case "error": {
+        const summarizing = state.compacting;      // Compact now failed: what you queued meanwhile comes back
         if (state.compacting) { state.compacting = false; render(); }
         if (Object.keys(state.cardBusy).length) {        // a card's choice that was refused: its buttons come back
           const busy = Object.keys(state.cardBusy); state.cardBusy = {};
@@ -2574,13 +2693,20 @@
           searchFirst(!!state.lastSent.searchFirst);
         }
         if (state.busy && !state.replyId) state.planAsked = false;
+        if (state.busy && state.replyId) state.failed = true;  // its turn ends next: what's queued waits for you
+        const refused = state.busy && !state.replyId;
         state.lastSent = null;
         state.busy = state.busy && !!state.replyId;           // a send that never started isn't running
         showNotice(msg.message || "ChatDGC hit an error.");
         controls();
+        if (refused || summarizing) restoreQueue();           // a queued send refused: the rest come back too
         return;
+      }
       case "lost":
         if (state.busy) { state.busy = false; showNotice(msg.message || "The reply stopped."); render(); }
+        state.stopping = false; state.failed = false;
+        restoreQueue();
+        controls();
         return;
       case "unavailable":
         state.unavailable = msg.message || "ChatDGC isn't available.";
@@ -2623,6 +2749,7 @@
         { const keep = pinned; pinned = false; render(); pinned = keep; }
         controls();
         announce("Earlier messages summarized.");
+        sendNext();                                   // what you sent while it summarized goes now
         return;
       case "image": {
         if (!/^att_[a-f0-9]{32}$/.test(String(msg.id || ""))) return;
