@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
-const { Recorder, recorderFor, toPcm16kMono, RATE } = require("../recording.js");
+const { Recorder, recorderFor, toPcm16kMono, rmsLevels, RATE } = require("../recording.js");
 const scratch = mkdtempSync(join(tmpdir(), "dgc-voice-test-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
@@ -253,10 +253,86 @@ test("DGC_VOICE_FAKE_RECORDING stands in for a microphone", async () => {
   assert.equal(existsSync(file), true, "the stand-in file is the tester's: it's left alone");
 });
 
-test("the extension runs on the computer you're at, offers its four commands, and hides them from the palette", () => {
+// ---- levels: how loud it is, while it records, for DGC's waveform ---------------------------------------------
+
+test("Linux: the levels are read from the recording as it grows, one per 50 ms, as loud as what was heard", async (t) => {
+  const env = standIn(["arecord"], ARECORD);              // a tone at 8000 of 32768: RMS 0.173
+  const recorder = new Recorder({ platform: "linux", env });
+  t.after(() => recorder.cancel());
+  assert.deepEqual(recorder.levels(), { ok: true, recording: false, levels: [] });
+  await recorder.start();
+  await new Promise((r) => setTimeout(r, 700));
+  const first = recorder.levels();
+  assert.equal(first.recording, true);
+  assert.ok(first.levels.length >= 8, `${first.levels.length} readings in 700 ms`);
+  assert.ok(first.levels.every((v) => Math.abs(v - 0.173) < 0.02), JSON.stringify(first.levels));
+  await new Promise((r) => setTimeout(r, 300));
+  const next = recorder.levels();
+  assert.ok(next.levels.length >= 3 && next.levels.length <= 10, `only what's new: ${next.levels.length}`);
+  assert.equal(recorder.levels().levels.length, 0, "read twice at once: nothing new");
+  await recorder.stop();
+  assert.equal(recorder.levels().recording, false);
+});
+
+test("Linux: silence reads as zero", async (t) => {
+  const env = { ...standIn(["arecord"], ARECORD), FAKE_LEVEL: "0" };
+  const recorder = new Recorder({ platform: "linux", env });
+  t.after(() => recorder.cancel());
+  await recorder.start();
+  await new Promise((r) => setTimeout(r, 500));
+  const { levels } = recorder.levels();
+  assert.ok(levels.length >= 4 && levels.every((v) => v === 0), JSON.stringify(levels));
+  recorder.cancel();
+});
+
+test("macOS and Windows: the script's \"L <level>\" lines are the levels; anything else it prints is not", async (t) => {
+  const SAYS = `${STOP_FILE}
+let n = 0;
+const talk = setInterval(() => {
+  n++;
+  process.stdout.write(n % 5 === 0 ? 'noise from the script\\n' : 'L ' + (n % 2 ? '0.25' : '0.00125') + '\\n');
+  if (n > 400) clearInterval(talk);
+}, 20);
+`;
+  const env = standIn(["powershell.exe"], SAYS);
+  const recorder = new Recorder({ platform: "win32", env, scripts: join(root, "recorders") });
+  t.after(() => recorder.cancel());
+  assert.equal((await recorder.start()).ok, true);
+  await new Promise((r) => setTimeout(r, 300));
+  const { levels } = recorder.levels();
+  assert.ok(levels.length >= 5, JSON.stringify(levels));
+  assert.ok(levels.every((v) => v === 0.25 || v === 0.0013), JSON.stringify(levels));
+  const done = await recorder.stop();
+  assert.equal(done.ok, true, done.error);
+});
+
+test("DGC_VOICE_FAKE_RECORDING: the levels follow the file as if it were spoken now, then fall quiet", async (t) => {
+  const file = join(scratch, "word.wav");
+  // half a second of quiet, half a second of a loud tone
+  writeFileSync(file, wav({ seconds: 1, samples: (i) => (i < 8000 ? 0 : Math.sin(i / 5) * 0.5) }));
+  const recorder = new Recorder({ platform: "linux", env: { DGC_VOICE_FAKE_RECORDING: file } });
+  t.after(() => recorder.cancel());
+  await recorder.start();
+  await new Promise((r) => setTimeout(r, 1300));
+  const { levels } = recorder.levels();
+  assert.ok(levels.slice(0, 9).every((v) => v < 0.001), `quiet first: ${levels.slice(0, 9)}`);
+  assert.ok(levels.slice(11, 19).every((v) => Math.abs(v - 0.354) < 0.02), `then the tone: ${levels.slice(11, 19)}`);
+  assert.ok(levels.length >= 25, `one reading per 50 ms, quiet ones too: ${levels.length}`);
+  assert.deepEqual(levels.slice(20), levels.slice(20).map(() => 0), "past the end of the file: quiet");
+  await recorder.stop();
+});
+
+test("rmsLevels: one reading per 50 ms of 16 kHz audio", () => {
+  const pcm = toPcm16kMono(wav({ seconds: 0.5, samples: () => 0.5 })).pcm;
+  const levels = rmsLevels(pcm);
+  assert.equal(levels.length, 10);
+  assert.ok(levels.every((v) => Math.abs(v - 0.5) < 0.001));
+});
+
+test("the extension runs on the computer you're at, offers its commands, and hides them from the palette", () => {
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   assert.deepEqual(pkg.extensionKind, ["ui"]);
-  const names = ["dgcVoice.start", "dgcVoice.stop", "dgcVoice.cancel", "dgcVoice.status"];
+  const names = ["dgcVoice.start", "dgcVoice.stop", "dgcVoice.cancel", "dgcVoice.status", "dgcVoice.level"];
   assert.deepEqual(pkg.contributes.commands.map((c) => c.command).sort(), [...names].sort());
   assert.deepEqual(pkg.activationEvents.sort(), names.map((n) => `onCommand:${n}`).sort());
   assert.deepEqual(pkg.contributes.menus.commandPalette.map((m) => [m.command, m.when]).sort(), names.map((n) => [n, "false"]).sort());

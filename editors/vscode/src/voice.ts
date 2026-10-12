@@ -8,7 +8,9 @@ import * as vscode from "vscode";
 
 /** DGC Voice's id on the Marketplace and Open VSX, and its commands. */
 export const VOICE_EXTENSION = "vibedgc.dgc-voice";
-const START = "dgcVoice.start", STOP = "dgcVoice.stop", CANCEL = "dgcVoice.cancel";
+const START = "dgcVoice.start", STOP = "dgcVoice.stop", CANCEL = "dgcVoice.cancel", LEVEL = "dgcVoice.level";
+/** How often the waveform asks how loud it is (each answer carries every ~50 ms reading since the last). */
+export const LEVEL_POLL_MS = 100;
 /** Raw PCM per voice_transcribe: as base64 it stays well inside a command's 4 MB. */
 export const PIECE_BYTES = 2 * 1024 * 1024;
 const STATE_TIMEOUT_MS = 15_000;
@@ -128,6 +130,17 @@ export class VoiceClient {
     return { ok: false, code: "failed", error: String(ev?.message || "That couldn't be written down.") };
   }
 
+  /** How loud the microphone has been since the last ask (RMS 0..1, ~50 ms each); none from a DGC Voice without it. */
+  async levels(): Promise<number[]> {
+    if (!this.recording) return [];
+    try {
+      const answer = await this.execute(LEVEL);
+      return Array.isArray(answer?.levels) ? answer.levels.filter((v: unknown) => typeof v === "number" && Number.isFinite(v)).slice(-200) : [];
+    } catch {
+      return [];
+    }
+  }
+
   /** Drops the recording: nothing is kept or sent. */
   async cancel(): Promise<void> {
     if (!this.recording) return;
@@ -138,5 +151,104 @@ export class VoiceClient {
   dispose(): void {
     void this.cancel();
     for (const [id, waiter] of this.waiting) { clearTimeout(waiter.timer); waiter.resolve({ type: "voice_error", code: "closed", message: "DGC closed." }); this.waiting.delete(id); }
+  }
+}
+
+/** A message box that dictates: its page gets {type: "mic", ...} and {type: "micLevels", levels}. */
+export interface DictationOwner {
+  post(message: Record<string, unknown>): void;
+}
+
+/** What a box's page sends: micStart, micStop {mode: "insert" | "send"}, micCancel. */
+export type MicMessage = { type: "micStart" } | { type: "micStop"; mode?: string } | { type: "micCancel" };
+export const MIC_MESSAGES = ["micStart", "micStop", "micCancel"];
+
+/**
+ * Dictation for every message box in the window -- DGC's chats, ChatDGC's and Pips': one microphone, so one box
+ * records at a time. While it records, its page hears how loud the microphone is (micLevels) for the waveform; when
+ * it stops, what was said (mic idle + text), to put in the box or to send.
+ */
+export class Dictation {
+  private owner?: DictationOwner;
+  private poll?: ReturnType<typeof setInterval>;
+  private asking = false;
+
+  constructor(readonly client: VoiceClient) {}
+
+  /** One of a page's mic messages, from the box `owner` speaks for. */
+  async handle(owner: DictationOwner, message: any): Promise<void> {
+    if (message?.type === "micStart") return this.start(owner);
+    if (message?.type === "micStop") return this.stop(owner, message.mode === "send" ? "send" : "insert");
+    if (message?.type === "micCancel") return this.cancel(owner);
+  }
+
+  isRecording(owner?: DictationOwner): boolean { return owner ? this.owner === owner : !!this.owner; }
+
+  private async start(owner: DictationOwner): Promise<void> {
+    if (this.owner) {
+      owner.post({ type: "mic", state: this.owner === owner ? "recording" : "idle",
+                   ...(this.owner === owner ? {} : { error: "Another chat is recording: stop it there first." }) });
+      return;
+    }
+    this.owner = owner;
+    const started = await this.client.start();
+    if (this.owner !== owner) { if (started.ok) await this.client.cancel(); return; }   // cancelled while it started
+    if (!started.ok) {
+      this.owner = undefined;
+      // No model yet: Settings -> Voice is open on the choice; the page says why, as information.
+      owner.post({ type: "mic", state: "idle", error: started.error, kind: started.code === "no_model" ? "info" : "error" });
+      return;
+    }
+    owner.post({ type: "mic", state: "recording" });
+    this.poll = setInterval(() => { void this.levels(owner); }, LEVEL_POLL_MS);
+  }
+
+  private async levels(owner: DictationOwner): Promise<void> {
+    if (this.asking || this.owner !== owner) return;
+    this.asking = true;
+    try {
+      const levels = await this.client.levels();
+      if (this.owner === owner && levels.length) owner.post({ type: "micLevels", levels });
+    } finally {
+      this.asking = false;
+    }
+  }
+
+  private stopPolling(): void {
+    if (this.poll) clearInterval(this.poll);
+    this.poll = undefined;
+  }
+
+  private async stop(owner: DictationOwner, mode: "insert" | "send"): Promise<void> {
+    if (this.owner !== owner) return;
+    this.stopPolling();
+    owner.post({ type: "mic", state: "writing", mode });
+    const said = await this.client.stop();
+    if (this.owner === owner) this.owner = undefined;
+    owner.post(said.ok ? { type: "mic", state: "idle", text: said.text || "", mode }
+                       : { type: "mic", state: "idle", error: said.error, kind: said.code === "no_model" ? "info" : "error" });
+  }
+
+  private async cancel(owner: DictationOwner): Promise<void> {
+    if (this.owner === owner) {
+      this.owner = undefined;
+      this.stopPolling();
+      await this.client.cancel();
+    }
+    owner.post({ type: "mic", state: "idle" });
+  }
+
+  /** A box that went away (its tab closed, its page reloaded): its recording goes with it, kept nowhere. */
+  release(owner: DictationOwner): void {
+    if (this.owner !== owner) return;
+    this.owner = undefined;
+    this.stopPolling();
+    void this.client.cancel();
+  }
+
+  dispose(): void {
+    this.stopPolling();
+    this.owner = undefined;
+    this.client.dispose();
   }
 }

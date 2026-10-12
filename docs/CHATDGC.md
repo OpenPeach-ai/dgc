@@ -17,8 +17,13 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
-- **Dictate.** Press the microphone beside Send and speak. Press it again, and what you said appears in the box
-  where the caret is, so you can edit it before you send. Esc cancels the recording.
+- **Dictate.** Press the microphone beside Send and speak. While you speak, the box's bottom row becomes the voice
+  bar: ✕ Cancel, a live waveform of your voice with the time, ■ Stop and ↑ Send.
+  - **Stop** puts what you said in the box where the caret is, so you can edit it before you send.
+  - **Send** puts it in and sends it at once.
+  - **Esc** cancels the recording.
+  - **A flat waveform:** if it stays flat for three seconds, the bar says it isn't hearing anything.
+  - **Elsewhere in DGC:** DGC's own chat and Pips have the same microphone and the same bar.
   - **The first time:** the microphone opens **Settings → Voice**. Install a speech model there:
     - **Moonshine Base:** English, 111 MB.
     - **NVIDIA Nemotron 3.5:** many languages, 475 MB.

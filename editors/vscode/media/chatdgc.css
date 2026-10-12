@@ -234,17 +234,10 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
   .cd-tools { flex-wrap: wrap; row-gap: var(--sp-1); }
   .cd-tools > .cd-spacer { display: none; }
 }
-/* Dictation: while it records, the microphone becomes Stop with the time beside it, in the accent. */
-.cd-mic { width: auto; min-width: var(--control); gap: var(--sp-1); }
-.cd-mic[data-state="recording"] { padding: 0 var(--sp-2); color: var(--link); background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.cd-mic[data-state="recording"]:hover { color: var(--link); background: color-mix(in srgb, var(--accent) 26%, transparent); }
-.cd-mic[data-state="recording"] > .codicon { animation: cd-mic-pulse 1.4s ease-in-out infinite; }
-.cd-mic:disabled { cursor: default; }
-.cd-mic-time { font: var(--w-med) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
-@keyframes cd-mic-pulse { 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .cd-mic[data-state="recording"] > .codicon { animation: none; } }
-/* No room for the time in a narrow box: the pulsing Stop says it's recording. */
-@container cd-box (max-width: 340px) { .cd-mic[data-state="recording"] { padding: 0; } .cd-mic-time { display: none; } }
+/* Dictation: while it records, the voice bar (media/voicebar.css) takes the tools row's place. */
+.cd-voice { display: none; }
+.cd-box.dictating .cd-tools { display: none; }
+.cd-box.dictating .cd-voice { display: flex; min-height: var(--control); }
 /* The model and its thinking, as main DGC's model control: the name, a small arc for thinking, a chevron. */
 .cd-picker { position: relative; display: inline-flex; min-width: 0; }
 .cd-model-pill { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 240px; min-width: 0; height: var(--control);

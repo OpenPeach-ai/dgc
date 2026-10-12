@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { MIC_MESSAGES, type Dictation, type DictationOwner } from './voice';
 import { randomBytes } from 'crypto';
 import { homedir } from 'os';
 
@@ -34,6 +35,10 @@ export class PipsEditor implements vscode.Disposable {
   private state: { connected: boolean; supported: boolean; enabled: boolean } = { connected: false, supported: false, enabled: false };
   /** Reads the extension host makes for itself (the attention watcher), never a webview's. */
   private hostReads = new Map<string, (event: any) => void>();
+  /** Dictation for the Pip chat's box (src/voice.ts), in this tab of its own; the side bar routes its own. */
+  private dictation?: () => Dictation;
+  private readonly mic: DictationOwner = { post: (message) => this.post({ ...message, from: 'pips' }) };
+  useDictation(dictation: () => Dictation): void { this.dictation = dictation; }
   constructor(private readonly extensionUri: vscode.Uri, private readonly send: (message: any, backendIdentity?: object) => boolean, private readonly connect: () => void, private readonly requireGeneration = false) {}
   attach(post: (message: any) => void): void {
     // The main panel is now the primary surface. Retire any old editor instance
@@ -89,7 +94,7 @@ export class PipsEditor implements vscode.Disposable {
       enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.extensionUri],
     });
     this.panel = panel;
-    panel.onDidDispose(() => { this.panel = undefined; this.pending.clear(); });
+    panel.onDidDispose(() => { this.panel = undefined; this.pending.clear(); this.dictation?.().release(this.mic); });
     panel.onDidChangeViewState(() => panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible }));
     panel.webview.onDidReceiveMessage(message => this.receive(message));
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
@@ -239,6 +244,7 @@ export class PipsEditor implements vscode.Disposable {
         && pip.name.trim() && pip.name.length <= 120 && PIP_TYPES.includes(pip.pip_type)) this.openComputer({ id: pip.id, name: pip.name.trim(), pip_type: pip.pip_type });
       return;
     }
+    if (MIC_MESSAGES.includes(message?.type) && !computer) { if (this.dictation) void this.dictation().handle(this.mic, message); return; }
     if (message?.type === 'pipComputerSave' && computer) { void this.saveComputerFile(surface, message); return; }
     if (message?.type === 'pipDesktop' && computer) {
       // The screen's viewer: bytes in base64, for this tab's own Pip only.

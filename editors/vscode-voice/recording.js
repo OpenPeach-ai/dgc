@@ -7,7 +7,10 @@
 //   Windows  the Windows audio API (winmm), from PowerShell (recorders/record-win.ps1)
 //   Linux    arecord (ALSA), else pw-record (PipeWire), else parecord (PulseAudio)
 // The two scripts stop when a file named after the recording plus ".stop" appears; the Linux ones on SIGINT.
+// While it records, levels() hands over how loud the microphone is, about every 50 ms, for the waveform DGC draws:
+// macOS's and Windows's scripts print "L <level>" lines; on Linux the recording file is read as it grows.
 // DGC_VOICE_FAKE_RECORDING=<a .wav> makes "recording" return that file: for testing on a machine with no microphone.
+// Its levels follow the file as if it were being spoken now.
 
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -16,6 +19,9 @@ const path = require('path');
 
 const RATE = 16000;
 const MAX_SECONDS = 600;
+/** One level reading per this much audio (and at most this many kept between two reads). */
+const LEVEL_MS = 50;
+const MAX_LEVELS = 200;
 
 function which(command, env = process.env) {
     for (const dir of String(env.PATH || '').split(path.delimiter)) {
@@ -124,6 +130,27 @@ function toPcm16kMono(wav) {
     return { pcm, seconds: outFrames / RATE };
 }
 
+/** The loudness (root mean square, 0..1) of each LEVEL_MS of 16-bit mono PCM at `rate`. */
+function rmsLevels(pcm, rate = RATE) {
+    const step = Math.max(2, Math.round(rate * LEVEL_MS / 1000) * 2), out = [];
+    for (let at = 0; at + step <= pcm.length; at += step) {
+        let sum = 0;
+        for (let i = at; i < at + step; i += 2) { const v = pcm.readInt16LE(i) / 32768; sum += v * v; }
+        out.push(Math.sqrt(sum / (step / 2)));
+    }
+    return out;
+}
+
+/** Where a WAV file's samples start (after its "data" header), or 44 when it hasn't been written yet. */
+function dataOffset(head) {
+    for (let at = 12; at + 8 <= head.length;) {
+        const id = head.toString('ascii', at, at + 4), size = head.readUInt32LE(at + 4);
+        if (id === 'data') return at + 8;
+        at += 8 + size + (size & 1);
+    }
+    return 44;
+}
+
 /** One recording at a time. */
 class Recorder {
     constructor({ scripts, platform, env } = {}) {
@@ -147,17 +174,30 @@ class Recorder {
             fs.rmSync(dir, { recursive: true, force: true });
             return { ok: false, code: 'no_recorder', error: NO_RECORDER[this.platform] || NO_RECORDER.other };
         }
-        const recording = { how, dir, out, started: Date.now(), stderr: '' };
+        const recording = { how, dir, out, started: Date.now(), stderr: '', levels: [], read: 0, pending: '' };
+        if (how.kind === 'fake') {
+            // Levels as the file would sound if it were being spoken now.
+            try { recording.fakeLevels = rmsLevels(toPcm16kMono(fs.readFileSync(how.file)).pcm); } catch { recording.fakeLevels = []; }
+        }
         if (how.kind !== 'fake') {
             let child;
             try {
-                child = spawn(how.command, how.args, { env: this.env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+                child = spawn(how.command, how.args, { env: this.env, stdio: ['ignore', how.stopFile ? 'pipe' : 'ignore', 'pipe'], windowsHide: true });
             } catch (error) {
                 fs.rmSync(dir, { recursive: true, force: true });
                 return { ok: false, code: 'record_failed', error: `The recorder couldn't start: ${error.message}` };
             }
             recording.child = child;
             child.stderr.on('data', (d) => { recording.stderr = (recording.stderr + d).slice(-4000); });
+            // The macOS and Windows scripts say how loud it is: "L <level>" a line, 0..1.
+            child.stdout?.on('data', (d) => {
+                const lines = (recording.pending + d).split('\n');
+                recording.pending = lines.pop().slice(-200);
+                for (const line of lines) {
+                    const m = /^L (\d+(?:\.\d+)?(?:e-?\d+)?)\s*$/.exec(line);
+                    if (m) this.keep(recording, [Math.min(1, Number(m[1]))]);
+                }
+            });
             recording.exited = new Promise((resolve) => {
                 child.on('error', (error) => { recording.stderr += String(error.message); resolve(-1); });
                 child.on('close', (code) => resolve(code));
@@ -172,6 +212,48 @@ class Recorder {
         recording.limit = setTimeout(() => { if (this.current === recording) this.signal(recording); }, MAX_SECONDS * 1000);
         this.current = recording;
         return { ok: true, recorder: how.kind };
+    }
+
+    keep(recording, levels) {
+        recording.levels.push(...levels);
+        if (recording.levels.length > MAX_LEVELS) recording.levels.splice(0, recording.levels.length - MAX_LEVELS);
+    }
+
+    /** How loud the microphone has been since the last call: one reading (0..1) per ~50 ms. */
+    levels() {
+        const recording = this.current;
+        if (!recording) return { ok: true, recording: false, levels: [] };
+        const seconds = (Date.now() - recording.started) / 1000;
+        if (recording.how.kind === 'fake') {
+            // One reading per 50 ms since it started; past the end of the file it's quiet, as a room is when you stop.
+            const due = Math.floor(seconds * 1000 / LEVEL_MS), fresh = [];
+            for (let i = Math.max(recording.read, due - MAX_LEVELS); i < due; i++) fresh.push(recording.fakeLevels[i] ?? 0);
+            recording.read = Math.max(recording.read, due);
+            this.keep(recording, fresh);
+        } else if (!recording.how.stopFile) {
+            // Linux: the recorder writes as it goes, so what's new in the file is what was just heard.
+            try {
+                const fd = fs.openSync(recording.out, 'r');
+                try {
+                    const size = fs.fstatSync(fd).size;
+                    if (!recording.read && size >= 44) {
+                        const head = Buffer.alloc(Math.min(size, 512));
+                        fs.readSync(fd, head, 0, head.length, 0);
+                        recording.read = dataOffset(head);
+                    }
+                    const step = RATE * LEVEL_MS / 1000 * 2;
+                    const whole = Math.floor(Math.max(0, size - recording.read) / step) * step;
+                    if (whole > 0) {
+                        const fresh = Buffer.alloc(Math.min(whole, step * MAX_LEVELS));
+                        fs.readSync(fd, fresh, 0, fresh.length, recording.read + whole - fresh.length);
+                        recording.read += whole;
+                        this.keep(recording, rmsLevels(fresh));
+                    }
+                } finally { fs.closeSync(fd); }
+            } catch { /* not written yet */ }
+        }
+        const levels = recording.levels.splice(0);
+        return { ok: true, recording: true, seconds, levels: levels.map((v) => Math.round(v * 10000) / 10000) };
     }
 
     signal(recording) {
@@ -219,4 +301,4 @@ class Recorder {
     }
 }
 
-module.exports = { Recorder, recorderFor, toPcm16kMono, explain, RATE };
+module.exports = { Recorder, recorderFor, toPcm16kMono, rmsLevels, explain, RATE };

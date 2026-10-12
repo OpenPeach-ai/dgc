@@ -4,8 +4,14 @@
 
 ### ChatDGC
 
-- **Dictation.** A microphone beside Send: press it and speak, then press it again, and what you said lands in
-  the box at the caret. Esc cancels. The first press opens **Settings → Voice**.
+- **Dictation, in every box.** DGC's chat, ChatDGC and Pips each have a microphone beside Send. While you speak, the
+  box's bottom row becomes the voice bar, as Codex shows it:
+  - **The bar:** ✕ Cancel, a live waveform with the time, ■ Stop and ↑ Send. Stop puts what you said in the box at
+    the caret; Send puts it in and sends it.
+  - **The waveform is your microphone:** DGC Voice measures how loud it is about every 50 ms, and each bar is
+    200 ms of that. If the line stays flat for three seconds, the bar says "Not hearing anything — check your
+    microphone".
+  - **One box records at a time.** Esc cancels, and the first press with no model opens **Settings → Voice**.
   - **Settings → Voice:** lists each model with its download size and licence. **Install** downloads it with a
     progress bar you can cancel, then **Use** picks it and **Remove** deletes it.
   - **DGC Voice:** a small extension that records on the computer you're at, even in a Remote SSH window. It uses

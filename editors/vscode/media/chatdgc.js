@@ -1789,48 +1789,47 @@
   input.addEventListener("input", () => { grow(); controls(); saveDraft(); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
-    else if (e.key === "Escape" && micState === "recording") { e.preventDefault(); e.stopPropagation(); micCancel(); }
+    else if (e.key === "Escape" && (micState === "recording" || micState === "starting")) { e.preventDefault(); e.stopPropagation(); micCancel(); }
     else if (e.key === "Escape" && state.busy) { e.preventDefault(); vscode.postMessage({ type: "stop" }); }
   });
   $("cd-box").addEventListener("submit", (e) => { e.preventDefault(); submit(); });
   stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
 
-  // ---- dictation: the microphone beside Send records on the computer you're at (DGC Voice), and what you said
-  // lands where the caret is. The first press with no model chosen opens Settings -> Voice.
-  const mic = $("cd-mic"), micTime = $("cd-mic-time");
-  let micState = "idle", micTimer = 0;
-  const MIC_LOOK = {
-    idle: { icon: "codicon-mic", label: "Dictate", title: "Dictate" },
-    starting: { icon: "codicon-loading codicon-modifier-spin", label: "Starting the microphone", title: "Starting the microphone" },
-    recording: { icon: "codicon-debug-stop", label: "Stop and write it down", title: "Stop and write it down (Esc cancels)" },
-    writing: { icon: "codicon-loading codicon-modifier-spin", label: "Writing down what you said", title: "Writing down what you said" },
-  };
-  function micShow(next) {
-    const look = MIC_LOOK[next] || MIC_LOOK.idle;
-    micState = MIC_LOOK[next] ? next : "idle";
-    mic.dataset.state = micState;
-    mic.setAttribute("aria-pressed", String(micState === "recording"));
-    mic.setAttribute("aria-label", look.label);
-    mic.title = look.title;
-    mic.disabled = micState === "starting" || micState === "writing";
-    mic.querySelector(".codicon").className = `codicon ${look.icon}`;
-    clearInterval(micTimer);
-    micTime.hidden = micState !== "recording";
-    if (micState === "recording") {
-      const began = Date.now();
-      const tick = () => { const s = Math.floor((Date.now() - began) / 1000); micTime.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-      tick();
-      micTimer = setInterval(tick, 500);
-      announce("Recording. Press the microphone again to stop, or Escape to cancel.");
-    }
+  // ---- dictation: the microphone beside Send records on the computer you're at (DGC Voice). While it records, the
+  // box's bottom row is the voice bar (media/voicebar.js): Cancel, the live waveform and time, Stop (what you said
+  // goes in the box) and Send (it goes in the box and is sent). The first press with no model opens Settings -> Voice.
+  const mic = $("cd-mic"), voiceRow = $("cd-voice"), box = $("cd-box");
+  const voice = window.DgcVoiceBar ? window.DgcVoiceBar.create("chatdgc") : null;
+  if (voice) voiceRow.innerHTML = voice.markup(); else mic.hidden = true;
+  let micState = "idle";
+  function micShow(next, action = "") {
+    micState = ["starting", "recording", "writing"].includes(next) ? next : "idle";
+    voice?.state(micState, action);
+    box.classList.toggle("dictating", micState !== "idle");
+    if (micState === "recording") announce("Recording. Stop to add it to your message, or press Escape to cancel.");
   }
-  function micCancel() { micShow("idle"); vscode.postMessage({ type: "micCancel" }); announce("Recording cancelled."); }
+  function micCancel() {
+    micShow("idle");
+    vscode.postMessage({ type: "micCancel" });
+    announce("Recording cancelled.");
+    input.focus();
+  }
   mic.addEventListener("click", () => {
-    if (micState === "idle") { hideNotice(); micShow("starting"); vscode.postMessage({ type: "micStart" }); }
-    else if (micState === "recording") { micShow("writing"); vscode.postMessage({ type: "micStop" }); }
+    if (micState !== "idle") return;
+    hideNotice();
+    micShow("starting");
+    vscode.postMessage({ type: "micStart" });
+  });
+  voiceRow.addEventListener("click", (e) => {
+    const action = e.target.closest?.("[data-voice-action]")?.dataset.voiceAction;
+    if (action === "cancel") micCancel();
+    else if ((action === "stop" || action === "send") && micState === "recording") {
+      micShow("writing", action);
+      vscode.postMessage({ type: "micStop", mode: action === "send" ? "send" : "insert" });
+    }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && micState === "recording" && e.target !== input) { e.preventDefault(); micCancel(); }
+    if (e.key === "Escape" && (micState === "recording" || micState === "starting") && e.target !== input) { e.preventDefault(); micCancel(); }
   });
   /** What was said, at the caret (or over the selection), spaced from its neighbours. */
   function dictated(text) {
@@ -2179,14 +2178,19 @@
     const msg = event.data || {};
     switch (msg.type) {
       case "mic": {
-        micShow(msg.state);
+        micShow(msg.state, msg.mode === "send" ? "send" : "stop");
         if (msg.error) showNotice(String(msg.error), msg.kind === "info" ? "info" : "error");
         if (typeof msg.text === "string") {
-          if (msg.text) dictated(msg.text);
-          else showNotice("Nothing was heard. Try again, a little closer to the microphone.", "info");
+          if (msg.text) {
+            dictated(msg.text);
+            if (msg.mode === "send") submit();
+          } else showNotice("Nothing was heard. Try again, a little closer to the microphone.", "info");
         }
         break;
       }
+      case "micLevels":
+        voice?.push(msg.levels);
+        break;
       case "opened": {
         // keep: the same chat shown again (a new version, or another one chosen): what you're typing and the
         // model and thinking you picked stay, and so does where you were reading.

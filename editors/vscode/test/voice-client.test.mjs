@@ -23,7 +23,7 @@ await build({
     builder.onLoad({ filter: /^vscode$/, namespace: "test" }, () => ({ contents: "module.exports = globalThis.__DGC_TEST_VSCODE;", loader: "js" }));
   } }],
 });
-const { VoiceClient, PIECE_BYTES, VOICE_EXTENSION } = createRequire(import.meta.url)(bundle);
+const { VoiceClient, Dictation, PIECE_BYTES, VOICE_EXTENSION, LEVEL_POLL_MS } = createRequire(import.meta.url)(bundle);
 after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 
 const MODELS = (installed) => [{ id: "moonshine-base-en", role: "dictation", installed }, { id: "kitten-mini-en", role: "read_aloud", installed: false }];
@@ -144,4 +144,70 @@ test("only its own answers: another request's voice events pass by", () => {
   assert.equal(w.client.onEvent({ type: "voice_state", request_id: "settings-voice-3" }), false);
   assert.equal(w.client.onEvent({ type: "voice_progress", id: "moonshine-base-en", stage: "download" }), false);
   assert.equal(w.client.onEvent({ type: "voice_text", request_id: "voice-dictate-nope" }), false);
+});
+
+// ---- Dictation: every box in the window, one microphone -------------------------------------------------------
+
+/** A box: what dictation tells its page. */
+const box = (name) => ({ name, said: [], post(message) { this.said.push(message); } });
+const until = async (check, ms = 3000) => { const end = Date.now() + ms; while (!check()) { if (Date.now() > end) throw new Error("timed out"); await new Promise((r) => setTimeout(r, 10)); } };
+
+test("one box records at a time; another is told so; the one recording hears its levels about every 100 ms", async () => {
+  let reading = 0;
+  const w = world({ recorder: (command) => command === "dgcVoice.level" ? { ok: true, recording: true, levels: [0.1 + (reading++ % 3) / 100, 0.12] }
+                                          : command === "dgcVoice.start" ? { ok: true } : { ok: true, pcm: speech(2).toString("base64") } });
+  const dictation = new Dictation(w.client);
+  const chat = box("chat"), pips = box("pips");
+  await dictation.handle(chat, { type: "micStart" });
+  assert.deepEqual(chat.said, [{ type: "mic", state: "recording" }]);
+  await dictation.handle(pips, { type: "micStart" });
+  assert.deepEqual(pips.said, [{ type: "mic", state: "idle", error: "Another chat is recording: stop it there first." }]);
+  await until(() => chat.said.filter((m) => m.type === "micLevels").length >= 3, LEVEL_POLL_MS * 10);
+  const levels = chat.said.filter((m) => m.type === "micLevels");
+  assert.ok(levels.every((m) => m.levels.length === 2 && m.levels.every((v) => v > 0.09 && v < 0.2)), JSON.stringify(levels));
+  assert.equal(pips.said.filter((m) => m.type === "micLevels").length, 0, "only the box that records hears levels");
+
+  // Stop, to send: writing, then the words, with the mode the page asked for.
+  await dictation.handle(chat, { type: "micStop", mode: "send" });
+  const tail = chat.said.filter((m) => m.type === "mic").slice(-2);
+  assert.deepEqual(tail, [{ type: "mic", state: "writing", mode: "send" }, { type: "mic", state: "idle", text: "book a table for two", mode: "send" }]);
+  const quiet = chat.said.length;
+  await new Promise((r) => setTimeout(r, LEVEL_POLL_MS * 3));
+  assert.equal(chat.said.length, quiet, "no levels once it stopped");
+  // The microphone is free again.
+  await dictation.handle(pips, { type: "micStart" });
+  assert.deepEqual(pips.said.at(-1), { type: "mic", state: "recording" });
+  await dictation.handle(pips, { type: "micStop" });
+  assert.equal(pips.said.at(-1).mode, "insert", "Stop without a mode puts the words in the box");
+  dictation.dispose();
+});
+
+test("cancel, a page that went away, and a DGC Voice too old to say how loud it is", async () => {
+  const w = world({ recorder: (command) => { if (command === "dgcVoice.level") throw new Error("command 'dgcVoice.level' not found"); return { ok: true }; } });
+  const dictation = new Dictation(w.client);
+  const chat = box("chat");
+  await dictation.handle(chat, { type: "micStart" });
+  await new Promise((r) => setTimeout(r, LEVEL_POLL_MS * 3));
+  assert.equal(chat.said.filter((m) => m.type === "micLevels").length, 0, "no levels, and no failure: the waveform just stays flat");
+  await dictation.handle(chat, { type: "micCancel" });
+  assert.deepEqual(chat.said.at(-1), { type: "mic", state: "idle" });
+  assert.ok(w.executed.includes("dgcVoice.cancel"));
+
+  // A page that reloads while it records: its recording is dropped, and the microphone is free.
+  await dictation.handle(chat, { type: "micStart" });
+  assert.equal(dictation.isRecording(chat), true);
+  dictation.release(chat);
+  assert.equal(dictation.isRecording(), false);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(w.executed.filter((c) => c === "dgcVoice.cancel").length, 2);
+  dictation.release(box("other"));   // a box that wasn't recording: nothing happens
+  assert.equal(w.executed.filter((c) => c === "dgcVoice.cancel").length, 2);
+
+  // No model: the page is told as information (Settings -> Voice opened); nothing records.
+  const none = world({ installed: false, recorder: () => ({ ok: true }) });
+  const d2 = new Dictation(none.client), page = box("page");
+  await d2.handle(page, { type: "micStart" });
+  assert.equal(page.said.at(-1).kind, "info");
+  assert.equal(d2.isRecording(), false);
+  dictation.dispose(); d2.dispose();
 });

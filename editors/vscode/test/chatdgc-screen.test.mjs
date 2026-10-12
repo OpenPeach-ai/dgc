@@ -40,8 +40,8 @@ function screenHtml() {
   const codicon = readFileSync(join(root, "media/codicon.css"), "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
-  const own = readFileSync(join(root, "media/chatdgc.css"), "utf8");
-  const js = ["chart.js", "breakdown.js", "chatdgc.js"].map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n");
+  const own = readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
+  const js = ["chart.js", "breakdown.js", "voicebar.js", "chatdgc.js"].map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   cached = { html: doc.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${own}</style></head>`), js, markdownJs };
@@ -156,7 +156,7 @@ test("with no click, the thinking is open while it thinks and closes when the an
   } finally { await s.page.close(); }
 });
 
-test("however narrow the editor, the prompt box keeps one row: the tools turn to icons, the meter, model, microphone and Send hold their places", async (t) => {
+test("however narrow the editor, the prompt box keeps one row: the tools turn to icons, the meter, model, microphone and Send hold their places; recording, the voice bar takes the row", async (t) => {
   if (skipOrFail(t)) return;
   for (const [width, recording] of [1100, 640, 460, 340, 230].flatMap((w) => [[w, false], [w, true]])) {
     const s = await openScreen({ width, height: 700 });
@@ -164,8 +164,31 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
       await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
       await s.send({ type: "models", ids: ["qwen3.6-35b-a3b-instruct-long-name:cloud"], current: "qwen3.6-35b-a3b-instruct-long-name:cloud" });
       await s.send({ type: "context", window: 32768, limit: 262144, used: 5200, preset: "32k", source: "reported", parts: { conversation: 5200 }, compactable: true });
-      // Recording, the microphone is Stop with the time beside it: wider, and the row still holds.
-      if (recording) await s.send({ type: "mic", state: "recording" });
+      if (recording) {
+        // Recording: the voice bar in the tools row's place -- Cancel, the waveform with the time, Stop, Send.
+        await s.page.locator("#cd-mic").click();
+        await s.send({ type: "mic", state: "recording" });
+        await s.send({ type: "micLevels", levels: [0.1, 0.12, 0.09, 0.11] });
+        await s.page.waitForTimeout(450);
+        const bar = await s.page.evaluate(() => {
+          const r = (n) => { const b = n.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width }; };
+          const q = (sel) => document.querySelector(`#cd-voice ${sel}`);
+          return { box: r(document.querySelector(".cd-box")), tools: getComputedStyle(document.querySelector(".cd-tools")).display,
+                   cancel: r(q('[data-voice-action="cancel"]')), wave: r(q("canvas")), time: r(q("[data-voice-time]")), timeShown: q("[data-voice-time]").checkVisibility(),
+                   stop: r(q('[data-voice-action="stop"]')), send: r(q('[data-voice-action="send"]')),
+                   sideways: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth };
+        });
+        assert.equal(bar.tools, "none", `${width}px: the tools row gives way`);
+        assert.ok(bar.cancel.l >= bar.box.l && bar.send.r <= bar.box.r + 1, `${width}px: the bar inside the box`);
+        assert.ok(bar.cancel.r <= bar.wave.l && bar.wave.r <= bar.stop.l && bar.stop.r <= bar.send.l, `${width}px: Cancel, waveform, Stop, Send`);
+        assert.ok(new Set([bar.cancel, bar.stop, bar.send].map((b) => Math.round((b.t + b.b) / 2))).size === 1, `${width}px: one row`);
+        assert.ok(bar.wave.w >= bar.box.w * (width > 300 ? 0.4 : 0.2), `${width}px: the waveform gets the room (${bar.wave.w} of ${bar.box.w})`);
+        if (bar.timeShown) assert.ok(bar.time.l >= bar.wave.r - 1 && bar.time.r <= bar.stop.l, `${width}px: the time between waveform and Stop`);
+        assert.equal(bar.sideways, 0);
+        if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-box-${width}-recording.png`) });
+        assert.deepEqual(s.errors, []);
+        continue;
+      }
       await s.frame();
       const got = await s.page.evaluate(() => {
         const box = (sel) => { const n = document.querySelector(sel); if (!n || n.hidden || !n.offsetWidth) return null; const r = n.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
@@ -184,74 +207,94 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
                      && mid(at["#cd-send"]) > mid(at["#cd-attach"]), `${width}px: too narrow for one row: the meter, model and Send together on the row below`);
       for (const [sel, b] of got.parts) assert.ok(b.l >= got.tools.l - 1 && b.r <= got.tools.r + 1, `${width}px: ${sel} inside the box`);
       assert.ok(at["#cd-send"].l > at["#cd-mic"].r && at["#cd-mic"].l > at["#cd-model-pill"].r && at["#cd-model-pill"].l > at["#cd-context"].r,
-                `${width}px${recording ? " recording" : ""}: meter, model, microphone, then Send`);
-      if (recording) assert.equal(await shown(s.page, "#cd-mic-time"), width > 340, `${width}px: the time shows while it records, where there's room`);
+                `${width}px: meter, model, microphone, then Send`);
       assert.ok(at["#cd-send"].r >= got.tools.r - 2, `${width}px: Send ends the row`);
       assert.equal(got.sideways, 0);
-      assert.deepEqual(got.spills, [], `${width}px${recording ? " recording" : ""}: nothing spills out of its place`);
+      assert.deepEqual(got.spills, [], `${width}px: nothing spills out of its place`);
       if (width >= 1100) assert.ok(got.words >= 3, "wide: Search, Deep research and Study say their names");
       if (width <= 460) assert.equal(got.words, 0, `${width}px: icons only`);
       assert.equal(await s.page.locator("#cd-research").getAttribute("aria-label"), "Deep research", "an icon still has its name");
-      if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-box-${width}${recording ? "-recording" : ""}.png`) });
+      if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-box-${width}.png`) });
       assert.deepEqual(s.errors, []);
     } finally { await s.page.close(); }
   }
 });
 
-test("dictation: the microphone records, Stop writes it down at the caret, Esc cancels, and what went wrong is said", async (t) => {
+test("dictation: the voice bar while it records; Stop writes it down at the caret, Send sends it, Esc cancels, and what went wrong is said", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen({ width: 900 });
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
-    const mic = s.page.locator("#cd-mic");
+    const mic = s.page.locator("#cd-mic"), bar = s.page.locator('#cd-voice [data-voicebar="chatdgc"]'), tools = s.page.locator(".cd-tools");
     assert.equal(await mic.getAttribute("aria-label"), "Dictate");
-    await mic.click();
-    assert.deepEqual((await s.posted("micStart")).length, 1);
-    assert.equal(await mic.isDisabled(), true, "starting: one press is enough");
-    await s.send({ type: "mic", state: "recording" });
-    assert.equal(await mic.getAttribute("aria-pressed"), "true");
-    assert.equal(await mic.getAttribute("aria-label"), "Stop and write it down");
-    assert.equal(await s.page.locator("#cd-mic .codicon").getAttribute("class"), "codicon codicon-debug-stop");
-    assert.match(await s.page.locator("#cd-mic-time").textContent(), /^0:0\d$/);
-
-    // Typed text either side of the caret: what was said goes between, spaced, and Send can send it.
+    assert.equal(await bar.isVisible(), false);
     await s.page.locator("#cd-input").fill("Plan a trip to Lisbon");
-    await s.page.evaluate(() => { const i = document.getElementById("cd-input"); i.setSelectionRange(11, 11); });
+    await s.page.evaluate(() => document.getElementById("cd-input").setSelectionRange(11, 11));
     await mic.click();
-    assert.equal((await s.posted("micStop")).length, 1);
-    assert.equal(await mic.getAttribute("aria-label"), "Writing down what you said");
-    await s.send({ type: "mic", state: "idle", text: "for two people" });
+    assert.equal((await s.posted("micStart")).length, 1);
+    assert.equal(await bar.isVisible(), true, "the voice bar at once, starting");
+    assert.equal(await tools.isVisible(), false);
+    assert.equal(await bar.getAttribute("data-state"), "starting");
+    await s.send({ type: "mic", state: "recording" });
+    assert.equal(await bar.getAttribute("data-state"), "recording");
+    for (let i = 0; i < 10; i++) { await s.send({ type: "micLevels", levels: [0.08 + (i % 3) * 0.03, 0.11] }); await s.page.waitForTimeout(100); }
+    const tallest = await s.page.evaluate(() => {
+      const c = document.querySelector("#cd-voice canvas"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+      let best = 0;
+      for (let x = 0; x < c.width; x++) { let col = 0; for (let y = 0; y < c.height; y++) if (d[(y * c.width + x) * 4 + 3] > 40) col++; best = Math.max(best, col); }
+      return best / c.height;
+    });
+    assert.ok(tallest > 0.5, `the waveform moves with the voice: ${tallest}`);
+    assert.match(await bar.locator("[data-voice-time]").textContent(), /^0:0[01]$/);
+
+    // Stop: what was said goes in at the caret, spaced; the tools come back.
+    await bar.locator('[data-voice-action="stop"]').click();
+    assert.deepEqual((await s.posted("micStop")).at(-1), { type: "micStop", mode: "insert" });
+    assert.equal(await bar.getAttribute("data-state"), "writing");
+    assert.equal(await bar.locator("[data-voice-status]").textContent(), "Writing it down…");
+    await s.send({ type: "mic", state: "idle", text: "for two people", mode: "insert" });
     assert.equal(await s.page.locator("#cd-input").inputValue(), "Plan a trip for two people to Lisbon");
     assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").selectionStart), "Plan a trip for two people".length, "the caret after what was said");
-    assert.equal(await s.page.locator("#cd-send").isDisabled(), false);
-    assert.equal(await mic.getAttribute("aria-pressed"), "false");
-    assert.equal(await s.page.locator("#cd-mic-time").isHidden(), true);
+    assert.equal(await tools.isVisible(), true);
+    assert.equal(await bar.isVisible(), false);
 
-    // Esc while recording drops it, from the box or anywhere on the page.
+    // Send: the words go in, and the message goes.
+    await s.page.evaluate(() => { const i = document.getElementById("cd-input"); i.setSelectionRange(i.value.length, i.value.length); });
+    await mic.click();
+    await s.send({ type: "mic", state: "recording" });
+    await bar.locator('[data-voice-action="send"]').click();
+    assert.deepEqual((await s.posted("micStop")).at(-1), { type: "micStop", mode: "send" });
+    await s.send({ type: "mic", state: "idle", text: "Book the hotel too.", mode: "send" });
+    assert.equal((await s.posted("send")).at(-1)?.text, "Plan a trip for two people to Lisbon Book the hotel too.");
+
+    // Esc cancels: from the box, or anywhere on the page.
     await mic.click();
     await s.send({ type: "mic", state: "recording" });
     await s.page.locator("#cd-input").press("Escape");
     assert.equal((await s.posted("micCancel")).length, 1);
-    assert.equal(await mic.getAttribute("aria-label"), "Dictate");
+    assert.equal(await tools.isVisible(), true);
     assert.equal((await s.posted("stop")).length, 0, "Esc cancelled the recording, not a reply");
     await mic.click();
     await s.send({ type: "mic", state: "recording" });
     await s.page.locator("#cd-title").click();
     await s.page.keyboard.press("Escape");
     assert.equal((await s.posted("micCancel")).length, 2);
+    await mic.click();
+    await bar.locator('[data-voice-action="cancel"]').click();
+    assert.equal((await s.posted("micCancel")).length, 3, "Cancel while it's still starting");
 
     // No model yet: the host opened Settings -> Voice; the page says why, as information. Nothing heard, too.
     await mic.click();
     await s.send({ type: "mic", state: "idle", error: "Choose a dictation model in Settings → Voice, then press the microphone again.", kind: "info" });
     assert.equal(await s.page.locator("#cd-notice").textContent(), "Choose a dictation model in Settings → Voice, then press the microphone again.");
     assert.equal(await s.page.locator("#cd-notice").getAttribute("data-kind"), "info");
+    assert.equal(await tools.isVisible(), true);
     await mic.click();
     assert.equal(await s.page.locator("#cd-notice").isHidden(), true, "a new press clears the old word");
     await s.send({ type: "mic", state: "recording" });
-    await mic.click();
+    await bar.locator('[data-voice-action="stop"]').click();
     await s.send({ type: "mic", state: "idle", text: "" });
     assert.match(await s.page.locator("#cd-notice").textContent(), /Nothing was heard/);
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "Plan a trip for two people to Lisbon", "nothing added");
     await s.send({ type: "mic", state: "idle", error: "Another chat is recording: stop it there first." });
     assert.equal(await s.page.locator("#cd-notice").getAttribute("data-kind"), "error");
     assert.deepEqual(s.errors, []);

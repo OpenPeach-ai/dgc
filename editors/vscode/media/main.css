@@ -2382,3 +2382,8 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .bd [data-id="free"] .bd-label, .bd [data-id="deferred"] .bd-label, .bd [data-id="buffer"] .bd-label { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .bd-more > summary .bd-label::after { transition: none; } }
 @media (forced-colors: active) { .bd-seg, .bd-dot { forced-color-adjust: none; border: 1px solid CanvasText; } }
+
+/* Dictation: while it records, the voice bar (media/voicebar.css) takes the footer's place. */
+#cbox .cvoice { display: none; }
+#cbox.dictating #cfooter { display: none; }
+#cbox.dictating .cvoice { display: flex; align-items: center; min-height: var(--control); padding: 2px 8px 6px; }

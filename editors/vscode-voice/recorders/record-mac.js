@@ -1,5 +1,6 @@
 // DGC Voice on macOS: records the microphone to the .wav named by the first argument -- 16-bit mono PCM at
 // 16 kHz -- with Apple's AVAudioRecorder, until a file of the same name plus ".stop" appears (or ten minutes pass).
+// Every 50 ms it prints "L <level>" (0..1, from the recorder's own meter) for DGC's waveform.
 // Run by `osascript -l JavaScript`, so it needs nothing that a Mac doesn't have. The first time, macOS asks
 // whether the editor may use the microphone.
 ObjC.import('AVFoundation');
@@ -22,12 +23,21 @@ function run(argv) {
     if (recorder.isNil()) {
         throw new Error('could not record: ' + (error.isNil() ? 'no microphone' : ObjC.unwrap(error.localizedDescription)));
     }
+    recorder.meteringEnabled = true;                            // before it starts, or the meter reads nothing
     if (!recorder.prepareToRecord || !recorder.record) {
         throw new Error('could not record: no microphone, or no permission to use it');
     }
+    // console.log writes to stderr: the levels go to stdout, a line each.
+    const stdout = $.NSFileHandle.fileHandleWithStandardOutput;
+    const say = (line) => stdout.writeData($.NSString.alloc.initWithUTF8String(line + '\n').dataUsingEncoding($.NSUTF8StringEncoding));
     const stop = out + '.stop';
     const until = Date.now() + 600000;
-    while (!files.fileExistsAtPath(stop) && Date.now() < until) delay(0.05);
+    while (!files.fileExistsAtPath(stop) && Date.now() < until) {
+        delay(0.05);
+        recorder.updateMeters;
+        const db = recorder.averagePowerForChannel(0);          // dBFS: -160 (nothing) .. 0 (full scale)
+        say('L ' + Math.pow(10, Math.max(-160, Math.min(0, db)) / 20).toFixed(5));
+    }
     recorder.stop;
     return '';
 }

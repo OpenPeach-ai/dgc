@@ -4,7 +4,7 @@ import { mkdirSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
-import type { DictationResult } from "./voice";
+import type { Dictation, DictationOwner } from "./voice";
 
 /**
  * ChatDGC in the editor: a chat tab of its own (one conversation each) and the home's Chat list.
@@ -48,19 +48,16 @@ export interface ChatDGCHost {
   chatdgcOffers?(): Record<string, unknown>;
   /** ChatDGC's context window, for every chat: one of CHATDGC_WINDOWS its backend offers. */
   chatdgcSetWindow?(preset: string): void;
-  /** Dictation: recorded on the computer you're at (DGC Voice), written down by the model Settings -> Voice chose. */
+  /** Dictation for every message box (src/voice.ts): recorded on the computer you're at, written down by the model
+   *  Settings -> Voice chose. One box records at a time. */
   dictation?(): Dictation | undefined;
 }
 
-/** What a tab needs of the VoiceClient (src/voice.ts). */
-export interface Dictation {
-  start(): Promise<DictationResult>;
-  stop(language?: string): Promise<DictationResult>;
-  cancel(): Promise<void>;
-}
 
 interface Tab {
   panel: vscode.WebviewPanel;
+  /** This tab's box, as dictation knows it. */
+  mic: DictationOwner;
   conversation: string;
   temporary: boolean;
   summary?: any;
@@ -205,7 +202,7 @@ function canvasTabPath(tab: vscode.Tab): string | undefined {
 export function chatdgcDocument(asset: (name: string) => string, cspSource: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
-<link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}">
+<link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}"><link rel="stylesheet" href="${attr(asset("media/voicebar.css"))}">
 <title>ChatDGC</title></head><body class="cd-blank" data-katex="${attr(asset("dist/katex/katex.js"))}" data-katex-css="${attr(asset("dist/katex/katex.css"))}">
 <header class="cd-head"><button type="button" id="cd-crumb" class="cd-crumb" hidden></button><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
 <button type="button" id="cd-keys-open" class="cd-icon" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts"><span class="codicon codicon-keyboard" aria-hidden="true"></span></button>
@@ -233,16 +230,16 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div class="cd-tools-end"><button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-pie-chart" aria-hidden="true"></span><span id="cd-context-pct">0%</span></button>
 <div class="cd-picker"><button type="button" id="cd-model-pill" class="cd-model-pill" aria-haspopup="dialog" aria-expanded="false" hidden><span id="cd-model-name" class="cd-model-name">Model</span><svg class="cd-pill-arc" viewBox="0 0 16 10" aria-hidden="true"><path class="cd-arc-track" d="M2 9 A6 6 0 0 1 14 9"></path><path id="cd-pill-arc-fill" class="cd-arc-fill" d=""></path></svg><span class="codicon codicon-chevron-up cd-model-chevron" aria-hidden="true"></span></button>
 <div id="cd-model-menu" class="cd-model-menu" role="dialog" aria-label="Model and thinking" hidden></div></div>
-<button type="button" id="cd-mic" class="cd-icon cd-mic" title="Dictate" aria-label="Dictate" aria-pressed="false"><span class="codicon codicon-mic" aria-hidden="true"></span><span id="cd-mic-time" class="cd-mic-time" aria-hidden="true" hidden>0:00</span></button>
+<button type="button" id="cd-mic" class="cd-icon cd-mic" title="Dictate" aria-label="Dictate"><span class="codicon codicon-mic" aria-hidden="true"></span></button>
 <button type="submit" id="cd-send" class="cd-send" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
 <button type="button" id="cd-stop" class="cd-send cd-stop" title="Stop (Esc)" aria-label="Stop" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button></div>
-</div></form>
+</div><div id="cd-voice" class="cd-voice"></div></form>
 <p class="cd-fine">ChatDGC answers with your own model. Check what matters.</p>
 </div></footer>
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -273,8 +270,6 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private homeShown = HOME_FIRST;
   private homeHeld = false;
   private homeTimer?: ReturnType<typeof setTimeout>;
-  /** The tab recording now: one microphone, so one tab at a time. */
-  private dictating?: Tab;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -794,12 +789,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean, project = ""): void {
     panel.iconPath = this.chatdgcIcon();
-    const tab: Tab = { panel, conversation, temporary, held: [], opened: false, picked: new Set(), ...(project ? { project } : {}) };
+    const tab: Tab = { panel, conversation, temporary, held: [], opened: false, picked: new Set(), ...(project ? { project } : {}),
+                       mic: { post: (message) => this.post(tab, message) } };
     this.tabs.add(tab);
     panel.onDidDispose(() => {
       this.tabs.delete(tab);
       for (const [id, asker] of this.requests) { if (asker.tab === tab) this.requests.delete(id); }
-      if (this.dictating === tab) { this.dictating = undefined; void this.host?.dictation?.()?.cancel(); }
+      this.host?.dictation?.()?.release(tab.mic);
     });
     panel.webview.onDidReceiveMessage((message) => { void this.fromTab(tab, message); });
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
@@ -1148,7 +1144,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "ready": {
         // The webview (re)loaded: it shows what this tab holds, or a new chat. A recording it started is gone with
         // the page that showed it.
-        if (this.dictating === tab) { this.dictating = undefined; void this.host?.dictation?.()?.cancel(); }
+        this.host?.dictation?.()?.release(tab.mic);
         this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(conversation ? { conversation_id: conversation } : {}),
                                           ...(!conversation && tab.temporary ? { temporary: true } : {}),
                                           ...(!conversation && tab.project ? { project: tab.project } : {}) });
@@ -1523,39 +1519,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.ask({ tab, kind: "memory" }, { type: "memory_forget", id: message.id });
         }
         return;
-      case "micStart": {
-        const voice = this.host?.dictation?.();
-        if (!voice) { this.post(tab, { type: "mic", state: "idle", error: "Update the DGC CLI to use voice." }); return; }
-        if (this.dictating) {
-          this.post(tab, { type: "mic", state: "idle", error: this.dictating === tab ? "" : "Another chat is recording: stop it there first." });
-          return;
-        }
-        this.dictating = tab;
-        const started = await voice.start();
-        if (this.dictating !== tab) { if (started.ok) await voice.cancel(); return; }   // cancelled while it started
-        if (!started.ok) {
-          this.dictating = undefined;
-          // No model yet: Settings -> Voice is open on the choice; the page says why.
-          this.post(tab, { type: "mic", state: "idle", error: started.error, kind: started.code === "no_model" ? "info" : "error" });
-          return;
-        }
-        this.post(tab, { type: "mic", state: "recording" });
+      case "micStart":
+      case "micStop":
+      case "micCancel": {
+        const dictation = this.host?.dictation?.();
+        if (!dictation) { this.post(tab, { type: "mic", state: "idle", error: "Update the DGC CLI to use voice." }); return; }
+        await dictation.handle(tab.mic, message);
         return;
       }
-      case "micStop": {
-        const voice = this.host?.dictation?.();
-        if (this.dictating !== tab || !voice) return;
-        this.post(tab, { type: "mic", state: "writing" });
-        const said = await voice.stop();
-        this.dictating = undefined;
-        this.post(tab, said.ok ? { type: "mic", state: "idle", text: said.text || "" }
-                               : { type: "mic", state: "idle", error: said.error, kind: said.code === "no_model" ? "info" : "error" });
-        return;
-      }
-      case "micCancel":
-        if (this.dictating === tab) { this.dictating = undefined; await this.host?.dictation?.()?.cancel(); }
-        this.post(tab, { type: "mic", state: "idle" });
-        return;
       case "openMemory":
         this.host?.openSettings?.("memory");
         return;

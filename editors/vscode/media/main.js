@@ -6410,8 +6410,61 @@
     // the rest of the line in a <div>, which the serializer would have to unpick -- so insert the
     // break explicitly and keep the host a flat run of text and <br>.
     else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); insertComposerText("\n"); }
+    else if (e.key === "Escape" && (micState === "recording" || micState === "starting")) { e.preventDefault(); micCancel(); }
     else if (e.key === "Escape" && streaming) doStop();
   });
+
+  // ---- dictation: the microphone beside Send records on the computer you're at (DGC Voice). While it records, the
+  // box's footer is the voice bar (media/voicebar.js): Cancel, the live waveform and time, Stop (what you said goes
+  // in the box) and Send. The first press with no model opens Settings -> Voice. In the side bar, the Pips box on
+  // the same page dictates too: every mic message says which box ("chat" here).
+  const micButton = $("btn-mic"), voiceRow = $("cvoice"), cbox = $("cbox");
+  const voice = window.DgcVoiceBar ? window.DgcVoiceBar.create("chat") : null;
+  if (voice) voiceRow.innerHTML = voice.markup(); else micButton.hidden = true;
+  let micState = "idle";
+  function micShow(next, action = "") {
+    micState = ["starting", "recording", "writing"].includes(next) ? next : "idle";
+    voice?.state(micState, action);
+    cbox.classList.toggle("dictating", micState !== "idle");
+  }
+  function micCancel() {
+    micShow("idle");
+    vscode.postMessage({ type: "micCancel", from: "chat" });
+    input.focus();
+  }
+  micButton.addEventListener("click", () => {
+    if (micState !== "idle" || composerLocked) return;
+    micShow("starting");
+    vscode.postMessage({ type: "micStart", from: "chat" });
+  });
+  voiceRow.addEventListener("click", (e) => {
+    const action = e.target.closest?.("[data-voice-action]")?.dataset.voiceAction;
+    if (action === "cancel") micCancel();
+    else if ((action === "stop" || action === "send") && micState === "recording") {
+      micShow("writing", action);
+      vscode.postMessage({ type: "micStop", mode: action === "send" ? "send" : "insert", from: "chat" });
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && (micState === "recording" || micState === "starting") && e.target !== input && cbox.contains(e.target)) { e.preventDefault(); micCancel(); }
+  });
+  /** What the host says about this box's dictation. */
+  function onMic(msg) {
+    if (msg.type === "micLevels") { voice?.push(msg.levels); return; }
+    micShow(msg.state, msg.mode === "send" ? "send" : "stop");
+    if (msg.error) sysLine(String(msg.error), msg.kind !== "info");
+    if (typeof msg.text !== "string") return;
+    if (!msg.text) { sysLine("Nothing was heard. Try again, a little closer to the microphone."); return; }
+    // What was said, at the caret, spaced from its neighbours.
+    const [start, end] = composerSelection();
+    const whole = composerText();
+    const before = whole.slice(0, start), after = whole.slice(end);
+    insertComposerText((before && !/\s$/.test(before) ? " " : "") + msg.text + (after && !/^\s/.test(after) ? " " : ""));
+    onInput();
+    persistDraft();
+    if (msg.mode === "send") submit();
+  }
+
   // Files dragged from the explorer (or a tab) attach as @-mentions, like the popup does.
   for (const zone of [input, log]) {
     zone.addEventListener("dragover", (e) => {
@@ -7166,6 +7219,12 @@
 
   window.addEventListener("message", (e) => {
     const msg = e.data;
+    if (msg.type === "mic" || msg.type === "micLevels") {
+      // This page's own box, or the Pips box beside it (in the side bar's Pips view).
+      if (msg.from === "chat") onMic(msg);
+      else if (msg.from === "pips") for (const listener of pipsListeners) listener(msg);
+      return;
+    }
     if (msg.type === "pipsOpen") { showPips(); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
     if (msg.type === "chatdgc_list") { if (chatPlace === "home") renderChats(msg); return; }

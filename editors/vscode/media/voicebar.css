@@ -1,0 +1,39 @@
+/* The voice bar (media/voicebar.js): in place of a message box's bottom row while you dictate, the same in DGC's
+   chat, ChatDGC and Pips. Cancel and Stop are quiet round buttons; Send is the brand's purple, as each box's own Send. */
+.dgc-voicebar { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; box-sizing: border-box; }
+.dgc-voicebar .vb-btn, .dgc-voicebar .vb-send {
+  position: relative; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 9999px;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background .12s, color .12s, opacity .12s; }
+.dgc-voicebar .vb-btn { background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .18)); color: var(--vscode-foreground, #ccc); }
+.dgc-voicebar .vb-btn:hover:not(:disabled) { background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, .3)); }
+.dgc-voicebar .vb-send { background: #7654F6; color: #fff; }
+.dgc-voicebar .vb-send:hover:not(:disabled) { background: #6A4BF0; }
+.dgc-voicebar button:disabled { cursor: default; opacity: .45; }
+.dgc-voicebar button[data-busy] { opacity: 1; }
+.dgc-voicebar button:focus-visible { outline: 1px solid var(--vscode-focusBorder, #7C5CFF); outline-offset: 2px; }
+.dgc-voicebar .vb-center { position: relative; flex: 1 1 auto; min-width: 0; height: 28px; display: flex; align-items: center; gap: 8px; }
+.dgc-voicebar .vb-wave { flex: 1 1 auto; min-width: 0; width: 100%; height: 28px; display: block; color: var(--vscode-foreground, #ccc); }
+.dgc-voicebar .vb-time { flex: none; font-size: 12px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--vscode-descriptionForeground, #9a9a9a); }
+.dgc-voicebar .vb-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 4px;
+  font-size: 12px; line-height: 1.2; text-align: center; color: var(--vscode-descriptionForeground, #9a9a9a); pointer-events: none; }
+.dgc-voicebar .vb-status:empty { display: none; }
+/* Starting and writing it down: words in place of the waveform. Not hearing anything: the words over a dimmed line. */
+.dgc-voicebar[data-state="writing"] .vb-wave, .dgc-voicebar[data-state="writing"] .vb-time,
+.dgc-voicebar[data-state="starting"] .vb-time { visibility: hidden; }
+.dgc-voicebar[data-state="starting"] .vb-wave { opacity: .5; }
+.dgc-voicebar[data-quiet] .vb-wave { opacity: .25; }
+.dgc-voicebar[data-quiet] .vb-status { color: var(--vscode-editorWarning-foreground, #cca700); }
+/* The button that was pressed spins while it's written down. */
+.dgc-voicebar .vb-spin { display: none; position: absolute; inset: 5px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent; animation: vb-spin .8s linear infinite; }
+.dgc-voicebar button[data-busy] > svg { visibility: hidden; }
+.dgc-voicebar button[data-busy] > .vb-spin { display: block; }
+@keyframes vb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dgc-voicebar .vb-spin { animation-duration: 2.4s; } }
+/* A narrow box: the time goes, the waveform keeps what room there is. */
+@container (max-width: 260px) { .dgc-voicebar .vb-time { display: none; } .dgc-voicebar { gap: 4px; } }
+@media (forced-colors: active) {
+  .dgc-voicebar .vb-btn, .dgc-voicebar .vb-send { forced-color-adjust: none; background: ButtonFace; color: ButtonText; border: 1px solid ButtonText; }
+  .dgc-voicebar .vb-wave { color: CanvasText; }
+}

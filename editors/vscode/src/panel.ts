@@ -10,7 +10,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
-import { VOICE_EXTENSION, VoiceClient } from "./voice";
+import { Dictation, MIC_MESSAGES, VOICE_EXTENSION, VoiceClient, type DictationOwner } from "./voice";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
@@ -576,8 +576,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private home = false;
   /** ChatDGC (chatdgc.ts): only the side bar's provider has it. */
   private chatdgc?: ChatDGC;
-  /** Dictation for ChatDGC (made the first time a chat asks for it). */
-  private voice?: VoiceClient;
+  /** Dictation for every message box in the window: the side bar's, made the first time a box asks for it. */
+  private dictation?: Dictation;
+  /** This chat's box, and (in the side bar) the Pips box beside it, as dictation knows them: one page, so each says
+   *  which box a mic message is for. */
+  private readonly micChat: DictationOwner = { post: (message) => this.post({ ...message, from: "chat" }) };
+  private readonly micPips: DictationOwner = { post: (message) => this.post({ ...message, from: "pips" }) };
   /** The side bar's tabs: their review documents and file events go through it. */
   private readonly tabProviders = new Set<DgcViewProvider>();
   /** The tab's title has been set from its session or its first prompt. */
@@ -657,22 +661,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const offered = (this.lastReadyEvent?.capabilities as any)?.chatdgc;
         return offered && typeof offered === "object" ? offered : {};
       },
-      dictation: () => {
-        if (this.lastReadyEvent && !(this.lastReadyEvent.capabilities as any)?.voice) return undefined;
-        return this.voice ??= new VoiceClient({
-          send: (cmd) => this.voiceSend(cmd),
-          openSettings: (section) => this.openSettings(section),
-          offerInstall: (message) => {
-            void vscode.window.showInformationMessage(message, "Install DGC Voice").then((install) => {
-              if (!install) return;
-              void Promise.resolve(vscode.commands.executeCommand("workbench.extensions.installExtension", VOICE_EXTENSION)).catch(() =>
-                vscode.commands.executeCommand("workbench.extensions.search", `@id:${VOICE_EXTENSION}`));
-            });
-          },
-        });
-      },
+      dictation: () => this.dictationService(),
     };
     chat.attach(host);
+  }
+
+  /** Dictation for the window: a session tab uses the side bar's, whose process carries voice. */
+  dictationService(): Dictation {
+    if (this.tab) return this.tab.host.dictationService();
+    return this.dictation ??= new Dictation(new VoiceClient({
+      send: (cmd) => this.voiceSend(cmd),
+      openSettings: (section) => this.openSettings(section),
+      offerInstall: (message) => {
+        void vscode.window.showInformationMessage(message, "Install DGC Voice").then((install) => {
+          if (!install) return;
+          void Promise.resolve(vscode.commands.executeCommand("workbench.extensions.installExtension", VOICE_EXTENSION)).catch(() =>
+            vscode.commands.executeCommand("workbench.extensions.search", `@id:${VOICE_EXTENSION}`));
+        });
+      },
+    }));
   }
 
   /** Voice's commands, on the side bar's process as Settings -> Voice uses (dgc/voice). */
@@ -1230,7 +1237,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // ChatDGC's, never a session's: no transcript, chip or card of this chat is about a ChatDGC chat.
     if (isChatdgcEvent(ev as any)) { this.chatdgc?.onEvent(ev); return; }
     // A dictation's answer, whichever chat's process carried it: no session's.
-    if (String(ev.type).startsWith("voice_") && this.voice?.onEvent(ev)) return;
+    if (String(ev.type).startsWith("voice_") && this.dictation?.client.onEvent(ev)) return;
     if (slot.id === this.activeSlotId) { this.onEvent(ev); return; }
     this.backgroundEvent(slot, ev);
   }
@@ -3802,6 +3809,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (!be.send({...msg} as any)) { this.promptPipRequests.delete(id);fail("DGC could not search this chat’s Pips."); }
         return;
       }
+      case "micStart":
+      case "micStop":
+      case "micCancel": {
+        // The chat's box, or the Pips box beside it in the side bar: the page says which.
+        const owner = msg.from === "pips" && !this.tab ? this.micPips : this.micChat;
+        await this.dictationService().handle(owner, msg);
+        return;
+      }
       case "pipsReady":
       case "pipsReconnect":
       case "pipsRequest":
@@ -3811,6 +3826,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       case "webviewReady": {
         this.webviewReady = true;
+        // A reloaded page: a recording its boxes started went with the page that showed it.
+        this.dictationService().release(this.micChat);
+        if (!this.tab) this.dictationService().release(this.micPips);
         this.repaintFromBackend();
         const actions = this.pendingWebviewActions.splice(0);
         for (const action of actions) { action(); }
@@ -5738,6 +5756,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (this.sessionReady) this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
       }, true);
       this.pipsEditor.attach(message => this.post(message));
+      this.pipsEditor.useDictation(() => this.dictationService());
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;
@@ -6758,7 +6777,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     if (this.pipsAttentionTimer) { clearInterval(this.pipsAttentionTimer); this.pipsAttentionTimer = undefined; }
-    this.voice?.dispose();
+    // A tab's box lets go of a recording it started; the side bar's dictation goes with the window.
+    if (this.tab) this.tab.host.dictationService().release(this.micChat);
+    else this.dictation?.dispose();
     // Note first, dispose the channel after: a panel teardown is one of the three things that can
     // end a turn, and it is the one the user never sees.
     this.backendNote("[extension: panel disposed — stopping the backend]");
@@ -6809,6 +6830,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const mermaid = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "mermaid.js"));
     const agentMarks = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "agents"));
     const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "codicon.css"));
+    // The voice bar: what the box shows while you dictate, the same here, in ChatDGC and in Pips.
+    const voicebarCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "voicebar.css"));
+    const voicebarJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "voicebar.js"));
     // `https:` in img-src is what lets a favicon load beside a link the user typed, and it is
     // the same allowance Codex ships. It is NOT what keeps model output from phoning home: the
     // markdown renderer never emits an <img> for model content -- it turns every image into a
@@ -6829,6 +6853,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <title>DGC</title>
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
+<link rel="stylesheet" href="${voicebarCss}">
 <link rel="stylesheet" href="${pipSetupStyle}">
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}">
 <header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to DGC chat" aria-label="Back to DGC chat" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Chat</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span><span class="pips-nav-core" aria-hidden="true"></span></button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
@@ -6992,15 +7017,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden>Queue</button>
       <button type="button" id="stop-run" class="fbtn" title="Stop generation" aria-label="Stop generation" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
+      <button type="button" id="btn-mic" class="fbtn mic-control" title="Dictate" aria-label="Dictate"><span class="codicon codicon-mic" aria-hidden="true"></span></button>
       <button type="button" id="send" class="csend" data-mode="default" title="Send" aria-label="Send message"><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
       </div>
     </div>
+    <div id="cvoice" class="cvoice"></div>
   </div>
   <div id="followup-hint" hidden></div>
 </footer>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>
 <script nonce="${nonce}" src="${pipsScript}"></script>
+<script nonce="${nonce}" src="${voicebarJs}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;
   }

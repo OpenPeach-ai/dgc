@@ -2,7 +2,7 @@
   "name": "dgc-voice",
   "displayName": "DGC Voice",
   "description": "Records your voice for DGC on the computer you're at, so DGC can take dictation even when it runs on another machine.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "vibedgc",
   "license": "Apache-2.0",
   "repository": {
@@ -25,7 +25,8 @@
     "onCommand:dgcVoice.start",
     "onCommand:dgcVoice.stop",
     "onCommand:dgcVoice.cancel",
-    "onCommand:dgcVoice.status"
+    "onCommand:dgcVoice.status",
+    "onCommand:dgcVoice.level"
   ],
   "contributes": {
     "commands": [
@@ -48,6 +49,11 @@
         "command": "dgcVoice.status",
         "title": "Can DGC record here?",
         "category": "DGC Voice"
+      },
+      {
+        "command": "dgcVoice.level",
+        "title": "How loud the microphone is",
+        "category": "DGC Voice"
       }
     ],
     "menus": {
@@ -66,6 +72,10 @@
         },
         {
           "command": "dgcVoice.status",
+          "when": "false"
+        },
+        {
+          "command": "dgcVoice.level",
           "when": "false"
         }
       ]
