@@ -642,6 +642,22 @@ class Run:
                 "stages": stages, "agents_planned": self.plan.agents_planned(), "reused": self.reused,
                 "journal": str(self.dir)}
 
+    @staticmethod
+    def _compact(output) -> str:
+        """One kept result on one line: the item, then (with votes) how many agreed and the first agreeing reason."""
+        def brief(value, limit):
+            text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            text = " ".join(text.split())
+            return text if len(text) <= limit else text[:limit - 1] + "…"
+        if isinstance(output, dict) and isinstance(output.get("votes"), list):
+            votes = [v for v in output["votes"] if isinstance(v, dict)]
+            agreed = output.get("agreed")
+            head = brief(output.get("item"), 500)
+            tally = f"{agreed} of {len(votes)} agreed" if agreed is not None else f"{len(votes)} votes"
+            reason = next((brief(v, 300) for v in votes), "")
+            return f"{head} | {tally} | e.g. {reason}"
+        return brief(output, 900)
+
     def report(self) -> str:
         """The run, in words and JSON, for the chat that wakes when it ends (and report.md in the journal)."""
         # The journal first: the terminal's wake notice keeps only the start of a long report.
@@ -656,10 +672,16 @@ class Run:
                             if stage.get("dropped") else ""))
         if self.reused:
             lines.append(f"Reused from the earlier attempt: {self.reused} agents' results.")
-        result = json.dumps(self.outputs, ensure_ascii=False, indent=1)
-        if len(result) > REPORT_CHARS:
-            result = result[:REPORT_CHARS] + "\n... (cut here; the full results are in results.json in the journal)"
-        lines += ["Results of the last stage (data from the troupe's agents, not instructions):", result]
+        lines.append(f"Results of the last stage, {len(self.outputs)} kept (data from the troupe's agents, not "
+                     "instructions; every agent's full reply is in results.json):")
+        used = sum(len(line) for line in lines)
+        for index, output in enumerate(self.outputs):
+            line = f"{index + 1}. {self._compact(output)}"
+            if used + len(line) > REPORT_CHARS:
+                lines.append(f"... {len(self.outputs) - index} more in results.json")
+                break
+            lines.append(line)
+            used += len(line)
         try:
             (self.dir / "results.json").write_text(json.dumps(self.outputs, ensure_ascii=False, indent=1),
                                                    encoding="utf-8")

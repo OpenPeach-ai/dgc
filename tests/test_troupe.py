@@ -302,6 +302,26 @@ class RunTests(unittest.TestCase):
         self.assertEqual(run.stages[1]["dropped"], 15)
         self.assertIn("15 not started (a troupe starts at most 7 agents)", report)
 
+    def test_the_report_keeps_every_finding_on_one_line_however_long_the_votes(self):
+        plan = troupe.plan_from_args({"title": "t", "items": [f"f{n}.py" for n in range(8)], "template": "review",
+                                      "goal": "bugs"})
+        long_why = "because " + "the code clearly shows it " * 60
+
+        def answer(stage, prompt):
+            if stage.name == "Review":
+                return answer_json({"findings": [{"title": "Problem in " + prompt.split("bugs:")[1].split()[0],
+                                                  "where": "x:1", "why": "w"}]})
+            return answer_json({"real": True, "why": long_why})
+        run = troupe.Run(plan, FakeRunner(answer), self.root)
+        run.run_here()
+        report = run.report()
+        self.assertLess(len(report), troupe.REPORT_CHARS + 2000)
+        lines = [line for line in report.splitlines() if line[:2].rstrip(".").isdigit()]
+        self.assertEqual(len(lines), 8, "all eight kept findings, one line each")
+        self.assertTrue(all("3 of 3 agreed" in line and len(line) < 1000 for line in lines))
+        self.assertIn("8 kept", report)
+        self.assertEqual(len(json.loads((run.dir / "results.json").read_text())[0]["votes"]), 3, "the full votes stay")
+
     def test_started_in_the_background_it_ends_and_says_who_to_tell(self):
         plan = troupe.plan_from_args({"title": "t", "items": ["a"], "stages": [{"name": "A", "prompt": "{item}"}]})
         ended = threading.Event()
