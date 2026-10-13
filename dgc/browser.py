@@ -71,7 +71,23 @@ _WINDOWS_CANDIDATES = (
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
 )
+
+
+def _windows_candidates(env=None) -> list[str]:
+    """Chrome and Edge where Windows installs them: for everyone (Program Files, on whichever drive Windows says),
+    or for this user alone (Chrome's installer without an admin password puts it under LOCALAPPDATA). Microsoft Edge
+    comes with every Windows 10 and 11, so a native DGC there always has a browser."""
+    env = os.environ if env is None else env
+    found: list[str] = []
+    for root in (env.get("PROGRAMFILES"), env.get("PROGRAMFILES(X86)"), env.get("LOCALAPPDATA")):
+        if root:
+            found.append(str(Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe"))
+    for root in (env.get("PROGRAMFILES(X86)"), env.get("PROGRAMFILES")):
+        if root:
+            found.append(str(Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe"))
+    return found + [path for path in _WINDOWS_CANDIDATES if path not in found]
 
 _LINUX_CANDIDATES = ("/opt/google/chrome/chrome",)
 
@@ -137,7 +153,7 @@ def discover_browser(configured: str = "") -> Path:
         for literal in _LINUX_CANDIDATES:
             if _real_binary(literal):
                 return Path(literal)
-    for literal in _MAC_CANDIDATES + _WINDOWS_CANDIDATES:
+    for literal in (*_MAC_CANDIDATES, *(_windows_candidates() if sys.platform == "win32" else ())):
         path = Path(literal).expanduser()
         if path.exists():
             return path
@@ -203,12 +219,14 @@ class _WebSocket:
     wrong: every client frame is masked, and a large CDP payload arrives fragmented.
     """
 
-    def __init__(self, url: str, timeout: float = CONNECT_TIMEOUT):
+    def __init__(self, url: str, timeout: float = CONNECT_TIMEOUT, sock: socket.socket | None = None):
+        """SOCK, when given, is already connected to the endpoint (a relay, as from WSL to Windows); the URL still
+        names the host and path the handshake asks for."""
         if not url.startswith("ws://"):
             raise BrowserError(f"unsupported devtools endpoint {url!r}")
         authority, _, path = url[len("ws://"):].partition("/")
         host, _, port = authority.partition(":")
-        self._sock = socket.create_connection((host, int(port or 80)), timeout=timeout)
+        self._sock = sock if sock is not None else socket.create_connection((host, int(port or 80)), timeout=timeout)
         self._sock.settimeout(timeout)
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         request = (

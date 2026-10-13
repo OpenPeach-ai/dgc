@@ -156,7 +156,8 @@ Without it, runs and Pip replies wait in the queue and schedules don't fire.
 is the one switch most people want. The runner then starts when you log in and after a
 restart, and is restarted if it fails, so a morning schedule still runs after a reboot.
 On Linux it also keeps running while you are logged out, where the system allows it
-(systemd "lingering"); `dgc pips keep-running` says whether yours does. Turning it off
+(systemd "lingering"); `dgc pips keep-running` says whether yours does. In WSL, Windows
+starts it when you sign in (see **Windows** below). Turning it off
 stops the runner starting on its own; the runner running now keeps going until you stop
 it. It never turns Pips on and never clears an emergency stop.
 
@@ -185,17 +186,33 @@ The runner does one run at a time.
 
 **Platforms.**
 
-| | Linux | macOS | Windows |
+| | Linux | macOS | Windows (DGC inside WSL 2) |
 | --- | --- | --- | --- |
-| Pips view, Pip chats, audits, Quill drafts, Personal tasks | Yes | Yes | Not yet |
-| Patch fixes and Pulse commands | With bubblewrap (`/usr/bin/bwrap`, `python3`, `git`) | Under Seatbelt, with Xcode or the Command Line Tools; weaker, see below | Not yet |
-| Keep Pips running | systemd user service; also while logged out, where the system allows lingering | LaunchAgent, while you are logged in | Not yet |
-| Desktop notifications | `notify-send`, when a notification service is running | Notification Center | Not yet |
+| Pips view, Pip chats, audits, Quill drafts, Personal tasks | Yes | Yes | Yes |
+| Patch fixes and Pulse commands | With bubblewrap (`/usr/bin/bwrap`, `python3`, `git`) | Under Seatbelt, with Xcode or the Command Line Tools; weaker, see below | As on Linux (`sudo apt install bubblewrap`) |
+| Keep Pips running | systemd user service; also while logged out, where the system allows lingering | LaunchAgent, while you are logged in | Windows starts the runner when you sign in (`wslg.exe`, from your own Run list), which keeps WSL running |
+| Desktop notifications | `notify-send`, when a notification service is running | Notification Center | Windows notifications |
 
-`dgc pips execution` shows whether this runner passed its confinement check. On Windows
-the Pips view says Pips are not available, the main chat has no Pips tools and
-`dgc pips` explains the same, so nothing can be created that would never run. A DGC
-installed inside WSL is a Linux install.
+`dgc pips execution` shows whether this runner passed its confinement check.
+
+**Windows means DGC inside WSL 2.** DGC installs into WSL (the installer is a shell script),
+and VS Code or Cursor connects to it there, so Pips are the Linux ones. Three things differ,
+and DGC handles each:
+
+- **WSL stops a distro when nothing on Windows holds it open**, soon after you close the
+  editor, systemd services included. So *Keep Pips running* doesn't use systemd there: Windows
+  starts the runner when you sign in, through WSL's own launcher that opens no window, and while
+  it runs WSL keeps the distro running. Without it, Pips run while the editor is open.
+- **WSL 1 has no Linux kernel of its own**, so Pips can't box commands or have a computer there.
+  Switch the distro to WSL 2 in Windows: `wsl --set-version <distro> 2`.
+- **Notifications** are Windows' own, shown through Windows PowerShell.
+
+This needs WSL interop (on unless `/etc/wsl.conf` turns it off). Not yet tested on a Windows
+machine.
+
+On Windows outside WSL (a native DGC, experimental) the Pips view says Pips are not available,
+the main chat has no Pips tools and `dgc pips` explains the same, so nothing can be created that
+would never run.
 
 **macOS is weaker than Linux, and says so.** On macOS commands run under Seatbelt
 rather than in a private namespace. The project copy is still read-only, the network
@@ -778,7 +795,10 @@ browser and the Terminal reach public websites only through DGC's egress proxy o
 nothing on your Mac or your network. Chrome runs with its own sandbox there. The VM gets 4 GB of
 memory and 4 CPUs, its Files are a folder on your Mac, and it is deleted when the computer closes.
 
-If something is missing, the **Job** tab says what. Windows is planned.
+On Windows, a Pip's computer is the Linux one, in DGC inside WSL 2: it needs bubblewrap there
+(`sudo apt install bubblewrap`), and DGC sets the desktop and Chrome up as on Linux.
+
+If something is missing, the **Job** tab says what.
 
 ### Drafts and reviewed sends
 

@@ -2337,6 +2337,11 @@
             "chatdgc_followups": {
               "type": "boolean"
             },
+            "turn_token_budget": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
             "sandbox": {
               "type": "boolean"
             },

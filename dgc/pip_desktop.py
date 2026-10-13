@@ -1,7 +1,8 @@
 """Desktop notifications from the runner: a new alert, or something waiting for your review.
 
-The operating system shows them (notify-send on Linux, Notification Center on macOS), so they
-reach you with the editor closed. Each alert and each review is announced once: what was already
+The operating system shows them (notify-send on Linux, Notification Center on macOS, and Windows' own
+notifications for DGC inside WSL, where Linux has no notification service), so they reach you with the
+editor closed. Each alert and each review is announced once: what was already
 announced is remembered in the registry, so a restarted runner does not repeat itself. At most one
 notification a minute. On by default; `dgc pips desktop-notifications off`, or the switch in the
 Pips view, turns it off at once (the runner reads the setting from the registry on every check).
@@ -58,6 +59,9 @@ def status(registry) -> dict:
 
 def available() -> bool:
     if sys.platform.startswith("linux"):
+        from . import wsl
+        if wsl.version() and wsl.windows_program("powershell.exe") is not None:
+            return True
         return _which("notify-send") is not None
     return sys.platform == "darwin"
 
@@ -71,6 +75,9 @@ def deliver(title: str, body: str) -> bool:
     title, body = _plain(title, 120), _plain(body, 400)
     env = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home()), "LANG": "C.UTF-8"}
     if sys.platform.startswith("linux"):
+        from . import wsl
+        if wsl.version() and wsl.windows_program("powershell.exe") is not None and wsl.notify(title, body):
+            return True                       # inside WSL: Windows shows it
         tool = _which("notify-send")
         if tool is None:
             return False

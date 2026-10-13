@@ -204,7 +204,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
     "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window", "memory", "chatdgc_web",
     "chatdgc_followups", "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
-    "monitor_max_consecutive_wakes",
+    "monitor_max_consecutive_wakes", "turn_token_budget",
     "thinking_inline", "thinking_inline_max_chars",
     # Same dial as the composer: the in-flight generation keeps its budget; the next model
     # round in this turn (or the next prompt) uses the new level.
@@ -292,9 +292,10 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 # search_url and search_api_key_set: the one web search Work, ChatDGC and Pips share, for Settings.
 # chatdgc_*: ChatDGC's custom instructions and personality, for Settings.
 # memory: whether DGC keeps one memory about you (dgc/shared_memory.py), for Settings -> Memory.
+# turn_token_budget: the cap on what one turn spends, sub-agents included, for Settings -> General.
 _CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size", "search_url", "search_api_key_set",
                                    "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window",
-                                   "memory", "chatdgc_web", "chatdgc_followups"})
+                                   "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -348,6 +349,7 @@ _CONFIG_INTEGER_RANGES = {
     "max_turns": (0, 10_000),
     "turn_budget_s": (0, 86_400),
     "max_tokens": (0, 1_000_000),
+    "turn_token_budget": (0, 1_000_000_000),            # 0: no cap
 }
 
 
@@ -3678,6 +3680,11 @@ class Backend:
                 extra["subagent_context_size"] = max(0, int(c.get("subagent_context_size", 0) or 0))
             except (TypeError, ValueError):
                 extra["subagent_context_size"] = 0
+        if "turn_token_budget" in self._config_fields:
+            try:
+                extra["turn_token_budget"] = max(0, int(c.get("turn_token_budget", 0) or 0))
+            except (TypeError, ValueError):
+                extra["turn_token_budget"] = 0
         from . import subscriptions as _subs
         self.em.emit("config", model=c.model, mode=self.agent.mode,
                      subscription_engine=str(c.get("subscription_engine", "")),

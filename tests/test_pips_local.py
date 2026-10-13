@@ -244,9 +244,9 @@ class LocalPipsTests(unittest.TestCase):
         pip = self.create()
         with patch.object(pips.os, "name", "nt"), \
              patch.object(pips.subprocess, "Popen", side_effect=AssertionError("must not launch")):
-            with self.assertRaisesRegex(RegistryError, "not on Windows yet"):
+            with self.assertRaisesRegex(RegistryError, "On Windows, Pips run in DGC inside WSL"):
                 self.store.enqueue(pip["id"], "unsupported", "device_1", self.cfg)
-            with self.assertRaisesRegex(RegistryError, "not on Windows yet"):
+            with self.assertRaisesRegex(RegistryError, "On Windows, Pips run in DGC inside WSL"):
                 pips._execute_run(self.registry, {}, self.cfg)
         self.assertEqual(self.store.runs(pip["id"]), [])
 

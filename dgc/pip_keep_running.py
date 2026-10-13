@@ -3,6 +3,10 @@
 Linux: the user-systemd unit from pip_service, installed, registered for login and started. It is
 restarted if it fails, and keeps running while you are logged out when the system allows lingering.
 macOS: a LaunchAgent that starts the runner when you log in and restarts it if it fails.
+WSL: WSL stops a distro soon after the last Windows program attached to it exits (the editor closing), systemd
+services included, so a user unit would not keep anything running. Instead Windows starts the runner itself when the
+user signs in, through wslg.exe (WSL's launcher that opens no window) from the user's own Run list in the registry,
+and while it runs WSL keeps the distro running. It restarts the runner if it fails.
 Elsewhere the switch is unavailable, and says so.
 
 Turning it off stops the runner from starting on its own; the runner running now keeps going until
@@ -13,11 +17,12 @@ from __future__ import annotations
 import hashlib
 import os
 import plistlib
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
-from . import pip_service
+from . import pip_service, wsl
 from .workspace_registry import RegistryError
 
 LABEL_PREFIX = "com.vibedgc.pips."
@@ -186,10 +191,118 @@ def _mac_off(spec):
     return _mac_status(spec)
 
 
+# ---------------------------------------------------------------- WSL: Windows starts it, and that keeps WSL running
+
+RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+WSL_RESTART_SECONDS = 30            # as the systemd unit's RestartSec and the LaunchAgent's ThrottleInterval
+
+
+def _wsl_reason() -> str:
+    """Why the switch can't work in this WSL distro, or "" when it can."""
+    if wsl.version() == 1:
+        return ("Keeping Pips running needs WSL 2. This distro runs on WSL 1; switch it in Windows with "
+                f"`wsl --set-version {wsl.distro() or '<distro>'} 2`.")
+    if not wsl.distro():
+        return "DGC can't tell which WSL distro this is. Open the Pips view from the editor connected to WSL and try again."
+    if not wsl.interop():
+        return ("Keeping Pips running needs WSL interop, which this distro turned off ([interop] enabled=false in "
+                "/etc/wsl.conf). Here, start the runner from the Pips view when you need it.")
+    if wsl.windows_program("wslg.exe") is None or wsl.windows_program("reg.exe") is None:
+        return "Keeping Pips running needs a current WSL. Run `wsl --update` in Windows, then try again."
+    return ""
+
+
+def _wsl_spec(home, *, python_executable=None, package_root=None, **_systemd_options):
+    source = pip_service._path(package_root if package_root is not None else Path(__file__).resolve().parent.parent, "DGC package root")
+    python = pip_service._executable(python_executable if python_executable is not None else sys.executable)
+    distro = wsl.distro()
+    folder = Path(home) / ".dgc"
+    script, mark = folder / "pips-keep-running.sh", folder / "pips-keep-running.on"
+    env = [f"HOME={home}", f"DGC_HOME={home}", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "PYTHONNOUSERSITE=1",
+           "PYTHONDONTWRITEBYTECODE=1"]
+    command = " ".join(shlex.quote(part) for part in ["/usr/bin/env", "-i", *env])
+    # Kept from WSL's own start: which distro this is, and the way back to Windows (a notification needs it).
+    command += ' WSL_DISTRO_NAME="$WSL_DISTRO_NAME" WSL_INTEROP="$WSL_INTEROP" '
+    command += " ".join(shlex.quote(part) for part in [str(python), "-I", "-B", "-c", pip_service._BOOTSTRAP,
+                                                         str(source), "pips", "serve", "--service"])
+    content = ("#!/bin/sh\n"
+               "# DGC: Keep Pips running, in WSL. Windows starts this when you sign in (wslg.exe, from your Run list),\n"
+               "# and while it runs WSL keeps this distro running. It restarts the runner if it fails, and stops when\n"
+               "# the runner stops on its own (Pips off or stopped). Turning the switch off removes it.\n"
+               f"mark={shlex.quote(str(mark))}\n"
+               'while [ -f "$mark" ]; do\n'
+               f"  {command}\n"
+               "  [ $? -eq 0 ] && break\n"
+               f"  sleep {int(WSL_RESTART_SECONDS)}\n"
+               "done\n")
+    launcher = wsl.windows_path(wsl.windows_program("wslg.exe") or Path("/nonexistent"))
+    arguments = ["-d", distro, "--exec", "/bin/sh", str(script)]
+    key = hashlib.sha256(os.fsencode(home)).hexdigest()[:12]
+    return {"distro": distro, "script": script, "mark": mark, "content": content, "launcher": launcher,
+            "arguments": subprocess.list2cmdline(arguments),
+            "command": subprocess.list2cmdline([launcher, *arguments]) if launcher else "",
+            "name": f"DGC-Pips-{distro}-{key}"}
+
+
+def _wsl_registered(spec) -> bool:
+    try:
+        done = wsl.run_windows([str(wsl.windows_program("reg.exe")), "query", RUN_KEY, "/v", spec["name"]], timeout=10)
+    except OSError:
+        return False
+    return done.returncode == 0
+
+
+def _wsl_status(spec, reason=""):
+    if reason:
+        return {**_unsupported(reason), "platform": "wsl"}
+    on = spec["mark"].is_file() and spec["script"].is_file() and _wsl_registered(spec)
+    return {"platform": "wsl", "supported": True, "reason": "", "on": on, "starts_at_login": on,
+            "restarts_after_failure": on, "while_logged_out": False}
+
+
+def _powershell(script):
+    try:
+        done = wsl.powershell(script, timeout=30)
+    except OSError:
+        raise RegistryError("service_manager_unavailable", "Windows PowerShell can't be started from WSL here.") from None
+    if done.returncode:
+        raise RegistryError("service_manager_error", "Windows refused the change.")
+
+
+def _wsl_on(spec, runner_online):
+    if not spec["launcher"]:
+        raise RegistryError("service_unsupported", "Keeping Pips running needs a current WSL. Run `wsl --update` in Windows, then try again.")
+    folder = spec["script"].parent
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    staged = spec["script"].with_name("." + spec["script"].name + ".tmp")
+    staged.write_text(spec["content"], encoding="utf-8")
+    os.chmod(staged, 0o700)
+    os.replace(staged, spec["script"])
+    spec["mark"].write_text("Keep Pips running is on. Turning it off in the Pips view removes this.\n", encoding="utf-8")
+    path = "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'"
+    _powershell(f"Set-ItemProperty -Path {path} -Name ({wsl.ps_text(spec['name'])}) -Value ({wsl.ps_text(spec['command'])})")
+    if not runner_online:
+        # Started now as Windows will start it at sign-in. wslg.exe opens no window.
+        _powershell(f"Start-Process -FilePath ({wsl.ps_text(spec['launcher'])}) -ArgumentList ({wsl.ps_text(spec['arguments'])})")
+    return _wsl_status(spec)
+
+
+def _wsl_off(spec):
+    spec["mark"].unlink(missing_ok=True)          # the runner now keeps going until it stops, and isn't started again
+    if _wsl_registered(spec):
+        path = "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'"
+        _powershell(f"Remove-ItemProperty -Path {path} -Name ({wsl.ps_text(spec['name'])})")
+    spec["script"].unlink(missing_ok=True)
+    return _wsl_status(spec)
+
+
 # ---------------------------------------------------------------- the switch
 
 
 def status(dgc_home=None, **options) -> dict:
+    if sys.platform.startswith("linux") and wsl.version():
+        reason = _wsl_reason()
+        return _wsl_status(None if reason else _wsl_spec(_home(dgc_home), **options), reason)
     if sys.platform.startswith("linux"):
         return _linux_status(_home(dgc_home), options)
     if sys.platform == "darwin":
@@ -200,6 +313,12 @@ def status(dgc_home=None, **options) -> dict:
 def set_on(enabled, *, runner_online, dgc_home=None, **options) -> dict:
     if not isinstance(enabled, bool):
         raise RegistryError("invalid_request", "Choose on or off.")
+    if sys.platform.startswith("linux") and wsl.version():
+        reason = _wsl_reason()
+        if reason:
+            raise RegistryError("service_unsupported", reason)
+        spec = _wsl_spec(_home(dgc_home), **options)
+        return _wsl_on(spec, runner_online) if enabled else _wsl_off(spec)
     if sys.platform.startswith("linux"):
         home = _home(dgc_home)
         return _linux_on(home, options, runner_online) if enabled else _linux_off(home, options)

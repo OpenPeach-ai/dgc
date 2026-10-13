@@ -230,7 +230,14 @@
 - Typing in the plugin search boxes keeps every letter in order. Each key rebuilt the list and put
   the caret back at the start, so "Granola" typed key by key came out as "alonar".
 
+### Settings
+
+- **Token cap per turn** (Settings → General): what one turn may spend, sub-agents included; 0 means no cap. An older
+  CLI shows it but can't save it.
+
 ### Pips
+
+- **On Windows outside WSL, the Pips view says where Pips run:** "On Windows, Pips run in WSL", with how to get there.
 
 - **What fills a Pip's window.** A Personal Pip's context menu shows it part by part: its instructions, each
   tool, its job, what it remembers, its skills, apps and references, as its last reply sent them, then its

@@ -1848,6 +1848,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "turn_token_budget": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
     "sandbox": {
       "types": [
         "boolean"

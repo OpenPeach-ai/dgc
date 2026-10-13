@@ -43,7 +43,7 @@ const ui = {
     bool: (id, on) => switchHTML(on, id.replaceAll('_', ' '), `id="${id}" data-setting="${id}"`),
     card: (title, body) => `<div class="card"><h3>${title}</h3>${body}</div>`
 };
-const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true };
+const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0 };
 function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus = 'Unsaved changes'; if ($('save-status'))
     $('save-status').textContent = saveStatus; }
 function applyConfig(ev) {
@@ -61,6 +61,7 @@ function applyConfig(ev) {
     draft.search_api_key_set = ev.search_api_key_set === true;
     draft.search_settable = 'search_api_key_set' in ev;
     draft.chatdgc_settable = 'chatdgc_personality' in ev;
+    draft.budget_settable = 'turn_token_budget' in ev;
     if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section) && !saving)
         render();
 }

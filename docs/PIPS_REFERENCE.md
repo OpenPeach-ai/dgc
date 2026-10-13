@@ -829,9 +829,15 @@ already online, and asks `loginctl enable-linger` when lingering is off. On macO
 `~/Library/LaunchAgents/com.vibedgc.pips.<home hash>.plist` (`RunAtLoad`,
 `KeepAlive: {SuccessfulExit: false}`, `ThrottleInterval` 30), enables it and bootstraps it
 into the GUI domain; an unchanged loaded agent is never reloaded, so a running runner is
-not interrupted. Off disables (Linux) or disables and removes the agent (macOS) and never
-stops the runner. Both start `pips serve --service`, which exits 0 when Pips are off,
-emergency-stopped or already running, so neither manager restarts it in a loop. Writable
+not interrupted. In WSL (platform `wsl`), on writes `~/.dgc/pips-keep-running.sh` (0700: a
+loop running the runner, restarting it 30 s after a failure, ending when it exits 0 or when
+`~/.dgc/pips-keep-running.on` is gone), adds `DGC-Pips-<distro>-<home hash>` to the user's
+own `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` running it through `wslg.exe`
+(no window), and starts it unless a runner is online; `while_logged_out` is false; WSL 1, an
+unnamed distro, interop off or no `wslg.exe` make it unsupported, with the reason. Off
+disables (Linux), disables and removes the agent (macOS), or removes the Run value and the
+script (WSL), and never stops the runner. All start `pips serve --service`, which exits 0 when Pips are off,
+emergency-stopped or already running, so none of them restarts it in a loop. Writable
 parents of the unit directory are refused unless the group is the user's own with no other
 member (OpenSSH's rule, so Ubuntu's 775 `~/.config` is accepted).
 

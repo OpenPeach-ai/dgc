@@ -540,6 +540,12 @@ def capability():
             raise _error("The sandbox helper is installed but its confinement probe failed. Execution is unavailable.", "execution_unavailable")
         result.update(available=True, backend=backend)
     except (RegistryError, OSError, ValueError):
+        from . import wsl
+        if wsl.version() == 1:
+            result["reason"] = ("This distro runs on WSL 1, which has no Linux kernel of its own, so DGC can't box "
+                                "Patch and Pulse commands. Switch it to WSL 2 in Windows: "
+                                f"`wsl --set-version {wsl.distro() or '<distro>'} 2`.")
+            return result
         result["reason"] = (
             "Patch and Pulse on macOS require sandbox-exec Seatbelt confinement, the selected Xcode or "
             "Command Line Tools Python 3 and Git, and the runner's process sampler; this runner did not "

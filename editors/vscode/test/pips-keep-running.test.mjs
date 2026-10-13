@@ -102,7 +102,7 @@ test('a current CLI that cannot run Pips here says why, not "update"', async()=>
   w.DgcPips.mount({root:w.document,host:'editor',postMessage:()=>{},onMessage:fn=>{listener=fn;},onSetupPrompt:()=>true});
   listener({type:'pipsConnection',apiVersion:api,generation:1,connected:true,supported:false,enabled:true});return w.document;};
  const windowsHost=make(41);await flush();
- assert.match(windowsHost.body.textContent,/Pips run on Linux and macOS/);assert.doesNotMatch(windowsHost.body.textContent,/Update the DGC CLI/);
+ assert.match(windowsHost.body.textContent,/On Windows, Pips run in WSL/);assert.doesNotMatch(windowsHost.body.textContent,/Update the DGC CLI/);
  const old=make(8);await flush();assert.match(old.body.textContent,/Update DGC to use Pips/);
 });
 

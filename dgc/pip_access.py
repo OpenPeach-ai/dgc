@@ -19,8 +19,8 @@ def require_unrestricted(config):
 # Pips run on Linux and macOS. Elsewhere (Windows) nothing offers them: no Pips view, no chat tools,
 # and `dgc pips` says so, rather than letting a Pip be created that can never run.
 PLATFORM_SUPPORTED = __import__("os").name == "posix"
-UNSUPPORTED_PLATFORM = ("Pips run on Linux and macOS, not on Windows yet. A DGC installed inside WSL "
-                        "is a Linux install.")
+UNSUPPORTED_PLATFORM = ("On Windows, Pips run in DGC inside WSL: install DGC there and open your folder in the "
+                        "editor connected to WSL.")
 
 
 def tools_available(config):

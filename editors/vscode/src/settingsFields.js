@@ -24,12 +24,15 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Thinking", "Applies to the next model round.", sel("think", [["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], think))
                 + field("DGC Ultra", "Extra guidance and bounded sub-agents. Permissions stay as set.", bool("ultra_mode", c.ultra_mode === true))
                 + field("Parallel sub-agents", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"))
+                + field("Token cap per turn", c.budget_settable ? "Tokens one turn may spend, sub-agents included. When it is reached, no new sub-agent starts and the turn wraps up, keeping its work. 0 means no cap." : "Update the DGC CLI to set this here.", inp("turn_token_budget", c.turn_token_budget ?? 0, "number"))
                 + field("Context size", "Tokens before DGC compacts. The model's own maximum still applies.", inp("context_size", c.context_size ?? "", "number"))
                 + field("Show thinking", "Inline, collapsed, or hidden.", sel("show_reasoning", [["inline", "Inline"], ["collapsed", "Collapsed"], ["hidden", "Hidden"]], shown))
                 + field("Prompt suggestions", "", bool("suggest", c.suggest !== false))
                 + field("Wake on monitors", "Start a short turn when a background monitor prints.", bool("monitor_wake", c.monitor_wake !== false))
                 + field("Tool profile", "Standard offers every product tool on each turn.", sel("tool_profile", [["standard", "Standard"], ["adaptive", "Adaptive"], ["full", "Full catalog"]], c.tool_profile || "standard")))
             + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
+        const cap = main.querySelector("#turn_token_budget");
+        if (cap) { cap.min = "0"; cap.step = "1000"; if (!c.budget_settable) cap.disabled = true; }
     }
     function renderModels(main) {
         const c = config;

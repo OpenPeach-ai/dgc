@@ -349,6 +349,29 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     the reply's last request, or an estimate before any reply and after Compact now or an edited summary.
     `compactable` says whether Compact now has more than the last exchange to summarize.
 
+### Windows: DGC inside WSL
+
+A Windows user's DGC is a Linux install inside WSL (the installer is a shell script, and VS Code and Cursor connect to
+it there). DGC now notices it is in WSL and handles the four ways WSL differs. None of this has run on a Windows
+machine yet; each part is tested here with Windows faked at its edges, and the relay below with real PowerShell.
+
+- **Keep Pips running works in WSL.** WSL stops a distro soon after the last Windows program attached to it exits,
+  systemd services included, so the systemd unit kept nothing running once the editor closed. In WSL the switch now
+  adds the runner to your own Windows Run list (no admin rights), through `wslg.exe`, WSL's launcher that opens no
+  window: Windows starts it when you sign in, and while it runs WSL keeps the distro running. A failed runner
+  restarts after 30 seconds; Pips off or stopped ends it; turning the switch off removes it. It needs a current WSL
+  and interop, and says so when either is missing.
+- **Your signed-in Chrome from WSL is the one on Windows.** DGC finds its profile on the Windows drive and connects
+  straight to it when WSL shares Windows' network (mirrored networking). Otherwise Windows PowerShell connects on the
+  Windows side and passes the bytes along, as nothing else in WSL can reach Windows' loopback. Chrome asks you as
+  always. Measured with PowerShell 7.6 on Linux: the exact relay script carried a 3 MB round trip byte for byte and a
+  whole Chromium DevTools session.
+- **Pip notifications show as Windows notifications** (WSL has no notification service).
+- **WSL 1 says what it can't do:** it has no Linux kernel of its own, so Pips can't box commands or have a
+  computer there. The Pip's page and `dgc pips execution` say `wsl --set-version <distro> 2`.
+- **Native Windows (experimental):** Pips point you to WSL, and Work's browser finds Microsoft Edge (in every
+  Windows 10 and 11) or Chrome wherever Windows installed them, including Chrome installed for one user.
+
 ### Models
 
 - **Ollama cloud replies stream.** Ollama's cloud labels its line-by-line stream `application/json`, and
@@ -358,6 +381,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Sessions
 
+- **The token cap per turn is in Settings → General.** `turn_token_budget` (tokens one turn may spend, sub-agents
+  included; 0, the default, is no cap) could only be set in `config.json`. When it is reached, no new sub-agent
+  starts and the turn wraps up, keeping its work. The `config` event carries it only to an editor that asks for it
+  (`get_config` `fields`).
 - **A Work session brings its own Chrome, so it can check the pages it builds.** With no Chrome or Chromium on the
   computer, the browser tool used to stop at "No Chrome found", and a web page was shipped unchecked (in the
   overnight battle, one only worked from a server, not from the file it was opened as). Now DGC fetches one, once,

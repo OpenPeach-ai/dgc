@@ -204,7 +204,7 @@ function welcome() {
   if(remoteHost&&!S.enabled)return '<div class="empty"><h2>Enable Pips on the computer</h2><p class="muted">Remote cannot enable this feature, choose a local path, or start its supervisor.</p><code>dgc remote connect --pips</code></div>';
   if (!S.connected) return `<div class="empty">${avatar('offline')}<h2>Connect to local DGC</h2><p class="muted">Pips uses the DGC process in this editor. No web account is needed.</p>${button('reconnect','Reconnect')}</div>`;
   // An API new enough for Pips that still says unsupported is the platform, not the version.
-  if (!S.supported && S.apiVersion >= 41) return `<div class="empty"><h2>Pips run on Linux and macOS</h2><p class="muted">Pips are not available on Windows yet. A DGC installed inside WSL is a Linux install. Everything else in DGC works here.</p></div>`;
+  if (!S.supported && S.apiVersion >= 41) return `<div class="empty"><h2>On Windows, Pips run in WSL</h2><p class="muted">Install DGC inside WSL and open your folder in the editor connected to WSL: Pips work there as on Linux. Everything else in DGC works here.</p></div>`;
   if (!S.supported) return `<div class="empty"><h2>Update DGC to use Pips</h2><p class="muted">This DGC is too old for Pips. Update it, then reconnect.</p>${button('reconnect','Reconnect')}</div>`;
   if (!S.enabled) return `<div class="empty">${avatar()}<h2>Meet your Pips</h2><p>Little helpers that work for you on this computer: they look things up, keep an eye on what you care about, and draft what you need.</p><p class="muted">Nothing is sent or changed without your OK. They use your DGC model.</p>${button('enable','Turn on Pips',S.busy,'primary')}</div>`;
   if (S.loading) return '<p role="status">Loading the current workspace…</p>';

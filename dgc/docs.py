@@ -2541,7 +2541,9 @@ install locations.
 - **macOS**: Google's own Chrome installer. It is opened read-only, and its app is kept under
   `~/.dgc/browser` only when macOS confirms it is intact and signed by Google LLC as Google Chrome.
   It is re-checked once a week. A Chrome in `/Applications` or `~/Applications` comes first.
-- **Windows**: not yet. Install Chrome, or point `browser_path` at one.
+- **Windows**: DGC runs inside WSL, so this is the Linux row above. A native DGC on Windows
+  (experimental) uses Microsoft Edge, which every Windows 10 and 11 has, or Chrome; it downloads
+  nothing.
 
 A `browser_path` that is wrong is reported, never replaced by a download, and a download that failed
 is tried again after an hour, not on every call.
@@ -2583,6 +2585,11 @@ Turn it on once in Chrome 144 or later: open `chrome://inspect/#remote-debugging
 debugging. Chrome then asks you every time DGC connects, and shows its "controlled by automated test
 software" banner while it is. DGC finds it through the `DevToolsActivePort` file Chrome writes in its
 profile folder (Google Chrome, Chrome Beta, Edge, Brave and Chromium, on Linux, macOS and Windows).
+
+**DGC in WSL** uses the Chrome you run on Windows. It finds Chrome's profile on the Windows drive and
+connects straight to it when WSL shares Windows' network (mirrored networking); otherwise Windows
+PowerShell connects on the Windows side and passes the connection along. Chrome asks you the same way.
+If WSL interop is turned off in the distro and the network isn't mirrored, DGC says so and how to fix it.
 
 Opening a site asks you first, **in every mode, auto included**: "Use your signed-in Chrome on
 mail.google.com?". Allow once is that visit; Always allow saves `Browser(signed-in:https://mail.google.com)`,

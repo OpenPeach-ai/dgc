@@ -763,6 +763,20 @@ test("settings disconnect Kimi before lowering mode and persist secrets only aft
   assert.deepEqual(notices.errors, []);
 });
 
+test("the token cap goes only to a CLI that answered it, as a whole number of tokens", async () => {
+  const older = harness();
+  await older.provider.saveSettings(settings({ turn_token_budget: "2000000" }));
+  assert.equal(older.commands.some((c) => c.type === "set_config" && "turn_token_budget" in (c.values || {})), false,
+    "an older CLI refuses an unknown key, and the whole save with it");
+  for (const [typed, sent] of [["2000000", 2000000], ["", 0], ["0", 0], ["-5", 0], ["1500.7", 1500], ["9e12", 1000000000]]) {
+    const { provider, commands } = harness();
+    provider.onEvent({ type: "config", model: "m", mode: "default", turn_token_budget: 0 });
+    await provider.saveSettings(settings({ turn_token_budget: typed }));
+    const config = commands.find((c) => c.type === "set_config" && "turn_token_budget" in (c.values || {}));
+    assert.equal(config?.values.turn_token_budget, sent, typed);
+  }
+});
+
 test("settings cancellation happens before backend or SecretStorage mutation", async () => {
   const { provider, timeline } = harness({ mode: "default", engine: "codex" });
   notices.warningResponses.push(undefined);

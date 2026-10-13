@@ -127,7 +127,8 @@ class ConsentTests(unittest.TestCase):
 
     def said(self, error):
         session = browser_user.UserChromeSession(folders=[])
-        with patch.object(browser_user, "find", return_value=("Google Chrome", 9222, "/devtools/browser/x")), \
+        with patch.object(browser_user, "find_route",
+                          return_value=("Google Chrome", 9222, "/devtools/browser/x", browser_user.DIRECT)), \
                 patch.object(browser_user, "_WebSocket", side_effect=error):
             with self.assertRaises(browser.BrowserError) as raised:
                 session.start()

@@ -17,7 +17,7 @@ class PlatformTests(unittest.TestCase):
                 err = io.StringIO()
                 with contextlib.redirect_stderr(err):
                     self.assertEqual(pip_cli.handle_command(config, ["list"]), 2)
-                self.assertIn("Pips run on Linux and macOS, not on Windows yet", err.getvalue())
+                self.assertIn("On Windows, Pips run in DGC inside WSL", err.getvalue())
 
     def test_the_editor_is_told_whether_this_platform_runs_pips(self):
         from dgc import headless

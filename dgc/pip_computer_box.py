@@ -427,7 +427,12 @@ def capability(home: Path | None = None) -> dict:
             return {"available": False, "reason": f"DGC could not set up its computer: {setup['error']}"[:400]}
         return {"available": False, "reason": "Setting up its computer. This happens once."}
     if not sys.platform.startswith("linux"):
-        return {"available": False, "reason": "Pip computers run on Linux and macOS for now; Windows is coming."}
+        return {"available": False, "reason": "On Windows, Pips and their computers run in DGC inside WSL 2."}
+    from . import wsl
+    if wsl.version() == 1:
+        return {"available": False, "reason": "This distro runs on WSL 1, which has no Linux kernel of its own, so a "
+                "Pip can't have a computer. Switch it to WSL 2 in Windows: "
+                f"`wsl --set-version {wsl.distro() or '<distro>'} 2`."}
     if not shutil.which("bwrap"):
         return {"available": False, "reason": "Install bubblewrap (sudo apt install bubblewrap) to give Pips a computer."}
     works, said = box_runs()

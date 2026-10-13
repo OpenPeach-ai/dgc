@@ -13,7 +13,8 @@ a web page shipped it unchecked. Now DGC brings one, as a Pip's computer does:
   says it is intact and signed by Google LLC. Google's "Chrome for Testing" build is not used: on a Mac
   it carries no Google signature to check (measured 2026-10-13: "TeamIdentifier=not set").
 
-Windows: not yet; the browser says how to install one.
+Windows: DGC runs inside WSL, where it is a Linux install (above). A native DGC on Windows (experimental)
+uses Microsoft Edge, which every Windows 10 and 11 has, or Chrome; nothing is downloaded there.
 """
 from __future__ import annotations
 

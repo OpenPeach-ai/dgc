@@ -410,6 +410,25 @@ test('ChatDGC: follow-ups under a reply, on unless this switch turns them off, s
   assert.equal(y.d.querySelector('#chatdgc_followups').disabled, true, 'an older CLI: shown, not changeable');
 });
 
+test('General: a token cap per turn, 0 for none, saved with the page; an older CLI shows it but cannot change it', () => {
+  const x = setup();
+  x.message({ type: 'event', event: { ...x.config, turn_token_budget: 0 } });
+  const cap = x.d.querySelector('#turn_token_budget');
+  assert.ok(cap, 'on the General page');
+  assert.equal(cap.value, '0');
+  assert.equal(cap.disabled, false);
+  assert.match(x.d.body.textContent, /Tokens one turn may spend, sub-agents included\. When it is reached, no new sub-agent starts and the turn wraps up, keeping its work\. 0 means no cap\./);
+  x.input('#turn_token_budget', '2000000');
+  x.click('#save');
+  assert.equal(x.sent.at(-1).type, 'saveSettings');
+  assert.equal(String(x.sent.at(-1).values.turn_token_budget), '2000000');
+  const y = setup();
+  y.message({ type: 'event', event: { ...y.config } });
+  const old = y.d.querySelector('#turn_token_budget');
+  assert.equal(old.disabled, true, 'an older CLI: shown, not changeable');
+  assert.match(y.d.body.textContent, /Update the DGC CLI to set this here\./);
+});
+
 test('Settings -> Voice lists each model with its size and licence; Install shows its progress, then Use and Remove',()=>{
   const x=setup();
   const last=()=>JSON.parse(JSON.stringify(x.sent.at(-1)));   // the page's own object, from its window
