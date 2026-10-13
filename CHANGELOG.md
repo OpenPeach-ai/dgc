@@ -349,6 +349,32 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     the reply's last request, or an estimate before any reply and after Compact now or an edited summary.
     `compactable` says whether Compact now has more than the last exchange to summarize.
 
+### Troupes: many sub-agents on one work order
+
+- **A troupe, under Ultra.** For a job too big for one agent to do reliably (review forty files and check every
+  finding, research a list of questions, make the same change in many places, compare options), the model writes a
+  work order and DGC runs it exactly as written, in the background: every item gets its own agent, every finding its
+  checkers, nothing skipped. The chat stays free and wakes with the results. Four templates (review, research,
+  change, compare) or up to four stages of its own, each with a prompt per item, a JSON shape every agent ends with,
+  and optionally votes (several agents independently), keep (only what enough of them agree on), split (a list in
+  each result becomes the next stage's items) and over-all (one agent sees everything). A work order is data, not a
+  program: local models write it reliably and there is no script runtime to confine.
+- **Auto mode just runs it**; other modes ask first with the plan in words ("Start a troupe?"); plan mode never
+  starts one. `Troupe` is a rule name (`Troupe(review)` allows review troupes; `"deny": ["Troupe"]` turns them off).
+- **Its agents:** explorer, researcher, critic and verifier read only (web included) and run beside your files; a
+  worker writes in an isolated checkout of its own and its change is merged back as a sub-task's is. They never
+  ask; a step that would is refused. One at a time on a model served on this machine, up to 8 at a time on a remote
+  or cloud model. The turn's token cap counts them all; a troupe starts at most 400 agents.
+- **Seeing and stopping it:** a card in the chat with each stage's progress and Stop (events `troupe_started`,
+  `troupe_progress`, `troupe_finished`; commands `list_troupes`, `stop_troupe`; `ready.capabilities.troupe`). In the
+  terminal, a line per finished stage and `/troupes [stop ID|all]`. A one-shot `dgc -p` run waits for it inside the
+  call.
+- **A journal per run** in `~/.dgc/troupes/<id>/` (work order, every agent's result as it lands, the last stage's
+  results, the report), so a stopped troupe resumes with `resume: <id>` and redoes only what had not finished.
+- Live, with deepseek-v4.1-flash:cloud: "review every Python file in app/ for security problems and double-check each
+  finding" started a review troupe on its own (4 explorers, 9 verifiers, 76 s for the whole turn): it kept exactly
+  the three planted problems, each confirmed 3 of 3, and left the constant-time token check and the clean file alone.
+
 ### Windows: DGC inside WSL
 
 A Windows user's DGC is a Linux install inside WSL (the installer is a shell script, and VS Code and Cursor connect to

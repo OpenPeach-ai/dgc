@@ -2398,3 +2398,16 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 #cbox .cvoice { display: none; }
 #cbox.dictating #cfooter { display: none; }
 #cbox.dictating .cvoice { display: flex; align-items: center; min-height: var(--control); padding: 2px 8px 6px; }
+
+/* A troupe's card: its stages as rows, each with a progress bar. */
+.artifact.troupe .troupe-state { margin-left: auto; color: var(--muted); font-size: 0.92em; }
+.artifact.troupe .troupe-stages { list-style: none; margin: 6px 0 4px; padding: 0; display: grid; gap: 4px; }
+.artifact.troupe .troupe-stages li { display: grid; grid-template-columns: minmax(64px, auto) minmax(40px, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
+.artifact.troupe .troupe-stage-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact.troupe .troupe-bar { height: 4px; border-radius: 2px; background: var(--border, rgba(128,128,128,0.25)); overflow: hidden; }
+.artifact.troupe .troupe-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
+.artifact.troupe .troupe-count { color: var(--muted); font-size: 0.92em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.artifact.troupe .troupe-note { font-size: 0.92em; overflow-wrap: anywhere; }
+.artifact.troupe.finished .troupe-bar > span { background: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .artifact.troupe .troupe-bar > span { transition: none; } }
+@media (forced-colors: active) { .artifact.troupe .troupe-bar { border: 1px solid CanvasText; } .artifact.troupe .troupe-bar > span { background: Highlight; } }

@@ -557,6 +557,50 @@ TOOL_SCHEMAS = [
         ["description", "prompt"]),
 ]
 
+# A troupe (dgc/troupe.py): many sub-agents on one fixed work order, in the background. Offered by Agent._tool_schemas
+# under Ultra only, and NOT part of TOOL_SCHEMAS for SUPERVISION_TOOL_SCHEMAS' reason below: `ready.tools` carrying a
+# name an installed dgc-sdk does not know kills that SDK's session when it sets allow_tools.
+_SKETCH = ('the JSON every agent of the stage ends with, written as it looks: "string", "integer", "number", '
+           '"boolean", objects of those, and one-element lists, e.g. {"real": "boolean", "why": "string"}')
+TROUPE_TOOL_SCHEMA = _fn(
+    "troupe",
+    "Run a troupe: many sub-agents working through one fixed work order, in the background; this chat wakes with "
+    "the results. For a big job made of many similar pieces that one agent would skip or lose track of: review many "
+    "files and verify every finding, research many questions and check each answer, make the same change in many "
+    "places, or compare several options. Each item gets its own agent; DGC runs the order exactly as written. Use a "
+    "template (review, research, change, compare) with a goal, or write stages. Not for one or two pieces: do those "
+    "yourself or use task.",
+    {"title": {"type": "string", "description": "A few words the user sees on the troupe's card."},
+     "items": {"type": "array", "items": {"type": "string"},
+               "description": "What to work through, one agent each: files, questions, places, options (up to 200)."},
+     "template": {"type": "string", "enum": ["review", "research", "change", "compare"],
+                  "description": "review: one explorer per item reports problems, then 3 verifiers each try to "
+                                 "disprove every problem and only those most agree on are kept. research: a "
+                                 "researcher per question, a critic checks each answer. change: a worker per place "
+                                 "(each in its own checkout, merged back), a verifier checks each change. compare: "
+                                 "an explorer works out each option, 3 judges pick the best."},
+     "goal": {"type": "string", "description": "With a template: what to look for or do, e.g. \"security problems\"."},
+     "stages": {"type": "array", "description": "Instead of a template: up to 4 stages, run in order.",
+                "items": {"type": "object", "properties": {
+                    "name": {"type": "string"},
+                    "agent": {"type": "string", "description": "explorer, researcher, critic or verifier (read "
+                              "only), worker (writes, in its own checkout), or a named agent."},
+                    "prompt": {"type": "string", "description": "What each agent does; {item} is where its item "
+                               "goes ({items} with over: all)."},
+                    "returns": {"type": "object", "description": _SKETCH},
+                    "over": {"type": "string", "enum": ["each", "all"],
+                             "description": "each (default): one agent per item; all: one agent sees every item."},
+                    "votes": {"type": "integer", "description": "Independent agents per item, 1-5."},
+                    "keep": {"type": "object", "description": "Keep only results whose field equals a value: "
+                             "{\"field\": \"real\", \"equals\": true}; with votes, \"at_least\" of them must "
+                             "(default: most)."},
+                    "split": {"type": "string", "description": "A list field in returns: each element becomes an "
+                              "item of the next stage."}},
+                    "required": ["name", "prompt"]}},
+     "resume": {"type": "string", "description": "A stopped troupe's id: run it again, reusing every result it "
+                "already has."}},
+    ["title", "items"])
+
 # Supervising the background children `task` already starts. Deliberately NOT part of
 # TOOL_SCHEMAS: `dgc serve` publishes every TOOL_SCHEMAS name in the `ready` event's `tools`
 # array, and an ALREADY INSTALLED dgc-sdk whose RuntimePolicy sets `allow_tools` raises

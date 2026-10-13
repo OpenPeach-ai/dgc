@@ -450,6 +450,18 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # persistent, timeout_ms, started_at (epoch s), end_reason?, exit_code?}
     "monitors": {"items": _A(), "wake_paused": _B(), "pending_events": _I(),
                  "request_id": _S(False)},
+    # ---- troupes (dgc/troupe.py): many sub-agents on one work order, in the background --------
+    # Sent only to a client whose ready.capabilities has `troupe`. Each carries the run's snapshot:
+    # state running|done|stopped|failed, reason (why it stopped), stages [{name, total, done, failed,
+    # kept, dropped?}], agents_planned (an estimate), reused (results kept from an earlier attempt),
+    # journal (the folder holding its work order and results). `troupes` answers list_troupes.
+    "troupe_started": {"run_id": _S(), "title": _S(), "state": _S(), "reason": _S(), "stages": _A(),
+                       "agents_planned": _I(), "reused": _I(), "journal": _S()},
+    "troupe_progress": {"run_id": _S(), "title": _S(), "state": _S(), "reason": _S(), "stages": _A(),
+                        "agents_planned": _I(), "reused": _I(), "journal": _S()},
+    "troupe_finished": {"run_id": _S(), "title": _S(), "state": _S(), "reason": _S(), "stages": _A(),
+                        "agents_planned": _I(), "reused": _I(), "journal": _S()},
+    "troupes": {"runs": _A(), "request_id": _S(False)},
     # ---- v13 token usage (local ledger) -------------------------------------------------------
     # The answer to get_usage: what ~/.dgc/usage.sqlite holds for one range, aggregated on this
     # machine from what each provider reported. Nothing is fetched from a provider. Nested shapes:
@@ -740,6 +752,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # running monitor. Wake settings travel in set_config (monitor_wake and three bounded integers).
     "list_monitors": {"request_id": _S(False)},
     "stop_monitor": {"id": _S(), "request_id": _S(False)},
+    # Troupes: both answer with `troupes`; stop_troupe stops one run (its agents stop, its report says what it
+    # finished) and is allowed while a turn runs.
+    "list_troupes": {"request_id": _S(False)},
+    "stop_troupe": {"run_id": _S(), "request_id": _S(False)},
     # ---- v13 token usage (local ledger) -------------------------------------------------------
     # Read-only and allowed while a turn runs; answered by one usage_report with this request_id.
     "get_usage": {

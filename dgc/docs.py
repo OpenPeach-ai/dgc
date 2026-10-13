@@ -1272,6 +1272,69 @@ work. If DGC's backend stops, the agents that were still running are marked stop
   line of a failure message.
 """.strip()),
 
+    ("Troupes", "many sub-agents on one fixed work order, in the background, under Ultra", """
+# Troupes
+
+A troupe is for a job too big for one agent to do reliably: reviewing forty files and checking every
+finding, researching a list of questions, making the same change in many places, comparing several
+options. One agent working through that by itself loses track, skips parts or stops early. With a
+troupe, the model writes a work order and DGC runs it exactly as written: every item gets its own
+agent, every finding gets its checkers, and nothing is skipped.
+
+Troupes are offered under **Ultra** (the effort menu's Ultra, or `/ultra`). The model decides when a
+job calls for one.
+
+## What happens
+
+1. The model starts a troupe with a title, the items to work through, and either a template or its
+   own stages.
+2. In **auto mode** it just runs. In other modes you see a card first, "Start a troupe?", with the
+   plan in words, the items and what Allow does. Plan mode never starts one.
+3. It runs in the background and the chat stays free. A card in the chat shows each stage's
+   progress, with **Stop**. In the terminal, a line marks each stage as it finishes; `/troupes`
+   lists them and `/troupes stop ID|all` stops one.
+4. When it ends, the chat wakes and the model reports the results. In a one-shot `dgc -p` run, the
+   troupe runs to its end inside the call, and the model answers with its results.
+
+## Templates
+
+- **review**: one explorer per item reports problems; then three verifiers each try to prove every
+  problem wrong, and only the problems most of them agree are real are kept.
+- **research**: a researcher per question answers it with sources; a critic checks each answer.
+- **change**: a worker per place makes the change in its own isolated checkout, which is merged
+  back as a sub-task's is; a verifier then checks each change.
+- **compare**: an explorer works out each option; three judges compare them all and pick the best.
+
+A work order can instead give up to four stages of its own. Each stage names its agent kind, a
+prompt with `{item}`, the JSON every agent ends with (`returns`), and optionally `votes` (several
+agents per item, independently), `keep` (only results whose field has a value; with votes, how many
+must agree), `split` (a list in each result becomes the next stage's items) and `over: "all"` (one
+agent sees every item at once).
+
+## What its agents may do
+
+- **explorer, researcher, critic, verifier** read only (files, search, the web). They run beside your
+  files, so a hundred of them cost no checkouts.
+- **worker** writes, always in an isolated checkout of its own, and its changes are merged back
+  exactly as a sub-task's are. A named agent from `.dgc/agents` that may write is treated the same.
+- They never ask you anything: a step that would ask is refused (in auto mode, everything their kind
+  allows runs). A deny rule still applies, `Troupe` included: `"deny": ["Troupe"]` turns troupes off.
+
+On a model served on this machine, one agent runs at a time; on a remote or cloud model, as many as
+sub-agents may (Ultra: 8). The turn's token cap (Settings, General) counts every troupe agent, and a
+troupe stops starting new agents when it is reached. A troupe starts at most 400 agents.
+
+## Results, and resuming
+
+Each run keeps a journal in `~/.dgc/troupes/<id>/`: its work order (`plan.json`), every agent's
+result as it lands (`results.jsonl`), the last stage's results (`results.json`) and the report the
+model was given (`report.md`). A stopped or interrupted troupe can be run again with its id: only
+the agents that had not finished run again.
+
+Troupes are one chat's work: a new chat, `/clear` or closing DGC stops them, and a troupe never
+reports into a chat other than the one that started it.
+"""),
+
     ("Handoff", "a continuation document from this session, for the next one", """
 # Handoff
 

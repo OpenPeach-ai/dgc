@@ -115,6 +115,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("monitors", "list, stop, or pause wake-ups from background monitors",
                 frozenset({"tui", "editor"}), "monitors", accepts_args=True,
                 usage="monitors [stop ID|all · wake on|off · show ID]", available_while_running=True),
+    CommandSpec("troupes", "list or stop troupes: many sub-agents on one work order, in the background", _T,
+                accepts_args=True, usage="troupes [stop ID|all]", available_while_running=True),
     CommandSpec("copy", "copy the last reply to your clipboard (all · code · N)", _T,
                 accepts_args=True, usage="copy [all|code|N]", available_while_running=True),
     CommandSpec("select", "drag-select mode — releases the mouse to your terminal", _T,

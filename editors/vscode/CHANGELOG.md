@@ -230,6 +230,12 @@
 - Typing in the plugin search boxes keeps every letter in order. Each key rebuilt the list and put
   the caret back at the start, so "Granola" typed key by key came out as "alonar".
 
+### Troupes
+
+- **A troupe's card in the chat:** its title, each stage with a progress bar ("Review 4 of 4 · 2 kept", "Verify 2 of
+  6"), Stop while it runs, and where its results are when it ends. A reconnect brings a running troupe's card back.
+- **Its approval card** (outside auto mode) says what it will do: the plan in words, the goal and the items.
+
 ### Settings
 
 - **Token cap per turn** (Settings → General): what one turn may spend, sub-agents included; 0 means no cap. An older

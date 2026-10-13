@@ -3933,6 +3933,55 @@
       sysLine(String(message.error || "DGC could not stop the artifact preview."), true);
     }
   }
+  // A troupe (many sub-agents on one work order, in the background): one card per run, its stages' progress, Stop
+  // while it runs. troupe_started makes it in the current turn; progress and the end update it wherever it is; a
+  // `troupes` snapshot (a reconnect) brings back a running one that has no card.
+  const troupeCards = new Map();
+  const TROUPE_STATES = { running: "Running", done: "Done", stopped: "Stopped", failed: "Failed" };
+  function troupeCard(ev, create) {
+    const id = String(ev.run_id || "");
+    if (!id) return null;
+    let card = troupeCards.get(id);
+    if (card && !card.isConnected) { troupeCards.delete(id); card = null; }
+    if (!card) {
+      if (!create) return null;
+      ensureTurn();
+      card = el("div", "artifact troupe"); card.dataset.troupeId = id;
+      card.setAttribute("role", "group"); card.setAttribute("aria-label", "Troupe");
+      card.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon("blocks")}</span><span class="anm">Troupe</span><span class="alabel"></span><span class="troupe-state" aria-live="polite"></span></div><ol class="troupe-stages"></ol><div class="muted troupe-note"></div>`;
+      const row = el("div", "abtns");
+      const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.troupeStop = "1";
+      stop.onclick = () => { if (stop.disabled) return; stop.disabled = true; stop.textContent = "Stopping…"; vscode.postMessage({ type: "stopTroupe", run_id: id }); };
+      row.appendChild(stop); card.appendChild(row);
+      troupeCards.set(id, card);
+      appendTurnContent(card); breakText();
+    }
+    paintTroupe(card, ev);
+    return card;
+  }
+  function paintTroupe(card, ev) {
+    const state = String(ev.state || "running");
+    card.querySelector(".alabel").textContent = String(ev.title || "");
+    const label = card.querySelector(".troupe-state");
+    label.textContent = (TROUPE_STATES[state] || state) + (ev.reason && state !== "running" ? ` · ${ev.reason}` : "");
+    card.classList.toggle("finished", state !== "running");
+    const list = card.querySelector(".troupe-stages");
+    const stages = Array.isArray(ev.stages) ? ev.stages.filter((s) => s && typeof s === "object") : [];
+    list.innerHTML = stages.map((s) => {
+      const total = Math.max(0, Number(s.total) || 0), done = Math.max(0, Number(s.done) || 0), failed = Math.max(0, Number(s.failed) || 0);
+      const share = total ? Math.min(100, Math.round(((done + failed) / total) * 100)) : 0;
+      const counts = total ? `${done + failed} of ${total}` : "waiting";
+      const extra = [failed ? `${failed} failed` : "", total && done + failed >= total ? `${Number(s.kept) || 0} kept` : "",
+                     s.dropped ? `${Number(s.dropped)} not started` : ""].filter(Boolean).join(" · ");
+      return `<li><span class="troupe-stage-name">${esc(String(s.name || ""))}</span><span class="troupe-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done + failed}"><span style="width:${share}%"></span></span><span class="troupe-count">${esc(counts)}${extra ? ` · ${esc(extra)}` : ""}</span></li>`;
+    }).join("");
+    const planned = Number(ev.agents_planned) || 0, reused = Number(ev.reused) || 0;
+    card.querySelector(".troupe-note").textContent = state === "running"
+      ? `About ${planned} agents. This chat continues when it ends.` + (reused ? ` ${reused} results reused.` : "")
+      : `Results: ${String(ev.journal || "")}`;
+    const stop = card.querySelector("[data-troupe-stop]");
+    if (stop && state !== "running") { stop.disabled = true; stop.textContent = state === "stopped" ? "Stopped" : "Stop"; stop.hidden = state !== "stopped"; }
+  }
   // Request ids restart with every backend process (r1, r2, ...), so a card remembers which backend
   // asked: a new backend's r1 is a new request even while the last one's answered r1 is on screen.
   let requestEpoch = 0;
@@ -3940,6 +3989,16 @@
   // not its JSON: what the Pip is, what it does, what it reads, and what Allow does.
   function pipPermissionDetail(name, args) {
     if (!args || typeof args !== "object") return "";
+    if (name === "troupe") {
+      const row = (label, value) => (value ? `<dt>${label}</dt><dd>${esc(String(value))}</dd>` : "");
+      const items = Array.isArray(args.items) ? args.items.map(String) : [];
+      const listed = items.slice(0, 5).join("\n") + (items.length > 5 ? `\n… and ${items.length - 5} more` : "");
+      const stages = Array.isArray(args.stages) ? args.stages.map((s) => `${(s && s.name) || "?"} (${(s && s.agent) || "explorer"}${s && s.votes > 1 ? `, ${s.votes} votes` : ""})`).join(" → ") : "";
+      const plan = args.template ? { review: "Review each, then 3 verifiers check every finding", research: "Research each, then a critic checks each answer",
+        change: "A worker changes each place in its own checkout, then a verifier checks it", compare: "Work out each option, then 3 judges pick the best" }[args.template] || args.template : stages;
+      return `<dl class="pip-permission">${row("Work", args.title)}${row("Plan", plan)}${row("Goal", args.goal)}${row(`Items (${items.length})`, listed)}${row("Resume", args.resume)}</dl>`
+        + `<div class="muted pip-permission-note">Allow starts it in the background: one agent per item. This chat continues when it ends, and the troupe's card can stop it.</div>`;
+    }
     const row = (label, value) => (value ? `<dt>${label}</dt><dd>${esc(String(value))}</dd>` : "");
     if (name === "pips_propose") {
       const changes = args.changes && typeof args.changes === "object" ? Object.entries(args.changes) : [];
@@ -5236,7 +5295,7 @@
           : ev.diff ? "" : (pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
         const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
-        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>${ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`}</span></div>${signedIn ? "" : summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>${ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "troupe" ? "Start a troupe?" : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`}</span></div>${signedIn ? "" : summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
@@ -5464,6 +5523,16 @@
           }, 60);
         }
         return;
+      }
+      case "troupe_started":
+      case "troupe_progress":
+      case "troupe_finished": {
+        troupeCard(ev, ev.type === "troupe_started");
+        break;
+      }
+      case "troupes": {
+        (Array.isArray(ev.runs) ? ev.runs : []).forEach((run) => { if (run && typeof run === "object") troupeCard(run, run.state === "running"); });
+        break;
       }
       case "artifact_ready": {
         ensureTurn();

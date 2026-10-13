@@ -719,6 +719,12 @@ class UI:
         self.console.print(
             f"  [{DIM}]· {_markup_literal(msg)}[/]", highlight=False)
 
+    def troupe_event(self, kind: str, fields: dict) -> None:
+        from .troupe_agent import describe_event
+        line = describe_event(kind, fields, self.__dict__.setdefault("_troupe_seen", set()), stop_hint=False)
+        if line:
+            self.info(line)
+
     def error(self, msg: str) -> None:
         self.stop_working()
         self.console.print(

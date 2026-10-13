@@ -1251,6 +1251,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (be && this.lastReadyEvent?.capabilities?.monitors) {
         be.send({ type: "list_monitors", request_id: this.nextRequestId("monitors-restore") });
       }
+      // Nor a running troupe's card, with its Stop.
+      if (be && (this.lastReadyEvent?.capabilities as any)?.troupe) {
+        be.send({ type: "list_troupes", request_id: this.nextRequestId("troupes-restore") });
+      }
       // Nor is there an agents list; the backend's snapshot brings back the pill.
       if (be && this.lastReadyEvent?.capabilities?.agents) {
         be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
@@ -1728,6 +1732,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } catch (err: any) {
       this.post({ type: "event", event: { type: "error",
         message: err?.message || "DGC could not stop the monitor." } });
+    }
+  }
+
+  /** Stop one troupe. The backend stops its agents; the `troupes` answer and the troupe_finished that follows update
+   *  its card. A CLI without troupes never sent one, so it is never asked. */
+  private async stopTroupe(id: string): Promise<void> {
+    const runId = String(id || "").slice(0, 64);
+    if (!/^tr-[0-9a-f]{10}$/.test(runId) || !(this.lastReadyEvent?.capabilities as any)?.troupe) { return; }
+    try {
+      await this.requestState(this.ensureBackend(), "troupe-stop", { type: "stop_troupe", run_id: runId }, "troupes", 5000);
+    } catch (err: any) {
+      this.post({ type: "event", event: { type: "error", message: err?.message || "DGC could not stop the troupe." } });
     }
   }
 
@@ -4304,6 +4320,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "stopMonitor":
         void this.stopMonitor(String(msg.id || ""));
+        break;
+      case "stopTroupe":
+        void this.stopTroupe(String(msg.run_id || ""));
         break;
       case "copy":
         vscode.env.clipboard.writeText(String(msg.text || ""));

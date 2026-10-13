@@ -103,7 +103,7 @@ _CONTROL_TOOLS_WITH_RULES = frozenset({"present_plan", "propose_options", "ask_u
 # Names `_handle_call` acts on but `EXECUTORS` does not contain: delegation, the artifact server,
 # and every MCP route (which are discovered at runtime, so they are matched by shape).
 _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_search",
-                                           "list_tasks", "wait_tasks", "use_pips"})
+                                           "list_tasks", "wait_tasks", "use_pips", "troupe"})
 # Pips tools reach the model only after `use_pips` loads them (or the user points a turn at a
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
@@ -898,7 +898,7 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
     segments = _and_segments(actual)
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
 from .tools import (EXECUTORS, MAX_TODO_CHARS, MAX_TODOS, TODO_STATUSES, TOOL_SCHEMAS,
-                    SUPERVISION_TOOL_SCHEMAS,
+                    SUPERVISION_TOOL_SCHEMAS, TROUPE_TOOL_SCHEMA,
                     bash_handle_tools, execute,
                     shutdown_browsers, shutdown_python_kernels, take_pending_images,
                     take_pending_files)
@@ -2670,6 +2670,7 @@ class Agent(GoalLifecycle):
             else:  # compatibility for injected/third-party manager shims
                 mcp_schemas = self.mcp.tool_schemas()
         schemas = (TOOL_SCHEMAS + SUPERVISION_TOOL_SCHEMAS
+                   + ([TROUPE_TOOL_SCHEMA] if self._troupe_exposed() else [])
                    + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas)
         from .pip_access import tools_available as pips_tools_available
         if not pips_tools_available(self.config):
@@ -3001,6 +3002,25 @@ class Agent(GoalLifecycle):
             return False
         return bool(getattr(self, "_detached_jobs", None)) or self._detached_result_waiting()
 
+    def _troupe_exposed(self) -> bool:
+        """Is `troupe` offered (dgc/troupe.py)? Under Ultra, to the agent the user talks to, outside plan mode and
+        monitor turns (a troupe's own results arrive in one: it must not start the next). Never to a session a
+        launching application's policy governs, for SUPERVISION_TOOL_SCHEMAS' reason: its SDK could not name it."""
+        if self.depth != 0 or self.mode == "plan" or getattr(self, "_monitor_turn", False):
+            return False
+        if not self.config.get("ultra_mode", False):
+            return False
+        from .permissions import session_policy
+        return session_policy() is None
+
+    def _ensure_detached_state(self) -> None:
+        """The bookkeeping background work shares (see _run_subagent), made on first use."""
+        if getattr(self, "_detached_jobs", None) is None:
+            self._detached_jobs = {}
+            self._finalizing = {}
+            self._finalizing_lock = threading.Lock()
+            self._finished_jobs = {}
+
     def _control_exposed(self) -> bool:
         """Are `message_task` / `close_task` offered on this request?
 
@@ -3104,6 +3124,11 @@ class Agent(GoalLifecycle):
             "yourself only to edit it or to check a child's claim.",
             "5. Review: spawn critic only when the user asks for a review or no test or command "
             "you can run checks the change.",
+            *(["6. Many similar pieces (reviewing many files and checking each finding, researching many questions, "
+               "the same change in many places, comparing options): start a `troupe`, which runs one fixed work "
+               "order " + ("and returns its results when it ends" if one_shot else
+                           "in the background and wakes this chat with the results") + ". In auto mode it just runs."]
+              if self._troupe_exposed() else []),
             f"Ultra does not change authority: permission mode remains {mode}, and every parent or "
             "child action stays inside that policy.",
         ]
@@ -3133,6 +3158,13 @@ class Agent(GoalLifecycle):
                 tool = {**tool, "function": function}
             if name == "task" and one_shot:
                 tool = _one_shot_task_schema(tool)
+            if name == "troupe" and one_shot:
+                # `dgc -p` has no later turn to wake: the troupe runs to its end inside the call.
+                function = dict(tool["function"])
+                function["description"] = str(function.get("description", "")).replace(
+                    "in the background; this chat wakes with the results",
+                    "and the call returns its results when it ends (this one-shot run waits for it)")
+                tool = {**tool, "function": function}
             out.append(tool)
         return out
 
@@ -8518,6 +8550,9 @@ class Agent(GoalLifecycle):
                             str(args.get("query", "")), args.get("limit", 8))
                     elif name == "use_pips":
                         out = self._load_pips_tools()
+                    elif name == "troupe":
+                        from . import troupe_agent
+                        out = troupe_agent.start(self, args, call_id)
                     elif name.startswith("mcp__") or name == "mcp_call":
                         target = name
                         mcp_args = args
@@ -9179,8 +9214,13 @@ class Agent(GoalLifecycle):
                                    workspace, sub_ui: _SubUI,
                                    call_id: str | None = None, *,
                                    cancel: threading.Event | None = None,
-                                   handle: dict | None = None) -> tuple[str, str, str]:
+                                   handle: dict | None = None,
+                                   tools: frozenset | None = None,
+                                   unattended: bool = False) -> tuple[str, str, str]:
         """Run one child in an already-selected checkout.
+
+        `tools` narrows what the child is offered (a troupe's read-only agents); `unattended` makes it refuse steps
+        that would ask, as a monitor turn's children do (nobody answers a troupe's hundred cards).
 
         Returns ``(failure, summary, start_error)``. It deliberately does not inspect, integrate,
         retain, or clean the checkout: the parent coordinator performs those operations in stable
@@ -9232,6 +9272,8 @@ class Agent(GoalLifecycle):
                 sub._agent_defs_config = self._agent_defs_config
                 if adef and adef.tool_allow:
                     sub._agent_tool_allowlist = adef.tool_allow
+                if tools is not None:
+                    sub._agent_tool_allowlist = frozenset(tools)
                 if isolated:
                     # After construction, so it is set on the object whose prompt it belongs to,
                     # and refreshed because __init__ already built messages[0] from a bare agent.
@@ -9271,7 +9313,7 @@ class Agent(GoalLifecycle):
                 sub._parent_call_id = call_id
                 sub._chat_tool_resources = resources
                 resources.add(sub)
-                if getattr(self, "_monitor_turn", False):
+                if getattr(self, "_monitor_turn", False) or unattended:
                     # Nobody is at the keyboard for a turn DGC started on a monitor event, and that holds
                     # for everything the turn delegates: the child refuses ASK steps and asks no question,
                     # plan or goal verdict either (auto mode still runs normally; see _handle_call).
@@ -9952,15 +9994,17 @@ class Agent(GoalLifecycle):
             resources.stop(owner, None)
 
     def stop_detached(self, agent_id: str | None = None) -> int:
-        """Cancel one detached child, or every detached child. Returns how many were signalled."""
+        """Cancel one detached child, or every detached child (and troupe). Returns how many were signalled."""
         jobs = getattr(self, "_detached_jobs", None) or {}
         if agent_id:
             job = jobs.get(agent_id)
             if job is None:
-                return 0
+                from . import troupe_agent
+                return len(troupe_agent.stop(self, agent_id)) if agent_id in getattr(self, "_troupes", {}) else 0
             job["cancel"].set()
             return 1
-        n = 0
+        from . import troupe_agent
+        n = len(troupe_agent.stop(self))
         for job in list(jobs.values()):
             job["cancel"].set()
             n += 1

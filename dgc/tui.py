@@ -4545,6 +4545,15 @@ class TUI:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {_esc(msg)}[/]"))
 
+    def troupe_event(self, kind: str, fields: dict) -> None:
+        """A troupe's milestones as transcript lines: started, each stage done, ended. Not every agent."""
+        from .troupe_agent import describe_event
+        line = describe_event(kind, fields, getattr(self, "_troupe_seen", None)
+                              or self.__dict__.setdefault("_troupe_seen", set()))
+        if line:
+            th = style_mod.theme()
+            self._append(self._rich(f"[{th.accent}]◆[/] {_esc(line)}"))
+
     def hook_activity(self, event: str, status: str, *, configured: int = 0,
                       duration_ms: int = 0, message: str = "") -> None:
         if status == "started":
@@ -6413,6 +6422,9 @@ class TUI:
             self._set_notify(rest)
         elif cmd == "monitors":
             self._tui_monitors(rest)
+        elif cmd == "troupes":
+            from .troupe_agent import command_text
+            self._append(self._rich(_esc(command_text(self.agent, rest))))
         elif cmd in ("history", "hist"):
             self._open_history()
         elif cmd in ("view-plan", "plan-view", "viewplan"):

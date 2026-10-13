@@ -218,7 +218,7 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
     "get_config", "status", "get_history", "list_monitors", "stop_monitor", "list_mcp_context",
-    "list_agents", "get_image",
+    "list_agents", "get_image", "list_troupes", "stop_troupe",
     # A liveness ping is the editor breathing, not the user acting. Left out of this set, every
     # ping ran the suppression pair around itself: _suppress_wakes(True) cancels any pending wake
     # timer, and the matching False tells the monitor policy a user command just landed. With a
@@ -281,7 +281,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
-    "get_memory", "add_memory", "list_monitors", "stop_monitor", "list_agents",
+    "get_memory", "add_memory", "list_monitors", "stop_monitor", "list_agents", "list_troupes", "stop_troupe",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
 })
@@ -934,6 +934,8 @@ def _work_keeping_alive(backend) -> str:
     try:
         if getattr(agent, "_detached_jobs", None):
             return "a detached sub-agent is still working"
+        if any(run.state == "running" for run in (getattr(agent, "_troupes", None) or {}).values()):
+            return "a troupe is still working"
     except Exception:
         return "sub-agent state is unreadable"
     try:
@@ -1527,6 +1529,12 @@ class HeadlessUI:
     def artifact_ready(self, art) -> None:
         self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
 
+    def troupe_event(self, kind: str, fields: dict) -> None:
+        """A troupe started, moved on, or ended (dgc/troupe.py): its card in the chat."""
+        if kind in ("started", "progress", "finished") and isinstance(fields, dict):
+            self.em.emit(f"troupe_{kind}", **{key: fields[key] for key in (
+                "run_id", "title", "state", "reason", "stages", "agents_planned", "reused", "journal")})
+
     def agent_step(self, agent_id, step, seq_in_agent=0) -> None:
         """One live step from a parallel child, for that child's own page."""
         if not agent_id or not isinstance(step, dict):
@@ -2070,6 +2078,8 @@ class Backend:
                           "pip_references": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
+                          # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
+                          "troupe": 1,
                           "pips_enabled": self.config.get("pips_enabled", False) is True,
                           # Additive capability data keeps strict older SDK ready-event
                           # validators working. IDs are private registry references,
@@ -5769,6 +5779,14 @@ class Backend:
             self._emit_monitors(request_id)
         elif t == "list_agents":
             self._emit_agents(request_id)
+        elif t == "list_troupes":
+            self._emit_troupes(request_id)
+        elif t == "stop_troupe":
+            from . import troupe_agent
+            target = str(cmd.get("run_id") or "")
+            if not troupe_agent.stop(self.agent, target):
+                self.em.emit("info", message=f"no running troupe '{target[:64]}'")
+            self._emit_troupes(request_id)
         elif t == "agent_control":
             self._agent_control(cmd)
         elif t == "stop_monitor":
@@ -6128,6 +6146,12 @@ class Backend:
             text=redact_value(text, secret_values(getattr(self, "config", None))),
             delivered=bool(delivered),
             **({"reason": _AGENT_MESSAGE_WIRE_REASON.get(why, "unknown")} if why else {}))
+
+    def _emit_troupes(self, request_id: str | None = None) -> None:
+        """Every troupe this chat started, newest first: the card a reconnecting editor repaints."""
+        runs = list((getattr(getattr(self, "agent", None), "_troupes", None) or {}).values())
+        runs.sort(key=lambda run: run.started_at, reverse=True)
+        self.em.emit("troupes", runs=[run.snapshot() for run in runs[:20]], **_request_fields(request_id))
 
     def _emit_agents(self, request_id: str | None = None) -> None:
         """The `agents` snapshot: every active record, then the most recent ended, exact counts."""

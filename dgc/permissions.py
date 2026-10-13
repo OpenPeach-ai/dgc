@@ -55,7 +55,7 @@ DISPLAY = {
     "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
     "present_plan": "PresentPlan", "present_document": "PresentDocument", "propose_options": "ProposeOptions",
     "ask_user": "AskUser", "artifact": "Artifact",
-    "task": "Task", "external_directory": "ExternalDirectory",
+    "task": "Task", "troupe": "Troupe", "external_directory": "ExternalDirectory",
 }
 DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 
@@ -80,6 +80,7 @@ RULE_ARG = {
     "browser": "url",
     "mcp_search": "query", "mcp_call": "name",
     "save_memory": "scope", "remember": "fact", "forget": "id", "artifact": "path", "task": "description", "notes": "query",
+    "troupe": "template",      # Always allow on a review troupe allows review troupes; one with its own stages, Troupe
     "external_directory": "path",
 }
 
