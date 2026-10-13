@@ -2730,7 +2730,7 @@ def _vision_route_label(ctx) -> str:
 
 def _browser_session(ctx):
     """One browser per agent session, launched on first use and reused after that."""
-    from .browser import BrowserSession, discover_browser
+    from .browser import BrowserSession, ensure_browser
     owner = _tool_owner(ctx)
     with _BROWSERS_LOCK:
         existing = _BROWSERS.get(owner)
@@ -2739,7 +2739,10 @@ def _browser_session(ctx):
     cfg = getattr(ctx, "config", None)
     configured = str(cfg.get("browser_path", "") if cfg else "")
     unsandboxed = bool(cfg.get("browser_allow_unsandboxed", False) if cfg else False)
-    session = BrowserSession(discover_browser(configured), allow_unsandboxed=unsandboxed)
+    # With no Chrome on this computer, DGC fetches one (browser_setup) and the first call waits for it.
+    binary, note = ensure_browser(configured, cancelled=getattr(ctx, "cancelled", None))
+    session = BrowserSession(binary, allow_unsandboxed=unsandboxed)
+    session.note = note                 # said once, with the first answer this browser gives
     with _BROWSERS_LOCK:
         # Another thread may have raced us here; keep whichever landed first and drop ours.
         winner = _BROWSERS.setdefault(owner, session)
@@ -2772,6 +2775,17 @@ def _browser_snapshot_text(session, ctx, *, header: str = "") -> str:
 
 def browser_tool(args: dict, ctx) -> str:
     """Drive a real browser. Never raises into the loop: every failure comes back as text."""
+    result = _browser_operation(args, ctx)
+    with _BROWSERS_LOCK:
+        session = _BROWSERS.get(_tool_owner(ctx))
+    note = getattr(session, "note", "") if session is not None else ""
+    if note and not result.startswith("error:"):
+        session.note = ""
+        return f"{note}\n\n{result}"
+    return result
+
+
+def _browser_operation(args: dict, ctx) -> str:
     from .browser import BrowserError
     operation = str(args.get("operation", "")).strip().lower()
     if operation not in BROWSER_OPS:

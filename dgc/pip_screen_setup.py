@@ -88,7 +88,8 @@ def current_root() -> Path | None:
         target = link.resolve(strict=True)
     except (OSError, RuntimeError):
         return None
-    if not link.is_symlink() or target.parent != home() or not (target / "manifest.json").is_file():
+    # Resolved both sides: a home (or ~/.dgc) reached through a symlink is still this one.
+    if not link.is_symlink() or target.parent != home().resolve() or not (target / "manifest.json").is_file():
         return None
     root = target / "root"
     return root if root.is_dir() else None

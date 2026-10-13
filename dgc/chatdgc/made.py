@@ -959,8 +959,8 @@ def _why_plain(exc: Exception) -> str:
     if "No Chrome or Chromium found" in text:
         return "no Chrome or Edge was found to print it. With one installed, PDFs print with full typography."
     if "sandbox" in text:
-        return ("Chrome can't start its sandbox on this system, and DGC doesn't run it without one unless you set "
-                "browser_allow_unsandboxed in ~/.dgc/config.json.")
+        return ("Chrome can't start its sandbox on this system and DGC couldn't box it. Install bubblewrap, or set "
+                "browser_allow_unsandboxed in ~/.dgc/config.json to run it without one.")
     return "the browser couldn't print it (" + (text.split("\n")[0][:120] or type(exc).__name__) + ")."
 
 
@@ -973,8 +973,10 @@ def _print(page: str, config, browser) -> bytes:
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(page)
         get = getattr(config, "get", None) or (lambda key, default=None: default)
+        # The page it prints is in its own folder: a browser in DGC's box may read that, and nothing else of yours.
         session = browser or cdp.BrowserSession(cdp.discover_browser(str(get("browser_path", "") or "")),
-                                                allow_unsandboxed=bool(get("browser_allow_unsandboxed", False)))
+                                                allow_unsandboxed=bool(get("browser_allow_unsandboxed", False)),
+                                                readable=(folder,))
         session.navigate("file://" + path if os.sep == "/" else "file:///" + path.replace("\\", "/"))
         width, height = (8.5, 11.0) if _letter() else (8.27, 11.69)
         footer = ('<div style="font: 8px -apple-system, \'Segoe UI\', Arial, sans-serif; color: #9ca3af; width: 100%; '

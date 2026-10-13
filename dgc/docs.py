@@ -2530,22 +2530,46 @@ with `ollama show <model>` — look for `vision` under Capabilities.
 
 DGC uses a Chrome or Chromium you already have. It looks at `browser_path` in
 `~/.dgc/config.json`, then `CHROME_PATH`, then Playwright's cache, then your PATH, then the usual
-install locations. **It never downloads a browser** — if there is none, it says so and tells you
-where to point it.
+install locations.
+
+**With none, DGC fetches one**, once, and the first browser call waits for it:
+
+- **Linux** (Debian, Ubuntu and their family): the same Google Chrome DGC downloads for Pip
+  computers. It comes from Google's package repository, checked against Google's signing key, and is
+  unpacked under `~/.dgc/desktop` with no admin password. Work runs it as a separate browser: it
+  never shares a Pip's browser, cookies or tabs. It is re-checked for updates once a day.
+- **macOS**: Google's own Chrome installer. It is opened read-only, and its app is kept under
+  `~/.dgc/browser` only when macOS confirms it is intact and signed by Google LLC as Google Chrome.
+  It is re-checked once a week. A Chrome in `/Applications` or `~/Applications` comes first.
+- **Windows**: not yet. Install Chrome, or point `browser_path` at one.
+
+A `browser_path` that is wrong is reported, never replaced by a download, and a download that failed
+is tried again after an hour, not on every call.
 
 Each session gets its own throwaway profile, so a page never sees your real cookies or logged-in
 sessions, and the profile is deleted when the session ends.
 
-## If the browser refuses to start
+## When Chrome can't use its own sandbox
 
 On Ubuntu 23.10 and later, and on other distributions that restrict unprivileged user namespaces,
-Chromium cannot build its sandbox and will not start:
+only a Chrome with an AppArmor profile (Google Chrome installed by its package) gets the namespaces
+its sandbox needs. Any other Chrome or Chromium (Playwright's, the one DGC downloaded) is then
+started inside a **bubblewrap box**, which lends them: Chrome's own sandbox runs in it and keeps
+every page contained, as on any other Linux (`chrome://sandbox` says "adequately sandboxed"). The
+box adds what a plain Chrome doesn't have: your home folder, with its keys and tokens, and DGC's
+environment variables are not in it (not even in bubblewrap's own process). It holds the system
+read-only, a fresh `/tmp`, the throwaway profile and Chrome's own files, and it ends with DGC.
+
+bubblewrap has to be allowed to make user namespaces itself, and DGC checks that it is, not just that it
+is installed: a stock Ubuntu 24.04 has bubblewrap but no AppArmor profile that lets it. Where it can't,
+the browser says so:
 
     Chromium cannot start its sandbox on this system…
 
-Install an AppArmor profile for the browser, or set `browser_allow_unsandboxed: true` in
-`~/.dgc/config.json`. The second is a real trade: without the renderer sandbox, a page exploit is
-no longer contained. DGC will not make that choice for you.
+Then install Google Chrome from google.com/chrome (its package brings the AppArmor profile its sandbox
+needs), install an AppArmor profile for your browser, or set `browser_allow_unsandboxed: true` in
+`~/.dgc/config.json`. The last is a real trade: without a sandbox, a page exploit is no longer
+contained. DGC will not make that choice for you, and it doesn't download a Chrome that couldn't start.
 
 ## Permissions
 

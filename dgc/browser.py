@@ -27,7 +27,9 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -60,6 +62,7 @@ _PATH_CANDIDATES = ("chromium", "chromium-browser", "chrome", "google-chrome",
 
 _MAC_CANDIDATES = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",     # installed without an admin password
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
 )
@@ -70,10 +73,11 @@ _WINDOWS_CANDIDATES = (
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
 )
 
+_LINUX_CANDIDATES = ("/opt/google/chrome/chrome",)
+
 INSTALL_HINT = (
     "No Chrome or Chromium found. Install one from your package manager or google.com/chrome, "
-    "or point DGC at an existing binary with `browser_path` in ~/.dgc/config.json. "
-    "DGC never downloads a browser for you.")
+    "or point DGC at an existing binary with `browser_path` in ~/.dgc/config.json.")
 
 
 def _playwright_browsers() -> list[Path]:
@@ -119,11 +123,44 @@ def discover_browser(configured: str = "") -> Path:
         found = shutil.which(name)
         if found:
             return Path(found)
+    if sys.platform.startswith("linux"):
+        # Google Chrome's own program, when it is one (not a launcher script, which may lead anywhere).
+        from .pip_computer_box import _real_binary
+        for literal in _LINUX_CANDIDATES:
+            if _real_binary(literal):
+                return Path(literal)
     for literal in _MAC_CANDIDATES + _WINDOWS_CANDIDATES:
-        path = Path(literal)
+        path = Path(literal).expanduser()
         if path.exists():
             return path
+    # The Chrome DGC fetched for this computer (browser_setup): on Linux the one Pip computers use.
+    from . import browser_setup
+    own = browser_setup.own_chrome()
+    if own is not None:
+        return own
     raise BrowserError(INSTALL_HINT)
+
+
+def ensure_browser(configured: str = "", *, cancelled=None) -> tuple[Path, str]:
+    """A browser to drive, fetching one when this computer has none (founder, 2026-10-13): (binary, a note
+    for the model when DGC just downloaded it). An explicit ``browser_path`` that is wrong is said, never
+    replaced by a download."""
+    from . import browser_setup
+    try:
+        found = discover_browser(configured)
+    except BrowserError:
+        if configured:
+            raise
+        ok, why = browser_setup.supported()
+        if not ok:
+            raise BrowserError(f"{INSTALL_HINT} ({why})") from None
+        try:
+            return browser_setup.fetch(cancelled=cancelled)
+        except RuntimeError as error:
+            raise BrowserError(f"{error} {INSTALL_HINT}") from None
+    if found == browser_setup.own_chrome():
+        browser_setup._refresh_later()          # DGC's copy: keep it current, in the background
+    return found, ""
 
 
 # --------------------------------------------------------------------------- websocket
@@ -348,12 +385,124 @@ class _Page:
     last_activity: float = 0.0
 
 
+def sandbox_refused(log: str) -> bool:
+    """Chrome stopped because it could not build its own sandbox (not for any other reason)."""
+    return any(sign in log for sign in ("No usable sandbox", "SUID sandbox helper", "setuid_sandbox_host",
+                                         "Failed to move to new namespace"))
+
+
+def _last_line(log: str) -> str:
+    lines = [line for line in log.strip().splitlines() if line.strip()]
+    return lines[-1][-300:] if lines else "no output"
+
+
+_BOX_PROBE: dict = {}
+
+
+def box_available() -> bool:
+    """bubblewrap is here and may lend Chrome the namespaces its sandbox needs. Installed is not enough: on a
+    stock Ubuntu 24.04 bwrap is installed but no AppArmor profile grants it user namespaces, and every box fails
+    ("setting up uid map: Permission denied"). So a box with the browser's own flags is tried once, making a
+    nested user namespace as Chrome's sandbox does. Cached per bwrap binary."""
+    if not sys.platform.startswith("linux"):
+        return False
+    bwrap, unshare = shutil.which("bwrap"), shutil.which("unshare")
+    if not bwrap or not unshare:
+        return False
+    try:
+        info = os.stat(bwrap)
+    except OSError:
+        return False
+    key = (bwrap, info.st_size, info.st_mtime)
+    if key not in _BOX_PROBE:
+        try:
+            probe = subprocess.run(
+                [bwrap, "--unshare-all", "--share-net", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
+                 "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                 unshare, "--user", "--map-root-user", "--mount", "--pid", "--fork", "true"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, env=box_env())
+            _BOX_PROBE[key] = probe.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            _BOX_PROBE[key] = False
+    return _BOX_PROBE[key]
+
+
+def box_env() -> dict:
+    """The environment a box starts with, bwrap itself included: never DGC's keys and tokens, its display or
+    its agents. Given to bwrap as its environment (owner-only in /proc), never on its command line (anyone's)."""
+    kept = {name: os.environ[name] for name in _BOX_ENV if name in os.environ}
+    kept.update({name: value for name, value in os.environ.items() if name.startswith("LC_")})
+    return kept
+
+
+# What a boxed Chrome keeps of the environment: never DGC's keys and tokens, its display or its agents.
+_BOX_ENV = ("PATH", "LANG", "LANGUAGE", "TZ", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+            "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY")
+
+
+def box_argv(binary: Path, profile: str, command: list[str], readable: tuple = ()) -> list[str]:
+    """Chrome in a bubblewrap box, for a system that refuses Chrome the user namespaces its own sandbox needs
+    (Ubuntu 23.10+ grants them only to a browser with an AppArmor profile; bubblewrap has one). The box lends
+    them, and Chrome's own sandbox does the containing, as on any other Linux: every page in its own namespaces
+    behind seccomp (chrome://sandbox says "adequately sandboxed"; the live test checks it). The box adds what
+    plain Chrome has not: the home folder (its keys and tokens) and DGC's environment are out of sight. It
+    holds the system read-only, a fresh /tmp, the throwaway profile, Chrome's own folder, and folders DGC
+    wrote for it to read (a PDF's page). The browser's network is the computer's, as Chrome's always is."""
+    real = Path(os.path.realpath(binary))
+    from . import browser_setup
+    root = browser_setup.download_root(binary)
+    libs = browser_setup.library_path(binary)
+    argv = ["bwrap", "--unshare-all", "--share-net", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
+            "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/bin", "/bin",
+            "--symlink", "usr/lib64", "/lib64", "--symlink", "usr/sbin", "/sbin"]
+    for path in ("/etc/fonts", "/etc/ssl", "/etc/ca-certificates", "/etc/ld.so.cache", "/etc/resolv.conf", "/etc/hosts",
+                 "/etc/nsswitch.conf", "/etc/gai.conf", "/etc/localtime", "/etc/alternatives", "/run/systemd/resolve"):
+        argv += ["--ro-bind-try", path, path]
+    argv += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+             "--bind", profile, profile, "--setenv", "HOME", profile, "--setenv", "TMPDIR", "/tmp"]
+    if root is not None:
+        argv += ["--ro-bind", str(root), str(root), "--setenv", "LD_LIBRARY_PATH", libs]
+    elif Path.home().is_relative_to(real.parent):
+        argv += ["--ro-bind", str(real), str(real)]      # a browser right in the home folder: never the folder itself
+    elif not str(real.parent).startswith("/usr/"):
+        argv += ["--ro-bind", str(real.parent), str(real.parent)]
+    for folder in readable:                     # a page DGC wrote for it to open (a PDF to print), read-only
+        argv += ["--ro-bind", str(folder), str(folder)]
+    return argv + [str(real), *command[1:]]
+
+
+def _start_boxed(argv: list[str], log) -> subprocess.Popen:
+    """Start the box from a thread that lives exactly as long as it does. bwrap's --die-with-parent ties the
+    box to its parent, and the kernel counts the thread that started a process as its parent: the box never
+    depends on which tool call's thread happened to start it, and it ends with DGC, a crash included."""
+    started: list = []
+    ready = threading.Event()
+    env = box_env()
+
+    def own():
+        try:
+            proc = subprocess.Popen(argv, stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True, env=env)
+        except BaseException as error:              # noqa: BLE001 -- handed to the caller
+            started.append(error)
+            ready.set()
+            return
+        started.append(proc)
+        ready.set()
+        proc.wait()
+    threading.Thread(target=own, name="dgc-browser-box", daemon=True).start()
+    ready.wait()
+    if isinstance(started[0], BaseException):
+        raise started[0]
+    return started[0]
+
+
 class BrowserSession:
     """One browser process, launched on first use and reused until the DGC session ends."""
 
     def __init__(self, binary: Path, *, allow_unsandboxed: bool = False,
-                 viewport: tuple[int, int] = DEFAULT_VIEWPORT):
+                 viewport: tuple[int, int] = DEFAULT_VIEWPORT, readable: tuple = ()):
         self.binary = binary
+        self.readable = tuple(readable)  # folders a box may read (box_argv): DGC's own pages, nothing of the user's
         self.allow_unsandboxed = allow_unsandboxed
         self.viewport = viewport
         self._proc: subprocess.Popen | None = None
@@ -362,6 +511,7 @@ class BrowserSession:
         self._next_id = 0
         self._page = _Page()
         self.current_url = ""
+        self.boxed = False               # running in DGC's bubblewrap box (box_argv), not Chrome's own sandbox
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -378,12 +528,24 @@ class BrowserSession:
         flags.append("about:blank")
         return flags
 
-    def _spawn(self, sandbox: bool) -> tuple[subprocess.Popen, str, str]:
+    def _env(self) -> dict | None:
+        """The environment it starts in: the libraries DGC's own Linux Chrome brought, when it is that one."""
+        from . import browser_setup
+        libs = browser_setup.library_path(self.binary)
+        return {**os.environ, "LD_LIBRARY_PATH": libs} if libs else None
+
+    def _spawn(self, sandbox: bool, box: bool = False) -> tuple[subprocess.Popen, str, str]:
         log_path = os.path.join(self._profile, "launch.log")
         handle = open(log_path, "wb")
         try:
-            proc = subprocess.Popen(self._flags(sandbox), stdout=handle, stderr=handle,
-                                    stdin=subprocess.DEVNULL, start_new_session=True)
+            if box:
+                # Chrome's own sandbox, inside the box (no --no-sandbox); /dev/shm is the box's own, so it uses /tmp.
+                command = self._flags(True)
+                command.insert(1, "--disable-dev-shm-usage")
+                proc = _start_boxed(box_argv(self.binary, self._profile, command, self.readable), handle)
+            else:
+                proc = subprocess.Popen(self._flags(sandbox), stdout=handle, stderr=handle,
+                                        stdin=subprocess.DEVNULL, start_new_session=True, env=self._env())
         finally:
             handle.close()
         port_file = os.path.join(self._profile, "DevToolsActivePort")
@@ -412,19 +574,31 @@ class BrowserSession:
         if self._ws is not None:
             return
         self._profile = tempfile.mkdtemp(prefix="dgc-browser-")
-        proc, port, log = self._spawn(sandbox=not self.allow_unsandboxed)
-        if not port and "No usable sandbox" in log:
-            # The distro blocks unprivileged user namespaces.  Say so, and say what it costs,
-            # rather than quietly dropping the renderer sandbox on the user's behalf.
-            if not self.allow_unsandboxed:
+        proc, port, log = self._spawn(sandbox=True)
+        self.boxed = False
+        if not port and sandbox_refused(log):
+            # The distro refuses Chrome the user namespaces its sandbox needs (Ubuntu 23.10+ grants them only to
+            # a browser with an AppArmor profile), and a Chrome outside /opt/google has no setuid helper (DGC's
+            # own download, Playwright's). bubblewrap lends them: Chrome's own sandbox runs inside its box.
+            boxed_log = ""
+            if box_available():
+                proc, port, boxed_log = self._spawn(sandbox=True, box=True)
+                self.boxed = bool(port)
+            if not port and not self.allow_unsandboxed:
+                # Say so, and say what it costs, rather than quietly dropping the renderer sandbox.
                 self._cleanup()
+                tried = (f" DGC's bubblewrap box did not start either: {_last_line(boxed_log)}." if boxed_log
+                         else " bubblewrap can't lend it them here either (it isn't installed, or this system "
+                              "doesn't let it make user namespaces).")
                 raise BrowserError(
                     "Chromium cannot start its sandbox on this system (unprivileged user "
-                    "namespaces are restricted, which is the default on Ubuntu 23.10+). "
-                    "Either install an AppArmor profile for the browser, or set "
+                    "namespaces are restricted, which is the default on Ubuntu 23.10+)." + tried +
+                    " Install Google Chrome from google.com/chrome (its package brings the AppArmor profile its "
+                    "sandbox needs), install an AppArmor profile for this browser, or set "
                     "`browser_allow_unsandboxed: true` in ~/.dgc/config.json to run without the "
                     "renderer sandbox -- which means a page exploit is no longer contained.")
-            proc, port, log = self._spawn(sandbox=False)
+            if not port:
+                proc, port, log = self._spawn(sandbox=False)
         if not port:
             self._cleanup()
             detail = log.strip().splitlines()[-1] if log.strip() else "no devtools port was written"

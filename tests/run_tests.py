@@ -1991,7 +1991,7 @@ def unit_tests(tmp: Path):
 
     # ---- browser tool ---------------------------------------------------------------------
     # The transport needs a real browser, so everything reachable without one is tested here and
-    # the live path is exercised separately (see browser_live_tests).
+    # the live path in tests/test_browser_setup.py (LiveBrowserTests).
     from dgc import browser as _browser_mod
     from dgc.tools import BROWSER_OPS as _BROWSER_OPS, take_pending_images as _take_images
 
@@ -2026,8 +2026,11 @@ def unit_tests(tmp: Path):
           "document.querySelector('[data-dgc-ref=\"e12\"]')",
           _browser_mod.BrowserSession._locator("e12"))
 
-    check("browser discovery never downloads a browser",
-          "never downloads" in _browser_mod.INSTALL_HINT.lower(), _browser_mod.INSTALL_HINT)
+    # With none, DGC now fetches one (founder, 2026-10-13; tests/test_browser_setup.py); where it can't, the
+    # browser still says how to install one.
+    check("browser discovery says how to install a browser",
+          "install one" in _browser_mod.INSTALL_HINT.lower() and "browser_path" in _browser_mod.INSTALL_HINT,
+          _browser_mod.INSTALL_HINT)
     try:
         _browser_mod.discover_browser("/definitely/not/a/browser")
         _missing_ok = False

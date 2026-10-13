@@ -358,6 +358,30 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### Sessions
 
+- **A Work session brings its own Chrome, so it can check the pages it builds.** With no Chrome or Chromium on the
+  computer, the browser tool used to stop at "No Chrome found", and a web page was shipped unchecked (in the
+  overnight battle, one only worked from a server, not from the file it was opened as). Now DGC fetches one, once,
+  and the first browser call waits for it (a minute or so), then says so:
+  - **Linux:** the same Google Chrome DGC downloads for Pip computers: Google's package, checked against Google's
+    signing key, with no admin password. Work runs it as a separate browser with a throwaway profile, so it never
+    shares a Pip's browser, cookies or tabs.
+  - **macOS:** Google's own installer, opened read-only, its app kept under `~/.dgc/browser` only when `codesign`
+    says it is intact and signed by Google LLC as Google Chrome, and re-checked weekly. (Google's "Chrome for
+    Testing" carries no Google signature on a Mac, so it isn't used.)
+  - A Chrome you have still comes first (on a Mac, `~/Applications` too), and a wrong `browser_path` is reported,
+    never replaced by a download. A download that failed is tried again after an hour, not on every call (one
+    DGC quit in the middle of, at once), and none starts where the Chrome couldn't run: user namespaces restricted
+    and no bubblewrap allowed to lend them (a stock Ubuntu 24.04; DGC tries a box rather than trusting that
+    bubblewrap is installed). There it says to install Google Chrome, whose package brings the AppArmor profile.
+- **A Chrome that can't build its own sandbox gets the help it needs from bubblewrap.** On Ubuntu 23.10+, only a
+  Chrome with an AppArmor profile gets the user namespaces its sandbox needs, so Playwright's Chromium and DGC's own
+  download refused to start unless you set `browser_allow_unsandboxed`. Such a Chrome now starts in a bubblewrap
+  box that lends them: Chrome's own sandbox runs inside and keeps every page contained (`chrome://sandbox`:
+  "adequately sandboxed", checked by a live test). The box also keeps your home folder and DGC's environment
+  variables (keys, tokens) out of Chrome's sight, bubblewrap's own process included, keeps proxy settings off the
+  command line other users can read, and ends with DGC, a crash included. ChatDGC's PDFs, printed by the
+  same browser, now get full typography there instead of the plain fallback.
+
 - **A hangup no longer half-stops DGC that was started with hangups ignored** (under `nohup`, or from an editor
   launched that way). DGC took SIGHUP over anyway: the CLI handed its colors back and carried on, and `dgc serve`
   stopped every turn. A signal ignored when DGC starts now stays ignored.
