@@ -426,7 +426,8 @@ TOOL_SCHEMAS = [
          "ref": {"type": "string",
                  "description": "element ref from a snapshot, such as e12, for click/type/select"},
          "key": {"type": "string", "description": "key name for press, such as Enter or Escape"},
-         "seconds": {"type": "number", "description": "wait timeout, capped at 30"}},
+         "seconds": {"type": "number", "description": "wait timeout, capped at 30"},
+         "signed_in": {"type": "boolean", "description": "true: the user's own signed-in Chrome; only for their logins"}},
         ["operation"]),
     _fn("web_search", "Search the web for current information (news, docs, versions, facts). Returns titles, "
         "URLs and snippets; follow up with web_fetch on a result URL to read the full page. Uses the user's "
@@ -2687,8 +2688,7 @@ def shutdown_browsers(owner: str | None = None) -> None:
             sessions = list(_BROWSERS.values())
             _BROWSERS.clear()
         else:
-            session = _BROWSERS.pop(owner, None)
-            sessions = [session] if session is not None else []
+            sessions = [found for key in (owner, owner + SIGNED_IN) if (found := _BROWSERS.pop(key, None)) is not None]
     for session in sessions:
         try:
             session.close()
@@ -2697,6 +2697,17 @@ def shutdown_browsers(owner: str | None = None) -> None:
 
 
 atexit.register(shutdown_browsers)
+
+
+def _drop_browser(key: str) -> None:
+    """Close one browser: the session's throwaway one (its owner key), never its tab in the user's Chrome with it."""
+    with _BROWSERS_LOCK:
+        session = _BROWSERS.pop(key, None)
+    if session is not None:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 def _shows_images(ctx) -> bool:
@@ -2728,14 +2739,24 @@ def _vision_route_label(ctx) -> str:
         return ""
 
 
-def _browser_session(ctx):
-    """One browser per agent session, launched on first use and reused after that."""
+SIGNED_IN = "#signed-in"          # the key of a session's tab in the user's own Chrome (browser_user)
+
+
+def _browser_session(ctx, signed_in: bool = False):
+    """One browser per agent session, launched on first use and reused after that; with ``signed_in``, one tab in the
+    user's own Chrome instead (browser_user), also kept for the session."""
     from .browser import BrowserSession, ensure_browser
-    owner = _tool_owner(ctx)
+    owner = _tool_owner(ctx) + (SIGNED_IN if signed_in else "")
     with _BROWSERS_LOCK:
         existing = _BROWSERS.get(owner)
         if existing is not None:
             return existing
+    if signed_in:
+        from .browser_user import UserChromeSession
+        session = UserChromeSession()
+        with _BROWSERS_LOCK:
+            winner = _BROWSERS.setdefault(owner, session)
+        return winner
     cfg = getattr(ctx, "config", None)
     configured = str(cfg.get("browser_path", "") if cfg else "")
     unsandboxed = bool(cfg.get("browser_allow_unsandboxed", False) if cfg else False)
@@ -2754,9 +2775,12 @@ def _browser_session(ctx):
     return winner
 
 
-def _browser_snapshot_text(session, ctx, *, header: str = "") -> str:
+def _browser_snapshot_text(session, ctx, *, header: str = "", guard=None) -> str:
     from .browser import MAX_SNAPSHOT_CHARS
     snap = session.snapshot()
+    stop = guard(snap.get("url", "")) if guard else ""
+    if stop:
+        return stop                     # the page this snapshot read, not where the tab was a moment before
     lines = list(snap.get("lines", []))
     body = "\n".join(lines)
     if len(body) > MAX_SNAPSHOT_CHARS:
@@ -2775,6 +2799,8 @@ def _browser_snapshot_text(session, ctx, *, header: str = "") -> str:
 
 def browser_tool(args: dict, ctx) -> str:
     """Drive a real browser. Never raises into the loop: every failure comes back as text."""
+    if args.get("signed_in") is True:
+        return _signed_in_operation(args, ctx)
     result = _browser_operation(args, ctx)
     with _BROWSERS_LOCK:
         session = _BROWSERS.get(_tool_owner(ctx))
@@ -2785,41 +2811,168 @@ def browser_tool(args: dict, ctx) -> str:
     return result
 
 
-def _browser_operation(args: dict, ctx) -> str:
+def _host(url: str) -> str:
+    """The site of an http(s) address as both Python and Chrome read it ("" for anything else: permissions._origin)."""
+    from urllib.parse import urlsplit
+    from .permissions import _origin
+    origin = _origin(str(url or ""))
+    return (urlsplit(origin).hostname or "").lower() if origin else ""
+
+
+def signed_in_page(ctx) -> str:
+    """Where DGC's tab in the user's own Chrome is now ("" when there is none or it can't tell), for the permission
+    check of a call that acts there."""
+    with _BROWSERS_LOCK:
+        session = _BROWSERS.get(_tool_owner(ctx) + SIGNED_IN)
+    if session is None or getattr(session, "_ws", True) is None:
+        return ""
+    try:
+        return str(session.evaluate_json("location.href") or "")
+    except Exception:                    # noqa: BLE001 -- the tool's own check says what is wrong
+        return ""
+
+
+def _signed_in_denied(ctx, url: str) -> str:
+    """The user's deny rule for this page of their signed-in Chrome, if one matches (checked where the tab is, not only
+    where it was asked to go)."""
+    from .permissions import DENY, PermissionEngine
+    cfg = getattr(ctx, "config", None)
+    saved = getattr(cfg, "permissions", None) if not isinstance(cfg, dict) else cfg.get("permissions")
+    session_rules = getattr(cfg, "session_permissions", None) or {}
+    rules = {action: [*((saved or {}).get(action, []) or []), *(session_rules.get(action, []) or [])]
+             for action in ("allow", "ask", "deny")}
+    try:
+        decision, reason = PermissionEngine("default", rules).decide("browser", {"operation": "open", "url": url,
+                                                                              "signed_in": True})
+    except Exception:                    # noqa: BLE001 -- a rule DGC can't read never opens a page
+        return "DGC couldn't read the user's browser rules"
+    return reason if decision == DENY else ""
+
+
+_CONNECTION_GONE = ("devtools connection closed", "Session with given id not found", "No target with given id",
+                    "Target closed", "the browser session is not running", "timed out", "said no", "Nobody answered",
+                    "can't reach the user's Chrome", "isn't running", "couldn't use the user's Chrome")
+
+
+def _signed_in_operation(args: dict, ctx) -> str:
+    """The browser tool in the user's own Chrome: one tab of DGC's, on the sites the user allowed. Opening a site is
+    what asks them (permissions.py: every mode); reading and acting happen only where they allowed it. Wherever the
+    tab goes by itself (a redirect, a click, a script) is checked before anything of it is read -- against the address
+    of what was read, not where the tab was a moment before: a site they haven't allowed, or one their rules deny,
+    stops there."""
+    from .browser import BrowserError
+    from .permissions import _origin
+    operation = str(args.get("operation", "")).strip().lower()
+    owner = _tool_owner(ctx) + SIGNED_IN
+    if operation == "close":
+        with _BROWSERS_LOCK:
+            session = _BROWSERS.pop(owner, None)
+        if session is not None:
+            session.close()
+        return "closed DGC's tab in the user's Chrome; the rest of their browser is as it was."
+    plain = {k: v for k, v in args.items() if k != "signed_in"}
+    wrong = _browser_args_error(operation, plain)          # nothing reaches the user's Chrome for a call that can't run
+    if wrong:
+        return wrong
+    url = str(args.get("url", "")).strip()
+    opening = operation == "open" or (operation == "screenshot" and bool(url))
+    if url and not opening:
+        return f"error: {operation} takes no url in the user's Chrome; use open to go somewhere (that asks the user)."
+    if opening and not _origin(url):
+        return (f"error: {operation} needs an http:// or https:// address DGC can read as one site (no backslash, "
+                "spaces, %-escapes or user name in its host)")
+    with _BROWSERS_LOCK:
+        session = _BROWSERS.get(owner)
+    if session is None and not opening:
+        return "error: open a site in the user's Chrome first (that asks them); there is no tab of DGC's there yet."
+    if opening:
+        denied = _signed_in_denied(ctx, url)
+        if denied:
+            return f"PERMISSION DENIED: {denied}. Do not retry this exact action."
+    try:
+        session = session or _browser_session(ctx, signed_in=True)
+        if opening:
+            session.allowed_hosts.add(_origin(url))     # this call is the user's permission for this site (its origin)
+        else:
+            session.start()
+
+        def guard(here: str | None = None) -> str:
+            here = str(session.evaluate_json("location.href") or "") if here is None else str(here or "")
+            origin = _origin(here)
+            if not origin or origin not in session.allowed_hosts:
+                if here.startswith("chrome-error://") or not here:
+                    return "The page didn't load in the user's Chrome. Nothing was read."
+                return (f"The tab in the user's Chrome is now on {origin or 'a page that is not an http(s) site'}, which "
+                        "the user hasn't allowed. Nothing from there was read. Use open with that address to ask them.")
+            denied = _signed_in_denied(ctx, here)
+            if denied:
+                return f"The tab in the user's Chrome is on {here}, which their rules deny ({denied}). Nothing was read."
+            return ""
+        stop = "" if opening else guard()
+        if stop:
+            return f"error: {stop}"
+        return _browser_operation(plain, ctx, session=session, guard=guard)
+    except (BrowserError, OSError) as error:
+        said = str(error) if isinstance(error, BrowserError) else f"the connection to the user's Chrome ended ({error})"
+        if isinstance(error, OSError) or any(sign in said for sign in _CONNECTION_GONE):
+            # The user's Chrome went away, closed DGC's window, or said no: start again next time (Chrome asks again).
+            with _BROWSERS_LOCK:
+                dropped = _BROWSERS.pop(owner, None)
+            if dropped is not None:
+                try:
+                    dropped.close()
+                except Exception:          # noqa: BLE001
+                    pass
+        return f"error: {said}"
+
+
+def _browser_args_error(operation: str, args: dict) -> str:
+    """What is wrong with a browser call's arguments, before anything starts ("" when nothing is)."""
+    url = str(args.get("url", "")).strip()
+    if operation not in BROWSER_OPS:
+        return f"error: unknown operation {operation!r}; expected one of {', '.join(BROWSER_OPS)}"
+    if operation == "open":
+        if not url:
+            return "error: open needs a url"
+        if not re.match(r"^https?://", url, re.IGNORECASE):
+            return "error: open needs an http:// or https:// url"
+    if operation == "screenshot" and url and not re.match(r"^https?://", url, re.IGNORECASE):
+        return "error: screenshot opens its url first, so it needs an http:// or https:// url"
+    if operation in ("click", "type", "select") and not str(args.get("ref", "")).strip():
+        return f"error: {operation} needs a ref from a snapshot, such as e12"
+    if operation == "type" and not str(args.get("text", "")):
+        return "error: type needs text"
+    if operation == "select" and not str(args.get("text", "")).strip():
+        return "error: select needs the option text in `text`"
+    if operation == "press" and not str(args.get("key", "")).strip():
+        return "error: press needs a key, such as Enter"
+    if operation == "find" and not str(args.get("text", "")).strip():
+        return "error: find needs text"
+    return ""
+
+
+def _browser_operation(args: dict, ctx, session=None, guard=None) -> str:
     from .browser import BrowserError
     operation = str(args.get("operation", "")).strip().lower()
     if operation not in BROWSER_OPS:
         return f"error: unknown operation {operation!r}; expected one of {', '.join(BROWSER_OPS)}"
     try:
         if operation == "close":
-            shutdown_browsers(_tool_owner(ctx))
+            _drop_browser(_tool_owner(ctx))
             return "browser closed."
         # Validate every argument BEFORE launching anything. Rejecting `javascript:` should not
         # cost the user a browser process, and a missing ref should not either.
         url = str(args.get("url", "")).strip()
-        if operation == "open":
-            if not url:
-                return "error: open needs a url"
-            if not re.match(r"^https?://", url, re.IGNORECASE):
-                return "error: open needs an http:// or https:// url"
-        if operation == "screenshot" and url and not re.match(r"^https?://", url, re.IGNORECASE):
-            return "error: screenshot opens its url first, so it needs an http:// or https:// url"
-        if operation in ("click", "type", "select") and not str(args.get("ref", "")).strip():
-            return f"error: {operation} needs a ref from a snapshot, such as e12"
-        if operation == "type" and not str(args.get("text", "")):
-            return "error: type needs text"
-        if operation == "select" and not str(args.get("text", "")).strip():
-            return "error: select needs the option text in `text`"
-        if operation == "press" and not str(args.get("key", "")).strip():
-            return "error: press needs a key, such as Enter"
-        if operation == "find" and not str(args.get("text", "")).strip():
-            return "error: find needs text"
-        session = _browser_session(ctx)
+        wrong = _browser_args_error(operation, args)
+        if wrong:
+            return wrong
+        session = session or _browser_session(ctx)
+        blocked = guard or (lambda: "")
         if operation == "open":
             readiness = session.navigate(url)
-            return _browser_snapshot_text(session, ctx, header=f"navigation: {readiness}")
+            return blocked() or _browser_snapshot_text(session, ctx, header=f"navigation: {readiness}", guard=guard)
         if operation == "snapshot":
-            return _browser_snapshot_text(session, ctx)
+            return blocked() or _browser_snapshot_text(session, ctx, guard=guard)
         if operation == "screenshot":
             navigation = ""
             if url:
@@ -2827,7 +2980,13 @@ def _browser_operation(args: dict, ctx) -> str:
                 # happened to be open (about:blank before any open) while the card showed the url
                 # sent the model to conclusions about a page it never saw.
                 navigation = f"navigation: {session.navigate(url)}. "
+            stop = blocked()
+            if stop:
+                return stop
             png = session.screenshot_png()
+            stop = blocked()                # and still there once the picture is taken
+            if stop:
+                return stop
             if len(png) > MAX_SCREENSHOT_BYTES:
                 return (f"error: the screenshot came back at {len(png) // 1024} KB, over the "
                         f"{MAX_SCREENSHOT_BYTES // 1024} KB ceiling; narrow the viewport and retry")
@@ -2874,7 +3033,13 @@ def _browser_operation(args: dict, ctx) -> str:
                     f"({len(png) // 1024} KB) saved to {where}. {seen}")
         if operation == "find":
             needle = str(args.get("text", "")).strip()
+            stop = blocked()
+            if stop:
+                return stop
             snap = session.snapshot()
+            stop = guard(snap.get("url", "")) if guard else ""
+            if stop:
+                return stop
             hits = [line for line in snap.get("lines", []) if needle.lower() in line.lower()]
             if not hits:
                 return f"no elements matched {needle!r} on {snap.get('url', '')}"
@@ -2884,12 +3049,24 @@ def _browser_operation(args: dict, ctx) -> str:
                 body += f"\n… and {len(hits) - len(shown)} more"
             return _safe_output(f"{len(hits)} match(es) for {needle!r}:\n{body}", ctx)
         if operation == "console":
+            stop = blocked()
+            if stop:
+                return stop
             messages = session.console_messages()
+            stop = blocked()
+            if stop:
+                return stop
             if not messages:
                 return "the page logged nothing to the console."
             return _safe_output("\n".join(messages), ctx)
         if operation == "requests":
+            stop = blocked()
+            if stop:
+                return stop
             entries = session.network_requests()
+            stop = blocked()
+            if stop:
+                return stop
             if not entries:
                 return "no network responses were recorded for this page."
             rows = []
@@ -2910,7 +3087,13 @@ def _browser_operation(args: dict, ctx) -> str:
             while time.time() < deadline:
                 if not needle:
                     break
+                stop = blocked()
+                if stop:
+                    return stop
                 snap = session.snapshot()
+                stop = guard(snap.get("url", "")) if guard else ""
+                if stop:
+                    return stop
                 if any(needle.lower() in line.lower() for line in snap.get("lines", [])):
                     return f"{needle!r} appeared."
                 time.sleep(0.4)
@@ -2928,14 +3111,24 @@ def _browser_operation(args: dict, ctx) -> str:
                 value = str(args.get("text", "")).strip()
                 label = session.select_option(ref, value)
                 what = f"selected {label!r} in {ref}"
-            return _browser_snapshot_text(session, ctx, header=what)
+            stop = blocked()                       # where the action took the tab, before anything of it is read
+            return f"{what}. {stop}" if stop else _browser_snapshot_text(session, ctx, header=what, guard=guard)
         if operation == "press":
             name = session.press(str(args.get("key", "")).strip())
-            return _browser_snapshot_text(session, ctx, header=f"pressed {name}")
+            stop = blocked()
+            return f"pressed {name}. {stop}" if stop else _browser_snapshot_text(session, ctx, header=f"pressed {name}", guard=guard)
         return f"error: {operation} is not implemented yet"
     except BrowserError as error:
-        return f"error: {error}"
+        if guard is not None:
+            raise                           # the user's Chrome: _signed_in_operation drops the connection and says so
+        if "cannot start its sandbox" in str(error):
+            # Discovered again next time: once the user installs Chrome, that one is used.
+            _drop_browser(_tool_owner(ctx))
+        from .browser import install_request_for
+        return f"error: {install_request_for(error, getattr(ctx, 'cancelled', None))}"
     except OSError as error:
+        if guard is not None:
+            raise
         return f"error: the browser could not be reached: {error}"
 
 

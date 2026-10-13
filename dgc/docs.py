@@ -2561,15 +2561,43 @@ environment variables are not in it (not even in bubblewrap's own process). It h
 read-only, a fresh `/tmp`, the throwaway profile and Chrome's own files, and it ends with DGC.
 
 bubblewrap has to be allowed to make user namespaces itself, and DGC checks that it is, not just that it
-is installed: a stock Ubuntu 24.04 has bubblewrap but no AppArmor profile that lets it. Where it can't,
-the browser says so:
+is installed: a stock Ubuntu 24.04 has bubblewrap but no AppArmor profile that lets it. There, only a
+Chrome an admin installed can sandbox itself, so DGC downloads Google Chrome's package (apt checks it
+against Google's signing key) and the model asks you to install it once:
 
-    Chromium cannot start its sandbox on this system…
+    sudo apt update && sudo apt install ~/.dgc/browser/linux/google-chrome-stable_<version>_<arch>.deb
 
-Then install Google Chrome from google.com/chrome (its package brings the AppArmor profile its sandbox
-needs), install an AppArmor profile for your browser, or set `browser_allow_unsandboxed: true` in
-`~/.dgc/config.json`. The last is a real trade: without a sandbox, a page exploit is no longer
-contained. DGC will not make that choice for you, and it doesn't download a Chrome that couldn't start.
+That puts Chrome in `/opt/google/chrome`, which Ubuntu's own AppArmor profile covers, and apt keeps it
+updated. The model is told not to work around it: no browser with `--no-sandbox`, and no change to
+`browser_allow_unsandboxed`. That setting stays yours: it runs the browser without a sandbox, so a page
+exploit is no longer contained.
+
+## Your own Chrome, signed in
+
+For a task that needs your logins (your email, a dashboard you're signed in to), the browser can use the
+Chrome you're running, with `signed_in: true`. DGC opens a window of its own there and works in that one
+tab: it never reads or touches your other tabs, never reads cookies or storage, and closes its tab when
+the session ends. Pips don't use it; they have computers of their own.
+
+Turn it on once in Chrome 144 or later: open `chrome://inspect/#remote-debugging` and allow remote
+debugging. Chrome then asks you every time DGC connects, and shows its "controlled by automated test
+software" banner while it is. DGC finds it through the `DevToolsActivePort` file Chrome writes in its
+profile folder (Google Chrome, Chrome Beta, Edge, Brave and Chromium, on Linux, macOS and Windows).
+
+Opening a site asks you first, **in every mode, auto included**: "Use your signed-in Chrome on
+mail.google.com?". Allow once is that visit; Always allow saves `Browser(signed-in:https://mail.google.com)`,
+that site and nothing else. A site is its origin: scheme, host and port, written as Chrome writes it
+(`http://bank.test:80/` and `http://BANK.test./` are `http://bank.test`). A rule written for the
+throwaway browser never covers your signed-in one, but a deny does, checked against the page the tab is
+on: `Browser(signed-in:*)` in `deny` turns it off, `Browser(signed-in:https://site/private*)` covers
+that path, and an `ask` rule for a site makes clicks and typing there ask too.
+
+Reading and acting happen only on a site you allowed. When a redirect, a click or the page itself takes
+the tab to another site, DGC reads nothing of it (each read is judged by the page it actually read), and
+opening that site asks you again. A click or keypress never carries an address. Password, card and
+one-time-code fields are never read out, alerts are dismissed rather than left blocking the tab, the
+console and network log start again with each page, and tabs DGC's page opened close with it. Plan mode
+never uses it.
 
 ## Permissions
 

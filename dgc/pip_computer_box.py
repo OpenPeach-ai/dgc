@@ -367,6 +367,52 @@ def _own_libraries(chrome: Path) -> list[str]:
     return ["--ro-bind", str(root / "usr"), "/opt/desk/usr", "--setenv", "LD_LIBRARY_PATH", libs]
 
 
+# Ubuntu's own profile for bubblewrap (shipped, off by default): bwrap may make namespaces, and what runs inside gets
+# no capabilities -- enough for a Pip's box, whose browser is held by the box and its proxy, not its own sandbox.
+UBUNTU_BWRAP_PROFILE = ("sudo apt update && sudo apt install apparmor-profiles && sudo install -m 0644 "
+                        "/usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/ && "
+                        "sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict")
+_BOX_PROBE: dict = {}
+
+
+def box_runs() -> tuple[bool, str]:
+    """Whether bubblewrap can build a Pip's box here, and if not why, in its own words. Installed is not enough: a
+    stock Ubuntu 24.04 has bwrap but lets no program without an AppArmor profile make user namespaces. A box with the
+    computer's own isolation is tried once (cached per bwrap binary)."""
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        return False, ""
+    try:
+        info = os.stat(bwrap)
+    except OSError:
+        return False, ""
+    key = (bwrap, info.st_size, info.st_mtime)
+    if key not in _BOX_PROBE:
+        try:
+            probe = subprocess.run([bwrap, "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
+                                    "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"],
+                                   capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL,
+                                   env={k: os.environ[k] for k in ("PATH", "LANG") if k in os.environ})
+            said = (probe.stderr or "").strip().splitlines()
+            result = (probe.returncode == 0, said[-1][:200] if said else "")
+        except (OSError, subprocess.SubprocessError) as error:
+            result = (False, str(error)[:200])
+        if not result[0]:
+            return result             # tried again next time: the user may have just turned the profile on
+        _BOX_PROBE[key] = result
+    return _BOX_PROBE[key]
+
+
+def box_refused_reason(said: str) -> str:
+    """What to tell the user when bubblewrap is here but can't build a box."""
+    from .browser_setup import userns_restricted
+    if userns_restricted():
+        return ("Ubuntu lets only programs with an AppArmor profile make the namespaces a Pip's computer needs, and "
+                "bubblewrap has none here. Turn on Ubuntu's own profile for it, once, in a terminal: "
+                + UBUNTU_BWRAP_PROFILE)
+    return "bubblewrap can't build a Pip's computer on this machine" + (f" ({said})" if said else "") + "."
+
+
 def capability(home: Path | None = None) -> dict:
     """Whether this computer can host Pip computers, and in one sentence why not."""
     if sys.platform == "darwin":
@@ -384,6 +430,9 @@ def capability(home: Path | None = None) -> dict:
         return {"available": False, "reason": "Pip computers run on Linux and macOS for now; Windows is coming."}
     if not shutil.which("bwrap"):
         return {"available": False, "reason": "Install bubblewrap (sudo apt install bubblewrap) to give Pips a computer."}
+    works, said = box_runs()
+    if not works:
+        return {"available": False, "reason": box_refused_reason(said)}
     chrome = find_chrome(home)
     if chrome is None:
         # DGC fetches Chrome itself (pip_screen_setup): say that, not an install command, while it can.

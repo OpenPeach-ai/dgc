@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -51,13 +52,11 @@ def supported() -> tuple[bool, str]:
         ok, why = pip_screen_setup.supported()
         if not ok:
             return False, f"DGC fetches Chrome with apt, on Debian, Ubuntu and their family ({why.rstrip('.')})."
-        from .browser import box_available
-        if userns_restricted() and not box_available():
-            # A Chrome DGC fetched could not start here: its sandbox needs the user namespaces this system keeps for
-            # programs with an AppArmor profile, and bubblewrap can't lend them (not installed, or not allowed to).
-            return False, ("this Linux keeps user namespaces from programs without an AppArmor profile, so a Chrome "
-                           "DGC fetched couldn't start its sandbox. Install Google Chrome from google.com/chrome: its "
-                           "package brings that profile.")
+        if needs_installed_chrome():
+            # A Chrome DGC unpacked could not start here (its sandbox needs what this system keeps for programs an admin
+            # installed): the browser asks the user to install Google's package instead (chrome_package).
+            return False, ("this Linux keeps the namespaces a browser's sandbox needs for programs an admin installed, so "
+                           "a Chrome DGC unpacked couldn't start; Google Chrome's package, installed once, can.")
         return True, ""
     if sys.platform == "darwin":
         for tool in ("hdiutil", "ditto", "codesign"):
@@ -233,6 +232,96 @@ def _refresh_later() -> None:
             _mac_start()
     except Exception:                    # noqa: BLE001 -- a refresh never costs the browser it already has
         pass
+
+
+# ---------------------------------------------------------------- Linux: a Chrome the user installs once
+
+def needs_installed_chrome() -> bool:
+    """A browser DGC fetched couldn't sandbox itself here: user namespaces are kept for programs an admin
+    installed (Ubuntu 23.10+), and bubblewrap may not lend them. Only a Chrome installed by its package (at
+    /opt/google/chrome, which Ubuntu's own AppArmor profile covers) can. Debian and Ubuntu family only."""
+    if not sys.platform.startswith("linux") or not userns_restricted():
+        return False
+    from . import pip_screen_setup
+    from .browser import box_available
+    return pip_screen_setup.supported()[0] and not box_available()
+
+
+def chrome_package(*, cancelled=None) -> Path:
+    """Google Chrome's package for the user to install once: downloaded by apt from Google's repository alone, which
+    apt checks against Google's signing key (pinned in pip_screen_setup) and the package against the signed list.
+    Kept under ~/.dgc/browser/linux, and fetched again after a week. Raises RuntimeError with why not."""
+    import fcntl
+    from . import pip_screen_setup
+    from .config import USER_HOME
+    home = Path(USER_HOME) / "browser" / "linux"
+    home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock = os.open(home / ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)                # another session fetching it: wait, then use its copy
+        kept = sorted(home.glob(f"{pip_screen_setup.CHROME_PACKAGE}_*.deb"), key=lambda p: p.stat().st_mtime)
+        if kept and time.time() - kept[-1].stat().st_mtime < 7 * 24 * 3600:
+            return kept[-1]
+        machine = pip_screen_setup.arch()
+        if not machine:
+            raise RuntimeError("This computer's architecture could not be read.")
+        apt = home / "apt"
+        shutil.rmtree(apt, ignore_errors=True)
+        for part in ("state/lists/partial", "cache/archives/partial", "parts"):
+            (apt / part).mkdir(parents=True, exist_ok=True)
+        pip_screen_setup._google_key(apt / "google.asc")
+        (apt / "parts" / "google-chrome.list").write_text(
+            f"deb [arch={machine} signed-by={apt / 'google.asc'}] {pip_screen_setup.GOOGLE_REPOSITORY} stable main\n",
+            encoding="utf-8")
+        options = pip_screen_setup._apt_options(apt)
+        download = Path(tempfile.mkdtemp(prefix="download-", dir=home))
+        try:
+            for argv, step in ((["apt-get", *options, "update"], "Reading Google's package list"),
+                               (["apt-get", *options, "download", pip_screen_setup.CHROME_PACKAGE], "Downloading Google Chrome")):
+                _run_cancellable(argv, step, download, cancelled)
+            debs = list(download.glob(f"{pip_screen_setup.CHROME_PACKAGE}_*.deb"))
+            if len(debs) != 1:
+                raise RuntimeError(f"Google has no Chrome package for this computer ({machine}).")
+            target = home / debs[0].name
+            os.replace(debs[0], target)
+            os.utime(target)          # when DGC fetched it: apt dates a download by the server's Last-Modified
+        finally:
+            shutil.rmtree(download, ignore_errors=True)
+            shutil.rmtree(apt, ignore_errors=True)
+        for old in kept:
+            if old != target:
+                old.unlink(missing_ok=True)
+        return target
+    finally:
+        os.close(lock)
+
+
+def _run_cancellable(argv: list[str], step: str, cwd: Path, cancelled) -> None:
+    proc = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                            text=True, env={**os.environ, "LC_ALL": "C", "DEBIAN_FRONTEND": "noninteractive"})
+    deadline = time.monotonic() + 15 * 60
+    while proc.poll() is None:
+        if (cancelled is not None and cancelled.is_set()) or time.monotonic() > deadline:
+            proc.kill()
+            proc.wait()
+            raise RuntimeError(f"{step} was stopped.")
+        time.sleep(0.2)
+    if proc.returncode != 0:
+        tail = (proc.stdout.read() if proc.stdout else "").strip().splitlines()[-2:]
+        raise RuntimeError(f"{step} failed: " + " ".join(tail)[:300])
+
+
+def install_request(package: Path) -> str:
+    """What the browser tells the model on a computer where only a Chrome the user installs can sandbox itself."""
+    return ("Chrome can't sandbox itself on this computer: Ubuntu gives the namespaces a browser's sandbox needs only to "
+            "programs an admin installed. DGC downloaded Google Chrome's package, and apt checked it against Google's "
+            f"signing key: {package}. Ask the user to install it once, with their password: "
+            f"`sudo apt update && sudo apt install {shlex.quote(str(package))}` (the update first: Chrome needs a few of "
+            "the system's own packages, and stale lists can't find them). Don't run it yourself: it's theirs to run. It "
+            "puts Chrome where Ubuntu's own AppArmor "
+            "profile lets it sandbox itself, and apt keeps it updated. Then use the browser again. Don't work around "
+            "this: no browser with --no-sandbox, and no change to browser_allow_unsandboxed; those are the user's "
+            "choice to make.")
 
 
 # ---------------------------------------------------------------- macOS: Google's installer image

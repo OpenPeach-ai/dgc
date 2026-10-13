@@ -117,6 +117,14 @@ def discover_browser(configured: str = "") -> Path:
         path = Path(env).expanduser()
         if path.exists():
             return path
+    if sys.platform.startswith("linux"):
+        from . import browser_setup
+        if browser_setup.userns_restricted():
+            # Where only a Chrome an admin installed can sandbox itself, that one first, before Playwright's.
+            from .pip_computer_box import _real_binary
+            for literal in _LINUX_CANDIDATES:
+                if _real_binary(literal):
+                    return Path(literal)
     for candidate in _playwright_browsers():
         return candidate
     for name in _PATH_CANDIDATES:
@@ -141,6 +149,26 @@ def discover_browser(configured: str = "") -> Path:
     raise BrowserError(INSTALL_HINT)
 
 
+def _install_request(cancelled=None) -> str:
+    """Google Chrome's package, fetched and checked, and what to ask the user (browser_setup.install_request)."""
+    from . import browser_setup
+    try:
+        return browser_setup.install_request(browser_setup.chrome_package(cancelled=cancelled))
+    except RuntimeError as error:
+        return (f"Chrome can't sandbox itself on this computer, and DGC couldn't download Google Chrome's package for the "
+                f"user to install ({error}). Ask the user to install Google Chrome from google.com/chrome. Don't work "
+                "around this with a browser that runs without its sandbox.")
+
+
+def install_request_for(error: BrowserError, cancelled=None) -> str:
+    """For a browser that couldn't start its sandbox: on a computer where only an installed Chrome can, what to ask
+    the user (with the package fetched); otherwise the error as it was."""
+    from . import browser_setup
+    if "cannot start its sandbox" in str(error) and browser_setup.needs_installed_chrome():
+        return _install_request(cancelled)
+    return str(error)
+
+
 def ensure_browser(configured: str = "", *, cancelled=None) -> tuple[Path, str]:
     """A browser to drive, fetching one when this computer has none (founder, 2026-10-13): (binary, a note
     for the model when DGC just downloaded it). An explicit ``browser_path`` that is wrong is said, never
@@ -151,6 +179,8 @@ def ensure_browser(configured: str = "", *, cancelled=None) -> tuple[Path, str]:
     except BrowserError:
         if configured:
             raise
+        if browser_setup.needs_installed_chrome():
+            raise BrowserError(_install_request(cancelled)) from None
         ok, why = browser_setup.supported()
         if not ok:
             raise BrowserError(f"{INSTALL_HINT} ({why})") from None
@@ -290,6 +320,12 @@ _SNAPSHOT_JS = r"""
   const SKIP = new Set(['SCRIPT', 'STYLE', 'HEAD', 'META', 'LINK', 'NOSCRIPT', 'TEMPLATE', 'SVG']);
   const refs = {};
   let counter = 0, truncated = false;
+  // A password, card or one-time code: by its type, any autocomplete token ("billing cc-number", "section-x cc-csc"),
+  // or a name a page gives it when it shows a password as text.
+  const secret = (el) => (el.type || '').toLowerCase() === 'password'
+    || (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/)
+         .some((t) => /^(cc-|current-password$|new-password$|one-time-code$)/.test(t))
+    || /pass(word|wd|code)?|pwd|otp|cvv|cvc|card.?num|security.?code/i.test((el.name || '') + ' ' + (el.id || ''));
   const clean = (value) => {
     const text = (value || '').replace(/\s+/g, ' ').trim();
     return text.length > MAX_NAME ? text.slice(0, MAX_NAME) + '…' : text;
@@ -356,7 +392,8 @@ _SNAPSHOT_JS = r"""
       if (el.hasAttribute('disabled')) bits.push('disabled');
       if (el.checked === true) bits.push('checked');
       if (el.value && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
-        bits.push('value=' + clean(String(el.value)));
+        // A saved password or card the browser filled in (the user's own Chrome autofills) is never read out.
+        bits.push('value=' + (secret(el) ? '(hidden)' : clean(String(el.value))));
       }
       const level = el.tagName.match(/^H([1-6])$/) ? ' level=' + el.tagName[1] : '';
       lines.push('  '.repeat(Math.min(depth, 12)) + '- ' + (role || 'generic') + level +
@@ -421,9 +458,12 @@ def box_available() -> bool:
                  "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
                  unshare, "--user", "--map-root-user", "--mount", "--pid", "--fork", "true"],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, env=box_env())
-            _BOX_PROBE[key] = probe.returncode == 0
+            works = probe.returncode == 0
         except (OSError, subprocess.SubprocessError):
-            _BOX_PROBE[key] = False
+            works = False
+        if not works:
+            return False              # asked again next time: the user may have just allowed it
+        _BOX_PROBE[key] = True
     return _BOX_PROBE[key]
 
 
@@ -512,6 +552,7 @@ class BrowserSession:
         self._page = _Page()
         self.current_url = ""
         self.boxed = False               # running in DGC's bubblewrap box (box_argv), not Chrome's own sandbox
+        self._session_id = ""            # one tab of a browser DGC shares (browser_user): every command goes to it
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -559,6 +600,7 @@ class BrowserSession:
             if proc.poll() is not None:
                 break
             time.sleep(0.1)
+        still_starting = proc.poll() is None
         try:
             proc.kill()
         except OSError:
@@ -568,6 +610,9 @@ class BrowserSession:
                 log = handle.read()[-4000:]
         except OSError:
             log = ""
+        if still_starting:
+            # Slow, not broken (a busy or emulated machine): its last log line is only some warning, so say what happened.
+            log += f"\nstill starting after {LAUNCH_TIMEOUT:.0f}s, so DGC stopped it; try again"
         return proc, "", log
 
     def start(self) -> None:
@@ -654,13 +699,16 @@ class BrowserSession:
         self._next_id += 1
         message_id = self._next_id
         self._ws.settimeout(timeout)
-        self._ws.send({"id": message_id, "method": method, "params": params or {}})
+        payload = {"id": message_id, "method": method, "params": params or {}}
+        if self._session_id:
+            payload["sessionId"] = self._session_id
+        self._ws.send(payload)
         deadline = time.monotonic() + timeout
         while True:
             if time.monotonic() > deadline:
                 raise BrowserError(f"{method} timed out after {timeout:.0f}s")
             message = self._ws.recv()
-            if message.get("id") == message_id:
+            if message.get("id") == message_id:     # ids are this connection's own: an error about a closed tab too
                 if "error" in message:
                     detail = message["error"].get("message", "unknown devtools error")
                     raise BrowserError(f"{method}: {detail}")
@@ -669,7 +717,34 @@ class BrowserSession:
 
     def _observe(self, message: dict) -> None:
         """Keep the events worth reporting; drop the rest without buffering them forever."""
+        if self._session_id and message.get("sessionId") != self._session_id:
+            return                        # another tab's, in a browser DGC shares: never DGC's to read
         method = message.get("method", "")
+        params = message.get("params", {}) or {}
+        if method == "Page.javascriptDialogOpening" and self._ws is not None:
+            # An alert, confirm or prompt blocks every command after it. Answered at once (left as it was, or leave the
+            # page for a beforeunload), without waiting: its reply is told apart by its id.
+            self._next_id += 1
+            answer = {"id": self._next_id, "method": "Page.handleJavaScriptDialog",
+                      "params": {"accept": params.get("type") == "beforeunload"}}
+            where = message.get("sessionId") or self._session_id     # the tab it came from (a Pip's box has several)
+            if where:
+                answer["sessionId"] = where
+            try:
+                self._ws.send(answer)
+            except OSError:
+                pass
+            if len(self._page.console) < MAX_CONSOLE_MESSAGES:
+                self._page.console.append(f"dialog ({params.get('type', 'alert')}, dismissed): "
+                                          f"{str(params.get('message', ''))[:200]}")
+            return
+        if method == "Page.frameNavigated" and not (params.get("frame") or {}).get("parentId"):
+            # A new page in the tab: what the last one logged and loaded is not this one's (in the user's Chrome, it may
+            # be a site they never allowed). Its own document request stays.
+            here = str((params.get("frame") or {}).get("url", ""))
+            self._page.console = []
+            self._page.requests = [r for r in self._page.requests if r.get("url") == here]
+            return
         params = message.get("params", {}) or {}
         if method in ("Network.requestWillBeSent", "Network.responseReceived",
                       "Network.loadingFinished", "Network.loadingFailed"):
@@ -743,7 +818,9 @@ class BrowserSession:
             except (BrowserError, socket.timeout, OSError):
                 break
             self._observe(message)
-            if message.get("method") == "Page.loadEventFired":
+            # Only this tab's load (another tab of a browser DGC shares loads on its own time).
+            if message.get("method") == "Page.loadEventFired" and (not self._session_id
+                                                                 or message.get("sessionId") == self._session_id):
                 loaded = True
                 break
         if not loaded:
@@ -800,7 +877,11 @@ class BrowserSession:
             " if (!el) return JSON.stringify({ok: false});"
             " el.scrollIntoView({block: 'center', inline: 'center'});"
             " const r = el.getBoundingClientRect();"
-            " const label = (el.innerText || el.value || el.getAttribute('aria-label') || '')"
+            " const hidden = (el.type || '').toLowerCase() === 'password'"
+            "   || (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/)"
+            "        .some((t) => /^(cc-|current-password$|new-password$|one-time-code$)/.test(t))"
+            "   || /pass(word|wd|code)?|pwd|otp|cvv|cvc|card.?num|security.?code/i.test((el.name || '') + ' ' + (el.id || ''));"
+            " const label = (el.innerText || (hidden ? '' : el.value) || el.getAttribute('aria-label') || '')"
             "   .replace(/\\s+/g, ' ').trim().slice(0, 80);"
             " return JSON.stringify({ok: r.width > 0 && r.height > 0,"
             "   x: r.left + r.width / 2, y: r.top + r.height / 2, label: label,"

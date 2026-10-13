@@ -1216,7 +1216,9 @@ def desktop_status(registry, pip_id: str, actor: str) -> dict:
     # Opening a computer is what sets its desktop up: DGC downloads what this machine lacks (the
     # desktop's programs, Google Chrome) into its own folder, with no password, and checks for a
     # newer Chrome once a day. The tab shows the progress (setup) and opens the screen when done.
-    if pip_screen_setup.due():
+    from .pip_computer_box import box_runs
+    # Nothing is downloaded for a box this computer can't build (a stock Ubuntu: see capability()).
+    if pip_screen_setup.due() and (sys.platform == "darwin" or box_runs()[0]):
         needs = pip_screen_setup.wanted()
         if needs or pip_screen_setup.current_root() is not None:
             pip_screen_setup.start(needs=needs)

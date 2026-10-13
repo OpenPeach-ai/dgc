@@ -177,7 +177,13 @@ class BoxTests(unittest.TestCase):
                 patch.object(browser.subprocess, "run", return_value=refused) as run:
             self.assertFalse(browser.box_available(), "stock Ubuntu: bwrap installed, uid map refused")
             self.assertFalse(browser.box_available())
-        self.assertEqual(run.call_count, 1, "asked once")
+        self.assertEqual(run.call_count, 2, "a refusal is asked again: the user may have just allowed it")
+        with patch.object(browser.shutil, "which", side_effect=lambda name: f"/usr/bin/{name}"), \
+                patch.object(browser.os, "stat", return_value=SimpleNamespace(st_size=1, st_mtime=2)), \
+                patch.object(browser.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+            self.assertTrue(browser.box_available())
+            self.assertTrue(browser.box_available())
+        self.assertEqual(run.call_count, 1, "a box that works is asked once")
         probe = run.call_args.args[0]
         self.assertIn("--cap-drop", probe)
         self.assertEqual(probe[probe.index("/usr/bin/unshare"):], ["/usr/bin/unshare", "--user", "--map-root-user",
@@ -568,8 +574,8 @@ class FetchFailureTests(unittest.TestCase):
                 patch.object(browser_setup, "userns_restricted", return_value=True), \
                 patch.object(browser, "box_available", return_value=False):
             ok, why = browser_setup.supported()
-        self.assertFalse(ok, "bubblewrap missing or not allowed: a Chrome DGC fetched could not start")
-        self.assertIn("Install Google Chrome from google.com/chrome", why)
+        self.assertFalse(ok, "bubblewrap missing or not allowed: a Chrome DGC unpacked could not start")
+        self.assertIn("Google Chrome's package, installed once, can", why)
         with patch.object(pip_screen_setup, "supported", return_value=(True, "")), \
                 patch.object(browser_setup, "userns_restricted", return_value=True), \
                 patch.object(browser, "box_available", return_value=True):
@@ -605,6 +611,146 @@ class FetchFailureTests(unittest.TestCase):
         (real / "current").symlink_to("v-1")
         with patch.object(pip_screen_setup, "home", return_value=link):
             self.assertEqual(pip_screen_setup.current_root(), (real / "v-1" / "root").resolve())
+
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux")
+class InstalledChromeTests(unittest.TestCase):
+    """A stock Ubuntu (23.10+): only a Chrome an admin installed can sandbox itself, and bubblewrap may not lend the
+    namespaces. The browser asks the user, through the model, to install Google's package once; it never works around."""
+
+    def stock(self, restricted=True, box=False):
+        from dgc import pip_screen_setup
+        return [patch.object(browser_setup, "userns_restricted", return_value=restricted),
+                patch.object(browser, "box_available", return_value=box),
+                patch.object(pip_screen_setup, "supported", return_value=(True, ""))]
+
+    def test_only_where_it_must_be(self):
+        for restricted, box, expected in ((True, False, True), (True, True, False), (False, False, False)):
+            patches = self.stock(restricted, box)
+            for p in patches:
+                p.start()
+            try:
+                self.assertEqual(browser_setup.needs_installed_chrome(), expected, (restricted, box))
+            finally:
+                for p in patches:
+                    p.stop()
+
+    def test_with_no_browser_the_model_is_given_the_one_command_to_ask_for(self):
+        package = Path("/home/u/.dgc/browser/linux/google-chrome-stable_155.0_arm64.deb")
+        patches = self.stock() + [patch.object(browser, "discover_browser", side_effect=HINT),
+                                  patch.object(browser_setup, "chrome_package", return_value=package)]
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+        with self.assertRaises(browser.BrowserError) as raised:
+            browser.ensure_browser("")
+        said = str(raised.exception)
+        self.assertIn(f"`sudo apt update && sudo apt install {package}`", said)
+        self.assertIn("Don't run it yourself: it's theirs to run", said)
+        self.assertIn("apt checked it against Google's signing key", said)
+        self.assertIn("Don't work around this: no browser with --no-sandbox, and no change to browser_allow_unsandboxed", said)
+
+    def test_a_browser_that_cannot_sandbox_itself_leads_to_the_same_request(self):
+        refused = browser.BrowserError("Chromium cannot start its sandbox on this system (unprivileged user namespaces are restricted)")
+        package = Path("/p/google-chrome-stable_1_arm64.deb")
+        patches = self.stock() + [patch.object(browser_setup, "chrome_package", return_value=package)]
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+        self.assertIn(f"sudo apt install {package}", browser.install_request_for(refused))
+        self.assertEqual(browser.install_request_for(browser.BrowserError("the browser did not start: Segfault")),
+                         "the browser did not start: Segfault", "any other failure is said as it was")
+
+    def test_the_tool_asks_and_forgets_the_browser_so_an_installed_chrome_is_used_next(self):
+        from dgc import tools
+        refused = browser.BrowserError("Chromium cannot start its sandbox on this system")
+        session = SimpleNamespace(navigate=lambda url: (_ for _ in ()).throw(refused), close=lambda: None, note="")
+        ctx = SimpleNamespace(config={}, cancelled=threading.Event(), tool_owner="stock-ubuntu")
+        patches = self.stock() + [patch.object(browser_setup, "chrome_package", return_value=Path("/p/chrome.deb")),
+                                  patch.object(tools, "_browser_session", return_value=session)]
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+        with tools._BROWSERS_LOCK:
+            tools._BROWSERS["stock-ubuntu"] = session
+        said = tools.browser_tool({"operation": "open", "url": "http://127.0.0.1:8765/"}, ctx)
+        self.assertTrue(said.startswith("error: Chrome can't sandbox itself on this computer"), said)
+        self.assertIn("sudo apt install /p/chrome.deb", said)
+        self.assertNotIn("stock-ubuntu", tools._BROWSERS, "found again next time")
+
+    def test_an_installed_google_chrome_comes_before_playwrights_where_only_it_can_sandbox(self):
+        with patch.object(browser_setup, "userns_restricted", return_value=True), \
+                patch("dgc.pip_computer_box._real_binary", side_effect=lambda p: str(p) == "/opt/google/chrome/chrome"), \
+                patch.object(browser, "_playwright_browsers", return_value=[Path("/pw/chrome")]), \
+                patch.dict(os.environ, {"CHROME_PATH": ""}):
+            self.assertEqual(browser.discover_browser(""), Path("/opt/google/chrome/chrome"))
+        with patch.object(browser_setup, "userns_restricted", return_value=False), \
+                patch.object(browser, "_playwright_browsers", return_value=[Path("/pw/chrome")]), \
+                patch.dict(os.environ, {"CHROME_PATH": ""}):
+            self.assertEqual(browser.discover_browser(""), Path("/pw/chrome"), "elsewhere, as before")
+
+    def test_the_package_comes_from_googles_list_alone_checked_by_apt_and_is_kept_a_week(self):
+        from dgc import pip_screen_setup
+        home = Path(tempfile.mkdtemp(prefix="dgc-home-"))
+        self.addCleanup(shutil.rmtree, home, True)
+        ran = []
+
+        def apt(argv, step, cwd, cancelled):
+            ran.append(argv[-1] if argv[-1] != "update" else "update")
+            lists = list((home / "browser" / "linux" / "apt" / "parts").glob("*.list"))
+            self.assertEqual(len(lists), 1, "Google's repository alone, not the system's")
+            line = lists[0].read_text()
+            self.assertIn("signed-by=", line)
+            self.assertIn(pip_screen_setup.GOOGLE_REPOSITORY, line)
+            if argv[-1] == pip_screen_setup.CHROME_PACKAGE:
+                deb = cwd / "google-chrome-stable_155.0.8059.39-1_arm64.deb"
+                deb.write_bytes(b"deb")
+                os.utime(deb, (time.time() - 30 * 24 * 3600,) * 2)       # apt dates it by Google's Last-Modified
+        with patch("dgc.config.USER_HOME", home), patch.object(pip_screen_setup, "_google_key", side_effect=lambda t: t.write_text("key")), \
+                patch.object(pip_screen_setup, "arch", return_value="arm64"), patch.object(browser_setup, "_run_cancellable", side_effect=apt):
+            first = browser_setup.chrome_package()
+            again = browser_setup.chrome_package()
+        self.assertEqual(first.name, "google-chrome-stable_155.0.8059.39-1_arm64.deb")
+        self.assertGreater(first.stat().st_mtime, time.time() - 60, "dated when DGC fetched it, not by Google's upload")
+        self.assertEqual(again, first)
+        self.assertEqual(ran, ["update", pip_screen_setup.CHROME_PACKAGE], "kept: not downloaded again")
+        self.assertFalse((home / "browser" / "linux" / "apt").exists(), "apt's lists are not kept")
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux")
+class PipBoxProbeTests(unittest.TestCase):
+    """A Pip's computer on a stock Ubuntu: bubblewrap installed but refused. Said, with Ubuntu's own fix; nothing downloaded."""
+
+    def setUp(self):
+        from dgc import pip_computer_box
+        self.box = pip_computer_box
+        pip_computer_box._BOX_PROBE.clear()
+        self.addCleanup(pip_computer_box._BOX_PROBE.clear)
+
+    def test_installed_but_refused_says_how_to_turn_on_ubuntus_own_profile(self):
+        refused = subprocess.CompletedProcess([], 1, "", "bwrap: setting up uid map: Permission denied\n")
+        with patch.object(self.box.shutil, "which", return_value="/usr/bin/bwrap"), \
+                patch.object(self.box.os, "stat", return_value=SimpleNamespace(st_size=1, st_mtime=2)), \
+                patch.object(self.box.subprocess, "run", return_value=refused) as run, \
+                patch("dgc.browser_setup.userns_restricted", return_value=True):
+            result = self.box.capability()
+            self.box.capability()
+        self.assertFalse(result["available"])
+        self.assertIn("Turn on Ubuntu's own profile for it, once, in a terminal: sudo apt update && sudo apt install apparmor-profiles", result["reason"])
+        self.assertIn("bwrap-userns-restrict", result["reason"])
+        self.assertEqual(run.call_count, 2, "a refusal is asked again: the user may have just turned the profile on")
+        probe = run.call_args.args[0]
+        self.assertEqual(probe[:2], ["/usr/bin/bwrap", "--unshare-all"], "the computer's own isolation, network included")
+
+    def test_elsewhere_bubblewraps_own_words(self):
+        refused = subprocess.CompletedProcess([], 1, "", "bwrap: Creating new namespace failed: Operation not permitted\n")
+        with patch.object(self.box.shutil, "which", return_value="/usr/bin/bwrap"), \
+                patch.object(self.box.os, "stat", return_value=SimpleNamespace(st_size=1, st_mtime=3)), \
+                patch.object(self.box.subprocess, "run", return_value=refused), \
+                patch("dgc.browser_setup.userns_restricted", return_value=False):
+            reason = self.box.capability()["reason"]
+        self.assertIn("Creating new namespace failed", reason)
 
 
 if __name__ == "__main__":

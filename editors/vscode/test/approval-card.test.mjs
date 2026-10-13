@@ -163,3 +163,29 @@ for (const theme of ["dark-modern", "light-modern"]) {
     }
   });
 }
+
+// The user's own Chrome, signed in as them (dgc/browser_user.py): the card names the site and says what it means,
+// instead of "Run browser" and the tool's arguments; Allow once is that call, Always saves that site and nothing else.
+test("a signed-in Chrome card names the site and what it can do there", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await scene("dark-modern");
+  try {
+    await s.send({ type: "permission_request", id: "req-chrome", name: "browser",
+      args: { operation: "open", url: "https://mail.google.com/mail/u/0/#inbox", signed_in: true },
+      summary: "open https://mail.google.com/mail/u/0/#inbox", suggested_rule: "Browser(signed-in:https://mail.google.com)" });
+    await s.send({ type: "permission_request", id: "req-evil", name: "browser",
+      args: { operation: "open", url: "https://<b>x</b>.example/", signed_in: true }, suggested_rule: "Browser(signed-in:https://x.example)" });
+    const card = s.card("chrome");
+    assert.equal((await card.locator(".q").innerText()).trim(), "Use your signed-in Chrome on mail.google.com?");
+    assert.match(await card.innerText(), /DGC wants to open mail\.google\.com in a window of its own in your Chrome, where you're signed in\. It can read and act on that site as you\./);
+    assert.deepEqual(await card.locator("button").allInnerTexts(), ["Allow once", "Always allow mail.google.com", "Deny"]);
+    assert.equal(await card.locator("pre").innerText(), "https://mail.google.com/mail/u/0/#inbox");
+    assert.equal(await s.card("evil").locator("b b, .q b b").count(), 0, "a name is text, never markup");
+    await card.locator('button[data-d="always"]').click();
+    const posted = await s.page.evaluate(() => window.__posted.filter((m) => m.type === "permission_response" && m.id === "req-chrome"));
+    assert.deepEqual(posted.map((m) => [m.decision, m.rule]), [["always", "Browser(signed-in:https://mail.google.com)"]]);
+    assert.deepEqual(s.errors, []);
+  } finally {
+    await s.page.close();
+  }
+});

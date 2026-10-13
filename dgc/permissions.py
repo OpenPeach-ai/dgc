@@ -396,7 +396,65 @@ def _permission_subject(tool: str, args: dict) -> tuple[str, dict]:
         return tool, {**args, "name": _mcp_permission_route(args.get("name"))}
     if tool in POLICY_ALIASES:
         return POLICY_ALIASES[tool], {RULE_ARG[tool]: args.get(RULE_ARG[tool], "")}
+    if tool == "browser" and isinstance(args, dict) and args.get("signed_in") is True:
+        # The user's own Chrome (browser_user) is its own permission: a rule written for the throwaway browser never
+        # covers it, and "allow always" saves Browser(signed-in:https://site) -- one site, any page of it. A call that
+        # goes nowhere is about the page the tab is on (_page, filled in by the agent).
+        return tool, {**args, "url": SIGNED_IN + _origin(_signed_in_where(args))}
     return tool, args
+
+
+SIGNED_IN = "signed-in:"
+
+
+def _signed_in_where(args: dict) -> str:
+    return str(args.get("url") or "").strip() or str(args.get("_page") or "")
+
+
+def _canonical(url) -> tuple[str, str]:
+    """(origin, path and query) of an http(s) address as Chrome reads it, or ("", "") for anything else.
+
+    The origin is scheme://host[:port] the way Chrome's own location.href spells it: an international name in its
+    ASCII form (bücher.test is xn--bcher-kva.test), no trailing dot, no default port (:80, :443). An address Python and
+    Chrome could read as different sites is no site at all -- a backslash (Python reads https://bank.com\\@ok.com/ as
+    ok.com, Chrome goes to bank.com), credentials, a %-escape in the host, a control or space character inside it."""
+    from urllib.parse import urlsplit
+    if not isinstance(url, str):
+        return "", ""
+    url = url.strip()
+    if not url or "\\" in url or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        return "", ""
+    try:
+        parts = urlsplit(url)
+        scheme, host, port = parts.scheme.lower(), parts.hostname or "", parts.port
+    except ValueError:
+        return "", ""
+    if (scheme not in ("http", "https") or not host or parts.username is not None or parts.password is not None
+            or "@" in parts.netloc or "%" in parts.netloc):
+        return "", ""
+    host = host.rstrip(".")
+    if not host:
+        return "", ""
+    if ":" in host:
+        name = f"[{host.lower()}]"                       # an IPv6 address
+    else:
+        try:
+            name = host.encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            return "", ""
+    shown = "" if port in (None, 80 if scheme == "http" else 443) else f":{port}"
+    rest = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    return f"{scheme}://{name}{shown}", rest
+
+
+def _origin(url) -> str:
+    return _canonical(url)[0]
+
+
+def signed_in_navigates(args: dict) -> bool:
+    """A call in the user's own Chrome that goes somewhere: any operation with an address (open, a screenshot of one, or
+    whatever the model calls it, in any case or spacing), as the tool would read it."""
+    return bool(str(args.get("url") or "").strip()) or str(args.get("operation", "")).strip().lower() == "open"
 
 
 def modes_allowing(name: str, args: dict, *, exclude: str = "") -> list[str]:
@@ -433,6 +491,8 @@ def rule_for(tool: str, args: dict) -> str:
         return f"{name}({value})"
     if value and len(value) <= 80:
         return f"{name}({value})"
+    if tool == "browser" and value.startswith(SIGNED_IN):
+        return f"{name}({value})"      # never a bare Browser rule: that would allow the browser everywhere
     return name
 
 
@@ -521,6 +581,15 @@ class PermissionEngine:
             return next((r for subject, subject_args in subjects
                          if (r := self._rule_action(subject, subject_args, action))), None)
 
+        signed_in = policy_tool == "browser" and args.get("signed_in") is True
+        if signed_in:
+            # Deny and ask rules see the whole address too (where the call goes, or where the tab is): a rule written for
+            # a site denies it signed in, and Browser(signed-in:https://site/private*) covers that path.
+            where = _signed_in_where(args)
+            origin, rest = _canonical(where)
+            subjects.append(("browser", {**args, "url": where}))
+            if origin:
+                subjects.append(("browser", {**args, "url": SIGNED_IN + origin + rest}))
         deny = rule_for_action(DENY)
         ext_deny = self._rule_action("external_directory", ext_args, DENY) if external else None
         if deny or ext_deny:
@@ -545,6 +614,23 @@ class PermissionEngine:
                     return ASK, f"rule: {session_ask.render()}"
                 return ALLOW, "plan mode (read-only)"
             return DENY, "plan mode is active — no changes allowed; present a plan and get it approved first"
+
+        if signed_in:
+            # The user's own Chrome, signed in as them: opening a new site asks them in every mode, auto included,
+            # unless they saved a rule for that site (Browser(signed-in:https://...)). Reading and acting happen only
+            # on a site they allowed -- the tool keeps to those -- so they don't ask again.
+            asked = rule_for_action(ASK)
+            if asked:
+                return ASK, f"rule: {asked.render()}"          # the user's own ask, for clicks in their accounts too
+            if not signed_in_navigates(args):
+                return ALLOW, "the user's Chrome, on a site they allowed"
+            if policy_args.get("url") == SIGNED_IN:
+                return ASK, "the user's signed-in Chrome: an address DGC can't read as one site asks"
+            saved = next((r for r in self.rules if r.action == ALLOW and r.tool == "browser"
+                          and (r.pattern or "").startswith(SIGNED_IN) and self._matches(r, policy_tool, policy_args)), None)
+            if saved:
+                return ALLOW, f"rule: {saved.render()}"
+            return ASK, "the user's signed-in Chrome: each new site asks, in every mode"
 
         # Security precedence is deny -> ask -> allow. A narrow ask must beat a broad allow.
         for action in (ASK, ALLOW):

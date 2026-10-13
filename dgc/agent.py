@@ -8361,7 +8361,13 @@ class Agent(GoalLifecycle):
                 return PermissionEngine(self.mode, rules, self.config.project_root)
         perms = current_permissions()
         external_paths = perms.external_paths(name, args)
-        decision, reason = perms.decide(name, args)
+        # A call in the user's own Chrome that goes nowhere (a click, typing) is about the page its tab is on: the rules
+        # see that page (permissions._signed_in_where), so a deny or an ask for that site or path holds there too.
+        policy_args = args
+        if name == "browser" and isinstance(args, dict) and args.get("signed_in") is True and not str(args.get("url") or "").strip():
+            from .tools import signed_in_page
+            policy_args = {**args, "_page": signed_in_page(self.ctx)}
+        decision, reason = perms.decide(name, policy_args)
         if decision == DENY:
             self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)
             return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
@@ -8377,7 +8383,7 @@ class Agent(GoalLifecycle):
                     "on their next prompt.")
         if decision == ASK:
             def recheck():
-                result, _ = current_permissions().decide(name, args)
+                result, _ = current_permissions().decide(name, policy_args)
                 return "once" if result == ALLOW else "no" if result == DENY else None
             # Opt in via a real method, not a permissive fixture's __getattr__ fallback.
             live_approve = getattr(type(self.ui), "approve_live", None)
@@ -8411,14 +8417,14 @@ class Agent(GoalLifecycle):
                     self.ui.info("credential-bearing approvals are one-time only; no rule was saved")
                 else:
                     saved_rule = (self.ui.add_permission_rule("external_directory", {"path": external_paths[0]})
-                                  if external_paths else self.ui.add_permission_rule(name, perms.canonical_args(name, args)))
+                                  if external_paths else self.ui.add_permission_rule(name, perms.canonical_args(name, policy_args)))
                     if isinstance(saved_rule, str) and saved_rule:
                         approval["rule"] = redact_text(saved_rule, secrets)[:1000]
                     else:
                         approval["decision"] = "once"
 
             # A newly selected plan/deny policy still wins over an earlier approval response.
-            decision, reason = current_permissions().decide(name, args)
+            decision, reason = current_permissions().decide(name, policy_args)
             if decision == DENY:
                 approval["denied_reason"] = redact_text(reason, secrets)[:2000]
                 self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)

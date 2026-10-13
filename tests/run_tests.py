@@ -11664,6 +11664,7 @@ def test_benchmark_integrity():
         # the shared-memory plan recorded. Its description is one line and its guidance one short section: the
         # concrete trigger stays, because without it the model said "I'll keep that in mind" and kept nothing (live,
         # 2026-10-12). Together they measured 6,754, from 6,985 before trimming; 6,800 keeps the same small headroom.
+        # The browser's signed_in option (the user's own Chrome, 2026-10-13) is one boolean with a nine-word line: 6,783.
         _PROBE_TOKEN_CEILING = 6800
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1

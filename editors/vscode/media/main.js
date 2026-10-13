@@ -5228,11 +5228,15 @@
         }
         // v7: the step's summary and, for an edit, the diff it would apply — approve against
         // what will happen, not raw JSON. A denial can carry a note for the model.
-        const detail = ev.command ? `<pre>$ ${esc(ev.command)}</pre>`
+        // The user's own Chrome, signed in as them: say so, and name the site, not the tool's arguments.
+        const signedIn = ev.name === "browser" && ev.args && ev.args.signed_in === true;
+        const site = signedIn ? (() => { try { return new URL(String(ev.args.url || "")).host; } catch { return ""; } })() : "";
+        const detail = signedIn ? `<p>DGC wants to open <b>${esc(site || "a site")}</b> in a window of its own in your Chrome, where you're signed in. It can read and act on that site as you.</p><pre>${esc(String(ev.args.url || ""))}</pre>`
+          : ev.command ? `<pre>$ ${esc(ev.command)}</pre>`
           : ev.diff ? "" : (pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
         const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
-        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>${ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : `Run <b>${esc(ev.name)}</b>`}</span></div>${summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>${ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`}</span></div>${signedIn ? "" : summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);

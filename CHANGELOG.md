@@ -373,6 +373,31 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     DGC quit in the middle of, at once), and none starts where the Chrome couldn't run: user namespaces restricted
     and no bubblewrap allowed to lend them (a stock Ubuntu 24.04; DGC tries a box rather than trusting that
     bubblewrap is installed). There it says to install Google Chrome, whose package brings the AppArmor profile.
+- **Your own Chrome, signed in, for the tasks that need your logins.** The browser tool takes `signed_in: true`:
+  DGC opens a window of its own in the Chrome you're running and works in that one tab, as Claude Code's and
+  Codex's Chrome extensions do, with no extension: Chrome 144+ lets you allow remote debugging of your browser
+  (`chrome://inspect/#remote-debugging`), asks you each time DGC connects, and shows its automation banner. DGC finds
+  it by the `DevToolsActivePort` file in its profile folder (Chrome, Beta, Edge, Brave, Chromium; Linux, macOS,
+  Windows). It never touches your other tabs, their events, cookies or storage, and closes only its own tab.
+  - Opening a site asks you, in every mode, auto included ("Use your signed-in Chrome on mail.google.com?"), however
+    the call is spelled and whatever operation carries an address. Always allow saves `Browser(signed-in:https://site)`,
+    that site alone. A rule for the throwaway browser never covers it; a deny does, checked where the tab is
+    (`Browser(signed-in:*)` turns it off), and an ask rule makes clicks there ask. Plan mode never uses it.
+  - Reading and acting happen only on an allowed site: a redirect, a click or a script that takes the tab elsewhere
+    stops before anything of that site is read. An address Python and Chrome would read as different sites (a
+    backslash, a user name) is refused. Password, card and one-time-code values are never read out (in the
+    throwaway browser too), and tabs DGC's page opened close with its own. A closed window or a restarted Chrome
+    reconnects on the next call (Chrome asks again).
+- **On a stock Ubuntu, the model asks you to install Chrome once, and never works around it.** Ubuntu 23.10+ keeps
+  the namespaces a browser's sandbox needs for programs an admin installed, and its bubblewrap has no profile that
+  lends them. DGC downloads Google Chrome's package (from Google's repository alone; apt checks it against Google's
+  signing key) and the browser tells the model to ask for `sudo apt install <that package>`: Chrome then lives where
+  Ubuntu's own AppArmor profile lets it sandbox itself, and apt updates it. An installed Google Chrome comes before
+  Playwright's there. The model is told not to work around it (no `--no-sandbox`, no `browser_allow_unsandboxed`).
+- **A Pip's computer says when bubblewrap can't build its box, and how to fix it.** It used to check only that
+  bubblewrap was installed, so on a stock Ubuntu every computer failed to start. DGC now tries a box with the
+  computer's own isolation, downloads nothing when it can't, and the Pip's page and Settings give Ubuntu's own fix,
+  once: turning on its shipped `bwrap-userns-restrict` profile (as OpenAI's Codex documents).
 - **A Chrome that can't build its own sandbox gets the help it needs from bubblewrap.** On Ubuntu 23.10+, only a
   Chrome with an AppArmor profile gets the user namespaces its sandbox needs, so Playwright's Chromium and DGC's own
   download refused to start unless you set `browser_allow_unsandboxed`. Such a Chrome now starts in a bubblewrap
