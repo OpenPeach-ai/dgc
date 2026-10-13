@@ -102,7 +102,7 @@ test('a current CLI that cannot run Pips here says why, not "update"', async()=>
   w.DgcPips.mount({root:w.document,host:'editor',postMessage:()=>{},onMessage:fn=>{listener=fn;},onSetupPrompt:()=>true});
   listener({type:'pipsConnection',apiVersion:api,generation:1,connected:true,supported:false,enabled:true});return w.document;};
  const windowsHost=make(41);await flush();
- assert.match(windowsHost.body.textContent,/On Windows, Pips run in WSL/);assert.doesNotMatch(windowsHost.body.textContent,/Update the DGC CLI/);
+ assert.match(windowsHost.body.textContent,/On Windows, Pips run in WSL/);assert.doesNotMatch(windowsHost.body.textContent,/Update DGC/);
  const old=make(8);await flush();assert.match(old.body.textContent,/Update DGC to use Pips/);
 });
 
@@ -115,7 +115,7 @@ test('sharing: export opens the file for Save As, import reads the picked file a
  const bridge=new PipsEditor({},m=>{sent.push(m);return true;},()=>{});bridge.attach(m=>posted.push(m));
  bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:40},{});
  bridge.receive({type:'pipsRequest',id:'e0',request:{type:'export_pip_file',pip_id:'pip_1'}});
- assert.match(posted.at(-1).error.message,/API 41/);
+ assert.match(posted.at(-1).error.message,/Update DGC to share Pips/);
  bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:41},{b:1});
  bridge.receive({type:'pipsRequest',id:'e1',request:{type:'export_pip_file',pip_id:'pip_1'}});
  const exp=sent.at(-1);assert.deepEqual([exp.type,exp.request.type,exp.request.pip_id],['pips_control','export_pip','pip_1']);

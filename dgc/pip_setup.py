@@ -44,9 +44,9 @@ _PINS = {'pip_id', 'expected_version', 'expected_lifecycle_revision'}
 _BODY = {'schema_version', 'request', 'definition', 'workspace_id', 'binding_id', 'runner_id',
          'project_root', 'root_identity', 'session_id', 'created_at', 'expires_at', 'next_run_at', 'counts_for_date'}
 _AUDIT = {'scout', 'lens', 'rook', 'lock'}
-SCOPE_NOTICE = ('Accepting this setup activates the Pip with the displayed schedule. '
-                'Committed source only. Reads files and saves a private report or documentation draft. '
-                'Does not run tests, open URLs, contact the application, change project files or deploy.')
+SCOPE_NOTICE = ('Once you accept, it’s on, with the schedule shown. '
+                'It reads committed code only and saves a private report or documentation draft. '
+                'It doesn’t run tests, open websites, touch the running app, change project files or deploy.')
 
 
 def _fail(message, code='invalid_request'):
@@ -345,7 +345,7 @@ def _load(registry, setup_id, workspace_id):
             elif (receipt['pip_id'] != request.get('pip_id') or receipt['job_version'] != request.get('expected_version')
                     or receipt['run_id'] is not None or receipt['next_run_at'] is not None): raise ValueError()
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError, RegistryError) as exc:
-        _fail('The saved setup or receipt no longer matches its bounded review. Nothing was applied.', 'review_changed')
+        _fail('This card no longer matches what was saved. Nothing was applied. Ask DGC for a new card.', 'review_changed')
     return dict(row), body, receipt
 
 
@@ -369,11 +369,11 @@ def _projection(registry, row, body, receipt):
             **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' else {}),
             'scope_notice': ('It has its own computer (a browser, a Terminal and files), separate from yours, and sees only what you share with it. Anything it would send or change waits for your OK.' if req.get('scope')=='personal' and body['definition'].get('computer_plan')
                              else 'It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
-            'runner_notice': (f"DGC checks {req['source_ref']} for new local commits only while the local Pips runner is enabled and running, and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Saving setup does not start or resume the runner."
+            'runner_notice': (f"While Pips are running, DGC checks {req['source_ref']} for new local commits and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Accepting this doesn’t start Pips."
                               if req.get('event_trigger') else 'It works while Pips are running on this computer. Creating it doesn’t start Pips.' if req.get('scope')=='personal'
-                              else 'A schedule runs only while the local Pips runner is enabled and running. Saving setup does not start or resume the runner.'),
-            'run_now_policy': (("Its first task counts as today's; the next one is on its next scheduled day." if req.get('scope')=='personal' else "The immediate run counts as today's daily occurrence; the next scheduled run is on the following local date.")
-                               if body['counts_for_date'] else ('It also does its task once, right after you create it.' if req.get('scope')=='personal' else 'Queue one run after approval, in addition to the displayed future schedule.') if req['run_now'] else None)}
+                              else 'Its schedule runs only while Pips are running on this computer. Accepting this doesn’t start Pips.'),
+            'run_now_policy': (("Its first task counts as today's; the next one is on its next scheduled day." if req.get('scope')=='personal' else "This first run counts as today's; the next scheduled run is tomorrow.")
+                               if body['counts_for_date'] else ('It also does its task once, right after you create it.' if req.get('scope')=='personal' else 'It also runs once right after you accept, as well as on the schedule shown.') if req['run_now'] else None)}
 
 
 def get(registry, setup_id, workspace_id):
@@ -452,7 +452,7 @@ be reopened, and changing the replacement again requires its own current digest.
     from .redaction import contains_secret, secret_values
     require_unrestricted(config)
     if config.get('pips_enabled', False) is not True:
-        _fail('Enable Pips before revising setup.', 'disabled')
+        _fail('Turn on Pips first.', 'disabled')
     choice = validate_model_choice(model_choice)
     row, body, _ = _load(registry, setup_id, workspace_id)
     if row['digest'] != expected_digest:
@@ -488,7 +488,7 @@ be reopened, and changing the replacement again requires its own current digest.
         workspace, binding = _scope(registry, root, body['session_id'], body['request'].get('scope')=='personal')
         if (workspace['id'] != workspace_id or binding['id'] != body['binding_id']
                 or registry.runner_id != body['runner_id'] or _root_identity(root) != body['root_identity']):
-            _fail('The project binding or directory changed. Ask for a fresh setup card.', 'conflict')
+            _fail('The project folder changed. Ask DGC for a new card.', 'conflict')
         if contains_secret(request, secret_values(config)):
             _fail('The setup overlaps configured credentials. Ask for a draft without secrets.', 'secret_detected')
         if choice == body['definition']['model_choice']:
@@ -522,7 +522,7 @@ Existing targets retain their actual checkpoint and reviewed finding history.
     request = body['request']
     binding = registry.binding(body['workspace_id'])
     if binding['id'] != body['binding_id'] or binding['canonical_root'] != body['project_root']:
-        _fail('The project binding changed. Ask for a fresh setup card.', 'conflict')
+        _fail('The project folder changed. Ask DGC for a new card.', 'conflict')
     store = PipStore(registry)
     lifecycle = 0
     if request.get('pip_id'):
@@ -551,7 +551,7 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
         _fail('Review requires the exact displayed setup digest.')
     from .pip_access import require_unrestricted
     require_unrestricted(config)
-    if config.get('pips_enabled', False) is not True: _fail('Enable Pips before reviewing setup.', 'disabled')
+    if config.get('pips_enabled', False) is not True: _fail('Turn on Pips first.', 'disabled')
     from .pips import PipStore, _json
     from .pip_schedules import _instant, timestamp
     from .redaction import contains_secret, secret_values
@@ -609,11 +609,11 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
             workspace, binding = _scope(registry, root, body['session_id'], body['request'].get('scope')=='personal')
             if (workspace['id'] != workspace_id or binding['id'] != body['binding_id']
                     or registry.runner_id != body['runner_id'] or _root_identity(root) != body['root_identity']):
-                _fail('The project binding or directory changed. Ask for a fresh setup card.', 'conflict')
+                _fail('The project folder changed. Ask DGC for a new card.', 'conflict')
             if contains_secret(body, secret_values(config)):
                 _fail('The setup overlaps configured credentials. Ask for a draft without secrets.', 'secret_detected')
             if body['next_run_at'] is not None and now >= body['next_run_at']:
-                _fail('The displayed next occurrence has passed. Ask for a fresh setup card.', 'stale_occurrence')
+                _fail('The time shown for its next run has passed. Ask DGC for a new card.', 'stale_occurrence')
             if body['counts_for_date'] is not None and _instant(now).astimezone(ZoneInfo(request['schedule']['timezone'])).date().isoformat() != body['counts_for_date']:
                 _fail("The local date changed. Review today's immediate run and the next occurrence again.", 'stale_occurrence')
             store = PipStore(registry)
@@ -680,9 +680,9 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
 
 def pulse_scope(plan):
     if plan['action']['network'] == 'loopback_http_v1':
-        return ('Only the displayed local HTTP GET checks. No redirects, cookies, credentials, external hosts or shell commands. '
-                '10 seconds and 64 KiB response body per check. Status checks do not verify rendering, login success or user journeys. '
-                'The running app may differ from the recorded committed source. No model is invoked.')
-    return ('Only the displayed commands, in an isolated committed-source copy with network off. '
-            '60 seconds, 30 CPU seconds, 512 MiB per process, 64 KiB output and 32 processes per command. '
-            'No changes are applied to the project. No model is invoked.')
+        return ('Only the local page checks shown. No redirects, cookies, sign-ins, other sites or shell commands. '
+                'Each check waits up to 10 seconds and reads up to 64 KB. A status check doesn’t show how a page looks, '
+                'whether signing in works, or anything a user does. The running app may not match the committed code. No model is used.')
+    return ('Only the commands shown, in a private copy of the committed code with no network. '
+            'Each command gets up to 60 seconds, 30 seconds of CPU, 512 MB of memory per process, 64 KB of output and 32 processes. '
+            'Nothing is changed in the project. No model is used.')

@@ -65,7 +65,7 @@ class PipSetupTests(unittest.TestCase):
         self.assertEqual(draft['next_run_at'], '2026-10-03T05:30:00.000Z')
         self.assertIsNone(draft['pip_id'])
         self.assertEqual(draft['permissions'], 'read_only')
-        self.assertIn('Does not run tests', draft['scope_notice'])
+        self.assertIn('doesn’t run tests', draft['scope_notice'])
         self.assertEqual(pip_setup.list_pending(self.registry, self.workspace['id']), [draft])
 
     def test_retry_is_session_scoped_and_accept_receipt_is_stable(self):
@@ -127,7 +127,7 @@ class PipSetupTests(unittest.TestCase):
         self.assertEqual(draft['next_run_at'], '2026-10-02T05:30:00.000Z')
         self.now = '2026-10-02T05:30:00.000Z'
         before = self.state()
-        with self.assertRaisesRegex(RegistryError, 'occurrence has passed'):
+        with self.assertRaisesRegex(RegistryError, 'next run has passed'):
             self.review(draft)
         self.assertEqual(before, self.state())
 
@@ -287,7 +287,7 @@ class PipSetupTests(unittest.TestCase):
         old = self.base / 'old-repo'
         self.root.rename(old)
         self.root.mkdir()
-        with self.assertRaisesRegex(RegistryError, 'directory changed'):
+        with self.assertRaisesRegex(RegistryError, 'project folder changed'):
             self.review(draft)
 
     def test_rebinding_retains_setup_history_but_cannot_retarget_it(self):

@@ -10,8 +10,8 @@ export function mountRunCards(options) {
  const node=(tag,cls,text)=>{const e=doc.createElement(tag);e.className=cls;if(text!==undefined)e.textContent=text;return e;};
  function paint(e){
   const r=e.run,stale=!connected||!!e.error;
-  const labels={queued:'Queued',running:'Running',cancelling:'Stopping',cancelled:'Cancelled',failed:'Failed',succeeded:'Report ready'};
-  let label=r?labels[r.status]:'Checking run…';
+  const labels={queued:'Waiting to start',running:'Working',cancelling:'Stopping',cancelled:'Cancelled',failed:'Failed',succeeded:r?.manifest?.run_kind==='personal_task'?'Done':'Report ready'};
+  let label=r?labels[r.status]:'Checking…';
   if(r?.status==='succeeded'&&r.manifest?.run_kind==='draft')label='Draft ready';
   const pulse=r?.status==='succeeded'&&r.execution_mode==='standalone_plan'?pulseProgress(r):null;
   if(r?.status==='succeeded'&&(r.manifest?.run_kind==='test'||r.manifest?.run_kind==='patch'))label='Results ready';
@@ -26,14 +26,14 @@ export function mountRunCards(options) {
     e.cleanup=globalThis.PipConcepts.plush.mount?.(e.face);
    }
   }
-  e.title.textContent=e.pip?.name||'Pip run';
+  e.title.textContent=e.pip?.name||'Pip';
   e.status.textContent=stale?(connected?'Status unavailable':'Disconnected'):label;
-  e.detail.textContent=e.error||(!connected?'Reconnect to check this run.':!r?'Reading the saved run from DGC.':
-   active(r.status)?(!e.runner?.online?'Runner offline · '+label.toLowerCase():r.status==='queued'?'Waiting for the local runner.':'Working independently. You can continue this conversation.'):
-   r.status==='failed'?'Open the run to inspect the failure.':r.status==='cancelled'?'This run was cancelled.':'Saved results are ready to review.');
-  if(connected&&!e.error&&active(r?.status)&&!e.runner?.online){e.status.textContent='Runner offline';e.root.dataset.state='offline';}
+  e.detail.textContent=e.error||(!connected?'Reconnect to see how it’s going.':!r?'Loading…':
+   active(r.status)?(!e.runner?.online?'Pips not running · '+label.toLowerCase():r.status==='queued'?'Waiting for its turn.':'Working on its own. You can keep chatting.'):
+   r.status==='failed'?'Open it to see what went wrong.':r.status==='cancelled'?'It was cancelled.':'Ready to look at.');
+  if(connected&&!e.error&&active(r?.status)&&!e.runner?.online){e.status.textContent='Pips not running';e.root.dataset.state='offline';}
   e.open.disabled=!r||!connected;e.refresh.disabled=e.loading||!connected;
-  e.open.title=`Open ${e.pip?.name||'Pip'} run · ${e.status.textContent}`;
+  e.open.title=`Open ${e.pip?.name||'this Pip'} · ${e.status.textContent}`;
   e.open.setAttribute('aria-label',e.open.title);
   e.refresh.hidden=!e.error;
  }
@@ -44,10 +44,10 @@ export function mountRunCards(options) {
    const result=await options.request('get_pip_run',{run_id:e.id});
    if(token!==epoch)return;
    const r=result.run;
-   if(!record(r)||r.id!==e.id||r.pip_id!==e.pipId||!id(r.workspace_id,'ws')||!['queued','running','cancelling','succeeded','failed','cancelled'].includes(r.status))throw Error('Run identity or status did not match.');
+   if(!record(r)||r.id!==e.id||r.pip_id!==e.pipId||!id(r.workspace_id,'ws')||!['queued','running','cancelling','succeeded','failed','cancelled'].includes(r.status))throw Error('This didn’t load. Retry.');
    const [pv,rv]=await Promise.all([options.request('get_pip',{pip_id:e.pipId}),options.request('get_pip_runner')]);
    if(token!==epoch)return;
-   if(!record(pv.pip)||pv.pip.id!==r.pip_id||pv.pip.workspace_id!==r.workspace_id||!TYPES.includes(pv.pip.pip_type)||typeof pv.pip.name!=='string'||!record(rv.runner)||typeof rv.runner.online!=='boolean')throw Error('Pip identity or runner status did not match.');
+   if(!record(pv.pip)||pv.pip.id!==r.pip_id||pv.pip.workspace_id!==r.workspace_id||!TYPES.includes(pv.pip.pip_type)||typeof pv.pip.name!=='string'||!record(rv.runner)||typeof rv.runner.online!=='boolean')throw Error('This didn’t load. Retry.');
    e.run=r;e.pip=pv.pip;e.runner=rv.runner;
   }catch(error){if(token===epoch)e.error=error.message;}
   finally{if(token===epoch){e.loading=false;paint(e);}}
@@ -55,9 +55,9 @@ export function mountRunCards(options) {
  function add(parent,runId,pipId){
   if(disposed||!id(runId,'run')||!id(pipId,'pip')||!parent)return;
   const existing=entries.get(runId);if(existing){if(existing.pipId===pipId&&!existing.root.isConnected){parent.append(existing.root);load(existing);}return;}
-  if(entries.size>=12){parent.append(node('p','pip-run-detail','Open Pips to inspect additional runs.'));return;}
+  if(entries.size>=12){parent.append(node('p','pip-run-detail','Open Pips to see more.'));return;}
   const root=node('div','pip-run-line'),face=node('span','pip-run-avatar'),title=node('span','pip-run-title'),status=node('span','pip-run-state'),detail=node('span','pip-run-detail');
-  root.setAttribute('aria-label','Pip run');face.setAttribute('aria-hidden','true');
+  root.setAttribute('aria-label','Pip at work');face.setAttribute('aria-hidden','true');
   root.setAttribute('role','group');
   const open=node('button','pip-run-open agent-name'),refresh=node('button','pip-run-refresh','Retry');open.type=refresh.type='button';
   open.append(title);root.append(face,open,status,detail,refresh);parent.append(root);

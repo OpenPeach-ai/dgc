@@ -101,7 +101,7 @@ test('approval during a live main turn automatically queues receipt and preserve
 test('Pulse card exposes exact HTTP checks and no execution model selector',async t=>{
  const x=harness(t,{api:27}),s={...setup(),pip_type:'pulse',work_kind:'app_smoke_test',permissions:'review_required',verification_plan:{schema_version:1,action:{kind:'test',network:'loopback_http_v1',tests:[{argv:['dgc-http-check','http://127.0.0.1:3090/login','200'],cwd:'.'}],limits:{wall_seconds:60,cpu_seconds:30,memory_bytes:536870912,output_bytes:65536,processes:32}}},scope_notice:'Local HTTP GET only. No redirects or credentials. Status does not verify rendering.'};
  await x.loaded(s);
- assert.match(x.d.querySelector('.pip-setup-details').textContent,/GET http:\/\/127.0.0.1:3090\/login → HTTP 200/);
+ assert.match(x.d.querySelector('.pip-setup-details').textContent,/GET http:\/\/127.0.0.1:3090\/login → status 200/);
  assert.match(x.d.body.textContent,/http:\/\/127.0.0.1:3090\/login/);
  assert.match(x.d.body.textContent,/No redirects/);
  assert.equal(x.find('Choose model'),undefined);

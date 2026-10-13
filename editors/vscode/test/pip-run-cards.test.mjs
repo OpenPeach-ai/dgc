@@ -22,7 +22,7 @@ function harness(t){
 }
 test('run receipt supplies identity only; state and character come from the backend',async t=>{
  const x=harness(t);x.send();assert.doesNotMatch(x.d.body.textContent,/Forged|Report ready/);await x.reply('queued');
- assert.match(x.d.body.textContent,/Review changes/);assert.equal(x.d.querySelector('.pip-run-state').textContent,'Queued');assert.equal(x.d.querySelector('.dgc-plush').dataset.character,'rook');
+ assert.match(x.d.body.textContent,/Review changes/);assert.equal(x.d.querySelector('.pip-run-state').textContent,'Waiting to start');assert.equal(x.d.querySelector('.dgc-plush').dataset.character,'rook');
  assert.ok(x.pending.every(p=>['get_pip_run','get_pip','get_pip_runner'].includes(p.type)));
 });
 test('polling tracks a running job after the tool returns, then stops requesting terminal jobs',async t=>{
@@ -32,12 +32,12 @@ test('polling tracks a running job after the tool returns, then stops requesting
  x.d.querySelector('.pip-run-open').click();assert.equal(x.opened[0].run,run);assert.equal(x.opened[0].pip,pip);
 });
 test('runner offline and backend disconnected never animate as live work',async t=>{
- const x=harness(t);x.send();await x.reply('running',false);assert.equal(x.d.querySelector('.pip-run-state').textContent,'Runner offline');assert.equal(x.d.querySelector('.dgc-plush').dataset.state,'offline');
+ const x=harness(t);x.send();await x.reply('running',false);assert.equal(x.d.querySelector('.pip-run-state').textContent,'Pips not running');assert.equal(x.d.querySelector('.dgc-plush').dataset.state,'offline');
  x.cards.connection(false);assert.equal(x.d.querySelector('.pip-run-state').textContent,'Disconnected');x.cards.tick();assert.equal(x.pending.length,0);
 });
 test('mismatched runs are refused and no secondary reads occur',async t=>{
  const x=harness(t);x.send();x.pending[0].resolve({run:{...saved('running'),pip_id:'pip_'+'d'.repeat(32)}});await flush();
- assert.match(x.d.body.textContent,/identity or status did not match/);assert.equal(x.pending.length,1);assert.equal(x.d.querySelector('.pip-run-open').disabled,true);
+ assert.match(x.d.body.textContent,/This didn’t load/);assert.equal(x.pending.length,1);assert.equal(x.d.querySelector('.pip-run-open').disabled,true);
 });
 test('old replies cannot repopulate a different conversation',async t=>{
  const x=harness(t);x.send();const old=x.pending[0];x.cards.reset();old.resolve({run:saved('running')});await flush();assert.equal(x.d.querySelector('.pip-run-line'),null);assert.equal(x.timers.size,0);

@@ -283,7 +283,7 @@ test('the extension host sends files only to an API 43 CLI, and images and files
   const editor=new out.exports.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});return {editor,posted,sent};};
  const base={type:'send_pip_message',pip_id:'pip_'+'g'.repeat(32),text:'x',idempotency_key:'k'};
  const note={name:'notes.txt',data:'data:application/octet-stream;base64,aGk='};
- const old=make(42);old.editor.receive({type:'pipsRequest',id:'a',request:{...base,files:[note]}});assert.equal(old.sent.length,0);assert.match(old.posted.at(-1).error.message,/API 43/);
+ const old=make(42);old.editor.receive({type:'pipsRequest',id:'a',request:{...base,files:[note]}});assert.equal(old.sent.length,0);assert.match(old.posted.at(-1).error.message,/send files to a Pip/);
  const h=make(43);
  h.editor.receive({type:'pipsRequest',id:'b',request:{...base,files:[{...note,data:'data:application/octet-stream;base64,'+'A'.repeat(1_400_000)}]}});
  assert.equal(h.sent.length,1,h.posted.at(-1)?.error?.message);
@@ -333,7 +333,7 @@ test('the extension host sends introduce_pip only to an API 43 CLI',()=>{
   const editor=new out.exports.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});
   editor.receive({type:'pipsRequest',id:'hello',request:{type:'introduce_pip',pip_id:'pip_'+'g'.repeat(32)}});
   assert.equal(sent.length,api>=43?1:0,`API ${api}`);
-  if(api<43)assert.match(posted.at(-1).error.message,/API 43/);
+  if(api<43)assert.match(posted.at(-1).error.message,/Pips that say hello/);
  }
 });
 

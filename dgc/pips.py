@@ -329,12 +329,12 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
         verification_plan = validate_verification_job(pip_type=pip_type, plan=verification_plan,
             source_policy=source_policy, schedule=schedule, event_trigger=event_trigger)
     if event_trigger is not None and (selected_type.id not in ("scout", "lens", "rook", "lock", "quill") or schedule is not None):
-        raise RegistryError("invalid_event_trigger", "Event triggers support read-only source auditors and Quill drafts and cannot be combined with a schedule.")
+        raise RegistryError("invalid_event_trigger", "Only audits and Quill drafts can run on events, and not together with a schedule.")
     if selected_type.id == "patch" and schedule is not None and source_policy != {"mode": "personal"}:
-        raise RegistryError("review_required", "Patch runs require a separately reviewed handoff; schedules are not enabled.")
+        raise RegistryError("review_required", "Patch runs only on a handoff you approve, never on a schedule.")
     source_ref = _text(source_ref, "source_ref", 200)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", source_ref) or ".." in source_ref:
-        raise RegistryError("invalid_request", "Use HEAD, a branch name or a full commit ID for source_ref.")
+        raise RegistryError("invalid_request", "Use HEAD, a branch name or a full commit ID for the branch or commit.")
     definition = {"schema_version": 1, "name": _text(name, "name", 120),
             "goal": _text(goal, "goal", 4000), "source_ref": source_ref,
             "policy": "review_required" if selected_type.id in ("patch", "pulse") and source_policy != {"mode": "personal"} else "read_only",
@@ -462,7 +462,7 @@ COMPUTER_STEPS = 30
 def _model_settings(config, model_choice=None, *, _prepared=None):
     from .pip_models import resolve_model_choice, validate_model_choice, validate_pinned_connection
     if config.get("subscription_engine", ""):
-        raise RegistryError("unsupported_model", "Pips currently require a native local or API model; delegated subscription CLIs are unsupported.")
+        raise RegistryError("unsupported_model", "Pips need a local or API model. They can’t use a model that runs through another app’s subscription.")
     choice = validate_model_choice(model_choice if model_choice is not None else {"mode": "default"})
     if _prepared is None:
         model = resolve_model_choice(config, choice)
@@ -547,7 +547,7 @@ class PipStore:
     def _job(self, pip_id):
         bound = self.db.execute("SELECT length(CAST(v.definition AS BLOB)) FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version WHERE p.id=?", (pip_id,)).fetchone()
         if bound is None:
-            raise RegistryError("not_found", "Pip not found on this runner.")
+            raise RegistryError("not_found", "That Pip isn’t on this computer. It may have been deleted.")
         if bound[0] is None or bound[0] > 16384:
             raise RegistryError("stored_data_limit", "Stored Pip definition exceeds its review budget.")
         row = self.db.execute("SELECT p.*,v.definition FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version WHERE p.id=?", (pip_id,)).fetchone()
@@ -574,7 +574,7 @@ class PipStore:
     def get(self, pip_id):
         bounded = self.db.execute("SELECT length(CAST(v.definition AS BLOB)) FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version WHERE p.id=?", (pip_id,)).fetchone()
         if bounded is None:
-            raise RegistryError('not_found', 'Pip not found on this runner.')
+            raise RegistryError('not_found', 'That Pip isn’t on this computer. It may have been deleted.')
         if bounded[0] is None or bounded[0] > 16384:
             raise RegistryError('stored_data_limit', 'Stored Pip definition exceeds its review budget.')
         from .pip_approvals import expire_pending
@@ -582,7 +582,7 @@ class PipStore:
         row = self.db.execute("""SELECT p.*,v.definition FROM pips p JOIN pip_versions v
             ON v.pip_id=p.id AND v.version=p.current_version WHERE p.id=?""", (pip_id,)).fetchone()
         if row is None:
-            raise RegistryError("not_found", "Pip not found on this runner.")
+            raise RegistryError("not_found", "That Pip isn’t on this computer. It may have been deleted.")
         result = dict(row)
         result.update(json.loads(result.pop("definition")))
         result.setdefault("schedule", None)
@@ -770,9 +770,9 @@ class PipStore:
             from .pip_archive import require_live
             require_live(self,pip_id)
             if pip["current_version"] != expected_version:
-                raise RegistryError("conflict", "The Pip changed; review the latest job before proposing an update.")
+                raise RegistryError("conflict", "This Pip changed. Refresh and try again.")
             if self.db.execute("SELECT count(*) FROM pip_proposals WHERE pip_id=? AND status='proposed'", (pip_id,)).fetchone()[0] >= 20:
-                raise RegistryError("limit", "Review existing job proposals before adding more.")
+                raise RegistryError("limit", "Too many changes are waiting for this Pip. Accept or turn some down first.")
             if self.db.execute("SELECT count(*) FROM pip_proposals").fetchone()[0] >= 10000:
                 raise RegistryError("limit", "The local proposal archive is full; retain/export it before adding more.")
             merged = {key: changes.get(key, pip[key]) for key in ("name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan")}
@@ -813,13 +813,13 @@ class PipStore:
             proposal = self.db.execute("SELECT * FROM pip_proposals WHERE id=? AND pip_id=?", (proposal_id, pip_id)).fetchone()
             approval = self.db.execute("SELECT * FROM pip_approvals WHERE proposal_id=? AND pip_id=?", (proposal_id, pip_id)).fetchone()
             if not proposal or not approval or proposal["status"] != "proposed" or approval["status"] != "pending":
-                error = RegistryError("conflict", "This review is expired or already resolved. Refresh the Pip before reviewing it.")
+                error = RegistryError("conflict", "This was already answered or has expired. Refresh to see it.")
             elif expected_version != proposal["expected_version"]:
-                error = RegistryError("conflict", "This proposal changed; review the saved version before resolving it.")
+                error = RegistryError("conflict", "This change was edited. Refresh and look at it again.")
             elif accept and expected_version != pip["current_version"]:
                 pip_approvals.resolve(self.registry, approval, "superseded", actor, now)
                 self.db.execute("UPDATE pip_proposals SET status='superseded' WHERE id=?", (proposal_id,))
-                error = RegistryError("conflict", "The Pip changed; this proposal needs a new review.")
+                error = RegistryError("conflict", "This Pip changed after this was written. Turn it down and ask again.")
             else:
                 definition = json.loads(proposal["definition"])
                 if pip_approvals.digest(definition) != approval["definition_digest"]:
@@ -902,9 +902,9 @@ class PipStore:
             if expected_lifecycle_revision is not None:
                 _integer(expected_lifecycle_revision,'Expected lifecycle revision')
                 if pip['lifecycle_revision'] != expected_lifecycle_revision:
-                    raise RegistryError('conflict','The Pip lifecycle changed. Refresh before pausing or resuming it.')
+                    raise RegistryError('conflict','This Pip changed. Refresh, then try again.')
             elif not paused and self.db.execute('SELECT 1 FROM pip_archive_requests WHERE pip_id=? LIMIT 1',(pip_id,)).fetchone():
-                raise RegistryError('lifecycle_revision_required','This Pip has archival history. Refresh and supply its current lifecycle revision before resuming it.')
+                raise RegistryError('lifecycle_revision_required','This Pip was archived before. Refresh, then resume it.')
             status = "paused" if paused else "active"
             self.db.execute("UPDATE pips SET status=?,updated_at=? WHERE id=?", (status, self.registry.clock(), pip_id))
             if pip["status"] != status:
@@ -1020,7 +1020,7 @@ class PipStore:
             return self._run(prior)
         from .pip_daemon import is_runtime_paused
         if is_runtime_paused(self.registry):
-            raise RegistryError("runner_stopped", "Pips are stopped on this runner. Run dgc pips resume locally before requesting new work.")
+            raise RegistryError("runner_stopped", "Pips are stopped on this computer. Resume Pips (or run dgc pips resume), then try again.")
         pip = self.get(pip_id)
         from .pip_archive import require_live
         require_live(self,pip_id)
@@ -1043,7 +1043,7 @@ class PipStore:
             # standalone Pulse runs its reviewed commands without a model, so it spends no tokens.
             from .pip_spend import over_daily_cap
             if over_daily_cap(self.registry, pip_id):
-                raise RegistryError("daily_cap_reached", "This Pip reached its daily token limit, so this automatic run was skipped. Raise or remove the limit in its Job tab.")
+                raise RegistryError("daily_cap_reached", "This Pip reached its daily token limit, so this scheduled run was skipped. Raise or remove the limit in its Settings.")
         if pulse_request is not None and pip['pip_type'] != 'pulse':
             raise RegistryError('invalid_request', 'Verification-plan run pins apply only to standalone Pulse.')
         if standalone:
@@ -1051,23 +1051,23 @@ class PipStore:
             plan = validate_job(pip_type=pip['pip_type'], plan=pip.get('verification_plan'),
                 source_policy=pip['source_policy'], schedule=pip['schedule'], event_trigger=pip['event_trigger'])
             if plan is None:
-                raise RegistryError('review_required', 'Review a standalone verification plan before starting Pulse without a handoff.')
+                raise RegistryError('review_required', 'Give Pulse a command plan first, or start it with a handoff.')
             from .redaction import redact_value, secret_values
             if redact_value(plan, secret_values(config)) != plan:
                 raise RegistryError('secret_detected', 'The reviewed commands overlap configured credentials; review a plan without secret arguments.')
             if pulse_request is not None and (pulse_request['expected_version'] != pip['current_version']
                     or pulse_request['expected_lifecycle_revision'] != pip['lifecycle_revision']
                     or pulse_request['expected_plan_digest'] != plan_digest(plan)):
-                raise RegistryError('conflict', 'The reviewed Pulse job, lifecycle or plan changed. Refresh before requesting execution.')
+                raise RegistryError('conflict', 'Pulse’s setup or command plan changed. Refresh, then run it again.')
         if pip["pip_type"] == "quill" and handoff is not None and not personal:
-            raise RegistryError("manual_only", "Quill draft runs do not accept handoffs.")
+            raise RegistryError("manual_only", "Quill doesn’t take handoffs.")
         if executable and handoff is None and not standalone:
-            raise RegistryError("review_required", "Patch and Pulse require a separately reviewed source-finding handoff before execution.")
+            raise RegistryError("review_required", "Patch and Pulse run only on a handoff you approve.")
         if executable:
             from .pip_execution import capability
             available = capability()
             if not available.get("available"):
-                raise RegistryError("execution_unavailable", available.get("reason", "Isolated execution is unavailable on this runner."))
+                raise RegistryError("execution_unavailable", available.get("reason", "Commands can’t run in a sealed-off copy on this computer."))
         from .pip_types import role_pin
         role = role_pin(pip["pip_type"])
         binding = self.registry.binding(pip["workspace_id"])
@@ -1076,7 +1076,7 @@ class PipStore:
                                                schedule=pip.get('schedule'), event_trigger=pip.get('event_trigger'))
         current_tree = selected_source['mode'] == 'current_tree'
         if current_tree and any(value is not None for value in (schedule_occurrence, handoff, event_occurrence, _audit_preparation)):
-            raise RegistryError('manual_only', 'Current-tree source supports only manual runs and conversations, without handoffs or automatic triggers.')
+            raise RegistryError('manual_only', 'A Pip that reads your current files runs only when you ask: no handoffs, schedule or events.')
         if current_tree and self.db.in_transaction:
             raise RegistryError('source_preparation_required', 'Capture current-tree source outside the queue transaction.')
         revision = None if current_tree or personal else source_revision(binding['canonical_root'], pip['source_ref'])
@@ -1186,7 +1186,7 @@ class PipStore:
                     pip_run_tool.validate_enqueue(self.registry, main_chat_request, latest, actor, key)
                 from .pip_daemon import is_runtime_paused
                 if is_runtime_paused(self.registry):
-                    raise RegistryError("runner_stopped", "Pips are stopped on this runner. Run dgc pips resume locally before requesting new work.")
+                    raise RegistryError("runner_stopped", "Pips are stopped on this computer. Resume Pips (or run dgc pips resume), then try again.")
                 if latest["status"] != "active" and not (conversation_request is not None and latest["status"] == "paused"):
                     raise RegistryError("paused", "Resume this Pip before starting another run.")
                 if latest["current_version"] != pip["current_version"]:
@@ -1256,7 +1256,7 @@ class PipStore:
                             or timestamp(occurrence["checked_at"]) > timestamp(self.registry.clock())):
                         raise RegistryError("invalid_schedule", "The queued occurrence must match the current approved schedule.")
                     if self.db.execute("SELECT 1 FROM pip_runs WHERE pip_id=? AND status IN ('queued','running','cancelling') LIMIT 1", (pip_id,)).fetchone():
-                        raise RegistryError("schedule_busy", "This Pip already has queued or active work; this occurrence is skipped.")
+                        raise RegistryError("schedule_busy", "It was still busy, so this scheduled run was skipped.")
                     manifest["schedule"] = latest["schedule"]
                     manifest["scheduled_at"] = occurrence["scheduled_at"]
                 if event_occurrence is not None:
@@ -1324,7 +1324,7 @@ class PipStore:
                         raise RegistryError("conflict", "The audit checkpoint or finding reviews changed while preparing source references. Refresh and retry.")
                     if ((schedule_occurrence is not None or event_occurrence is not None)
                             and _unchanged_since_checkpoint(audit_preparation, latest, model, manifest["workspace_context"])):
-                        raise RegistryError("source_unchanged", "Nothing changed since this Pip's last report, so this occurrence was skipped.")
+                        raise RegistryError("source_unchanged", "Nothing changed since its last report, so this scheduled run was skipped.")
                     manifest["audit_checkpoint"] = audit_preparation["checkpoint"]
                     manifest["changes_since_checkpoint"] = audit_preparation["changes"]
                 if run_kind in ("audit", "conversation"):

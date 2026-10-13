@@ -233,7 +233,7 @@ class LocalPipsTests(unittest.TestCase):
     def test_delegated_route_refused(self):
         self.commit()
         self.cfg.data["subscription_engine"] = "codex"
-        with self.assertRaisesRegex(RegistryError, "native"):
+        with self.assertRaisesRegex(RegistryError, "local or API model"):
             self.enqueue()
 
     def test_uncommitted_folder_refused(self):

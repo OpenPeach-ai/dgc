@@ -1,7 +1,7 @@
 // Main-chat setup reviews. Tool output supplies an identity only: every actionable
 // card is loaded again from the local registry and approved by its exact digest.
 import '../media/pips/plush.js';
-import {pipSetup,pipSetupResolution,pipModels,modelChoice,scheduleLabel} from './pipsModel.js';
+import {pipSetup,pipSetupResolution,pipModels,modelChoice,scheduleLabel,commandLine} from './pipsModel.js';
 import {appReadWords} from './pipsAppPicker.js';
 import {mountRunCards} from './pipRunCards.js';
 import {mountEmailCards} from './pipEmailCards.js';
@@ -11,7 +11,7 @@ export function mountSetupCards(options) {
  let generation=0, epoch=0, sequence=0, connected=false, supported=false, api=0, backgroundSetup=false, disposed=false, dockView=null;
  const node=(tag,cls,text)=>{const e=doc.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
  const request=(type,fields={})=>new Promise((resolve,reject)=>{
-  if(!connected||!supported)return reject(Error('Reconnect to this chat before reviewing Pip setup.'));
+  if(!connected||!supported)return reject(Error('Reconnect, then try again.'));
   const id=`pip-card-${epoch}-${++sequence}`;
   const timer=setTimeout(()=>{pending.delete(id);reject(Error('No reply from DGC. Refresh this card before trying again.'));},20000);
   pending.set(id,{resolve,reject,timer});options.postMessage({type:'pipsRequest',id,generation,request:{type,...fields}});
@@ -30,7 +30,7 @@ export function mountSetupCards(options) {
    const seen=new Set([s.id]);
    while(s.status==='rejected'&&s.receipt?.replacement_setup_id){
     const next=s.receipt.replacement_setup_id;
-    if(seen.has(next)||seen.size>=8)throw Error('This proposal has several revisions. Open Pips to review its latest setup.');
+    if(seen.has(next)||seen.size>=8)throw Error('This card changed several times. Open Pips to see the latest.');
     seen.add(next);const reply=await request('get_pip_setup',{setup_id:next});if(token!==epoch)return;
     s=pipSetup(reply.setup,s.workspace_id,next);
    }
@@ -69,7 +69,7 @@ export function mountSetupCards(options) {
   const facts=node('dl','pip-setup-facts');detail(facts,s.source_policy==='personal'?'Scope':'Project',s.source_policy==='personal'?'Personal':s.project_root);if(s.event_trigger)detail(facts,'Runs',`After each new commit to ${s.source_ref}`);else detail(facts,'Schedule',s.schedule?scheduleLabel(s.schedule):'When you ask');
   if(s.next_run_at)detail(facts,'Next run',`${new Date(s.next_run_at).toLocaleString()} (your local time)`);
   detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal')detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:'Your DGC model');
-  if(s.verification_plan){detail(facts,'Execution','Fixed checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Exact check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → HTTP ${test.argv[2]}`:JSON.stringify(test.argv)+' · cwd '+test.cwd);}
+  if(s.verification_plan){detail(facts,'Runs','Set checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → status ${test.argv[2]}`:commandLine(test.argv)+' · in '+test.cwd);}
   if(s.app_plan)for(const words of appReadWords(s.app_plan))detail(facts,'Reads',words);
   if(s.web_plan)for(const read of s.web_plan.reads||[])detail(facts,read.kind==='page'?'Web page':'Web search',read.kind==='page'?read.url:read.query);
   body.append(facts,node('p','pip-setup-notice',s.scope_notice),node('p','pip-setup-notice',s.runner_notice));
@@ -155,7 +155,7 @@ export function mountSetupCards(options) {
   if(dockView&&dockView.entry!==next){const old=dockView;dockView=null;options.dock.hide(old.root);repaint(old.entry);}
   if(!next)return;
   if(!dockView){
-   const root=node('section','ask pip-dock');root.setAttribute('role','group');root.setAttribute('aria-label',`Pip proposal: ${next.setup.name}`);root.dataset.setupId=next.id;
+   const root=node('section','ask pip-dock');root.setAttribute('role','group');root.setAttribute('aria-label',`New Pip: ${next.setup.name}`);root.dataset.setupId=next.id;
    const view={kind:'dock',root,entry:next,uid:`pip-dock-face-${++sequence}`,open:false};paintDock(view);
    if(!options.dock.show(root))return;
    dockView=view;repaint(next);
@@ -173,7 +173,7 @@ export function mountSetupCards(options) {
   }catch(error){if(token===epoch)entry.error=error.message;}finally{if(token===epoch){entry.busy=false;repaint(entry);}}
  }
  async function resolve(entry,accept){
-  if(accept&&entry.setup?.pip_type==='pulse'&&api<27){entry.error='Update the DGC CLI (Pips API 27) for conversational Pulse setup.';repaint(entry);return;}
+  if(accept&&entry.setup?.pip_type==='pulse'&&api<27){entry.error='Update DGC to set up Pulse from the chat.';repaint(entry);return;}
   if(entry.busy||!entry.setup)return;const token=epoch,s=entry.setup;entry.busy=true;entry.error='';repaint(entry);
   try{
    const latest=pipSetup((await request('get_pip_setup',{setup_id:s.id})).setup,s.workspace_id,s.id);if(token!==epoch)return;
@@ -188,7 +188,7 @@ export function mountSetupCards(options) {
   if(!backgroundSetup){entry.error=`${entry.setup?.name||'The Pip'} is created. Reload the window so the chat hears about it.`;repaint(entry);return;}
   const token=epoch;entry.notifying=true;
   try{const value=await request('notify_pip_setup',{setup_id:entry.setup.id});if(token!==epoch)return;
-   if(value.setup_id!==entry.setup.id||!['started','queued','steered','already_notified'].includes(value.notification))throw Error('The notification receipt did not match this setup.');
+   if(value.setup_id!==entry.setup.id||!['started','queued','steered','already_notified'].includes(value.notification))throw Error('The chat wasn’t told. Try again.');
    entry.continued=true;
   }catch(error){if(token===epoch)entry.error=error.message;}finally{if(token===epoch){entry.notifying=false;repaint(entry);}}
  }
@@ -223,7 +223,7 @@ export function mountSetupCards(options) {
  function finish(block){
   runs.finish(block);
   const ids=[...block.querySelectorAll('[data-pip-setup]')].map(c=>c.dataset.pipSetup);
-  if(!ids.length)return;let group=block.querySelector(':scope > .pip-setup-pending');if(!group){group=node('section','pip-setup-pending');group.setAttribute('aria-label','Pip proposals from this response');block.append(group);}
+  if(!ids.length)return;let group=block.querySelector(':scope > .pip-setup-pending');if(!group){group=node('section','pip-setup-pending');group.setAttribute('aria-label','New Pips from this reply');block.append(group);}
   for(const id of new Set(ids)){const entry=entries.get(id);if(!entry)continue;const view=entry.views.find(v=>block.contains(v.root));if(view){const tool=view.root.closest('[data-pip-setup]');group.append(view.root);if(tool)tool.classList.add('pip-setup-moved');}}
  }
  function reset(){emails.reset();runs.reset();if(dockView){options.dock?.hide(dockView.root);dockView=null;}epoch++;for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('The conversation changed.'));}pending.clear();for(const e of entries.values())for(const v of e.views){v.dispose?.();v.root.remove();}entries.clear();}

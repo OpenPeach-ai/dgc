@@ -90,7 +90,7 @@ class PipArchiveTests(unittest.TestCase):
 
     def test_restored_resume_requires_fresh_explicit_lifecycle_pin(self):
         self.setup_source(); self.change(); self.change(archived=False,key='restore')
-        with self.assertRaisesRegex(RegistryError,'revision'):self.store.set_paused(self.source['id'],False,'device')
+        with self.assertRaisesRegex(RegistryError,'archived before'):self.store.set_paused(self.source['id'],False,'device')
         with self.assertRaisesRegex(RegistryError,'changed'):self.store.set_paused(self.source['id'],False,'device',expected_lifecycle_revision=0)
         self.assertEqual(self.store.set_paused(self.source['id'],False,'device',expected_lifecycle_revision=2)['status'],'active')
 

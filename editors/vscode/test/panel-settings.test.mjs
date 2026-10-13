@@ -2285,7 +2285,7 @@ test('Pips controls stay on their originating chat channel and reject stale view
   h.provider.backend=channel;h.provider.ensureBackend=()=>channel;
   h.provider.pipsEditor.ready(h.provider.lastReadyEvent.capabilities,channel);
   await h.provider.onMessage({...old,id:'late-ui'});assert.equal(secondary.length,0);
-  assert.match(h.messages.at(-1).error.message,/earlier chat connection/);
+  assert.match(h.messages.at(-1).error.message,/from an earlier connection/);
   await h.provider.onMessage(h.request('current'));assert.equal(secondary.length,1);
   assert.equal(secondary[0].chat_id,'chat-other');assert.equal(secondary[0].request.chat_id,undefined);
   const replies=h.messages.filter(m=>m.type==='pipsReply').length;

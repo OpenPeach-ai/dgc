@@ -229,7 +229,7 @@ export class PipsEditor implements vscode.Disposable {
       if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > 131072) throw Error('This run has no supported Markdown document within the 128 KiB limit.');
       // Text comes from the correlated backend read, never from a webview payload.
       // Open source text, not a preview that could load model-authored image URLs.
-      const content = `Saved Pip result · ${requested.run}\n\nModel-authored document. Review before relying on or sharing it.\n\n${text}\n`;
+      const content = `Saved Pip result · ${requested.run}\n\nWritten by a Pip with its model. Check it before you rely on it or share it.\n\n${text}\n`;
       const document = await vscode.workspace.openTextDocument({ language: 'markdown', content });
       if (requested.generation !== this.generation || !this.state.connected) throw Error('The DGC connection changed. Open the result again.');
       await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
@@ -278,14 +278,14 @@ export class PipsEditor implements vscode.Disposable {
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } }, surface);
     // A computer tab is pinned to its own Pip and to the computer's commands.
     if (computer && (!COMPUTER_COMMANDS.has(message.request?.type) || (Object.prototype.hasOwnProperty.call(message.request, 'pip_id') && message.request.pip_id !== computer.pip.id))) { fail('This tab only uses this Pip\'s computer.'); return; }
-    if (this.requireGeneration && message.generation !== this.generation) { fail('This Pip view belongs to an earlier chat connection. Refresh before trying again.'); return; }
-    if (!this.state.connected || !this.state.supported) { fail('The local Pips backend is unavailable. Update the DGC CLI to Pips API v9 or later, then reconnect.'); return; }
+    if (this.requireGeneration && message.generation !== this.generation) { fail('This view is from an earlier connection. Refresh and try again.'); return; }
+    if (!this.state.connected || !this.state.supported) { fail('Pips aren’t available. Update DGC, then reconnect.'); return; }
     for (const [id, item] of this.pending) if (Date.now() - item.at > 60000) this.pending.delete(id);
-    if (this.pending.size >= 64) { fail('Too many requests are pending. Reconnect before trying again.'); return; }
+    if (this.pending.size >= 64) { fail('DGC is busy. Reconnect and try again.'); return; }
     const request = message.request;
     if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.type !== 'string') return;
     if (request.type === 'export_pip_file' || request.type === 'import_pip_file') {
-      if (this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) to share Pips.'); return; }
+      if (this.apiVersion < 41) { fail('Update DGC to share Pips.'); return; }
       if (request.type === 'import_pip_file') {
         if (Object.keys(request).some(key => key !== 'type')) { fail('Choose a shared Pip file to import.'); return; }
         void this.importFile(message.id); return;
@@ -309,56 +309,56 @@ export class PipsEditor implements vscode.Disposable {
       }
       return;
     }
-    if (['get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft'].includes(request.type) && this.apiVersion < 37) { fail('Update the DGC CLI (Pips API 37) for conversational connector drafts.'); return; }
-    if (['get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft'].includes(request.type) && this.apiVersion < 35) { fail('Update the DGC CLI (Pips API 35) for conversational calendar drafts.'); return; }
-    if (['get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft'].includes(request.type) && this.apiVersion < 32) { fail('Update the DGC CLI (Pips API 32) for conversational email drafts.'); return; }
-    if (['inspect_pip_connector_actions','propose_pip_connector_action'].includes(request.type) && this.apiVersion < 36) { fail('Update the DGC CLI (Pips API 36) for reviewed connector actions.'); return; }
-    if (['inspect_pip_calendar_connection','propose_pip_calendar_action'].includes(request.type) && this.apiVersion < 34) { fail('Update the DGC CLI (Pips API 34) for reviewed calendar events.'); return; }
-    if (['inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action'].includes(request.type) && this.apiVersion < 31) { fail('Update the DGC CLI (Pips API 31) for reviewed messages.'); return; }
-    if (request.type === 'propose_pip_personal_handoff' && this.apiVersion < 30) { fail('Update the DGC CLI (Pips API 30) for Personal result handoffs.'); return; }
-    if (request.type === 'list_pip_accounts' && this.apiVersion < 29) { fail('Update the DGC CLI (Pips API 29) for connected-account selection.'); return; }
-    if (request.type === 'revise_pip_setup' && this.apiVersion < 25) { fail('Update the computer to Pips API 25 to change the model on a setup card.'); return; }
-    if (request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'chat_options') && this.apiVersion < 24) { fail('Update the computer to Pips API 24 for conversation context and thinking controls.'); return; }
-    if (request.type === 'send_pip_message' && Number(request.chat_options?.context_size) > 32768 && this.apiVersion < 25) { fail('Update the computer to Pips API 25 for conversation context above 32768 tokens.'); return; }
-    if (['propose_pip_calendar_action','prepare_pip_calendar_draft'].includes(request.type) && request.event && ['attendees','repeat','send_invitations'].some(key => Object.prototype.hasOwnProperty.call(request.event,key)) && this.apiVersion < 38) { fail('Update the DGC CLI (Pips API 38) for calendar invitations and series.'); return; }
-    if (request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'web_plan') && this.apiVersion < 40) { fail('Update the DGC CLI (Pips API 40) for web reads.'); return; }
-    if (request.type === 'propose_pip_update' && request.changes?.app_plan?.schema_version === 3 && this.apiVersion < 39) { fail('Update the DGC CLI (Pips API 39) for Drive, Notion and Contacts reads.'); return; }
-    if (request.type === 'propose_pip_update' && request.changes?.app_plan?.schema_version === 2 && this.apiVersion < 33) { fail('Update the DGC CLI (Pips API 33) for recurring calendar windows.'); return; }
-    if ((['list_pip_connections','inspect_pip_connection'].includes(request.type) || request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'app_plan')) && this.apiVersion < 28) { fail('Update the DGC CLI (Pips API 28) for reviewed app reads.'); return; }
-    if (['list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup'].includes(request.type) && this.apiVersion < 23) { fail('Update the computer to Pips API 23 for conversational setup reviews.'); return; }
-    if ((['get_pip_proposal', 'list_pip_adaptations'].includes(request.type) || request.type === 'propose_pip_update' && (request.changes?.adaptation_policy !== undefined || request.changes?.event_trigger !== undefined)) && this.apiVersion < 10) { fail('Update the computer to Pips API 10 for this control.'); return; }
-    if ((request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'verification_plan') || request.type === 'run_pip' && ['expected_version', 'expected_lifecycle_revision', 'expected_plan_digest'].some(key => Object.prototype.hasOwnProperty.call(request, key))) && this.apiVersion < 21) { fail('Update the computer to Pips API 21 for reviewed standalone Pulse commands.'); return; }
-    if (request.type === 'propose_pip_update' && (Object.prototype.hasOwnProperty.call(request.changes?.event_trigger || {}, 'commit_paths') || Array.isArray(request.changes?.event_trigger?.events) && request.changes.event_trigger.events.includes('committed_paths_changed')) && this.apiVersion < 22) { fail('Update the computer to Pips API 22 to review committed-path rules.'); return; }
-    if (request.type === 'propose_pip_update' && Array.isArray(request.changes?.event_trigger?.events) && request.changes.event_trigger.events.includes('session_turn_completed') && this.apiVersion < 18) { fail('Update the computer to Pips API 18 to review Session turn saved.'); return; }
-    if (request.type === 'propose_pip_update' && request.changes?.source_policy !== undefined && this.apiVersion < 11) { fail('Update the computer to Pips API 11 to review source policy.'); return; }
-    if (['list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context'].includes(request.type) && this.apiVersion < 17) { fail('Update the computer to Pips API 17 for recorded command outcomes.'); return; }
-    if ((['archive_pip', 'restore_pip'].includes(request.type) || ['pause_pip', 'resume_pip'].includes(request.type) && request.expected_lifecycle_revision !== undefined) && this.apiVersion < 16) { fail('Update the computer to Pips API 16 for reviewed lifecycle changes.'); return; }
-    if (request.action && Object.prototype.hasOwnProperty.call(request.action, 'specialists') && this.apiVersion < 15) { fail('Update the computer to Pips API 15 before reviewing specialists.'); return; }
-    if (['get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements'].includes(request.type) && this.apiVersion < 19) { fail('Update the computer to Pips API 19 for reviewed Pip claims and preferences.'); return; }
-    if (['get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories'].includes(request.type) && this.apiVersion < 14) { fail('Update the computer to Pips API 14 for source-bound exceptions.'); return; }
-    if (['list_pip_notifications', 'mark_pip_notification_read'].includes(request.type) && this.apiVersion < 13) { fail('Update the computer to Pips API 13 for notifications.'); return; }
-    if ((request.type === 'list_workspace_sessions' || request.type.includes('workspace_session_outcome')) && this.apiVersion < 12) { fail('Update the computer to Pips API 12 for reviewed session statements.'); return; }
+    if (['get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft'].includes(request.type) && this.apiVersion < 37) { fail('Update DGC for app action drafts.'); return; }
+    if (['get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft'].includes(request.type) && this.apiVersion < 35) { fail('Update DGC for calendar drafts.'); return; }
+    if (['get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft'].includes(request.type) && this.apiVersion < 32) { fail('Update DGC for email drafts.'); return; }
+    if (['inspect_pip_connector_actions','propose_pip_connector_action'].includes(request.type) && this.apiVersion < 36) { fail('Update DGC for app actions.'); return; }
+    if (['inspect_pip_calendar_connection','propose_pip_calendar_action'].includes(request.type) && this.apiVersion < 34) { fail('Update DGC to add calendar events.'); return; }
+    if (['inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action'].includes(request.type) && this.apiVersion < 31) { fail('Update DGC to send email from a Pip.'); return; }
+    if (request.type === 'propose_pip_personal_handoff' && this.apiVersion < 30) { fail('Update DGC to share results between Pips.'); return; }
+    if (request.type === 'list_pip_accounts' && this.apiVersion < 29) { fail('Update DGC to choose an account.'); return; }
+    if (request.type === 'revise_pip_setup' && this.apiVersion < 25) { fail('Update DGC to change the model on a new-Pip card.'); return; }
+    if (request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'chat_options') && this.apiVersion < 24) { fail('Update DGC to change context and thinking.'); return; }
+    if (request.type === 'send_pip_message' && Number(request.chat_options?.context_size) > 32768 && this.apiVersion < 25) { fail('Update DGC for a context window above 32K tokens.'); return; }
+    if (['propose_pip_calendar_action','prepare_pip_calendar_draft'].includes(request.type) && request.event && ['attendees','repeat','send_invitations'].some(key => Object.prototype.hasOwnProperty.call(request.event,key)) && this.apiVersion < 38) { fail('Update DGC for calendar invitations and repeating events.'); return; }
+    if (request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'web_plan') && this.apiVersion < 40) { fail('Update DGC for web reads.'); return; }
+    if (request.type === 'propose_pip_update' && request.changes?.app_plan?.schema_version === 3 && this.apiVersion < 39) { fail('Update DGC to read Drive, Notion and Contacts.'); return; }
+    if (request.type === 'propose_pip_update' && request.changes?.app_plan?.schema_version === 2 && this.apiVersion < 33) { fail('Update DGC to read upcoming days from a calendar.'); return; }
+    if ((['list_pip_connections','inspect_pip_connection'].includes(request.type) || request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'app_plan')) && this.apiVersion < 28) { fail('Update DGC for app reads.'); return; }
+    if (['list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup'].includes(request.type) && this.apiVersion < 23) { fail('Update DGC for new-Pip cards in the chat.'); return; }
+    if ((['get_pip_proposal', 'list_pip_adaptations'].includes(request.type) || request.type === 'propose_pip_update' && (request.changes?.adaptation_policy !== undefined || request.changes?.event_trigger !== undefined)) && this.apiVersion < 10) { fail('Update DGC for saved changes, self-changes and events.'); return; }
+    if ((request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'verification_plan') || request.type === 'run_pip' && ['expected_version', 'expected_lifecycle_revision', 'expected_plan_digest'].some(key => Object.prototype.hasOwnProperty.call(request, key))) && this.apiVersion < 21) { fail('Update DGC for Pulse command plans.'); return; }
+    if (request.type === 'propose_pip_update' && (Object.prototype.hasOwnProperty.call(request.changes?.event_trigger || {}, 'commit_paths') || Array.isArray(request.changes?.event_trigger?.events) && request.changes.event_trigger.events.includes('committed_paths_changed')) && this.apiVersion < 22) { fail('Update DGC to watch paths.'); return; }
+    if (request.type === 'propose_pip_update' && Array.isArray(request.changes?.event_trigger?.events) && request.changes.event_trigger.events.includes('session_turn_completed') && this.apiVersion < 18) { fail('Update DGC to run a Pip after a chat turn.'); return; }
+    if (request.type === 'propose_pip_update' && request.changes?.source_policy !== undefined && this.apiVersion < 11) { fail('Update DGC to change what a Pip reads.'); return; }
+    if (['list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context'].includes(request.type) && this.apiVersion < 17) { fail('Update DGC for check command results.'); return; }
+    if ((['archive_pip', 'restore_pip'].includes(request.type) || ['pause_pip', 'resume_pip'].includes(request.type) && request.expected_lifecycle_revision !== undefined) && this.apiVersion < 16) { fail('Update DGC to archive or restore Pips.'); return; }
+    if (request.action && Object.prototype.hasOwnProperty.call(request.action, 'specialists') && this.apiVersion < 15) { fail('Update DGC to use helpers.'); return; }
+    if (['get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements'].includes(request.type) && this.apiVersion < 19) { fail('Update DGC for claims and preferences.'); return; }
+    if (['get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories'].includes(request.type) && this.apiVersion < 14) { fail('Update DGC for exceptions.'); return; }
+    if (['list_pip_notifications', 'mark_pip_notification_read'].includes(request.type) && this.apiVersion < 13) { fail('Update DGC for notifications.'); return; }
+    if ((request.type === 'list_workspace_sessions' || request.type.includes('workspace_session_outcome')) && this.apiVersion < 12) { fail('Update DGC for session statements.'); return; }
     const requestId = 'pips-editor-' + randomBytes(12).toString('hex');
-    if (request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'github_plan') && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) for GitHub reads.'); return; }
-    if (request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'computer_plan') && this.apiVersion < 42) { fail('Update the DGC CLI (Pips API 42) to give a Pip a computer.'); return; }
-    if(['finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link'].includes(request.type) && this.apiVersion < 43) { fail('Update the DGC CLI (Pips API 43) to connect apps to a Pip.'); return; }
-    if(['list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine'].includes(request.type) && this.apiVersion < 43) { fail('Update the DGC CLI (Pips API 43) for routines.'); return; }
-    if(['set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps'].includes(request.type) && this.apiVersion < 43) { fail('Update the DGC CLI (Pips API 43) for this.'); return; }
-    if(['list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_attention','list_pip_notes','add_pip_note','forget_pip_note','list_pip_sites','set_pip_careful','forget_pip_site','get_pip_chat_context','list_pip_reply_stats','get_pips_limit','set_pips_limit'].includes(request.type) && this.apiVersion < 44) { fail('Update the DGC CLI (Pips API 44) to let a Pip use your plugins.'); return; }
-    if(request.type === 'set_plugin_permission' && this.apiVersion < 45) { fail('Update the DGC CLI (Pips API 45) to choose what a plugin may do without asking.'); return; }
-    if(request.type === 'introduce_pip' && this.apiVersion < 43) { fail('Update the DGC CLI (Pips API 43) for Pips that say hello.'); return; }
-    if(request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'files') && this.apiVersion < 43) { fail('Update the DGC CLI (Pips API 43) to send files to a Pip.'); return; }
-    if((request.type === 'get_pip_message_image' || request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'images')) && this.apiVersion < 43) { fail('Update the DGC CLI (Pips API 43) to send images to a Pip.'); return; }
-    if(['list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_computer_desktop'].includes(request.type) && this.apiVersion < 43) { fail('Update the DGC CLI (Pips API 43) for a Pip computer\'s Files and Terminal.'); return; }
-    if(['always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view'].includes(request.type) && this.apiVersion < 42) { fail('Update the DGC CLI (Pips API 42) for Pip computers.'); return; }
-    if(['always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) to let a Pip act without asking.'); return; }
-    if(['set_pip_feedback','list_pip_feedback'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) to rate Pip results.'); return; }
-    if(['get_pip_usage','set_pip_daily_cap'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) for Pip usage and daily limits.'); return; }
-    if(['get_pips_desktop_notifications','set_pips_desktop_notifications'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) for desktop notifications.'); return; }
-    if(['get_pips_keep_running','set_pips_keep_running'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) to keep Pips running.'); return; }
-    if(['list_pip_starters','propose_starter_pip'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) for starter Pips.'); return; }
-    if(['get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) for the Pips digest and notification settings.'); return; }
-    if(request.type==='notify_pip_setup'&&!this.backgroundSetup){fail('Setup is saved. Reload the window to get background approval notifications.');return;}
+    if (request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'github_plan') && this.apiVersion < 41) { fail('Update DGC for GitHub reads.'); return; }
+    if (request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'computer_plan') && this.apiVersion < 42) { fail('Update DGC to give a Pip a computer.'); return; }
+    if(['finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link'].includes(request.type) && this.apiVersion < 43) { fail('Update DGC to connect apps to a Pip.'); return; }
+    if(['list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine'].includes(request.type) && this.apiVersion < 43) { fail('Update DGC for routines.'); return; }
+    if(['set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps'].includes(request.type) && this.apiVersion < 43) { fail('Update DGC to use this.'); return; }
+    if(['list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_attention','list_pip_notes','add_pip_note','forget_pip_note','list_pip_sites','set_pip_careful','forget_pip_site','get_pip_chat_context','list_pip_reply_stats','get_pips_limit','set_pips_limit'].includes(request.type) && this.apiVersion < 44) { fail('Update DGC to let a Pip use your plugins.'); return; }
+    if(request.type === 'set_plugin_permission' && this.apiVersion < 45) { fail('Update DGC to choose what a plugin may do without asking.'); return; }
+    if(request.type === 'introduce_pip' && this.apiVersion < 43) { fail('Update DGC for Pips that say hello.'); return; }
+    if(request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'files') && this.apiVersion < 43) { fail('Update DGC to send files to a Pip.'); return; }
+    if((request.type === 'get_pip_message_image' || request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'images')) && this.apiVersion < 43) { fail('Update DGC to send images to a Pip.'); return; }
+    if(['list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_computer_desktop'].includes(request.type) && this.apiVersion < 43) { fail('Update DGC for a Pip computer’s Files and Terminal.'); return; }
+    if(['always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view'].includes(request.type) && this.apiVersion < 42) { fail('Update DGC for Pip computers.'); return; }
+    if(['always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant'].includes(request.type) && this.apiVersion < 41) { fail('Update DGC to let a Pip act without asking.'); return; }
+    if(['set_pip_feedback','list_pip_feedback'].includes(request.type) && this.apiVersion < 41) { fail('Update DGC to rate Pip results.'); return; }
+    if(['get_pip_usage','set_pip_daily_cap'].includes(request.type) && this.apiVersion < 41) { fail('Update DGC for Pip usage and daily limits.'); return; }
+    if(['get_pips_desktop_notifications','set_pips_desktop_notifications'].includes(request.type) && this.apiVersion < 41) { fail('Update DGC for desktop notifications.'); return; }
+    if(['get_pips_keep_running','set_pips_keep_running'].includes(request.type) && this.apiVersion < 41) { fail('Update DGC to keep Pips running.'); return; }
+    if(['list_pip_starters','propose_starter_pip'].includes(request.type) && this.apiVersion < 41) { fail('Update DGC for starter Pips.'); return; }
+    if(['get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes'].includes(request.type) && this.apiVersion < 41) { fail('Update DGC for the Pips digest and notification settings.'); return; }
+    if(request.type==='notify_pip_setup'&&!this.backgroundSetup){fail('It’s created. Reload the window so the chat hears about it.');return;}
     let command: any;
     if (request.type === 'pips_enable' && typeof request.enabled === 'boolean') {
       command = {type: 'pips_enable', enabled: request.enabled, request_id: requestId};
@@ -385,7 +385,7 @@ export class PipsEditor implements vscode.Disposable {
       command = {type: 'pips_control', request: nested};
     } else { fail('Unknown Pips command.'); return; }
     this.pending.set(requestId, {client: message.id, command: request.type, at: Date.now(), surface});
-    if (!this.send(command, this.backendIdentity)) { this.pending.delete(requestId); fail('DGC could not send the request. Its outcome is unknown; refresh before retrying.'); }
+    if (!this.send(command, this.backendIdentity)) { this.pending.delete(requestId); fail('DGC couldn’t send that. Refresh to see whether it worked before trying again.'); }
   }
   dispose(): void { this.pending.clear(); this.embeddedPost = undefined; this.panel?.dispose(); for (const { panel } of [...this.computers.values()]) panel.dispose(); }
 }

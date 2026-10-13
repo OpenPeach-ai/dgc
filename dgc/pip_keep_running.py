@@ -307,7 +307,7 @@ def status(dgc_home=None, **options) -> dict:
         return _linux_status(_home(dgc_home), options)
     if sys.platform == "darwin":
         return _mac_status(_agent_spec(_home(dgc_home), **options))
-    return _unsupported("Keeping Pips running is available on Linux and macOS. Here, start the runner from the Pips view when you need it.")
+    return _unsupported("Keeping Pips running is available on Linux and macOS. Here, start Pips from the Pips view when you need them.")
 
 
 def set_on(enabled, *, runner_online, dgc_home=None, **options) -> dict:

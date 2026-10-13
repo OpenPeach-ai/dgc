@@ -477,6 +477,12 @@ machine yet; each part is tested here with Windows faked at its edges, and the r
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **What Pips say back, in plain words.** A project setup card's notices ("Once you accept, it's on, with the
+  schedule shown…", "Its schedule runs only while Pips are running on this computer. Accepting this doesn't start
+  Pips."), Pulse's scope, the Pip type descriptions, the note shown beside a Pip chat's summary (the model's own
+  notice is unchanged) and the refusals the Pips view shows: "Pips are stopped on this computer. Resume Pips (or run
+  dgc pips resume), then try again." instead of "on this runner", and "Raise or remove the limit in its Settings."
+  instead of "in its Job tab", which no longer exists. Error codes, fields and stored values are unchanged.
 - **A fenced Pip draft is read, not refused.** A Quill run failed outright when the model wrapped its JSON in a code
   fence or a sentence ("Draft JSON rejected ... line 1, column 1"). The one object inside is now taken out and parsed
   just as strictly, every citation checked against the source again; no model rewrites it, so a citation that doesn't

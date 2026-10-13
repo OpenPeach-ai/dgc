@@ -30,7 +30,7 @@ test('host gates larger context on API25 while 32K continues on API24',()=>{
   editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});
   for(const size of [32768,65536,1048576])editor.receive({type:'pipsRequest',id:'ctx-'+size,request:{type:'send_pip_message',pip_id:'p',text:'Explain',idempotency_key:'test',chat_options:{context_size:size,thinking:'off'}}});
   assert.equal(sent.length,api===24?1:3);
-  if(api===24)assert.match(posted.at(-1).error.message,/API 25/);
+  if(api===24)assert.match(posted.at(-1).error.message,/context window above 32K/);
  }
 });
 test('same-generation connection publication cannot refresh over an approval in flight',async t=>{

@@ -331,9 +331,9 @@ class PipHandoffTests(unittest.TestCase):
                 ("pulse", {"kind": "test", "tests": [{"argv": ["/usr/bin/python3", "-m", "unittest"], "cwd": "."}]}, "test")):
                 job = self.store.create(self.workspace["id"], pip_type, "Reviewed isolated task", "device", pip_type=pip_type)
                 self.assertEqual(job["policy"], "review_required")
-                with self.assertRaisesRegex(RegistryError, "reviewed"):
+                with self.assertRaisesRegex(RegistryError, "handoff you approve"):
                     self.store.enqueue(job["id"], "direct", "device", self.cfg)
-                with self.assertRaisesRegex(RegistryError, "schedules"):
+                with self.assertRaisesRegex(RegistryError, "schedule"):
                     self.store.propose(job["id"], 1, {"schedule": {"type": "interval", "minutes": 60}}, "device")
                 proposed = self.propose(target_pip_id=job["id"], action=action, idempotency_key=pip_type)
                 approved = self.accept(proposed)

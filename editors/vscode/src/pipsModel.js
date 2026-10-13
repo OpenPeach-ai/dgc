@@ -6,6 +6,12 @@ export const active = status => ['queued','running','cancelling'].includes(statu
 export const statusLabel = status => ({queued:'Waiting to start',running:'Auditing source',cancelling:'Cancelling',cancelled:'Cancelled',failed:'Failed',succeeded:'Report ready',active:'Ready',paused:'Paused'}[status] || 'Status unknown');
 /** A Personal Pip's run, in its words: it works and is done; it does not audit or report. */
 export const personalStatusLabel = status => ({queued:'Waiting to start',running:'Working',cancelling:'Stopping',cancelled:'Stopped',failed:'Failed',succeeded:'Done',active:'Ready',paused:'Paused'}[status] || 'Status unknown');
+/** How a command, test or run ended, in words, never the stored enum ("timed_out"). */
+export const outcomeWords = value => ({passed:'Passed',failed:'Failed',completed:'Done',complete:'Every command finished',succeeded:'Done',exited:'Finished',timed_out:'Stopped: took too long',output_limit:'Stopped: too much output',resource_limit:'Stopped: hit a memory or process limit',cancelled:'Cancelled',interrupted:'Interrupted',failed_to_start:'Didn’t start',unfinalized:'No result saved',stale_grant:'Stopped: its approval changed',infrastructure_failure:'Stopped: DGC couldn’t run it'}[value] || String(value ?? '').replaceAll('_',' '));
+/** A review's state in words (handoffs, statements, waiting changes). */
+export const reviewStatusWords = value => ({pending:'Waiting for you',accepted:'Accepted',approved:'Approved',rejected:'Rejected',expired:'Expired',superseded:'Set aside'}[value] || String(value ?? ''));
+/** An exact argument list as one readable command line: an argument with spaces or quotes is shell-quoted, so nothing is ambiguous. */
+export const commandLine = argv => argv.map(a => /^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replaceAll("'", "'\\''")}'`).join(' ');
 export const errorText = value => typeof value === 'string' ? value : record(value) && typeof value.message === 'string' ? value.message : 'Something went wrong. Refresh and try again.';
 // Only expose recorded, allowlisted metrics. Missing legacy fields are unknown, not zero.
 export const count = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString() : 'Not recorded';
@@ -28,7 +34,7 @@ export function execution(run) {
     tools: Array.isArray(m.tools) && m.tools.length <= 128 && m.tools.every(t => typeof t === 'string') ? m.tools : null,
     calls: count(r.tools_called),
     usage: [['Input tokens','input_tokens'],['Output tokens','output_tokens'],['Cached input','cached_input_tokens'],['Reasoning tokens','reasoning_tokens'],['Model requests','requests']].map(([label,key]) => [label,count(usage[key])]),
-    limits: [['Wall limit','wall_seconds'],['Tool-call limit','tool_calls'],['Iteration limit','iterations'],['Snapshot byte limit','snapshot_bytes']].map(([label,key]) => [label,count(limits[key]) + (key === 'wall_seconds' && Number.isSafeInteger(limits[key]) && limits[key] >= 0 ? ' s' : '')]),
+    limits: [['Time limit','wall_seconds'],['Tool-call limit','tool_calls'],['Step limit','iterations'],['Code size limit (bytes)','snapshot_bytes']].map(([label,key]) => [label,count(limits[key]) + (key === 'wall_seconds' && Number.isSafeInteger(limits[key]) && limits[key] >= 0 ? ' s' : '')]),
     queueDuration: duration(run?.created_at, run?.started_at),
     duration: duration(run?.started_at, run?.finished_at),
   };
@@ -48,12 +54,12 @@ export function activityLabel(event) {
   if (event.event_type === 'pip_run_progress') {
     const tool=typeof p.tool === 'string' ? p.tool : 'Tool';
     if (p.kind === 'tool_call') return `${tool} · started`;
-    if (p.kind === 'tool_result') return `${tool} · ${p.status === 'completed' ? 'completed' : p.status === 'failed' ? 'failed' : 'result recorded'}`;
-    if (p.kind === 'tool_denied') return `${tool} · denied`;
+    if (p.kind === 'tool_result') return `${tool} · ${p.status === 'completed' ? 'completed' : p.status === 'failed' ? 'failed' : 'finished'}`;
+    if (p.kind === 'tool_denied') return `${tool} · not allowed`;
     if (p.kind === 'error') return 'Something went wrong';
-    return typeof p.message === 'string' ? p.message : 'Progress recorded';
+    return typeof p.message === 'string' ? p.message : 'Working';
   }
-  return {pip_run_queued:'Waiting to start',pip_run_started:'Started',pip_run_snapshot:'Getting ready',pip_run_succeeded:'Report ready',pip_run_failed:'Run failed',pip_run_cancelled:'Run cancelled',pip_run_cancelling:'Stopping',workspace_session_turn_completed:'Session turn saved',workspace_committed_paths_changed:'Selected committed paths changed'}[event.event_type] || 'Run event';
+  return {pip_run_queued:'Waiting to start',pip_run_started:'Started',pip_run_snapshot:'Getting ready',pip_run_succeeded:'Report ready',pip_run_failed:'Run failed',pip_run_cancelled:'Run cancelled',pip_run_cancelling:'Stopping',workspace_session_turn_completed:'A DGC chat turn was saved',workspace_committed_paths_changed:'Watched paths changed in a commit'}[event.event_type] || 'Step';
 }
 export function report(value) {
   if (!record(value) || typeof value.summary !== 'string' || value.tests_executed !== false || typeof value.verification !== 'string' || !Array.isArray(value.findings) || value.findings.length > 16 || !Array.isArray(value.limitations) || value.limitations.length > 12 || !value.limitations.every(v => typeof v === 'string')) return null;
@@ -131,7 +137,7 @@ export function scheduleFromDraft(value,now=Date.now()) {
   if(value.scheduleType==='cron')return {type:'cron',cron:cronExpression(value.scheduleCron),timezone:scheduleZone(value.scheduleZone),missed_policy:'coalesce_latest',dst_policy:'skip_gap_first_fold'};
   throw new Error('Choose Manual, Interval, Daily, Once, or Cron.');
 }
-export const approvalStatus = value => ({pending:'Pending',approved:'Approved',rejected:'Rejected',expired:'Expired',superseded:'Superseded'}[value] || 'Unknown');
+export const approvalStatus = value => ({pending:'Waiting for you',approved:'Accepted',rejected:'Turned down',expired:'Expired',superseded:'Set aside'}[value] || 'Unknown');
 export function approvalsPage(value,pip) {
   if (!record(value) || !Array.isArray(value.approvals) || value.approvals.length > 20 || !(value.next_before_id === null || typeof value.next_before_id === 'string')) throw new Error('Review history is invalid.');
   const seen=new Set();
@@ -147,7 +153,7 @@ export function pipTypes(value) {
   if (!record(value) || !Array.isArray(value.types) || value.types.length !== characterIds.length) throw new Error('Pip types are unavailable. Refresh before creating a Pip.');
   const seen = new Set();
   for (const t of value.types) {
-    if (!record(t) || !characterIds.includes(t.id) || seen.has(t.id) || t.character_index !== characterIds.indexOf(t.id) || typeof t.available !== 'boolean' || !['name','role','description','default_name','default_goal'].every(k=>typeof t[k]==='string') || !(t.unavailable_reason===null || typeof t.unavailable_reason==='string') || !(t.engine===null || typeof t.engine==='string') || (t.available && (t.engine!==(t.id==='patch'?'patch':t.id==='pulse'?'test':t.id==='quill'?'documentation_draft':'source_audit') || !t.default_goal.trim())) || (!t.available && !t.unavailable_reason)) throw new Error('The backend returned an invalid Pip type. Creation stays disabled.');
+    if (!record(t) || !characterIds.includes(t.id) || seen.has(t.id) || t.character_index !== characterIds.indexOf(t.id) || typeof t.available !== 'boolean' || !['name','role','description','default_name','default_goal'].every(k=>typeof t[k]==='string') || !(t.unavailable_reason===null || typeof t.unavailable_reason==='string') || !(t.engine===null || typeof t.engine==='string') || (t.available && (t.engine!==(t.id==='patch'?'patch':t.id==='pulse'?'test':t.id==='quill'?'documentation_draft':'source_audit') || !t.default_goal.trim())) || (!t.available && !t.unavailable_reason)) throw new Error('DGC sent a kind of Pip this editor doesn’t know. Update the DGC extension to create Pips.');
     seen.add(t.id);
   }
   return [...value.types].sort((a,b)=>a.character_index-b.character_index);
@@ -181,32 +187,32 @@ export function chatContinuity(value,pip,workspace){
  return value;
 }
 export function pipModels(value) {
-  if(!record(value)||typeof value.default_model!=='string'||!Array.isArray(value.models)||value.models.length>500||!value.models.every(m=>record(m)&&typeof m.id==='string'&&m.id&&typeof m.name==='string')||new Set(value.models.map(m=>m.id)).size!==value.models.length)throw new Error('Model list is unavailable. The configured default is still available.');
+  if(!record(value)||typeof value.default_model!=='string'||!Array.isArray(value.models)||value.models.length>500||!value.models.every(m=>record(m)&&typeof m.id==='string'&&m.id&&typeof m.name==='string')||new Set(value.models.map(m=>m.id)).size!==value.models.length)throw new Error('Models didn’t load. You can still use the same model as DGC.');
   return value;
 }
 export function modelChoice(value,models) {
   if(value==='default')return{mode:'default'};
   const id=typeof value==='string'&&value.startsWith('model:')?value.slice(6):'';
-  if(!id||!models.some(m=>m.id===id))throw new Error('Choose the configured default or a model listed by this connection.');
+  if(!id||!models.some(m=>m.id===id))throw new Error('Choose Same as DGC or a model from the list.');
   return{mode:'model',model:id};
 }
-export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:'Configured default';
+export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:'Same as DGC';
 export function presentation(pip, runs, connected, runnerState) {
   if (!connected) return {state:'offline',label:'Disconnected'};
   if (pip?.status === 'archived') return {state:'offline',label:'Archived'};
   const current = record(pip?.active_run) && active(pip.active_run.status) ? pip.active_run : runs.find(r => ['running','cancelling'].includes(r.status)) || runs.find(r => r.status === 'queued');
   const latest = record(pip?.latest_run) ? pip.latest_run : runs[0];
   const conversation=run=>run?.run_kind==='conversation'||run?.manifest?.run_kind==='conversation';
-  const label=run=>run?.status==='running'&&run.execution_mode==='standalone_plan'?'Running approved commands':run?.status==='running'&&(run?.run_kind||run?.manifest?.run_kind)==='draft'?'Drafting documentation':conversation(run)&&run.status==='running'?'Replying':(run?.run_kind||run?.manifest?.run_kind)==='personal_task'?personalStatusLabel(run.status):['patch','test'].includes(run?.run_kind||run?.manifest?.run_kind)&&run.status==='running'?'Executing reviewed handoff':statusLabel(run.status);
+  const label=run=>run?.status==='running'&&run.execution_mode==='standalone_plan'?'Running approved commands':run?.status==='running'&&(run?.run_kind||run?.manifest?.run_kind)==='draft'?'Drafting documentation':conversation(run)&&run.status==='running'?'Replying':(run?.run_kind||run?.manifest?.run_kind)==='personal_task'?personalStatusLabel(run.status):['patch','test'].includes(run?.run_kind||run?.manifest?.run_kind)&&run.status==='running'?'Working on a handoff':statusLabel(run.status);
   if (!runnerState || !runnerState.online) return {state:'offline',label:`${runnerState?'Pips not running':'Can’t tell if Pips are running'}${current?` · last: ${label(current)}`:''}`};
   if (current) return {state: current.status === 'queued' ? 'idle' : 'working', label:label(current)};
   if (pendingReviews(pip)>0) return {state:'waiting_approval',label:'Waiting for you'};
   if (pip?.status === 'paused' || runnerState.paused) return {state:'idle',label:runnerState.paused?'Pips stopped':'Paused'};
   if (latest?.status === 'failed') return {state:'failure',label:'Last run failed'};
-  if (latest?.status==='succeeded'&&latest.execution_mode==='standalone_plan'){const p=pulseProgress(latest);return {state:p?.failed?'failure':'idle',label:p?`${p.failed} failed · ${p.passed} passed invocation${p.passed===1?'':'s'}`:'Command capture complete · inspect outcomes'};}
-  if (latest?.status === 'succeeded') return {state:'success',label:conversation(latest)?'Reply ready':(latest?.run_kind||latest?.manifest?.run_kind)==='draft'?'Draft ready':['patch','test'].includes(latest?.run_kind||latest?.manifest?.run_kind)?'Execution evidence ready':'Report ready'};
+  if (latest?.status==='succeeded'&&latest.execution_mode==='standalone_plan'){const p=pulseProgress(latest);return {state:p?.failed?'failure':'idle',label:p?`${p.failed} failed · ${p.passed} passed`:'Commands finished · see results'};}
+  if (latest?.status === 'succeeded') return {state:'success',label:conversation(latest)?'Reply ready':(latest?.run_kind||latest?.manifest?.run_kind)==='draft'?'Draft ready':['patch','test'].includes(latest?.run_kind||latest?.manifest?.run_kind)?'Results ready':'Report ready'};
   if (latest?.status === 'cancelled') return {state:'idle',label:'Last run cancelled'};
-  return {state:'idle',label: pip ? 'Ready when you are' : 'Manual source audits'};
+  return {state:'idle',label: pip ? 'Ready when you are' : 'Ready'};
 }
 export function requestBroker(send, namespace=globalThis.crypto.randomUUID()) {
   let sequence = 0;
@@ -286,7 +292,7 @@ export function handoffAction(kind,paths='',tests='[]',specialists=undefined){
   for(const command of commands){
     if(!record(command)||Object.keys(command).sort().join()!=='argv,cwd'||!Array.isArray(command.argv)||!command.argv.length||command.argv.length>32||command.argv.some(a=>typeof a!=='string'||!a||/[\x00-\x1f\x7f]/.test(a)||bytes(a)>1024)||!command.argv[0]||command.argv.reduce((n,a)=>n+bytes(a),0)>8192||!relativePath(command.cwd,true))throw new Error('Each test needs an exact argv array (1–32 arguments, at most 1,024 bytes each and 8,192 total) and a relative cwd.');
     totalArgumentBytes+=command.argv.reduce((n,a)=>n+bytes(a),0);
-    if(totalArgumentBytes>8192)throw new Error('All reviewed command arguments together must fit in 8,192 UTF-8 bytes.');
+    if(totalArgumentBytes>8192)throw new Error('These commands are too long. Shorten their arguments.');
   }
   if(kind==='test')return {kind,tests:commands};
   const write_paths=paths.split('\n').map(p=>p.trim()).filter(Boolean);
@@ -380,6 +386,12 @@ export function executionContextContent(p){
   const stopped=['timed_out','cancelled','output_limit','resource_limit'];
   return `Historical runner receipt for ${p.run_id} at source ${p.source_revision}.\nPrivate changed files: ${p.changed_files}. Recorded commands: ${p.tests.length}; passed: ${p.tests.filter(t=>t.status==='passed').length}; failed: ${p.tests.filter(t=>t.status==='failed').length}; stopped: ${p.tests.filter(t=>stopped.includes(t.status)).length}; not run: ${p.tests_not_run}.\nOutcome accepted at review revision ${p.review_revision}; result SHA-256 ${p.result_digest}.\nThis records the reviewed execution at that time, not current source health or proof of correctness. Later reviews may differ. No changes were applied by recording this receipt; it grants no execution or write permission.`;
 }
+/** An accepted Patch or Pulse result saved to context, in words. The stored text stays exact (it is checked above). */
+export function executionContextWords(p){
+  if(!record(p)||!Array.isArray(p.tests))return '';
+  const stopped=['timed_out','cancelled','output_limit','resource_limit'],count=(n,one,many)=>`${n} ${n===1?one:many}`,passed=p.tests.filter(t=>t.status==='passed').length,failed=p.tests.filter(t=>t.status==='failed').length,stops=p.tests.filter(t=>stopped.includes(t.status)).length;
+  return `${p.run_kind==='patch'?`${count(p.changed_files,'file','files')} changed in a private copy. `:''}${p.tests.length+p.tests_not_run?`Tests: ${passed} passed, ${failed} failed${stops?`, ${stops} stopped`:''}${p.tests_not_run?`, ${p.tests_not_run} didn’t run`:''}.`:'No tests.'} Commit ${String(p.source_revision).slice(0,12)}.`;
+}
 export function executionContextEntry(entry){
   const p=entry?.provenance,fail=()=>{throw new Error('Workspace execution context has an invalid historical receipt.');},integer=(n,min,max)=>Number.isSafeInteger(n)&&n>=min&&n<=max;
   const keys='artifact,changed_files,classification,input,job_version,model,pip_id,result_digest,review_revision,review_status,run_id,run_kind,source,source_revision,tests,tests_not_run,verification';
@@ -446,7 +458,7 @@ const pathCommit=value=>typeof value==='string'&&[40,64].includes(value.length)&
 const pathId=(value,prefix)=>typeof value==='string'&&value.length===prefix.length+33&&value.startsWith(prefix+'_')&&/^[a-f0-9]+$/.test(value.slice(prefix.length+1));
 const pathRef=value=>typeof value==='string'&&value.length>=1&&value.length<=200&&!/[\r\n]/.test(value)&&/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)&&!value.includes('..');
 export function commitPathRules(value){
- const fail=()=>{throw Error('Use 1–32 literal exact paths or directory prefixes, at most 256 UTF-8 bytes each and 2,048 bytes together. Paths must be relative, unique and contain no wildcard or .git component.');};
+ const fail=()=>{throw Error('Use 1 to 32 different paths inside the project, with no wildcards or .git, and keep each one short.');};
  if(!Array.isArray(value)||value.length<1||value.length>32)fail();const seen=new Set(),encoder=new TextEncoder();
  const rules=value.map(rule=>{if(!pathKeys(rule,'kind,path')||!['exact','directory'].includes(rule.kind)||typeof rule.path!=='string'||!rule.path||rule.path.length>256||/^[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]|[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]$/.test(rule.path)||/[\x00-\x1f\x7f\\:*?\[\]]/.test(rule.path)||[...rule.path].some(c=>c.length===1&&c.charCodeAt(0)>=0xd800&&c.charCodeAt(0)<=0xdfff)||bytes(rule.path)>256||rule.path.split('/').some(c=>!c||c==='.'||c==='..'||c.toLowerCase()==='.git')||seen.has(rule.path))fail();seen.add(rule.path);return {kind:rule.kind,path:rule.path};});
  rules.sort((a,b)=>{const x=encoder.encode(a.path),y=encoder.encode(b.path);for(let i=0;i<Math.min(x.length,y.length);i++)if(x[i]!==y[i])return x[i]-y[i];return x.length-y.length;});if(bytes(JSON.stringify(rules))>2048)fail();return rules;
@@ -480,7 +492,7 @@ export function commitPathObservation(value,pip){
  }return value;
 }
 
-export const EVENT_TRIGGER_NAMES={context_updated:'Workspace context changes',finding_accepted:'A finding is accepted',commit_changed:'The committed source changes',session_turn_completed:'Session turn saved',committed_paths_changed:'Selected committed paths change'};
+export const EVENT_TRIGGER_NAMES={context_updated:'Workspace context changes',finding_accepted:'A finding is accepted',commit_changed:'A new commit on its branch',session_turn_completed:'A DGC chat turn is saved',committed_paths_changed:'Watched paths change in a commit'};
 export function eventTrigger(value){
  if(value==null)return null;
  const fail=()=>{throw new Error('Choose one to four supported events and an interval from 5 to 10,080 minutes.');};
@@ -489,11 +501,13 @@ export function eventTrigger(value){
  const paths=value.events.includes('committed_paths_changed');if(paths&&value.events.includes('commit_changed')||!paths&&Object.hasOwn(value,'commit_paths'))fail();
  return {events:[...value.events].sort(),minimum_minutes:minutes,missed_policy:'coalesce_latest',...(paths?{commit_paths:commitPathRules(value.commit_paths)}:{})};
 }
-export function eventTriggerLabel(value){try{const p=eventTrigger(value);return p?p.events.map(e=>EVENT_TRIGGER_NAMES[e]).join('; ')+` · at least ${p.minimum_minutes} minutes apart`:'No event trigger';}catch{return 'Unsupported event trigger';}}
+export function eventTriggerLabel(value){try{const p=eventTrigger(value);return p?p.events.map(e=>EVENT_TRIGGER_NAMES[e]).join('; ')+` · at least ${p.minimum_minutes} minutes apart`:'No events';}catch{return 'Events this editor doesn’t know';}}
 export function eventTriggerFromDraft(draft,rules){
  if(!/^\d+$/.test(String(draft.triggerMinutes)))throw new Error('Use a whole number of minutes between 5 and 10,080.');
  return eventTrigger({events:[...(draft.triggerContext?['context_updated']:[]),...(draft.triggerFinding?['finding_accepted']:[]),...(draft.triggerCommit?['commit_changed']:[]),...(draft.triggerSession?['session_turn_completed']:[]),...(draft.triggerPaths?['committed_paths_changed']:[])],minimum_minutes:Number(draft.triggerMinutes),missed_policy:'coalesce_latest',...(draft.triggerPaths?{commit_paths:rules}:{})});
 }
+/** What an event was, in words, never its stored type. */
+export const eventWords = event => ({workspace_context_recorded:'A context note was added',workspace_context_archived:'A context note was archived',workspace_finding_accepted:'A finding was saved to context',workspace_execution_recorded:'A run result was saved to context',pip_finding_accepted:'A finding was accepted',workspace_commit_changed:'A new commit',workspace_session_turn_completed:'A DGC chat turn was saved',workspace_committed_paths_changed:'Watched paths changed in a commit'}[event?.event_type] || String(event?.event_type ?? 'An event').replaceAll('_',' '));
 export function eventRunPin(manifest){
  if(manifest?.trigger!=='event')return null;
  const p=manifest.event_trigger,e=p?.event,fail=()=>{throw new Error('This run has an invalid event-trigger receipt.');};
@@ -620,9 +634,9 @@ export function pulseVerificationReceipt(value,m,status){
  return value;
 }
 export function pulseCommandLabel(command){
- if(command.launch_state==='not_started'||command.launch_state==='finished'&&command.outcome.exit_code===null)return 'Unexecuted';
- if(command.launch_state==='launch_reserved')return 'Outcome unknown';
- return command.outcome.status==='passed'?'Passed invocation':command.outcome.status==='failed'?'Failed invocation':'Stopped invocation';
+ if(command.launch_state==='not_started'||command.launch_state==='finished'&&command.outcome.exit_code===null)return 'Didn’t run';
+ if(command.launch_state==='launch_reserved')return 'Result unknown';
+ return command.outcome.status==='passed'?'Passed':command.outcome.status==='failed'?'Failed':'Stopped';
 }
 export function pulseProgress(run){
  if(run?.execution_mode!=='standalone_plan')return null;
@@ -639,9 +653,9 @@ export function sourcePolicy(value){
  if(value===undefined||value==='committed_only')return {mode:'committed_only'};
  if(record(value)&&Object.keys(value).sort().join()==='mode'&&value.mode==='committed_only')return {mode:'committed_only'};
  if(record(value)&&Object.keys(value).sort().join()==='exclusions,mode'&&value.mode==='current_tree'&&value.exclusions==='safe_source_v1')return {mode:'current_tree',exclusions:'safe_source_v1'};
- throw new Error('Unsupported source policy. Refresh or update the computer before starting work.');
+ throw new Error('This Pip reads code in a way this editor doesn’t know. Refresh, or update DGC.');
 }
-export function sourcePolicyLabel(value){try{if(sourcePolicy(value).mode==='personal')return 'Personal · no project access';return sourcePolicy(value).mode==='current_tree'?'Current working tree · manual only':'Committed source only';}catch{return 'Unsupported source policy';}}
+export function sourcePolicyLabel(value){try{if(sourcePolicy(value).mode==='personal')return 'Personal · no project access';return sourcePolicy(value).mode==='current_tree'?'Your current files · only when you ask':'Committed code';}catch{return 'Not supported here';}}
 export function sourceSnapshot(value){
  const integer=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
  if(!record(value)||Object.keys(value).sort().join()!=='bytes,consistency,excluded_directories,excluded_entries,exclusions,files,kind,schema_version,sha256'||value.schema_version!==1||value.kind!=='current_tree'||!/^[a-f0-9]{64}$/.test(value.sha256)||typeof value.sha256!=='string'||value.exclusions!=='safe_source_v1'||value.consistency!=='checked_non_atomic'||!integer(value.files,1,10000)||!integer(value.bytes,0,67108864)||!integer(value.excluded_entries,0,10000)||!integer(value.excluded_directories,0,value.excluded_entries)||value.files+value.excluded_entries>10000)throw new Error('The current-tree snapshot receipt is invalid.');
@@ -742,13 +756,16 @@ export function commandOutcomeEntry(e,workspace){
 export function commandOutcomeSummary(entry){
  const p=commandOutcomeEntry(entry).provenance,f=p.facts;
  return {
-  qualifier:'Historical command outcome; not a test result.',
-  outcome:`${f.state.replaceAll('_',' ')}${f.exit_code===null?'':` · exit ${f.exit_code}`} · ${f.duration_ms} ms`,
-  output:`${f.output_bytes} bytes captured · ${f.output_complete?'complete':'incomplete; missing size unknown'}`,
-  source:`${p.source_comparison==='unchanged_observation'?'Before/after match':p.source_comparison==='changed_observation'?'Before/after differ':'Comparison unavailable'} · non-atomic observations`,
+  qualifier:'What happened when a session ran its check command. Not a test result.',
+  outcome:`${outcomeWords(f.state)}${f.exit_code===null?'':` · exit ${f.exit_code}`} · ${f.duration_ms} ms`,
+  output:`${f.output_bytes} bytes${f.output_complete?'':' · some output missing'}`,
+  source:p.source_comparison==='unchanged_observation'?'Files looked the same before and after':p.source_comparison==='changed_observation'?'Files changed while it ran':'Couldn’t compare the files',
  };
 }
 
+const NOTIFICATION_WORDS={job_update:'A change is waiting for you',schedule_update:'A schedule change is waiting for you',handoff:'A handoff is waiting for you',session_outcome:'A session statement is waiting for you',run:'A run failed'};
+/** A notification's title in words. The stored title stays exactly as DGC sends it (checked below). */
+export const notificationWords = n => NOTIFICATION_WORDS[n?.source_kind] || n?.title || 'Notification';
 const NOTIFICATION_TITLES={job_update:'Pip job update needs review',schedule_update:'Pip schedule update needs review',handoff:'Pip handoff needs review',session_outcome:'Session statement needs review',run:'Pip run failed'};
 const notificationInteger=(v,min=0,max=Number.MAX_SAFE_INTEGER)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
 const notificationDate=v=>typeof v==='string'&&v.length<=40&&!/[\r\n]/.test(v)&&!Number.isNaN(Date.parse(v));
@@ -769,7 +786,7 @@ export function notificationsPage(value,workspace=null){
 }
 export function notificationNavigation(v){pipNotification(v);return v.source_kind==='session_outcome'?{pip:'',section:'context',reviewKind:'session_outcome',review:v.reference.proposal_id}:v.source_kind==='run'?{pip:v.pip_id,section:'runs',run:v.reference.run_id}:v.source_kind==='handoff'?{pip:v.pip_id,section:'handoffs',reviewKind:'handoff',review:v.reference.handoff_id}:{pip:v.pip_id,section:'revisions',reviewKind:v.source_kind,review:v.reference.proposal_id};}
 
-export const PIP_MEMORY_NOTICE='A user-recorded exception is reference only. It does not suppress or resolve findings, verify the assessment, add shared context, or grant execution permission.';
+export const PIP_MEMORY_NOTICE='An exception tells this Pip a finding is fine. It doesn’t hide or close the finding, confirm the model was right, add to shared context, or let the Pip run anything.';
 const memoryHash=v=>typeof v==='string'&&v.length===64&&/^[0-9a-f]{64}$/.test(v);
 const memoryTime=v=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(v)&&!Number.isNaN(Date.parse(v))&&new Date(v).toISOString()===v;
 const memoryInt=(v,min=0,max=Number.MAX_SAFE_INTEGER)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
@@ -800,7 +817,7 @@ export function pipMemoryPin(v,run){
  const ids=new Set();for(const e of v.entries){if(!exactOutcome(e,['memory','applicability']))memoryInvalid();const m=pipMemory(e.memory,v.pip_id,v.workspace_id);if(ids.has(m.id)||m.status!=='active'||m.created_at>v.as_of||m.expires_at!==null&&m.expires_at<=v.as_of)memoryInvalid();ids.add(m.id);const sameSource=memoryJson(memorySourcePin(m.source))===memoryJson(v.source),sameJob=m.source.job_version===v.job_version,expected=sameSource?(sameJob?'exact_source_and_job':'historical_job'):(sameJob?'historical_source':'historical_source_and_job');if(e.applicability!==expected)memoryInvalid();}return v;
 }
 
-export const PIP_STATEMENT_NOTICE='A recorded claim may be wrong. A preference is advisory. Both are Pip-local reference only: they do not verify source, override the approved job, hide findings, add shared context, or grant permissions.';
+export const PIP_STATEMENT_NOTICE='A claim is something you told this Pip; it may be wrong. A preference is a wish, not a rule. Only this Pip sees them. They don’t check the code, change what it’s set up to do, hide findings, add to shared context, or give it permissions.';
 const statementAnchorKeys=['schema_version','pip_id','workspace_id','job_version','job_digest','lifecycle_revision','binding','context_reference','source_reference','source_semantics'];
 const statementBodyKeys=['schema_version','id','pip_id','workspace_id','kind','title','statement','reason','anchor','anchor_digest','created_at','created_by','expires_at','classification','verification','effect'];
 function statementInvalid(){throw Error('The Pip statement metadata is invalid, unsupported, or belongs to another Pip. Refresh before reviewing.');}
@@ -825,7 +842,7 @@ export function pipStatementsPage(v,pip,workspace){
  const ids=new Set(),counts={active:0,expired:0,revoked:0};for(const e of v.entries){if(!exactOutcome(e,['memory','effective_status']))statementInvalid();const m=pipStatement(e.memory,pip,workspace),status=m.status==='revoked'?'revoked':m.expires_at!==null&&m.expires_at<=v.as_of?'expired':'active';if(e.effective_status!==status||ids.has(m.id))statementInvalid();ids.add(m.id);counts[status]++;}if(Object.keys(counts).some(k=>counts[k]>v.counts[k]))statementInvalid();return v;
 }
 export function pipStatementDraft(v,now=Date.now()){
- if(!['fact','preference'].includes(v.kind)||!statementText(v.title,200)||!statementText(v.statement,2000,true)||!statementText(v.reason,1000,true))throw Error('Enter a single-line title up to 200 UTF-8 bytes, statement up to 2,000 bytes and reason up to 1,000 bytes. Nothing is shortened.');
+ if(!['fact','preference'].includes(v.kind)||!statementText(v.title,200)||!statementText(v.statement,2000,true)||!statementText(v.reason,1000,true))throw Error('Add a one-line title and a statement of a paragraph or two, and keep the reason short. Nothing is shortened for you.');
  let expires_at=null;if(v.expiry){const raw=v.expiry;if(typeof raw!=='string'||/[\r\n]/.test(raw)||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(raw)||Number.isNaN(Date.parse(raw))||Date.parse(raw)<=now)throw Error('Enter a future expiry with seconds and an explicit offset or Z, or leave it empty.');expires_at=new Date(raw).toISOString();}
  if(v.source_run_id&&!outcomeId(v.source_run_id,'run'))throw Error('Choose a loaded successful audit from this Pip, or leave the source unobserved.');return {kind:v.kind,title:v.title,statement:v.statement,reason:v.reason,expires_at,...(v.source_run_id?{source_run_id:v.source_run_id}:{})};
 }
@@ -951,7 +968,7 @@ export function pipSetups(value,workspace){
  const seen=new Set();return value.setups.map(row=>{const setup=pipSetup(row,workspace);if(setup.status!=='pending'||seen.has(setup.id))throw Error('Setup review list contains duplicate or nonpending proposals.');seen.add(setup.id);return setup;});
 }
 export function pipSetupPrompt(workspace,text,pip=null){
- if(!record(workspace)||!setupText(workspace.id,100)||!setupText(workspace.name,200)||!setupText(text,4000)||pip!==null&&(!record(pip)||pip.workspace_id!==workspace.id||!/^pip_[a-f0-9]{32}$/.test(pip.id)||!setupText(pip.name,480)||!Number.isSafeInteger(pip.current_version)||pip.current_version<1||!Number.isSafeInteger(pip.lifecycle_revision)||pip.lifecycle_revision<0))throw Error('Enter a task of at most 4,000 UTF-8 bytes for this project. Refresh an existing Pip before describing a setup change.');
+ if(!record(workspace)||!setupText(workspace.id,100)||!setupText(workspace.name,200)||!setupText(text,4000)||pip!==null&&(!record(pip)||pip.workspace_id!==workspace.id||!/^pip_[a-f0-9]{32}$/.test(pip.id)||!setupText(pip.name,480)||!Number.isSafeInteger(pip.current_version)||pip.current_version<1||!Number.isSafeInteger(pip.lifecycle_revision)||pip.lifecycle_revision<0))throw Error('Describe the task in a few paragraphs at most. To change an existing Pip, refresh it first.');
  if(workspace.kind==='personal')return `Help me ${pip?'change':'create'} a personal Pip, available across my project directories. ${pip?`Pip reference: ${pip.id} · job v${pip.current_version} · lifecycle v${pip.lifecycle_revision}.`:''}\n\nMy request:\n${text.trim()}\n\nPrepare a pips_setup review card with scope personal and work_kind personal_task. Use this chat’s actual root as target_root; the controller will choose private profile storage. Do not grant project files, commands or browser access. App access needs exact inspected connection, account and read-call permissions; never invent a connected account. Ask for missing details. Do not activate it before my review.`;
  const project=JSON.stringify(workspace.name),name=pip?JSON.stringify(pip.name):'';
  const opening=pip?`Help me change the setup for ${name} in ${project}.\nPip reference: ${pip.id} · job v${pip.current_version} · lifecycle v${pip.lifecycle_revision}.`:`Help me set up a Pip for ${project}.`;

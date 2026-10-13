@@ -338,6 +338,19 @@
   for your OK); "the Job tab" (now Settings); "Connect an app once in DGC Settings" (Settings shows
   **Reads before each task** only for a Pip that has them; apps connect from the chat); "Online like
   Grok's bots" in the Terminal; "A completed Pip run never performs one automatically".
+- **Plain words for project Pips too.** Scout, Lens, Rook, Lock, Quill, Patch and Pulse no longer
+  say runner, revision, proposal, receipt, artifact, invocation, digest or "Pips API 22". An audit is
+  **Compared with the last audit** ("Found again", "Not found again", and that a finding not found
+  again isn't fixed); Patch and Pulse results list **Test commands (1 of 1 ran)** as command lines
+  rather than JSON, with how each ended ("Stopped: took too long", not "timed out"); a project
+  Pip's change review is **Change <Pip>?** with **Accept** / **Turn down**, as a Personal Pip's is;
+  handoffs, schedules, path triggers, Memory, claims, Context, notifications and check-command
+  results say what they are, and who asked ("by you in the editor", not `editor-user`). Run IDs and
+  hashes sit under **Technical details**, with the exact saved records. A DGC too old for something
+  says what to update ("Update DGC to watch paths."), not "Update the computer to Pips API 22".
+- No longer true, and gone: "Restore from Job" and "in Job" (now Settings), "update the lab", a
+  Pip computer's "Its own browser and files" in a change review (it has a Terminal too), and a
+  Personal Pip's finished task reading "Report ready" in the main chat (it is "Done").
 - A Personal Pip has no **Run now**, like Grok's bots: you chat with it, or it works on its schedule.
   Its Results say what it made on its schedule, or how to give it one in its chat.
 - **You can message Core.** Core's chat never sent: the choices and the send button stayed grey and

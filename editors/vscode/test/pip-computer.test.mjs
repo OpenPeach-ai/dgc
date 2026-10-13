@@ -196,7 +196,7 @@ test('Stop asks the supervisor to stop; a proposal review says what changes abou
  x.answer(x.requests('stop_pip_computer')[0],{pip_id:pipId,stopping:true});await x.drain();
  assert.match(x.d.body.textContent,/Stopping the computer/);
  x.click('[data-tab=revisions]');x.click('[data-proposal=proposal-2]');
- const dialog=x.d.querySelector('[role=dialog]').textContent;assert.match(dialog,/Computer nowIts own browser and files/);assert.match(dialog,/Computer afterNone/);
+ const dialog=x.d.querySelector('[role=dialog]').textContent;assert.match(dialog,/Computer nowIts own browser, Terminal and files/);assert.match(dialog,/Computer afterNone/);
 });
 
 test('a run that used its computer shows how much, and what it saw one screenshot at a time',async()=>{
@@ -233,7 +233,7 @@ test('the extension host passes computer commands only to an API 42 CLI',()=>{
   for(const [type,extra] of [['always_allow_pip_computer_action',{action_id:actionId,expected_digest:'d'.repeat(64)}],['get_pip_computer',{pip_id:pipId}],['decide_pip_computer_action',{action_id:actionId,expected_digest:'d'.repeat(64),approve:true}],['use_pip_computer_view',{pip_id:pipId,op:'frame'}],['propose_pip_update',{pip_id:pipId,expected_version:1,changes:{computer_plan:PLAN},reason:'x'}]])
    editor.receive({type:'pipsRequest',id:type,request:{type,...extra}});
   assert.equal(sent.length,api>=42?5:0,`API ${api}`);
-  if(api<42)assert.match(posted.at(-1).error.message,/API 42/);
+  if(api<42)assert.match(posted.at(-1).error.message,/Update DGC to give a Pip a computer/);
  }
 });
 
