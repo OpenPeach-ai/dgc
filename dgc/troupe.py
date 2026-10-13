@@ -298,7 +298,7 @@ def plan_from_args(args: dict, agent_names=()) -> Plan:
     if template is not None:
         if template not in TEMPLATES:
             raise PlanError(f"template must be one of {', '.join(TEMPLATES)}")
-        goal = _text(args.get("goal"), "goal", 600)
+        goal = _text(args.get("goal"), "goal", 2000)
         stages = _template(template, goal)
     else:
         if not isinstance(stages_in, list) or not stages_in:

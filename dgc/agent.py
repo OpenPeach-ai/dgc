@@ -3013,6 +3013,16 @@ class Agent(GoalLifecycle):
         from .permissions import session_policy
         return session_policy() is None
 
+    def _troupe_will_wake(self) -> bool:
+        """A troupe this chat started is still running and its end will wake the chat: a turn waiting on it may stop
+        with its checklist open. Held open instead, the model polled the troupe's journal and reported before the
+        troupe had (live, 2026-10-14)."""
+        if self._non_interactive():
+            return False
+        if not any(getattr(run, "state", "") == "running" for run in (getattr(self, "_troupes", None) or {}).values()):
+            return False
+        return callable(getattr(self, "on_detached_ended", None)) or self._monitor_delivery()
+
     def _ensure_detached_state(self) -> None:
         """The bookkeeping background work shares (see _run_subagent), made on first use."""
         if getattr(self, "_detached_jobs", None) is None:
@@ -7168,7 +7178,7 @@ class Agent(GoalLifecycle):
                 # still open; the strict check lives in the goal loop, which refuses a "completed"
                 # report over open items.
                 pending = self._open_todos()
-                if pending and todo_gate < _MAX_TODO_GATE and did_tools and not wake:
+                if pending and todo_gate < _MAX_TODO_GATE and did_tools and not wake and not self._troupe_will_wake():
                     todo_gate += 1
                     self.messages.append({"role": "user", "content":
                         "<system-reminder>\nYou're stopping but these todos are still open: "

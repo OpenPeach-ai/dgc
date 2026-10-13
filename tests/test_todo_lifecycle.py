@@ -182,6 +182,25 @@ class TodoLifecycleTests(unittest.TestCase):
         self.assertIn("Before the next step", str(calls[1]))
         self.assertEqual(self.agent.todos[0]["status"], "done")
 
+    def test_a_turn_waiting_on_a_running_troupe_may_stop_with_its_checklist_open(self):
+        rows = [{"content": "Report the troupe's findings", "status": "pending"}]
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("todo", "todo", {"todos": rows})]),
+            ChatResult(content="The troupe is running; this chat wakes with its results."))
+        self.agent.on_detached_ended = lambda notice: None          # an editor: the troupe's end wakes the chat
+        self.agent._troupes = {"tr-0123456789": types.SimpleNamespace(state="running")}
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Review everything with a troupe."))
+        self.assertEqual(self.reminders(), 0, "held open, the model polled the journal and reported early")
+        self.assertEqual(len(calls), 2)
+        self.agent._troupes["tr-0123456789"].state = "done"
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("todo2", "todo", {"todos": rows})]),
+            ChatResult(content="Stopping."), ChatResult(content="Stopping."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.agent.run_turn("And now?")
+        self.assertGreater(self.reminders(), 0, "nothing running: the checklist still holds the turn")
+
     def test_goal_and_tool_use_the_same_current_checklist(self):
         self.update([{"content": "Check the result", "status": "pending"}])
         self.assertEqual(self.agent.todos, self.agent.ctx.todos)
