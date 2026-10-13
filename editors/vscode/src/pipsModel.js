@@ -164,6 +164,12 @@ export function messagesPage(value,pip,workspace) {
   // Choices a Pip offered under a reply: 2–4 short lines, never on the user's own message.
   // Why a turn failed, under the user's message (a newer DGC): one short line.
   for(const m of value.messages)if(m.error!==undefined&&(m.role!=='user'||m.status!=='failed'||typeof m.error!=='string'||!m.error||m.error.length>300))throw new Error('Conversation error text is invalid.');
+  // The plugins a reply took an answer from ("Used Aave"): up to 8, each its id and a name of up to 80 characters (as
+  // Python counts them), never on the user's message. A line under a reply never costs the chat: a bad one is dropped.
+  for(const m of value.messages)if(m.plugins!==undefined){
+    const ok=m.role==='assistant'&&Array.isArray(m.plugins)?m.plugins.filter(p=>record(p)&&typeof p.plugin==='string'&&/^[a-z0-9][a-z0-9-]{0,63}$/.test(p.plugin)&&typeof p.name==='string'&&p.name&&[...p.name].length<=80).slice(0,8):[];
+    if(ok.length)m.plugins=ok;else delete m.plugins;
+  }
   for(const m of value.messages)if(m.choices!==undefined&&(m.role!=='assistant'||!Array.isArray(m.choices)||m.choices.length<2||m.choices.length>4||m.choices.some(c=>typeof c!=='string'||!c||c.length>80)))throw new Error('Conversation choices are invalid.');
   if(value.next_before_id!==null&&value.next_before_id!==value.messages[0]?.id)throw new Error('Conversation history cursor is invalid.');
   if(value.active_run!==null&&(!record(value.active_run)||typeof value.active_run.id!=='string'||!active(value.active_run.status)))throw new Error('Conversation active run is invalid.');

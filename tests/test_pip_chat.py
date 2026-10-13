@@ -48,6 +48,34 @@ class PipChatTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(RegistryError):
                 pip_chat.validate_choices(bad)
 
+    def test_a_reply_says_which_plugins_it_used_and_a_run_without_them_says_nothing(self):
+        # "Used [logo] Aave" under the reply, as ChatGPT names the apps it used: the plugins its controller saw it read.
+        self.setup_job()
+        used = [{"plugin": "aave", "name": "Aave"}, {"plugin": "context7", "name": "Context7"}]
+        sent = self.send()
+        self.store.claim_next()
+        self.store.finish(sent["run"]["id"], result={"text": "USDC supplies at 4.1% on Aave.", "plugins": used})
+        sent2 = self.send(text="And now?", key="message-2")
+        self.store.claim_next()
+        self.store.finish(sent2["run"]["id"], result={"text": "Nothing new."})
+        messages = pip_chat.list_messages(self.store, self.job["id"])["messages"]
+        replies = [m for m in messages if m["role"] == "assistant"]
+        self.assertEqual(replies[0]["plugins"], used)
+        self.assertNotIn("plugins", replies[1], "a reply that used none says nothing")
+        self.assertTrue(all("plugins" not in m for m in messages if m["role"] == "user"))
+        for bad in ([], [{"plugin": "Aave", "name": "Aave"}], [{"plugin": "aave", "name": ""}], [{"plugin": "aave"}],
+                    [{"plugin": "aave", "name": "Aave", "logo": "x"}], [{"plugin": "aave", "name": "Aave"}] * 2,
+                    [{"plugin": f"p{i}", "name": "P"} for i in range(9)], [{"plugin": "../x", "name": "X"}], "aave"):
+            with self.subTest(bad=bad):
+                self.assertIsNone(pip_chat.used_plugins(bad))
+
+    def test_a_reply_with_invalid_plugins_is_not_saved(self):
+        self.setup_job()
+        sent = self.send()
+        self.store.claim_next()
+        with self.assertRaises(RegistryError):
+            self.store.finish(sent["run"]["id"], result={"text": "Rates.", "plugins": [{"plugin": "aave", "name": "Aave", "logo": "data:"}]})
+
     def test_persistent_history_idempotent_retry_and_key_conflict(self):
         self.setup_job()
         sent = self.send()

@@ -63,6 +63,12 @@
 /* Task-list markers are content, not the full-width inputs used by setup forms. */
 .message-body li.task-item{position:relative;list-style:none}
 .message-body li.task-item>input[type=checkbox]{position:absolute;left:-20px;top:3px;width:13px;height:13px;min-height:0;margin:0;padding:0;accent-color:var(--vscode-button-background,#7c5cff)}
+/* "Used [logo] Aave": the plugins a reply took an answer from, quiet under it. */
+.msg-plugins{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:6px 0 0;color:var(--vscode-descriptionForeground);font-size:11px;line-height:1.5}
+.msg-plugin{display:inline-flex;align-items:center;gap:4px;min-width:0}
+.msg-plugin-mark{display:inline-flex;width:14px;height:14px;flex:none}
+.msg-plugin-mark img{width:14px;height:14px;border-radius:3px;object-fit:contain}
+.msg-plugin-mark svg{width:13px;height:13px}
 /* Grok's A/B card: the Pip's choices under its latest reply. */
 .msg-choices{display:flex;flex-direction:column;gap:6px;margin:8px 0 2px;max-width:420px}
 .msg-choice{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 12px;border:1px solid var(--pip-edge,var(--vscode-widget-border));border-radius:10px;background:transparent;color:var(--vscode-foreground);font:inherit;cursor:pointer}

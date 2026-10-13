@@ -23,9 +23,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **Nothing to look at, as ChatGPT's voice mode:** a spoken turn isn't offered `ask_user`, `make_file`,
     `show_widget` or the canvas tools, nor told about them or about charts; one called anyway is refused. Typing
     again brings them back.
-- **Which plugin a reply used:** a ChatDGC reply that read from a plugin keeps its name (`plugins` on the message) and
-  shows **Used Aave** under it once it's finished, as ChatGPT names the apps it used: numbers from a live plugin no
-  longer look like the model's memory. A card that waits, a listing, or a read that came back as an error is not a use.
+- **Which plugin a reply used, with its logo:** a reply that read from a plugin shows **Used [logo] Aave** under it
+  once it's finished, in ChatDGC and in a Pip's chat, as ChatGPT names the apps it used: numbers from a live plugin no
+  longer look like the model's memory. A card that waits, a listing, or a read that came back as an error is not a
+  use. ChatDGC keeps them on the message as `plugins: [{plugin, name}]`. A Pip's controller records them per run
+  (never the worker's word for it), and `list_pip_messages` returns them as the reply's `plugins`. The editor reads
+  each logo once, from the plugin's package or the logos DGC ships, and shows a plug for one with none.
 - **Compact now, then Edit at once:** "compacted" was said while the chat was still busy recounting its window, so
   editing the new summary straight away was refused as "still answering". It's said once the chat is free.
 - **A card of several questions:** `ask_user` takes `questions` (up to four, each with its options) and `submit`, the

@@ -132,8 +132,26 @@ class ReadsAndCards(PluginChat):
         self.assertIn("Dentist", self.told()[0])
         self.assertNotIn("actions", reply)
         self.assertGreater(self.world["stopped"], 0, "its connection closes with the reply")
-        self.assertEqual(reply["plugins"], ["Google Calendar"], "the reply says which plugin it read (Used ...)")
-        self.assertEqual(self.store.get(chat["id"])["messages"][-1]["plugins"], ["Google Calendar"], "and keeps it")
+        used = [{"plugin": "gcal", "name": "Google Calendar"}]
+        self.assertEqual(reply["plugins"], used, "the reply says which plugin it read (Used [logo] ...), by id for its logo")
+        self.assertEqual(self.store.get(chat["id"])["messages"][-1]["plugins"], used, "and keeps it")
+
+    def test_each_plugin_is_named_once_in_the_order_it_was_read(self):
+        chat, reply = self.say("My calendar, and Aave's rates?",
+                               {"calls": [("call_plugin", {"plugin": "gcal", "tool": "list_events", "arguments": {"day": "today"}}),
+                                          ("call_plugin", {"plugin": "aave", "tool": "get_rates", "arguments": {}}),
+                                          ("call_plugin", {"plugin": "gcal", "tool": "list_events", "arguments": {"day": "tomorrow"}})]},
+                               {"parts": ["Here they are."]})
+        self.assertEqual(reply["plugins"], [{"plugin": "gcal", "name": "Google Calendar"}, {"plugin": "aave", "name": "Aave"}])
+
+    def test_a_continued_reply_keeps_what_it_used_once_and_an_earlier_builds_bare_name(self):
+        from dgc.chatdgc.engine import _merged_plugins
+        gcal, aave = {"plugin": "gcal", "name": "Google Calendar"}, {"plugin": "aave", "name": "Aave"}
+        self.assertEqual(_merged_plugins([gcal], [aave, gcal]), [gcal, aave])
+        self.assertEqual(_merged_plugins(["Aave"], [gcal]), ["Aave", gcal], "a bare name stays (no id, so no logo)")
+        self.assertEqual(_merged_plugins(["Aave"], [aave]), [aave], "read again: the entry with its id, once (not Aave, Aave)")
+        self.assertEqual(_merged_plugins([aave], ["Aave", "", 3, {"name": "x"}]), [aave], "nothing else")
+        self.assertEqual(_merged_plugins(None, [aave]), [aave])
 
     def test_a_read_that_fails_is_not_a_plugin_used(self):
         """The line under a reply says what it read from; a read that came back as an error read nothing (adversarial

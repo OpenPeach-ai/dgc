@@ -40,6 +40,9 @@ export class PipsEditor implements vscode.Disposable {
   private readAloud?: () => ReadAloud;
   private readonly mic: DictationOwner = { post: (message) => this.post({ ...message, from: 'pips' }) };
   useDictation(dictation: () => Dictation, readAloud?: () => ReadAloud): void { this.dictation = dictation; this.readAloud = readAloud; }
+  /** A plugin's logo by its id (a data: URI), for a reply's "Used Aave" line; "" when it has none. */
+  private pluginLogo?: (plugin: string) => string;
+  usePluginLogos(lookup: (plugin: string) => string): void { this.pluginLogo = lookup; }
   constructor(private readonly extensionUri: vscode.Uri, private readonly send: (message: any, backendIdentity?: object) => boolean, private readonly connect: () => void, private readonly requireGeneration = false) {}
   attach(post: (message: any) => void): void {
     // The main panel is now the primary surface. Retire any old editor instance
@@ -248,6 +251,15 @@ export class PipsEditor implements vscode.Disposable {
     if (MIC_MESSAGES.includes(message?.type) && !computer) { if (this.dictation) void this.dictation().handle(this.mic, message); return; }
     if (SPEAK_MESSAGES.includes(message?.type) && !computer) { if (this.readAloud) void this.readAloud().handle(this.mic, message); return; }
     if (message?.type === 'pipComputerSave' && computer) { void this.saveComputerFile(surface, message); return; }
+    if (message?.type === 'pipsPluginLogos' && !computer) {
+      // The logos of the plugins a Pip's replies used ("Used [logo] Aave"), by id; "" for one with none.
+      const ids = Array.isArray(message.plugins) ? message.plugins.filter((id: unknown) => typeof id === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(id)).slice(0, 16) : [];
+      if (!ids.length) return;
+      const logos: Record<string, string> = {};
+      for (const id of ids) logos[id] = this.pluginLogo?.(id) || '';
+      this.post({ type: 'pipsPluginLogos', logos }, surface);
+      return;
+    }
     if (message?.type === 'pipDesktop' && computer) {
       // The screen's viewer: bytes in base64, for this tab's own Pip only.
       const op = message.op, data = message.data;

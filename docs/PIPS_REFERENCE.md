@@ -712,6 +712,12 @@ again within that time returns the kept answer and does not run again. A payment
 allow: `always_allow_pip_app_action` refuses it with `asks_every_time` before the action runs, and a grant
 never covers it.
 
+**Used plugins.** A chat reply that took an answer from a plugin (a `[runs]` call that didn't come back as an
+error, a kept answer, or `plugin_answer`) says so: the controller records each plugin once per run
+(`Session.used`, up to 8) and saves them in the run's result as `plugins: [{plugin, name}]`, never taking the
+worker's word for it. `list_pip_messages` returns them as the assistant message's `plugins`, and the editor
+shows "Used [logo] Aave" under the reply. A run from before this has none.
+
 Local-only commands: `list_pip_plugins {pip_id}` → `{pip_id, plugins: [], installed}`;
 `list_pip_plugin_uses` → `{plugins: [{plugin, name, about, money, permission}], levels, installed}`;
 `set_plugin_permission {plugin, level}` (API 45) → the same, after saving the level (refused for a device,

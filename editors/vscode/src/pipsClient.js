@@ -350,7 +350,7 @@ function chatMarkup(){
   let last=null;
   const timed=m=>{const at=Date.parse(m.created_at),mark=simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return mark;};
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
-  const messages=shown.map(m=>timed(m)+messageMarkup(m,{imageSrc:messageImageSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt:S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null})).join('');
+  const messages=shown.map(m=>timed(m)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt:S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null})).join('');
   return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${S.messageCursor&&S.messages.length<200?button('older-messages','Load earlier messages',S.messagesLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':!S.messages.length?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'the captured working-tree source':'the committed source')+' in this workspace.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${simple?'':typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${routineCards()}${needsYouCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Captured working-tree source':'Committed source only')+' · Read-only tools'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 async function toggleChatActivity(runId){
@@ -416,6 +416,8 @@ async function loadChatStream(){
 // added with the image button, pasted or dropped, shown as previews, and sent with the message.
 const PIP_IMAGE_TYPES=['image/png','image/jpeg','image/gif','image/webp','image/bmp'],PIP_MAX_IMAGES=4,PIP_MAX_IMAGE_BYTES=2*1024*1024;
 const chatImages=new Map(),messageImageCache=new Map(),messageImageFlight=new Set();
+// Plugin logos for "Used [logo] Aave", by plugin id: the host reads each once (a data: URI; "" for none).
+const pluginLogoCache=new Map(),pluginLogoAsked=new Set();
 // Files go with a message too, as in the main chat: text and code, PDF, Word, Excel, PowerPoint,
 // OpenDocument, RTF, CSV and TSV. Up to 4, and 2 MB in all with any images.
 const PIP_FILE_EXTENSIONS=['.pdf','.docx','.xlsx','.pptx','.odt','.ods','.odp','.rtf','.csv','.tsv','.txt','.md','.markdown','.rst','.log','.json','.jsonl','.yaml','.yml','.toml','.ini','.cfg','.conf','.xml','.html','.htm','.css','.js','.mjs','.cjs','.ts','.tsx','.jsx','.py','.rb','.go','.rs','.java','.kt','.swift','.c','.h','.cpp','.hpp','.cs','.php','.sh','.sql','.r','.ipynb','.srt','.vtt','.tex','.bib','.svg','.ics','.vcf','.eml'],PIP_MAX_FILES=4;
@@ -444,6 +446,22 @@ function addImageFiles(files){
  for(const file of takeFiles){if(!file.size){setError(`${file.name} is empty.`);continue;}const reader=new FileReader();reader.onload=()=>{if(typeof reader.result!=='string'||!reader.result.startsWith('data:'))return;const data=reader.result.replace(/^data:[^;,]*(;[^,]*)?;base64,/,'data:application/octet-stream;base64,');const next=[...(chatFiles.get(pip)||[]),{name:file.name,data,bytes:file.size}].slice(0,PIP_MAX_FILES);chatFiles.set(pip,next);if(S.selected===pip)render();};reader.readAsDataURL(file);}
 }
 function messageImageSrc(messageId,index){return messageImageCache.get(`${messageId}:${index}`)||'';}
+function pluginLogoSrc(plugin){return pluginLogoCache.get(plugin)||'';}
+function hydratePluginLogos(){
+ const wanted=[...new Set([...document.querySelectorAll('[data-plugin-mark]')].map(n=>n.dataset.pluginMark))].filter(id=>!pluginLogoCache.has(id)&&!pluginLogoAsked.has(id)).slice(0,16);
+ if(!wanted.length)return;
+ for(const id of wanted)pluginLogoAsked.add(id);
+ vscode.postMessage({type:'pipsPluginLogos',plugins:wanted});
+}
+function takePluginLogos(logos){
+ if(!record(logos))return;
+ for(const [id,src] of Object.entries(logos)){
+  if(!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)||typeof src!=='string'||src&&!/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src))continue;
+  pluginLogoCache.set(id,src);
+  if(!src)continue;
+  for(const mark of document.querySelectorAll(`[data-plugin-mark="${id}"]`)){const img=document.createElement('img');img.alt='';img.src=src;mark.replaceChildren(img);}
+ }
+}
 // Thumbnails of images already sent load one at a time, when their message is on screen.
 function hydrateMessageImages(){
  for(const node of document.querySelectorAll('img[data-message-image]')){
@@ -1675,7 +1693,7 @@ function render() {
   reader?.sync();talkBar?.refresh();voiceBar?.refresh();
   const parts=document.querySelector('.pip-ctx-breakdown');if(parts&&S.chatContext?.breakdown&&window.DgcBreakdown)parts.replaceChildren(window.DgcBreakdown.render(S.chatContext.breakdown));
   for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose&&(old.dataset.tint||'')===(node.dataset.tint||''))node.replaceWith(old);}
-  observeAvatars();fitChatInput();hydrateMessageImages();
+  observeAvatars();fitChatInput();hydrateMessageImages();hydratePluginLogos();
   // A card Needs attention opened stays shown as the chat redraws while its drafts and apps load.
   if(cardFlash.selector&&Date.now()<cardFlash.until)for(const el of document.querySelectorAll(cardFlash.selector))el.classList.add('attention-flash');
   const newLog=document.querySelector('.conversation-log');if(newLog){const first=newLog.querySelector('[data-message]')?.dataset.message;newLog.scrollTop=atEnd?newLog.scrollHeight:first!==oldFirst?oldScroll+newLog.scrollHeight-oldHeight:oldScroll;}
@@ -2950,6 +2968,7 @@ const stopMessages=options.onMessage(message=>{
     return;
   }
   if(message.type==='pipsReply'){broker.receive(message);return;}
+  if(message.type==='pipsPluginLogos'){takePluginLogos(message.logos);return;}
   if(message.type==='pipsVisibility'){S.visible=message.visible===true;motion();if(S.visible)void refresh(false);return;}
   if(message.type==='pipsConnection'){
     if(message.generation !== undefined && message.generation === S.generation) return;

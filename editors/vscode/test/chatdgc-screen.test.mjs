@@ -1832,12 +1832,26 @@ test("a reply that read a plugin says so under it (Used Aave), as ChatGPT names 
   try {
     await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
       { id: M(1), role: "user", text: "USDC rate on Aave?" },
-      { id: M(2), role: "assistant", text: "About 3.87% on the main market.", finish: "stop", plugins: ["Aave", "<b>x</b>"] },
+      { id: M(2), role: "assistant", text: "About 3.87% on the main market.", finish: "stop",
+        plugins: [{ plugin: "aave", name: "Aave" }, { plugin: "evil", name: "<b>x</b>" }, "Context7"] },
       { id: M(3), role: "user", text: "Thanks" },
       { id: M(4), role: "assistant", text: "Any time.", finish: "stop" }] });
     await s.frame();
-    assert.deepEqual(await s.page.locator(".cd-plugins-used").allTextContents(), ["Used Aave, <b>x</b>"], "only the reply that read one, names as words");
+    assert.deepEqual(await s.page.locator(".cd-plugins-used").allTextContents(), ["Used Aave, <b>x</b>, Context7"],
+                     "only the reply that read one, names as words (a bare name from an earlier build too)");
     assert.equal(await s.page.locator(".cd-plugins-used b").count(), 0);
+    // Its logo, from the host: a plug until it comes, asked once for the plugins with an id.
+    assert.equal(await s.page.locator(".cd-plugin-mark img").count(), 0);
+    assert.deepEqual((await s.posted("pluginLogos")).map((m) => m.plugins), [["aave", "evil"]]);
+    await s.send({ type: "pluginLogos", logos: { aave: "data:image/png;base64,iVBORw0KGgo=", evil: "javascript:alert(1)" } });
+    assert.equal(await s.page.locator('.cd-plugin-mark[data-plugin-mark="aave"] img').getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
+    assert.equal(await s.page.locator('.cd-plugin-mark[data-plugin-mark="evil"] img').count(), 0, "only an image the host read");
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "USDC rate on Aave?" },
+      { id: M(2), role: "assistant", text: "About 3.87%.", finish: "stop", plugins: [{ plugin: "aave", name: "Aave" }] }] });
+    await s.frame();
+    assert.equal(await s.page.locator('.cd-plugin-mark[data-plugin-mark="aave"] img').count(), 1, "drawn again with its logo");
+    assert.equal((await s.posted("pluginLogos")).length, 1, "never asked again");
     await s.send({ type: "turn", state: "started", replyId: M(6) });
     await s.send({ type: "message", message: { id: M(5), role: "user", text: "Again?" } });
     await s.send({ type: "delta", messageId: M(6), text: "Checking" });

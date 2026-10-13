@@ -7261,6 +7261,7 @@
     }
     if (msg.type === "sessions_show") { showSessions(); return; }
     if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
+    if (msg.type === "pipsPluginLogos") { for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
       pipSetupCards?.receive(msg);
       pipDigestBar?.receive(msg);

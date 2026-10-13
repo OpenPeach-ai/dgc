@@ -36,7 +36,8 @@
   it summarizes) waits above the box and goes by itself when the reply finishes, one a reply, in order. Edit or ✕
   on each; ↑ in an empty box takes back the last. Stop, or a reply that fails, sends none of them: they come back
   to the box.
-- **Used Aave:** a ChatDGC reply that read from a plugin says which under it, once it's finished.
+- **Used [logo] Aave:** a reply that read from a plugin says which under it, with the plugin's logo, once it's
+  finished, in ChatDGC and in a Pip's chat.
 - **Several questions in one card.** When the model needs a few things to go on, ChatDGC asks up to four questions
   in one card, numbered, the first answer of each chosen until you change it, and one button in the model's words
   (**Build my plan**) sends them all.

@@ -751,13 +751,38 @@ def insert_user(store, pip, req, run_id, model, now):
         store.db.execute("INSERT INTO pip_chat_files VALUES(?,?,?,?,?)", (message_id, index, item["name"], item["sha256"], item["bytes"]))
 
 
+PLUGIN_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
+
+
+def used_plugins(value):
+    """The plugins a reply took an answer from, as its run kept them ([{"plugin", "name"}], up to 8), or None."""
+    if (not isinstance(value, list) or not 1 <= len(value) <= 8
+            or any(not isinstance(u, dict) or set(u) != {"plugin", "name"} or not isinstance(u["plugin"], str)
+                   or not PLUGIN_ID.match(u["plugin"]) or not isinstance(u["name"], str) or not 1 <= len(u["name"]) <= 80
+                   for u in value)
+            or len({u["plugin"] for u in value}) != len(value)):
+        return None
+    return value
+
+
+def reply_plugins(db, run_id):
+    """What a reply's run kept of the plugins it used ("Used Aave" under it), or [] (a run before DGC kept them)."""
+    row = db.execute("SELECT json_extract(result,'$.plugins') FROM pip_runs WHERE id=?", (run_id,)).fetchone()
+    try:
+        return used_plugins(json.loads(row[0])) or [] if row and row[0] else []
+    except (TypeError, ValueError):
+        return []
+
+
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "context" in result:
         # What filled its window besides the chat (pip_chat_breakdown), for the meter's breakdown.
         from .pip_chat_breakdown import validate as validate_context
         validate_context(result["context"])
+    if "plugins" in result and used_plugins(result["plugins"]) is None:
+        raise RegistryError("invalid_reply", "This reply's plugins are invalid.")
     if "computer" in result:
         # A chat that used the Pip's computer: how many steps, and what it left waiting for the user.
         used = result["computer"]
@@ -854,6 +879,9 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             offered = message_choices(store.db, row["id"])
             if offered:
                 message["choices"] = offered
+            plugins = reply_plugins(store.db, row["run_id"])
+            if plugins:
+                message["plugins"] = plugins
         amount = len(_json(message).encode())
         if size + amount > 96 * 1024:
             break

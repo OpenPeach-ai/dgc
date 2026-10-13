@@ -386,13 +386,39 @@
     }
     return box;
   }
-  /** The plugins a reply read from ("Used Aave"), as ChatGPT names the apps it used: what came from a plugin did. */
+  /** Plugin logos for "Used [logo] Aave", by plugin id: the host reads each once (a data: URI; "" when it has none). */
+  const PLUGIN_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+  const pluginLogos = new Map(), pluginLogosAsked = new Set();
+  let logosWanted = [];
+  function wantLogo(id) {
+    if (pluginLogos.has(id) || pluginLogosAsked.has(id)) return;
+    pluginLogosAsked.add(id);
+    if (!logosWanted.length) setTimeout(() => {
+      const plugins = logosWanted; logosWanted = [];
+      for (let i = 0; i < plugins.length; i += 16) vscode.postMessage({ type: "pluginLogos", plugins: plugins.slice(i, i + 16) });
+    }, 0);
+    logosWanted.push(id);
+  }
+  function logoImage(src) { const img = document.createElement("img"); img.alt = ""; img.src = src; return img; }
+  /** The plugins a reply read from ("Used [logo] Aave"), as ChatGPT names the apps it used: what came from a plugin
+   *  did. A logo not here yet shows a plug until the host sends it; a bare name (an earlier build's) keeps the plug. */
   function pluginsNote(message) {
-    const names = (Array.isArray(message.plugins) ? message.plugins : []).filter((n) => typeof n === "string" && n).slice(0, 8);
-    if (!names.length) return null;
+    const used = (Array.isArray(message.plugins) ? message.plugins : [])
+      .map((p) => typeof p === "string" ? { plugin: "", name: p } : p)
+      .filter((p) => p && typeof p.name === "string" && p.name && typeof p.plugin === "string").slice(0, 8);
+    if (!used.length) return null;
     const line = el("div", "cd-plugins-used");
-    line.append(icon("plug"), el("span", "", `Used ${names.join(", ")}`));
-    line.title = "This reply read from these plugins";
+    line.append(el("span", "", "Used"));
+    used.forEach((p, i) => {
+      const mark = el("span", "cd-plugin-mark");
+      if (PLUGIN_ID.test(p.plugin)) { mark.dataset.pluginMark = p.plugin; wantLogo(p.plugin); }
+      const src = pluginLogos.get(p.plugin);
+      mark.append(src ? logoImage(src) : icon("plug"));
+      const chip = el("span", "cd-plugin");
+      chip.append(mark, el("span", "", p.name + (i < used.length - 1 ? "," : "")));
+      line.append(" ", chip);         // a space a flex row doesn't draw, for its words (copied, read aloud)
+    });
+    line.title = used.length === 1 ? "This reply used this plugin" : "This reply used these plugins";
     return line;
   }
   /** What a reply saved to (or deleted from) the user's memory, each with Forget, and the way to all of it. */
@@ -2739,6 +2765,13 @@
         // The window sizes its backend takes (none from an older one: the details then point to Settings).
         state.windows = Array.isArray(msg.presets) ? msg.presets.filter((p) => typeof p === "string") : [];
         if (!$("cd-context-pop").hidden) popover();
+        return;
+      case "pluginLogos":
+        for (const [id, src] of Object.entries(msg.logos && typeof msg.logos === "object" ? msg.logos : {})) {
+          if (!PLUGIN_ID.test(id) || typeof src !== "string" || (src && !/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src))) continue;
+          pluginLogos.set(id, src);
+          if (src) for (const mark of document.querySelectorAll(`.cd-plugin-mark[data-plugin-mark="${id}"]`)) mark.replaceChildren(logoImage(src));
+        }
         return;
       case "favicons":
         favicons = msg.on === true;

@@ -2462,7 +2462,7 @@ class ChatEngine:
             if widgets:
                 message["widgets"] = widgets
             if plugins_used:
-                message["plugins"] = list(dict.fromkeys([*(existing.get("plugins") or []), *plugins_used]))
+                message["plugins"] = _merged_plugins(existing.get("plugins"), plugins_used)
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -2653,6 +2653,27 @@ def _add_usage(a: dict, b: dict) -> dict:
         if isinstance(value, (int, float)) and isinstance(out.get(key, 0), (int, float)):
             out[key] = out.get(key, 0) + value
     return out
+
+
+def _merged_plugins(before, used) -> list:
+    """A continued reply's plugins: what it had, then what it read since, each once. A bare name (saved by an earlier
+    build, with no plugin id for its logo) stays as it was, unless the reply read that plugin again: then it's the
+    entry with the id."""
+    merged = []
+    for entry in [*(before if isinstance(before, list) else []), *used]:
+        if isinstance(entry, dict):
+            if not isinstance(entry.get("plugin"), str) or not entry["plugin"]:
+                continue
+            same = next((i for i, kept in enumerate(merged)
+                         if (isinstance(kept, dict) and kept["plugin"] == entry["plugin"]) or kept == entry.get("name")), None)
+            if same is None:
+                merged.append(entry)
+            elif not isinstance(merged[same], dict):
+                merged[same] = entry
+        elif isinstance(entry, str) and entry and not any(
+                kept == entry or (isinstance(kept, dict) and kept.get("name") == entry) for kept in merged):
+            merged.append(entry)
+    return merged
 
 
 def _failure_text(exc) -> str:

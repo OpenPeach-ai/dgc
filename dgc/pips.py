@@ -3330,6 +3330,15 @@ def _execute_run(registry, row, config):
         result["snapshot"] = snapshot_info
         if computer_socket is not None:
             result["computer"] = {"calls": computer_socket.calls, "held": list(computer_host.waiting)}
+        # The plugins a chat reply took an answer from ("Used Aave" under it): what this controller saw, never the
+        # worker's word for it.
+        result.pop("plugins", None)
+        if app_socket is not None and app_socket.plugins.used and manifest.get("run_kind") == "conversation":
+            from .pip_chat import used_plugins
+            # A line under the reply never costs the reply: a list the reply's check would refuse is left out.
+            used = used_plugins([dict(used) for used in app_socket.plugins.used])
+            if used:
+                result["plugins"] = used
         if current_tree:
             from .pip_tree_snapshot import verify
             verify(snapshot, source['source_snapshot'])

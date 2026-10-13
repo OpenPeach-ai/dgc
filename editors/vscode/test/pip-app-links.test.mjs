@@ -135,6 +135,29 @@ test("Grok's A/B card: the Pip's choices sit under its latest reply, and a tap a
  assert.equal([...x.d.querySelectorAll('.pip-message.user .prompt-text')].at(-1)?.textContent,'Yes, connect Gmail','already in the chat');
  assert.match(x.d.querySelector('.pip-working')?.textContent||'',/getting ready/);
 });
+test('a reply that used a plugin says so under it with its logo (Used [logo] Aave); the host is asked once',async()=>{
+ const x=setup({links:[],messages:[message('u1','user','USDC on Aave?'),message('a1','assistant','About 3.9%.',{plugins:[{plugin:'aave',name:'Aave'},{plugin:'evil',name:'<b>x</b>'}]}),message('u2','user','Thanks'),message('a2','assistant','Any time.')]});await openChat(x);
+ const line=x.d.querySelector('[data-message="a1"] .msg-plugins');
+ assert.ok(line,'under the reply that used one');
+ assert.equal(line.textContent.replace(/\s+/g,' ').trim(),'Used Aave, <b>x</b>','names as words');
+ assert.equal(line.querySelector('b'),null);
+ assert.equal(x.d.querySelector('[data-message="a2"] .msg-plugins'),null,'not under a reply that used none');
+ assert.equal(line.querySelectorAll('img').length,0,'a plug until the host sends the logo');
+ assert.deepEqual(x.sent.filter(m=>m.type==='pipsPluginLogos').map(m=>[...m.plugins]),[['aave','evil']],'asked once, for both');
+ x.w.dispatchEvent(new x.w.MessageEvent('message',{data:{type:'pipsPluginLogos',logos:{aave:'data:image/png;base64,iVBORw0KGgo=',evil:'javascript:alert(1)'}}}));
+ assert.equal(x.d.querySelector('[data-plugin-mark="aave"] img')?.getAttribute('src'),'data:image/png;base64,iVBORw0KGgo=');
+ assert.equal(x.d.querySelector('[data-plugin-mark="evil"] img'),null,'only an image the host read; the plug stays');
+ await x.drain();
+ assert.equal(x.sent.filter(m=>m.type==='pipsPluginLogos').length,1,'never asked again');
+});
+test('a plugin line the chat cannot use is dropped, never the chat: a name counted as Python counts it',async()=>{
+ const long='🦄'+'a'.repeat(79),tooLong='🦄'+'a'.repeat(80);
+ const x=setup({links:[],messages:[message('u1','user','Hi',{plugins:[{plugin:'aave',name:'Aave'}]}),message('a1','assistant','Rates.',{plugins:[{plugin:'aave',name:long},{plugin:'Bad Id',name:'X'},{plugin:'context7',name:tooLong}]}),message('a2','assistant','More.',{plugins:'aave'})]});await openChat(x);
+ assert.equal(x.d.querySelectorAll('.pip-message').length,3,'the chat loads');
+ assert.equal(x.d.querySelector('[data-message="u1"] .msg-plugins'),null,'never on your own message');
+ assert.equal(x.d.querySelector('[data-message="a1"] .msg-plugins').textContent.replace(/\s+/g,' ').trim(),`Used ${long}`,'80 characters with an emoji is fine; 81 is dropped');
+ assert.equal(x.d.querySelector('[data-message="a2"] .msg-plugins'),null);
+});
 test('choices under an older reply are not offered, and words already typed are kept',async()=>{
  const x=setup({links:[],messages:[message('u1','user','Hi'),message('a1','assistant','Shall I?',{choices:['Yes','No']}),message('u2','user','Yes')]});await openChat(x);
  assert.equal(x.d.querySelector('.msg-choice'),null,'answered already');

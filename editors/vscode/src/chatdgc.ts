@@ -53,6 +53,8 @@ export interface ChatDGCHost {
   dictation?(): Dictation | undefined;
   /** Reading a reply aloud, one at a time across the window. */
   readAloud?(): ReadAloud | undefined;
+  /** A plugin's logo by its id (a data: URI), for a reply's "Used Aave" line; "" when it has none. */
+  pluginLogo?(plugin: string): string;
 }
 
 
@@ -1164,6 +1166,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         try { favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) !== false; } catch { /* default */ }
         this.post(tab, { type: "favicons", on: favicons });
         this.post(tab, { type: "windows", presets: this.windowPresets() });
+        return;
+      }
+      case "pluginLogos": {
+        // The logos of the plugins replies used ("Used [logo] Aave"), by id; "" for one with none (it shows a plug).
+        const ids = Array.isArray(message.plugins) ? message.plugins.filter((id: unknown) => typeof id === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(id)).slice(0, 16) : [];
+        if (!ids.length) return;
+        const logos: Record<string, string> = {};
+        for (const id of ids) logos[id] = this.host?.pluginLogo?.(id) || "";
+        this.post(tab, { type: "pluginLogos", logos });
         return;
       }
       case "breakdown":

@@ -19,6 +19,7 @@ import { checkForExtensionUpdates } from "./extensionupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 import { PipsEditor } from "./pipsView";
+import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
 import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 
@@ -668,6 +669,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       },
       dictation: () => this.dictationService(),
       readAloud: () => this.readAloudService(),
+      pluginLogo: (plugin) => this.replyPluginLogo(plugin),
     };
     chat.attach(host);
   }
@@ -3859,6 +3861,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsReconnect":
       case "pipsRequest":
       case "pipsOpenComputer":
+      case "pipsPluginLogos":
         if (msg.documentId !== this.pipsDocumentId) return;
         this.ensurePipsBridge().receive(msg);
         return;
@@ -5798,6 +5801,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }, true);
       this.pipsEditor.attach(message => this.post(message));
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
+      this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;
@@ -5872,32 +5876,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
   }
 
-  private pluginLogo(item: { name?: string; icon?: string; logo_file?: string; developer?: string }, webview?: vscode.Webview): string {
+  private pluginLogo(item: PluginLogoItem, webview?: vscode.Webview): string {
     if (!webview) return "";
-    if (item.logo_file) {
-      try {
-        const root = fs.realpathSync(join(homedir(), ".dgc", "plugins", "logos"));
-        const file = fs.realpathSync(item.logo_file);
-        if (file.startsWith(root + path.sep) && file.endsWith(".png") && fs.statSync(file).size <= 512 * 1024) {
-          const data = fs.readFileSync(file);
-          if (data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) {
-            return `data:image/png;base64,${data.toString("base64")}`;
-          }
-        }
-      } catch { /* use the shipped logo when a package asset is unavailable */ }
-    }
-    const png = vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", `${item.name}.png`);
-    const shipped: Record<string,string> = {composio:"composio.svg", zapier:"zapier.ico", make:"make.ico", n8n:"n8n.ico", arcade:"arcade.svg", "google-workspace":"google.png"};
-    const mark = item.name && shipped[item.name]
-      ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", shipped[item.name])
-      : item.icon === "dgc" && item.name?.startsWith("dgc-")
-      ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", "dgc.svg")
-      // Anthropic's own plugins declare no logo of their own: they show Anthropic's mark, as their developer.
-      : item.developer === "Anthropic"
-      ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", "anthropic.png")
-      : undefined;
-    const file = fs.existsSync(png.fsPath) ? png : mark && fs.existsSync(mark.fsPath) ? mark : undefined;
-    return file ? webview.asWebviewUri(file).toString() : "";
+    const found = pluginLogoSource(this.context.extensionUri, item);
+    return found.data ?? (found.file ? webview.asWebviewUri(found.file).toString() : "");
+  }
+
+  /** A plugin's logo for a reply's "Used Aave" line (ChatDGC, Pips), by its id: as the catalog knows it when Settings
+   *  has listed plugins, else the logo DGC ships for it. */
+  private replyPluginLogo(plugin: string): string {
+    if (!PLUGIN_ID.test(plugin)) return "";
+    const known = this.settingsCatalog.find(row => row?.name === plugin);
+    return pluginLogoData(this.context.extensionUri, known && typeof known === "object" ? known : { name: plugin });
   }
 
   private async saveConnector(msg: any): Promise<void> {

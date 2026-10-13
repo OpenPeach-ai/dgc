@@ -1302,3 +1302,24 @@ test("a message spoken in voice mode goes as spoken only to a backend that offer
   panel.say({ type: "send", text: "Typed.", voice: "yes" });
   assert.equal(last("chatdgc_send").voice, undefined, "only true");
 });
+
+test("a tab asks for the logos of the plugins its replies used, and gets them from the host by valid id only", async () => {
+  chat.open("");
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(1), title: "Rates", temporary: false });
+  const asked = [];
+  host.pluginLogo = (id) => { asked.push(id); return id === "aave" ? "data:image/png;base64,AAAA" : ""; };
+  panel.say({ type: "pluginLogos", plugins: ["aave", "context7", "../x", 7, "Aave"] });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(asked, ["aave", "context7"]);
+  assert.deepEqual(panel.last("pluginLogos"), { type: "pluginLogos", logos: { aave: "data:image/png;base64,AAAA", context7: "" } });
+  const before = panel.webview.posted.length;
+  panel.say({ type: "pluginLogos", plugins: ["../x"] });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(panel.webview.posted.length, before, "nothing valid: no reply");
+  delete host.pluginLogo;
+  panel.say({ type: "pluginLogos", plugins: ["aave"] });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(panel.last("pluginLogos").logos, { aave: "" }, "a host with no logos: the page keeps its plug");
+});

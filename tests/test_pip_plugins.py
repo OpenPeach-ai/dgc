@@ -168,6 +168,25 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertIn("Weekend plan", said)
         self.assertEqual(Vendor.made[0].calls, [("airtable__list_records", {"table": "Plans"})])
 
+    def test_the_reply_records_each_plugin_it_read_once_never_a_failed_read_or_a_card(self):
+        # "Used Airtable" under the reply: what the controller saw it read, in order, each once.
+        self.use("call_plugin", plugin="airtable", tool="list_records", arguments={"table": "Plans"})
+        self.use("call_plugin", plugin="aave", tool="list_records", arguments={"table": "Rates"})
+        self.use("call_plugin", plugin="Airtable", tool="list_records", arguments={"table": "Other"})
+        self.assertEqual(self.session.used, [{"plugin": "airtable", "name": "Airtable"}, {"plugin": "aave", "name": "Aave"}])
+        for answer in ("ERROR: MCP tool 'list_records' failed: 401 Unauthorized", json.dumps({"isError": True, "error": "expired"})):
+            with self.subTest(answer=answer[:20]):
+                Vendor.answer = answer
+                session = self.session_for()
+                self.use("call_plugin", session, plugin="airtable", tool="list_records", arguments={"table": "Plans"})
+                self.assertEqual(session.used, [], "a read that came back as an error used nothing")
+        Vendor.answer = None
+        session = self.session_for()
+        self.assertIn("draft", self.use("call_plugin", session, plugin="airtable", tool="create_record",
+                                        arguments={"table": "Plans", "fields": {"Name": "Run"}}))
+        self.use("plugin_tools", session, plugin="airtable")
+        self.assertEqual(session.used, [], "an Allow card waiting, or a tool list, is not a use")
+
     def test_an_important_change_becomes_an_allow_card_and_nothing_runs(self):
         reply = self.use("call_plugin", plugin="airtable", tool="create_record", arguments={"table": "Plans", "fields": {"Name": "Run"}})
         self.assertIn("An Allow card for create_record in Airtable is below your reply", reply["text"])
@@ -269,6 +288,70 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertEqual(plugins.permission("airtable"), "any_changes", "kept with the plugins, for every Pip")
 
 
+class UsedPluginsRunTests(PluginWorld, unittest.TestCase):
+    """The line under a Pip's reply ("Used Aave") is what the run's controller saw it read, never the worker's word for
+    it: the worker is the model's side of the run, and the model can say anything."""
+
+    def setUp(self):
+        local.LocalPipsTests.setUp(self)
+        self.world()
+        self.pip = self.store.create(self.registry.personal()["id"], "Ava", "Keep my rates", "local-console")
+        self.sent = 0
+
+    def reply_after(self, worker_says=None, controller_saw=()):
+        import io
+        from unittest.mock import Mock
+        from dgc import pip_chat
+        self.sent += 1
+        sent = pip_chat.send(self.store, self.pip["id"], "What's USDC on Aave?", f"rates-{self.sent}", "local-console", self.cfg)
+        row = self.store.claim_next()
+        digest, real_payload = {}, pips._worker_payload
+
+        def payload(value):
+            digest["policy"] = value["manifest"]["policy_digest"]
+            return real_payload(value)
+
+        def worker(argv, **kwargs):
+            self.assertEqual(argv[1:], ["-m", "dgc.pips", "--worker"])
+            result = {"text": "USDC supplies at 4.1%.", "usage": {}, "tools_called": 0,
+                      **({"plugins": worker_says} if worker_says is not None else {})}
+            lines = [{"kind": "policy_ready", "digest": digest["policy"]}, {"kind": "result", "result": result}]
+            process = Mock(stdin=io.BytesIO(), stdout=io.BytesIO(b"".join((json.dumps(e) + "\n").encode() for e in lines)))
+            process.wait.return_value = 0
+            process.poll.return_value = 0
+            return process
+        start = pip_plugins.Session.__init__
+
+        def session(this, *a, **kw):
+            start(this, *a, **kw)
+            this.used = [dict(u) for u in controller_saw]          # what this run's plugin calls read, as recorded
+        with patch.object(pips, "_worker_payload", side_effect=payload), patch.object(pips.subprocess, "Popen", side_effect=worker), \
+                patch.object(pip_plugins.Session, "__init__", session):
+            result = pips._execute_run(self.registry, row, self.cfg)
+        self.assertEqual(self.store.finish(sent["run"]["id"], result=result)["status"], "succeeded")
+        return [m for m in pip_chat.list_messages(self.store, self.pip["id"])["messages"] if m["role"] == "assistant"][-1]
+
+    def test_the_worker_cannot_say_a_plugin_was_used(self):
+        forged = [{"plugin": "aave", "name": "Aave"}]
+        self.assertNotIn("plugins", self.reply_after(worker_says=forged), "the controller saw no read")
+        saw = [{"plugin": "airtable", "name": "Airtable"}]
+        self.assertEqual(self.reply_after(worker_says=forged, controller_saw=saw)["plugins"], saw, "only what it saw")
+        self.assertEqual(self.reply_after(controller_saw=saw)["plugins"], saw)
+
+    def test_a_line_the_reply_would_refuse_is_left_out_and_the_reply_kept(self):
+        reply = self.reply_after(controller_saw=[{"plugin": "airtable", "name": "x" * 81}])
+        self.assertEqual(reply["text"], "USDC supplies at 4.1%.")
+        self.assertNotIn("plugins", reply)
+
+    def test_a_plugin_with_a_blank_name_is_named_by_its_id(self):
+        rows = installed(("airtable", "   ", AIRTABLE, False), ("aave", "Aave", AAVE, True))
+        with patch("dgc.plugins._installed", return_value=rows):
+            session = pip_plugins.Session(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], "run_" + "b" * 32)
+            self.addCleanup(session.close)
+            session.call(self.registry, "call_plugin", {"plugin": "airtable", "tool": "list_records", "arguments": {"table": "Plans"}})
+        self.assertEqual(session.used, [{"plugin": "airtable", "name": "airtable"}])
+
+
 class PluginActionTests(PluginWorld, unittest.TestCase):
     """The Allow card runs one exact call on the plugin's server, only while the Pip may use it."""
 
@@ -365,6 +448,7 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
         self.assertIn('{"table": "Plans"}', read, "with the inputs it ran with")
         self.assertIn("Weekend plan", read)
         self.assertEqual(len(self.vendor.calls), 1, "it ran once")
+        self.assertEqual(self.session.used, [{"plugin": "airtable", "name": "Airtable"}], "its kept answer is a use")
         other = self.session.call(self.registry, "call_plugin", {"plugin": "airtable", "tool": "create_record", "arguments": {"table": "Other"}})
         self.assertIn("draft", other, "a different call asks again")
 
