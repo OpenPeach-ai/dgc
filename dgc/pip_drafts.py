@@ -153,6 +153,42 @@ def _pairs(pairs):
     return result
 
 
+_FENCED = re.compile(r"\A\s*```(?:json)?[ \t]*\r?\n(.*?)\r?\n?```\s*\Z", re.S)
+
+
+def _unwrapped(text):
+    """The one JSON object a reply wrapped in a code fence or a sentence, or None: a fenced block, else the text from
+    its first "{" to its last "}" when there is anything around them. Two objects stay two (and fail)."""
+    if not isinstance(text, str):
+        return None
+    fenced = _FENCED.match(text)
+    if fenced:
+        return fenced.group(1)
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end and (start > 0 or end < len(text) - 1):
+        return text[start:end + 1]
+    return None
+
+
+def finish(text, snapshot, read_calls):
+    """The draft a run ends with: its reply, parsed strictly; or, when the reply wrapped its one JSON object in a code
+    fence or a sentence (a flash model fenced it and the whole Quill run failed, overnight battle 2026-10-13), that
+    object, parsed just as strictly -- every field and every citation checked against the source again. No model
+    rewrites anything, so nothing can be dropped or changed to get through; any other failure is the original one."""
+    try:
+        return parse_reply(text, snapshot, read_calls=read_calls)
+    except RegistryError as original:
+        inner = _unwrapped(text) if original.code == "invalid_draft" else None
+        if inner is None or inner == text:
+            raise
+        try:
+            return parse_reply(inner, snapshot, read_calls=read_calls)
+        except RegistryError as second:
+            if second.code == "unverified_draft":
+                raise                     # its citations don't hold: say so, as an unwrapped reply would have
+            raise original from None
+
+
 def parse_reply(text, snapshot, *, read_calls):
     """Model boundary. No files are written; raw replies are never reflected in errors."""
     if type(read_calls) is not int or read_calls < 1:

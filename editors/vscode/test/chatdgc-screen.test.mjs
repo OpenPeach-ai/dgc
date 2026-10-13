@@ -1826,6 +1826,27 @@ test("Codex's queue: what you send while it answers waits above the box and goes
   } finally { await s.page.close(); }
 });
 
+test("a reply that read a plugin says so under it (Used Aave), as ChatGPT names the apps it used", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "USDC rate on Aave?" },
+      { id: M(2), role: "assistant", text: "About 3.87% on the main market.", finish: "stop", plugins: ["Aave", "<b>x</b>"] },
+      { id: M(3), role: "user", text: "Thanks" },
+      { id: M(4), role: "assistant", text: "Any time.", finish: "stop" }] });
+    await s.frame();
+    assert.deepEqual(await s.page.locator(".cd-plugins-used").allTextContents(), ["Used Aave, <b>x</b>"], "only the reply that read one, names as words");
+    assert.equal(await s.page.locator(".cd-plugins-used b").count(), 0);
+    await s.send({ type: "turn", state: "started", replyId: M(6) });
+    await s.send({ type: "message", message: { id: M(5), role: "user", text: "Again?" } });
+    await s.send({ type: "delta", messageId: M(6), text: "Checking" });
+    await s.frame();
+    assert.equal(await s.page.locator(`[data-id="${M(6)}"] .cd-plugins-used`).count(), 0, "not while it's still being written");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("Codex's queue while it summarizes: a message sent during Compact now goes once the summary is in", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

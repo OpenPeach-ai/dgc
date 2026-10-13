@@ -97,6 +97,28 @@ class DraftTests(unittest.TestCase):
         self.assertNotIn("findings", result)
         self.assertNotIn("artifact", result["draft"])
 
+    def test_a_fenced_or_prefaced_draft_is_unwrapped_and_checked_as_strictly(self):
+        """A flash model fenced its JSON and the whole Quill run failed (overnight battle, 2026-10-13). parse_reply still
+        parses once, strictly; finish() takes the one object out of a fence or a sentence and parses THAT strictly --
+        every citation checked again. No model rewrites it, so a citation that doesn't hold can't be dropped to pass."""
+        self.commit()
+        good = json.dumps(self.body())
+        for wrapped in ("```json\n" + good + "\n```", "```\n" + good + "\n```", "Here is the draft:\n" + good,
+                        good + "\nThat's all."):
+            with self.subTest(start=wrapped[:12]):
+                result = drafts.finish(wrapped, self.root, 1)
+                self.assertEqual((result["title"], result["draft"]["citations"][0]["path"]), ("Greeting helper", "source.py"))
+        bad = self.body()
+        bad["citations"][0]["excerpt"] = "def goodbye():"
+        with self.assertRaises(RegistryError) as caught:
+            drafts.finish("```json\n" + json.dumps(bad) + "\n```", self.root, 1)
+        self.assertEqual(caught.exception.code, "unverified_draft", "fenced or not, a citation that doesn't hold is said")
+        for broken in (good + good, "PRIVATE no json at all", "\ud800 not json", '{"title": "PRIVATE"'):
+            with self.subTest(broken=broken[:10]), self.assertRaises(RegistryError) as caught:
+                drafts.finish(broken, self.root, 1)
+            self.assertEqual(caught.exception.code, "invalid_draft")
+            self.assertNotIn("PRIVATE", str(caught.exception))
+
     def test_json_bounds_before_decode_and_unicode_invalid(self):
         self.commit()
         for text in ("x" * (drafts.MAX_REPLY_BYTES + 1), "\ud800", "é" * drafts.MAX_REPLY_BYTES):

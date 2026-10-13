@@ -9,12 +9,13 @@ def finish(agent, text, snapshot, read_calls, *, deadline=None):
     except RegistryError as original:
         # A bad citation or unfinished audit is not a formatting problem. Do not
         # discard it or convert it into an empty, apparently successful report.
-        if original.code != 'invalid_report' or not isinstance(text,str) or len(text)>32000 or len(text.encode('utf-8'))>32000:
+        # A lone surrogate can't be encoded: that reply is refused as it was, never turned into a codec error.
+        if original.code != 'invalid_report' or not isinstance(text,str) or len(text)>32000 or len(text.encode('utf-8','surrogatepass'))>32000:
             raise
         if agent.cancelled.is_set():raise
         now=time.monotonic()
         until=min(deadline-1,now+30) if deadline is not None else now+30
-        if until-now<1 or len(text.encode())>max(1024,(agent.context_size()-2048)*3):raise
+        if until-now<1 or len(text.encode('utf-8','surrogatepass'))>max(1024,(agent.context_size()-2048)*3):raise
         from .agent import _DeadlineCancel
         cancel=_DeadlineCancel(agent.cancelled,until)
         try:

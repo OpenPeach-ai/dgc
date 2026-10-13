@@ -386,6 +386,15 @@
     }
     return box;
   }
+  /** The plugins a reply read from ("Used Aave"), as ChatGPT names the apps it used: what came from a plugin did. */
+  function pluginsNote(message) {
+    const names = (Array.isArray(message.plugins) ? message.plugins : []).filter((n) => typeof n === "string" && n).slice(0, 8);
+    if (!names.length) return null;
+    const line = el("div", "cd-plugins-used");
+    line.append(icon("plug"), el("span", "", `Used ${names.join(", ")}`));
+    line.title = "This reply read from these plugins";
+    return line;
+  }
   /** What a reply saved to (or deleted from) the user's memory, each with Forget, and the way to all of it. */
   function memoryNote(message) {
     const ops = Array.isArray(message.memory) ? message.memory.filter((op) => op && typeof op.text === "string") : [];
@@ -1226,6 +1235,7 @@
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
     if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
     if (!live) { const kept = memoryNote(message); if (kept) node.append(kept); }
+    if (!live) { const used = pluginsNote(message); if (used) node.append(used); }
     const end = endNote(message);
     if (end) node.append(end);
     const next = !live ? followupsNode(message) : null;

@@ -10,7 +10,21 @@ protocol and the TypeScript SDK's known events, so neither SDK drops them.
 lists, opens and starts chats (`ask`, `list`, `new`, `open`); a `Chat` sends (`send`, `stream`), runs deep research
 (`research`, with a plan you may edit), stops a reply (`cancel`) and is renamed, pinned, archived, deleted or
 exported. Replies carry their numbered `sources`. It runs on a backend of its own in a private empty folder, in plan
-mode; a CLI without ChatDGC raises `DGCUnsupportedError`.
+mode (on an inherited profile, in your own mode: it runs no prompt); a CLI without ChatDGC raises
+`DGCUnsupportedError`.
+
+- **`dgc.chat()` on your own profile works.** With `inherit_user_state=True` (`inheritUserState: true`) -- the guide's
+  own example -- it asked for plan mode, which an inherited client refuses unless that is already your mode, so it
+  raised `DGCConfigError` for anyone in `default` or `auto` (and for `DGC(mode="auto")`). Its backend runs in default
+  there, never `auto`, so nothing is acknowledged in your `~/.dgc`.
+- **Study mode and question cards, as the editor has them:** `chat.send`/`stream` take `study` (`True` on, `False`
+  off, for the chat from that message), and `chat.answer(message_id, choice)` answers a reply's question card --
+  `choices=[...]`, one per question, for a card of several (`ready.capabilities.chatdgc.question_forms`; an older CLI
+  raises `DGCUnsupportedError`), on `AsyncChat` too. Answers must be text, are trimmed and counted in characters
+  alike in both SDKs, and a card the chat knows must get one answer per question. TypeScript:
+  `chat.answer(messageId, choice, { choices })`.
+- **Pips API 46:** `list_pip_notes`, `add_pip_note` and `forget_pip_note` take `shared: true` (a Pip's notes in the
+  one memory DGC keeps for you); the SDK refuses it before sending to a runtime below API 46.
 
 More Pips API 44, all local only and refused before sending to a runtime below API 44:
 `list_pip_attention` (`limit`) reads everything your Personal Pips wait on you for; `list_pip_notes`

@@ -5,7 +5,7 @@ lets trusted host code read and manage the Pips of an existing DGC profile throu
 `dgc serve`: list workspaces and Pips, read runs and reports, review proposals,
 setups and handoffs, queue runs, chat with a Pip, and review Personal app actions.
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 41** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 46** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -118,8 +118,8 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.48.0 is API 41; Pip computers need API 42. Starter Pips (also
-API 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
+needs a newer API, before sending it. CLI 0.48.0 is API 46; Pip computers need API 42. Starter Pips (API
+41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
 | API | Commands or parameters |
@@ -156,7 +156,10 @@ job with `create_pip` and a reviewed update.
 | 40 | `changes.web_plan` |
 | 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`, `get_pips_keep_running`, `set_pips_keep_running`, `get_pips_desktop_notifications`, `set_pips_desktop_notifications`, `get_pip_usage`, `set_pip_daily_cap`, `export_pip`, `list_pip_feedback`, `set_pip_feedback`, `always_allow_pip_app_action`, `list_pip_action_grants`, `revoke_pip_action_grant`; `changes.github_plan` |
 | 42 | Pip computers: `get_pip_computer`, `list_pip_computer_actions`, `get_pip_computer_frame`, `list_pip_computer_frames`, `decide_pip_computer_action`, `always_allow_pip_computer_action`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view`; `changes.computer_plan` |
-| 43 | `introduce_pip`; `create_pip` with an empty `goal` and `pip_type` `core` for Personal Pips; `images` and `files` on `send_pip_message`; `get_pip_message_image`; a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `list_pip_computer_terminal`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`) |
+| 43 | `introduce_pip`; `create_pip` with an empty `goal`, `pip_type` `core` and `source_ref` `HEAD` (what the editor sends) for Personal Pips; `images` and `files` on `send_pip_message`; `get_pip_message_image`; a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `list_pip_computer_terminal`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`) |
+| 44 | Personal Pips' plugins: `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`, `list_pip_attention`; notes (`list_pip_notes`, `add_pip_note`, `forget_pip_note`), sites, `get_pip_chat_context`, `list_pip_reply_stats`, `get_pips_limit`/`set_pips_limit`, `set_pip_careful`, `forget_pip_site` |
+| 45 | `set_plugin_permission`: what each plugin may do without asking (`always_ask`, `any_changes`, `important`, `never_ask`), for every Pip. A read at `important` runs without a card. |
+| 46 | `shared: true` on `list_pip_notes`, `add_pip_note` and `forget_pip_note`: a Pip's notes are kept in the one memory DGC keeps for you (ids `mem_…`). |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend

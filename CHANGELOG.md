@@ -23,6 +23,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **Nothing to look at, as ChatGPT's voice mode:** a spoken turn isn't offered `ask_user`, `make_file`,
     `show_widget` or the canvas tools, nor told about them or about charts; one called anyway is refused. Typing
     again brings them back.
+- **Which plugin a reply used:** a ChatDGC reply that read from a plugin keeps its name (`plugins` on the message) and
+  shows **Used Aave** under it once it's finished, as ChatGPT names the apps it used: numbers from a live plugin no
+  longer look like the model's memory. A card that waits, a listing, or a read that came back as an error is not a use.
 - **Compact now, then Edit at once:** "compacted" was said while the chat was still busy recounting its window, so
   editing the new summary straight away was refused as "still answering". It's said once the chat is free.
 - **A card of several questions:** `ask_user` takes `questions` (up to four, each with its options) and `submit`, the
@@ -395,6 +398,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **A fenced Pip draft is read, not refused.** A Quill run failed outright when the model wrapped its JSON in a code
+  fence or a sentence ("Draft JSON rejected ... line 1, column 1"). The one object inside is now taken out and parsed
+  just as strictly, every citation checked against the source again; no model rewrites it, so a citation that doesn't
+  hold can't be dropped to get through. A lone surrogate in a report or draft is refused as before, not a codec error.
 - **Needs attention: one list of everything your Personal Pips wait on you for.** `list_pip_attention`
   (`limit` 1–100, local only) reads every card across all your Personal Pips, newest first: emails,
   calendar events and plugin actions to Allow, prepared app actions, Connect cards, plugin requests,

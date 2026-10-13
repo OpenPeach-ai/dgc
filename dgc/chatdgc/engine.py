@@ -2417,13 +2417,14 @@ class ChatEngine:
             finish = "cancelled"
         if picturing is not None:
             web_images = self._end_pictures(picturing, wait=finish not in ("cancelled", "error")) or None
+        used = list(getattr(plugins, "used", None) or []) if plugins is not None else []
         if plugins is not None:
             plugins.close()
         try:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,
                                        actions=actions, files=files, canvases=canvases, queries=queries,
-                                       widgets=widgets)
+                                       widgets=widgets, plugins_used=used)
             return message
         finally:
             if picturing is not None:
@@ -2433,7 +2434,7 @@ class ChatEngine:
 
     def _keep_reply(self, chat, existing, reply_id, model, client, text, thought_text, finish, failure, usage, counted,
                     sources, searches, questions, memory_ops, web_images, *, actions=None, files=None,
-                    canvases=None, queries=None, widgets=None) -> dict:
+                    canvases=None, queries=None, widgets=None, plugins_used=None) -> dict:
         """The reply as it ended, saved (with what it looked up, asked, remembered and showed)."""
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
@@ -2460,6 +2461,8 @@ class ChatEngine:
                 message["queries"] = queries
             if widgets:
                 message["widgets"] = widgets
+            if plugins_used:
+                message["plugins"] = list(dict.fromkeys([*(existing.get("plugins") or []), *plugins_used]))
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -2484,6 +2487,8 @@ class ChatEngine:
                 message["queries"] = queries
             if widgets:
                 message["widgets"] = widgets
+            if plugins_used:
+                message["plugins"] = list(plugins_used)
             chat["messages"].append(message)
         if counted:
             message["counted"] = counted

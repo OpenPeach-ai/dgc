@@ -446,6 +446,8 @@ textarea.cd-plan-input { resize: vertical; }
 .cd-memory { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); color: var(--muted);
   font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
 .cd-memory-row { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.cd-plugins-used { display: flex; align-items: center; gap: var(--sp-1); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.cd-plugins-used .codicon { font-size: 12px; }
 .cd-memory-row .codicon { font-size: 12px; }
 .cd-memory-text { min-width: 0; overflow-wrap: anywhere; }
 .cd-memory-forget, .cd-memory-manage { padding: 0; border: 0; background: none; color: var(--link, var(--accent-text)); font: inherit; cursor: pointer; }

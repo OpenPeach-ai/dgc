@@ -255,6 +255,32 @@ class DGC:
         turn_budget_s: int | None = None,
         max_tokens: int | None = None,
     ) -> Session:
+        return self._session(cwd=cwd, permissions=permissions, on_permission=on_permission, on_plan=on_plan, on_question=on_question, on_mcp_input=on_mcp_input, model=model, base_url=base_url, api_key=api_key, mode=mode, thinking=thinking, tools=tools, instructions=instructions, max_turns=max_turns, sandbox=sandbox, verify_command=verify_command, decision_timeout=decision_timeout, turn_budget_s=turn_budget_s, max_tokens=max_tokens)
+
+    def _session(
+        self,
+        *,
+        cwd: str | Path,
+        permissions: PermissionPolicy | Mapping[str, str] | None = None,
+        on_permission: OnPermission | None = None,
+        on_plan: OnPlan | None = None,
+        on_question: OnQuestion | None = None,
+        on_mcp_input: OnMcpInput | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        mode: PermissionMode | None = None,
+        thinking: str | None = None,
+        tools: Sequence[ToolSpec] = (),
+        instructions: str | None = None,
+        max_turns: int | None = None,
+        sandbox: SandboxPolicy | Mapping[str, str] | None = None,
+        verify_command: str | None = None,
+        decision_timeout: float | None = 30.0,
+        turn_budget_s: int | None = None,
+        max_tokens: int | None = None,
+        chat_backend: bool = False,
+    ) -> Session:
         if self._closed:
             raise DGCRuntimeError("this DGC client is closed")
         workspace = Path(cwd).expanduser().resolve()
@@ -262,7 +288,9 @@ class DGC:
             raise DGCConfigError("cwd must be an existing directory")
         perm_mode, unhandled = permission_settings(
             permissions, mode=mode, default_mode=self._mode, on_permission=on_permission)
-        requested_mode = mode or _explicit_mode(permissions) or (
+        # ChatDGC's own backend (chat()) runs no prompt, in default mode: on your profile, your saved mode isn't
+        # compared with it (an untrusted private folder holds any mode at default, which failed for mode="auto").
+        requested_mode = None if chat_backend else mode or _explicit_mode(permissions) or (
             self._mode if self._mode != "default" else None)
         if self._inherit:
             _reject_inherited(max_turns=max_turns, verify_command=verify_command,
@@ -576,7 +604,11 @@ class DGC:
             raise DGCRuntimeError("this DGC client is closed")
         workspace = self._state_dir / "chat-workspace"
         workspace.mkdir(mode=0o700, exist_ok=True)
-        session = self.session(cwd=workspace, permissions={"mode": "plan", "unhandled": "deny"})
+        # Plan mode keeps an isolated chat backend from ever editing anything. It runs no prompt, only chatdgc_*
+        # commands. On your own profile asking for plan would have to change your settings, which an inherited client
+        # refuses; it runs in default there (never acceptEdits/auto, which would acknowledge trust in your ~/.dgc).
+        permissions = {"mode": "default" if self._inherit else "plan", "unhandled": "deny"}
+        session = self._session(cwd=workspace, permissions=permissions, chat_backend=self._inherit)
         try:
             return Chats(session, model=model, thinking=thinking, reply_timeout=reply_timeout)
         except BaseException:

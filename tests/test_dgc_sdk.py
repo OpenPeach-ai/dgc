@@ -79,6 +79,7 @@ def _call(name: str, args: dict) -> str:
 class _Model(BaseHTTPRequestHandler):
     behavior = "text"
     posts = 0
+    last_system = ""
 
     def log_message(self, *args):
         pass
@@ -103,6 +104,7 @@ class _Model(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         request = json.loads(self.rfile.read(length) or b"{}")
         messages = request.get("messages") or []
+        _Model.last_system = next((str(m.get("content") or "") for m in messages if m.get("role") == "system"), "")
         last = ""
         for message in reversed(messages):
             if message.get("role") == "tool":
@@ -150,6 +152,14 @@ class _Model(BaseHTTPRequestHandler):
             return
         if last.startswith("TOOL:"):
             self._send(_answer("Done."))
+            return
+        if "all at once" in last.lower() and any(t.get("function", {}).get("name") == "ask_user"
+                                                 for t in request.get("tools") or []):
+            # ChatDGC's card of several questions (ask_user with `questions`).
+            self._send(_call("ask_user", {
+                "questions": [{"question": "Who should own it?", "options": ["Only me", "Jointly"]},
+                              {"question": "Where is it?", "options": ["England", "Scotland"]}],
+                "prompt": "Build my plan.", "submit": "Build my plan"}))
             return
         if self.behavior == "mcp" or "look up sku" in last.lower():
             self._send(_call("mcp__app__sku_lookup", {"sku": "A-1"}))

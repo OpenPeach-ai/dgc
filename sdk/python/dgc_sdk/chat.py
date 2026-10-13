@@ -129,6 +129,11 @@ def _choice(value: str | None, allowed: Sequence[str], name: str) -> str | None:
     return value
 
 
+def _answer_text(text: str) -> str:
+    """An answer as it's sent: without the spaces (or a byte-order mark) around it, as the TypeScript SDK trims it."""
+    return text.strip().strip("\ufeff").strip()
+
+
 class Chats:
     """ChatDGC on its own backend: list, open and start chats. Made by :meth:`DGC.chat`; close it (or the
     client) when done."""
@@ -333,6 +338,14 @@ class Chat:
                 if chats._listeners.get(self.id) is listener:
                     del chats._listeners[self.id]
 
+    def _card(self, message_id: str, question: int) -> dict[str, Any] | None:
+        """The question card ``question`` of reply ``message_id``, as this chat last saw it (None when unknown)."""
+        for message in self.messages:
+            if message.get("id") == message_id and message.get("role") == "assistant":
+                asked = message.get("questions") if isinstance(message.get("questions"), list) else []
+                return asked[question] if 0 <= question < len(asked) and isinstance(asked[question], Mapping) else None
+        return None
+
     def _remember(self, message: dict[str, Any]) -> None:
         for index, known in enumerate(self.messages):
             if known.get("id") == message.get("id"):
@@ -341,7 +354,7 @@ class Chat:
         self.messages.append(message)
 
     def _send_command(self, text: str, model: str | None, thinking: str | None, search: str | None,
-                      files: Sequence[str | Path]) -> dict[str, Any]:
+                      files: Sequence[str | Path], study: bool | None = None) -> dict[str, Any]:
         if not isinstance(text, str) or not text.strip():
             raise DGCConfigError("text must be a non-empty message")
         if len(files) > MAX_FILES:
@@ -355,6 +368,10 @@ class Chat:
             command["thinking"] = thinking
         if search is not None:
             command["search"] = _choice(search, SEARCH, "search")
+        if study is not None:
+            if not isinstance(study, bool):
+                raise DGCConfigError("study must be True or False")
+            command["study"] = study
         if files:
             attachments = []
             for item in files:
@@ -366,14 +383,16 @@ class Chat:
         return command
 
     def stream(self, text: str, *, model: str | None = None, thinking: str | None = None,
-               search: str | None = None, files: Sequence[str | Path] = (),
+               search: str | None = None, files: Sequence[str | Path] = (), study: bool | None = None,
                timeout: float | None = None) -> Iterator[ChatEvent]:
         """Send a message and yield the reply as it's written; the last event is ``"reply"``.
 
         ``search``: ``"auto"`` (the default: it searches when an answer depends on facts), ``"on"`` (search first)
-        or ``"off"``. ``files``: up to ten local files the backend reads. ``timeout``: seconds for the whole reply
-        (default: the client's ``reply_timeout``); past it the reply is stopped."""
-        return self._turn(self._send_command(text, model, thinking, search, files), timeout)
+        or ``"off"``. ``files``: up to ten local files the backend reads. ``study``: True turns Study mode on for the
+        chat from this message (it teaches instead of answering), False turns it off; left out, the chat stays as it
+        is. ``timeout``: seconds for the whole reply (default: the client's ``reply_timeout``); past it the reply is
+        stopped."""
+        return self._turn(self._send_command(text, model, thinking, search, files, study), timeout)
 
     def send(self, text: str, **options: Any) -> ChatReply:
         """Send a message and wait for the whole reply. Options as :meth:`stream`."""
@@ -420,6 +439,55 @@ class Chat:
                 report = event.reply
         assert report is not None
         return report
+
+    def answer(self, message_id: str, choice: str | None = None, *, question: int = 0,
+               choices: Sequence[str] | None = None, model: str | None = None, thinking: str | None = None,
+               search: str | None = None, timeout: float | None = None) -> ChatReply:
+        """Answer the question card a reply asked (a ``"question"`` event), as a click on it does: the message the
+        model wrote for it is sent with your answer in, and its reply comes back. ``choice`` answers a one-question
+        card (one of its options, or your own words); ``choices`` answers a card of several questions, one each, in
+        order. Only while that reply is the last thing said."""
+        if not isinstance(message_id, str) or not message_id:
+            raise DGCConfigError("message_id must be the id of the reply that asked")
+        if isinstance(question, bool) or not isinstance(question, int) or question < 0:
+            raise DGCConfigError("question must be the card's index (0 for the first)")
+        command: dict[str, Any] = {"type": "chatdgc_answer", "message_id": message_id, "question": question}
+        card = self._card(message_id, question)
+        form = card.get("questions") if card and isinstance(card.get("questions"), list) and len(card["questions"]) > 1 else None
+        if choices is not None:
+            if isinstance(choices, (str, bytes)) or not all(isinstance(c, str) for c in choices):
+                raise DGCConfigError("choices must be a list of answers, each one text")
+            picked = [_answer_text(c) for c in choices]
+            if not 2 <= len(picked) <= 4 or not all(1 <= len(c) <= 500 for c in picked):
+                raise DGCConfigError("choices must be 2 to 4 answers of 1 to 500 characters, one for each question on the card")
+            if card is not None and form is None:
+                raise DGCConfigError("that card asks one question: answer it with choice")
+            if form is not None and len(form) != len(picked):
+                raise DGCConfigError(f"that card asks {len(form)} questions: give one answer each")
+            forms = (self._chats._session.capabilities.get("chatdgc") or {}).get("question_forms")
+            if not isinstance(forms, int) or forms < 1:
+                raise DGCUnsupportedError("This DGC CLI can't take a card of several questions; update it (dgc update).")
+            command["choice"], command["choices"] = picked[0], picked
+        else:
+            if not isinstance(choice, str) or not 1 <= len(_answer_text(choice)) <= 500:
+                raise DGCConfigError("choice must be the answer, 1 to 500 characters")
+            if form is not None:
+                raise DGCConfigError(f"that card asks {len(form)} questions: answer them with choices=[...], one each")
+            command["choice"] = _answer_text(choice)
+        model = model or self._chats._model
+        thinking = _choice(thinking, THINKING, "thinking") or self._chats._thinking
+        if model:
+            command["model"] = str(model)
+        if thinking:
+            command["thinking"] = thinking
+        if search is not None:
+            command["search"] = _choice(search, SEARCH, "search")
+        reply = None
+        for event in self._turn(command, timeout):
+            if event.kind == "reply":
+                reply = event.reply
+        assert reply is not None
+        return reply
 
     def cancel(self) -> None:
         """Stop the reply being written; what it wrote so far is kept."""
@@ -524,6 +592,10 @@ class AsyncChat:
 
     async def send(self, text: str, **options: Any) -> ChatReply:
         return await asyncio.to_thread(self._sync.send, text, **options)
+
+    async def answer(self, message_id: str, choice: str | None = None, **options: Any) -> ChatReply:
+        """:meth:`Chat.answer`, awaitable."""
+        return await asyncio.to_thread(self._sync.answer, message_id, choice, **options)
 
     async def stream(self, text: str, **options: Any) -> AsyncIterator[ChatEvent]:
         """Yield :class:`ChatEvent` as the reply is written; the last one is ``"reply"``."""

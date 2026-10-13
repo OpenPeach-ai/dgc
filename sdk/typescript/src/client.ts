@@ -183,7 +183,10 @@ export class DGC {
     const inherit = Boolean(this.options.inheritUserState);
     const [mode, unhandled] = permissionSettings(options.permissions, options.mode,
       this.options.mode ?? "default", options.onPermission);
-    const requestedMode: PermissionMode | undefined = options.mode || options.permissions?.mode
+    // ChatDGC's own backend (chat()) runs no prompt, in default mode: on your profile, your saved mode isn't compared
+    // with it (an untrusted private folder holds any mode at default, which failed for mode: "auto").
+    const requestedMode: PermissionMode | undefined = (options as { chatBackend?: boolean }).chatBackend ? undefined
+      : options.mode || options.permissions?.mode
       || (this.options.mode && this.options.mode !== "default" ? this.options.mode : undefined);
     if (inherit) {
       rejectInherited({
@@ -404,7 +407,12 @@ export class DGC {
     if (this.closed) throw new DGCRuntimeError("this DGC client is closed");
     const workspace = join(this.stateDir, "chat-workspace");
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
-    const session = await this.session({ cwd: workspace, permissions: { mode: "plan", unhandled: "deny" } });
+    // Plan mode keeps an isolated chat backend from ever editing anything. It runs no prompt, only chatdgc_* commands.
+    // On your own profile asking for plan would have to change your settings, which an inherited client refuses; it
+    // runs in default there (never acceptEdits/auto, which would acknowledge trust in your ~/.dgc).
+    const inherit = Boolean(this.options.inheritUserState);
+    const session = await this.session({ cwd: workspace, permissions: { mode: inherit ? "default" : "plan", unhandled: "deny" },
+                                         ...(inherit ? { chatBackend: true } : {}) } as SessionOptions);
     try {
       return new Chats(session, options);
     } catch (error) {

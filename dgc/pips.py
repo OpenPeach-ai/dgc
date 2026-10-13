@@ -2854,7 +2854,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             result = {"summary": _text(summary, "execution summary", 4000), "tests_executed": False,
                       "verification": "Model summary only; the controller records actual changes and test outcomes separately."}
         elif kind == "draft":
-            result = pip_drafts.parse_reply(final, snapshot, read_calls=ui.read_calls)
+            result = pip_drafts.finish(final, snapshot, ui.read_calls)
         else:
             from .pip_report_format import finish as finish_report
             result = finish_report(agent, final, snapshot, ui.read_calls, deadline=deadline)

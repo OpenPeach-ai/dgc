@@ -80,7 +80,20 @@ export type ChatSendOptions = {
   search?: ChatSearch;
   /** Up to ten local files the backend reads. */
   files?: string[];
+  /** `true` turns Study mode on for the chat from this message (it teaches instead of answering), `false` off. */
+  study?: boolean;
   /** For the whole reply (default: the client's `replyTimeoutMs`); past it the reply is stopped. `null`: none. */
+  timeoutMs?: number | null;
+};
+
+export type ChatAnswerOptions = {
+  /** The card's index in the reply (0 for the first). */
+  question?: number;
+  /** A card of several questions: one answer each, in order (instead of the single choice). */
+  choices?: string[];
+  model?: string;
+  thinking?: ChatThinking;
+  search?: ChatSearch;
   timeoutMs?: number | null;
 };
 
@@ -157,6 +170,8 @@ class Inbox {
 /** ChatDGC on its own backend: list, open and start chats. Made by `dgc.chat()`; close it (or the client) when done. */
 export class Chats {
   private readonly session: Session;
+  /** @internal What the backend offers (a card of several questions, ...). */
+  capabilities(): Record<string, unknown> { return this.session.capabilities as Record<string, unknown>; }
   private readonly ownsSession: boolean;
   /** @internal */ readonly model: string | undefined;
   /** @internal */ readonly thinking: ChatThinking | undefined;
@@ -335,6 +350,14 @@ export class Chat {
     }
   }
 
+  /** The question card `question` of reply `messageId`, as this chat last saw it (undefined when unknown). */
+  private card(messageId: string, question: number): Record<string, unknown> | undefined {
+    const message = this.messages.find((m) => m.id === messageId && m.role === "assistant");
+    const asked = Array.isArray(message?.questions) ? (message!.questions as unknown[]) : [];
+    const found = asked[question];
+    return found && typeof found === "object" ? found as Record<string, unknown> : undefined;
+  }
+
   private remember(message: Record<string, unknown>): void {
     const at = this.messages.findIndex((known) => known.id === message.id);
     if (at >= 0) this.messages[at] = message;
@@ -354,6 +377,10 @@ export class Chat {
     if (options.search !== undefined) {
       if (!SEARCH.includes(options.search)) throw new DGCConfigError("search must be one of off, auto, on");
       command.search = options.search;
+    }
+    if (options.study !== undefined) {
+      if (typeof options.study !== "boolean") throw new DGCConfigError("study must be true or false");
+      command.study = options.study;
     }
     if (files.length) {
       command.attachments = files.map((item) => {
@@ -412,6 +439,53 @@ export class Chat {
     }
     if (!report) throw new DGCRuntimeError("ChatDGC ended the research without a report");
     return report;
+  }
+
+    /**
+   * Answer the question card a reply asked (a `"question"` event), as a click on it does: the message the model wrote
+   * for it is sent with your answer in, and its reply comes back. `choice` answers a one-question card; `choices`
+   * (in options) answers a card of several questions, one each, in order. Only while that reply is the last thing said.
+   */
+  async answer(messageId: string, choice?: string, options: ChatAnswerOptions = {}): Promise<ChatReply> {
+    if (typeof messageId !== "string" || !messageId) throw new DGCConfigError("messageId must be the id of the reply that asked");
+    const question = options.question ?? 0;
+    if (!Number.isSafeInteger(question) || question < 0) throw new DGCConfigError("question must be the card's index (0 for the first)");
+    const command: Frame = { type: "chatdgc_answer", message_id: messageId, question };
+    // Counted in characters (code points) after trimming, as the Python SDK counts them.
+    const size = (text: string) => [...text].length;
+    const card = this.card(messageId, question);
+    const form = card && Array.isArray(card.questions) && card.questions.length > 1 ? card.questions : null;
+    if (options.choices !== undefined) {
+      if (!Array.isArray(options.choices) || !options.choices.every((c) => typeof c === "string")) {
+        throw new DGCConfigError("choices must be a list of answers, each one text");
+      }
+      const picked = options.choices.map((c) => c.trim());
+      if (picked.length < 2 || picked.length > 4 || picked.some((c) => size(c) < 1 || size(c) > 500)) {
+        throw new DGCConfigError("choices must be 2 to 4 answers of 1 to 500 characters, one for each question on the card");
+      }
+      if (card && !form) throw new DGCConfigError("that card asks one question: answer it with choice");
+      if (form && form.length !== picked.length) throw new DGCConfigError(`that card asks ${form.length} questions: give one answer each`);
+      const forms = record(this.chats.capabilities().chatdgc).question_forms;
+      if (typeof forms !== "number" || forms < 1) throw new DGCUnsupportedError("This DGC CLI can't take a card of several questions; update it (dgc update).");
+      command.choice = picked[0]; command.choices = picked;
+    } else {
+      const text = typeof choice === "string" ? choice.trim() : "";
+      if (size(text) < 1 || size(text) > 500) throw new DGCConfigError("choice must be the answer, 1 to 500 characters");
+      if (form) throw new DGCConfigError(`that card asks ${form.length} questions: answer them with choices, one each`);
+      command.choice = text;
+    }
+    const model = options.model || this.chats.model;
+    const thinking = thinkingOf(options.thinking) ?? this.chats.thinking;
+    if (model) command.model = String(model);
+    if (thinking) command.thinking = thinking;
+    if (options.search !== undefined) {
+      if (!SEARCH.includes(options.search)) throw new DGCConfigError("search must be one of off, auto, on");
+      command.search = options.search;
+    }
+    let reply: ChatReply | undefined;
+    for await (const event of this.turn(command, options.timeoutMs)) if (event.kind === "reply") reply = event.reply;
+    if (!reply) throw new DGCRuntimeError("ChatDGC ended the reply without one");
+    return reply;
   }
 
   /** Stop the reply being written; what it wrote so far is kept. */

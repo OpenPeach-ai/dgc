@@ -132,6 +132,19 @@ class ReadsAndCards(PluginChat):
         self.assertIn("Dentist", self.told()[0])
         self.assertNotIn("actions", reply)
         self.assertGreater(self.world["stopped"], 0, "its connection closes with the reply")
+        self.assertEqual(reply["plugins"], ["Google Calendar"], "the reply says which plugin it read (Used ...)")
+        self.assertEqual(self.store.get(chat["id"])["messages"][-1]["plugins"], ["Google Calendar"], "and keeps it")
+
+    def test_a_read_that_fails_is_not_a_plugin_used(self):
+        """The line under a reply says what it read from; a read that came back as an error read nothing (adversarial
+        review, 2026-10-13: "Used Google Calendar" under "I couldn't reach your calendar")."""
+        for answer in ("ERROR: MCP tool 'list_events' failed: 401 Unauthorized", json.dumps({"isError": True, "error": "token expired"})):
+            with self.subTest(answer=answer[:20]):
+                self.world["answers"]["list_events"] = answer
+                chat, reply = self.say("What's on my calendar tomorrow?",
+                                       {"calls": [("call_plugin", {"plugin": "Google Calendar", "tool": "list_events", "arguments": {"day": "tomorrow"}})]},
+                                       {"parts": ["I couldn't reach your calendar."]})
+                self.assertNotIn("plugins", reply)
 
     def test_a_change_is_a_card_that_waits_and_nothing_runs(self):
         cards = []
@@ -152,6 +165,7 @@ class ReadsAndCards(PluginChat):
         self.assertEqual(self.store.get(chat["id"])["messages"][-1]["actions"], [card], "kept with the reply")
         self.assertEqual(event_error({"type": "chatdgc_action", "seq": 0, "conversation_id": chat["id"],
                                       "message_id": reply["id"], "action": card}), None)
+        self.assertNotIn("plugins", self.store.get(chat["id"])["messages"][-1], "a card waiting is not a plugin used")
 
     def test_a_payment_plugin_always_asks_even_at_never_ask_and_a_calendar_at_never_ask_does_not(self):
         from dgc import plugins

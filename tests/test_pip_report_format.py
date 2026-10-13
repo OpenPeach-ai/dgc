@@ -43,6 +43,12 @@ class ReportFormatTests(unittest.TestCase):
             if cancel:self.agent.cancelled.set()
             with self.assertRaises(RegistryError):finish(self.agent,text,self.root,1,deadline=deadline)
         self.client.chat.assert_not_called()
+    def test_a_lone_surrogate_is_refused_as_it_was_never_a_codec_error(self):
+        # Adversarial review (2026-10-13): the size guard encoded the reply and raised UnicodeEncodeError inside the
+        # handler, so the worker reported a Python codec message instead of the fixed refusal.
+        self.client.chat.return_value.content='Still prose'
+        with self.assertRaises(RegistryError) as caught:finish(self.agent,'\ud800 not json',self.root,1)
+        self.assertEqual(caught.exception.code,'invalid_report')
     def test_tool_call_from_formatter_is_never_executed(self):
         self.client.chat.return_value.tool_calls=[{'name':'bash'}]
         with self.assertRaises(RegistryError):finish(self.agent,'Prose',self.root,1)

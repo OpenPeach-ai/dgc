@@ -98,7 +98,8 @@ try {
 | `chats.ask(text, **options)` | One question in a new chat: its `ChatReply`. Takes `temporary=True` for a chat that's never saved or listed. |
 | `chats.list(query=None, limit=, offset=, archived=)` | `ChatSummary` rows, newest first; `query` finds a chat by its title or anything said in it. |
 | `chats.new(temporary=)`, `chats.open(chat_id)` | A `Chat`: a new one (saved from its first message) or an existing one with its latest `messages`. |
-| `chat.send(text, model=, thinking=, search=, files=, timeout=)` | Send and wait for the whole reply. `search`: `auto` (default), `on` or `off`; `files`: up to ten local files. |
+| `chat.send(text, model=, thinking=, search=, files=, study=, timeout=)` | Send and wait for the whole reply. `search`: `auto` (default), `on` or `off`; `files`: up to ten local files; `study`: `True` turns Study mode on for the chat (it teaches instead of answering), `False` turns it off. |
+| `chat.answer(message_id, choice, question=0, choices=None, ...)` | Answer the question card a reply asked (a `question` event), as a click on it does: `choice` for a one-question card, `choices` (one per question, in order) for a card of several. The message the model wrote for it is sent with your answers, and its reply comes back. TypeScript: `chat.answer(messageId, choice, { choices })`. |
 | `chat.stream(...)` | The same, as `ChatEvent`s while it's written: `text`, `thinking`, `activity` (searching, looking), `question`, `research`, and last `reply`. |
 | `chat.research(question, edit_plan=, on_event=)` | Deep research: a plan you may change, then the research, then a report whose citations are checked. |
 | `chat.cancel()`, `rename(title)`, `pin()`, `archive()`, `delete()`, `export(path, format=)`, `refresh()` | Stop a reply (what it wrote is kept), manage the chat, save it as Markdown or JSON. |
@@ -302,7 +303,7 @@ dgc.session(*, cwd, permissions=None, on_permission=None, on_plan=None, on_quest
 
 | Parameter | Meaning |
 | --- | --- |
-| `cwd` | Workspace directory. Must exist. |
+| `cwd` | Workspace directory. Must exist. An isolated session keeps it as its project root. With `inherit_user_state=True` a folder inside a project resolves to that project's root (its git root, or the folder holding `DGC.md` or `.dgc/`), as the editor and the `dgc` CLI do, so relative paths are written there. |
 | `permissions` | A `PermissionPolicy` or `{"mode": ..., "unhandled": "deny" \| "callback"}`. `mode` here applies when the `mode` argument is not given. `"callback"` requires `on_permission`. |
 | `on_permission` | `(PermissionRequest) -> "once" \| "always" \| "deny"`. `"always"` adds a rule for this session's isolated config. |
 | `on_plan` | `(PlanRequest) -> "auto" \| "acceptEdits" \| "default" \| "reject"`. |
