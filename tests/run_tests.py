@@ -6943,18 +6943,37 @@ def test_mcp_protocol():
         check("MCP remote environment passthrough is never mistaken for Bearer auth",
               proxy_only_args[:5] == ["-y", "mcp-remote@0.8.3", "https://example.invalid/mcp", "--auth-timeout", "120"]
               and "--header" not in proxy_only_args)
-        # Assert what the guard must achieve, not the one path Linux happens to use. Pinning the
-        # literal "/bin/true" made this check agree with a macOS build in which the guard did
-        # nothing at all: macOS has no /bin/true, so the environment came back untouched and a
-        # browser could open before the editor asked.
-        from dgc.mcp import _suppress_bridge_browser
-        quiet_env = _suppress_bridge_browser({"PATH": "/usr/bin", "BROWSER": "xdg-open"})
-        opener = quiet_env.get("BROWSER")
+        # DGC's own remote client opens no browser: it hands the sign-in link to the caller (the
+        # editor's card, the terminal's prompt), which asks first. The bridge needed BROWSER pointed
+        # at a no-op to promise this, and macOS once had no such no-op, so assert the behaviour.
+        import shutil
+        import webbrowser
+        from unittest import mock as _mock
+        from dgc import mcp_remote as _mcp_remote, plugin_credentials as _credentials
+        offered, opened = [], []
+        auth_home = Path(tempfile.mkdtemp(prefix="dgc-remote-auth-"))
+        with _mock.patch("dgc.config.dgc_home", return_value=auth_home), \
+                _mock.patch.object(_credentials, "_KEYRING", False), \
+                _mock.patch.object(webbrowser, "open", side_effect=lambda *a, **k: opened.append(a)), \
+                _mock.patch.object(webbrowser, "open_new_tab", side_effect=lambda *a, **k: opened.append(a)):
+            options = _mcp_remote.parse_options(["-y", "mcp-remote", "https://example.invalid/mcp"], {})
+            auth = _mcp_remote.RemoteAuth("browser-check", options, None,
+                                          sign_in=lambda url, redirect: offered.append(url) or False,
+                                          cancelled=lambda: False, note=lambda text: None)
+            auth.discover = lambda challenge: {"issuer": "https://example.invalid", "resource_metadata": {},
+                                               "metadata": {"authorization_endpoint": "https://example.invalid/a",
+                                                            "token_endpoint": "https://example.invalid/t"}}
+            auth._client = lambda found, redirect: {"client_id": "c"}
+            try:
+                auth.authorize({}, {})
+                declined = False
+            except _mcp_remote.SignInDeclined:
+                declined = True
+        shutil.rmtree(auth_home, ignore_errors=True)
         check("Remote MCP sign-in does not open a browser before the editor asks",
-              isinstance(opener, str) and opener != "xdg-open" and os.path.isfile(opener)
-              and os.access(opener, os.X_OK) and quiet_env.get("PATH") == "/usr/bin",
-              f"BROWSER={opener!r} on {sys.platform}: the caller's opener must be replaced by a "
-              f"no-op executable that exists on THIS platform")
+              declined and not opened and len(offered) == 1
+              and offered[0].startswith("https://example.invalid/a?") and "code_challenge_method=S256" in offered[0],
+              f"offered={offered!r} opened={opened!r}")
         extra_header_args = _runtime_server_args({
             "transport": "remote", "command": "npx",
             "args": ["-y", "mcp-remote", "https://example.invalid/mcp",

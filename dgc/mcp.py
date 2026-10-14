@@ -465,40 +465,6 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(value)).strip("_") or "unnamed"
 
 
-# `true` lives in /bin on Linux and in /usr/bin on macOS, which has no /bin/true at all.
-# Linux keeps its own path first, so nothing there changes.
-_NOOP_OPENERS = ("/bin/true", "/usr/bin/true")
-
-
-def _noop_opener() -> str:
-    """The first no-op executable this OS actually has, or "" if it has none."""
-    for path in _NOOP_OPENERS:
-        if os.path.isfile(path) and os.access(path, os.X_OK):
-            return path
-    return ""
-
-
-def _suppress_bridge_browser(env: dict) -> dict:
-    """Stop mcp-remote from opening a browser before the user agrees.
-
-    Its bundled opener treats BROWSER=<a no-op binary> as success and then skips the desktop
-    fallbacks. The editor or CLI opens the URL only after that consent.
-
-    The path used to be the literal "/bin/true", which macOS does not ship. There the guard
-    returned the environment unchanged and a browser opened for OAuth before anyone was asked --
-    the one thing this function exists to prevent -- and it did so silently, because returning
-    `env` is also how a legitimately unsupported platform opts out.
-    """
-    if os.name != "posix":
-        return env
-    opener = _noop_opener()
-    if not opener:
-        return env
-    quiet = dict(env)
-    quiet["BROWSER"] = opener
-    return quiet
-
-
 def _runtime_server_args(spec: dict) -> list[str]:
     """Materialize safe remote auth indirection without persisting a header value."""
     args = list(spec.get("args") or []) if isinstance(spec.get("args"), list) else []
@@ -520,7 +486,8 @@ def _runtime_server_args(spec: dict) -> list[str]:
             args.extend(["--header", f"Authorization: Bearer ${{{auth_env}}}"])
     if (spec.get("transport") == "remote" and args[:2] == ["-y", "mcp-remote"]
             and len(args) >= 3 and args[2] == url and valid_remote_mcp_url(url)):
-        # Persist the logical bridge identity for older editors; execute the reviewed version.
+        # The saved shape names the bridge DGC once ran; DGC's own client (mcp_remote.py) reads these
+        # arguments now and runs nothing. Older editors still write and expect this exact shape.
         args[1] = MCP_REMOTE_PACKAGE
         if "--auth-timeout" not in args:
             args.extend(["--auth-timeout", "120"])
@@ -592,15 +559,20 @@ class MCPServer:
         self._connection_cancel = None
         self._browser_auth_generation: int | None = None
         self._needs_sign_in = False
+        self._connecting = False
+        self._sign_in_count = 0
 
     # lifecycle ----------------------------------------------------------------
     def start(self, timeout: float = 10.0, cancel: threading.Event | None = None) -> bool:
         self._connection_done.clear()
         self._browser_auth_generation = None
+        self._sign_in_count = 0
         self._connection_cancel = _AnyCancel(cancel, self._connection_done)
+        self._connecting = True
         try:
             return self._start(timeout, self._connection_cancel)
         finally:
+            self._connecting = False
             self._connection_done.set()
 
     def _start(self, timeout: float, cancel: threading.Event | None) -> bool:
@@ -615,9 +587,8 @@ class MCPServer:
         # official SDKs do: a handshake-era server may reject or corrupt its state on an unknown
         # first request, so legacy fallback always receives a fresh process.
         probe_timeout = min(max(0.25, float(timeout)), 3.0)
-        # mcp-remote 0.8.3 exposes a known initialize-era stdio interface. It starts that interface
-        # only after connecting/authenticating remotely. Probing and killing it after three seconds
-        # interrupts npm installation and OAuth, then duplicates the login on the fallback process.
+        # A remote server is reached over HTTP by DGC's own client (mcp_remote.py), with the initialize
+        # handshake its transports define. Probing first would start a sign-in, then repeat it.
         discovered, discover_error = (None, None) if self.remote_bridge else self._request(
             "server/discover", {}, probe_timeout, cancel, modern=True)
         if cancel is not None and cancel.is_set():
@@ -652,7 +623,7 @@ class MCPServer:
             self.server_info = dict(info) if isinstance(info, dict) else {}
         else:
             if self.remote_bridge:
-                self.negotiation_note = f"{MCP_REMOTE_PACKAGE} uses the initialize handshake"
+                self.negotiation_note = "remote server over HTTP: initialize handshake"
             else:
                 note = discover_error or "invalid server/discover response"
                 self.negotiation_note = f"modern probe unavailable; used legacy handshake ({note[:240]})"
@@ -716,26 +687,30 @@ class MCPServer:
         return True
 
     def _launch(self) -> bool:
-        env = _suppress_bridge_browser(self.env) if self.remote_bridge else self.env
+        generation = self._generation + 1
         if self.remote_bridge:
-            # Its sign-in lives in a folder of its own, so removing the server removes exactly that (plugin_signin).
-            from . import plugin_signin
+            # No process: DGC's own HTTP client, driven through the same stdin/stdout lines. Its sign-in is
+            # kept in the system keychain (plugin_credentials), so removing the server removes exactly that.
+            from .mcp_remote import RemoteConnection, RemoteError
             try:
-                env = plugin_signin.prepare(self.name, self.args, env)
-            except (OSError, ValueError) as exc:
-                self.error = f"could not prepare its sign-in folder: {exc}"
+                proc = RemoteConnection(
+                    self.name, self.args, self.env,
+                    sign_in=lambda url, redirect: self._browser_sign_in(url, generation),
+                    cancelled=self._sign_in_cancelled)
+            except (RemoteError, OSError, ValueError) as exc:
+                self.error = f"could not start: {exc}"
                 return False
-        try:
-            proc = subprocess.Popen(
-                [self.command, *self.args],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                env=env, cwd=str(self.root), text=True, bufsize=1, start_new_session=True,
-            )
-        except Exception as e:
-            self.error = f"could not launch: {e}"
-            return False
-        self._generation += 1
-        generation = self._generation
+        else:
+            try:
+                proc = subprocess.Popen(
+                    [self.command, *self.args],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=self.env, cwd=str(self.root), text=True, bufsize=1, start_new_session=True,
+                )
+            except Exception as e:
+                self.error = f"could not launch: {e}"
+                return False
+        self._generation = generation
         self.proc = proc
         stdout_thread = threading.Thread(
             target=self._reader, args=(proc, generation), daemon=True,
@@ -965,7 +940,7 @@ class MCPServer:
         # and sweep that group even if the leader has already exited: a server can otherwise leave a
         # descendant holding inherited stdio pipes, keeping both reader threads and arbitrary work
         # alive indefinitely.
-        pgid = proc.pid if os.name == "posix" else None
+        pgid = proc.pid if os.name == "posix" and not getattr(proc, "in_process", False) else None
         if proc.poll() is None:
             try:
                 if pgid is not None:
@@ -1008,50 +983,61 @@ class MCPServer:
         if text:
             self.diagnostics = (self.diagnostics + "\n" + text)[-_MAX_DIAGNOSTIC:]
 
+    def _sign_in_cancelled(self) -> bool:
+        """Only a connection still being made can be cancelled mid sign-in; later, its own close ends it."""
+        cancel = self._connection_cancel
+        return bool(self._connecting and cancel is not None and cancel.is_set())
+
+    def _browser_sign_in(self, url: str, generation: int) -> bool:
+        """DGC's remote client needs the user to sign in: ask whoever can (the editor's card, the terminal).
+
+        True once they agreed and the browser opened; the client then waits for the service's redirect."""
+        self._append_diagnostic("Remote MCP browser sign-in requested")
+        if not self._connecting or self._generation != generation:
+            # Mid-session (a sign-in that expired and couldn't refresh) nobody is waiting on a connection
+            # to ask; the call fails and says to connect again.
+            self._needs_sign_in = True
+            return False
+        try:
+            # This is a transient browser link, never catalog metadata or model context.
+            params = sanitize_input_request("elicitation/create", {
+                "mode": "url", "url": url,
+                "message": "Sign in to this MCP server in your browser, then continue."})
+            # Generic server input sanitization strips this private marker. Only DGC's own client
+            # may ask the editor to forward its loopback callback.
+            params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
+        except MCPInputError as exc:
+            self._append_diagnostic(f"Remote MCP sign-in could not be completed ({exc})")
+            self._connection_done.set()
+            return False
+        if not callable(self._auth_handler):
+            # Startup has nobody to sign in: say so now instead of holding the session open until the
+            # start deadline (an installed plugin that was never signed in made every new chat wait).
+            self._needs_sign_in = True
+            self._connection_done.set()
+            return False
+        self._sign_in_count += 1
+        if self._sign_in_count > 2:
+            self._connection_done.set()
+            return False
+        # Once a real authorize URL exists, the human owns the wait: initialize waits past its
+        # deadline until the sign-in finishes or the user/connection cancels.
+        self._browser_auth_generation = generation
+        try:
+            response = self._auth_handler(self.name, "elicitation/create", params, self._connection_cancel)
+        except Exception as exc:                                    # noqa: BLE001
+            self._append_diagnostic(f"Remote MCP sign-in could not be completed ({type(exc).__name__})")
+            response = {}
+        if not isinstance(response, dict) or response.get("action") != "accept":
+            self._connection_done.set()
+            return False
+        return True
+
     def _stderr_reader(self, proc: subprocess.Popen) -> None:
         if not proc.stderr:
             return
-        awaiting_auth_url = False
-        auth_count = 0
         try:
             for line, oversized in _bounded_lines(proc.stderr, 8192):
-                if self.remote_bridge and not oversized:
-                    if "Please authorize this client by visiting:" in line:
-                        awaiting_auth_url = True
-                        self._append_diagnostic("Remote MCP browser sign-in requested")
-                        continue
-                    if awaiting_auth_url and line.strip():
-                        awaiting_auth_url = False
-                        auth_count += 1
-                        # This is a transient browser link, never catalog metadata or model context.
-                        try:
-                            params = sanitize_input_request("elicitation/create", {
-                                "mode": "url", "url": line.strip(),
-                                "message": "Sign in to this MCP server in your browser, then continue."
-                            })
-                            # Generic server input sanitization strips this private marker. Only
-                            # the local pinned bridge may ask the editor to forward its callback.
-                            params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
-                            if not callable(self._auth_handler) and self.proc is proc:
-                                # Startup has nobody to sign in: say so now instead of holding the
-                                # session open until the start deadline (an installed plugin that
-                                # was never signed in made every new chat wait, then hang).
-                                self._needs_sign_in = True
-                                self._connection_done.set()
-                            elif auth_count <= 2 and callable(self._auth_handler) and self.proc is proc:
-                                # Once a real authorize URL exists, the human owns the wait.
-                                # Preserve this bridge/callback until initialize completes or
-                                # the user/connection cancels, not the startup request deadline.
-                                self._browser_auth_generation = self._generation
-                                response = self._auth_handler(self.name, "elicitation/create", params,
-                                                              self._connection_cancel)
-                                if response.get("action") != "accept":
-                                    self._connection_done.set()
-                        except Exception as exc:
-                            self._append_diagnostic(
-                                f"Remote MCP sign-in could not be completed ({type(exc).__name__})")
-                            self._connection_done.set()
-                        continue
                 self._append_diagnostic(
                     "oversized stderr frame discarded" if oversized else line)
         except Exception:

@@ -227,6 +227,8 @@
 
 ### Plugins
 
+- Hosted plugins no longer need Node.js: the CLI connects to them itself and keeps their sign-ins in your system
+  keychain. The MCP server form's transport now reads **Remote (Streamable HTTP or SSE)**.
 - Typing in the plugin search boxes keeps every letter in order. Each key rebuilt the list and put
   the caret back at the start, so "Granola" typed key by key came out as "alonar".
 

@@ -773,21 +773,29 @@ plan mode permits attached snapshots but does not execute live MCP tools.
 
 ## Remote browser sign-in
 
-Remote entries use the pinned `mcp-remote@0.8.3` bridge and require Node/npm. Explicit reconnects
-allow a cancellable browser sign-in window. Decline stops the connection; use Reconnect to retry
-an expired login or cold-start failure. Each remote server's sign-in (its OAuth tokens and client
-registration) lives in a folder of its own, `~/.dgc/plugin-auth/<server>/`, readable only by you
-and separate from bearer tokens managed by the editor. Removing the server or uninstalling its
+DGC connects to remote (hosted) MCP servers itself, over Streamable HTTP or the older HTTP+SSE
+transport, with nothing else to install (no Node or npm). When a server asks you to sign in, DGC
+shows the sign-in link and opens it only after you agree; the service sends you back to DGC on
+`http://localhost:<port>/oauth/callback`. Explicit reconnects allow a cancellable sign-in window.
+Decline stops the connection; use Reconnect to retry an expired login or cold-start failure.
+
+Each remote server's sign-in (its OAuth tokens and client registration) is kept in your system
+keychain: the macOS Keychain, or the desktop keyring through `secret-tool` on Linux. Where there is
+no keychain DGC can use (a Mac reached over SSH keeps it locked, or a Linux machine without
+`secret-tool`), it goes in an owner-only file, `~/.dgc/plugin-auth/<server>/credentials.json`.
+`plugin_credentials_store` in `~/.dgc/config.json` chooses: `auto` (the default), `keyring` (the
+keychain or fail) or `file`. Tokens refresh before they expire. A tool that needs more access
+than you gave says so, and the next Connect asks for it. Removing the server or uninstalling its
 plugin asks the service to revoke the token (OAuth token revocation, where the service offers it)
-and deletes that folder; DGC says which happened. The bridge's shared `~/.mcp-auth` folder, used by
-other apps on your computer, is never read or changed.
+and deletes the sign-in; DGC says which happened. Sign-ins other apps keep (such as
+`~/.mcp-auth`) are never read or changed.
 
 For desktop SSH/remote editors, DGC requests callback forwarding before opening sign-in. If the
 editor changes the callback port or address, forward the remote callback port to the same local
-port in the Ports panel and reconnect. This bridge cannot use browser-only remote editors that
-require another callback origin. Terminal SSH needs equivalent forwarding. Device-code support
-belongs to the provider. See [MCP authentication details](https://github.com/OpenPeach-ai/dgc/blob/main/docs/MCP_CONTEXT.md)
-for verified flows and current bridge limits.
+port in the Ports panel and reconnect. Browser-only remote editors that require another callback
+origin are not supported. Terminal SSH needs equivalent forwarding. Device-code support belongs to
+the provider. See [MCP authentication details](https://github.com/OpenPeach-ai/dgc/blob/main/docs/MCP_CONTEXT.md)
+for verified flows and current limits.
 
 ## Protocol and execution boundaries
 

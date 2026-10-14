@@ -67,58 +67,58 @@ editor keeps the draft so that attachments can be reduced before retrying.
 
 ## Remote authentication and recovery
 
-DGC executes the reviewed `mcp-remote@0.8.3` bridge for standard remote configurations. Node.js and
-`npx` must be available on the machine running DGC. Existing logical `mcp-remote` configuration
-entries remain compatible. The bridge uses the initialize-era stdio handshake; DGC does not run
-the disposable modern-protocol probe against it, which previously interrupted slow startup and
-browser authentication.
+DGC connects to remote MCP servers with its own client (`dgc/mcp_remote.py`); nothing is started and
+Node.js is not needed. A saved remote entry keeps its logical `npx -y mcp-remote <url>` shape, so
+existing configurations and older editors stay compatible; DGC reads those arguments (the URL, a
+callback port, `--header`, `--static-oauth-client-info`, `--static-oauth-client-metadata`,
+`--auth-timeout`, `--resource`, `--transport`) and runs nothing.
 
-Explicit connection operations allow up to 150 seconds, including the bridge's 120-second OAuth
-callback window, and can be cancelled. When browser authorization is required, DGC displays a
-transient sign-in link. Declining it stops the connection. The bridge can also launch its local
-browser helper. Authorization links are excluded from DGC's regular bridge diagnostics; they are
-not resource attachments or model instructions. The bridge stores OAuth tokens in its user cache
-(`~/.mcp-auth` by default); the verified POSIX token files have owner-only permissions.
+- **Transports:** Streamable HTTP first: one POST per message, answered as JSON or an SSE stream, with
+  the `Mcp-Session-Id` kept and returned, `MCP-Protocol-Version` after initialize, a GET stream for
+  what the server says unprompted, and `DELETE` to end the session. A `404` for a session starts a new
+  one. A server that answers the first POST with `400`, `404` or `405` is reached over the older
+  HTTP+SSE transport (an `endpoint` event, then POSTs answered on the stream), as `mcp-remote`'s
+  `http-first` did. The handshake is `initialize`; the stateless 2026 probe is not sent to remote
+  servers.
+- **Sign-in:** OAuth 2.1 with PKCE (S256). A `401` names the server's protected-resource metadata
+  (RFC 9728), checked to describe this server, which names its authorization server (RFC 8414 or
+  OpenID discovery, path-aware). DGC registers itself as "DGC" (RFC 7591) unless the entry names your
+  own app, sends the resource indicator (RFC 8707), and asks for the scope the challenge or metadata
+  names. Tokens refresh before they expire and after a `401`. A `403 insufficient_scope` signs in
+  again for the larger scope while you are connecting; in the middle of a conversation the call says
+  so, and the next Connect asks for it.
+- **Where sign-ins live:** the system keychain (macOS Keychain through the Security framework; the
+  Linux desktop keyring through `secret-tool`, with the secret on its standard input), one entry per
+  server and DGC home. Without a usable keychain, an owner-only file under
+  `~/.dgc/plugin-auth/<server>/`. `plugin_credentials_store` is `auto`, `keyring` or `file`. Several
+  DGC windows and Pips share a sign-in; a lock makes one of them sign in or refresh at a time.
+- **Your own app's secret** stays in the owner-only file the editor writes; the keychain entry
+  keeps only its client id and where that file is.
 
-Cold startup remains bounded and does not wait for interactive sign-in. If a first installation or
-expired login fails at startup, use **Reconnect** after the client is ready. An SSH/remote extension
-host runs the bridge remotely: its loopback OAuth callback port must be reachable from the browser
-that completes sign-in. Before opening the authorization page, the extension now requests forwarding
-for the bridge's validated callback through the editor's `asExternalUri` API. Generic server-provided
-URL requests cannot request port forwarding. Duplicate acceptance, cancellation, expiration and
-backend replacement cannot acknowledge a pending launch or open its browser page afterward.
+Explicit connection operations allow up to 150 seconds, including a 120-second sign-in window, and
+can be cancelled. Declining stops the connection. Authorization links are kept out of diagnostics;
+they are not resource attachments or model instructions. Cold startup does not wait for sign-in:
+a server that needs it is reported as needing sign-in at once, and **Reconnect** signs in.
 
-The pinned bridge's registered callback must retain its HTTP loopback address, port and path. If the
-editor maps it to another port or a web-hosted address, DGC cancels the attempt and explains how to
-forward the remote callback port to the same local port in the desktop editor's Ports panel, then
-reconnect. DGC does not rewrite an OAuth redirect after registration. Browser-only remote editors
-that require a different callback origin are not supported by this bridge flow. A terminal-only SSH
-session needs equivalent forwarding configured by its user. Provider-specific device-code flows
-remain provider-owned; this check does not claim device-code support for every MCP server.
-
-Forwarding and late-response behavior have extension regression coverage; the actual bridge tests
-exercise HTTP and OAuth locally. Neither establishes that every remote-host/identity-provider
-combination works. The editor API's forwarding contract is described in the
+An SSH/remote extension host runs DGC remotely: its loopback callback port must be reachable from
+the browser that completes sign-in. Before opening the authorization page, the extension requests
+forwarding for DGC's validated callback through the editor's `asExternalUri` API. Generic
+server-provided URL requests cannot request port forwarding. Duplicate acceptance, cancellation,
+expiration and backend replacement cannot acknowledge a pending launch or open its page afterward.
+If the editor maps the callback to another port or a web-hosted address, DGC cancels the attempt
+and explains how to forward the remote callback port to the same local port in the Ports panel.
+DGC never rewrites an OAuth redirect after registration. Browser-only remote editors that require
+a different callback origin are not supported. A terminal-only SSH session needs equivalent
+forwarding configured by its user. Provider-specific device-code flows remain provider-owned. The
+editor API's forwarding contract is described in the
 [official remote-extension guide](https://code.visualstudio.com/api/advanced-topics/remote-extensions#forwarding-localhost).
 
-The real-bridge fixture verifies public HTTP, bearer auth, OAuth authorization-code/PKCE, reuse of a
-cached login, refresh after an expired-token `401`, slow startup without duplicate processes,
-cancellation, and declining sign-in. It also exposed an upstream 0.8.3 limitation: proactive refresh
-can reject a path-specific resource identifier when it compares it with the issuer origin. Refresh
-after the server rejects the expired token succeeded in the fixture. DGC does not claim proactive
-refresh is verified for every provider.
+## Tests
 
-## Reproduce the isolated bridge checks
-
-Install the reference bridge separately; it is not vendored or a new Python runtime dependency:
-
-```bash
-npm install --prefix /tmp/dgc-mcp-reference --ignore-scripts --no-audit --no-fund mcp-remote@0.8.3
-DGC_TEST_MCP_REMOTE=/tmp/dgc-mcp-reference/node_modules/mcp-remote/dist/proxy.js \
-  python -m unittest discover -s tests -p test_mcp_remote.py -v
-```
-
-These tests use temporary loopback servers, synthetic credentials, a separate temporary token
-cache, and a suppressed browser helper. Normal Python test discovery skips them unless the
-reference bridge path is selected explicitly. The modern and legacy stdio context tests run in
-the normal suite.
+`tests/test_mcp_remote.py` runs in the normal suite against a real local vendor on loopback (HTTP,
+OAuth and revocation) with a temporary DGC home and a stand-in keychain: public and bearer servers,
+SSE answers, sessions and a forgotten session, the older SSE transport, cancellation, sign-in with
+PKCE and the resource indicator, reuse of a kept sign-in, refresh before expiry and after a `401`,
+step-up at the next Connect, declining, startup with nobody to ask, your own app's secret (never
+stored), two windows signing in at once (one browser), and revocation on removal. The macOS Keychain
+calls were also run on a real Mac against a temporary keychain file.

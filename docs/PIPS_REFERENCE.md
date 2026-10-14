@@ -687,8 +687,8 @@ Statuses: `requested`, `authorizing`, `connected`, `declined`, `failed` (with `e
 
 **A Pip's plugins** (API 44; API 45 since 2026-10-09). The same socket serves `plugin_tools {plugin,
 tool?}`, `call_plugin {plugin, tool, arguments}` and `plugin_answer {}` (`pip_plugins.Session`). A plugin
-counts when it is installed and each of its servers is the vendor's hosted server through DGC's bridge
-(`transport: remote`, `npx -y mcp-remote <https url>`), saved exactly as the plugin registered it and not
+counts when it is installed and each of its servers is the vendor's hosted server, reached by DGC's own
+remote client (`transport: remote`, saved as `npx -y mcp-remote <https url>`), saved exactly as the plugin registered it and not
 in `disabled_mcp_servers`; the saved settings file is read, so a plugin added while the runner runs counts at
 once. **Every plugin that counts is every Personal Pip's**: turning it on in Settings is the consent, and
 there is no `use_plugin` or per-Pip card (API 44's `pip_plugin_grants` rows are kept but no longer

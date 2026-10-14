@@ -12,11 +12,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   streaming a chunked or compressed response could make DGC buffer without bound or loop), and CVE-2026-97687 (TLS
   settings for an HTTPS proxy and the target server not kept apart). DGC streams every model response.
 - A sub-agent record's SHA-1 id says it is not a security use (`usedforsecurity=False`), as the code scan asked.
-- **Removing a plugin signs you out of it.** Each remote server's sign-in now lives in its own owner-only folder,
-  `~/.dgc/plugin-auth/<server>/`. Removing the server (`/mcp remove`, the editor, or uninstalling its plugin) asks
-  the service to revoke DGC's token (RFC 7009, found through the service's OAuth metadata), then deletes the folder,
-  and says which happened. Before, the token stayed on disk in the bridge's shared `~/.mcp-auth`, which DGC now never
-  touches (other apps use it). A remote server you had already signed in to asks you to sign in once more.
+- **Plugin sign-ins are kept in your system keychain**, as Codex and Claude Code keep theirs: the macOS Keychain, or
+  the desktop keyring on Linux (`secret-tool`). Where there is none DGC can use (a Mac over SSH keeps its keychain
+  locked; Linux without `secret-tool`), an owner-only file, `~/.dgc/plugin-auth/<server>/credentials.json`.
+  `plugin_credentials_store` (`auto`, `keyring` or `file`) chooses. Each entry belongs to one DGC home, so a test or an
+  isolated session never reads or deletes yours.
+- **DGC connects to hosted plugins itself, with no Node.js.** Its own client replaces the `mcp-remote` bridge:
+  Streamable HTTP (JSON or SSE answers, sessions, the GET stream) and the older HTTP+SSE transport, with OAuth 2.1
+  sign-in (PKCE, resource metadata, the resource indicator, registration as "DGC", your own app's client), refresh
+  before a token expires, and one sign-in at a time across windows and Pips. A tool that needs more access says so,
+  and the next Connect asks for it. Saved plugins keep working unchanged.
+- **Removing a plugin signs you out of it.** Removing the server (`/mcp remove`, the editor, or uninstalling its plugin)
+  asks the service to revoke DGC's token (RFC 7009, at the address saved at sign-in or found through the service's
+  OAuth metadata), then deletes the sign-in, and says which happened. Before, the token stayed on disk in the bridge's
+  shared `~/.mcp-auth`, which DGC never touches (other apps use it). A remote server you had already signed in to
+  asks you to sign in once more.
 
 ### ChatDGC
 

@@ -4,18 +4,17 @@ Found in real VS Code on 2026-10-07: with Granola installed but not signed in, e
 "DGC is reconnecting to this chat" for good. Startup connected each hosted server in turn; Granola's
 bridge waited for a sign-in nobody could give until its start deadline, past the editor's
 10-second session request. Hosted servers now connect on a background thread, a turn waits a
-little for them, and a bridge that asks for sign-in at startup stops at once.
+little for them, and a server that asks for sign-in at startup stops at once.
 """
 import sys
 import tempfile
-import textwrap
 import threading
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dgc import mcp
+from dgc import mcp, plugin_credentials
 from dgc.mcp import MCPManager, MCPServer
 
 REMOTE = {"transport": "remote", "command": "npx", "args": ["-y", "mcp-remote", "https://hosted.example/mcp"],
@@ -58,21 +57,20 @@ class BackgroundStartupTests(unittest.TestCase):
             self.assertEqual(calls, ["local", "aave"], "a sign-in the user asked for is not deferred")
             self.assertTrue(manager.wait_background(1))
 
-    def test_a_bridge_that_asks_for_sign_in_with_nobody_to_answer_stops_at_once(self):
-        script = Path(tempfile.mkdtemp()) / "bridge.py"
-        script.write_text(textwrap.dedent("""
-            import sys, time
-            sys.stderr.write("Please authorize this client by visiting:\\n")
-            sys.stderr.write("https://auth.example/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A4242%2Foauth%2Fcallback\\n")
-            sys.stderr.flush()
-            time.sleep(30)
-        """))
-        server = MCPServer("granola", sys.executable, [str(script)], remote_bridge=True)
-        began = time.monotonic()
-        self.assertFalse(server.start(timeout=10))
-        self.assertLess(time.monotonic() - began, 5, "not held until the start deadline")
-        self.assertTrue(server._needs_sign_in)
-        server.stop()
+    def test_a_hosted_server_that_asks_for_sign_in_with_nobody_to_answer_stops_at_once(self):
+        from test_mcp_remote import Vendor
+        vendor = Vendor()
+        vendor.mode = "oauth"
+        self.addCleanup(vendor.close)
+        home = Path(tempfile.mkdtemp())
+        with patch("dgc.config.dgc_home", return_value=home), patch.object(plugin_credentials, "_KEYRING", False):
+            server = MCPServer("granola", "npx", ["-y", "mcp-remote@0.8.3", vendor.base + "/mcp"], remote_bridge=True)
+            began = time.monotonic()
+            self.assertFalse(server.start(timeout=10))
+            self.assertLess(time.monotonic() - began, 5, "not held until the start deadline")
+            self.assertTrue(server._needs_sign_in)
+            server.stop()
+        self.assertEqual(vendor.grants, [])
 
     def test_an_unsigned_server_is_named_as_needing_sign_in(self):
         def needs_sign_in(server, timeout=10.0, cancel=None):

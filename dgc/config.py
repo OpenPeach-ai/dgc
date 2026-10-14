@@ -473,6 +473,8 @@ DEFAULTS: dict = {
     "mcp_servers": {},                          # name -> {command, args, env} stdio MCP servers
     "disabled_skills": [],                     # skill names disabled across native/delegated clients
     "disabled_mcp_servers": [],                # lifecycle state separate from credential identity
+    "plugin_credentials_store": "auto",        # remote plugin sign-ins: auto (the system keychain, else an
+                                                # owner-only file) | keyring (keychain or fail) | file
     "language_servers": {},                     # language/ext -> {command, args, env, extensions}
     "code_intel_timeout": 15,                   # configured LSP request timeout (0.1-60s)
     "code_intel_lsp_idle_s": 120,               # reuse per-project LSP this long; 0 = one-shot
@@ -1053,6 +1055,8 @@ class Config:
                     self._provider_secret_identity[key] = _provider_secret_identity(self.data, key)
         for action in ("allow", "ask", "deny"):
             self.permissions[action] = list(perms.get(action, []))
+        from . import plugin_credentials
+        plugin_credentials.configure(self.data.get("plugin_credentials_store"))
         # A launching process's policy that reviews permissions itself (project_allow=False, set by
         # an SDK session without workspace trust) must not let even the user's own stored allow
         # rules pre-approve a command — only its callback's runtime "always" answers may. This is
@@ -1469,6 +1473,9 @@ class Config:
             held.discard(key)                          # the user chose: the hold is over
             self._ephemeral_keys.discard(key)
         self.data[key] = value
+        if key == "plugin_credentials_store":
+            from . import plugin_credentials
+            plugin_credentials.configure(value)
         if key == "tool_profile":
             # Setting it is choosing it: the one-shot 0.41.7 migration must never take it back.
             self.data["tool_profile_chosen"] = True

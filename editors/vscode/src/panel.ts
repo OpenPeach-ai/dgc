@@ -4585,7 +4585,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return safe;
   }
 
-  // Your own OAuth app: mcp-remote reads its client id and secret from an owner-only file (never from
+  // Your own OAuth app: DGC's remote client reads its client id and secret from an owner-only file (never from
   // argv, where other local users could see a secret) and listens for the sign-in on the fixed port the
   // app registered: http://localhost:<port>/oauth/callback.
   // One file per server name AND content: a save the backend rejects never rewrites the file the
@@ -4616,7 +4616,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     fs.writeFileSync(temp, body, { mode: 0o600 });
     fs.renameSync(temp, file);
     fs.chmodSync(file, 0o600);
-    // The server (mcp-remote) runs beside `dgc serve`: under hidden WSL it reads the file by its path in the distro.
+    // DGC's remote client runs in `dgc serve`: under hidden WSL it reads the file by its path in the distro.
     return [String(item.oauth.port), "--static-oauth-client-info", `@${backendPath(file)}`];
   }
 

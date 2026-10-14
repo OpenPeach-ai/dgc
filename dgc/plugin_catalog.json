@@ -60,7 +60,7 @@
    "developer": "Composio",
    "category": "App connector",
    "verification": "DGC browser handoff verified. A user confirmed Figma connection in Composio. Individual app setup from DGC settings is not supported; use Composio Connect Apps. Authenticated tool execution in DGC remains unverified.",
-   "requirements": "A Composio For You account, browser consent, and Node.js/npm for DGC’s existing remote MCP bridge. Composio handles app credentials and executes app requests in its cloud, including when your model runs locally.",
+   "requirements": "A Composio For You account and browser consent. Composio handles app credentials and executes app requests in its cloud, including when your model runs locally.",
    "audited_on": "2026-09-23",
    "metadata": {
     "display_name": "Composio",
@@ -263,7 +263,7 @@
    "auth": "browser",
    "audited_on": "2026-09-23",
    "verification": "Browser handoff tested; account authorisation and tools still require verification.",
-   "requirements": "Node.js with npx, a service account, and permission to authorise the connection. Organisation policies can restrict access.",
+   "requirements": "A service account, and permission to authorise the connection. Organisation policies can restrict access.",
    "terms_url": "https://www.notion.com/terms",
    "privacy_url": "https://www.notion.com/help/privacy",
    "cloud_execution": true
@@ -282,7 +282,7 @@
    "auth": "browser",
    "audited_on": "2026-09-23",
    "verification": "Browser handoff tested; account authorisation and tools still require verification.",
-   "requirements": "Node.js with npx, a service account, and permission to authorise the connection. Organisation policies can restrict access.",
+   "requirements": "A service account, and permission to authorise the connection. Organisation policies can restrict access.",
    "terms_url": "https://linear.app/terms",
    "privacy_url": "https://linear.app/privacy",
    "cloud_execution": true
@@ -301,7 +301,7 @@
    "auth": "browser",
    "audited_on": "2026-09-23",
    "verification": "Browser handoff tested; account authorisation and tools still require verification.",
-   "requirements": "Node.js with npx, a service account, and permission to authorise the connection. Organisation policies can restrict access.",
+   "requirements": "A service account, and permission to authorise the connection. Organisation policies can restrict access.",
    "terms_url": "https://sentry.io/terms/",
    "privacy_url": "https://sentry.io/privacy/",
    "cloud_execution": true
@@ -346,7 +346,7 @@
    "auth": "browser",
    "audited_on": "2026-09-23",
    "verification": "Browser handoff tested; account authorisation and tools still require verification.",
-   "requirements": "Node.js with npx, a service account, and permission to authorise the connection. Organisation policies can restrict access.",
+   "requirements": "A service account, and permission to authorise the connection. Organisation policies can restrict access.",
    "terms_url": "https://supabase.com/terms",
    "privacy_url": "https://supabase.com/privacy",
    "cloud_execution": true
@@ -382,7 +382,7 @@
    "auth": "browser",
    "audited_on": "2026-09-23",
    "verification": "Browser handoff tested; account authorisation and tools still require verification.",
-   "requirements": "Node.js with npx, a service account, and permission to authorise the connection. Organisation policies can restrict access.",
+   "requirements": "A service account, and permission to authorise the connection. Organisation policies can restrict access.",
    "terms_url": "https://www.atlassian.com/legal/cloud-terms-of-service",
    "privacy_url": "https://www.atlassian.com/legal/privacy-policy",
    "cloud_execution": true
@@ -401,7 +401,7 @@
    "auth": "pat",
    "audited_on": "2026-09-23",
    "verification": "Package checked; authenticated tools not tested.",
-   "requirements": "Node.js with npx and a GitHub personal access token. Set GITHUB_PAT_TOKEN in the server environment or save a bearer token in MCP servers.",
+   "requirements": "A GitHub personal access token. Set GITHUB_PAT_TOKEN in the server environment or save a bearer token in MCP servers.",
    "terms_url": "https://docs.github.com/site-policy/github-terms/github-terms-of-service",
    "privacy_url": "https://docs.github.com/site-policy/privacy-policies/github-privacy-statement",
    "cloud_execution": true
@@ -439,7 +439,7 @@
    "logo": "assets/stripe-logo.png",
    "audited_on": "2026-09-23",
    "verification": "Browser handoff tested; account authorisation and tools still require verification.",
-   "requirements": "Node.js with npx, a service account, and permission to authorise the connection. Organisation policies can restrict access.",
+   "requirements": "A service account, and permission to authorise the connection. Organisation policies can restrict access.",
    "terms_url": "https://stripe.com/legal/ssa",
    "privacy_url": "https://stripe.com/privacy",
    "cloud_execution": true

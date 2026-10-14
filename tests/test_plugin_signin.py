@@ -1,4 +1,5 @@
-"""A remote plugin's sign-in: its own folder, revoked at the vendor (RFC 7009) and deleted when the plugin goes.
+"""A remote plugin's sign-in: kept by name in the keychain (or its owner-only file), revoked at the vendor (RFC 7009)
+and deleted when the plugin goes.
 
 The vendor is a real HTTP server on 127.0.0.1 that answers discovery (RFC 9728, RFC 8414) and revocation, so the
 requests DGC makes are the ones a vendor would see.
@@ -15,7 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs
 
-from dgc import plugin_signin
+from dgc import plugin_credentials, plugin_signin
 
 
 class Vendor:
@@ -82,39 +83,45 @@ class PluginSigninTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(self.temp.cleanup)
+        store = patch.object(plugin_credentials, "_KEYRING", False)     # no system keychain: the owner-only file
+        store.start()
+        self.addCleanup(store.stop)
+        self.addCleanup(plugin_credentials.configure, plugin_credentials.mode())
+        plugin_credentials.configure("auto")
 
     def vendor(self, **kwargs):
         vendor = Vendor(**kwargs)
         self.addCleanup(vendor.close)
         return vendor
 
-    def signed_in(self, name, url, *, client=None, tokens=None, static=None):
-        """A server the bridge has signed in to: what mcp-remote 0.8.3 writes under MCP_REMOTE_CONFIG_DIR."""
-        args = ["-y", "mcp-remote@0.8.3", url]
+    def signed_in(self, name, url, *, client=None, tokens=None, static=None, server=None):
+        """A server DGC's remote client has signed in to: the record it keeps (dgc/mcp_remote.py RemoteAuth)."""
+        record = {"version": 1, "url": url, "client": client or {"client_id": "dgc-registered"},
+                  "tokens": tokens or {"access_token": "access-1", "token_type": "Bearer", "refresh_token": "refresh-1"},
+                  "server": server or {}}
         if static is not None:
             path = self.home / "static-client.json"
             path.write_text(json.dumps(static))
-            args += ["3334", "--static-oauth-client-info", f"@{path}"]
-        env = plugin_signin.prepare(name, args, {"PATH": "/usr/bin"})
-        store = Path(env["MCP_REMOTE_CONFIG_DIR"]) / "mcp-remote-v1"     # mcp-remote's getConfigDir()
-        store.mkdir(parents=True)
-        digest = hashlib.md5(url.encode()).hexdigest()                     # mcp-remote's getServerUrlHash(url)
-        (store / f"{digest}_tokens.json").write_text(json.dumps(tokens or {
-            "access_token": "access-1", "token_type": "Bearer", "refresh_token": "refresh-1"}))
-        (store / f"{digest}_client_info.json").write_text(json.dumps(client or {"client_id": "dgc-registered"}))
-        return env
+            record["client"] = {"client_id": static["client_id"]}
+            record["static_client_file"] = str(path)
+        plugin_credentials.save(name, record)
 
-    def test_each_remote_server_gets_its_own_owner_only_folder(self):
-        env = plugin_signin.prepare("asana", ["-y", "mcp-remote@0.8.3", "https://mcp.example.com/mcp"], {"PATH": "/x"})
+    def test_a_sign_in_is_kept_by_the_servers_plain_name_and_owner_only(self):
+        self.signed_in("asana", "https://mcp.example.com/mcp")
         folder = self.home / ".dgc" / "plugin-auth" / "asana"
-        self.assertEqual(env, {"PATH": "/x", "MCP_REMOTE_CONFIG_DIR": str(folder)})
         self.assertEqual(stat.S_IMODE(folder.stat().st_mode), 0o700)
-        note = json.loads((folder / "dgc-server.json").read_text())
-        self.assertEqual(note, {"url": "https://mcp.example.com/mcp", "static_client": ""})
-        self.assertEqual(stat.S_IMODE((folder / "dgc-server.json").stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE((folder / "credentials.json").stat().st_mode), 0o600)
         for bad in ("", "..", ".", "a/b", "x" * 65, "../asana"):
-            with self.subTest(bad=bad), self.assertRaises(ValueError):
-                plugin_signin.prepare(bad, [], {})
+            with self.subTest(bad=bad):
+                self.assertEqual(plugin_signin.forget(bad)["message"], "")
+        self.assertTrue(folder.exists(), "a bad name never reaches a real sign-in")
+
+    def test_the_revocation_address_saved_at_sign_in_is_used_without_discovery(self):
+        vendor = self.vendor()
+        self.signed_in("asana", vendor.url("/mcp"), server={"revocation_endpoint": vendor.url("/as/revoke")})
+        with patch.object(plugin_signin, "revocation_endpoint", side_effect=AssertionError("no discovery")):
+            self.assertTrue(plugin_signin.forget("asana")["revoked"])
+        self.assertEqual(len(vendor.revoked), 2)
 
     def test_removing_revokes_the_refresh_then_the_access_token_and_deletes_the_sign_in(self):
         vendor = self.vendor()
@@ -189,9 +196,11 @@ class PluginSigninTests(unittest.TestCase):
 
     def test_nothing_to_forget_says_nothing(self):
         self.assertEqual(plugin_signin.forget("never-added")["message"], "")
-        plugin_signin.prepare("added", ["-y", "mcp-remote@0.8.3", "https://mcp.example.com/mcp"], {})
-        result = plugin_signin.forget("added")                  # added, never signed in
+        with plugin_credentials.locked("added"):                # connected once, never signed in
+            pass
+        result = plugin_signin.forget("added")
         self.assertEqual((result["had_signin"], result["deleted"], result["message"]), (False, True, ""))
+        self.assertFalse((self.home / ".dgc" / "plugin-auth" / "added").exists())
 
 
 class WiringTests(unittest.TestCase):
@@ -202,24 +211,18 @@ class WiringTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_the_bridge_is_launched_with_the_servers_own_folder(self):
+    def test_a_remote_server_starts_no_process(self):
         from dgc.mcp import MCPServer
+        from dgc.mcp_remote import RemoteConnection
         server = MCPServer("linear", "npx", ["-y", "mcp-remote@0.8.3", "https://mcp.linear.app/mcp"],
                            env={"PATH": os.environ.get("PATH", "")}, remote_bridge=True)
-        seen = {}
-
-        def popen(argv, **kwargs):
-            seen.update(kwargs["env"])
-            raise OSError("stop here")
-
-        with patch("dgc.mcp.subprocess.Popen", side_effect=popen):
-            self.assertFalse(server._launch())
-        self.assertEqual(seen["MCP_REMOTE_CONFIG_DIR"], str(Path(self.temp.name) / ".dgc" / "plugin-auth" / "linear"))
-        local = MCPServer("files", "python3", ["server.py"], env={"PATH": "/usr/bin"})
-        seen.clear()
-        with patch("dgc.mcp.subprocess.Popen", side_effect=popen):
-            local._launch()
-        self.assertNotIn("MCP_REMOTE_CONFIG_DIR", seen, "a local server signs in to nothing")
+        with patch("dgc.mcp.subprocess.Popen", side_effect=AssertionError("no bridge process")):
+            self.assertTrue(server._launch())
+        self.addCleanup(server.stop)
+        self.assertIsInstance(server.proc, RemoteConnection)
+        self.assertIsNone(server.proc.poll())
+        server.stop()
+        self.assertIsNone(server.proc)
 
     def test_removing_with_mcp_remove_signs_out_and_says_so(self):
         from dgc import mcp_management
@@ -248,7 +251,7 @@ class WiringTests(unittest.TestCase):
             return {"message": "Signed out: mcp.linear.app revoked DGC's access, and its sign-in was deleted from this computer."}
         with patch("dgc.plugin_signin.forget", side_effect=forget):
             reply = mcp_management.manage_mcp(config, manager, "remove linear")
-        self.assertEqual(order, [("forget", "linear", ["linear"])], "after the bridge stopped")
+        self.assertEqual(order, [("forget", "linear", ["linear"])], "after its connection closed")
         self.assertIn("Removed MCP server 'linear'. Signed out: mcp.linear.app revoked", reply)
         self.assertEqual(config.data["mcp_servers"], {})
 
