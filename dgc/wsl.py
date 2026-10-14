@@ -317,6 +317,7 @@ OWN_DISTRO_MARK = Path("/etc/dgc-distro")
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
 _BRIDGES: dict[int, socket.socket] = {}
 _BRIDGE_LOCK = threading.Lock()
+_SPARE_SETS: dict[int, "_Spares"] = {}
 _NOTHING_ON_WINDOWS: dict[int, float] = {}       # port -> when Windows didn't answer (each look costs a PowerShell)
 LOOK_AGAIN = 60.0
 
@@ -360,9 +361,61 @@ def _pump(source: socket.socket, sink: socket.socket) -> None:
             pass
 
 
+class _Spares:
+    """Relays already connected to Windows, waiting: each relay is a PowerShell that takes about 1.2 s to start
+    (measured on Windows 11, WSL 3.0.3), and DGC opens a connection per model request. One waits ready; taking it
+    starts the next. One the server has closed meanwhile is dropped."""
+
+    def __init__(self, port: int, connect, keep: int = 1):
+        self.port, self.connect, self.keep = port, connect, keep
+        self.ready: list[socket.socket] = []
+        self.lock = threading.Lock()
+        self.starting = 0
+
+    def _alive(self, relay: socket.socket) -> bool:
+        import select
+        try:
+            readable, _, _ = select.select([relay], [], [], 0)
+            return not readable or bool(relay.recv(1, socket.MSG_PEEK))
+        except OSError:
+            return False
+
+    def _start_one(self) -> None:
+        try:
+            relay = self.connect(self.port, timeout=10.0)
+        except OSError:
+            relay = None
+        with self.lock:
+            self.starting -= 1
+            if relay is not None and len(self.ready) < self.keep:
+                self.ready.append(relay)
+                relay = None
+        if relay is not None:
+            relay.close()
+
+    def refill(self) -> None:
+        with self.lock:
+            missing = self.keep - len(self.ready) - self.starting
+            self.starting += max(0, missing)
+        for _ in range(max(0, missing)):
+            threading.Thread(target=self._start_one, name="dgc-wsl-bridge-spare", daemon=True).start()
+
+    def take(self) -> socket.socket:
+        relay = None
+        with self.lock:
+            while self.ready and relay is None:
+                candidate = self.ready.pop(0)
+                if self._alive(candidate):
+                    relay = candidate
+                else:
+                    candidate.close()
+        self.refill()
+        return relay if relay is not None else self.connect(self.port, timeout=10.0)
+
+
 def _carry(client: socket.socket, port: int, connect) -> None:
     try:
-        remote = connect(port, timeout=10.0)
+        remote = connect.take() if isinstance(connect, _Spares) else connect(port, timeout=10.0)
     except OSError:
         client.close()
         return
@@ -411,13 +464,18 @@ def bridge_windows_port(port: int, *, connect=None, own_distro: bool | None = No
             return False
         _BRIDGES[port] = listener
 
+    spares = _Spares(port, connect)
+    with _BRIDGE_LOCK:
+        _SPARE_SETS[port] = spares
+    spares.refill()
+
     def accept():
         while True:
             try:
                 client, _ = listener.accept()
             except OSError:
                 return
-            threading.Thread(target=_carry, args=(client, port, connect), name="dgc-wsl-bridge", daemon=True).start()
+            threading.Thread(target=_carry, args=(client, port, spares), name="dgc-wsl-bridge", daemon=True).start()
 
     threading.Thread(target=accept, name=f"dgc-wsl-bridge-{port}", daemon=True).start()
     return True
@@ -446,6 +504,13 @@ def _close_bridges() -> None:
                 pass
             listener.close()
         _BRIDGES.clear()
+        for spares in _SPARE_SETS.values():
+            spares.keep = 0
+            with spares.lock:
+                for relay in spares.ready:
+                    relay.close()
+                spares.ready.clear()
+        _SPARE_SETS.clear()
         _NOTHING_ON_WINDOWS.clear()
 
 

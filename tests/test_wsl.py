@@ -356,9 +356,39 @@ class ModelOnWindowsTests(unittest.TestCase):
         self.assertTrue(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=True))
         self.assertTrue(self.ask(b"post /v1/chat/completions").endswith(b"POST /V1/CHAT/COMPLETIONS"))
         self.assertTrue(self.ask(b"get /v1/models").endswith(b"GET /V1/MODELS"), "every connection, carried anew")
-        self.assertEqual(self.opened, [self.port] * 3, "the probe, then one relay per connection")
+        time.sleep(0.2)                          # the next spare
+        self.assertEqual(self.opened, [self.port] * 4, "the probe, one spare ready, and the next after each is taken")
         self.assertTrue(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=True), "once per process")
-        self.assertEqual(len(self.opened), 3)
+        self.assertEqual(len(self.opened), 4)
+
+    def test_a_request_takes_a_relay_that_is_already_connected(self):
+        """Each relay is a PowerShell (1.2 s to start on Windows 11): one waits connected, and is replaced when taken."""
+        slow = []
+
+        def slow_connect(port, timeout=10.0):
+            slow.append(time.monotonic())
+            time.sleep(0.4)
+            return self.connect(port, timeout)
+        self.assertTrue(wsl.bridge_windows_port(self.port, connect=slow_connect, own_distro=True))
+        time.sleep(0.6)                          # the spare connects while nothing is asked
+        started = time.monotonic()
+        self.assertTrue(self.ask(b"ping").endswith(b"PING"))
+        self.assertLess(time.monotonic() - started, 0.3, "no relay start on the request's own time")
+
+    def test_a_spare_the_server_closed_is_not_used(self):
+        self.assertTrue(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=True))
+        time.sleep(0.2)
+        spare = socket.socket()
+        spare.close()                             # a relay whose remote end went away
+        dead_a, dead_b = socket.socketpair()
+        dead_b.close()
+        spares = wsl._Spares(self.port, self.connect, keep=0)
+        spares.ready.append(dead_a)
+        relay = spares.take()
+        relay.sendall(b"hello")
+        relay.shutdown(socket.SHUT_WR)
+        self.assertTrue(relay.recv(100).endswith(b"HELLO"), "a fresh relay instead of the dead one")
+        relay.close()
 
     def test_only_in_dgcs_own_distro_and_only_when_needed(self):
         self.assertFalse(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=False),
