@@ -5,6 +5,7 @@ import { ChatDGC } from "./chatdgc";
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
 import { heldCliTerminalOptions, updateCliWithProgress } from "./cliupdate";
+import { wslCli } from "./wslSetup";
 
 export function activate(context: vscode.ExtensionContext): void | object {
   if (vscode.workspace.isTrusted === false) {
@@ -50,10 +51,14 @@ export function activate(context: vscode.ExtensionContext): void | object {
       void updateCliWithProgress(executable.command, () => { for (const each of every()) each.restart("manual CLI update"); });
       return true;
     }
+    // Under hidden WSL, the DGC in its distro, in this workspace's folder.
+    const routed = wslCli([subcommand], vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+    const exe = routed?.executable ?? executable.command;
+    const argv = (args: string[]) => routed?.args ?? args;
     const term = vscode.window.createTerminal(subcommand === "notes"
-        ? heldCliTerminalOptions(executable.command, ["notes"], "DGC notes",
+        ? heldCliTerminalOptions(exe, argv(["notes"]), "DGC notes",
           "Those are this project's context notes.", "DGC notes failed")
-        : heldCliTerminalOptions(executable.command, ["export-training"], "DGC export-training",
+        : heldCliTerminalOptions(exe, argv(["export-training"]), "DGC export-training",
           "Export finished.", "DGC export-training failed"));
     term.show();
     return true;

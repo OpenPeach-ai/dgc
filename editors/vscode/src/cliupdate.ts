@@ -3,6 +3,8 @@ import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, readFileSync, realpathSync, statSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve as resolvePath, sep } from "path";
+import { launch } from "./wslHost";
+import { hiddenWslDistro } from "./wslSetup";
 
 /** How long the installer may run before we stop waiting. It creates a virtualenv and installs
  *  pinned wheels, which is slow on a cold pip cache but is not an hour's work. */
@@ -319,7 +321,10 @@ export function runCliUpdate(
         // Its own process group. The installer forks bash, curl, python and pip; signalling only
         // the process we spawned would leave those running, still holding the pipes, so a
         // cancelled update would keep installing and the editor would never see the end of it.
-        current = spawn(executable, ["update"], { env, detached: process.platform !== "win32" });
+        // Under hidden WSL (src/wslSetup.ts), the DGC to update is the one in its distro.
+        const distro = hiddenWslDistro();
+        const spec = distro ? launch(distro, undefined, ["update"], env) : { command: executable, args: ["update"], env };
+        current = spawn(spec.command, spec.args, { env: spec.env, detached: process.platform !== "win32", windowsHide: true });
       } catch (err: any) {
         finish({ ok: false, reason: `could not run ${executable}: ${err?.message ?? err}`, log });
         return;

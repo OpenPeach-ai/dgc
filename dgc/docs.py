@@ -90,6 +90,22 @@ installs the self-hosted editor extension into each of them. Set
 `DGC_SKIP_EXTENSION=1` before the install command to leave editor-managed state
 untouched and install an extension later from the editor page.
 
+### On Windows
+
+DGC is a Linux and macOS program; on Windows it runs inside WSL (Windows Subsystem for Linux).
+
+- **In VS Code or Cursor on Windows**, with your folders on `C:\\`: install the DGC extension and
+  open DGC. The first time, it sets up a small Linux system of its own. If WSL is off, it asks to
+  turn it on (Windows asks for administrator permission, then wants a restart). Then **Set up DGC
+  on Windows?** downloads Ubuntu 24.04 as a WSL distro named `DGC`, prepares it and installs DGC
+  in it, in a few minutes; your own distros are not touched. From then on every chat runs there:
+  your Windows folders are `/mnt/c/...` to DGC, and the editor shows them as Windows paths. Pips,
+  their computers and your signed-in Chrome work as they do in WSL (below). Settings:
+  `dgc.windows.wslDistro` names the distro; `dgc.windows.useWsl` off, with `dgc.command` set to it,
+  runs a DGC you installed on Windows yourself instead.
+- **In WSL yourself** (a WSL terminal, or VS Code connected to WSL): install with the command
+  above inside your distro, as on Linux.
+
 ## First launch
 
 ```

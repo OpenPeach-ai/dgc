@@ -192,7 +192,8 @@ export function widgetDocument(html: string, fields?: WidgetField[], ref?: Widge
 </head><body>${html}</body></html>`;
   return page;
 }
-const CANVAS_PATH = /^(?:\/|[A-Za-z]:\\).*[\\/]canvas[\\/](chat_[a-f0-9]{32})[\\/](cv_[a-f0-9]{16})[\\/][^\\/]+$/;
+// Absolute: POSIX, a drive, or DGC's own distro on Windows (hidden WSL: \\wsl.localhost\DGC\home\...).
+const CANVAS_PATH = /^(?:\/|[A-Za-z]:\\|\\\\wsl(?:\.localhost|\$)\\).*[\\/]canvas[\\/](chat_[a-f0-9]{32})[\\/](cv_[a-f0-9]{16})[\\/][^\\/]+$/;
 const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 /** The file a tab shows, as text or formatted (the canvas's own editor), or undefined. */

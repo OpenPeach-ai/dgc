@@ -12,10 +12,20 @@ import {
   dgcCommandError,
   dgcEventError,
 } from "./protocol.generated";
+import type { Bridge } from "./wslBridge";
+import type { Launch } from "./wslHost";
 
 export { DGC_PROTOCOL_VERSION, MAX_COMMAND_BYTES };
 export type { DgcEvent };
 const RESERVED_EVENT_NAMES = new Set(["error", "event", "newListener", "removeListener"]);
+
+/** Hidden WSL (src/wslHost.ts): how this backend's `dgc serve` is started inside DGC's distro, how the paths in its
+ *  frames are translated, and how to tell, from what wsl.exe said, that DGC is not set up there yet. */
+export interface HostRoute {
+  launch(cwd: string, args: string[]): Launch;
+  bridge: Bridge;
+  notSetUp(stderr: string): boolean;
+}
 
 /** What the panel needs to say about one child's end, reported exactly once per child. */
 export interface ChildExitInfo {
@@ -194,9 +204,12 @@ export class DgcBackend extends EventEmitter {
   ready = false;
 
   constructor(private readonly cwd: string, private readonly command: string,
-              private readonly requiredCliVersion?: string) {
+              private readonly requiredCliVersion?: string, private readonly route?: HostRoute) {
     super();
   }
+
+  /** What the child wrote on stderr before `ready` (bounded): wsl.exe's own complaint when DGC isn't set up. */
+  private earlyStderr = "";
 
   start(): void {
     if (this.proc) {
@@ -213,11 +226,17 @@ export class DgcBackend extends EventEmitter {
     this.requestChats.clear();
     this.ignoredUnknownTypes.clear();
     let child: ChildProcessWithoutNullStreams;
+    this.earlyStderr = "";
     try {
-      child = spawn(this.command, ["serve"], {
-        cwd: this.cwd,
-        env: { ...process.env },
-      });
+      if (this.route) {
+        const spec = this.route.launch(this.cwd, ["serve"]);
+        child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, windowsHide: true });
+      } else {
+        child = spawn(this.command, ["serve"], {
+          cwd: this.cwd,
+          env: { ...process.env },
+        });
+      }
     } catch (err: any) {
       this.launchError(err);
       return;
@@ -243,6 +262,9 @@ export class DgcBackend extends EventEmitter {
         return;
       }
       const text = String(chunk).trim();
+      if (text && !this.ready && this.route && this.earlyStderr.length < 8192) {
+        this.earlyStderr += text.replace(/\0/g, "") + "\n";
+      }
       if (text) {
         this.emit("stderr", text);
       }
@@ -322,6 +344,12 @@ export class DgcBackend extends EventEmitter {
       }
       this.life.delete(child);
       this.stopLivenessPings();
+      if (this.route && !this.ready && this.proc === child && code !== 0 && this.route.notSetUp(this.earlyStderr)) {
+        // DGC's distro, or DGC in it, isn't there yet: say so once, as a missing CLI is, and don't restart into it.
+        record.cause = "DGC is not set up in WSL";
+        this.emit("event", { type: "error", fatal: true, notInstalled: true, wsl: true,
+          message: "DGC runs in a small Linux system of its own on Windows (WSL), and it isn't set up yet." });
+      }
       const info: ChildExitInfo = {
         pid: record.pid, uptimeMs: Date.now() - record.startedAt, cause: record.cause,
         transport: record.transport, framesWritten: record.framesWritten, lastFrame: record.lastFrame,
@@ -417,8 +445,19 @@ export class DgcBackend extends EventEmitter {
       try {
         parsed = JSON.parse(line);
       } catch {
+        if (this.route && !this.ready && this.lastSeq < 0) {
+          // wsl.exe's own words before DGC started (WSL 3 writes "There is no distribution…" on stdout): kept
+          // for the not-set-up check at exit, and shown as the child's output, never parsed as the protocol.
+          const said = line.replace(/\0/g, "");
+          if (this.earlyStderr.length < 8192) { this.earlyStderr += said + "\n"; }
+          if (said.trim()) { this.emit("stderr", said.trim()); }
+          continue;
+        }
         this.protocolFailure("dgc backend emitted malformed NDJSON");
         return;
+      }
+      if (this.route && parsed && typeof parsed === "object") {
+        parsed = this.route.bridge.toEditor(parsed as Record<string, any>);
       }
       const schemaProblem = dgcEventError(parsed);
       if (schemaProblem) {
@@ -711,7 +750,13 @@ export class DgcBackend extends EventEmitter {
       // JavaScript properties set to `undefined` are absent on the JSON wire and
       // must not be rejected as though an invalid value had been transmitted.
       wireCommand = JSON.parse(encoded) as DgcCommand;
-      frame = encoded + "\n";
+      if (this.route) {
+        // The child reads paths in its own distro: translate the wire copy, never the caller's object.
+        wireCommand = this.route.bridge.toBackend(wireCommand as any) as DgcCommand;
+        frame = JSON.stringify(wireCommand) + "\n";
+      } else {
+        frame = encoded + "\n";
+      }
     } catch {
       this.reject("DGC command is not JSON-serializable");
       return undefined;

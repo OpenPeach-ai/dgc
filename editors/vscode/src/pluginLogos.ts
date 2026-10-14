@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { homedir } from "os";
+import { dgcHome } from "./wslSetup";
 import * as path from "path";
 
 /** What the plugin catalog knows of a plugin, for its logo. */
@@ -16,7 +16,7 @@ const MAX_BYTES = 512 * 1024;
 export function pluginLogoSource(extensionUri: vscode.Uri, item: PluginLogoItem): { data?: string; file?: vscode.Uri } {
   if (item.logo_file) {
     try {
-      const root = fs.realpathSync(path.join(homedir(), ".dgc", "plugins", "logos"));
+      const root = fs.realpathSync(path.join(dgcHome(), "plugins", "logos"));
       const file = fs.realpathSync(item.logo_file);
       if (file.startsWith(root + path.sep) && file.endsWith(".png") && fs.statSync(file).size <= MAX_BYTES) {
         const data = fs.readFileSync(file);

@@ -230,6 +230,20 @@
 - Typing in the plugin search boxes keeps every letter in order. Each key rebuilt the list and put
   the caret back at the start, so "Granola" typed key by key came out as "alonar".
 
+### DGC on Windows
+
+- **DGC in VS Code or Cursor on Windows, with nothing else to install.** DGC is a Linux and macOS program, so on
+  Windows the extension runs it inside WSL, in a distro of its own named `DGC`, and translates every path that
+  crosses: your `C:\Users\you\proj` is `/mnt/c/Users/you/proj` to DGC, and files DGC keeps for itself open from
+  `\\wsl.localhost\DGC\...`. Your own WSL distros are never touched.
+- **It sets itself up, one dialog at a time.** WSL off: "Turn on WSL for DGC?" (Windows asks for administrator
+  permission, then a restart). No distro yet: "Set up DGC on Windows?" downloads Ubuntu 24.04 straight from its
+  site, prepares it (DGC's user, Python's venv, bubblewrap for Pip computers) and installs DGC in it, with each step
+  in a progress notification and the full output in the DGC Backend log. A step that fails says which.
+- **The CLI update, `DGC: Notes` and the export terminal** run the DGC in that distro too.
+- Settings: `dgc.windows.wslDistro` (the distro's name) and `dgc.windows.useWsl` (off, with `dgc.command`, runs a
+  DGC you installed on Windows yourself).
+
 ### Troupes
 
 - **A troupe's card in the chat:** its title, each stage with a progress bar ("Review 4 of 4 · 2 kept", "Verify 2 of

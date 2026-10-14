@@ -555,6 +555,18 @@
           "scope": "machine",
           "description": "Path to the current DGC CLI executable (editor protocol v14 required)."
         },
+        "dgc.windows.useWsl": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "description": "On Windows, run DGC inside a small Linux system of its own (a WSL distro DGC sets up and keeps apart from yours). Turn off only to run a DGC you installed on Windows yourself (set dgc.command to it)."
+        },
+        "dgc.windows.wslDistro": {
+          "type": "string",
+          "default": "DGC",
+          "scope": "machine",
+          "description": "The name of DGC's own WSL distro on Windows."
+        },
         "dgc.autoUpdateCli": {
           "type": "boolean",
           "default": true,

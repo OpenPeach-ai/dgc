@@ -12,6 +12,7 @@ import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VOICE_EXTENSION, VoiceClient, type DictationOwner } from "./voice";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
+import { backendPath, dgcHome, editorPath, hiddenWslDistro, setUpWsl, wslRoute } from "./wslSetup";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
 } from "./cliupdate";
@@ -2513,7 +2514,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const host = this.chatHost(slot);
     const be: ChatBackend = host
       ? new OpenedChat(host, folder, this.nextRequestId("open-chat"))
-      : new DgcBackend(folder, cmd, this.context.extension.packageJSON.dgcCliVersion);
+      : new DgcBackend(folder, cmd, this.context.extension.packageJSON.dgcCliVersion, this.hostRoute());
     if (!host) {
       this.processEpochs.set(be, this.processEpoch);
       this.logProcess(be as DgcBackend);
@@ -3330,7 +3331,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     if (ev.type === "plugin_operation") {
       if (ev.action === "create_plugin" && ev.path) {
-        const root = join(homedir(), ".dgc", "plugins", "authored");
+        const root = join(dgcHome(), "plugins", "authored");
         if (path.resolve(ev.path).startsWith(root + path.sep)) this.createdPluginFiles.add(ev.path);
       }
       if (ev.action === "uninstall_plugin" && ev.removed_servers?.length) {
@@ -3418,9 +3419,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (action === "accept" && this.pendingSignIn === request) { this.openedSignIn = { id, be }; }
   }
 
+  /** On native Windows, DGC's `dgc serve` runs in its own WSL distro (src/wslSetup.ts); elsewhere, as it is. */
+  private hostRoute() {
+    const distro = hiddenWslDistro();
+    return distro ? wslRoute(distro) : undefined;
+  }
+
   private promptInstallCli(): void {
     if (this._installPrompted || this.tab) { return; }       // the side bar asks, once for the window
     this._installPrompted = true;
+    const distro = hiddenWslDistro();
+    if (distro) {
+      // Not a CLI on PATH: DGC's distro, set up step by step, then this backend starts again.
+      void setUpWsl(distro, this.backendLog).then((ready) => {
+        this._installPrompted = false;
+        if (ready) { this.restart("DGC set up in WSL"); }
+      });
+      return;
+    }
     const INSTALL = "Install DGC CLI", SETPATH = "Set dgc.command…", RETRY = "Retry";
     vscode.window.showErrorMessage(
       "DGC needs the `dgc` command-line tool, which isn't installed or on PATH.",
@@ -3712,7 +3728,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media"),
         vscode.Uri.joinPath(this.context.extensionUri, "dist"),
-        vscode.Uri.file(join(homedir(), ".dgc", "plugins", "logos"))],
+        vscode.Uri.file(join(dgcHome(), "plugins", "logos"))],
     };
     view.webview.html = this.html(view.webview);
     // VS Code keeps both copies alive (retainContextWhenHidden), and it does not resolve a view a
@@ -4400,7 +4416,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           return folder === base || folder.startsWith(base + sep);
         } catch { return false; }
       };
-      const sessions = join(homedir(), ".dgc", "sessions");
+      const sessions = join(dgcHome(), "sessions");
       const inSessionStore = folder.endsWith(".images") && await inside(sessions);
       let inScreenshots = false;
       for (const root of this.workspaceRoots()) {
@@ -4472,7 +4488,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async openFile(path: string, line?: number): Promise<void> {
-    const target = await workspaceFile(path, this.workspaceRoots());
+    // A path DGC (or its model) wrote in its own Linux names, under hidden WSL: the file as Windows names it.
+    const target = await workspaceFile(typeof path === "string" ? editorPath(path) : path, this.workspaceRoots());
     if (!target) {
       void vscode.window.showInformationMessage("That file is unavailable in the current workspace.");
       return;
@@ -4574,7 +4591,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   // One file per server name AND content: a save the backend rejects never rewrites the file the
   // server already uses, and "Asana" and "asana" never share one on a case-blind disk.
   private oauthAppPrefix(name: string): string {
-    return join(homedir(), ".dgc", "mcp-oauth",
+    return join(dgcHome(), "mcp-oauth",
       `${name.toLowerCase().replace(/[^a-z0-9_.-]/g, "_")}-${createHash("sha256").update(name, "utf8").digest("hex").slice(0, 8)}-`);
   }
 
@@ -4599,7 +4616,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     fs.writeFileSync(temp, body, { mode: 0o600 });
     fs.renameSync(temp, file);
     fs.chmodSync(file, 0o600);
-    return [String(item.oauth.port), "--static-oauth-client-info", `@${file}`];
+    // The server (mcp-remote) runs beside `dgc serve`: under hidden WSL it reads the file by its path in the distro.
+    return [String(item.oauth.port), "--static-oauth-client-info", `@${backendPath(file)}`];
   }
 
   /** Remove a server's own-app files, keeping `keep` (the one it uses now), if any. */

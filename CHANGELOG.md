@@ -385,6 +385,20 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   count toward the Pip's daily limit; "changed" remembers the last commit it reviewed. Read-only troupes only: a
   change template or a worker stage is refused. Pips registry schema 45 (`pip_routines.troupe`).
 
+### Windows: the editor runs DGC in a WSL distro of its own
+
+- **VS Code or Cursor on Windows, folders on `C:\`, nothing else to install.** The extension starts `dgc serve`
+  through `wsl.exe` in a distro DGC owns (`DGC`, Ubuntu 24.04, its own user), with no shell between them
+  (`wsl.exe -d DGC --cd <folder> --exec ~/.local/bin/dgc serve`), and translates every path in the protocol that
+  names a file on either side, both ways, by field (never free text, tool arguments, rules or paths inside a Pip's
+  computer). Setting it up is dialogs in the editor: turn on WSL (administrator, then a restart), then download
+  Ubuntu with `--web-download`, prepare it as root from fixed text, and run the installer as DGC's user.
+- **What a real Windows 11 (build 26300, WSL 3.0.3) taught it:** the inbox `wsl.exe` writes UTF-16 even with
+  `WSL_UTF8=1`, and says "not installed" on every command (exit 1, or 50 for `--status`); WSL 3 writes "There is no
+  distribution with the supplied name" on stdout, not stderr, and exits -1; a distro installed through the Store
+  from an editor sat at 0% CPU for 15 minutes, while `--web-download` took a minute. All of it is in the tests,
+  with the bytes Windows wrote.
+
 ### Windows: DGC inside WSL
 
 A Windows user's DGC is a Linux install inside WSL (the installer is a shell script, and VS Code and Cursor connect to
