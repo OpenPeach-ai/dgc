@@ -155,7 +155,8 @@ def spool_root(project_root: Path | str) -> Path:
     editor-supplied path would be one more place a bug could turn into "read any file on disk".
     """
     root = Path(canonical_root(project_root)) if project_root else Path.home()
-    base = Path.home() / ".dgc" / "spool" / "images"
+    from .config import dgc_home
+    base = dgc_home() / "spool" / "images"
     base.mkdir(parents=True, exist_ok=True)
     try:
         base.chmod(0o700)

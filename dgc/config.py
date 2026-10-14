@@ -27,6 +27,12 @@ def _user_home_root() -> Path:
 
 
 USER_HOME = _user_home_root() / ".dgc"
+
+
+def dgc_home() -> Path:
+    """DGC's own folder (``~/.dgc``, or ``$DGC_HOME/.dgc``), read now: an isolated SDK session's runtime files (peer
+    notes, locks, the image spool) stay in its own home, never the account's."""
+    return _user_home_root() / ".dgc"
 USER_CONFIG = USER_HOME / "config.json"
 USER_SECRETS = USER_HOME / "secrets.json"
 USER_MEMORY = USER_HOME / "DGC.md"

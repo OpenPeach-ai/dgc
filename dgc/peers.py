@@ -40,7 +40,10 @@ ANNOUNCE_EVERY = 30                  # 2.0s x 30 = a 60s note refresh
 
 
 def peers_dir() -> Path:
-    return Path.home() / ".dgc" / "peers"
+    # DGC's own home: an isolated SDK session (DGC_HOME) leaves no note in the account's ~/.dgc (founder, 2026-10-14:
+    # isolation wins over being seen by the editor's DGC).
+    from .config import dgc_home
+    return dgc_home() / "peers"
 
 
 def _staging(directory: Path, name: str) -> Path:

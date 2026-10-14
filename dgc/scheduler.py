@@ -30,7 +30,8 @@ def _canonical_key(project_root) -> str:
 def _lock_directory() -> Path:
     """Return an owner-private directory shared by this user's DGC processes."""
     try:
-        base = Path.home() / ".dgc" / "locks"
+        from .config import dgc_home
+        base = dgc_home() / "locks"
     except (RuntimeError, OSError):
         identity = str(os.getuid()) if hasattr(os, "getuid") else "user"
         base = Path(tempfile.gettempdir()) / f"dgc-locks-{identity}"
