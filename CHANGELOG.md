@@ -537,9 +537,11 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 
 - **A Pip run keeps going.** No step limit, no time limit and no 4,096-token answer cap: a run uses DGC's own output
   budget per response, in the Pip's own context window, compacts as a DGC chat does when it fills, and ends when its
-  work is done, when you press Stop, or when it repeats itself without progress. A Patch with reviewed specialists keeps
-  the bounds its review set (5 minutes, 12 model turns, 64 tool calls, 4,096 tokens), and its reviewed tests get their
-  own five minutes from when they start.
+  work is done, when you press Stop, or when it repeats itself without progress. A Patch with reviewed specialists
+  (helpers) too: they share its lifetime with no limit on model requests, tool calls, output or time (their policy is
+  version 2; saved version-1 runs, which had 5 minutes, 12 requests, 64 tool calls and 4,096 tokens, still read), and a
+  helper's long answer is shortened in its summary instead of failing the run. The reviewed number of helper calls
+  (1–3) stays. Reviewed tests get their own five minutes from when they start.
 - **A Pip's context window and thinking are its own,** set in its message box as in DGC's own chat (they were for one
   reply, and its other runs were held to 32K): saved as you change them (`set_pip_chat_options`, Pips API 47) or by a
   message sent with them, and used by its replies and everything it does on its own. A new Pip starts with DGC's

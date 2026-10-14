@@ -269,6 +269,9 @@
 - **A Pip's context and thinking, in its message box, are the Pip's own:** "For this Pip: its replies and the work it
   does on its own", saved the moment you change them (with a DGC from before, still the next reply only). A run's
   details say **None** for the time, tool-call and step limits a run that keeps going doesn't have.
+- **Patch helpers work until the run ends:** the Helpers section of a Patch handoff no longer promises 12 model
+  requests, 64 tool calls and 5 minutes; helpers share the run's lifetime, and stopping the run stops them. A run saved
+  under the old limits still opens with its receipts.
 
 - **No daily limit in a Pip's Job tab:** Usage shows what it spent today and over 30 days, with its chart, and says
   Pips have no daily limit. The setup card no longer mentions a 200,000-token limit.

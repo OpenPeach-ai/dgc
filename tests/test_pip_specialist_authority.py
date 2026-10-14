@@ -31,49 +31,56 @@ class SpecialistBudgetAuthorityTests(unittest.TestCase):
         client.chat=chat
         return client
 
-    def test_retry_attempts_reserve_again_and_stop_before_thirteenth_transport(self):
+    def test_retry_attempts_reserve_again_with_no_request_ceiling(self):
         budget=self.budget();client=budget.wrap(self.client(attempts=3))
-        for _ in range(4):self.assertEqual(client.chat([]),'reply')
-        self.assertEqual((budget.requests,budget.model_calls,budget.transport_attempts),(12,4,12))
-        self.assertEqual(budget.output_token_reservations,12*4096)
-        with self.assertRaises(RegistryError):client.chat([])
-        self.assertEqual(budget.transport_attempts,12)
-        self.assertTrue(self.cancel.is_set())
+        for _ in range(5):self.assertEqual(client.chat([]),'reply')
+        self.assertEqual((budget.requests,budget.model_calls,budget.transport_attempts),(15,5,15))
+        self.assertEqual(budget.output_token_reservations,15*4096)
+        self.assertFalse(self.cancel.is_set())
 
     def test_parent_and_auxiliary_child_clients_share_one_request_budget(self):
         budget=self.budget();record=budget.begin('worker','fixture')
         parent=budget.wrap(self.client());child=budget.wrap(self.client(),record);aux=budget.wrap(self.client(),record)
-        for _ in range(4):parent.chat([]);child.chat([]);aux.chat([])
-        self.assertEqual(budget.requests,12);self.assertEqual(record['requests'],8)
+        for _ in range(5):parent.chat([]);child.chat([]);aux.chat([])
+        self.assertEqual(budget.requests,15);self.assertEqual(record['requests'],10)
         self.assertIsNone(aux.compact_responses([]))
+        self.cancel.set()                                         # Stop on the run is what ends them all
         with self.assertRaises(RegistryError):aux.chat([])
 
     def test_route_model_api_mode_and_output_cap_changes_refuse_before_call(self):
         for field,value in (('base_url','https://other.invalid/v1'),('model','other'),
-                            ('requested_api_mode','responses'),('max_tokens',4097),('max_tokens',True)):
+                            ('requested_api_mode','responses'),('max_tokens',specialists.OUTPUT_CEILING+1),('max_tokens',True)):
             budget=self.budget();client=self.client();setattr(client,field,value)
             client=budget.wrap(client)
             with self.subTest(field=field),self.assertRaises(RegistryError):client.chat([])
             self.assertEqual((budget.requests,budget.transport_attempts),(0,0))
 
-    def test_shared_deadline_and_cancel_refuse_before_attempt(self):
-        for stopped in ('deadline','cancel'):
-            budget=self.budget();client=budget.wrap(self.client())
-            if stopped=='deadline':self.clock[0]=310.0
-            else:self.cancel.set()
-            with self.assertRaises(RegistryError):client.chat([])
-            self.assertEqual(budget.transport_attempts,0)
+    def test_cancel_and_a_passed_deadline_refuse_before_attempt_but_time_alone_does_not(self):
+        budget=self.budget();client=budget.wrap(self.client())
+        self.clock[0]=10.0+3600                                   # an hour in: version 1 stopped at 300 s
+        self.assertEqual(client.chat([]),'reply')
+        self.cancel.set()
+        with self.assertRaises(RegistryError):client.chat([])
+        self.assertEqual(budget.transport_attempts,1)
+        self.cancel=threading.Event()
+        timed=specialists.SharedBudget(GRANT,SETTINGS,self.cancel,deadline=20.0,clock=lambda:self.clock[0])
+        with self.assertRaises(RegistryError):timed.wrap(self.client()).chat([])
+        self.assertEqual(timed.transport_attempts,0)
 
-    def test_tool_budget_is_shared_across_children_and_cancels_before_sixty_fifth_exec(self):
+    def test_tool_calls_are_counted_across_children_past_the_old_sixty_four(self):
         budget=self.budget();parent=pips._WorkerUI(lambda event:None)
-        parent.tool_cap=pips.BOUNDED_LIMITS['tool_calls']     # a reviewed specialist run, as execute_native sets it
         parent.agent=SimpleNamespace(cancelled=self.cancel)
         first=specialists.SpecialistUI(parent,budget.begin('explorer','fixture'),budget)
         second=specialists.SpecialistUI(parent,budget.begin('worker','fixture'),budget)
-        for _ in range(32):first.tool_call('read_file',{'path':'source.py'})
-        for _ in range(32):second.tool_call('read_file',{'path':'source.py'})
-        with self.assertRaises(RegistryError):second.tool_call('read_file',{'path':'source.py'})
-        self.assertTrue(self.cancel.is_set())
+        for _ in range(50):first.tool_call('read_file',{'path':'source.py'})
+        for _ in range(50):second.tool_call('read_file',{'path':'source.py'})
+        self.assertEqual(parent.calls,100);self.assertFalse(self.cancel.is_set())
+        self.assertEqual([c['tool_calls'] for c in budget.calls],[50,50])
+        for call in budget.calls:call['status']='completed'
+        receipt=budget.result(specialists.pin({'kind':'patch','specialists':GRANT}),100)
+        self.assertEqual(specialists.validate_result(receipt,GRANT)['tool_calls'],100)
+        self.cancel.set()
+        with self.assertRaises(RegistryError):first.tool_call('read_file',{'path':'source.py'})
 
     def test_nested_bridge_refuses_before_constructing_another_agent(self):
         budget=self.budget()
@@ -108,8 +115,8 @@ class SpecialistBudgetAuthorityTests(unittest.TestCase):
         for _ in range(10000):ui.on_text('')
         self.assertEqual(ui.parts,[])
         ui.on_text('x'*32768)
-        with self.assertRaises(RegistryError):ui.on_text('x')
-        self.assertTrue(self.cancel.is_set())
+        ui.on_text('x')                                           # kept no longer, and nothing fails
+        self.assertEqual(len(ui.parts),1);self.assertFalse(self.cancel.is_set())
 
     def test_receipt_reservations_cannot_claim_fewer_tokens_than_requests(self):
         budget=self.budget();client=budget.wrap(self.client());client.chat([])
@@ -123,7 +130,7 @@ class SpecialistBudgetAuthorityTests(unittest.TestCase):
         result={'tools_called':0,'specialists':budget.result(policy,0)}
         manifest={'run_kind':'patch','model':'fixture','specialists':policy,
                   'handoff':{'payload':{'action':{'kind':'patch','specialists':GRANT}}},
-                  'limits':{'iterations':12,'tool_calls':64,'wall_seconds':300}}
+                  'limits':{'iterations':0,'tool_calls':0,'wall_seconds':0}}
         specialists.validate_result_for_manifest(result,manifest)
         bad=copy.deepcopy(result);bad['specialists']['calls'][0]['model']='other'
         with self.assertRaises(RegistryError):specialists.validate_result_for_manifest(bad,manifest)

@@ -943,8 +943,9 @@ than run unconfined.
   output budget per model response, in the Pip's own context window. It compacts as a DGC
   chat does when the window fills. It ends when it finishes, when you press **Stop**, or
   when it repeats itself without progress (the same call over and over, or a page that a
-  click never changes). A Patch with reviewed specialists keeps the budget its review
-  set: five minutes, 12 model turns, 64 tool calls, 4,096 output tokens.
+  click never changes). A Patch with reviewed specialists (helpers) works the same way: the
+  helpers share its lifetime with no limit on requests, tool calls, output or time, and the
+  number of helper calls you approved (1 to 3) is their only bound.
 - Up to four Pips run at once (`pips_parallel_runs`, 1 to 32), each one run at a time; at
   most 20 runs queued or running.
 - Source copies: up to 10,000 files and folders, 4 MiB per file, 64 MiB in total.

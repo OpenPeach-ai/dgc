@@ -1,5 +1,6 @@
 """Explicit specialist grants, shared budgets and native constrained child loops."""
 import copy
+import hashlib
 import json
 import os
 import threading
@@ -16,6 +17,16 @@ from tests import test_pip_handoffs as fixtures
 
 def grant(roles=None,calls=3): return {'roles': roles or ['explorer','critic','worker'], 'max_calls':calls}
 def action(roles=None,calls=3): return {'kind':'patch','write_paths':['source.py'],'tests':[],'specialists':grant(roles,calls)}
+OPEN={'iterations':0,'tool_calls':0,'wall_seconds':0}                 # a specialist run's limits since version 2: none
+V1_LIMITS={'iterations':12,'tool_calls':64,'wall_seconds':300}
+
+
+def v1_pin(selected):
+    """A version-1 policy, as a run saved before 2026-10-14 carries it: 12 requests, 64 tools, 4,096 tokens, 300 s."""
+    g=selected['specialists']
+    payload={'version':1,'grant':g,'instructions':{r:hashlib.sha256(specialists.instruction(r).encode()).hexdigest() for r in g['roles']},
+             'limits':{'calls':g['max_calls'],'requests':12,'tool_calls':64,'output_tokens_per_request':4096,'wall_seconds':300}}
+    return {**payload,'digest':hashlib.sha256(specialists._json(payload).encode()).hexdigest()}
 
 
 class SpecialistContractTests(unittest.TestCase):
@@ -38,8 +49,13 @@ class SpecialistContractTests(unittest.TestCase):
     def test_pinned_builtin_instructions_and_policy_are_exact(self):
         selected=execution.validate_action('patch',action())
         pin=specialists.pin(selected)
-        manifest={'run_kind':'patch','specialists':pin,'limits':{'iterations':12,'tool_calls':64,'wall_seconds':300}}
+        self.assertEqual((pin['version'],pin['limits']),
+                         (2,{'calls':3,'requests':0,'tool_calls':0,'output_tokens_per_request':0,'wall_seconds':0}),
+                         'the grant (how many calls) is the only bound since version 2')
+        manifest={'run_kind':'patch','specialists':pin,'limits':dict(OPEN)}
         self.assertEqual(specialists.validate_manifest(manifest,selected),pin)
+        with self.assertRaises(RegistryError):
+            specialists.validate_manifest({**manifest,'limits':dict(V1_LIMITS)},selected)   # limits must say none
         with patch.object(specialists,'GUIDANCE',specialists.GUIDANCE+' Changed.'),self.assertRaises(RegistryError): specialists.validate_manifest(manifest,selected)
         for field,value in [('version',True),('digest','0'*64),('extra',True)]:
             changed=copy.deepcopy(manifest);changed['specialists'][field]=value
@@ -61,8 +77,7 @@ class SpecialistContractTests(unittest.TestCase):
         policy=specialists.pin(selected)
         budget=self.budget()
         receipt=budget.result(policy,0)
-        manifest={'run_kind':'patch','model':'fixture','specialists':policy,
-                  'limits':{'iterations':12,'tool_calls':64,'wall_seconds':300},
+        manifest={'run_kind':'patch','model':'fixture','specialists':policy,'limits':dict(OPEN),
                   'handoff':{'payload':{'action':selected}}}
         with patch.object(specialists,'GUIDANCE',specialists.GUIDANCE+' Runtime update.'):
             specialists.validate_result_for_manifest({'tools_called':0,'specialists':receipt},manifest)
@@ -78,17 +93,18 @@ class SpecialistContractTests(unittest.TestCase):
         return SimpleNamespace(model='fixture',base_url='http://localhost.invalid/v1',api_mode='chat_completions',max_tokens=4096,
                                chat=reply or (lambda **kwargs:ChatResult(content='done')),compact_responses=lambda *a,**k:'UNBUDGETED')
 
-    def test_twelve_total_model_calls_not_twelve_per_child(self):
-        budget=self.budget();record=budget.begin('worker','fixture')
+    def test_parent_and_children_share_one_request_count_past_the_old_twelve(self):
+        budget=self.budget();record=budget.begin('worker','fixture');record['status']='completed'
         parent=budget.wrap(self.client());child=budget.wrap(self.client(),record)
         for _ in range(8):parent.chat()
-        for _ in range(4):child.chat()
-        with self.assertRaisesRegex(RegistryError,'shared twelve'): parent.chat()
-        self.assertEqual(budget.requests,12);self.assertEqual(record['requests'],4)
-        self.assertEqual(budget.model_calls,12);self.assertEqual(budget.transport_attempts,0)
-        self.assertEqual(budget.output_token_reservations,49152)
-        self.assertTrue(self.cancel.is_set())
+        for _ in range(20):child.chat()
+        self.assertEqual(budget.requests,28);self.assertEqual(record['requests'],20)
+        self.assertEqual(budget.model_calls,28);self.assertEqual(budget.transport_attempts,0)
+        self.assertEqual(budget.output_token_reservations,28*4096)
+        self.assertFalse(self.cancel.is_set(),'version 1 stopped the run at twelve; nothing does now')
         self.assertIsNone(parent.compact_responses())
+        receipt=budget.result(specialists.pin(action()),0)
+        self.assertEqual(specialists.validate_result(receipt,grant())['requests'],28)
 
     def test_auxiliary_metadata_and_load_probes_are_disabled_on_wrapped_client(self):
         budget=self.budget();client=self.client()
@@ -107,13 +123,14 @@ class SpecialistContractTests(unittest.TestCase):
             for _ in range(13):client._begin_attempt(None,'fixture')
         client.chat=retry
         budget.wrap(client)
-        with self.assertRaises(RegistryError):client.chat()
-        self.assertEqual(len(begun),12)
-        self.assertEqual(budget.requests,12);self.assertEqual(budget.model_calls,1)
-        self.assertEqual(budget.transport_attempts,12)
+        client.chat()
+        self.assertEqual(len(begun),13,'every retry goes through')
+        self.assertEqual(budget.requests,13,'each retry after the first attempt reserves again');self.assertEqual(budget.model_calls,1)
+        self.assertEqual(budget.transport_attempts,13)
 
     def test_stop_deadline_routes_and_output_caps_refuse_before_model(self):
-        for changed in ({'model':'other'},{'base_url':'https://other.invalid'},{'api_mode':'responses'},{'max_tokens':4097}):
+        for changed in ({'model':'other'},{'base_url':'https://other.invalid'},{'api_mode':'responses'},
+                        {'max_tokens':specialists.OUTPUT_CEILING+1},{'max_tokens':True}):
             budget=self.budget();client=self.client(reply=lambda **kw:self.fail('provider called'))
             for key,value in changed.items():setattr(client,key,value)
             with self.subTest(changed=changed),self.assertRaises(RegistryError):budget.wrap(client).chat()
@@ -121,26 +138,34 @@ class SpecialistContractTests(unittest.TestCase):
         with self.assertRaises(RegistryError):budget.wrap(self.client()).chat()
         budget=self.budget();self.cancel.set()
         with self.assertRaises(RegistryError):budget.begin('worker','fixture')
-        for invalid in (True,float('nan'),float('inf'),401):
+        for invalid in (True,float('nan'),'400'):
             with self.subTest(deadline=invalid),self.assertRaises(RegistryError):specialists.SharedBudget(grant(),{},threading.Event(),deadline=invalid,clock=lambda:100)
+        for fine in (None,float('inf'),100_000):                 # no ceiling on how long a run may take
+            self.assertGreater(specialists.SharedBudget(grant(),{},threading.Event(),deadline=fine,clock=lambda:100).deadline,400)
+        budget=self.budget();client=self.client();client.max_tokens=16384    # main DGC's own output budget
+        budget.wrap(client).chat();self.assertEqual(budget.output_token_reservations,16384)
 
-    def test_grant_cap_and_bounded_ui_output(self):
+    def test_grant_cap_holds_and_long_prose_is_shortened_not_fatal(self):
         budget=self.budget()
         for _ in range(3):budget.begin('critic','fixture')
-        with self.assertRaises(RegistryError):budget.begin('critic','fixture')
+        with self.assertRaises(RegistryError):budget.begin('critic','fixture')     # the reviewed call count stays
         ui=specialists.SpecialistUI(SimpleNamespace(),budget.calls[0],budget)
         ui.on_text('界'*10000)
-        with self.assertRaisesRegex(RegistryError,'budget'):ui.on_text('界'*1000)
-        self.assertTrue(self.cancel.is_set())
+        ui.on_text('界'*1000)                                   # past 32 KiB: no longer kept, and the run goes on
+        self.assertEqual(len(ui.parts),1)
+        self.assertFalse(self.cancel.is_set())
         text=specialists.summary('界'*1000)
         self.assertLessEqual(len(text.encode()),1200)
         self.assertIn('truncated',text)
+        long=specialists.summary('word '*100_000)               # a final answer far past the old 32 KiB
+        self.assertLessEqual(len(long.encode()),1200);self.assertIn('truncated',long)
+        self.assertEqual(specialists.summary('ok \ud800 \x00done'),'ok ? done')
 
     def test_receipt_types_counts_and_unapproved_models_refused(self):
         budget=self.budget();rec=budget.begin('worker','fixture');rec['status']='completed'
         value=budget.result(specialists.pin(action()),0)
         self.assertEqual(value['calls'][0]['summary'],'')
-        manifest={'run_kind':'patch','model':'fixture','specialists':specialists.pin(action()),'limits':{'iterations':12,'tool_calls':64,'wall_seconds':300},'handoff':{'payload':{'action':action()}}}
+        manifest={'run_kind':'patch','model':'fixture','specialists':specialists.pin(action()),'limits':dict(OPEN),'handoff':{'payload':{'action':action()}}}
         specialists.validate_result_for_manifest({'tools_called':0,'specialists':value},manifest)
         for mutate in (lambda x:x.update(version=True),lambda x:x.update(requests=True),lambda x:x['calls'][0].update(status='running'),
                        lambda x:x['calls'][0].update(tool_calls=1),lambda x:x['calls'][0].update(summary='界'*401),lambda x:x['calls'].append(x['calls'][0])):
@@ -148,6 +173,26 @@ class SpecialistContractTests(unittest.TestCase):
             with self.assertRaises(RegistryError):specialists.validate_result(bad,grant())
         bad=copy.deepcopy(value);bad['calls'][0]['model']='other'
         with self.assertRaises(RegistryError):specialists.validate_result_for_manifest({'tools_called':0,'specialists':bad},manifest)
+        bad=copy.deepcopy(value);bad['version']=1                # a receipt can't claim the other version's policy
+        with self.assertRaises(RegistryError):specialists.validate_result_for_manifest({'tools_called':0,'specialists':bad},manifest)
+
+    def test_saved_version_one_runs_still_read_but_never_run_again(self):
+        selected=execution.validate_action('patch',action())
+        old=v1_pin(selected)
+        manifest={'run_kind':'patch','model':'fixture','specialists':old,'limits':dict(V1_LIMITS),
+                  'handoff':{'payload':{'action':selected}}}
+        receipt={'version':1,'policy_digest':old['digest'],'calls':[],'requests':12,'model_calls':12,
+                 'transport_attempts':0,'output_token_reservations':12*4096,'tool_calls':64}
+        specialists.validate_result_for_manifest({'tools_called':64,'specialists':receipt},manifest)
+        self.assertEqual(specialists.validate_manifest(manifest,selected,runtime=False),old)
+        with self.assertRaises(RegistryError):
+            specialists.validate_manifest(manifest,selected)            # queued under version 1: review again
+        for key,value in (('requests',13),('tool_calls',65),('output_token_reservations',12*4097)):
+            bad={**receipt,key:value}
+            with self.subTest(key=key),self.assertRaises(RegistryError):
+                specialists.validate_result_for_manifest({'tools_called':bad['tool_calls'],'specialists':bad},manifest)
+        with self.assertRaises(RegistryError):                          # version 1 with no limits is not a policy
+            specialists.validate_manifest({**manifest,'limits':dict(OPEN)},selected,runtime=False)
 
 
 class NativeSpecialistTests(unittest.TestCase):

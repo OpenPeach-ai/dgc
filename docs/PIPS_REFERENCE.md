@@ -1092,10 +1092,11 @@ passed on. Personal Pips can't hand off to project Pips.
 | --- | --- |
 | Concurrent runs per runner | `pips_parallel_runs` (default 4, 1–32); one per Pip |
 | Queued, running and cancelling runs | 20 |
-| Run wall time | none (a reviewed specialist Patch: 300 seconds) |
-| Model turns per run | none (specialist Patch: 12) |
-| Tool calls per run | none (specialist Patch: 64) |
-| Output tokens per model response | DGC's `max_tokens` (specialist Patch: 4,096) |
+| Run wall time | none |
+| Model turns per run | none |
+| Tool calls per run | none |
+| Output tokens per model response | DGC's `max_tokens` |
+| Specialist calls of a reviewed Patch | the reviewed `max_calls` (1–3); they share the run's lifetime, policy version 2 (version 1: 300 s, 12 requests, 64 tool calls, 4,096 tokens) |
 | Reviewed commands of a run | 300 seconds from when they start |
 | Worker input | 128 KiB |
 | Source copy | 10,000 entries, 4 MiB per file, 64 MiB total |

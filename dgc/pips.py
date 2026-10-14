@@ -471,11 +471,9 @@ def source_revision(root, ref):
 # A Pip run keeps going (founder, 2026-10-14): no step limit (0, as DGC's own max_turns), no wall clock, and main
 # DGC's output budget per request, in the Pip's own context window (pip_chat_options). It compacts as any DGC session
 # does and ends when its work is done, when the user stops it, or when the Agent's loop guards see it repeating
-# itself. A patch run with reviewed specialists keeps the bounds its grant was reviewed with (BOUNDED_*).
+# itself. A patch run with reviewed specialists too: they share its lifetime (pip_specialists, policy version 2).
 STEPS = 0
 COMPUTER_STEPS = 0
-BOUNDED_MODEL = {"max_tokens": 4096, "max_turns": 12, "turn_budget_s": MAX_WALL_SECONDS - 10}
-BOUNDED_LIMITS = {"wall_seconds": MAX_WALL_SECONDS, "tool_calls": 64, "iterations": 12}
 OPEN_LIMITS = {"wall_seconds": 0, "tool_calls": 0, "iterations": 0}       # 0: none
 
 
@@ -1267,9 +1265,6 @@ class PipStore:
                         if specialists is not None:
                             manifest['specialists'] = specialists
                             manifest['tools'] = sorted(set(manifest['tools']) | {'task'})
-                            # Reviewed specialists keep the bounds their grant was reviewed with.
-                            manifest['limits'] = {**manifest['limits'], **BOUNDED_LIMITS}
-                            manifest['model_settings'] = {**manifest['model_settings'], **BOUNDED_MODEL}
                         manifest["policy_digest"] = hashlib.sha256(_json(native_policy(action)).encode()).hexdigest()
                 if schedule_occurrence is not None:
                     from .pip_schedules import plan_due, occurrence_key, timestamp
@@ -1900,8 +1895,6 @@ class _WorkerUI:
     deny_reason = "Manual auditor policy is read-only."
     plan_feedback = ""
 
-    tool_cap = None                     # a patch run with reviewed specialists: 64 (BOUNDED_LIMITS)
-
     def __init__(self, emit):
         self.emit = emit
         self.read_calls = 0
@@ -1922,10 +1915,6 @@ class _WorkerUI:
 
     def tool_call(self, name, args, call_id=None):
         self.calls += 1
-        if self.tool_cap is not None and self.calls > self.tool_cap:
-            if self.agent is not None:
-                self.agent.cancelled.set()
-            raise RegistryError("tool_limit", f"The run exceeded its reviewed {self.tool_cap} tool-call budget.")
         self.emit({"kind": "tool_call", "tool": str(name)[:80], "call_id": str(call_id or "")[:120],
                    "path": str(args.get("path", ""))[:512]})
 
@@ -2603,8 +2592,6 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         from .pip_source_changes import validate_for_source
         changes_since_checkpoint = validate_for_source(manifest["changes_since_checkpoint"], source, checkpoint)
     ui = _ConversationUI(emit, config) if conversation is not None else _WorkerUI(emit)
-    if specialist_pin is not None:
-        ui.tool_cap = BOUNDED_LIMITS["tool_calls"]
     mcp = MCPManager(snapshot)
     agent = ReadOnlyAuditor(config, ui, mcp=mcp)
     if specialist_budget is not None:
@@ -2969,8 +2956,7 @@ def _worker_main():
 
     try:
         emit({"kind": "policy_ready", "digest": hashlib.sha256(_json(native_policy(action, personal=manifest.get("source_policy",{}).get("mode")=="personal")).encode()).hexdigest()})
-        result = execute_native(config, snapshot, payload["manifest"], emit,
-                                deadline=payload.get('specialist_deadline'))
+        result = execute_native(config, snapshot, payload["manifest"], emit)
         emit({"kind": "result", "result": result})
         return 0
     except Exception as exc:
@@ -3074,8 +3060,8 @@ def _execute_pulse_plan(registry, row, manifest, config, deadline):
 
 def _execute_run(registry, row, config):
     _require_runner_platform()
-    # What still has a clock: a standalone Pulse, the app reads before the model, reviewed specialists. The model's
-    # own run has none (a Pip run keeps going), unless its manifest is bounded (BOUNDED_LIMITS).
+    # What still has a clock: a standalone Pulse, the app reads before the model, reviewed tests. The model's own run
+    # has none (a Pip run keeps going), specialists included, unless its manifest is bounded (a version 1 run).
     deadline = time.monotonic() + MAX_WALL_SECONDS
     from .pip_daemon import is_runtime_paused
     if config.get("pips_enabled", False) is not True or is_runtime_paused(registry):
@@ -3285,8 +3271,6 @@ def _execute_run(registry, row, config):
         manifest = {**manifest, 'conversation_file_paths': [
             str(path) for path in file_paths(registry.directory, row['pip_id'], conversation_pin['files'])]}
     payload = {"snapshot": str(snapshot), "manifest": manifest, "api_key": frozen_config.get("api_key", "")}
-    if action is not None and 'specialists' in action:
-        payload['specialist_deadline'] = deadline
     payload_bytes = _worker_payload(payload)
     if time.monotonic() >= deadline:
         raise RegistryError("timeout", "The run exceeded its five-minute budget before model execution.")

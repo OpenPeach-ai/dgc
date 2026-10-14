@@ -160,7 +160,7 @@ job with `create_pip` and a reviewed update.
 | 44 | Personal Pips' plugins: `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`, `list_pip_attention`; notes (`list_pip_notes`, `add_pip_note`, `forget_pip_note`), sites, `get_pip_chat_context`, `list_pip_reply_stats`, `get_pips_limit`/`set_pips_limit`, `set_pip_careful`, `forget_pip_site` |
 | 45 | `set_plugin_permission`: what each plugin may do without asking (`always_ask`, `any_changes`, `important`, `never_ask`), for every Pip. A read at `important` runs without a card. |
 | 46 | `shared: true` on `list_pip_notes`, `add_pip_note` and `forget_pip_note`: a Pip's notes are kept in the one memory DGC keeps for you (ids `mem_…`). |
-| 47 | A Pip's `chat_options` are its own and apply to all its runs; runs have no step or time limit (a reviewed specialist Patch keeps its bounds); several Pips run at once |
+| 47 | A Pip's `chat_options` are its own and apply to all its runs; runs have no step or time limit, reviewed specialist Patches included (specialist policy version 2); several Pips run at once |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend

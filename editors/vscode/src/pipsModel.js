@@ -34,7 +34,7 @@ export function execution(run) {
     tools: Array.isArray(m.tools) && m.tools.length <= 128 && m.tools.every(t => typeof t === 'string') ? m.tools : null,
     calls: count(r.tools_called),
     usage: [['Input tokens','input_tokens'],['Output tokens','output_tokens'],['Cached input','cached_input_tokens'],['Reasoning tokens','reasoning_tokens'],['Model requests','requests']].map(([label,key]) => [label,count(usage[key])]),
-    // 0 is none: a Pip run keeps going (2026-10-14); a reviewed specialist patch run still has its bounds.
+    // 0 is none: a Pip run keeps going (2026-10-14), a reviewed specialist patch run too (a saved version-1 one has bounds).
     limits: [['Time limit','wall_seconds'],['Tool-call limit','tool_calls'],['Step limit','iterations'],['Code size limit (bytes)','snapshot_bytes']].map(([label,key]) => [label,key !== 'snapshot_bytes' && limits[key] === 0 ? 'None' : count(limits[key]) + (key === 'wall_seconds' && Number.isSafeInteger(limits[key]) && limits[key] >= 0 ? ' s' : '')]),
     queueDuration: duration(run?.created_at, run?.started_at),
     duration: duration(run?.started_at, run?.finished_at),
@@ -871,19 +871,25 @@ function pipTypedMemoryPin(v,run){
 
 export const SPECIALIST_ROLES=['explorer','critic','worker'];
 export function specialistGrant(v){if(!exactOutcome(v,['roles','max_calls'])||!Array.isArray(v.roles)||!v.roles.length||v.roles.length>3||v.roles.some(r=>!SPECIALIST_ROLES.includes(r))||new Set(v.roles).size!==v.roles.length||!Number.isSafeInteger(v.max_calls)||v.max_calls<1||v.max_calls>3)throw Error('Choose unique Explorer, Critic or Worker roles and a total call cap of 1–3.');return {roles:SPECIALIST_ROLES.filter(r=>v.roles.includes(r)),max_calls:v.max_calls};}
+// Helpers' policy versions (dgc/pip_specialists.py): 1 pinned 12 requests, 64 tool calls, 4,096 output tokens a request
+// and 300 s; 2 (2026-10-14) pins none, as every Pip run, and its counts are real ones. Saved version-1 runs still read.
+const SPECIALIST_CAPS={1:{requests:12,tools:64,output:4096},2:{requests:1000000,tools:1000000,output:1000000}};
+function specialistLimits(version,grant){return version===1?{calls:grant.max_calls,requests:12,tool_calls:64,output_tokens_per_request:4096,wall_seconds:300}:{calls:grant.max_calls,requests:0,tool_calls:0,output_tokens_per_request:0,wall_seconds:0};}
 export function specialistPolicy(manifest,action){
  const fail=()=>{throw Error('The saved specialist policy does not match this reviewed Patch run.');};
  if(!Object.hasOwn(action,'specialists')){if(Object.hasOwn(manifest,'specialists'))fail();return null;}
- const grant=specialistGrant(action.specialists),v=manifest.specialists,limits={calls:grant.max_calls,requests:12,tool_calls:64,output_tokens_per_request:4096,wall_seconds:300};
- if(action.kind!=='patch'||manifest.run_kind!=='patch'||!exactOutcome(v,['version','grant','instructions','limits','digest'])||v.version!==1||!memoryHash(v.digest)||memoryJson(v.grant)!==memoryJson(grant)||!exactOutcome(v.instructions,grant.roles)||!Object.values(v.instructions).every(memoryHash)||memoryJson(v.limits)!==memoryJson(limits)||!record(manifest.limits)||manifest.limits.iterations!==12||manifest.limits.tool_calls!==64||manifest.limits.wall_seconds!==300)fail();return v;
+ const grant=specialistGrant(action.specialists),v=manifest.specialists;
+ if(!record(v)||![1,2].includes(v.version))fail();
+ const limits=specialistLimits(v.version,grant),run=v.version===1?{iterations:12,tool_calls:64,wall_seconds:300}:{iterations:0,tool_calls:0,wall_seconds:0};
+ if(action.kind!=='patch'||manifest.run_kind!=='patch'||!exactOutcome(v,['version','grant','instructions','limits','digest'])||!memoryHash(v.digest)||memoryJson(v.grant)!==memoryJson(grant)||!exactOutcome(v.instructions,grant.roles)||!Object.values(v.instructions).every(memoryHash)||memoryJson(v.limits)!==memoryJson(limits)||!record(manifest.limits)||Object.entries(run).some(([k,n])=>manifest.limits[k]!==n))fail();return v;
 }
 export function specialistReceipt(result,manifest,action){
  const pin=specialistPolicy(manifest,action),fail=()=>{throw Error('Specialist receipts are invalid or do not match their saved policy. Their prose is not execution evidence.');};
  if(!pin){if(result&&Object.hasOwn(result,'specialists'))fail();return null;}
- const v=result?.specialists;if(!exactOutcome(v,['version','policy_digest','calls','requests','model_calls','transport_attempts','output_token_reservations','tool_calls'])||v.version!==1||v.policy_digest!==pin.digest||!memoryInt(v.requests,0,12)||!memoryInt(v.model_calls,0,v.requests)||!memoryInt(v.transport_attempts,0,v.requests)||!memoryInt(v.output_token_reservations,v.requests,v.requests*4096)||!memoryInt(v.tool_calls,0,64)||result.tools_called!==v.tool_calls||!Array.isArray(v.calls)||v.calls.length>pin.grant.max_calls)fail();
+ const v=result?.specialists,cap=SPECIALIST_CAPS[pin.version];if(!exactOutcome(v,['version','policy_digest','calls','requests','model_calls','transport_attempts','output_token_reservations','tool_calls'])||v.version!==pin.version||v.policy_digest!==pin.digest||!memoryInt(v.requests,0,cap.requests)||!memoryInt(v.model_calls,0,v.requests)||!memoryInt(v.transport_attempts,0,v.requests)||!memoryInt(v.output_token_reservations,v.requests,v.requests*cap.output)||!memoryInt(v.tool_calls,0,cap.tools)||result.tools_called!==v.tool_calls||!Array.isArray(v.calls)||v.calls.length>pin.grant.max_calls)fail();
  const ids=new Set(),totals={requests:0,model_calls:0,transport_attempts:0,tool_calls:0};
  const specialistText=(s,max,empty=false)=>typeof s==='string'&&(empty||!!s.trim())&&!s.includes('\0')&&!Array.from(s).some(c=>c.codePointAt(0)>=0xd800&&c.codePointAt(0)<=0xdfff)&&bytes(s)<=max;
- for(const c of v.calls){if(!exactOutcome(c,['id','role','status','model','requests','model_calls','transport_attempts','tool_calls','usage','summary'])||typeof c.id!=='string'||c.id.length!==16||!/^sub-[0-9a-f]{12}$/.test(c.id)||ids.has(c.id)||!pin.grant.roles.includes(c.role)||!['completed','failed','cancelled'].includes(c.status)||!specialistText(c.model,256)||c.model!==manifest.model||!specialistText(c.summary,1200,true)||!memoryInt(c.requests,0,12)||!memoryInt(c.model_calls,0,c.requests)||!memoryInt(c.transport_attempts,0,c.requests)||!memoryInt(c.tool_calls,0,64)||!exactOutcome(c.usage,['input_tokens','output_tokens','cached_input_tokens','reasoning_tokens','requests'])||!Object.values(c.usage).every(n=>memoryInt(n)))fail();ids.add(c.id);for(const k of Object.keys(totals))totals[k]+=c[k];}
+ for(const c of v.calls){if(!exactOutcome(c,['id','role','status','model','requests','model_calls','transport_attempts','tool_calls','usage','summary'])||typeof c.id!=='string'||c.id.length!==16||!/^sub-[0-9a-f]{12}$/.test(c.id)||ids.has(c.id)||!pin.grant.roles.includes(c.role)||!['completed','failed','cancelled'].includes(c.status)||!specialistText(c.model,256)||c.model!==manifest.model||!specialistText(c.summary,1200,true)||!memoryInt(c.requests,0,cap.requests)||!memoryInt(c.model_calls,0,c.requests)||!memoryInt(c.transport_attempts,0,c.requests)||!memoryInt(c.tool_calls,0,cap.tools)||!exactOutcome(c.usage,['input_tokens','output_tokens','cached_input_tokens','reasoning_tokens','requests'])||!Object.values(c.usage).every(n=>memoryInt(n)))fail();ids.add(c.id);for(const k of Object.keys(totals))totals[k]+=c[k];}
  if(Object.keys(totals).some(k=>totals[k]>v[k]))fail();return v;
 }
 

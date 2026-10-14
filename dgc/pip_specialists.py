@@ -18,12 +18,15 @@ from .workspace_registry import RegistryError
 
 ROLES = ('explorer', 'critic', 'worker')
 MAX_CALLS = 3
-MAX_REQUESTS = 12
-MAX_TOOLS = 64
-MAX_OUTPUT_TOKENS = 4096
+# Version 2 (founder, 2026-10-14): specialists share their Patch run's lifetime with no request, tool-call, output or
+# time limit, as every Pip run does; the reviewed grant (roles, how many calls) is the only bound. Version 1 pinned 12
+# requests, 64 tool calls, 4,096 output tokens per request and 300 s; its saved runs and receipts still validate.
+VERSION = 2
+V1_REQUESTS, V1_TOOLS, V1_OUTPUT_TOKENS, V1_WALL_SECONDS = 12, 64, 4096, 300
+MAX_COUNT = 1_000_000            # a receipt's counters: real counts, as tools_called is everywhere else
+OUTPUT_CEILING = 1_000_000       # output tokens per request, the same ceiling as a Pip run's own (pips._output_budget)
 MAX_STREAM_BYTES = 32768
 MAX_SUMMARY_BYTES = 1200
-VERSION = 1
 _USAGE = {'input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_tokens', 'requests'}
 GUIDANCE = (
     'You are a synchronous specialist inside one reviewed Pip Patch run. '
@@ -74,6 +77,26 @@ def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
+def _limits(version, grant):
+    """The limits a policy version pins: version 1's numbers, or none (0) since version 2."""
+    if version == 1:
+        return {'calls': grant['max_calls'], 'requests': V1_REQUESTS, 'tool_calls': V1_TOOLS,
+                'output_tokens_per_request': V1_OUTPUT_TOKENS, 'wall_seconds': V1_WALL_SECONDS}
+    return {'calls': grant['max_calls'], 'requests': 0, 'tool_calls': 0, 'output_tokens_per_request': 0, 'wall_seconds': 0}
+
+
+def _run_limits(version):
+    """What the run's manifest `limits` must say for that version: version 1's bounds, or none."""
+    if version == 1:
+        return {'iterations': V1_REQUESTS, 'tool_calls': V1_TOOLS, 'wall_seconds': V1_WALL_SECONDS}
+    return {'iterations': 0, 'tool_calls': 0, 'wall_seconds': 0}
+
+
+def _caps(version):
+    """Receipt bounds: (requests, tool calls, output tokens per request)."""
+    return (V1_REQUESTS, V1_TOOLS, V1_OUTPUT_TOKENS) if version == 1 else (MAX_COUNT, MAX_COUNT, OUTPUT_CEILING)
+
+
 def instruction(role):
     from .agents import builtin_agents
     if role not in ROLES:
@@ -89,8 +112,7 @@ def pin(action):
     grant = validate_grant(action['specialists'])
     payload = {'version': VERSION, 'grant': grant,
                'instructions': {role: hashlib.sha256(instruction(role).encode()).hexdigest() for role in grant['roles']},
-               'limits': {'calls': grant['max_calls'], 'requests': MAX_REQUESTS, 'tool_calls': MAX_TOOLS,
-                          'output_tokens_per_request': MAX_OUTPUT_TOKENS, 'wall_seconds': 300}}
+               'limits': _limits(VERSION, grant)}
     return {**payload, 'digest': hashlib.sha256(_json(payload).encode()).hexdigest()}
 
 
@@ -98,12 +120,11 @@ def validate_pin(value, grant):
     """Validate immutable historical policy without requiring today's persona text."""
     grant = validate_grant(grant)
     if (not isinstance(value, dict) or set(value) != {'version','grant','instructions','limits','digest'}
-            or type(value['version']) is not int or value['version'] != VERSION
+            or type(value['version']) is not int or value['version'] not in (1, VERSION)
             or value['grant'] != grant or _json(value['grant']) != _json(grant)):
         raise _error('The specialist policy pin is malformed.', 'specialist_policy_mismatch')
     instructions = value['instructions']
-    limits = {'calls':grant['max_calls'],'requests':MAX_REQUESTS,'tool_calls':MAX_TOOLS,
-              'output_tokens_per_request':MAX_OUTPUT_TOKENS,'wall_seconds':300}
+    limits = _limits(value['version'], grant)
     if (not isinstance(instructions, dict) or set(instructions) != set(grant['roles'])
             or any(not isinstance(item,str) or not re.fullmatch(r'[0-9a-f]{64}',item) for item in instructions.values())
             or value['limits'] != limits or _json(value['limits']) != _json(limits)):
@@ -125,7 +146,7 @@ def validate_manifest(manifest, action, *, runtime=True):
     if (manifest.get('run_kind') != 'patch' or (runtime and checked != expected)
             or not isinstance(limits, dict)
             or any(type(limits.get(key)) is not int or limits[key] != value
-                   for key,value in {'iterations':MAX_REQUESTS,'tool_calls':MAX_TOOLS,'wall_seconds':300}.items())):
+                   for key,value in _run_limits(checked['version']).items())):
         raise _error('The reviewed specialist policy changed or does not match this run. Review a new handoff.', 'specialist_policy_mismatch')
     return checked
 
@@ -145,7 +166,7 @@ def schema(grant):
     return {'type': 'function', 'function': {'name': 'task',
         'description': ('Run one synchronous builtin specialist inside this reviewed Patch snapshot. '
             'Explorer/Critic only read; Worker uses the same exact reviewed write paths. All calls share '
-            'the parent run budget. No background work, custom agents, nesting, model changes or test execution.'),
+            'the parent run. No background work, custom agents, nesting, model changes or test execution.'),
         'parameters': {'type': 'object', 'properties': {
             'agent': {'type': 'string', 'enum': grant['roles']},
             'description': {'type': 'string', 'minLength': 1, 'maxLength': 120},
@@ -154,16 +175,17 @@ def schema(grant):
 
 
 class SharedBudget:
-    """Reserve model request slots before calls; keep all child work in one lifetime."""
+    """Count model requests before calls; keep all child work in one lifetime: the run's, so Stop ends it.
+
+    Since policy version 2 nothing else bounds it; a caller's deadline, when it passes one, ends it early. (Version 1,
+    which only saved runs carry, had twelve requests, 4,096 output tokens each and 300 s.)"""
     def __init__(self, grant, model_settings, cancelled, *, deadline=None, clock=time.monotonic):
         self.grant = validate_grant(grant)
         self.settings = dict(model_settings)
         self.cancelled, self.clock = cancelled, clock
-        now = clock()
-        self.deadline = now + 300 if deadline is None else deadline
-        if (isinstance(self.deadline, bool) or not isinstance(self.deadline, (int, float))
-                or not math.isfinite(self.deadline) or self.deadline > now + 300):
-            raise _error('The specialist deadline must stay within the existing run budget.')
+        self.deadline = math.inf if deadline is None else deadline
+        if isinstance(self.deadline, bool) or not isinstance(self.deadline, (int, float)) or math.isnan(self.deadline):
+            raise _error('The specialist deadline must be a time or none.')
         self.calls, self.requests, self.output_token_reservations = [], 0, 0
         self.model_calls, self.transport_attempts = 0, 0
         self._lock = threading.Lock()
@@ -171,7 +193,7 @@ class SharedBudget:
     def check(self):
         if self.cancelled.is_set() or self.clock() >= self.deadline:
             self.cancelled.set()
-            raise _error('The shared Pip run stopped or exhausted its deadline.', 'cancelled')
+            raise _error('The shared Pip run stopped.', 'cancelled')
 
     def reserve(self, client, role):
         self.check()
@@ -180,11 +202,11 @@ class SharedBudget:
                 or getattr(client, 'model', None) != self.settings['model']
                 or requested_mode != self.settings['api_mode']):
             raise _error('A specialist attempted to change the pinned model connection.', 'specialist_policy_mismatch')
-        tokens = _int(getattr(client, 'max_tokens', None), 'Request output token cap', 1, MAX_OUTPUT_TOKENS)
+        tokens = _int(getattr(client, 'max_tokens', None), 'Request output token cap', 1, OUTPUT_CEILING)
         with self._lock:
-            if self.requests >= MAX_REQUESTS:
+            if self.requests >= MAX_COUNT:           # a counter's ceiling, so the receipt stays a real count
                 self.cancelled.set()
-                raise _error('Parent and specialists exhausted their shared twelve-request budget.', 'model_limit')
+                raise _error(f'Parent and specialists made {MAX_COUNT:,} model requests.', 'model_limit')
             self.requests += 1
             self.output_token_reservations += tokens
             if role is not None:
@@ -254,18 +276,22 @@ class SharedBudget:
 def validate_result(value, grant, *, policy_pin=None):
     grant = validate_grant(grant)
     keys = {'version', 'policy_digest', 'calls', 'requests', 'model_calls', 'transport_attempts', 'output_token_reservations', 'tool_calls'}
-    if not isinstance(value, dict) or set(value) != keys or type(value['version']) is not int or value['version'] != VERSION:
+    if (not isinstance(value, dict) or set(value) != keys or type(value['version']) is not int
+            or value['version'] not in (1, VERSION)):
         raise _error('Specialist receipts require their closed versioned schema.')
     if not isinstance(value['policy_digest'],str) or not re.fullmatch(r'[0-9a-f]{64}',value['policy_digest']):
         raise _error('Specialist receipts require their saved policy digest.')
-    if policy_pin is not None and value['policy_digest'] != validate_pin(policy_pin,grant)['digest']:
-        raise _error('Specialist receipts do not match the reviewed builtin policy.')
-    requests = _int(value['requests'], 'Shared model requests', 0, MAX_REQUESTS)
+    if policy_pin is not None:
+        checked_pin = validate_pin(policy_pin, grant)
+        if value['policy_digest'] != checked_pin['digest'] or value['version'] != checked_pin['version']:
+            raise _error('Specialist receipts do not match the reviewed builtin policy.')
+    max_requests, max_tools, max_output = _caps(value['version'])
+    requests = _int(value['requests'], 'Shared model requests', 0, max_requests)
     _int(value['model_calls'], 'Shared model calls', 0, requests)
     _int(value['transport_attempts'], 'Shared transport attempts', 0, requests)
-    tokens = _int(value['output_token_reservations'], 'Reserved output tokens', 0, MAX_REQUESTS*MAX_OUTPUT_TOKENS)
-    tools = _int(value['tool_calls'], 'Shared tool calls', 0, MAX_TOOLS)
-    if (requests == 0) != (tokens == 0) or not requests <= tokens <= requests*MAX_OUTPUT_TOKENS:
+    tokens = _int(value['output_token_reservations'], 'Reserved output tokens', 0, max_requests*max_output)
+    tools = _int(value['tool_calls'], 'Shared tool calls', 0, max_tools)
+    if (requests == 0) != (tokens == 0) or not requests <= tokens <= requests*max_output:
         raise _error('Specialist request and reservation counts are inconsistent.')
     if not isinstance(value['calls'], list) or len(value['calls']) > grant['max_calls']:
         raise _error('The specialist receipt exceeds its reviewed call cap.')
@@ -280,10 +306,10 @@ def validate_result(value, grant, *, policy_pin=None):
             raise _error('Specialist receipts cannot claim an unapproved role or unfinished result.')
         _text(call['model'],'Specialist model',256)
         _text(call['summary'],'Specialist assessment',MAX_SUMMARY_BYTES,empty=True)
-        child_requests += _int(call['requests'],'Child requests',0,MAX_REQUESTS)
+        child_requests += _int(call['requests'],'Child requests',0,max_requests)
         child_model_calls += _int(call['model_calls'],'Child model calls',0,call['requests'])
         child_attempts += _int(call['transport_attempts'],'Child transport attempts',0,call['requests'])
-        child_tools += _int(call['tool_calls'],'Child tool calls',0,MAX_TOOLS)
+        child_tools += _int(call['tool_calls'],'Child tool calls',0,max_tools)
         if not isinstance(call['usage'], dict) or set(call['usage']) != _USAGE:
             raise _error('Specialist usage must contain bounded aggregate counters.')
         for item in call['usage'].values():
@@ -320,14 +346,12 @@ class SpecialistUI:
         self.parts, self.bytes, self.last = [], 0, ''
 
     def on_text(self, chunk):
-        _text(chunk, 'Specialist output chunk', MAX_STREAM_BYTES, empty=True)
-        if not chunk:
+        # Past MAX_STREAM_BYTES the prose stops being kept, never the run: its summary comes from the final message.
+        if not isinstance(chunk, str) or not chunk:
             return
-        self.bytes += len(chunk.encode())
-        if self.bytes > MAX_STREAM_BYTES:
-            self.budget.cancelled.set()
-            raise _error('Specialist prose exceeded its bounded output budget.', 'output_limit')
-        self.parts.append(chunk)
+        self.bytes += len(chunk.encode('utf-8', errors='replace'))
+        if self.bytes <= MAX_STREAM_BYTES:
+            self.parts.append(chunk)
 
     def end_stream(self, phase=''):
         if self.parts:
@@ -362,9 +386,10 @@ class SpecialistUI:
 
 
 def summary(value):
-    # Model prose is a labelled preview, never a test or finding attestation.
-    _text(value,'Specialist assessment',MAX_STREAM_BYTES,empty=True)
-    raw = value.encode()
+    # Model prose is a labelled preview, never a test or finding attestation. However long the final message, only
+    # its start is kept: a long answer is not a failed specialist.
+    raw = (value if isinstance(value, str) else '').replace('\x00', '').encode('utf-8', errors='replace')
+    value = raw.decode('utf-8')                  # a lone surrogate became '?', so the receipt's text check holds
     if len(raw) <= MAX_SUMMARY_BYTES:
         return value
     return raw[:1080].decode('utf-8',errors='ignore').rstrip()+'\n[Specialist assessment truncated.]'
