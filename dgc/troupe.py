@@ -96,6 +96,24 @@ def check_sketch(sketch, where: str = "returns", depth: int = 0) -> None:
     raise PlanError(f"{where}: write the shape as a type name, an object or a one-element list")
 
 
+def coerce(value, sketch):
+    """Quoted scalars a model wrote where the shape wants a bare one ("true", "3"), as the scalar; nothing else."""
+    if isinstance(sketch, str) and isinstance(value, str):
+        text = value.strip()
+        if sketch == "boolean" and text.lower() in ("true", "false"):
+            return text.lower() == "true"
+        if sketch == "integer" and re.fullmatch(r"-?\d{1,15}", text):
+            return int(text)
+        if sketch == "number" and re.fullmatch(r"-?\d{1,15}(\.\d{1,15})?", text):
+            return float(text)
+        return value
+    if isinstance(sketch, list) and isinstance(value, list):
+        return [coerce(item, sketch[0]) for item in value]
+    if isinstance(sketch, dict) and isinstance(value, dict):
+        return {key: (coerce(item, sketch[key]) if key in sketch else item) for key, item in value.items()}
+    return value
+
+
 def matches(value, sketch, where: str = "result") -> str:
     """"" when VALUE has SKETCH's shape, else what is wrong. Extra fields are allowed; missing ones are not."""
     if isinstance(sketch, str):
@@ -158,6 +176,7 @@ def parse_result(text: str, sketch) -> tuple[dict | None, str]:
         if not isinstance(value, dict):
             last_problem = "the reply's JSON is not an object"
             continue
+        value = coerce(value, sketch)
         problem = matches(value, sketch)
         if not problem:
             return value, ""
@@ -419,6 +438,7 @@ class Unit:
     key: str
     result: dict | None = None
     failure: str = ""
+    reply: str = ""     # the start of a reply that could not be used, for the journal
 
 
 class Run:
@@ -453,7 +473,8 @@ class Run:
     def _journal(self, unit: Unit) -> None:
         with self._lock, open(self.dir / "results.jsonl", "a", encoding="utf-8") as handle:
             handle.write(json.dumps({"key": unit.key, "stage": unit.stage, "index": unit.index, "vote": unit.vote,
-                                     "result": unit.result, "failure": unit.failure}, ensure_ascii=False) + "\n")
+                                     "result": unit.result, "failure": unit.failure,
+                                     **({"reply": unit.reply} if unit.reply else {})}, ensure_ascii=False) + "\n")
 
     @staticmethod
     def load_cached(run_dir: Path) -> dict:
@@ -574,6 +595,7 @@ class Run:
                 unit.result, problem = parse_result(text, stage.returns)
                 if unit.result is None:
                     unit.failure = f"its reply could not be used: {problem}"
+                    unit.reply = str(text or "")[-2000:]
             self._journal(unit)
             return unit
 

@@ -131,9 +131,14 @@ class ResultTests(unittest.TestCase):
                 value, problem = troupe.parse_result(bad, sketch)
                 self.assertIsNone(value)
                 self.assertIn(words, problem)
+        self.assertEqual(troupe.parse_result('{"real": "TRUE", "why": "x"}', sketch)[0]["real"], True, "a quoted true")
+        self.assertIn("boolean", troupe.parse_result('{"real": "partly", "why": "x"}', sketch)[1], "not a guess")
+        self.assertEqual(troupe.parse_result('{"n": "12"}', {"n": "integer"})[0], {"n": 12})
+        self.assertIn("integer", troupe.parse_result('{"n": "12.5"}', {"n": "integer"})[1])
         nested = {"findings": [{"title": "string", "line": "integer"}]}
         self.assertEqual(troupe.parse_result(answer_json({"findings": [{"title": "a", "line": 3}]}), nested)[1], "")
-        self.assertIn("integer", troupe.parse_result(answer_json({"findings": [{"title": "a", "line": "3"}]}), nested)[1])
+        self.assertEqual(troupe.parse_result(answer_json({"findings": [{"title": "a", "line": "3"}]}), nested)[0],
+                         {"findings": [{"title": "a", "line": 3}]}, "a quoted number inside a list, as the number")
         self.assertIn("integer", troupe.parse_result(answer_json({"findings": [{"title": "a", "line": True}]}), nested)[1])
 
     def test_each_agent_is_told_its_item_and_the_json_to_end_with(self):
@@ -219,6 +224,10 @@ class RunTests(unittest.TestCase):
         self.assertEqual(run.state, "done", "agents failing is not the run failing")
         rows = [json.loads(line) for line in (run.dir / "results.jsonl").read_text().splitlines()]
         self.assertEqual(sorted(r["failure"] for r in rows), ["", "RuntimeError: boom", "the model went away"])
+        unusable = troupe.Run(plan, FakeRunner(lambda s, p: "I think it is partly real"), self.root)
+        unusable.run_here()
+        row = json.loads((unusable.dir / "results.jsonl").read_text().splitlines()[0])
+        self.assertEqual(row["reply"], "I think it is partly real", "the reply that could not be used is kept to read")
 
     def test_stopping_starts_nothing_more_and_says_so(self):
         plan = troupe.plan_from_args({"title": "t", "items": [f"i{n}" for n in range(6)], "stages": [
