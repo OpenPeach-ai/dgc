@@ -534,6 +534,21 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **A Pip run keeps going.** No step limit, no time limit and no 4,096-token answer cap: a run uses DGC's own output
+  budget per response, in the Pip's own context window, compacts as a DGC chat does when it fills, and ends when its
+  work is done, when you press Stop, or when it repeats itself without progress. A Patch with reviewed specialists keeps
+  the bounds its review set (5 minutes, 12 model turns, 64 tool calls, 4,096 tokens), and its reviewed tests get their
+  own five minutes from when they start.
+- **A Pip's context window and thinking are its own,** set in its message box as in DGC's own chat (they were for one
+  reply, and its other runs were held to 32K): saved as you change them (`set_pip_chat_options`, Pips API 47) or by a
+  message sent with them, and used by its replies and everything it does on its own. A new Pip starts with DGC's
+  context window.
+- **Several Pips run at once:** up to four by default (`pips_parallel_runs`, 1 to 32), each one run at a time, so a
+  long run no longer holds up every other Pip; stopping the runner cancels every run it owns.
+- **The loop guard knows a page can change:** a read after a click (a Pip's computer, Work's browser) is a new look,
+  and a click whose next read shows a different page made progress; a click that never changes anything is still a
+  loop. A long computer session was refused its fourth identical read after clicks, and stopped at the seventh.
+
 - **No daily token limits.** A Pip runs until its work is done; nothing stops it for what it spent today. Usage stays
   (today, 30 days, the Settings breakdown) to see, never to stop. A Pip the chat creates no longer starts with a
   200,000-token limit, `dgc pips usage` has no `--daily-limit`, and a limit an older DGC stored is ignored. For older

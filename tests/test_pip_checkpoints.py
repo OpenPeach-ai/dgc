@@ -325,10 +325,13 @@ class PipCheckpointTests(unittest.TestCase):
         value.update(usage={"input_tokens": 10, "output_tokens": 20, "requests": 2}, tools_called=2,
                      snapshot={"sha256": "b" * 64, "files": 3, "bytes": 80})
         self.assertEqual(json.loads(checkpoints.encode_result(value)), value)
+        long_run = copy.deepcopy(value)
+        long_run.update(tools_called=900)           # a run that keeps going reports its real count
+        self.assertEqual(json.loads(checkpoints.encode_result(long_run))["tools_called"], 900)
         mutations = [lambda r: r.update(extra={"huge": "x" * 100000}),
                      lambda r: r.update(usage={"input_tokens": True}),
                      lambda r: r.update(usage={"unknown_field": 3}),
-                     lambda r: r.update(tools_called=65), lambda r: r.update(tools_called=False),
+                     lambda r: r.update(tools_called=1_000_001), lambda r: r.update(tools_called=False),
                      lambda r: r["snapshot"].update(bytes=64 * 1024 * 1024 + 1),
                      lambda r: r.update(limitations=["x"] * 13),
                      lambda r: r.update(summary="\ud800"),

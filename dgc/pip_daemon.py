@@ -173,8 +173,7 @@ def _shutdown_owned(registry, runtime_config, record):
         thread = _controller(registry.directory)
         if thread is None:
             break
-        run_id = pips.active_run_id(registry.directory)
-        if run_id:
+        for run_id in pips.active_run_ids(registry.directory):     # every run this process owns, several at once
             try:
                 pips.PipStore(registry).cancel(run_id, "local-supervisor-shutdown")
             except Exception as exc:

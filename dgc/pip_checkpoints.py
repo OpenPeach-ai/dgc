@@ -230,7 +230,7 @@ def encode_result(result):
             raise _error("An audit limitation exceeds its 500-character bound.", "checkpoint_limit")
         _text(item, "Inspection limitation", 2000, multiline=True)
     if "tools_called" in result:
-        _integer(result["tools_called"], "Tool-call count", 0, 64)
+        _integer(result["tools_called"], "Tool-call count", 0, 1_000_000)     # a run keeps going: its real count
     if "usage" in result:
         usage = result["usage"]
         if not isinstance(usage, dict) or set(usage) - {"input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "requests"}:

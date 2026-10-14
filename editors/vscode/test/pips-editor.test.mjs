@@ -95,6 +95,14 @@ test('Escape dismisses review and restores its keyboard trigger',async()=>{const
 
 test('malformed pinned context is reported without crashing or inventing records',async()=>{const x=setup({runs:[run('r1','a',{manifest:{workspace_context:{workspace_id:'ws',revision:1,entries:[null],digest:'a'.repeat(64)}}})]});await x.drain();assert.match(x.d.body.textContent,/context saved with this run couldn’t be read/);assert.match(x.d.body.textContent,/Review this edge case/);});
 
+test('a run that keeps going shows None for its time, tool-call and step limits',async()=>{
+ const x=setup({runs:[run('r1','a',{manifest:{model:'m',limits:{wall_seconds:0,tool_calls:0,iterations:0,snapshot_bytes:32768}}})]});
+ await x.drain();const view=x.d.querySelector('[aria-label="Run execution"]');
+ const metric=label=>[...view.querySelectorAll('dt')].find(n=>n.textContent===label)?.nextElementSibling.textContent;
+ assert.equal(metric('Time limit'),'None');assert.equal(metric('Tool-call limit'),'None');assert.equal(metric('Step limit'),'None');
+ assert.equal(metric('Code size limit (bytes)'),'32,768');
+});
+
 test('execution uses pinned fields, measured calls, usage and timing without exposing model routes',async()=>{
  const x=setup({runs:[run('r1','a',{started_at:'2026-10-01T10:00:03Z',finished_at:'2026-10-01T10:01:25.5Z',manifest:{model:'pinned-model',runner_id:'runner-original',policy:'read_only',tools:['read_file','search'],policy_digest:'c'.repeat(64),model_settings:{base_url:'https://secret-route.invalid',api_key:'do-not-render'},limits:{wall_seconds:180,tool_calls:64,iterations:12,snapshot_bytes:32768}},result:{...report,tools_called:3,usage:{input_tokens:100,output_tokens:20,cached_input_tokens:0,reasoning_tokens:7,requests:2,untrusted_metric:'do-not-render'}}})]});
  await x.drain();const view=x.d.querySelector('[aria-label="Run execution"]');

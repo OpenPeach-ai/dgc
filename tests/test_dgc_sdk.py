@@ -244,9 +244,12 @@ class SdkTests(unittest.TestCase):
                    api_key="sk-local", **kwargs)
 
     def _host_snapshot(self):
+        # The test process's own peer note is not the SDK child's: an earlier test in this same runner process can leave
+        # a backend thread announcing, and its note follows HOME, which this test points here. The child has its own pid.
+        own = f"peers/{os.getpid()}.json"
         root = self.host_home / ".dgc"
         return {str(path.relative_to(root)): path.read_bytes()
-                for path in root.rglob("*") if path.is_file()}
+                for path in root.rglob("*") if path.is_file() and str(path.relative_to(root)) != own}
 
     def test_isolated_session_does_not_touch_host_dgc(self):
         before = self._host_snapshot()

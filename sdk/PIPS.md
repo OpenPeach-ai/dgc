@@ -160,6 +160,7 @@ job with `create_pip` and a reviewed update.
 | 44 | Personal Pips' plugins: `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`, `list_pip_attention`; notes (`list_pip_notes`, `add_pip_note`, `forget_pip_note`), sites, `get_pip_chat_context`, `list_pip_reply_stats`, `get_pips_limit`/`set_pips_limit`, `set_pip_careful`, `forget_pip_site` |
 | 45 | `set_plugin_permission`: what each plugin may do without asking (`always_ask`, `any_changes`, `important`, `never_ask`), for every Pip. A read at `important` runs without a card. |
 | 46 | `shared: true` on `list_pip_notes`, `add_pip_note` and `forget_pip_note`: a Pip's notes are kept in the one memory DGC keeps for you (ids `mem_…`). |
+| 47 | A Pip's `chat_options` are its own and apply to all its runs; runs have no step or time limit (a reviewed specialist Patch keeps its bounds); several Pips run at once |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -277,10 +278,12 @@ Revising replaces the card with a new pending card that uses another model.
 completion: read the run until it reaches a terminal status. Reusing an
 `idempotency_key` with the same content returns the original run.
 
-`chat_options` sets one reply's context budget and reasoning effort:
+`chat_options` sets the Pip's context window and reasoning effort:
 `{"context_size": 2048–1048576, "thinking": "off" | "low" | "medium" | "high" | "xhigh"}`.
-Both fields are required when the object is present. It cannot change a mode,
-permission, model or endpoint, and it does not change the Pip's job.
+Both fields are required when the object is present. Since Pips API 47 a message sent with
+them keeps them as that Pip's own, for its replies and every run it starts on its own
+(before, one reply only). It cannot change a mode, permission, model or endpoint, and it
+does not change the Pip's job.
 
 A standing Pulse plan runs only with the exact reviewed pins:
 

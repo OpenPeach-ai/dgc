@@ -31,7 +31,8 @@ USER_HOME = _user_home_root() / ".dgc"
 
 def dgc_home() -> Path:
     """DGC's own folder (``~/.dgc``, or ``$DGC_HOME/.dgc``), read now: an isolated SDK session's runtime files (peer
-    notes, locks, the image spool) stay in its own home, never the account's."""
+    notes, the image spool) stay in its own home, never the account's. Workspace locks stay the account's
+    (scheduler._lock_directory): they protect the user's project files, which every DGC shares."""
     return _user_home_root() / ".dgc"
 USER_CONFIG = USER_HOME / "config.json"
 USER_SECRETS = USER_HOME / "secrets.json"
@@ -444,6 +445,7 @@ DEFAULTS: dict = {
     "model_idle_timeout_s": 300,                # seconds without a token mid-stream before it is a stall
                                                 #   (partial output is continued, not discarded); 0 = off
     "pips_enabled": True,                      # Pips: personal and project agents beside the chat
+    "pips_parallel_runs": 4,                   # Pips running at once, one run per Pip (pips.parallel_runs)
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never
     "model_stall_retries": 2,                   # re-issues after a stall before fallback_model or failing
     "model_load_timeout_s": 900,                # self-hosted Ollama: how long a model may take to load

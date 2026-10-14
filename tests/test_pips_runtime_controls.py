@@ -226,6 +226,68 @@ class RuntimeControlsTests(unittest.TestCase):
         self.assertTrue(proc.stdin.closed)
         self.assertTrue(proc.stdout.closed)
 
+    def test_several_pips_run_at_once_and_each_pip_one_run_at_a_time(self):
+        """Founder, 2026-10-14: a Pip run keeps going, so one long run must not hold up every other Pip."""
+        import threading
+        import time as clock
+        other = self.store.create(self.workspace["id"], "Second", "Read committed source", "paired-browser")
+        first = self.enqueue("a-1")
+        second = self.enqueue("a-2")
+        third = self.store.enqueue(other["id"], "b-1", "paired-browser", self.config)
+        running, seen, order, lock = set(), [], [], threading.Lock()
+        release = threading.Event()
+
+        def execution(registry, row, _config):
+            with lock:
+                self.assertNotIn(row["pip_id"], running, "a Pip never runs twice at once")
+                running.add(row["pip_id"])
+                seen.append(set(running))
+                order.append(row["id"])
+                together = len(running)
+            if together < 2:
+                release.wait(5)                  # the first holds until the other Pip's run is going too
+            else:
+                release.set()
+            clock.sleep(0.05)
+            with lock:
+                running.discard(row["pip_id"])
+            raise RegistryError("fixture_done", "done")
+        with patch.object(pips, "_execute_run", side_effect=execution):
+            pips._drain(self.config, self.registry.directory)
+        self.assertTrue(any(len(both) == 2 for both in seen), "two Pips ran together")
+        self.assertTrue(all(len(both) <= 2 for both in seen))
+        self.assertEqual(sorted(order), sorted([first["id"], second["id"], third["id"]]), "each run once")
+        self.assertEqual({self.store.run(r["id"])["status"] for r in (first, second, third)}, {"failed"}, "every run ran")
+
+    def test_one_run_at_a_time_when_set_to_one(self):
+        import threading
+        other = self.store.create(self.workspace["id"], "Second", "Read committed source", "paired-browser")
+        self.enqueue("a-1")
+        self.store.enqueue(other["id"], "b-1", "paired-browser", self.config)
+        self.config.data["pips_parallel_runs"] = 1
+        live, peak, lock = [0], [0], threading.Lock()
+
+        def execution(registry, row, _config):
+            with lock:
+                live[0] += 1
+                peak[0] = max(peak[0], live[0])
+            with lock:
+                live[0] -= 1
+            raise RegistryError("fixture_done", "done")
+        with patch.object(pips, "_execute_run", side_effect=execution):
+            pips._drain(self.config, self.registry.directory)
+        self.assertEqual(peak[0], 1)
+        self.assertEqual(pips.parallel_runs(self.config), 1)
+        self.config.data["pips_parallel_runs"] = 999
+        self.assertEqual(pips.parallel_runs(self.config), pips.PARALLEL_MAX)
+
+    def test_a_pip_with_a_run_going_is_not_given_another(self):
+        first = self.enqueue("a-1")
+        second = self.enqueue("a-2")
+        claimed = self.store.claim_next()
+        self.assertIn(claimed["id"], (first["id"], second["id"]))
+        self.assertIsNone(self.store.claim_next(), "its next run waits for this one")
+
     def test_controller_records_only_its_claimed_run_and_clears_ownership_after_failure(self):
         run = self.enqueue()
         seen = []

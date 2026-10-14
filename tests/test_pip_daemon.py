@@ -334,7 +334,7 @@ class PipDaemonTests(unittest.TestCase):
         thread = Mock()
         record = self.record()
         with patch.object(daemon, "_controller", side_effect=[thread, None]), \
-             patch.object(pips, "active_run_id", return_value=owned, create=True), \
+             patch.object(pips, "active_run_ids", return_value=[owned], create=True), \
              patch.object(daemon, "_heartbeat", side_effect=OSError("status write failed")), \
              patch("os.kill", side_effect=AssertionError("No PID signalling")):
             with self.assertRaisesRegex(OSError, "status write failed"):
@@ -346,7 +346,7 @@ class PipDaemonTests(unittest.TestCase):
     def test_shutdown_waits_for_worker_even_if_cancellation_storage_fails(self):
         thread = Mock()
         with patch.object(daemon, "_controller", side_effect=[thread, None]), \
-             patch.object(pips, "active_run_id", return_value="owned", create=True), \
+             patch.object(pips, "active_run_ids", return_value=["owned"], create=True), \
              patch.object(pips.PipStore, "cancel", side_effect=OSError("cancel storage failed")):
             with self.assertRaisesRegex(OSError, "cancel storage failed"):
                 daemon._shutdown_owned(self.registry, self.config, self.record())

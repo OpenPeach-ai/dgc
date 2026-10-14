@@ -66,6 +66,7 @@ class SpecialistBudgetAuthorityTests(unittest.TestCase):
 
     def test_tool_budget_is_shared_across_children_and_cancels_before_sixty_fifth_exec(self):
         budget=self.budget();parent=pips._WorkerUI(lambda event:None)
+        parent.tool_cap=pips.BOUNDED_LIMITS['tool_calls']     # a reviewed specialist run, as execute_native sets it
         parent.agent=SimpleNamespace(cancelled=self.cancel)
         first=specialists.SpecialistUI(parent,budget.begin('explorer','fixture'),budget)
         second=specialists.SpecialistUI(parent,budget.begin('worker','fixture'),budget)

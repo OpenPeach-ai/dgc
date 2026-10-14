@@ -764,6 +764,43 @@ def _sampling(cfg) -> dict:
     return out
 
 
+# A call that changes what the same tool's reads will see: a click on a page, a command in a Pip's computer. A read
+# after it is a new look, not a loop. Tool -> (the argument naming its step, the steps that change state). Without
+# this a Pip that keeps going on its computer was refused its 4th identical `read` after clicks, and stopped at the 7th.
+_STATE_CHANGING_STEPS = {
+    "computer": ("op", frozenset({"open", "click", "type", "press", "choose", "back", "run"})),
+    "browser": ("operation", frozenset({"open", "navigate", "click", "type", "press", "select", "close", "back"})),
+}
+
+
+def _forget_reads_after_action(counts: dict, name: str, arguments) -> None:
+    """A state-changing step: the same tool's other calls are no longer loop-equivalent. Its own repeats still are."""
+    rule = _STATE_CHANGING_STEPS.get(name)
+    if rule is None or not isinstance(arguments, dict) or arguments.get(rule[0]) not in rule[1]:
+        return
+    own = (name, json.dumps(arguments, sort_keys=True, default=str))
+    for sig in list(counts):
+        if sig and sig[0] == name and sig != own:
+            counts.pop(sig, None)
+
+
+def _note_new_look(counts: dict, previous, name: str, arguments, out) -> None:
+    """A read of a tool with state-changing steps that differs from the same read before: its actions moved things
+    on (a "Next" clicked on many pages), so they are not repeats either. An action that changes nothing still is."""
+    rule = _STATE_CHANGING_STEPS.get(name)
+    if (rule is None or not isinstance(arguments, dict) or arguments.get(rule[0]) in rule[1]
+            or previous is None or previous == out):
+        return
+    for sig in list(counts):
+        if sig and sig[0] == name:
+            try:
+                step = json.loads(sig[1]).get(rule[0])
+            except (ValueError, AttributeError):
+                continue
+            if step in rule[1]:
+                counts.pop(sig, None)
+
+
 def _forget_mutation_sensitive_signatures(counts: dict) -> None:
     """An edit changes the meaning of subsequent reads/tests; they are not loop-equivalent anymore."""
     for sig in list(counts):
@@ -7477,6 +7514,7 @@ class Agent(GoalLifecycle):
                     parallel_tasks = {run[j]: outcome for j, outcome in inner.items()}
                 sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
                 seen = 1
+                _forget_reads_after_action(sig_count, call.name, call.arguments)
                 if call.name not in _LOOP_EXEMPT_CALLS:
                     seen = sig_count[sig] = sig_count.get(sig, 0) + 1
                 task_integrated = False
@@ -7518,6 +7556,7 @@ class Agent(GoalLifecycle):
                         out = self._handle_call(call)
                         task_integrated = call.name == "task" and self._last_task_integrated
                     if call.name not in _LOOP_EXEMPT_CALLS and isinstance(out, str):
+                        _note_new_look(sig_count, sig_outputs.get(sig), call.name, call.arguments, out)
                         sig_outputs[sig] = out          # so a repeat can be answered, not refused
                 out = self._safe_text(out)
                 if call.name != "update_goal":

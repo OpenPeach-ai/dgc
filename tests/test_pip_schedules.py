@@ -200,7 +200,7 @@ class ScheduleStateTests(unittest.TestCase):
         self.assertEqual(manifest["policy"], "read_only")
         self.assertEqual(manifest["tools"], sorted(pips.READ_TOOLS))
         self.assertIn("workspace_context", manifest)
-        self.assertEqual(manifest["limits"]["wall_seconds"], pips.MAX_WALL_SECONDS)
+        self.assertEqual(manifest["limits"]["wall_seconds"], 0, "a Pip run keeps going: no wall clock")
         self.assertEqual(self.state(job)["next_due_at"], "2026-10-01T10:10:00.000Z")
 
     def test_duplicate_occurrence_is_idempotent_after_cursor_advanced(self):

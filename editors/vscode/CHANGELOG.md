@@ -260,6 +260,10 @@
 
 ### Pips
 
+- **A Pip's context and thinking, in its message box, are the Pip's own:** "For this Pip: its replies and the work it
+  does on its own", saved the moment you change them (with a DGC from before, still the next reply only). A run's
+  details say **None** for the time, tool-call and step limits a run that keeps going doesn't have.
+
 - **No daily limit in a Pip's Job tab:** Usage shows what it spent today and over 30 days, with its chart, and says
   Pips have no daily limit. The setup card no longer mentions a 200,000-token limit.
 

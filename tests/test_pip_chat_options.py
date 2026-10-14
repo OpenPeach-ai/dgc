@@ -69,8 +69,9 @@ class PipChatOptionsTests(unittest.TestCase):
         self.assertEqual(manifest['chat_options'], {'context_size': 8192, 'thinking': 'high'})
         self.assertEqual(manifest['model_settings']['context_size'], 8192)
         self.assertEqual(manifest['model_settings']['thinking'], 'high')
-        self.assertEqual(manifest['model_settings']['max_tokens'], 4096)
-        self.assertEqual(manifest['model_settings']['max_turns'], 12)
+        self.assertEqual(manifest['model_settings']['max_tokens'], pips._output_budget(self.cfg), "main DGC's budget")
+        self.assertEqual(manifest['model_settings']['max_turns'], 0, 'a Pip run keeps going')
+        self.assertEqual(manifest['model_settings']['turn_budget_s'], 0)
         self.assertEqual(manifest['tools'], sorted(pips.READ_TOOLS))
         self.assertEqual(manifest['policy'], 'read_only')
         self.assertEqual(self.store.get(self.job['id'])['model_choice'], job['model_choice'])
@@ -90,23 +91,50 @@ class PipChatOptionsTests(unittest.TestCase):
                 self.send(changed)
         self.assertEqual(self.registry.db.execute('SELECT count(*) FROM pip_runs').fetchone()[0], 1)
 
-    def test_legacy_send_stays_off_and_clamped(self):
+    def test_a_send_without_options_uses_main_dgcs_window_until_the_pip_has_its_own(self):
         self.setup_job()
         self.cfg.data.update(context_size=1048576, thinking='xhigh')
         manifest = self.raw(self.send())
         self.assertNotIn('chat_options', manifest)
-        self.assertEqual(manifest['model_settings']['context_size'], 32768)
+        self.assertEqual(manifest['model_settings']['context_size'], 1048576, 'no 32K cap: main DGC\'s window')
         self.assertEqual(manifest['model_settings']['thinking'], 'off')
 
-    def test_scheduled_audit_settings_do_not_inherit_reply_choices(self):
+    def test_everything_the_pip_does_uses_its_prompt_box_choices(self):
+        """Founder, 2026-10-14: the prompt box sets the Pip's context window and thinking, for its replies and for the
+        work it does on its own."""
         self.setup_job()
         self.finish(self.send({'context_size': 8192, 'thinking': 'high'}))
+        self.assertEqual(options.saved(self.registry.db, self.job['id']), {'context_size': 8192, 'thinking': 'high'})
         run = self.store.enqueue(self.job['id'], 'audit', 'device_1', self.cfg)
         manifest = self.raw({'run': run})
         self.assertNotIn('chat_options', manifest)
         self.assertEqual(manifest['run_kind'], 'audit')
-        self.assertEqual(manifest['model_settings']['context_size'], 32768)
-        self.assertEqual(manifest['model_settings']['thinking'], 'off')
+        self.assertEqual(manifest['model_settings']['context_size'], 8192)
+        self.assertEqual(manifest['model_settings']['thinking'], 'high')
+        self.assertEqual(manifest['limits']['wall_seconds'], 0)
+
+    def test_the_prompt_box_saves_the_pips_choices_without_a_reply(self):
+        self.setup_job()
+        here = lambda *a, **k: WorkspaceRegistry(self.registry.directory, clock=self.registry.clock)  # noqa: E731
+        patcher = patch.object(pips, 'WorkspaceRegistry', here)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        result = pips.handle_control(self.cfg, {'type': 'set_pip_chat_options', 'request_id': 'r1', 'pip_id': self.job['id'],
+                                                'chat_options': {'context_size': 131072, 'thinking': 'medium'}},
+                                     'editor-user')
+        self.assertTrue(result['ok'], result)
+        controls = result['result']['chat_controls']
+        self.assertEqual(controls['options'], {'context_size': 131072, 'thinking': 'medium'})
+        self.assertEqual(controls['options_source'], 'last_message', 'the remembered choice editors since API 24 know')
+        audit = self.raw({'run': self.store.enqueue(self.job['id'], 'audit-saved', 'device_1', self.cfg)})
+        self.assertEqual((audit['model_settings']['context_size'], audit['model_settings']['thinking']), (131072, 'medium'))
+        for bad in ({'context_size': 1024, 'thinking': 'off'}, {'context_size': 8192}, None):
+            refused = pips.handle_control(self.cfg, {'type': 'set_pip_chat_options', 'request_id': 'r1', 'pip_id': self.job['id'],
+                                                     'chat_options': bad}, 'editor-user')
+            self.assertFalse(refused['ok'], bad)
+        other = pips.handle_control(self.cfg, {'type': 'set_pip_chat_options', 'request_id': 'r1', 'pip_id': self.job['id'],
+                                               'chat_options': {'context_size': 8192, 'thinking': 'off'}}, 'main-chat')
+        self.assertFalse(other['ok'], 'only the user, on this computer')
 
     def test_default_controls_inherit_main_context_without_network(self):
         self.setup_job()
@@ -221,7 +249,7 @@ class PipChatOptionsTests(unittest.TestCase):
             with self.assertRaises(RegistryError):
                 options.validate_manifest(broken)
         for key, value in (('context_size', 32768), ('thinking', 'off'), ('think_budget_tokens', 99999),
-                           ('max_tokens', 8192), ('max_turns', 100)):
+                           ('max_tokens', 0), ('max_tokens', '4096'), ('max_turns', -1), ('max_turns', None)):
             broken = copy.deepcopy(manifest); broken['model_settings'][key] = value
             with self.assertRaises(RegistryError):
                 options.validate_manifest(broken)
@@ -307,12 +335,12 @@ class PipChatOptionsTests(unittest.TestCase):
         sent = self.send({'context_size': 262144, 'thinking': 'medium'})
         manifest = self.raw(sent)
         self.assertEqual(manifest['model_settings']['context_size'], 262144)
-        self.assertEqual(manifest['model_settings']['max_tokens'], 4096)
+        self.assertEqual(manifest['model_settings']['max_tokens'], pips._output_budget(self.cfg))
         self.assertEqual(manifest['tools'], sorted(pips.READ_TOOLS))
         self.assertEqual(options.validate_manifest(manifest)['context_size'], 262144)
         self.finish(sent)
         audit = self.raw({'run': self.store.enqueue(self.job['id'], 'audit-large-context', 'device_1', self.cfg)})
-        self.assertEqual(audit['model_settings']['context_size'], 32768)
+        self.assertEqual(audit['model_settings']['context_size'], 262144, "the Pip's window, for its own work too")
 
     def test_small_and_large_history_budgets_select_whole_pairs_without_six_pair_cutoff(self):
         self.setup_job()
@@ -362,7 +390,7 @@ class PipChatOptionsTests(unittest.TestCase):
             return original_compact(agent, *args, **kwargs)
         def chat(client, messages, tools=None, **kwargs):
             self.assertEqual(client.context_size, 262144)
-            self.assertLessEqual(client._request_max_tokens('medium'), 4096)
+            self.assertLessEqual(client._request_max_tokens('medium'), max(pips._output_budget(self.cfg), 4096) + 2048)
             return ChatResult(content='The selected large window uses the normal DGC loop.')
         with patch.dict(os.environ, {'DGC_SESSION_POLICY': pips._json(pips.native_policy())}), \
              patch.object(Agent, 'maybe_compact', compact), patch.object(LLMClient, 'chat', chat), \

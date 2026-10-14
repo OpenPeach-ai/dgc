@@ -1176,7 +1176,7 @@ def validate_execution_result(result, action):
     if result["tests_executed"] != bool(executed):
         raise _error("The result cannot claim test execution without a started command.", "invalid_execution_result")
     if "tools_called" in result:
-        integer(result["tools_called"], 64)
+        integer(result["tools_called"], 64 if 'specialists' in action else 1_000_000)   # reviewed bound, or real count
     if 'specialists' in action:
         from .pip_specialists import validate_result as validate_specialists
         checked_specialists = validate_specialists(result.get('specialists'), action['specialists'])

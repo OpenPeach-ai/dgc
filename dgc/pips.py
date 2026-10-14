@@ -71,6 +71,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_routines", "add_pip_routine", "update_pip_routine", "delete_pip_routine", "decide_pip_routine",
     "set_pip_profile", "list_pip_shared", "get_pip_computers", "update_pip_computers", "reset_pip_computer", "list_pip_apps",
     "list_pip_plugins", "allow_pip_plugin", "decline_pip_plugin", "list_pip_plugin_uses", "get_pip_chat_context",
+    "set_pip_chat_options",
     "list_pip_reply_stats", "get_pips_limit", "set_pips_limit", "list_pip_attention",
     "list_pip_notes", "add_pip_note", "forget_pip_note", "list_pip_sites", "set_pip_careful", "forget_pip_site",
     "set_plugin_permission",
@@ -112,6 +113,7 @@ _COMMAND_ARGS = {
     "forget_pip_note": {"pip_id", "note_id", "all", "shared"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
     "set_plugin_permission": {"plugin", "level"},
     "forget_pip_site": {"pip_id", "site"}, "get_pip_chat_context": {"pip_id", "context_size"},
+    "set_pip_chat_options": {"pip_id", "chat_options"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
     "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
@@ -216,7 +218,20 @@ MAX_WORKER_INPUT_BYTES = 128 * 1024
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 _THREAD_LOCK = threading.Lock()
 _THREADS: dict[str, threading.Thread] = {}
-_ACTIVE_RUNS: dict[str, str] = {}
+_ACTIVE_RUNS: dict[str, set] = {}      # state directory -> the runs this process is executing
+# Runs at once (founder, 2026-10-14: a Pip run keeps going, so one long run must not hold up every other Pip): one at
+# a time per Pip, several Pips together. `pips_parallel_runs` in DGC's settings; a model served on this machine still
+# answers one request at a time if it can't do more.
+PARALLEL_DEFAULT = 4
+PARALLEL_MAX = 32
+
+
+def parallel_runs(config) -> int:
+    try:
+        value = int(config.get("pips_parallel_runs", PARALLEL_DEFAULT))
+    except (TypeError, ValueError):
+        return PARALLEL_DEFAULT
+    return min(PARALLEL_MAX, max(1, value))
 _DRAIN_FAILURES: dict[str, dict[str, str]] = {}
 _RERUN: set[str] = set()
 AUDIT_SYSTEM_INSTRUCTIONS = (
@@ -453,10 +468,24 @@ def source_revision(root, ref):
     return revision
 
 
-# Tool steps per run. A Pip with its own computer gets more: reading a few pages and clicking through a
-# form is many browser steps, and at 12 a Google search ran out (founder, 2026-10-07: raise it).
-STEPS = 12
-COMPUTER_STEPS = 30
+# A Pip run keeps going (founder, 2026-10-14): no step limit (0, as DGC's own max_turns), no wall clock, and main
+# DGC's output budget per request, in the Pip's own context window (pip_chat_options). It compacts as any DGC session
+# does and ends when its work is done, when the user stops it, or when the Agent's loop guards see it repeating
+# itself. A patch run with reviewed specialists keeps the bounds its grant was reviewed with (BOUNDED_*).
+STEPS = 0
+COMPUTER_STEPS = 0
+BOUNDED_MODEL = {"max_tokens": 4096, "max_turns": 12, "turn_budget_s": MAX_WALL_SECONDS - 10}
+BOUNDED_LIMITS = {"wall_seconds": MAX_WALL_SECONDS, "tool_calls": 64, "iterations": 12}
+OPEN_LIMITS = {"wall_seconds": 0, "tool_calls": 0, "iterations": 0}       # 0: none
+
+
+def _output_budget(config) -> int:
+    """Main DGC's output tokens per request (its `max_tokens`), within what any provider takes."""
+    try:
+        value = int(config.get("max_tokens", 16384))
+    except (TypeError, ValueError):
+        return 16384
+    return min(1_000_000, max(256, value))
 
 
 def _model_settings(config, model_choice=None, *, _prepared=None):
@@ -481,11 +510,12 @@ def _model_settings(config, model_choice=None, *, _prepared=None):
     url = urlsplit(base)
     if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password or url.query or url.fragment:
         raise RegistryError("unsupported_model", "The local model endpoint must be an HTTP(S) URL without credentials or query data.")
+    from .pip_chat_options import CONTEXT_MAX, CONTEXT_MIN, inherited_context
     settings = {"model": model, "base_url": base.rstrip("/"),
             "api_mode": config.get("api_mode", "auto"),
-            "context_size": min(32768, max(2048, int(config.get("context_size", 32768)))),
-            "thinking": "off", "max_tokens": 4096, "max_turns": STEPS,
-            "turn_budget_s": MAX_WALL_SECONDS - 10}
+            "context_size": min(CONTEXT_MAX, max(CONTEXT_MIN, inherited_context(config))),
+            "thinking": "off", "max_tokens": _output_budget(config), "max_turns": STEPS,
+            "turn_budget_s": 0}
     if _prepared is not None and settings != _prepared['settings']:
         raise RegistryError('conflict', 'The model settings changed after preparing this Pip setup. Review it again.')
     return settings
@@ -1079,11 +1109,16 @@ class PipStore:
         if not standalone:
             model = (_model_settings(frozen_config, pip["model_choice"], _prepared=_model_preparation)
                      if _model_preparation is not None else _model_settings(frozen_config, pip["model_choice"]))
+            # The Pip's own context window and thinking, from its prompt box: a reply sent with them keeps them as
+            # the Pip's, and everything it does on its own uses them too.
+            from .pip_chat_options import apply as apply_chat_options, save as save_chat_options, saved as saved_chat_options
+            chosen = (conversation_request['chat_options']
+                      if conversation_request is not None and 'chat_options' in conversation_request
+                      else saved_chat_options(self.db, pip_id))
+            if chosen is not None:
+                model = apply_chat_options(model, chosen, frozen_config)
             if conversation_request is not None and 'chat_options' in conversation_request:
-                from .pip_chat_options import apply as apply_chat_options
-                model = apply_chat_options(model, conversation_request['chat_options'], frozen_config)
-            if personal and pip.get('computer_plan') is not None:
-                model = {**model, 'max_turns': COMPUTER_STEPS}
+                save_chat_options(self.registry, pip_id, chosen)
             from .pip_models import validate_pinned_connection
             validate_pinned_connection(config, model)
         connector_context = None
@@ -1137,8 +1172,7 @@ class PipStore:
                         "model": model["model"] if model is not None else None, "model_settings": model,
                         "policy": "read_only", "tools": sorted(READ_TOOLS),
                         "policy_digest": hashlib.sha256(_json(native_policy(personal=personal)).encode()).hexdigest(),
-                        "limits": {"wall_seconds": MAX_WALL_SECONDS, "tool_calls": 64, "iterations": 12,
-                                   "snapshot_bytes": MAX_SNAPSHOT_BYTES},
+                        "limits": {**OPEN_LIMITS, "snapshot_bytes": MAX_SNAPSHOT_BYTES},
                         "trigger": "schedule" if schedule_occurrence else "manual", "requested_by": actor}
             if not personal and pip.get('github_plan') is not None and run_kind in ("audit", "draft"):
                 manifest['github_plan'] = pip['github_plan']
@@ -1233,6 +1267,9 @@ class PipStore:
                         if specialists is not None:
                             manifest['specialists'] = specialists
                             manifest['tools'] = sorted(set(manifest['tools']) | {'task'})
+                            # Reviewed specialists keep the bounds their grant was reviewed with.
+                            manifest['limits'] = {**manifest['limits'], **BOUNDED_LIMITS}
+                            manifest['model_settings'] = {**manifest['model_settings'], **BOUNDED_MODEL}
                         manifest["policy_digest"] = hashlib.sha256(_json(native_policy(action)).encode()).hexdigest()
                 if schedule_occurrence is not None:
                     from .pip_schedules import plan_due, occurrence_key, timestamp
@@ -1552,9 +1589,12 @@ class PipStore:
             from .pip_daemon import is_runtime_paused
             if is_runtime_paused(self.registry):
                 return None
+            # The oldest queued run of a Pip that has none running: several Pips run together, each one at a time.
             row = self.db.execute("""SELECT r.id FROM pip_runs r JOIN pips p ON p.id=r.pip_id
                 WHERE r.status='queued' AND (p.status='active' OR (p.status='paused' AND EXISTS
-                  (SELECT 1 FROM pip_chat_messages m WHERE m.run_id=r.id AND m.role='user'))) ORDER BY r.created_at,r.id LIMIT 1""").fetchone()
+                  (SELECT 1 FROM pip_chat_messages m WHERE m.run_id=r.id AND m.role='user')))
+                  AND NOT EXISTS (SELECT 1 FROM pip_runs o WHERE o.pip_id=r.pip_id AND o.status IN ('running','cancelling'))
+                ORDER BY r.created_at,r.id LIMIT 1""").fetchone()
             if row is None:
                 return None
             row = self._transition_row(row['id'])
@@ -1860,6 +1900,8 @@ class _WorkerUI:
     deny_reason = "Manual auditor policy is read-only."
     plan_feedback = ""
 
+    tool_cap = None                     # a patch run with reviewed specialists: 64 (BOUNDED_LIMITS)
+
     def __init__(self, emit):
         self.emit = emit
         self.read_calls = 0
@@ -1880,10 +1922,10 @@ class _WorkerUI:
 
     def tool_call(self, name, args, call_id=None):
         self.calls += 1
-        if self.calls > 64:
+        if self.tool_cap is not None and self.calls > self.tool_cap:
             if self.agent is not None:
                 self.agent.cancelled.set()
-            raise RegistryError("tool_limit", "The audit exceeded its 64 tool-call budget.")
+            raise RegistryError("tool_limit", f"The run exceeded its reviewed {self.tool_cap} tool-call budget.")
         self.emit({"kind": "tool_call", "tool": str(name)[:80], "call_id": str(call_id or "")[:120],
                    "path": str(args.get("path", ""))[:512]})
 
@@ -1969,7 +2011,8 @@ class _ConversationUI(_WorkerUI):
             self.stream_bytes += len(chunk.encode("utf-8"))
             self.stream_events += 1
             if self.stream_bytes > MAX_REPLY_BYTES or self.stream_events > 512:
-                raise RegistryError("output_limit", "The conversational stream exceeded its bounded output budget.")
+                # A long run says more than a reply: past this the live view stops; the reply itself still arrives.
+                continue
             self.emit({"kind": "text_delta", "text": chunk})
 
     def on_text(self, chunk):
@@ -2206,9 +2249,6 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _new_client(self, *args, **kwargs):
             client = super()._new_client(*args, **kwargs)
-            if chat_options is not None:
-                from .pip_chat_options import bind_client
-                client = bind_client(client)
             return specialist_budget.wrap(client, self._pip_specialist_record) if specialist_budget is not None else client
 
         def _effective_thinking(self, user_text):
@@ -2563,6 +2603,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         from .pip_source_changes import validate_for_source
         changes_since_checkpoint = validate_for_source(manifest["changes_since_checkpoint"], source, checkpoint)
     ui = _ConversationUI(emit, config) if conversation is not None else _WorkerUI(emit)
+    if specialist_pin is not None:
+        ui.tool_cap = BOUNDED_LIMITS["tool_calls"]
     mcp = MCPManager(snapshot)
     agent = ReadOnlyAuditor(config, ui, mcp=mcp)
     if specialist_budget is not None:
@@ -2898,7 +2940,7 @@ def _worker_main():
         "fallback_model": "", "fallback_base_url": "", "fallback_api_key": "",
         "mcp_servers": {}, "hooks": {}, "code_action": False, "ultra_mode": False,
         "verify_before_done": False, "verify_command": "", "autonomous_gate": "",
-        "artifact_autostart": False, "tool_profile": "standard", "model_stall_retries": 0,
+        "artifact_autostart": False, "tool_profile": "standard",
     }.items():
         config.set(key, value, persist=False)
     config.permissions = {"allow": [], "ask": [], "deny": []}
@@ -3032,6 +3074,8 @@ def _execute_pulse_plan(registry, row, manifest, config, deadline):
 
 def _execute_run(registry, row, config):
     _require_runner_platform()
+    # What still has a clock: a standalone Pulse, the app reads before the model, reviewed specialists. The model's
+    # own run has none (a Pip run keeps going), unless its manifest is bounded (BOUNDED_LIMITS).
     deadline = time.monotonic() + MAX_WALL_SECONDS
     from .pip_daemon import is_runtime_paused
     if config.get("pips_enabled", False) is not True or is_runtime_paused(registry):
@@ -3254,6 +3298,8 @@ def _execute_run(registry, row, config):
     timed_out = threading.Event()
     state_unavailable = threading.Event()
     execution_cancel = threading.Event()
+    bounded = int((manifest.get("limits") or {}).get("wall_seconds") or 0) > 0
+    model_deadline = deadline if bounded else float("inf")
 
     def watch():
         try:
@@ -3262,9 +3308,9 @@ def _execute_run(registry, row, config):
                     if config.get("pips_enabled", False) is not True or is_runtime_paused(watcher):
                         PipStore(watcher).cancel(row["id"], "runner-stop")
                     status = watcher.db.execute("SELECT status FROM pip_runs WHERE id=?", (row["id"],)).fetchone()
-                    if not status or status[0] == "cancelling" or time.monotonic() >= deadline:
+                    if not status or status[0] == "cancelling" or time.monotonic() >= model_deadline:
                         execution_cancel.set()
-                        if time.monotonic() >= deadline:
+                        if time.monotonic() >= model_deadline:
                             timed_out.set()
                         _terminate(proc)
                         return
@@ -3290,7 +3336,8 @@ def _execute_run(registry, row, config):
             if not line:
                 break
             total += len(line)
-            if len(line) > 65536 or total > 512 * 1024:
+            # One line is bounded; a run that keeps going says as much as it needs over its life.
+            if len(line) > 65536 or (bounded and total > 512 * 1024):
                 raise RegistryError("output_limit", "The worker exceeded its bounded output budget.")
             try:
                 event = json.loads(line)
@@ -3316,7 +3363,7 @@ def _execute_run(registry, row, config):
         if state_unavailable.is_set():
             raise RegistryError("runner_state_unavailable", "The worker stopped because its local runner state could not be checked.")
         if timed_out.is_set():
-            raise RegistryError("timeout", "The audit exceeded its five-minute wall-clock budget.")
+            raise RegistryError("timeout", "The run exceeded its reviewed five-minute wall-clock budget.")
         if not confirmed or rc or not isinstance(result, dict) or failure:
             if isinstance(failure, dict):
                 raise RegistryError(str(failure.get("code", "worker_failed")), str(failure.get("message", "Audit failed.")))
@@ -3339,9 +3386,13 @@ def _execute_run(registry, row, config):
         if action is not None:
             from .pip_execution import collect_artifacts, run_reviewed_tests, validate_execution_result
 
+            # The reviewed tests have a clock of their own, from when they start: the model's run before them
+            # may have taken as long as it needed.
+            tests_deadline = time.monotonic() + MAX_WALL_SECONDS
+
             class CancelledExecution:
                 def is_set(self):
-                    if time.monotonic() >= deadline:
+                    if time.monotonic() >= tests_deadline:
                         timed_out.set()
                     # This method is called in the controller thread before each
                     # reviewed command as well as during capture. Recheck authority
@@ -3426,38 +3477,77 @@ def _drain(config, directory):
         return
     try:
         with WorkspaceRegistry(directory) as registry:
-            store = PipStore(registry)
-            store.recover()
-            from .pip_run_cleanup import prune_finished, prune_run
+            PipStore(registry).recover()
+            from .pip_run_cleanup import prune_finished
             try:
                 prune_finished(registry)    # copies left by earlier runs, a bounded batch at a time
             except Exception:
                 pass                        # disk housekeeping never stops queued work
-            while config.get("pips_enabled", False) is True:
-                row = store.claim_next()
-                if row is None:
-                    break
-                with _THREAD_LOCK:
-                    _ACTIVE_RUNS[str(directory)] = row["id"]
-                try:
-                    result = _execute_run(registry, row, config)
-                    store.finish(row["id"], result=result)
-                    _run_granted_actions(registry, config, row["id"])
-                except Exception as exc:
-                    from .redaction import redact_text, secret_values
-                    store.finish(row["id"], error={"code": getattr(exc, "code", "run_failed"),
-                        "message": redact_text(str(exc), secret_values(config))[:1500]})
-                finally:
-                    with _THREAD_LOCK:
-                        _ACTIVE_RUNS.pop(str(directory), None)
-                try:
-                    status = registry.db.execute("SELECT status FROM pip_runs WHERE id=?", (row["id"],)).fetchone()
-                    if status and status[0] in TERMINAL:
-                        prune_run(registry.directory, row["id"])
-                except Exception:
-                    pass
+        # Several workers under the one lease, each with its own registry connection. A worker with nothing to claim
+        # keeps looking while another still runs: a run queued during a long one starts at once, not after it.
+        busy = [0]
+        failures: list[BaseException] = []
+        guard = threading.Lock()
+
+        def worker():
+            try:
+                with WorkspaceRegistry(directory) as registry:
+                    store = PipStore(registry)
+                    while config.get("pips_enabled", False) is True:
+                        row = store.claim_next()
+                        if row is None:
+                            with guard:
+                                if busy[0] == 0:
+                                    return
+                            time.sleep(1.0)
+                            continue
+                        with guard:
+                            busy[0] += 1
+                        try:
+                            _run_claimed(registry, store, row, config, directory)
+                        finally:
+                            with guard:
+                                busy[0] -= 1
+            except BaseException as exc:     # surfaced as the controller's failure below
+                with guard:
+                    failures.append(exc)
+
+        workers = [threading.Thread(target=worker, name=f"dgc-pips-run-{n}", daemon=True)
+                   for n in range(parallel_runs(config))]
+        for thread in workers:
+            thread.start()
+        for thread in workers:
+            thread.join()
+        if failures:
+            raise failures[0]
     finally:
         lease.release()
+
+
+def _run_claimed(registry, store, row, config, directory):
+    from .pip_run_cleanup import prune_run
+    with _THREAD_LOCK:
+        _ACTIVE_RUNS.setdefault(str(directory), set()).add(row["id"])
+    try:
+        result = _execute_run(registry, row, config)
+        store.finish(row["id"], result=result)
+        _run_granted_actions(registry, config, row["id"])
+    except Exception as exc:
+        from .redaction import redact_text, secret_values
+        store.finish(row["id"], error={"code": getattr(exc, "code", "run_failed"),
+            "message": redact_text(str(exc), secret_values(config))[:1500]})
+    finally:
+        with _THREAD_LOCK:
+            owned = _ACTIVE_RUNS.get(str(directory), set())
+            owned.discard(row["id"])
+            if not owned:
+                _ACTIVE_RUNS.pop(str(directory), None)
+    try:
+        status = registry.db.execute("SELECT status FROM pip_runs WHERE id=?", (row["id"],)).fetchone()
+        if status and status[0] in TERMINAL:
+            prune_run(registry.directory, row["id"])
+    except Exception:
+        pass
 
 
 def start_queued(config):
@@ -3533,10 +3623,17 @@ def clear_drain_failure(directory):
         _DRAIN_FAILURES.pop(key, None)
 
 
-def active_run_id(directory):
-    """Process-local ownership only; never derive a kill target from a stored PID."""
+def active_run_ids(directory) -> list:
+    """The runs this process is executing for a state directory. Process-local ownership only; never derive a kill
+    target from a stored PID."""
     with _THREAD_LOCK:
-        return _ACTIVE_RUNS.get(str(directory))
+        return sorted(_ACTIVE_RUNS.get(str(directory), ()))
+
+
+def active_run_id(directory):
+    """One of them (the first), or None."""
+    owned = active_run_ids(directory)
+    return owned[0] if owned else None
 
 
 def handle_control(config, request: dict, device_id: str, *, start_worker=True) -> dict:
@@ -3790,6 +3887,15 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "A Pip's chat is on this computer only.")
                 result = reply_stats(store, pip_id, request.get('run_ids'))
+            elif command == 'set_pip_chat_options':
+                # The prompt box's context window and thinking (API 47): kept as this Pip's own, for its replies
+                # and everything it does on its own.
+                from .pip_chat_options import controls, save
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "A Pip's chat is on this computer only.")
+                store._job(pip_id)
+                save(registry, pip_id, request.get('chat_options'))
+                result = {'chat_controls': controls(store, pip_id, config)}
             elif command == 'get_pip_chat_context':
                 # The prompt box's context meter: how much of the window this chat takes next reply.
                 from .pip_chat_options import context_estimate

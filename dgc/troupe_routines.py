@@ -2,8 +2,8 @@
 findings", on its own, with the results in a Pip's chat.
 
 A Personal Pip's routine (pip_routines) may carry a troupe instead of a prompt to act on. When it is due, the Pips
-runner starts the troupe as a job of its own rather than as one of the Pip's runs: a Pip run is short (five minutes,
-twelve model requests) and one at a time across every Pip, and a troupe is many agents for many minutes. The job:
+runner starts the troupe as a job of its own rather than as one of the Pip's runs: a Pip run is one agent, one at a
+time per Pip, and a troupe is many agents at once on a snapshot of the project. The job:
 
 - reads the project's COMMITTED code (a snapshot of HEAD, as a scheduled project Pip does), with read-only agents
   only: a troupe on a schedule never writes, so a "change" troupe or one with a worker can't be scheduled;

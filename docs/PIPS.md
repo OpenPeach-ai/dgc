@@ -453,8 +453,11 @@ failed runs. Marking one read approves, rejects or starts nothing.
 
 **Chat with a Pip.** Each Pip has its own conversation. A project Pip can read its
 approved source while it answers, but it can't edit files, run commands or change
-its own job. For one reply you can choose a context size and a reasoning level;
-these don't change the Pip's job. A Pip answers only while the runner is running.
+its own job. In its message box you choose its **context window** and how much it
+**thinks**, as in DGC's own chat; they are that Pip's own, saved as you change them,
+and apply to its replies and to everything it does on its own (schedules, routines,
+triggers, handoffs). A new Pip starts with DGC's context window. They don't change the
+Pip's job. A Pip answers only while the runner is running.
 
 You can send a Personal Pip images and files with a message, as in the main chat: use the attach
 button, paste, or drop them on the message box. Images, text and code files, and PDF, Word,
@@ -936,9 +939,14 @@ than run unconfined.
 
 ## Limits
 
-- One run at a time per runner, at most 20 queued or running.
-- A run has five minutes in total, up to 12 model turns and 64 tool calls, and up
-  to 4,096 output tokens per model response.
+- A run keeps going until its work is done: no step limit, no time limit, and DGC's own
+  output budget per model response, in the Pip's own context window. It compacts as a DGC
+  chat does when the window fills. It ends when it finishes, when you press **Stop**, or
+  when it repeats itself without progress (the same call over and over, or a page that a
+  click never changes). A Patch with reviewed specialists keeps the budget its review
+  set: five minutes, 12 model turns, 64 tool calls, 4,096 output tokens.
+- Up to four Pips run at once (`pips_parallel_runs`, 1 to 32), each one run at a time; at
+  most 20 runs queued or running.
 - Source copies: up to 10,000 files and folders, 4 MiB per file, 64 MiB in total.
   A committed symbolic link or submodule fails the run.
 - Pulse and Patch commands: up to four per run, each with 60 seconds, 30 CPU

@@ -114,6 +114,7 @@ export type PipMutationParams = {
   add_pip_note: { pip_id: string; text: string; shared?: true };
   forget_pip_note: { pip_id: string; note_id?: string; all?: true; shared?: true };
   set_pip_careful: { pip_id: string; on: boolean };
+  set_pip_chat_options: { pip_id: string; chat_options: PipChatOptions };
   set_plugin_permission: { plugin: string; level: "always_ask" | "any_changes" | "important" | "never_ask" };
   forget_pip_site: { pip_id: string; site: string };
   set_pips_limit: { max_pips: number };
@@ -204,6 +205,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   set_plugin_permission: ["level", "plugin"],
   forget_pip_site: ["pip_id", "site"],
   get_pip_chat_context: ["pip_id", "context_size"],
+  set_pip_chat_options: ["pip_id", "chat_options"],
   list_pip_reply_stats: ["pip_id", "run_ids"],
   get_pips_limit: [],
   set_pips_limit: ["max_pips"],
@@ -561,6 +563,9 @@ for (const command of API44_MUTATIONS) MUTATIONS.add(command);
 // API 45: what each plugin may do without asking (ChatGPT's four levels), for every Pip; local only.
 const API45_MUTATIONS = new Set(["set_plugin_permission"]);
 for (const command of API45_MUTATIONS) MUTATIONS.add(command);
+// API 47: a Pip's context window and thinking are its own (its prompt box), for all its runs; local only.
+const API47_MUTATIONS = new Set(["set_pip_chat_options"]);
+for (const command of API47_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -649,7 +654,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API47_MUTATIONS.has(command) ? 47 : API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -736,7 +741,10 @@ export class Pips {
     if (command === "propose_pip_update" && calendarPlan?.schema_version === 2 && (this.caps.pips_api_version as number) < 33) {
       throw new DGCUnsupportedError("Recurring calendar windows require Pips API 33 or newer");
     }
-    if (command === "send_pip_message" && Object.hasOwn(values, "chat_options")) {
+    if (command === "set_pip_chat_options" && !Object.hasOwn(values, "chat_options")) {
+      throw new DGCConfigError("set_pip_chat_options requires chat_options");
+    }
+    if ((command === "send_pip_message" || command === "set_pip_chat_options") && Object.hasOwn(values, "chat_options")) {
       if ((this.caps.pips_api_version as number) < 24) {
         throw new DGCUnsupportedError("Per-message reply controls require a runtime advertising Pips API 24 or newer");
       }

@@ -437,8 +437,9 @@ written with mode 0600. Both export forms need Linux.
 ## The runner
 
 The runner (supervisor) is a separate local process. It writes a heartbeat every two
-seconds, fires due schedules and triggers, and executes queued runs one at a time
-under the `pips-runner` lease. Only one supervisor can run per state folder. A
+seconds, fires due schedules and triggers, and executes queued runs under the
+`pips-runner` lease: up to `pips_parallel_runs` at once (default 4, at most 32), never two
+of one Pip together (`claim_next` takes the oldest queued run of a Pip with none running). Only one supervisor can run per state folder. A
 heartbeat older than 15 seconds reads as offline. Queueing a run, a chat reply or a
 handoff needs a live supervisor: a fresh heartbeat and a held lease.
 
@@ -510,9 +511,14 @@ private `artifacts/documentation.md`.
 **Conversations.** A message is up to 4,000 characters (8 KiB); a reply up to 24 KiB.
 Recent complete exchanges are sent with the next message, up to half the reply's
 context budget (at most 64 KiB); older exchanges are folded into a summary of at most
-8 KiB, which you can inspect. Per-reply options: `context_size` 2,048 to 1,048,576
-and `thinking` `off`, `low`, `medium`, `high` or `xhigh`. Scheduled and handoff runs
-use at most a 32K context, 4,096 output tokens and no extra reasoning.
+8 KiB, which you can inspect. The Pip's options: `context_size` 2,048 to 1,048,576
+and `thinking` `off`, `low`, `medium`, `high` or `xhigh`, kept per Pip in registry
+metadata (`pip_chat_options:<pip>`) by `set_pip_chat_options {pip_id, chat_options}` (API 47,
+local only) or by a message sent with them, and applied to every run of that Pip
+(scheduled, routine, trigger and handoff runs too). Without any, a run uses DGC's
+`context_size` and thinking off. Every run requests DGC's `max_tokens` per response and
+has no step or time limit (`max_turns` 0, `turn_budget_s` 0; the manifest's `limits` are 0,
+meaning none), except a Patch with reviewed specialists, whose bounds stay as reviewed.
 
 ## Schedules and event triggers
 
@@ -1084,12 +1090,13 @@ passed on. Personal Pips can't hand off to project Pips.
 
 | Item | Limit |
 | --- | --- |
-| Concurrent runs per runner | 1 |
+| Concurrent runs per runner | `pips_parallel_runs` (default 4, 1–32); one per Pip |
 | Queued, running and cancelling runs | 20 |
-| Run wall time | 300 seconds, including commands |
-| Model turns per run | 12 |
-| Tool calls per run | 64 |
-| Output tokens per model response | 4,096 |
+| Run wall time | none (a reviewed specialist Patch: 300 seconds) |
+| Model turns per run | none (specialist Patch: 12) |
+| Tool calls per run | none (specialist Patch: 64) |
+| Output tokens per model response | DGC's `max_tokens` (specialist Patch: 4,096) |
+| Reviewed commands of a run | 300 seconds from when they start |
 | Worker input | 128 KiB |
 | Source copy | 10,000 entries, 4 MiB per file, 64 MiB total |
 | Commands per action | 4 (Pulse 1–4, Patch 0–4) |

@@ -30,8 +30,9 @@ def _canonical_key(project_root) -> str:
 def _lock_directory() -> Path:
     """Return an owner-private directory shared by this user's DGC processes."""
     try:
-        from .config import dgc_home
-        base = dgc_home() / "locks"
+        # The account's, even for an isolated SDK session (DGC_HOME): a lock keeps two DGCs from writing the same
+        # project files at once, and the files are shared whatever DGC's home is.
+        base = Path.home() / ".dgc" / "locks"
     except (RuntimeError, OSError):
         identity = str(os.getuid()) if hasattr(os, "getuid") else "user"
         base = Path(tempfile.gettempdir()) / f"dgc-locks-{identity}"

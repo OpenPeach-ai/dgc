@@ -139,3 +139,25 @@ test('the Pip in a chat\'s header is never clipped when it hops: only its name i
   assert.deepEqual(got,{avatar:'visible',body:'visible',name:'hidden'},'the name\'s ellipsis must not clip the Pip, whose drawing is spans too');
  }finally{await browser.close();}
 });
+
+test('since API 47 the prompt box\'s context and thinking are the Pip\'s own, saved as soon as they change',async()=>{
+ const x=setup({api:47,chatControls:{...controls(),context_max:1048576}});await x.select('a');
+ assert.match(x.control('#chat-thinking').title,/For this Pip: its replies and the work it does on its own/);
+ assert.match(x.d.querySelector('.composer-note').textContent,/For this Pip/);
+ x.choose('#chat-context','262144');
+ const saved=x.requests('set_pip_chat_options');
+ assert.equal(saved.length,1,'saved at once, no reply needed');
+ assert.deepEqual(JSON.parse(JSON.stringify(saved[0].request)),{type:'set_pip_chat_options',pip_id:'a',chat_options:{context_size:262144,thinking:'off'}});
+ x.answer(saved[0],{chat_controls:{...controls({context_size:262144,thinking:'off'}),context_max:1048576,effective_context_size:262144}});await x.drain();
+ assert.equal(x.control('#chat-context').value,'262144');
+ x.choose('#chat-thinking','high');
+ assert.equal(x.requests('set_pip_chat_options')[1].request.chat_options.thinking,'high');
+ assert.equal(x.requests('propose_pip_update').length,0,'never a job change');
+});
+
+test('before API 47 a choice is for the next reply only and nothing is saved',async()=>{
+ const x=setup({api:46,chatControls:{...controls(),context_max:1048576}});await x.select('a');
+ x.choose('#chat-context','65536');
+ assert.equal(x.requests('set_pip_chat_options').length,0);
+ assert.match(x.control('#chat-thinking').title,/next reply/i);
+});
