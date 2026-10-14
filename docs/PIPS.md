@@ -207,8 +207,7 @@ and DGC handles each:
   Switch the distro to WSL 2 in Windows: `wsl --set-version <distro> 2`.
 - **Notifications** are Windows' own, shown through Windows PowerShell.
 
-This needs WSL interop (on unless `/etc/wsl.conf` turns it off). Not yet tested on a Windows
-machine.
+This needs WSL interop (on unless `/etc/wsl.conf` turns it off).
 
 On Windows outside WSL (a native DGC, experimental) the Pips view says Pips are not available,
 the main chat has no Pips tools and `dgc pips` explains the same, so nothing can be created that

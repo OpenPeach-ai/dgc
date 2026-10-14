@@ -378,8 +378,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 ### Windows: DGC inside WSL
 
 A Windows user's DGC is a Linux install inside WSL (the installer is a shell script, and VS Code and Cursor connect to
-it there). DGC now notices it is in WSL and handles the four ways WSL differs. None of this has run on a Windows
-machine yet; each part is tested here with Windows faked at its edges, and the relay below with real PowerShell.
+it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 
 - **Keep Pips running works in WSL.** WSL stops a distro soon after the last Windows program attached to it exits,
   systemd services included, so the systemd unit kept nothing running once the editor closed. In WSL the switch now
