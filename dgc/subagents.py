@@ -798,7 +798,7 @@ def restore_records(messages, session_key: str, *,
         call_id = str(call.get("id") or "")
         description = redact(str(args.get("description") or ""))
         state, message = outcome
-        digest = hashlib.sha1(f"{session_key}:{index}:{call_index}".encode()).hexdigest()[:12]
+        digest = hashlib.sha1(f"{session_key}:{index}:{call_index}".encode(), usedforsecurity=False).hexdigest()[:12]  # an id, not a secret
         agent_type = redact(str(args.get("agent") or "")) if isinstance(args.get("agent"), str) else ""
         records.append({
             "id": f"sub-{digest}", "parent_id": None,

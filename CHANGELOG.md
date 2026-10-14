@@ -6,6 +6,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+### Security
+
+- **urllib3 2.8.0** (was 2.7.0) in the runtime lock: CVE-2026-97689 and CVE-2026-97688 (a malicious or broken server
+  streaming a chunked or compressed response could make DGC buffer without bound or loop), and CVE-2026-97687 (TLS
+  settings for an HTTPS proxy and the target server not kept apart). DGC streams every model response.
+- A sub-agent record's SHA-1 id says it is not a security use (`usedforsecurity=False`), as the code scan asked.
+
 ### ChatDGC
 
 - **One memory, written everywhere.** Work sessions and Pips now add to the memory ChatDGC keeps, under the same

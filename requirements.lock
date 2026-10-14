@@ -13,5 +13,5 @@ Pygments==2.20.0
 pypdf==6.19.0
 requests==2.34.2
 rich==15.0.0
-urllib3==2.7.0
+urllib3==2.8.0
 wcwidth==0.8.2
