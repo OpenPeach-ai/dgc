@@ -27,8 +27,10 @@ LOCK_ENTRY_RE = re.compile(
     r"([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)=="
     r"([A-Za-z0-9](?:[A-Za-z0-9.!+_-]*[A-Za-z0-9])?)\Z"
 )
+# A key starts at a word's edge: "befo-re_and_after_not_execution_attestation" (a runtime constant) is not a Resend
+# key, and refusing the release over it stopped the 0.48 build.
 SECRET_RE = re.compile(
-    rb"(?:AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{24,}|github_pat_[A-Za-z0-9_]{20,}"
+    rb"(?<![A-Za-z0-9_])(?:AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{24,}|github_pat_[A-Za-z0-9_]{20,}"
     rb"|gh[pousr]_[A-Za-z0-9]{30,}|re_[A-Za-z0-9_-]{24,}"
     rb"|-----BEGIN [A-Z ]*PRIVATE KEY-----)"
 )
