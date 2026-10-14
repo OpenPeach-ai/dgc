@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 44
+SCHEMA_VERSION = 45
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -382,6 +382,12 @@ class WorkspaceRegistry:
             # What each Personal Pip remembers about you, from your chat, deletable (pip_notes.SCHEMA).
             from .pip_notes import SCHEMA as notes_schema
             _execute_schema(self.db, notes_schema)
+        if version < 45:
+            # A routine may run a troupe on a schedule (pip_routines.TROUPE_COLUMN, troupe_routines).
+            # Idempotent, as every CREATE ... IF NOT EXISTS above is: a registry may be re-stamped older.
+            from .pip_routines import TROUPE_COLUMN
+            if "troupe" not in {row[1] for row in self.db.execute("PRAGMA table_info(pip_routines)")}:
+                self.db.execute(TROUPE_COLUMN)
         # Schema33 admits explicit version3 bounded additional app-read grants.
         # Schema32 adds explicit guest and finite-series semantics to calendar drafts/actions.
         # Older readers must refuse the registry instead of rendering a partial review.

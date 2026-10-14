@@ -13,6 +13,10 @@ Two kinds of "when":
   first email check only notes what is already there; each later one that finds new items runs the
   routine with up to five of them as untrusted data, and no item runs twice.
 
+A routine may run a troupe instead (troupe_routines): many read-only agents on a project's committed
+code, as a job of its own, with the Pip telling the user what it found. It is scheduled from a DGC
+chat, where the user approves it, and only on a schedule.
+
 A routine the user adds in the Pip's Settings is on at once. One the Pip suggests in its chat
 (add_routine) waits for the user's Add on its card. A busy Pip keeps a due routine for the next
 check; a Pip over its daily token limit skips it, and says so in Settings.
@@ -67,6 +71,9 @@ CREATE TABLE IF NOT EXISTS pip_routines (
 CREATE INDEX IF NOT EXISTS pip_routines_due ON pip_routines(status, next_due_at);
 CREATE INDEX IF NOT EXISTS pip_routines_pip ON pip_routines(pip_id, created_at);
 """
+# Schema 45: a routine that runs a troupe holds its work order here (troupe_routines.validate); NULL for the rest.
+TROUPE_COLUMN = ("ALTER TABLE pip_routines ADD COLUMN troupe TEXT "
+                 "CHECK(troupe IS NULL OR length(CAST(troupe AS BLOB)) <= 32768)")
 
 
 # --------------------------------------------------------------------------- time
@@ -149,12 +156,20 @@ def label(trigger: dict) -> str:
     return f"on the schedule {spec['cron']}"
 
 
+def _troupe(row):
+    return row["troupe"] if "troupe" in row.keys() and row["troupe"] else None
+
+
 def projection(row) -> dict:
     trigger = json.loads(row["trigger"])
-    return {"id": row["id"], "pip_id": row["pip_id"], "workspace_id": row["workspace_id"], "title": row["title"],
-            "prompt": row["prompt"], "trigger": trigger, "label": label(trigger), "status": row["status"],
-            "created_by": row["created_by"], "run_id": row["run_id"], "next_due_at": row["next_due_at"], "last_run_at": row["last_run_at"],
-            "last_error": row["last_error"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
+    value = {"id": row["id"], "pip_id": row["pip_id"], "workspace_id": row["workspace_id"], "title": row["title"],
+             "prompt": row["prompt"], "trigger": trigger, "label": label(trigger), "status": row["status"],
+             "created_by": row["created_by"], "run_id": row["run_id"], "next_due_at": row["next_due_at"], "last_run_at": row["last_run_at"],
+             "last_error": row["last_error"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
+    if _troupe(row):
+        from .troupe_routines import summary
+        value["troupe"] = summary(json.loads(row["troupe"]))     # only on a troupe routine: older editors ignore it
+    return value
 
 
 def _first_due(trigger: dict, now: datetime) -> str | None:
@@ -191,7 +206,7 @@ def listing(store, pip_id) -> dict:
     return {"pip_id": pip_id, "workspace_id": job["workspace_id"], "routines": [projection(r) for r in rows]}
 
 
-def _insert(store, pip_id, title, prompt, trigger, *, status, created_by, run_id=None) -> dict:
+def _insert(store, pip_id, title, prompt, trigger, *, status, created_by, run_id=None, troupe=None) -> dict:
     registry = store.registry
     job = _personal(store, pip_id)
     trigger = validate_trigger(trigger)
@@ -206,9 +221,10 @@ def _insert(store, pip_id, title, prompt, trigger, *, status, created_by, run_id
     # (Inside the transaction that saves a chat reply, for a routine the Pip suggested.)
     with contextlib.nullcontext() if registry.db.in_transaction else registry.transaction():
         registry.db.execute("INSERT INTO pip_routines(id,pip_id,workspace_id,title,prompt,trigger,status,created_by,run_id,"
-                            "anchor_at,next_due_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            "anchor_at,next_due_at,created_at,updated_at,troupe) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                             (routine_id, pip_id, job["workspace_id"], title, prompt, json.dumps(trigger), status, created_by,
-                             run_id, stamp(now), _first_due(trigger, now) if status == "on" else None, stamp(now), stamp(now)))
+                             run_id, stamp(now), _first_due(trigger, now) if status == "on" else None, stamp(now), stamp(now),
+                             None if troupe is None else json.dumps(troupe)))
         registry.event(job["workspace_id"], "pip_routine_added", pip_id=pip_id,
                        payload={"routine_id": routine_id, "status": status, "by": created_by})
     return projection(_row(registry, pip_id, routine_id))
@@ -217,6 +233,15 @@ def _insert(store, pip_id, title, prompt, trigger, *, status, created_by, run_id
 def add(store, pip_id, title, prompt, trigger) -> dict:
     """The user adds a routine in the Pip's Settings: it is on at once."""
     return _insert(store, pip_id, title, prompt, trigger, status="on", created_by="user")
+
+
+def add_troupe(store, pip_id, title, payload, trigger) -> dict:
+    """A troupe on a schedule, which the user approved in a DGC chat (troupe_routines.schedule): on at once."""
+    from .troupe_routines import describe, validate
+    payload = validate(payload)
+    if validate_trigger(trigger)["kind"] != "schedule":
+        raise RegistryError("invalid_routine", "A troupe routine runs on a schedule.")
+    return _insert(store, pip_id, title, describe(payload)[:4000], trigger, status="on", created_by="user", troupe=payload)
 
 
 def update(store, pip_id, routine_id, changes: dict) -> dict:
@@ -228,6 +253,11 @@ def update(store, pip_id, routine_id, changes: dict) -> dict:
     row = _row(registry, pip_id, routine_id)
     if row["status"] in ("suggested", "declined"):
         raise RegistryError("invalid_state", "Add this routine first.")
+    if _troupe(row) and "prompt" in changes and changes["prompt"] != row["prompt"]:
+        raise RegistryError("invalid_request", "This routine runs a troupe: ask for a new one in a DGC chat to change "
+                                               "what it does.")
+    if _troupe(row) and "trigger" in changes and (changes["trigger"] or {}).get("kind") != "schedule":
+        raise RegistryError("invalid_routine", "A troupe routine runs on a schedule.")
     fields = {}
     if "title" in changes:
         fields["title"] = _text(changes["title"], 160, "its name")
@@ -471,6 +501,24 @@ def check(registry, config, row, *, reader=None, now=None) -> str:
             _record(registry, row, next_due_at=following, last_checked_at=stamp(now),
                     last_error="Skipped: it reached its daily token limit.")
             return "daily_cap"
+        status = "on" if following is not None else "off"         # a one-time routine is done
+        if _troupe(row):
+            # A job of its own, not one of the Pip's runs (troupe_routines). One at a time: a due one waits for
+            # the next heartbeat, on this occurrence. Its cursor moves first, so a quick job's own writes never
+            # race the move.
+            from . import troupe_routines
+            if troupe_routines.busy():
+                _record(registry, row, last_checked_at=stamp(now), last_error=None)
+                return "busy"
+            if not _record(registry, row, next_due_at=following, status=status, last_run_at=stamp(now),
+                           last_checked_at=stamp(now), last_error=None):
+                return "changed"
+            try:
+                troupe_routines.start(registry.directory, config, row, f"schedule:{due}")
+            except RegistryError as exc:
+                _record(registry, _row(registry, row["pip_id"], row["id"]), last_error=str(exc)[:500])
+                return "error"
+            return "started"
         try:
             _fire(store, row, config, "", f"schedule:{due}")
         except RegistryError as exc:
@@ -479,7 +527,6 @@ def check(registry, config, row, *, reader=None, now=None) -> str:
             _record(registry, row, last_checked_at=stamp(now),
                     last_error=None if exc.code == "conversation_busy" else str(exc)[:500])
             return "busy"
-        status = "on" if following is not None else "off"         # a one-time routine is done
         _record(registry, row, next_due_at=following, status=status, last_run_at=stamp(now),
                 last_checked_at=stamp(now), last_error=None)
         return "ran"

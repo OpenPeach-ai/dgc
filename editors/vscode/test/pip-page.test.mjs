@@ -87,6 +87,20 @@ test('you add a routine in a few words; its switch turns it off; editing saves o
  assert.deepEqual(Object.keys(edit.request.changes).sort(),['prompt','title'],'the same "when" is not sent: its schedule is not restarted');
 });
 
+test('a routine that runs a troupe says so, and its form keeps what it does',async()=>{
+ const troupe={title:'Weekly review',plan:'Review → Verify',project:'repo',items:'the files changed since it last ran'};
+ const x=setup({list:[routine({title:'Weekly review',prompt:'Run the troupe "Weekly review" (Review → Verify) on the files changed since it last ran in repo.',troupe,trigger:{kind:'schedule',schedule:{type:'cron',cron:'0 9 * * 1',timezone:'UTC'}}})]});
+ await openPage(x);
+ assert.match(x.d.querySelector('.routine-row').textContent,/Weekly review.*Mondays at 09:00.*Troupe · Review → Verify · repo/);
+ x.click(`[data-routine-edit="${R1}"]`);
+ const prompt=x.d.querySelector('#routinePrompt');
+ assert.ok(prompt.readOnly,'what it does was approved in a chat');
+ assert.match(x.d.querySelector('#routineTroupeNote').textContent,/runs a troupe on repo: the files changed since it last ran\. To change what it does, ask for a new one in a DGC chat\./);
+ const kinds=[...x.d.querySelectorAll('#routineKind option')].map(o=>o.value);
+ assert.ok(!kinds.includes('email')&&!kinds.includes('calendar'),'on a schedule only');
+ assert.equal(routines.routine({...routine(),troupe:{title:1}},PIP).troupe,undefined,'a malformed summary is dropped');
+});
+
 test('a routine the Pip suggests is a card under its message: Add routine or Not now',async()=>{
  const x=setup({list:[routine({id:R2,status:'suggested',created_by:'pip',run_id:RUN,next_due_at:null,title:'Bank alerts',prompt:'Tell me what the bank email says.',trigger:{kind:'email',query:'from:alerts@bank.example',every_minutes:10}})]});
  await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();

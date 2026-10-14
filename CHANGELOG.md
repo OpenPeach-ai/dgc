@@ -375,6 +375,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   finding" started a review troupe on its own (4 explorers, 9 verifiers, 76 s for the whole turn): it kept exactly
   the three planted problems, each confirmed 3 of 3, and left the constant-time token check and the clean file alone.
 
+- **A troupe on a schedule, as a Pip routine.** "Every Monday at 9, review last week's changes and double-check what
+  you find" makes the troupe a routine of your Primary Pip (or the Pip you name) instead of running it now: the
+  `troupe` tool takes `routine` (`every` day, weekday, week or hours, `at`, `day`, which `items` each time: changed
+  since it last ran, matching a pattern, or a list, and which `pip`). Outside auto mode the card asks "Schedule a
+  troupe?", and Always allow saves `Troupe(routine)`, separate from running one. When due, it runs as a job of its
+  own (`python -m dgc.troupe_job`) with your model on a snapshot of the project's committed code, one at a time, for
+  at most an hour; then the Pip tells you what it found in its chat, the report handed to it as data. Its tokens
+  count toward the Pip's daily limit; "changed" remembers the last commit it reviewed. Read-only troupes only: a
+  change template or a worker stage is refused. Pips registry schema 45 (`pip_routines.troupe`).
+
 ### Windows: DGC inside WSL
 
 A Windows user's DGC is a Linux install inside WSL (the installer is a shell script, and VS Code and Cursor connect to

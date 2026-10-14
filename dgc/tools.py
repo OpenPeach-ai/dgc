@@ -598,8 +598,25 @@ TROUPE_TOOL_SCHEMA = _fn(
                               "item of the next stage."}},
                     "required": ["name", "prompt"]}},
      "resume": {"type": "string", "description": "A stopped troupe's id: run it again, reusing every result it "
-                "already has."}},
-    ["title", "items"])
+                "already has."},
+     "routine": {"type": "object", "description": "Only when the user asks for it on a schedule (\"every Monday, "
+                 "review last week's changes\"): instead of running now, it becomes a routine of their Personal Pip, "
+                 "which runs it on this project's committed code and tells them what it found. Read-only work only "
+                 "(review, research, compare, or stages without a worker).",
+                 "properties": {
+                     "every": {"type": "string", "enum": ["day", "weekday", "week", "hours"]},
+                     "at": {"type": "string", "description": "Local time, HH:MM (default 09:00)."},
+                     "day": {"type": "string", "description": "With every: week, e.g. monday."},
+                     "hours": {"type": "integer", "description": "With every: hours, 1-168."},
+                     "items": {"type": "string", "enum": ["changed", "matching", "these"],
+                               "description": "Each time: changed (default), the files changed since it last ran "
+                                              "(the first time, the last 7 days); matching, the files matching "
+                                              "pattern; these, the items given."},
+                     "pattern": {"type": "string", "description": "With items: matching, e.g. src/**/*.py."},
+                     "pip": {"type": "string", "description": "Which Personal Pip posts the results, by name "
+                                                              "(default: the Primary Pip)."}},
+                 "required": ["every"]}},
+    ["title"])
 
 # Supervising the background children `task` already starts. Deliberately NOT part of
 # TOOL_SCHEMAS: `dgc serve` publishes every TOOL_SCHEMAS name in the `ready` event's `tools`

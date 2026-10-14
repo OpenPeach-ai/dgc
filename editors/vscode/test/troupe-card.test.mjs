@@ -82,3 +82,18 @@ test("outside auto mode the approval card says what the troupe will do", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(posted.find((m) => m.type === "permission_response"))),
     { type: "permission_response", id: "p1", decision: "always", rule: "Troupe(review)" });
 });
+
+test("a troupe on a schedule asks to schedule it, and says when, what each time, and who reports", () => {
+  const { doc, send } = makeDom();
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "every monday review", kind: "prompt" } });
+  send({ type: "event", event: { type: "permission_request", id: "p2", call_id: "c2", name: "troupe",
+    args: { title: "Weekly review", template: "review", goal: "correctness bugs", routine: { every: "week", day: "monday", at: "09:00" } },
+    command: null, summary: "Weekly review", diff: null, suggested_rule: "Troupe(routine)", choices: ["once", "always", "deny"] } });
+  const card = doc.querySelector(".card[data-request-id='p2']");
+  assert.match(card.querySelector(".q").textContent, /Schedule a troupe\?/);
+  for (const words of ["Weekly review", "Every Monday at 09:00", "The files changed since it last ran",
+                       "Your Primary Pip, in its chat", "Allow adds it to the Pip's routines", "only reads this project's committed code"]) {
+    assert.ok(card.textContent.includes(words), words);
+  }
+  assert.ok(!card.textContent.includes("Items ("), "no list of items: they are found each time");
+});

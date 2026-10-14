@@ -3996,6 +3996,20 @@
       const stages = Array.isArray(args.stages) ? args.stages.map((s) => `${(s && s.name) || "?"} (${(s && s.agent) || "explorer"}${s && s.votes > 1 ? `, ${s.votes} votes` : ""})`).join(" → ") : "";
       const plan = args.template ? { review: "Review each, then 3 verifiers check every finding", research: "Research each, then a critic checks each answer",
         change: "A worker changes each place in its own checkout, then a verifier checks it", compare: "Work out each option, then 3 judges pick the best" }[args.template] || args.template : stages;
+      const routine = args.routine && typeof args.routine === "object" ? args.routine : null;
+      if (routine) {
+        // On a schedule, as a Pip routine (dgc/troupe_routines.py): when, which items each time, and who reports.
+        const at = typeof routine.at === "string" && routine.at ? routine.at : "09:00";
+        const day = typeof routine.day === "string" && routine.day ? routine.day[0].toUpperCase() + routine.day.slice(1).toLowerCase() : "Monday";
+        const when = { day: `Every day at ${at}`, weekday: `Weekdays at ${at}`, week: `Every ${day} at ${at}`,
+          hours: `Every ${Number(routine.hours) || "?"} hours` }[routine.every] || String(routine.every || "");
+        const source = routine.items || "changed";
+        const each = source === "matching" ? `The files matching ${routine.pattern || "?"}`
+          : source === "these" ? listed : "The files changed since it last ran (the first time, the last 7 days)";
+        return `<dl class="pip-permission">${row("Work", args.title)}${row("Plan", plan)}${row("Goal", args.goal)}${row("When", when)}`
+          + `${row(source === "these" ? `Items (${items.length})` : "Each time", each)}${row("Results", routine.pip ? `${routine.pip}, in its chat` : "Your Primary Pip, in its chat")}</dl>`
+          + `<div class="muted pip-permission-note">Allow adds it to the Pip's routines, on at once. It only reads this project's committed code. Turn it off in the Pip's Settings, Routines.</div>`;
+      }
       return `<dl class="pip-permission">${row("Work", args.title)}${row("Plan", plan)}${row("Goal", args.goal)}${row(`Items (${items.length})`, listed)}${row("Resume", args.resume)}</dl>`
         + `<div class="muted pip-permission-note">Allow starts it in the background: one agent per item. This chat continues when it ends, and the troupe's card can stop it.</div>`;
     }
@@ -5295,7 +5309,7 @@
           : ev.diff ? "" : (pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
         const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
-        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>${ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "troupe" ? "Start a troupe?" : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`}</span></div>${signedIn ? "" : summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>${ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`}</span></div>${signedIn ? "" : summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);

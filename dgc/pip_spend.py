@@ -114,12 +114,48 @@ def usage(registry, pip_id, *, now=None) -> dict:
         entry = by_day.setdefault(day, [0, 0])
         entry[0] += _tokens(row, imported)
         entry[1] += 1
+    for day, tokens in _external(registry, pip_id):
+        if day >= first_day:
+            by_day.setdefault(day, [0, 0])[0] += tokens
     today_tokens, today_runs = by_day.get(today, [0, 0])
     limit = cap(registry, pip_id)
     return {"pip_id": pip_id, "today": {"day": today, "tokens": today_tokens, "runs": today_runs},
             "last_30_days": {"tokens": sum(v[0] for v in by_day.values()), "runs": sum(v[1] for v in by_day.values())},
             "days": [{"day": day, "tokens": v[0], "runs": v[1]} for day, v in sorted(by_day.items())][-WINDOW_DAYS:],
             "daily_cap": limit, "capped_today": limit is not None and today_tokens >= limit}
+
+
+EXTERNAL_PREFIX = "pip_troupe_tokens:"   # + pip id + ":" + local day: a troupe routine's tokens (troupe_routines)
+
+
+def _external(registry, pip_id):
+    prefix = f"{EXTERNAL_PREFIX}{pip_id}:"
+    for key, value in registry.db.execute("SELECT key,value FROM metadata WHERE substr(key,1,?)=?",
+                                          (len(prefix), prefix)).fetchall():
+        try:
+            yield key[len(prefix):], max(0, int(value))
+        except (TypeError, ValueError):
+            continue
+
+
+def add_external(registry, pip_id, tokens: int, *, now=None) -> None:
+    """Charge work the Pip started outside its runs (a troupe routine) to its day, so its daily limit counts it."""
+    from .pip_digest import local_day
+    if type(tokens) is not int or tokens <= 0:
+        return
+    now = now or _instant(registry.clock())
+    day = local_day(now)
+    oldest = local_day(now - timedelta(days=WINDOW_DAYS + 1))
+    prefix = f"{EXTERNAL_PREFIX}{pip_id}:"
+    with registry.transaction():
+        row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (prefix + day,)).fetchone()
+        try:
+            before = int(row[0]) if row else 0
+        except (TypeError, ValueError):
+            before = 0
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (prefix + day, str(before + tokens)))
+        registry.db.execute("DELETE FROM metadata WHERE substr(key,1,?)=? AND substr(key,?)<?",
+                            (len(prefix), prefix, len(prefix) + 1, oldest))
 
 
 def over_daily_cap(registry, pip_id) -> bool:

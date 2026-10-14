@@ -1333,6 +1333,24 @@ the agents that had not finished run again.
 
 Troupes are one chat's work: a new chat, `/clear` or closing DGC stops them, and a troupe never
 reports into a chat other than the one that started it.
+
+## On a schedule
+
+Ask for a troupe on a schedule ("every Monday at 9, review last week's changes for bugs and
+double-check what you find") and the model schedules it instead of running it: it becomes a routine
+of your Primary Pip, or of the Personal Pip you name. Outside auto mode you see **Schedule a
+troupe?** first, with when it runs, what it works through each time and which Pip reports; Always
+allow saves `Troupe(routine)`, which is separate from the rules that allow running one now.
+
+When it is due, the troupe runs as a job of its own, with your model, on a snapshot of the project's
+committed code: one troupe routine at a time, for at most an hour. Each time it works through the
+files changed since it last ran (the first time, the last seven days), the tracked files matching a
+pattern, or a fixed list. The Pip then tells you what it found in its chat; the full results are in
+`~/.dgc/troupes/`. Its tokens count toward the Pip's daily limit, and a Pip over its limit skips it.
+
+A scheduled troupe only reads: review, research, compare, or stages without a worker. Rename it,
+change its time or turn it off in the Pip's Settings, Routines; to change what it does, ask for a
+new one. Pips must be running on this computer for it to run.
 """),
 
     ("Handoff", "a continuation document from this session, for the next one", """

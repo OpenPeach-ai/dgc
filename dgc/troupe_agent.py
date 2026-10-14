@@ -182,6 +182,10 @@ def deliver(agent, run, epoch) -> None:
 def start(agent, args: dict, call_id) -> str:
     """The `troupe` tool: check the work order, start it, and say what will happen."""
     from .config import USER_HOME
+    if args.get("routine") is not None:
+        # Not now: on a schedule, as a Pip routine (dgc/troupe_routines.py).
+        from .troupe_routines import schedule
+        return schedule(agent, args)
     root = Path(USER_HOME) / "troupes"
     resume = str(args.get("resume") or "").strip()
     cached: dict = {}

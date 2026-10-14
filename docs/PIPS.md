@@ -586,6 +586,17 @@ emails already there; each new matching email after that starts one run (up to f
 and an email is never handled twice. The emails and events reach the model as untrusted data. A
 routine whose app is not connected waits and says so ("Waiting for Gmail: ask Ava to connect it").
 
+A routine can also run a **troupe** (many read-only agents on one work order; see the DGC docs,
+Troupes) on a project. Ask for it in a DGC chat with Ultra on ("every Monday at 9, review last
+week's changes for bugs and double-check what you find"); the chat schedules it as a routine of your
+Primary Pip (or the Pip you name) after you allow **Schedule a troupe?**. When it is due, the troupe
+runs as a job of its own on the project's committed code (never your unsaved changes), one troupe
+routine at a time and for at most an hour. Each time it works through the files changed since it
+last ran (the first time, the last seven days), the files matching a pattern, or a fixed list. Then
+the Pip tells you what it found in its chat. Its tokens count toward the Pip's daily limit. You can
+rename it, change its time or turn it off in the Pip's Settings; to change what it does, ask for a
+new one in a chat. It only reads: a troupe that writes can't be scheduled.
+
 A Pip has at most ten routines. While the Pip is busy, a due routine waits for it; while it is
 paused, or has reached its daily limit, the routine's time is skipped. Routines run while Pips are
 running on this computer. A Pip made before routines that has a schedule shows it as **Its task**,

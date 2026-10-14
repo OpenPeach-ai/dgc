@@ -397,6 +397,9 @@ def _permission_subject(tool: str, args: dict) -> tuple[str, dict]:
         return tool, {**args, "name": _mcp_permission_route(args.get("name"))}
     if tool in POLICY_ALIASES:
         return POLICY_ALIASES[tool], {RULE_ARG[tool]: args.get(RULE_ARG[tool], "")}
+    if tool == "troupe" and isinstance(args, dict) and args.get("routine") is not None:
+        # Scheduling one is its own permission: Always allow on running review troupes never schedules any.
+        return tool, {**args, "template": "routine"}
     if tool == "browser" and isinstance(args, dict) and args.get("signed_in") is True:
         # The user's own Chrome (browser_user) is its own permission: a rule written for the throwaway browser never
         # covers it, and "allow always" saves Browser(signed-in:https://site) -- one site, any page of it. A call that

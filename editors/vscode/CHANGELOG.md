@@ -235,6 +235,9 @@
 - **A troupe's card in the chat:** its title, each stage with a progress bar ("Review 4 of 4 · 2 kept", "Verify 2 of
   6"), Stop while it runs, and where its results are when it ends. A reconnect brings a running troupe's card back.
 - **Its approval card** (outside auto mode) says what it will do: the plan in words, the goal and the items.
+- **A troupe on a schedule:** "Schedule a troupe?" says when it runs, what it works through each time and which Pip
+  reports. In the Pip's Settings, Routines, the routine shows "Troupe · Review → Verify · <project>"; its name and
+  time can be changed, and what it does is kept as approved (ask in a chat for a new one).
 
 ### Settings
 

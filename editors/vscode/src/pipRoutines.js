@@ -25,6 +25,11 @@ export function routine(value, pip) {
     || !(value.next_due_at === null || time(value.next_due_at)) || !(value.last_run_at === null || time(value.last_run_at))
     || !(value.last_error === null || text(value.last_error, 600)) || !time(value.updated_at)) fail();
   if (value.trigger.kind === 'schedule' && !record(value.trigger.schedule)) fail();
+  // A routine that runs a troupe (dgc/troupe_routines.py) says so in a few words; anything else there is dropped.
+  if (value.troupe !== undefined && !(record(value.troupe) && ['title', 'plan', 'project', 'items'].every(k => text(value.troupe[k], 400)))) {
+    const { troupe, ...rest } = value;
+    return rest;
+  }
   return value;
 }
 
@@ -51,7 +56,8 @@ export function routineWhen(trigger, formatDate = v => new Date(v).toLocaleStrin
 /** The form's fields for a routine (a new one when there is none). */
 export function routineDraft(value = null, zone = 'UTC') {
   const d = { routineId: value?.id || '', routineTitle: value?.title || '', routinePrompt: value?.prompt || '', routineKind: 'daily',
-    routineTime: '09:00', routineDay: '1', routineHours: '3', routineAt: '', routineQuery: '', routineLead: '15', routineZone: zone };
+    routineTime: '09:00', routineDay: '1', routineHours: '3', routineAt: '', routineQuery: '', routineLead: '15', routineZone: zone,
+    routineTroupe: value?.troupe || null };
   const t = value?.trigger;
   if (!t) return d;
   if (t.kind === 'email') return { ...d, routineKind: 'email', routineQuery: t.query };
@@ -137,6 +143,7 @@ export function routinesMarkup(routines, { esc, busy = false, editing = '', form
   const rows = shown.map(r => editing === r.id ? form : `<li class="routine-row" data-state="${esc(r.status)}">`
     + `<button type="button" class="routine-open" data-routine-edit="${esc(r.id)}"${off}>${mark}<span class="routine-words"><strong>${esc(r.title)}</strong>`
     + `<small>${esc(routineWhen(r.trigger, formatDate))}${r.status === 'on' && r.next_due_at && r.trigger.kind === 'schedule' && r.trigger.schedule.type !== 'once' ? ` · next ${esc(shortDate(r.next_due_at))}` : ''}</small>`
+    + `${r.troupe ? `<small class="routine-troupe">Troupe · ${esc([r.troupe.plan, r.troupe.project].filter(Boolean).join(' · '))}</small>` : ''}`
     + `${r.last_error ? `<small class="routine-error">${esc(r.last_error)}</small>` : ''}</span></button>`
     + `<label class="switch" title="${r.status === 'on' ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-routine-toggle="${esc(r.id)}"${r.status === 'on' ? ' checked' : ''}${off} aria-label="${esc(r.title)} ${r.status === 'on' ? 'on' : 'off'}"><span aria-hidden="true"></span></label></li>`).join('');
   const legacy = schedule ? `<li class="routine-row legacy"><span class="routine-open static">${mark}<span class="routine-words"><strong>Its task</strong><small>${esc(schedule)}</small></span></span><button type="button" class="quiet" data-routine-legacy${off}>Change</button></li>` : '';
@@ -148,8 +155,10 @@ export function routinesMarkup(routines, { esc, busy = false, editing = '', form
 /** Add or edit one routine. */
 export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = false, calendar = false, isNew = true }) {
   const off = busy ? ' disabled' : '';
+  // A troupe routine runs on a schedule only, and what it does was approved in a DGC chat: its words can't be edited.
+  const troupe = d.routineTroupe;
   const kinds = [['daily', 'Every day'], ['weekdays', 'Weekdays'], ['weekly', 'Every week'], ['hours', 'Every few hours'], ['once', 'Once'],
-    ['email', 'When an email arrives'], ['calendar', 'Before calendar events'], ...(d.routineKind === 'custom' ? [['custom', 'Its current schedule']] : [])];
+    ...(troupe ? [] : [['email', 'When an email arrives'], ['calendar', 'Before calendar events']]), ...(d.routineKind === 'custom' ? [['custom', 'Its current schedule']] : [])];
   const at = ['daily', 'weekdays', 'weekly'].includes(d.routineKind)
     ? `${d.routineKind === 'weekly' ? `<select id="routineDay" data-draft="routineDay" aria-label="Day"${off}>${WEEKDAYS.map((w, i) => `<option value="${i}"${String(d.routineDay) === String(i) ? ' selected' : ''}>${w.slice(0, -1)}</option>`).join('')}</select>` : ''}<label class="inline">at <input id="routineTime" data-draft="routineTime" type="time" step="60" value="${esc(d.routineTime)}"${off}></label>`
     : d.routineKind === 'hours' ? `<label class="inline">every <input id="routineHours" data-draft="routineHours" type="number" min="1" max="168" step="1" value="${esc(d.routineHours)}"${off}> hours</label>`
@@ -161,7 +170,8 @@ export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = fa
     : ['daily', 'weekdays', 'weekly'].includes(d.routineKind) ? `Times are in ${esc(d.routineZone)}.` : d.routineKind === 'custom' ? 'Choose a new time to change it.' : '';
   return `<li class="routine-form-row"><form id="routine-form" class="routine-form form">`
     + `<label for="routineTitle">Name</label><input id="routineTitle" data-draft="routineTitle" maxlength="160" placeholder="Morning brief" value="${esc(d.routineTitle)}"${off}>`
-    + `<label for="routinePrompt">What it does</label><textarea id="routinePrompt" data-draft="routinePrompt" rows="3" maxlength="4000" placeholder="Check my calendar and the weather, and tell me what today looks like."${off}>${esc(d.routinePrompt)}</textarea>`
+    + `<label for="routinePrompt">What it does</label><textarea id="routinePrompt" data-draft="routinePrompt" rows="3" maxlength="4000" placeholder="Check my calendar and the weather, and tell me what today looks like."${troupe ? ' readonly aria-describedby="routineTroupeNote"' : ''}${off}>${esc(d.routinePrompt)}</textarea>`
+    + (troupe ? `<p class="muted" id="routineTroupeNote">This routine runs a troupe on ${esc(troupe.project || 'a project')}: ${esc(troupe.items || '')}. To change what it does, ask for a new one in a DGC chat.</p>` : '')
     + `<label for="routineKind">When</label><div class="routine-when"><select id="routineKind" data-draft="routineKind"${off}>${kinds.map(([k, l]) => `<option value="${k}"${d.routineKind === k ? ' selected' : ''}>${l}</option>`).join('')}</select>${at}</div>`
     + (note ? `<p class="muted">${note}</p>` : '') + (error ? `<p class="error" role="alert">${esc(error)}</p>` : '')
     + `<div class="actions"><button type="submit" class="primary"${off}>${isNew ? 'Add routine' : 'Save'}</button><button type="button" class="quiet" data-routine-cancel${off}>Cancel</button>`
