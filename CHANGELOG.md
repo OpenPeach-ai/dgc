@@ -12,6 +12,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   streaming a chunked or compressed response could make DGC buffer without bound or loop), and CVE-2026-97687 (TLS
   settings for an HTTPS proxy and the target server not kept apart). DGC streams every model response.
 - A sub-agent record's SHA-1 id says it is not a security use (`usedforsecurity=False`), as the code scan asked.
+- **Removing a plugin signs you out of it.** Each remote server's sign-in now lives in its own owner-only folder,
+  `~/.dgc/plugin-auth/<server>/`. Removing the server (`/mcp remove`, the editor, or uninstalling its plugin) asks
+  the service to revoke DGC's token (RFC 7009, found through the service's OAuth metadata), then deletes the folder,
+  and says which happened. Before, the token stayed on disk in the bridge's shared `~/.mcp-auth`, which DGC now never
+  touches (other apps use it). A remote server you had already signed in to asks you to sign in once more.
 
 ### ChatDGC
 

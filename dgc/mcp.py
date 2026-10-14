@@ -717,6 +717,14 @@ class MCPServer:
 
     def _launch(self) -> bool:
         env = _suppress_bridge_browser(self.env) if self.remote_bridge else self.env
+        if self.remote_bridge:
+            # Its sign-in lives in a folder of its own, so removing the server removes exactly that (plugin_signin).
+            from . import plugin_signin
+            try:
+                env = plugin_signin.prepare(self.name, self.args, env)
+            except (OSError, ValueError) as exc:
+                self.error = f"could not prepare its sign-in folder: {exc}"
+                return False
         try:
             proc = subprocess.Popen(
                 [self.command, *self.args],

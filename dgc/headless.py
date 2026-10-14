@@ -4470,6 +4470,8 @@ class Backend:
                 self._emit_skill_catalog(request)
                 self._emit_mcp_servers(request)
                 message = "Plugin uninstalled."
+                if result.get("signed_out"):
+                    message += " " + " ".join(result["signed_out"])
                 if result["retained_servers"]:
                     message += " Kept shared or edited MCP servers: " + ", ".join(result["retained_servers"])
             elif action in ("add_plugin_marketplace", "refresh_plugin_marketplace"):
@@ -5054,6 +5056,10 @@ class Backend:
             if isinstance(disabled, list) and name in disabled:
                 self.config.set("disabled_mcp_servers", [value for value in disabled if value != name])
             getattr(self.agent.mcp, "disabled_names", set()).discard(name)
+            from . import plugin_signin
+            signed_out = plugin_signin.forget(name)
+            if signed_out["message"]:
+                self.em.emit("info", message=f"{name}: {signed_out['message']}")
             self._emit_mcp_servers(request_id)
 
         elif t == "reload_mcp_servers":

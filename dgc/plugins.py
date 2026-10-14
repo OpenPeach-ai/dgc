@@ -911,7 +911,9 @@ def uninstall(name: str, *, config, manager=None) -> dict:
         state = _state()
         state['removed_defaults'] = sorted(set(state.get('removed_defaults', [])) | {name})
         sources.write_json(STATE_PATH,state)
-        return {'name':name, 'retained_servers':retained, 'removed_servers':removed}
+    from . import plugin_signin
+    signed_out = [message for message in (plugin_signin.forget(server)['message'] for server in removed) if message]
+    return {'name':name, 'retained_servers':retained, 'removed_servers':removed, 'signed_out':signed_out}
 
 
 # What a plugin may do without asking, ChatGPT's four levels (OpenAI, "Managing app permissions in ChatGPT"):

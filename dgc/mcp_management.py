@@ -139,7 +139,9 @@ def manage_mcp(config, manager, arguments: str = "", *, agent=None):
         if isinstance(disabled, list) and name in disabled:
             config.set("disabled_mcp_servers", [value for value in disabled if value != name])
         manager.disabled_names.discard(name)
-        return f"Removed MCP server '{name}'."
+        from . import plugin_signin
+        signed_out = plugin_signin.forget(name)["message"]
+        return f"Removed MCP server '{name}'." + (f" {signed_out}" if signed_out else "")
     server = manager.servers.get(name)
     if server is None:
         raise ValueError("This MCP server is disconnected or disabled")

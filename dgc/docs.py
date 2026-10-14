@@ -775,8 +775,12 @@ plan mode permits attached snapshots but does not execute live MCP tools.
 
 Remote entries use the pinned `mcp-remote@0.8.3` bridge and require Node/npm. Explicit reconnects
 allow a cancellable browser sign-in window. Decline stops the connection; use Reconnect to retry
-an expired login or cold-start failure. OAuth tokens live in the bridge's private user cache,
-separate from bearer tokens managed by the editor.
+an expired login or cold-start failure. Each remote server's sign-in (its OAuth tokens and client
+registration) lives in a folder of its own, `~/.dgc/plugin-auth/<server>/`, readable only by you
+and separate from bearer tokens managed by the editor. Removing the server or uninstalling its
+plugin asks the service to revoke the token (OAuth token revocation, where the service offers it)
+and deletes that folder; DGC says which happened. The bridge's shared `~/.mcp-auth` folder, used by
+other apps on your computer, is never read or changed.
 
 For desktop SSH/remote editors, DGC requests callback forwarding before opening sign-in. If the
 editor changes the callback port or address, forward the remote callback port to the same local
