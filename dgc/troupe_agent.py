@@ -8,7 +8,7 @@ Every troupe agent is an ordinary sub-agent, started through the same core as `t
   isolated checkout of its own and its changes are merged back exactly as a task's are -- isolation stays mandatory.
 - They are unattended, as the agents of a monitor turn are: nobody is answering a hundred approval cards, so a step
   that would ask is refused (auto mode still runs everything its role allows).
-- They are not in the agents list: the troupe's card shows the run instead of a row per agent.
+- They are not in the agents list: the troupe's row above the prompt shows the run instead of a row per agent.
 
 Locally served models get one agent at a time (one GPU); remote ones as many as `task` may run in parallel.
 """

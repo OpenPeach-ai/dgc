@@ -365,7 +365,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   worker writes in an isolated checkout of its own and its change is merged back as a sub-task's is. They never
   ask; a step that would is refused. One at a time on a model served on this machine, up to 8 at a time on a remote
   or cloud model. The turn's token cap counts them all; a troupe starts at most 400 agents.
-- **Seeing and stopping it:** a card in the chat with each stage's progress and Stop (events `troupe_started`,
+- **Seeing and stopping it:** in the editor, a row above the prompt box with each stage's progress and Stop (events
+  `troupe_started`,
   `troupe_progress`, `troupe_finished`; commands `list_troupes`, `stop_troupe`; `ready.capabilities.troupe`). In the
   terminal, a line per finished stage and `/troupes [stop ID|all]`. A one-shot `dgc -p` run waits for it inside the
   call.

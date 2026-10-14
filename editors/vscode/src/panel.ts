@@ -1252,7 +1252,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (be && this.lastReadyEvent?.capabilities?.monitors) {
         be.send({ type: "list_monitors", request_id: this.nextRequestId("monitors-restore") });
       }
-      // Nor a running troupe's card, with its Stop.
+      // Nor a running troupe's row above the prompt, with its Stop.
       if (be && (this.lastReadyEvent?.capabilities as any)?.troupe) {
         be.send({ type: "list_troupes", request_id: this.nextRequestId("troupes-restore") });
       }
@@ -1737,7 +1737,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Stop one troupe. The backend stops its agents; the `troupes` answer and the troupe_finished that follows update
-   *  its card. A CLI without troupes never sent one, so it is never asked. */
+   *  its row. A CLI without troupes never sent one, so it is never asked. */
   private async stopTroupe(id: string): Promise<void> {
     const runId = String(id || "").slice(0, 64);
     if (!/^tr-[0-9a-f]{10}$/.test(runId) || !(this.lastReadyEvent?.capabilities as any)?.troupe) { return; }
@@ -7003,6 +7003,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <div id="monitor-chips" class="monitor-chips" role="list" aria-label="Running monitors"></div>
         <span id="monitors-paused" class="monitors-paused" title="Wake-ups are paused: new events wait for your next message" hidden>paused</span>
       </div>
+    </section>
+    <section id="troupebar" class="rail-item" aria-label="Troupes" data-state="running" hidden>
+      <div id="troupe-panel" class="troupe-panel" role="region" aria-label="Troupe stages" hidden></div>
+      <div class="rail-row">
+        <button type="button" id="troupe-main" class="rail-main" aria-expanded="false" aria-controls="troupe-panel" title="Show the troupe's stages"><span id="troupe-mark" class="troupe-mark" aria-hidden="true"></span><span id="troupe-label" class="troupe-label">Troupe</span><span id="troupe-title"></span><span id="troupe-mini" class="troupe-bar troupe-mini" aria-hidden="true"><span></span></span><span id="troupe-count"></span></button>
+        <div class="goal-actions">
+          <button type="button" id="troupe-stop" class="rail-icon-button" title="Stop the troupe" aria-label="Stop the troupe"><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
+          <button type="button" id="troupe-dismiss" class="rail-icon-button" title="Dismiss" aria-label="Dismiss" hidden><span class="codicon codicon-close" aria-hidden="true"></span></button>
+          <button type="button" id="troupe-toggle" class="rail-icon-button" aria-expanded="false" aria-controls="troupe-panel" title="Show the troupe's stages" aria-label="Show the troupe's stages"><span class="codicon codicon-chevron-up" aria-hidden="true"></span></button>
+        </div>
+      </div>
+      <span id="troupe-status" class="sr-only" role="status"></span>
     </section>
     <section id="changesbar" class="rail-item" aria-label="Changes in this chat" hidden>
       <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files" title="Every file this chat has changed, with its diff"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this chat</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>

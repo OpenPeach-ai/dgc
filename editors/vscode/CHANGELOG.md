@@ -246,8 +246,14 @@
 
 ### Troupes
 
-- **A troupe's card in the chat:** its title, each stage with a progress bar ("Review 4 of 4 · 2 kept", "Verify 2 of
-  6"), Stop while it runs, and where its results are when it ends. A reconnect brings a running troupe's card back.
+- **A troupe is a row above the prompt box**, like the checklist and the goal, never a card in the chat. One line:
+  its mark (four tiles in the sub-agents' colours, which light up in turn while it works), its title, the stage it
+  is on ("Verify 2/6") with a small progress bar, and Stop. The chevron opens every stage with its progress bar
+  ("Review 4 of 4 · 2 kept") and, when it ends, where its results are.
+  - **When it ends**, the row says how ("Done · 5 kept", "Stopped") and stays until you dismiss it (✕) or send your
+    next message. The turn its results start doesn't count as yours.
+  - **Several at once:** the row leads with the newest one still working ("2 troupes"); open, each has its own Stop.
+  - **A reconnect** brings back the ones still running, and a new or switched chat starts without any.
 - **Its approval card** (outside auto mode) says what it will do: the plan in words, the goal and the items.
 - **A troupe on a schedule:** "Schedule a troupe?" says when it runs, what it works through each time and which Pip
   reports. In the Pip's Settings, Routines, the routine shows "Troupe · Review → Verify · <project>"; its name and

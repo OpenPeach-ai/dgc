@@ -2399,15 +2399,37 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 #cbox.dictating #cfooter { display: none; }
 #cbox.dictating .cvoice { display: flex; align-items: center; min-height: var(--control); padding: 2px 8px 6px; }
 
-/* A troupe's card: its stages as rows, each with a progress bar. */
-.artifact.troupe .troupe-state { margin-left: auto; color: var(--muted); font-size: 0.92em; }
-.artifact.troupe .troupe-stages { list-style: none; margin: 6px 0 4px; padding: 0; display: grid; gap: 4px; }
-.artifact.troupe .troupe-stages li { display: grid; grid-template-columns: minmax(64px, auto) minmax(40px, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
-.artifact.troupe .troupe-stage-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.artifact.troupe .troupe-bar { height: 4px; border-radius: 2px; background: var(--border, rgba(128,128,128,0.25)); overflow: hidden; }
-.artifact.troupe .troupe-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
-.artifact.troupe .troupe-count { color: var(--muted); font-size: 0.92em; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.artifact.troupe .troupe-note { font-size: 0.92em; overflow-wrap: anywhere; }
-.artifact.troupe.finished .troupe-bar > span { background: var(--muted); }
-@media (prefers-reduced-motion: reduce) { .artifact.troupe .troupe-bar > span { transition: none; } }
-@media (forced-colors: active) { .artifact.troupe .troupe-bar { border: 1px solid CanvasText; } .artifact.troupe .troupe-bar > span { background: Highlight; } }
+/* Troupes: a rail row like the checklist's. Collapsed, the newest troupe's mark, title, the stage it is on and Stop
+   on one line; open, every troupe's stages above that line in their own bounded scroller. */
+#troupebar { flex-direction: column; align-items: stretch; gap: 0; }
+.troupe-panel { display: grid; gap: var(--sp-3); max-height: min(30vh, 220px); overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--sp-2) var(--sp-1); border-bottom: 1px solid var(--border); color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.troupe-mark { flex: none; width: 16px; height: 16px; }
+.troupe-mark svg { display: block; width: 100%; height: 100%; }
+.troupe-label { flex: none; color: var(--text); font-weight: var(--w-med); }
+#troupe-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#troupe-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.troupe-mini { flex: none; width: 36px; }
+.troupe-bar { height: 4px; border-radius: 2px; background: var(--border, rgba(128,128,128,0.25)); overflow: hidden; }
+.troupe-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
+/* An ended troupe's bars go grey, the light grey the rail's quiet text uses: --muted is near-black in the light themes. */
+#troupebar:not([data-state="running"]) .troupe-mini > span, .troupe-run:not([data-state="running"]) .troupe-bar > span { background: var(--faint); }
+.troupe-run-head { display: flex; min-width: 0; align-items: center; gap: var(--sp-2); }
+.troupe-run-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-med); }
+.troupe-run-state { flex: none; color: var(--muted); font-size: var(--t-xs); }
+.troupe-stages { list-style: none; margin: var(--sp-1) 0; padding: 0; display: grid; gap: 4px; }
+.troupe-stages li { display: grid; grid-template-columns: minmax(64px, auto) minmax(40px, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
+.troupe-stage-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.troupe-count { color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.troupe-note { color: var(--muted); font-size: var(--t-xs); overflow-wrap: anywhere; }
+/* While a troupe works its tiles light up in turn, clockwise; when it ends they hold still, and one that was stopped
+   or failed loses its colour. */
+@keyframes troupe-tile { 0%, 40%, 100% { filter: none; } 20% { filter: brightness(1.22) saturate(1.4); } }
+#troupebar[data-state="running"] .troupe-mark .tm-part { animation: troupe-tile 2.4s ease-in-out infinite; }
+#troupebar[data-state="running"] .troupe-mark .tm-part:nth-of-type(2) { animation-delay: 0.6s; }
+#troupebar[data-state="running"] .troupe-mark .tm-part:nth-of-type(3) { animation-delay: 1.2s; }
+#troupebar[data-state="running"] .troupe-mark .tm-part:nth-of-type(4) { animation-delay: 1.8s; }
+#troupebar[data-state="stopped"] .troupe-mark, #troupebar[data-state="failed"] .troupe-mark { filter: grayscale(0.85); opacity: 0.75; }
+@media (max-width: 300px) { .troupe-mini { display: none; } }
+@media (prefers-reduced-motion: reduce) { .troupe-mark .tm-part { animation: none !important; } .troupe-bar > span { transition: none; } }
+@media (forced-colors: active) { .troupe-bar { border: 1px solid CanvasText; } .troupe-bar > span { background: Highlight; } }

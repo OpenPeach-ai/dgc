@@ -1308,9 +1308,10 @@ job calls for one.
    own stages.
 2. In **auto mode** it just runs. In other modes you see a card first, "Start a troupe?", with the
    plan in words, the items and what Allow does. Plan mode never starts one.
-3. It runs in the background and the chat stays free. A card in the chat shows each stage's
-   progress, with **Stop**. In the terminal, a line marks each stage as it finishes; `/troupes`
-   lists them and `/troupes stop ID|all` stops one.
+3. It runs in the background and the chat stays free. In the editor, a row above the prompt box
+   shows the stage it is on, with **Stop**; its chevron opens every stage's progress. In the
+   terminal, a line marks each stage as it finishes; `/troupes` lists them and `/troupes stop
+   ID|all` stops one.
 4. When it ends, the chat wakes and the model reports the results. In a one-shot `dgc -p` run, the
    troupe runs to its end inside the call, and the model answers with its results.
 

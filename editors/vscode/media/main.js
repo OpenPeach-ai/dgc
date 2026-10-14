@@ -508,7 +508,7 @@
   // the draft this is where its placeholder is turned back into the words the model should read.
   const wireText = (text) => text;
   const goalBar = $("goalbar"), changesBar = $("changesbar"), tasksBar = $("tasksbar"), composerRail = $("composer-rail");
-  const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar"), pipsBar = $("pipsbar");
+  const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar"), pipsBar = $("pipsbar"), troupeBar = $("troupebar");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   // Pips has its own durable conversations. Hiding the main chat preserves its
@@ -3933,55 +3933,149 @@
       sysLine(String(message.error || "DGC could not stop the artifact preview."), true);
     }
   }
-  // A troupe (many sub-agents on one work order, in the background): one card per run, its stages' progress, Stop
-  // while it runs. troupe_started makes it in the current turn; progress and the end update it wherever it is; a
-  // `troupes` snapshot (a reconnect) brings back a running one that has no card.
-  const troupeCards = new Map();
+  // A troupe (many sub-agents on one work order, in the background) is a row in the composer rail, not a card in the
+  // chat: the newest troupe's title, the stage it is on and Stop on one line; open, every troupe's stages with their
+  // progress. troupe_started adds one, progress and the end update it, and a `troupes` snapshot (a reconnect) brings
+  // back a running one. A finished troupe stays to say how it ended and where its results are until it is
+  // dismissed, the next message is sent, or the chat changes.
+  const troupeRuns = new Map();        // run_id -> its latest event, oldest first
+  const troupeStopping = new Set();    // Stop was pressed; the run's own end settles it
+  let troupesOpen = false;
   const TROUPE_STATES = { running: "Running", done: "Done", stopped: "Stopped", failed: "Failed" };
-  function troupeCard(ev, create) {
-    const id = String(ev.run_id || "");
-    if (!id) return null;
-    let card = troupeCards.get(id);
-    if (card && !card.isConnected) { troupeCards.delete(id); card = null; }
-    if (!card) {
-      if (!create) return null;
-      ensureTurn();
-      card = el("div", "artifact troupe"); card.dataset.troupeId = id;
-      card.setAttribute("role", "group"); card.setAttribute("aria-label", "Troupe");
-      card.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon("blocks")}</span><span class="anm">Troupe</span><span class="alabel"></span><span class="troupe-state" aria-live="polite"></span></div><ol class="troupe-stages"></ol><div class="muted troupe-note"></div>`;
-      const row = el("div", "abtns");
-      const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.troupeStop = "1";
-      stop.onclick = () => { if (stop.disabled) return; stop.disabled = true; stop.textContent = "Stopping…"; vscode.postMessage({ type: "stopTroupe", run_id: id }); };
-      row.appendChild(stop); card.appendChild(row);
-      troupeCards.set(id, card);
-      appendTurnContent(card); breakText();
-    }
-    paintTroupe(card, ev);
-    return card;
+  // The mark: four tiles in the agent faces' colours (media/agents/), each a pale base under blurred orbs, as a face
+  // is. Clockwise, so a running troupe's tiles light up in turn around the square.
+  const TROUPE_TILES = [[2, 2, ["#D2E7DD", "#BEE2D1", "#50E5CB", "#4261D9"]], [12.6, 2, ["#EBD8CE", "#E8C8B7", "#EB4A4A", "#DF3C83"]],
+                        [12.6, 12.6, ["#EAE8CF", "#E6E4B9", "#EBAD4A", "#DF653C"]], [2, 12.6, ["#CED7EB", "#B7C7E8", "#5C4AEB", "#AB3CDF"]]];
+  const TROUPE_MARK = (() => {
+    const defs = ['<filter id="troupe-mark-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.1"/></filter>'];
+    const tiles = TROUPE_TILES.map(([x, y, [base, ...hues]], i) => {
+      defs.push(`<clipPath id="troupe-mark-c${i}"><rect x="${x}" y="${y}" width="9.4" height="9.4" rx="2.6"/></clipPath>`);
+      const orbs = [[2.2, 2, 6], [4.6, 4.8, 5], [7.6, 7.6, 5.4]].map(([dx, dy, r], j) => {
+        defs.push(`<radialGradient id="troupe-mark-g${i}${j}" cx="${x + dx}" cy="${y + dy}" r="${r}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${hues[j]}"/><stop offset="1" stop-color="${hues[j]}" stop-opacity="0"/></radialGradient>`);
+        return `<circle cx="${x + dx}" cy="${y + dy}" r="${r}" fill="url(#troupe-mark-g${i}${j})"/>`;
+      }).join("");
+      return `<g class="tm-part" clip-path="url(#troupe-mark-c${i})"><rect x="${x}" y="${y}" width="9.4" height="9.4" fill="${base}"/><g filter="url(#troupe-mark-blur)">${orbs}</g></g>`;
+    });
+    return `<svg viewBox="0 0 24 24" focusable="false"><defs>${defs.join("")}</defs>${tiles.join("")}</svg>`;
+  })();
+  $("troupe-mark").innerHTML = TROUPE_MARK;
+  function troupeStages(ev) { return Array.isArray(ev.stages) ? ev.stages.filter((s) => s && typeof s === "object") : []; }
+  function troupeCounts(s) {
+    const total = Math.max(0, Number(s.total) || 0), done = Math.max(0, Number(s.done) || 0), failed = Math.max(0, Number(s.failed) || 0);
+    return { total, done, failed, settled: done + failed };
   }
-  function paintTroupe(card, ev) {
+  function troupeStateWords(ev) {
     const state = String(ev.state || "running");
-    card.querySelector(".alabel").textContent = String(ev.title || "");
-    const label = card.querySelector(".troupe-state");
-    label.textContent = (TROUPE_STATES[state] || state) + (ev.reason && state !== "running" ? ` · ${ev.reason}` : "");
-    card.classList.toggle("finished", state !== "running");
-    const list = card.querySelector(".troupe-stages");
-    const stages = Array.isArray(ev.stages) ? ev.stages.filter((s) => s && typeof s === "object") : [];
-    list.innerHTML = stages.map((s) => {
-      const total = Math.max(0, Number(s.total) || 0), done = Math.max(0, Number(s.done) || 0), failed = Math.max(0, Number(s.failed) || 0);
-      const share = total ? Math.min(100, Math.round(((done + failed) / total) * 100)) : 0;
-      const counts = total ? `${done + failed} of ${total}` : "waiting";
-      const extra = [failed ? `${failed} failed` : "", total && done + failed >= total ? `${Number(s.kept) || 0} kept` : "",
-                     s.dropped ? `${Number(s.dropped)} not started` : ""].filter(Boolean).join(" · ");
-      return `<li><span class="troupe-stage-name">${esc(String(s.name || ""))}</span><span class="troupe-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done + failed}"><span style="width:${share}%"></span></span><span class="troupe-count">${esc(counts)}${extra ? ` · ${esc(extra)}` : ""}</span></li>`;
-    }).join("");
-    const planned = Number(ev.agents_planned) || 0, reused = Number(ev.reused) || 0;
-    card.querySelector(".troupe-note").textContent = state === "running"
-      ? `About ${planned} agents. This chat continues when it ends.` + (reused ? ` ${reused} results reused.` : "")
-      : `Results: ${String(ev.journal || "")}`;
-    const stop = card.querySelector("[data-troupe-stop]");
-    if (stop && state !== "running") { stop.disabled = true; stop.textContent = state === "stopped" ? "Stopped" : "Stop"; stop.hidden = state !== "stopped"; }
+    return (TROUPE_STATES[state] || state) + (ev.reason && state !== "running" ? ` · ${ev.reason}` : "");
   }
+  // One line for a troupe: the stage at work (the first not through all its items; a later stage's total is 0 until
+  // it begins) while it runs, and how it ended once it has.
+  function troupeSummary(ev) {
+    const state = String(ev.state || "running"), stages = troupeStages(ev);
+    if (state === "running") {
+      const stage = stages.find((s) => { const c = troupeCounts(s); return !c.total || c.settled < c.total; }) || stages.at(-1);
+      if (!stage) return { text: "Starting", share: 0 };
+      const c = troupeCounts(stage), name = String(stage.name || "");
+      return { text: c.total ? `${name} ${Math.min(c.settled, c.total)}/${c.total}` : `${name} starting`,
+               share: c.total ? Math.min(100, Math.round((c.settled / c.total) * 100)) : 0 };
+    }
+    const last = [...stages].reverse().find((s) => troupeCounts(s).total > 0);
+    return { text: (TROUPE_STATES[state] || state) + (state === "done" && last ? ` · ${Number(last.kept) || 0} kept` : ""), share: 100 };
+  }
+  function troupeEvent(ev, create) {
+    const id = String(ev.run_id || "");
+    if (!id || (!troupeRuns.has(id) && !create)) return;
+    troupeRuns.set(id, ev);
+    if (String(ev.state || "running") !== "running") troupeStopping.delete(id);
+    while (troupeRuns.size > 20) troupeRuns.delete(troupeRuns.keys().next().value);
+    paintTroupes();
+  }
+  function stopTroupe(id) {
+    const ev = troupeRuns.get(id);
+    if (!ev || String(ev.state || "running") !== "running" || troupeStopping.has(id)) return;
+    troupeStopping.add(id);
+    vscode.postMessage({ type: "stopTroupe", run_id: id });
+    paintTroupes();
+  }
+  // Finished troupes leave the row; a running one never does.
+  function dropFinishedTroupes() {
+    let dropped = false;
+    for (const [id, ev] of troupeRuns) if (String(ev.state || "running") !== "running") { troupeRuns.delete(id); dropped = true; }
+    if (dropped) paintTroupes();
+  }
+  function resetTroupes() { troupeRuns.clear(); troupeStopping.clear(); troupesOpen = false; paintTroupes(); }
+  function troupeStageRows(ev) {
+    return troupeStages(ev).map((s) => {
+      const c = troupeCounts(s);
+      const share = c.total ? Math.min(100, Math.round((c.settled / c.total) * 100)) : 0;
+      const counts = c.total ? `${c.settled} of ${c.total}` : "waiting";
+      const extra = [c.failed ? `${c.failed} failed` : "", c.total && c.settled >= c.total ? `${Number(s.kept) || 0} kept` : "",
+                     s.dropped ? `${Number(s.dropped)} not started` : ""].filter(Boolean).join(" · ");
+      return `<li><span class="troupe-stage-name">${esc(String(s.name || ""))}</span><span class="troupe-bar" role="progressbar" aria-label="${esc(String(s.name || "Stage"))}" aria-valuemin="0" aria-valuemax="${c.total}" aria-valuenow="${Math.min(c.settled, c.total)}"><span style="width:${share}%"></span></span><span class="troupe-count">${esc(counts)}${extra ? ` · ${esc(extra)}` : ""}</span></li>`;
+    }).join("");
+  }
+  function paintTroupes() {
+    const bar = $("troupebar"), panel = $("troupe-panel");
+    const runs = [...troupeRuns.values()];
+    if (!runs.length) {
+      const hadFocus = bar.contains(document.activeElement);
+      troupesOpen = false; panel.innerHTML = ""; bar.hidden = true;
+      paintTroupesOpen(); syncComposerRail();
+      if (hadFocus) input.focus();
+      return;
+    }
+    const running = runs.filter((ev) => String(ev.state || "running") === "running");
+    const lead = running.at(-1) || runs.at(-1);   // the newest at work, else the newest to end
+    const leadId = String(lead.run_id), sum = troupeSummary(lead), title = String(lead.title || "");
+    bar.dataset.state = running.length ? "running" : String(lead.state || "done");
+    $("troupe-label").textContent = runs.length > 1 ? `${runs.length} troupes` : "Troupe";
+    $("troupe-title").textContent = title;
+    $("troupe-title").title = title;
+    $("troupe-count").textContent = sum.text;
+    $("troupe-mini").querySelector("span").style.width = `${sum.share}%`;
+    $("troupe-main").setAttribute("aria-label", `Troupe ${title}: ${sum.text}`
+      + (runs.length > 1 ? `, ${running.length} of ${runs.length} troupes running` : ""));
+    const stop = $("troupe-stop"), stopping = troupeStopping.has(leadId);
+    stop.hidden = !running.length;
+    stop.dataset.troupeStop = leadId;
+    stop.disabled = stopping;
+    const stopLabel = stopping ? "Stopping…" : `Stop ${title || "the troupe"}`;
+    stop.title = stopLabel; stop.setAttribute("aria-label", stopLabel);
+    stop.querySelector(".codicon").className = stopping ? "codicon codicon-loading codicon-modifier-spin" : "codicon codicon-debug-stop";
+    $("troupe-dismiss").hidden = running.length > 0;
+    // The panel is rebuilt on every progress event: a Stop in it that had the focus gets it back.
+    const focused = panel.contains(document.activeElement) ? document.activeElement.dataset.troupeStop || "" : "";
+    panel.innerHTML = [...runs].reverse().map((ev) => {
+      const id = String(ev.run_id), state = String(ev.state || "running"), planned = Number(ev.agents_planned) || 0, reused = Number(ev.reused) || 0;
+      const note = state === "running"
+        ? `About ${planned} agents. This chat continues when it ends.` + (reused ? ` ${reused} results reused.` : "")
+        : `Results: ${String(ev.journal || "")}`;
+      const stopButton = state === "running" && runs.length > 1
+        ? `<button type="button" class="rail-text-action" data-troupe-stop="${esc(id)}"${troupeStopping.has(id) ? " disabled" : ""}>${troupeStopping.has(id) ? "Stopping…" : "Stop"}</button>` : "";
+      return `<div class="troupe-run" data-troupe-id="${esc(id)}" data-state="${esc(state)}"><div class="troupe-run-head"><span class="troupe-run-title">${esc(String(ev.title || ""))}</span><span class="troupe-run-state">${esc(troupeStateWords(ev))}</span>${stopButton}</div><ol class="troupe-stages">${troupeStageRows(ev)}</ol><div class="troupe-note">${esc(note)}</div></div>`;
+    }).join("");
+    panel.querySelectorAll("[data-troupe-stop]").forEach((button) => { button.onclick = () => stopTroupe(button.dataset.troupeStop); });
+    if (focused) panel.querySelector(`[data-troupe-stop="${cssEscape(focused)}"]`)?.focus();
+    // Said once when it changes, not on every tick: a troupe starting or ending, never its counts.
+    const status = runs.map((ev) => `${ev.title || "Troupe"}: ${troupeStateWords(ev)}`).join("; ");
+    if ($("troupe-status").dataset.said !== status) { $("troupe-status").dataset.said = status; $("troupe-status").textContent = status; }
+    bar.hidden = false;
+    paintTroupesOpen();
+    syncComposerRail();
+  }
+  function paintTroupesOpen() {
+    const label = troupesOpen ? "Hide the troupe's stages" : "Show the troupe's stages";
+    $("troupe-panel").hidden = !troupesOpen;
+    for (const button of [$("troupe-main"), $("troupe-toggle")]) button.setAttribute("aria-expanded", String(troupesOpen));
+    $("troupe-toggle").title = label; $("troupe-toggle").setAttribute("aria-label", label);
+    $("troupe-main").title = label;
+    $("troupe-toggle").querySelector(".codicon").className = `codicon codicon-chevron-${troupesOpen ? "down" : "up"}`;
+  }
+  function toggleTroupes() { troupesOpen = !troupesOpen; paintTroupesOpen(); }
+  $("troupe-main").onclick = toggleTroupes;
+  $("troupe-toggle").onclick = toggleTroupes;
+  $("troupe-stop").onclick = () => stopTroupe($("troupe-stop").dataset.troupeStop || "");
+  $("troupe-dismiss").onclick = dropFinishedTroupes;
   // Request ids restart with every backend process (r1, r2, ...), so a card remembers which backend
   // asked: a new backend's r1 is a new request even while the last one's answered r1 is on screen.
   let requestEpoch = 0;
@@ -4011,7 +4105,7 @@
           + `<div class="muted pip-permission-note">Allow adds it to the Pip's routines, on at once. It only reads this project's committed code. Turn it off in the Pip's Settings, Routines.</div>`;
       }
       return `<dl class="pip-permission">${row("Work", args.title)}${row("Plan", plan)}${row("Goal", args.goal)}${row(`Items (${items.length})`, listed)}${row("Resume", args.resume)}</dl>`
-        + `<div class="muted pip-permission-note">Allow starts it in the background: one agent per item. This chat continues when it ends, and the troupe's card can stop it.</div>`;
+        + `<div class="muted pip-permission-note">Allow starts it in the background: one agent per item. Its progress shows above the message box, where you can stop it, and this chat continues when it ends.</div>`;
     }
     const row = (label, value) => (value ? `<dt>${label}</dt><dd>${esc(String(value))}</dd>` : "");
     if (name === "pips_propose") {
@@ -4359,8 +4453,9 @@
 
   function syncComposerRail() {
     composerRail.hidden = goalBar.hidden && changesBar.hidden && tasksBar.hidden && monitorsBar.hidden
-      && pasteBar.hidden && (!pipsBar || pipsBar.hidden);
+      && troupeBar.hidden && pasteBar.hidden && (!pipsBar || pipsBar.hidden);
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
+    composerRail.classList.toggle("has-troupes", !troupeBar.hidden);
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
@@ -5010,7 +5105,8 @@
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
         // snapshot that follows, so the row is left for that event to overwrite. Either way a
         // clear that was waiting belonged to the chat being left.
-        if (["cleared", "new", "resumed"].includes(ev.kind)) { settleTodoClear(); renderMonitors({ items: [], reset: true }); }
+        // Troupes too: a resumed chat's running ones come back with the `troupes` snapshot the restore asks for.
+        if (["cleared", "new", "resumed"].includes(ev.kind)) { settleTodoClear(); renderMonitors({ items: [], reset: true }); resetTroupes(); }
         if (ev.kind === "cleared" || ev.kind === "new") renderTodos([]);
         // A branch keeps the conversation on screen — that is the whole point of it.
         if (ev.kind === "forked") {
@@ -5051,6 +5147,8 @@
           typeof ev.request_id === "string" ? ev.request_id : "");
         if (!replaying) customCommandPending = "";
         if (!replaying) returnedPrompts.length = 0;   // given back before this turn: ordinary transcript now
+        // The next message moves on from a troupe that has ended; its own wake-up turn (a monitor turn) does not.
+        if (!replaying && (ev.kind || "prompt") === "prompt") dropFinishedTroupes();
         if (!replaying) {
           // A monitor turn was never queued by anyone, so it takes nothing off the queued count.
           setSending(true); if (queuedCount > 0 && ev.kind !== "monitor" && ev.kind !== "pip_setup") { queuedCount--; renderQueued(); }
@@ -5541,11 +5639,13 @@
       case "troupe_started":
       case "troupe_progress":
       case "troupe_finished": {
-        troupeCard(ev, ev.type === "troupe_started");
+        troupeEvent(ev, ev.type === "troupe_started");
         break;
       }
       case "troupes": {
-        (Array.isArray(ev.runs) ? ev.runs : []).forEach((run) => { if (run && typeof run === "object") troupeCard(run, run.state === "running"); });
+        // Newest first on the wire; the row keeps them oldest first, the order live ones arrive in.
+        (Array.isArray(ev.runs) ? ev.runs : []).slice(0, 20).reverse()
+          .forEach((run) => { if (run && typeof run === "object") troupeEvent(run, run.state === "running"); });
         break;
       }
       case "artifact_ready": {
@@ -7000,6 +7100,7 @@
     settleTodoClear();
     renderTodos([]);
     renderMonitors({ items: [], reset: true });
+    resetTroupes();
     returnedPrompts.length = 0;
     backendExitNotice = null;
   }
