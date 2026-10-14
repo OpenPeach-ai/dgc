@@ -153,6 +153,10 @@ def label(trigger: dict) -> str:
     weekdays = re.fullmatch(r"(\d+) (\d+) \* \* 1-5", spec["cron"])
     if weekdays:
         return f"on weekdays at {int(weekdays.group(2)):02d}:{int(weekdays.group(1)):02d}"
+    weekly = re.fullmatch(r"(\d+) (\d+) \* \* ([0-6])", spec["cron"])
+    if weekly:
+        day = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")[int(weekly.group(3))]
+        return f"every {day} at {int(weekly.group(2)):02d}:{int(weekly.group(1)):02d}"
     return f"on the schedule {spec['cron']}"
 
 

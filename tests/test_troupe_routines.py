@@ -91,7 +91,7 @@ class TroupeRoutineTests(unittest.TestCase):
     def test_how_often_becomes_a_routine_schedule_the_pips_accept(self):
         cases = [({"every": "day", "at": "07:30"}, "every day at 07:30"),
                  ({"every": "weekday"}, "on weekdays at 09:00"),
-                 ({"every": "week", "day": "friday", "at": "18:00"}, "on the schedule 0 18 * * 5"),
+                 ({"every": "week", "day": "friday", "at": "18:00"}, "every Friday at 18:00"),
                  ({"every": "hours", "hours": 6}, "every 6 hours")]
         for spec, words in cases:
             with self.subTest(spec=spec):
