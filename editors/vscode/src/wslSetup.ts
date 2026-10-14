@@ -111,8 +111,10 @@ async function setUp(distro: string, log: vscode.OutputChannel): Promise<boolean
       progress.report({ message: `${step.title} (${index + 1} of ${steps.length})…` });
       log.appendLine(`[DGC on Windows] ${step.title}: wsl.exe ${step.args.join(" ")}`);
       const result = await run(step.args, { input: step.input, timeoutMs: step.timeoutMs });
-      if (result.out.trim()) { log.appendLine(result.out.trim().slice(-20000)); }
-      if (result.err.trim()) { log.appendLine(result.err.trim().slice(-20000)); }
+      // The installer colours its lines for a terminal; the log shows them plain.
+      const plain = (text: string) => text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").trim().slice(-20000);
+      if (plain(result.out)) { log.appendLine(plain(result.out)); }
+      if (plain(result.err)) { log.appendLine(plain(result.err)); }
       if (result.code !== 0) {
         log.show(true);
         void vscode.window.showErrorMessage(`Setting up DGC on Windows stopped at "${step.title}". The DGC log (Output) says why.`);
