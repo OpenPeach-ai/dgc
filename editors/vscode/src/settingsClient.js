@@ -24,7 +24,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const paths = { voice: 'M10 2a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a5 5 0 0 0 10 0 M10 15v3 M7 18h6', memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13' };
 const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${paths[name] || paths.plugins}"/></svg>`;
 const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
-let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null;
+let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
 let mcpError = "";
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
 let usageView = 'all', pipUsage = null;
@@ -648,16 +648,29 @@ function renderMcp(main) {
     $('refresh-mcp').onclick = () => send({ type: 'listMcp' });
     bindPlugins(main);
 }
+// Save and connect keeps the form on screen while it connects (a redraw would lose what was typed), so the
+// "finish in your browser" banner goes beside the button that was just pressed, for that server only.
+function formSignin() {
+    $('mcp-signin')?.remove();
+    const form = $('mcp-form');
+    if (!form || !signin || !mcpSubmitted || signin.server !== mcpSubmitted) return;
+    // After the form, not in it: its buttons would submit the form (and save the server again).
+    form.insertAdjacentHTML('afterend', `<div id="mcp-signin">${banner()}</div>`);
+    const box = $('mcp-signin');
+    box.querySelector('[data-browser]').onclick = () => send({ type: 'openSignIn' });
+    box.querySelector('[data-cancel-connect]').onclick = () => send({ type: 'cancelSignIn' });
+    box.scrollIntoView?.({ block: 'nearest' });
+}
 function renderMcpForm(main, s) {
     const remote = s.transport === 'remote';
     main.innerHTML = `<div class="crumbs"><button id="mcp-back">${esc(detail ? items.find(r => r.name === detail)?.display_name || 'Plugin' : 'MCP servers')}</button><span>›</span><span>${esc(s.name || 'Add server')}</span></div><h1>${s.name ? 'Configure server' : 'Add server'}</h1><p class="sub">Use your existing MCP configuration and credential storage.</p>${s.setup_note ? `<p class="note">${esc(s.setup_note)}</p>` : ''}<form class="mcp-form" id="mcp-form"><label>Server name<input id="mcp-name" required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" value="${esc(s.name || s.suggested_name)}"></label><label>Transport<select id="mcp-transport"><option value="stdio">Local STDIO</option><option value="remote"${remote ? ' selected' : ''}>Remote HTTP</option></select></label><label><span id="mcp-target-label">${remote ? 'Server URL' : 'Command'}</span><input id="mcp-target" required value="${esc(remote ? s.url : s.command)}"></label><label id="args-label">Arguments <span class="note">One per line. No shell parsing.</span><textarea id="mcp-args">${esc((s.args || []).join('\n'))}</textarea></label><label id="env-label">Environment <span class="note">KEY=value goes to SecretStorage. KEY uses the environment.</span><textarea id="mcp-env" placeholder="${esc((s.env_names || []).join('\n'))}"></textarea></label><label id="token-label">Bearer token <span class="note">Leave blank to keep the saved token.</span><input type="password" id="mcp-token" autocomplete="off"></label><fieldset id="oauth-app" class="oauth-app"><legend>Your own OAuth app <span class="note">Optional. For a service that doesn’t let DGC register itself (Asana, Zoom, Docusign, or a Google app of your own).</span></legend><label>Client ID<input id="mcp-oauth-id" autocomplete="off" spellcheck="false" value="${esc(s.oauth_client_id || '')}"></label><label>Client secret <span class="note">${s.oauth_client_id ? 'Leave blank to keep the saved secret.' : 'Leave blank for a public client.'}</span><input type="password" id="mcp-oauth-secret" autocomplete="off"></label><label>Callback port<input id="mcp-oauth-port" inputmode="numeric" pattern="[0-9]{4,5}" placeholder="3334" value="${esc(s.oauth_port || '')}"></label><p class="note" id="mcp-oauth-redirect">In the app's settings at the service, add this redirect URL: <code>http://localhost:${esc(String(s.oauth_port || 3334))}/oauth/callback</code></p></fieldset><label>Log level<select id="mcp-log">${['warning', 'info', 'debug', 'error', 'off'].map(v => `<option${v === s.log_level ? ' selected' : ''}>${v}</option>`).join('')}</select></label><label class="check"><input type="checkbox" id="mcp-clear">Clear stored credentials before saving</label><div class="actions"><button class="save">Save and connect</button><button type="button" class="secondary" id="mcp-cancel">Cancel</button>${s.name ? '<button type="button" class="secondary" id="mcp-reconnect">Reconnect</button><button type="button" class="secondary" id="mcp-remove">Remove server</button>' : ''}</div></form>`;
-    const back = () => { mcpEditing = null; render(); };
+    const back = () => { mcpEditing = null; mcpSubmitted = ''; render(); };
     $('mcp-back').onclick = back;
     $('mcp-cancel').onclick = back;
     const transport = () => { const remote = $('mcp-transport').value === 'remote'; $('args-label').hidden = remote; $('env-label').hidden = remote; $('token-label').hidden = !remote; $('oauth-app').hidden = !remote; $('mcp-target-label').textContent = remote ? 'Server URL' : 'Command'; };
     $('mcp-transport').onchange = transport;
     transport();
-    $('mcp-form').onsubmit = e => { e.preventDefault(); send({ type: 'mcpSave', values: { original_name: s.name || '', name: $('mcp-name').value, transport: $('mcp-transport').value, target: $('mcp-target').value, args: $('mcp-args').value, env: $('mcp-env').value, env_names: s.env_names || [], token: $('mcp-token').value, clear_secrets: $('mcp-clear').checked, log_level: $('mcp-log').value, oauth_client_id: $('mcp-oauth-id').value, oauth_client_secret: $('mcp-oauth-secret').value, oauth_port: $('mcp-oauth-port').value || ($('mcp-oauth-id').value.trim() ? '3334' : '') } }); };
+    $('mcp-form').onsubmit = e => { e.preventDefault(); mcpSubmitted = $('mcp-name').value; formSignin(); send({ type: 'mcpSave', values: { original_name: s.name || '', name: $('mcp-name').value, transport: $('mcp-transport').value, target: $('mcp-target').value, args: $('mcp-args').value, env: $('mcp-env').value, env_names: s.env_names || [], token: $('mcp-token').value, clear_secrets: $('mcp-clear').checked, log_level: $('mcp-log').value, oauth_client_id: $('mcp-oauth-id').value, oauth_client_secret: $('mcp-oauth-secret').value, oauth_port: $('mcp-oauth-port').value || ($('mcp-oauth-id').value.trim() ? '3334' : '') } }); };
     $('mcp-oauth-port').oninput = () => { $('mcp-oauth-redirect').querySelector('code').textContent = `http://localhost:${$('mcp-oauth-port').value || 3334}/oauth/callback`; };
     if (s.name) {
         $('mcp-reconnect').onclick = () => send({ type: 'mcpReconnect', name: s.name });
@@ -724,6 +737,8 @@ window.addEventListener('message', event => {
         if (signin && items.some(r => r.name === connectingPlugin && (r.name === signin.server || r.server_names?.includes(signin.server)))) updateConnection('browser');
         if (['plugins', 'mcp'].includes(section) && !mcpEditing)
             render();
+        else if (mcpEditing)
+            formSignin();
     }
     else if (msg.type === 'pluginResult') {
         pending.delete(msg.name);
