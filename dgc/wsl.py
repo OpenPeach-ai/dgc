@@ -15,8 +15,10 @@ there DGC is a Linux install. Four things differ, and this module is where DGC f
 Reaching Windows uses WSL interop (running a Windows program from Linux). It is on by default; a distro can turn it
 off in /etc/wsl.conf, and then DGC says what it can't do rather than guessing.
 
-Nothing here is measured on Windows yet (no Windows machine was reachable when this was written, 2026-10-14). The
-facts it relies on are Microsoft's documented ones; each is named where it is used.
+Measured on a real Windows 11 (build 26300, WSL 3.0.3, 2026-10-14): NAT is the default networking mode, so a distro
+can't reach Windows' 127.0.0.1 (curl exit 7) and the relay is how DGC does; a relay costs a PowerShell start, about
+1.2 s; wslg.exe takes -d, --cd, -u, --shell-type and `--` (no --exec); the Windows notification shows. The signed-in
+Chrome path is not yet run on Windows; its relay is the one the model bridge uses.
 """
 from __future__ import annotations
 

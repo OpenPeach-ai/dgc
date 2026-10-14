@@ -393,6 +393,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   names a file on either side, both ways, by field (never free text, tool arguments, rules or paths inside a Pip's
   computer). Setting it up is dialogs in the editor: turn on WSL (administrator, then a restart), then download
   Ubuntu with `--web-download`, prepare it as root from fixed text, and run the installer as DGC's user.
+- **A model on Windows' own localhost** (Ollama or LM Studio installed on Windows): WSL's default NAT networking keeps
+  it out of reach (curl exit 7 from the distro). In DGC's own distro (marked `/etc/dgc-distro` at setup), a model URL
+  on a loopback port that answers nothing there but answers on Windows gets a listener there, for the process's
+  life, whose every connection Windows PowerShell carries; one relay waits connected, so a request costs 0.01 s
+  instead of the 1.2 s a PowerShell takes to start. Never in a distro of your own, where the port stays yours.
+- **Keep Pips running in WSL now starts at sign-in.** The Run list handed `wslg.exe` a `--exec`, which only `wsl.exe`
+  has: Windows showed wslg's usage in a dialog at every sign-in and started nothing. It is now
+  `-d <distro> --shell-type none -- /bin/sh <script>`; across two reboots the runner was online with no dialog.
 - **What a real Windows 11 (build 26300, WSL 3.0.3) taught it:** the inbox `wsl.exe` writes UTF-16 even with
   `WSL_UTF8=1`, and says "not installed" on every command (exit 1, or 50 for `--status`); WSL 3 writes "There is no
   distribution with the supplied name" on stdout, not stderr, and exits -1; a distro installed through the Store
