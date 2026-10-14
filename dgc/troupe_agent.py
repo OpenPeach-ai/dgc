@@ -20,8 +20,8 @@ from pathlib import Path
 from . import troupe
 
 # A troupe agent's role, ahead of its task. Not the `.dgc/agents` built-ins: those write files and hand off with a
-# FILES line, and a troupe agent reads and answers in JSON. Not added to the `task` roster either (its prompt is
-# measured: tests/run_tests.py, the prompt-surface probe).
+# FILES line, and a troupe agent reads and answers in JSON. The `task` roster has a verifier of its own (agents.py),
+# which may run checks; a troupe's verifier is matched here first and stays read only.
 ROLE = {
     "explorer": "You are a read-only explorer: search and read, never write or change anything. Cite path:line.",
     "researcher": "You are a researcher: read and search the web, never write or change anything. Name your sources.",

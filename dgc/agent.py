@@ -3099,7 +3099,7 @@ class Agent(GoalLifecycle):
         except Exception:                      # a partially built fixture/probe agent
             defs = {}
         defs = defs or builtin_agents()
-        names = [name for name in ("explorer", "researcher", "critic", "worker") if name in defs]
+        names = [name for name in ("explorer", "researcher", "critic", "verifier", "worker") if name in defs]
         names += sorted(name for name in defs if name not in names)[:12]
         roster = [f"- {name}: " + (" ".join(str(defs[name].description or "").split())[:120]
                                    or "custom agent") + (" (default)" if name == "worker" else "")

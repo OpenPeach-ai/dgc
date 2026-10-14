@@ -383,8 +383,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   troupe?", and Always allow saves `Troupe(routine)`, separate from running one. When due, it runs as a job of its
   own (`python -m dgc.troupe_job`) with your model on a snapshot of the project's committed code, one at a time, for
   at most an hour; then the Pip tells you what it found in its chat, the report handed to it as data. Its tokens
-  count toward the Pip's daily limit; "changed" remembers the last commit it reviewed. Read-only troupes only: a
-  change template or a worker stage is refused. Pips registry schema 45 (`pip_routines.troupe`).
+  count in the Pip's usage; "changed" remembers the last commit it reviewed. Read-only troupes only: a change
+  template or a worker stage is refused. Pips registry schema 45 (`pip_routines.troupe`).
+- **A verifier for ordinary sub-agents too.** `task`'s roster gains `verifier` beside explorer, researcher, critic and
+  worker: it tries to prove a claim or a change wrong, reads and runs the tests or commands that would show it (in
+  its own checkout, which has your uncommitted edits), edits nothing, and starts its answer with CONFIRMED, REFUTED
+  or UNSURE. A troupe's verifier is unchanged: read only, answering in JSON. A `~/.dgc/agents/verifier.md` of your own
+  still replaces it.
 
 ### Windows: the editor runs DGC in a WSL distro of its own
 

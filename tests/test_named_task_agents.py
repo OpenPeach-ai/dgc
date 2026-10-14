@@ -1,4 +1,4 @@
-"""Built-in task specialists: explorer / researcher / critic / worker."""
+"""Built-in task specialists: explorer / researcher / critic / verifier / worker."""
 from __future__ import annotations
 
 import tempfile
@@ -15,13 +15,28 @@ from test_subagents import Harness
 class BuiltinAgentCatalogTests(unittest.TestCase):
     def test_builtins_are_always_present(self):
         names = set(agents.discover_agents("/no/such/project").keys())
-        self.assertEqual(names, {"explorer", "researcher", "critic", "worker"})
+        self.assertEqual(names, {"explorer", "researcher", "critic", "verifier", "worker"})
         explorer = agents.discover_agents("/no/such/project")["explorer"]
         self.assertTrue(explorer.builtin)
         self.assertIn("read_file", explorer.tool_allow)
         self.assertNotIn("write_file", explorer.tool_allow)
         self.assertNotIn("bash", explorer.tool_allow)
         self.assertEqual(agents.discover_agents("/no/such/project")["worker"].tool_allow, frozenset())
+
+    def test_verifier_runs_checks_but_cannot_edit(self):
+        verifier = agents.discover_agents("/no/such/project")["verifier"]
+        self.assertTrue(verifier.builtin)
+        self.assertTrue({"read_file", "grep", "git_diff", "bash"} <= verifier.tool_allow, "it reads and runs the tests")
+        self.assertFalse(verifier.tool_allow & {"write_file", "edit_file", "multi_edit", "task"}, "it edits nothing")
+        for word in ("prove", "wrong", "CONFIRMED", "REFUTED", "UNSURE", "Do not edit"):
+            self.assertIn(word, verifier.body)
+        # A troupe's verifier is its own (read only, JSON), matched before the roster is ever consulted.
+        from dgc import troupe, troupe_agent
+        runner = troupe_agent.TroupeRunner.__new__(troupe_agent.TroupeRunner)
+        runner.agent = SimpleNamespace(agent_defs={"verifier": verifier})
+        name, tools, writes = runner._kind(SimpleNamespace(agent="verifier"))
+        self.assertEqual((name, tools, writes), ("", troupe.READ_TOOLS, False))
+        self.assertNotIn("bash", troupe.READ_TOOLS)
 
     def test_project_file_overrides_a_builtin_after_trust(self):
         temp = tempfile.TemporaryDirectory(prefix="dgc-named-agents-")
@@ -80,6 +95,8 @@ class ExplorerToolGateTests(unittest.TestCase):
         prompt = h.agent.system_prompt()
         self.assertIn("explorer:", prompt)
         self.assertIn("critic:", prompt)
+        self.assertIn("- verifier: Try to disprove a claim or change by running checks; edits nothing", prompt)
+        self.assertLess(prompt.index("- verifier:"), prompt.index("- worker:"), "the default stays last")
         self.assertIn("Do not paste the child's logs", prompt)
 
     def test_finished_agent_keeps_a_files_line(self):

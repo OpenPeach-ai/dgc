@@ -11665,7 +11665,9 @@ def test_benchmark_integrity():
         # concrete trigger stays, because without it the model said "I'll keep that in mind" and kept nothing (live,
         # 2026-10-12). Together they measured 6,754, from 6,985 before trimming; 6,800 keeps the same small headroom.
         # The browser's signed_in option (the user's own Chrome, 2026-10-13) is one boolean with a nine-word line: 6,783.
-        _PROBE_TOKEN_CEILING = 6800
+        # A verifier in the `task` roster (founder, 2026-10-14: troupes had one, ordinary sub-agents did not) is one
+        # roster line, shortened from 22 tokens to 20: 6,803. 6,830 keeps the same small headroom.
+        _PROBE_TOKEN_CEILING = 6830
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"

@@ -1080,11 +1080,13 @@ sub-agent the chat has started and what each one is doing, instead of one spinne
 
 ## Named agents and trust
 
-Four specialists are always available as the `task` tool's `agent` argument:
+Five specialists are always available as the `task` tool's `agent` argument:
 
 - **explorer** — read-only search and map of the codebase (no writes).
 - **researcher** — investigate and write one findings file, then stop.
 - **critic** — review named files or a change; correct them or list blocking issues.
+- **verifier** — try to prove a claim or a change wrong: it reads and runs the tests or commands that
+  would show it, edits nothing, and starts its answer with CONFIRMED, REFUTED or UNSURE.
 - **worker** — implement a bounded change (the default when `agent` is omitted).
 
 The main agent is offered `task` when you ask it to delegate or to survey the codebase, and on
@@ -1489,7 +1491,7 @@ choosing.
 
 ## Agent, memory, and control
 
-- `task` — a sub-agent: `agent` picks explorer / researcher / critic / worker (or a named
+- `task` — a sub-agent: `agent` picks explorer / researcher / critic / verifier / worker (or a named
   definition); `background: true` runs on after the turn, except in a one-shot `dgc -p` run (see
   **Sub-agents**).
 - `list_tasks` · `wait_tasks` — what this chat's sub-agents are doing, and block for a background

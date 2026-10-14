@@ -18,7 +18,7 @@ A sub-agent is a Markdown file with frontmatter:
     System guidance the sub-agent follows for this kind of task...
 
 Discovery (trusted project overrides user, which overrides built-ins):
-  built-in explorer / researcher / critic / worker
+  built-in explorer / researcher / critic / verifier / worker
   ~/.dgc/agents/<name>.md
   <project>/.dgc/agents/<name>.md
 
@@ -80,6 +80,15 @@ def builtin_agents() -> dict[str, AgentDef]:
             body="You are a critic. Review the files or change named in the task against its "
                  "requirements: correctness, missed cases, tests. Correct those files or list "
                  "blocking issues. Do not implement the surrounding feature.\n" + _HANDOFF),
+        # A troupe has its own verifier (troupe_agent.ROLE: read only, answers in JSON); this one is for `task`, and
+        # verifying a change usually means running its tests, in the child's own checkout.
+        "verifier": AgentDef(
+            name="verifier", builtin=True, tools=_READS + ", bash",
+            description="Try to disprove a claim or change by running checks; edits nothing",
+            body="You are a verifier. Try to prove the claim or change named in the task wrong: read what it "
+                 "names and run the tests or commands that would show it fails. Do not edit or write files. "
+                 "Start with CONFIRMED, REFUTED or UNSURE, then the evidence: path:line references and each "
+                 "command you ran with its result.\n" + _HANDOFF),
         "worker": AgentDef(
             name="worker", builtin=True, tools="",
             description="Implement a bounded change",
