@@ -81,6 +81,7 @@ test("setting it up: the distro, then prepared as root from fixed text, then DGC
   assert.deepEqual(all[1].args, ["-d", "DGC", "-u", "root", "--exec", "/bin/sh", "-s"]);
   assert.match(all[1].input, /useradd -m -s \/bin\/bash dgc/);
   assert.match(all[1].input, /python3-venv bubblewrap/);
+  assert.match(all[1].input, /^touch \/etc\/dgc-distro$/m, "marked as DGC's own (dgc/wsl.py OWN_DISTRO_MARK)");
   assert.deepEqual(all[3].args, ["-d", "DGC", "-u", "dgc", "--exec", "/bin/sh", "-s"]);
   assert.match(all[3].input, /DGC_SKIP_EXTENSION=1 bash/);
   assert.deepEqual(host.setupSteps("no-dgc", "DGC").map((s) => s.title), ["Preparing it", "Restarting it", "Installing DGC"]);

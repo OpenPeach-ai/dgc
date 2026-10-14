@@ -125,6 +125,8 @@ export const PREPARE_SCRIPT = [
   "fi",
   "apt-get update -q",
   "apt-get install -y -q python3-venv bubblewrap curl ca-certificates",
+  // DGC's own distro (dgc/wsl.py OWN_DISTRO_MARK): only here does DGC bridge a model on Windows' localhost.
+  "touch /etc/dgc-distro",
 ].join("\n");
 
 /** As DGC's user: the published installer, which never touches the editor's extension here. */

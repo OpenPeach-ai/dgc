@@ -308,6 +308,147 @@ def windows_loopback(port: int, *, timeout: float = 10.0, argv: list[str] | None
     return ours
 
 
+# ---------------------------------------------------------------- a model on Windows, from DGC's own distro
+
+# Written by the editor when it sets up the distro DGC runs in on Windows (editors/vscode/src/wslHost.ts). Only there
+# does DGC bridge a loopback port: in a distro of the user's own, holding 127.0.0.1:11434 would stop them starting
+# their own Ollama in it.
+OWN_DISTRO_MARK = Path("/etc/dgc-distro")
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
+_BRIDGES: dict[int, socket.socket] = {}
+_BRIDGE_LOCK = threading.Lock()
+_NOTHING_ON_WINDOWS: dict[int, float] = {}       # port -> when Windows didn't answer (each look costs a PowerShell)
+LOOK_AGAIN = 60.0
+
+
+def _answers_here(port: int) -> bool:
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        return True
+    except OSError:
+        return False
+
+
+def _answers_on_windows(port: int, connect) -> bool:
+    """Whether a server on Windows' 127.0.0.1:PORT answers an HTTP request through the relay."""
+    try:
+        probe = connect(port, timeout=10.0)
+    except OSError:
+        return False
+    try:
+        probe.sendall(b"HEAD / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+        return bool(probe.recv(1))
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
+def _pump(source: socket.socket, sink: socket.socket) -> None:
+    try:
+        while True:
+            chunk = source.recv(65536)
+            if not chunk:
+                break
+            sink.sendall(chunk)
+    except OSError:
+        pass
+    finally:
+        try:
+            sink.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+
+
+def _carry(client: socket.socket, port: int, connect) -> None:
+    try:
+        remote = connect(port, timeout=10.0)
+    except OSError:
+        client.close()
+        return
+    remote.settimeout(None)
+    back = threading.Thread(target=_pump, args=(remote, client), name="dgc-wsl-bridge-down", daemon=True)
+    back.start()
+    _pump(client, remote)
+    back.join()
+    client.close()
+    remote.close()
+
+
+def bridge_windows_port(port: int, *, connect=None, own_distro: bool | None = None) -> bool:
+    """Let 127.0.0.1:PORT in DGC's own distro reach a server on Windows' 127.0.0.1:PORT (Ollama, LM Studio), which
+    WSL's default NAT networking can't: a listener here, for this process's life, whose every connection Windows
+    PowerShell carries (windows_loopback). Only in DGC's own distro, only when nothing here answers on that port and
+    something on Windows does. SO_REUSEPORT: each DGC process (the editor's, the Pips runner) keeps its own, and one
+    quitting leaves the others. Returns whether the port is bridged by this process now."""
+    if not 0 < port < 65536:
+        return False
+    if own_distro is None:
+        own_distro = version() == 2 and OWN_DISTRO_MARK.exists()
+    if not own_distro:
+        return False
+    with _BRIDGE_LOCK:
+        if port in _BRIDGES:
+            return True
+        connect = connect or windows_loopback
+        if _answers_here(port):
+            return False
+        import time
+        if time.monotonic() - _NOTHING_ON_WINDOWS.get(port, -LOOK_AGAIN) < LOOK_AGAIN:
+            return False
+        if not _answers_on_windows(port, connect):
+            _NOTHING_ON_WINDOWS[port] = time.monotonic()
+            return False
+        _NOTHING_ON_WINDOWS.pop(port, None)
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            listener.bind(("127.0.0.1", port))
+            listener.listen(64)
+        except OSError:
+            listener.close()
+            return False
+        _BRIDGES[port] = listener
+
+    def accept():
+        while True:
+            try:
+                client, _ = listener.accept()
+            except OSError:
+                return
+            threading.Thread(target=_carry, args=(client, port, connect), name="dgc-wsl-bridge", daemon=True).start()
+
+    threading.Thread(target=accept, name=f"dgc-wsl-bridge-{port}", daemon=True).start()
+    return True
+
+
+def bridge_model_url(url: str) -> bool:
+    """bridge_windows_port for a model endpoint on this computer's loopback (http://localhost:11434/v1)."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(str(url or ""))
+        host, port = (parts.hostname or "").lower(), parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return False
+    if host not in LOOPBACK_HOSTS or not (version() == 2 and OWN_DISTRO_MARK.exists()):
+        return False
+    return bridge_windows_port(port, own_distro=True)
+
+
+def _close_bridges() -> None:
+    """Tests: drop every listener this process opened."""
+    with _BRIDGE_LOCK:
+        for listener in _BRIDGES.values():
+            try:
+                listener.shutdown(socket.SHUT_RDWR)       # wakes the accept loop; close alone may not
+            except OSError:
+                pass
+            listener.close()
+        _BRIDGES.clear()
+        _NOTHING_ON_WINDOWS.clear()
+
+
 # ---------------------------------------------------------------- a Windows notification
 
 _TOAST = """[void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]

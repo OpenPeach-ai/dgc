@@ -1462,6 +1462,13 @@ class LLMClient:
                  first_token_timeout="auto", idle_timeout=300, stall_notice=45,
                  stall_retries=2, load_timeout=900):
         self.base_url = base_url.rstrip("/")
+        try:
+            # DGC on Windows runs in a WSL distro of its own, whose localhost isn't Windows': a model the user serves
+            # on Windows (Ollama, LM Studio) is reached through Windows (wsl.bridge_model_url). Elsewhere, nothing.
+            from .wsl import bridge_model_url
+            bridge_model_url(self.base_url)
+        except Exception:                        # noqa: BLE001 -- the request then says what it can't reach
+            pass
         self.api_key = api_key
         self.model = model
         self.adapter = provider_adapter(self.base_url)

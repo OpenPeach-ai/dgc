@@ -310,6 +310,87 @@ class RelayTests(unittest.TestCase):
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "WSL is Linux: its paths run only there")
+class _Echo(socketserver.BaseRequestHandler):
+    """A stand-in for Ollama on Windows: answers every request with what it received, upper-cased."""
+    def handle(self):
+        data = self.request.recv(65536)
+        if data:
+            self.request.sendall(b"HTTP/1.0 200 OK\r\n\r\n" + data.upper())
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "SO_REUSEPORT on loopback, as in WSL")
+class ModelOnWindowsTests(unittest.TestCase):
+    """DGC on Windows runs in its own distro, where localhost isn't Windows': a model there is bridged."""
+
+    def setUp(self):
+        self.windows = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _Echo)
+        self.windows.daemon_threads = True
+        threading.Thread(target=self.windows.serve_forever, daemon=True).start()
+        self.addCleanup(self.windows.server_close)
+        self.addCleanup(self.windows.shutdown)
+        self.addCleanup(wsl._close_bridges)
+        self.port = _free_port()                 # nothing listens here: "WSL's own localhost"
+        self.opened = []
+
+    def connect(self, port, timeout=10.0):
+        """windows_loopback, here: the relay reaches 'Windows' 127.0.0.1:port, which is the stand-in."""
+        self.opened.append(port)
+        return socket.create_connection(("127.0.0.1", self.windows.server_address[1]), timeout=timeout)
+
+    def ask(self, payload: bytes) -> bytes:
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as client:
+            client.sendall(payload)
+            client.shutdown(socket.SHUT_WR)
+            chunks = []
+            while chunk := client.recv(65536):
+                chunks.append(chunk)
+        return b"".join(chunks)
+
+    def test_a_model_on_windows_answers_on_this_distros_localhost(self):
+        self.assertTrue(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=True))
+        self.assertTrue(self.ask(b"post /v1/chat/completions").endswith(b"POST /V1/CHAT/COMPLETIONS"))
+        self.assertTrue(self.ask(b"get /v1/models").endswith(b"GET /V1/MODELS"), "every connection, carried anew")
+        self.assertEqual(self.opened, [self.port] * 3, "the probe, then one relay per connection")
+        self.assertTrue(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=True), "once per process")
+        self.assertEqual(len(self.opened), 3)
+
+    def test_only_in_dgcs_own_distro_and_only_when_needed(self):
+        self.assertFalse(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=False),
+                         "a distro of the user's own: their port stays theirs")
+        self.assertEqual(self.opened, [])
+        with socket.socket() as here:                    # something already answers in WSL
+            here.bind(("127.0.0.1", self.port))
+            here.listen(1)
+            self.assertFalse(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=True))
+        self.assertEqual(self.opened, [], "never asks Windows when this side answers")
+
+    def test_nothing_on_windows_is_remembered_for_a_minute(self):
+        def refused(port, timeout=10.0):
+            self.opened.append(port)
+            raise ConnectionRefusedError("nothing on Windows")
+        self.assertFalse(wsl.bridge_windows_port(self.port, connect=refused, own_distro=True))
+        self.assertFalse(wsl.bridge_windows_port(self.port, connect=refused, own_distro=True))
+        self.assertEqual(len(self.opened), 1, "one PowerShell, not one per model client")
+
+    def test_only_a_loopback_url_in_dgcs_own_distro(self):
+        with patch.object(wsl, "bridge_windows_port", return_value=True) as bridge, \
+                patch.object(wsl, "version", return_value=2), patch.object(wsl, "OWN_DISTRO_MARK") as mark:
+            mark.exists.return_value = True
+            self.assertTrue(wsl.bridge_model_url("http://localhost:11434/v1"))
+            bridge.assert_called_once_with(11434, own_distro=True)
+            self.assertFalse(wsl.bridge_model_url("https://api.example.com/v1"))
+            self.assertFalse(wsl.bridge_model_url("http://192.168.1.10:11434/v1"))
+            mark.exists.return_value = False
+            self.assertFalse(wsl.bridge_model_url("http://127.0.0.1:1234/v1"))
+        self.assertEqual(bridge.call_count, 1)
+
+
 class SignedInChromeTests(unittest.TestCase):
     """The user's Chrome, on Windows, from DGC in WSL."""
 
