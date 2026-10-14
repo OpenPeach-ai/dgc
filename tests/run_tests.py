@@ -7015,7 +7015,7 @@ def test_mcp_protocol():
               and "bounded-64" not in started_servers)
         check("MCP runtime refuses an invalid remote bridge before starting a process",
               "mismatch" not in started_servers
-              and invalid_manager.failures.get("mismatch") == "invalid remote MCP bridge identity")
+              and invalid_manager.failures.get("mismatch") == "invalid remote MCP server entry")
 
         import io as _io
         framed = list(_bounded_lines(_io.StringIO("0123456789abcdef\nvalid\n"), limit=8))

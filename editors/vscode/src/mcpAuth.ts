@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 export type McpBrowserRequest = { url: string; callbackUrl?: string; opening?: boolean };
 const loopback = (host: string): boolean => ["localhost", "127.0.0.1", "[::1]"].includes(host);
 
-/** Forward a bridge-owned loopback callback before opening its authorization page. Never rewrite
+/** Forward DGC's own loopback callback before opening its authorization page. Never rewrite
  * redirect_uri: registration, PKCE completion and token exchange must use the same exact value. */
 export async function openMcpBrowser(request: McpBrowserRequest, current: () => boolean): Promise<boolean> {
   const target = new URL(request.url);
@@ -46,7 +46,7 @@ export async function openMcpBrowser(request: McpBrowserRequest, current: () => 
           || mapped.username || mapped.password) {
         throw new Error(`The editor could not forward MCP callback port ${callback.port} unchanged. `
           + `Forward that remote port to the same local port in the Ports panel, then reconnect the MCP server. `
-          + `This bridge sign-in flow requires a desktop editor with loopback forwarding.`);
+          + `DGC's sign-in needs a desktop editor with loopback forwarding.`);
       }
     }
   }

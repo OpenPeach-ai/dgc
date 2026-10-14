@@ -1624,8 +1624,8 @@ class MCPManager:
                     _background: bool = False) -> None:
         """Connect configured servers, deferring editor-secret entries during cold startup.
 
-        At startup, hosted (remote bridge) servers connect on a background thread: each one is an
-        npx bridge plus a network round trip, and one waiting for a sign-in held a new chat open
+        At startup, hosted (remote) servers connect on a background thread: each one is a network
+        round trip or several, and one waiting for a sign-in held a new chat open
         past the editor's 10-second session request, so the chat never became ready. A turn waits
         a little for them (wait_background) so its first request still sees their tools.
         """
@@ -1673,7 +1673,7 @@ class MCPManager:
                                 and isinstance(url, str) and raw_args[2] == url
                                 and valid_remote_mcp_url(url))
                 if not exact_bridge:
-                    self.failures[name] = "invalid remote MCP bridge identity"
+                    self.failures[name] = "invalid remote MCP server entry"
                     continue
             configured_env = raw_spec.get("env")
             configured_env = dict(configured_env) if isinstance(configured_env, dict) else {}
