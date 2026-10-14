@@ -11,7 +11,7 @@ twelve model requests) and one at a time across every Pip, and a troupe is many 
   days), the tracked files matching a pattern, or a fixed list;
 - runs one at a time on this computer, for at most an hour, as `python -m dgc.troupe_job` under the user's own DGC
   home and model;
-- charges its tokens to the Pip's day, so the Pip's daily limit stops the next one from starting;
+- counts its tokens in the Pip's usage for the day;
 - then hands the Pip its report, as data, in an ordinary routine turn, and the Pip tells the user in its chat.
 """
 from __future__ import annotations

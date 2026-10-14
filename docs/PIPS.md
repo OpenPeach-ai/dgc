@@ -113,9 +113,7 @@ chips for when it runs, what it reads and its model. Choose **Create Pip** (or
 **Create & run**, or **Update Pip** for a change to a Pip you have), **Details** for
 the project folder, the source, the next run time, the exact reads and the model, or
 **Not now**. The **×** puts it aside: it waits in the reply, where **Review** docks it
-again. Plan mode refuses it. A Pip the chat creates starts with a daily limit of
-200,000 tokens, which you can change in its **Job** tab. Pause, change or delete it
-any time in the Pips view.
+again. Plan mode refuses it. Pause, change or delete it any time in the Pips view.
 
 Two kinds of Pip always dock for your choice, even in auto mode: one that reads your
 connected accounts (mail, calendar, files), and a Pulse that runs commands. Those run
@@ -364,7 +362,7 @@ dgc pips feedback RUN_ID clear
 
 Only you can rate, on this computer; a Pip and the main chat cannot.
 
-## Usage and daily limits
+## Usage
 
 Every Pip's **Job** tab shows what its runs cost in tokens, today and over the last 30
 days, with a chart of the last two weeks. `dgc pips usage PIP` says the same in the
@@ -376,17 +374,8 @@ input and output tokens and runs for the range you pick, its share of the Pips' 
 and what all of the Pips used out of everything DGC counted. It is a breakdown of the
 **Everything** totals, not an addition to them, and includes replies in each Pip's chat.
 
-To keep a scheduled Pip from running up a bill, give it a **daily limit**:
-
-```sh
-dgc pips usage PIP --daily-limit 200k     # or 1.5m, 250000; off removes it
-```
-
-Once its runs today reach the limit, its schedules and event triggers are skipped for the
-rest of the day, and the skip says why; a skipped run does not run later. A run you start
-yourself, a chat reply and a handoff you approve still run, and a Pulse running its
-reviewed commands uses no model, so its schedule is never skipped. The limit is your setting, not part of the job: it needs no review
-and no model can change it.
+Pips have no daily token limit: a Pip runs until its work is done. Usage is there for you
+to see, never to stop it. (A limit an older DGC let you set is ignored.)
 
 ## Reviewing what Pips propose
 
@@ -593,12 +582,12 @@ Primary Pip (or the Pip you name) after you allow **Schedule a troupe?**. When i
 runs as a job of its own on the project's committed code (never your unsaved changes), one troupe
 routine at a time and for at most an hour. Each time it works through the files changed since it
 last ran (the first time, the last seven days), the files matching a pattern, or a fixed list. Then
-the Pip tells you what it found in its chat. Its tokens count toward the Pip's daily limit. You can
+the Pip tells you what it found in its chat. Its tokens show in the Pip's usage. You can
 rename it, change its time or turn it off in the Pip's Settings; to change what it does, ask for a
 new one in a chat. It only reads: a troupe that writes can't be scheduled.
 
 A Pip has at most ten routines. While the Pip is busy, a due routine waits for it; while it is
-paused, or has reached its daily limit, the routine's time is skipped. Routines run while Pips are
+paused, the routine's time is skipped. Routines run while Pips are
 running on this computer. A Pip made before routines that has a schedule shows it as **Its task**,
 with **Change**.
 

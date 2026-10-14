@@ -501,9 +501,8 @@ def parser():
     take = command("import", "show a shared Pip file's job, then create it once you confirm")
     take.add_argument("file")
     take.add_argument("--yes", action="store_true", help="create the displayed job without the question")
-    spend = command("usage", "what a Pip's runs cost in tokens, today and over 30 days; set or remove its daily limit")
+    spend = command("usage", "what a Pip's runs cost in tokens, today and over 30 days")
     spend.add_argument("pip_id")
-    spend.add_argument("--daily-limit", metavar="TOKENS|off", help="stop its schedules and triggers for the day once its runs reach this many tokens")
     desktop = command("desktop-notifications", "the runner's desktop notifications for new alerts and reviews: show, or turn on or off")
     desktop.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
@@ -816,11 +815,6 @@ def usage_text(item) -> str:
     runs = lambda n: f"{n} run{'' if n == 1 else 's'}"
     text = (f"Today: {today['tokens']:,} tokens ({runs(today['runs'])}). "
             f"Last 30 days: {month['tokens']:,} tokens ({runs(month['runs'])}).")
-    if item["daily_cap"] is None:
-        return text + " No daily limit."
-    text += f" Daily limit for automatic runs: {item['daily_cap']:,} tokens."
-    if item["capped_today"]:
-        text += " Reached today: its schedules and triggers are skipped for the rest of the day; runs you start still run."
     return text
 
 
@@ -1342,17 +1336,7 @@ def _digest_command(config, args):
             return {"exported": str(path), "left_out": value["document"]["left_out"]}
         return {"shared_pip": value["document"]}
     if args.command == "usage":
-        if args.daily_limit is None:
-            return control({"type": "get_pip_usage", "pip_id": args.pip_id})
-        raw = args.daily_limit.strip().lower().replace(",", "").replace("_", "")
-        if raw in ("off", "none"):
-            limit = None
-        else:
-            try:
-                limit = int(float(raw[:-1]) * 1000) if raw.endswith("k") else int(float(raw[:-1]) * 1_000_000) if raw.endswith("m") else int(raw)
-            except (ValueError, OverflowError):
-                raise RegistryError("invalid_request", "Give the daily limit in tokens, for example 200000, 200k or 1.5m, or off.") from None
-        return control({"type": "set_pip_daily_cap", "pip_id": args.pip_id, "daily_tokens": limit})
+        return control({"type": "get_pip_usage", "pip_id": args.pip_id})
     if args.command == "desktop-notifications":
         if args.state is None:
             return control({"type": "get_pips_desktop_notifications"})
@@ -1639,7 +1623,7 @@ def agent_shell_allows(args) -> bool:
     if args.command in ("keep-running", "desktop-notifications"):
         return args.state is None
     if args.command == "usage":
-        return args.daily_limit is None
+        return True
     if args.command == "allowed":
         return args.revoke is None
     if args.command == "memory" and args.memory_action == "statements":

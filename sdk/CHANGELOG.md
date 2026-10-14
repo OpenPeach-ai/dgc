@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Pips have no daily token limit any more (backend 2026-10-14): `set_pip_daily_cap` accepts only `daily_tokens: null`
+(answered with the usage) and refuses a number; `get_pip_usage` keeps `daily_cap` (always null) and `capped_today`
+(always false).
+
 The ChatDGC events (`chatdgc_chats`, `chatdgc_opened`, `chatdgc_earlier`, `chatdgc_turn`, `chatdgc_activity`,
 `chatdgc_delta`, `chatdgc_message`, `chatdgc_changed`, `chatdgc_error`) are part of the vendored
 protocol and the TypeScript SDK's known events, so neither SDK drops them.

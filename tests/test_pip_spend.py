@@ -1,4 +1,4 @@
-"""Spend control: what each Pip costs, and a daily limit that stops automatic runs only."""
+"""What each Pip costs in tokens. There is no daily limit (founder, 2026-10-14)."""
 import contextlib
 import io
 import json
@@ -53,64 +53,50 @@ class SpendTests(unittest.TestCase):
         self.ledger(first["id"], 6_000, 500)
         self.assertEqual(spend.usage(self.registry, job["id"])["today"]["tokens"], 48_500, "the imported total wins")
 
-    def test_the_limit_stops_schedules_for_the_day_and_never_what_you_start(self):
+    def test_no_daily_limit_stops_a_pip(self):
+        """Founder, 2026-10-14: no daily budgets. A limit an older DGC stored is ignored, whatever was spent."""
         job = self.job()
-        spend.set_cap(self.registry, job["id"], 10_000, "editor-user")
+        with self.registry.transaction():
+            self.registry.db.execute("INSERT INTO metadata VALUES(?,?)", ("pip_daily_token_cap:" + job["id"], "10000"))
         self.now = "2026-10-01T10:05:00.000Z"
-        self.assertEqual(schedules.tick(self.registry, self.cfg)["enqueued"], 1, "under the limit: it runs")
-        self.finish(self.store.runs(job["id"])[0]["id"], tokens=12_000)
-        self.assertTrue(spend.usage(self.registry, job["id"])["capped_today"])
+        self.assertEqual(schedules.tick(self.registry, self.cfg)["enqueued"], 1)
+        self.finish(self.store.runs(job["id"])[0]["id"], tokens=1_200_000)
+        value = spend.usage(self.registry, job["id"])
+        self.assertEqual((value["today"]["tokens"], value["daily_cap"], value["capped_today"]), (1_200_000, None, False))
         self.now = "2026-10-01T10:10:00.000Z"
-        result = schedules.tick(self.registry, self.cfg)
-        self.assertEqual((result["enqueued"], result["skipped"]), (0, 1))
-        events = [json.loads(p[0])["reason"] for p in self.registry.db.execute(
+        schedules.tick(self.registry, self.cfg)
+        reasons = [json.loads(p[0])["reason"] for p in self.registry.db.execute(
             "SELECT payload FROM workspace_events WHERE event_type='pip_schedule_skipped'").fetchall()]
-        self.assertIn("daily_cap_reached", events, "the skip says why")
-        manual = self.store.enqueue(job["id"], "manual-one", "user", self.cfg)
-        self.assertEqual(manual["status"], "queued", "a run you start still runs")
-        spend.set_cap(self.registry, job["id"], None, "editor-user")
-        self.assertFalse(spend.over_daily_cap(self.registry, job["id"]), "removing the limit lifts it at once")
+        self.assertNotIn("daily_cap_reached", reasons, "never skipped for what it spent")
+        self.assertFalse(hasattr(spend, "over_daily_cap"))
 
-    def test_the_limit_is_the_users_and_bounded(self):
+    def test_an_older_editor_or_sdk_cannot_set_one(self):
         job = self.job()
-        for actor in ("main-chat", "local-scheduler"):
-            with self.assertRaises(RegistryError):
-                spend.set_cap(self.registry, job["id"], 50_000, actor)
-        for bad in (999, 1_000_000_001, 1.5, "50000", True):
-            with self.subTest(bad=bad), self.assertRaises(RegistryError):
-                spend.set_cap(self.registry, job["id"], bad, "editor-user")
+        with self.assertRaises(RegistryError) as caught:
+            spend.set_cap(self.registry, job["id"], 50_000, "editor-user")
+        self.assertIn("no daily token limit", str(caught.exception))
+        self.assertEqual(set(spend.set_cap(self.registry, job["id"], None, "editor-user")),
+                         {"pip_id", "today", "last_30_days", "days", "daily_cap", "capped_today"},
+                         "removing one answers with the usage, in the shape editors since API 41 read")
         with self.assertRaises(RegistryError):
-            spend.set_cap(self.registry, "pip_" + "0" * 32, 50_000, "editor-user")
-        value = spend.set_cap(self.registry, job["id"], 50_000, "local-console")
-        self.assertEqual(value["daily_cap"], 50_000)
-        self.assertEqual(self.store.get(job["id"])["current_version"], 2, "not part of the reviewed job")
+            spend.set_cap(self.registry, "pip_" + "0" * 32, None, "editor-user")
 
-    def test_the_cli_shows_and_sets_the_limit_in_plain_words(self):
+    def test_the_cli_shows_usage_and_has_no_limit_to_set(self):
         from unittest.mock import patch
         job = self.job()
         self.cfg.data["pips_enabled"] = True
-        sent = []
 
         def control(config, request, actor, **kw):
-            sent.append(request)
-            if request["type"] == "set_pip_daily_cap":
-                return {"ok": True, "result": {"usage": spend.set_cap(self.registry, job["id"], request["daily_tokens"], actor)}}
             return {"ok": True, "result": {"usage": spend.usage(self.registry, job["id"])}}
-        run = lambda *argv: (lambda out: (pip_cli.handle_command(self.cfg, list(argv)), out.getvalue()))(io.StringIO())
         with patch("dgc.pips.handle_control", side_effect=control):
-            for raw, tokens in (("200k", 200_000), ("1.5m", 1_500_000), ("250,000", 250_000), ("off", None)):
-                out = io.StringIO()
-                with contextlib.redirect_stdout(out):
-                    self.assertEqual(pip_cli.handle_command(self.cfg, ["usage", job["id"], "--daily-limit", raw]), 0)
-                self.assertEqual(sent[-1]["daily_tokens"], tokens, raw)
-            self.assertIn("No daily limit.", out.getvalue())
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                pip_cli.handle_command(self.cfg, ["usage", job["id"], "--daily-limit", "200k"])
-            self.assertIn("Daily limit for automatic runs: 200,000 tokens.", out.getvalue())
+                self.assertEqual(pip_cli.handle_command(self.cfg, ["usage", job["id"]]), 0)
+            self.assertIn("Today: 0 tokens (0 runs). Last 30 days: 0 tokens (0 runs).", out.getvalue())
+            self.assertNotIn("limit", out.getvalue().lower())
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                self.assertNotEqual(pip_cli.handle_command(self.cfg, ["usage", job["id"], "--daily-limit", "lots"]), 0)
+                self.assertNotEqual(pip_cli.handle_command(self.cfg, ["usage", job["id"], "--daily-limit", "200k"]), 0)
 
 
 if __name__ == "__main__":

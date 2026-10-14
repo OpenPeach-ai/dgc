@@ -260,6 +260,9 @@
 
 ### Pips
 
+- **No daily limit in a Pip's Job tab:** Usage shows what it spent today and over 30 days, with its chart, and says
+  Pips have no daily limit. The setup card no longer mentions a 200,000-token limit.
+
 - **On Windows outside WSL, the Pips view says where Pips run:** "On Windows, Pips run in WSL", with how to get there.
 
 - **What fills a Pip's window.** A Personal Pip's context menu shows it part by part: its instructions, each

@@ -534,6 +534,12 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **No daily token limits.** A Pip runs until its work is done; nothing stops it for what it spent today. Usage stays
+  (today, 30 days, the Settings breakdown) to see, never to stop. A Pip the chat creates no longer starts with a
+  200,000-token limit, `dgc pips usage` has no `--daily-limit`, and a limit an older DGC stored is ignored. For older
+  editors and SDKs `get_pip_usage` keeps `daily_cap` (always null) and `capped_today` (always false), and
+  `set_pip_daily_cap` refuses a number.
+
 - **What Pips say back, in plain words.** A project setup card's notices ("Once you accept, it's on, with the
   schedule shown…", "Its schedule runs only while Pips are running on this computer. Accepting this doesn't start
   Pips."), Pulse's scope, the Pip type descriptions, the note shown beside a Pip chat's summary (the model's own

@@ -30,8 +30,7 @@ made it, and the controller decides what that actor may do.
 Accepting a handoff or an external action, and a setup with app reads or Pulse
 commands, is a local-user decision. Another setup or a name, goal or source-ref
 proposal from the main chat is accepted by the call's own permission decision (auto
-mode, an allow rule or the user's Allow), recorded as `chat-permission:<mode>`; a new
-Pip created that way gets a 200,000-token daily limit (`pip_spend.DEFAULT_CHAT_CAP`).
+mode, an allow rule or the user's Allow), recorded as `chat-permission:<mode>`.
 No main-chat tool, scheduler, trigger or Pip worker can accept one. Personal Pips,
 external actions, connections and setup reviews are available only to the local
 user's own controllers.
@@ -632,18 +631,16 @@ newest 50 per Pip are kept in registry metadata, outside the job, and each ratin
 ratings with notes redacted by the current secrets, and the worker shows them as reference
 "where it fits the approved goal", never as a new task, a job change or a permission.
 
-**Usage and daily limits** (API 41). `get_pip_usage {pip_id}` returns `{usage: {pip_id,
+**Usage** (API 41). `get_pip_usage {pip_id}` returns `{usage: {pip_id,
 today: {day, tokens, runs}, last_30_days: {tokens, runs}, days: [{day, tokens, runs}],
 daily_cap, capped_today}}` over local days. A run's tokens are the input plus output tokens
 the runner imported for it (`pip_usage_imports` in the usage ledger now keeps each run's
-totals, all of its requests); a run not imported yet counts its result's `usage`.
-`set_pip_daily_cap {pip_id, daily_tokens}` (local only; 1,000 to 1,000,000,000, or null)
-is kept in registry metadata, outside the job definition, and records
-`pip_daily_cap_changed`. While today's tokens are at or over the limit, `enqueue` refuses
-schedule and event occurrences with `daily_cap_reached`, which the scheduler and the
-trigger controller record as an ordinary skip (a skipped occurrence does not run later);
-manual, chat, handoff and main-chat runs are not limited, and neither is a standalone
-Pulse schedule, which runs its reviewed commands without a model.
+totals, all of its requests); a run not imported yet counts its result's `usage`, and a troupe
+routine's tokens are added to the day it ran. Pips have no daily limit (2026-10-14): `daily_cap`
+is always null and `capped_today` always false, kept because editors since API 41 read them, and
+a limit an older DGC stored is ignored. `set_pip_daily_cap {pip_id, daily_tokens}` stays for older
+editors and SDKs: `daily_tokens: null` answers with the usage, a number is refused
+(`invalid_request`, "Pips have no daily token limit").
 
 **Always allow** (API 41). `always_allow_pip_app_action {action_id, expected_digest}` (local
 only) accepts one pending action like `accept_pip_app_action` and then saves a grant for its Pip:
@@ -801,7 +798,7 @@ and the desktop notifier names each action a grant ran.
 **Token usage by Pip** (editor protocol, capability `pip_usage_report`). `get_pip_usage_report
 {request_id, range}` is answered by one `pip_usage_report {request_id, range, generated_at,
 timezone, all_tokens, totals: {input_tokens, output_tokens, runs}, by_pip: [{pip_id, name,
-pip_type, scope, project, status, input_tokens, output_tokens, runs, daily_cap}], omitted,
+pip_type, scope, project, status, input_tokens, output_tokens, runs, daily_cap (always null)}], omitted,
 error?}` (`dgc/pip_usage_report.py`). Runs that finished in the range count on that local day,
 with the imported totals or the run's own reported usage; `all_tokens` is the same range's
 ledger total, so the Pips are shown as a part of it, never added to it. It reads the registry

@@ -4029,7 +4029,7 @@
     const fresh = !args.pip_id;
     return `<dl class="pip-permission">${row("Pip", args.name)}${row("Job", args.goal)}${row("Kind", kind)}`
       + `${row("Reads", readText)}${row("Model", model)}${row("First run", args.run_now ? "Now, then on its schedule" : "")}</dl>`
-      + `<div class="muted pip-permission-note">${fresh ? "Allow creates this Pip and turns it on, with a daily limit of 200,000 tokens you can change." : "Allow applies this setup to the existing Pip."} `
+      + `<div class="muted pip-permission-note">${fresh ? "Allow creates this Pip and turns it on." : "Allow applies this setup to the existing Pip."} `
       + `Pause, change or delete it any time in Pips.</div>`;
   }
   function requestCard(c, id) { c.dataset.requestId = String(id); c._requestEpoch = requestEpoch; renderTurnMeta(); return c; }

@@ -531,12 +531,12 @@ function githubProposalMarkup(proposal){
  const list=v=>v?`${esc(v.repository)}<ul class="web-reads">${v.reads.map(r=>`<li>${esc(githubReadLabel(r))}</li>`).join('')}</ul>`:'None';
  return `<h3>GitHub reads</h3><dl class="meta"><dt>Current</dt><dd>${list(current)}</dd><dt>Proposed</dt><dd>${list(proposed)}</dd></dl><p class="muted">Read-only, with your own GitHub login. DGC makes these reads before each run; the model never chooses what to read.</p>`;
 }
-// Usage and the daily limit (API 41): what this Pip's runs cost, and a limit on automatic runs.
+// Usage (API 41): what this Pip's runs cost. Pips have no daily limit (founder, 2026-10-14).
 let usageState={pip:'',value:null,loading:false,error:''};
 async function loadUsage(){
  const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||usageState.loading&&usageState.pip===pip)return;
  const token=scope();usageState={pip,value:null,loading:true,error:'',token};
- try{const value=pipUsage((await send('get_pip_usage',{pip_id:pip})).usage,pip);if(token!==scope()||S.selected!==pip)return;usageState.value=value;draft.usageLimit=value.daily_cap===null?'':String(value.daily_cap);}
+ try{const value=pipUsage((await send('get_pip_usage',{pip_id:pip})).usage,pip);if(token!==scope()||S.selected!==pip)return;usageState.value=value;}
  catch(error){if(token===scope()&&S.selected===pip)usageState.error=errorText(error);}
  finally{if(usageState.token===token){usageState.loading=false;if(token!==scope()||S.selected!==pip)usageState.pip='';render();}}
 }
@@ -614,27 +614,17 @@ function parseTokens(text){
 function usageChart(u){
  const days=[],[y,mo,d]=u.today.day.split('-').map(Number),byDay=new Map(u.days.map(e=>[e.day,e.tokens]));
  for(let i=13;i>=0;i--){const t=new Date(Date.UTC(y,mo-1,d-i));days.push({day:t.toISOString().slice(0,10),tokens:byDay.get(t.toISOString().slice(0,10))||0});}
- // Scaled to the days themselves: a limit far above them would flatten every bar, so its line is
- // drawn only when it is near enough to read (the form above says the limit in words).
- const busiest=Math.max(1,...days.map(e=>e.tokens)),cap=u.daily_cap&&u.daily_cap<=busiest*1.5?u.daily_cap:0;
- const max=Math.max(busiest,cap),w=14,gap=4,h=40;
+ const max=Math.max(1,...days.map(e=>e.tokens)),w=14,gap=4,h=40;
  const bars=days.map((e,i)=>{const bh=e.tokens?Math.max(2,Math.round(e.tokens/max*h)):1;return `<rect x="${i*(w+gap)}" y="${h-bh}" width="${w}" height="${bh}" rx="2" class="${e.tokens?'usage-bar':'usage-bar empty'}"><title>${e.day}: ${e.tokens.toLocaleString('en-US')} tokens</title></rect>`;}).join('');
- const capLine=cap?`<line x1="0" x2="${14*(w+gap)-gap}" y1="${h-Math.round(cap/max*h)}" y2="${h-Math.round(cap/max*h)}" class="usage-cap"/>`:'';
- return `<svg class="usage-chart" viewBox="0 0 ${14*(w+gap)-gap} ${h}" preserveAspectRatio="none" role="img" aria-label="Tokens per day for the last 14 days">${bars}${capLine}</svg>`;
+ return `<svg class="usage-chart" viewBox="0 0 ${14*(w+gap)-gap} ${h}" preserveAspectRatio="none" role="img" aria-label="Tokens per day for the last 14 days">${bars}</svg>`;
 }
 function usageMarkup(){
  if(S.apiVersion<41||!S.pip)return '';
  if(usageState.pip!==S.selected){void loadUsage();return '<section class="section"><h2>Usage</h2><p class="muted">Loading…</p></section>';}
- const u=usageState.value,off=S.busy||!usable()||!u;
+ const u=usageState.value;
  if(!u)return `<section class="section"><h2>Usage</h2>${errorMarkup(usageState.error)||'<p class="muted">Loading…</p>'}</section>`;
  const n=v=>v.toLocaleString('en-US'),runs=v=>`${v} run${v===1?'':'s'}`;
- return `<form id="usage-form" class="section form"><h2>Usage</h2><dl class="meta usage-counts"><dt>Today</dt><dd>${n(u.today.tokens)} tokens · ${runs(u.today.runs)}</dd><dt>Last 30 days</dt><dd>${n(u.last_30_days.tokens)} tokens · ${runs(u.last_30_days.runs)}</dd></dl>${usageChart(u)}${u.capped_today?'<p class="notice">It reached its daily limit: its schedules and triggers are skipped for the rest of the day. Runs you start still run.</p>':''}${errorMarkup(usageState.error)}<label for="usageLimit">Daily limit for work it does on its own (tokens)</label><input id="usageLimit" data-draft="usageLimit" inputmode="numeric" autocomplete="off" placeholder="No limit (for example 200k)" value="${esc(draft.usageLimit||'')}"${off?' disabled':''}><p class="muted">After that, its scheduled runs wait until tomorrow. Runs you start still run.</p><div class="actions"><button type="submit" class="primary"${off?' disabled':''}>Save limit</button>${u.daily_cap!==null?button('remove-usage-limit','Remove limit',off,'quiet'):''}</div></form>`;
-}
-function saveUsageLimit(limit){
- const u=usageState.value,pip=S.selected;if(S.apiVersion<41||!u||u.pip_id!==pip)return;
- if(limit===undefined||limit!==null&&(limit<1000||limit>1000000000)){usageState.error='Give a daily limit from 1,000 to 1,000,000,000 tokens, for example 200k, or leave it empty for no limit.';render();return;}
- usageState.error='';
- void mutate({type:'set_pip_daily_cap',pip_id:pip,daily_tokens:limit},result=>{const value=pipUsage(result.usage,pip);if(value.daily_cap!==limit)throw Error('The saved limit differs from your choice. Refresh this Pip.');usageState.value=value;draft.usageLimit=limit===null?'':String(limit);S.notice=limit===null?'Daily limit removed.':`Daily limit saved: ${limit.toLocaleString('en-US')} tokens a day for work it does on its own.`;});
+ return `<section id="usage-section" class="section"><h2>Usage</h2><dl class="meta usage-counts"><dt>Today</dt><dd>${n(u.today.tokens)} tokens · ${runs(u.today.runs)}</dd><dt>Last 30 days</dt><dd>${n(u.last_30_days.tokens)} tokens · ${runs(u.last_30_days.runs)}</dd></dl>${usageChart(u)}${errorMarkup(usageState.error)}<p class="muted">What its runs and replies spent, counted on the day each finished. Pips have no daily limit.</p></section>`;
 }
 Object.assign(draft,{pipsMax:'',pipSearch:''});
 // Pips settings: how many Pips you can have (pip_limits; API 44).
@@ -642,7 +632,6 @@ document.addEventListener('submit',event=>{if(event.target.id!=='pips-limit-form
  const value=Number(draft.pipsMax);if(!Number.isSafeInteger(value)||value<1||value>(pipsSettings.limit?.maximum||100000)){setError(`Choose a number from 1 to ${(pipsSettings.limit?.maximum||100000).toLocaleString('en-US')}.`);return;}
  void mutate({type:'set_pips_limit',max_pips:value},result=>{if(!record(result)||result.max_pips!==value)throw Error('The saved number differs from your choice. Refresh and try again.');pipsSettings.limit=result;draft.pipsMax=String(value);S.notice=`You can have up to ${value.toLocaleString('en-US')} Pips.`;});
 });
-document.addEventListener('submit',event=>{if(event.target.id!=='usage-form')return;event.preventDefault();if(S.busy||!usable())return;saveUsageLimit(parseTokens(draft.usageLimit));});
 function notifyMarkup(){
  if(S.apiVersion<41||!auditPip())return '';
  if(notifyState.pip!==S.selected){void loadNotify();return '<section class="section"><h2>Notifications</h2><p class="muted">Loading…</p></section>';}
@@ -2756,7 +2745,6 @@ document.addEventListener('click',event=>{
     case 'computer-backspace':void computerView('key',{key:'Backspace'});break;
     case 'computer-scroll-down':void computerView('scroll',{dy:500});break;
     case 'computer-scroll-up':void computerView('scroll',{dy:-500});break;
-    case 'remove-usage-limit':saveUsageLimit(null);break;
     case 'rate-up':saveFeedback('up');break;
     case 'rate-down':saveFeedback('down');break;
     case 'rate-clear':saveFeedback(null);break;

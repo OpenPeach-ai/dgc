@@ -1,13 +1,12 @@
-"""Spend control: what each Pip's runs cost in tokens, and an optional daily limit.
+"""What each Pip's runs cost in tokens: today and over the last 30 local days. Nothing here limits a Pip.
 
 Tokens per run come from the usage the runner imports when the run finishes (pip_usage), which
 counts every request, including those of a run that failed or timed out. A run whose usage is not
 imported yet counts what its own result reported. Days are local days, like the digest's.
 
-The limit is the user's own setting, kept in the registry, not part of the reviewed job: lowering
-it needs no review and no model can change it. Once a Pip's runs today reach it, its schedules and
-event triggers are skipped (`daily_cap_reached`) until the next local day; a run you start
-yourself, a chat reply or a handoff you approve still runs.
+Pips have no daily token limit (founder, 2026-10-14: no daily budgets). Older registries may still
+hold a limit a user once set (`pip_daily_token_cap:<pip>`): it is ignored. The usage answer keeps its
+`daily_cap` (always null) and `capped_today` (always false), which editors since API 41 expect.
 """
 from __future__ import annotations
 
@@ -17,9 +16,6 @@ from pathlib import Path
 
 from .workspace_registry import RegistryError
 
-CAP_PREFIX = "pip_daily_token_cap:"
-MIN_CAP = 1_000
-MAX_CAP = 1_000_000_000
 WINDOW_DAYS = 30
 
 
@@ -30,43 +26,13 @@ def _instant(stamp):
         return None
 
 
-def cap(registry, pip_id) -> int | None:
-    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (CAP_PREFIX + pip_id,)).fetchone()
-    try:
-        value = int(row[0]) if row else None
-    except (TypeError, ValueError):
-        return None
-    return value if value is not None and MIN_CAP <= value <= MAX_CAP else None
-
-
-DEFAULT_CHAT_CAP = 200_000
-
-
-def apply_default(registry, pip_id) -> int:
-    """A Pip the chat created on a tool permission, with no card to look at, starts with a daily
-    limit: one created by mistake cannot spend for weeks. The user raises or removes it."""
-    with registry.transaction():
-        registry.db.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)", (CAP_PREFIX + pip_id, str(DEFAULT_CHAT_CAP)))
-        workspace = registry.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
-        registry.event(workspace, "pip_daily_cap_changed", pip_id=pip_id,
-                       payload={"daily_tokens": DEFAULT_CHAT_CAP, "actor": "chat-permission-default"})
-    return DEFAULT_CHAT_CAP
-
-
 def set_cap(registry, pip_id, daily_tokens, actor) -> dict:
-    if actor not in ("editor-user", "local-console"):
-        raise RegistryError("local_only", "A Pip's daily limit is set on this computer only.")
+    """An older editor's or SDK's set_pip_daily_cap: removing a limit is answered with the usage (there is none);
+    setting one is refused, in words."""
     if registry.db.execute("SELECT 1 FROM pips WHERE id=?", (pip_id,)).fetchone() is None:
         raise RegistryError("not_found", "Pip not found on this runner.")
-    if daily_tokens is not None and (type(daily_tokens) is not int or not MIN_CAP <= daily_tokens <= MAX_CAP):
-        raise RegistryError("invalid_request", f"Choose a daily limit from {MIN_CAP:,} to {MAX_CAP:,} tokens, or none.")
-    with registry.transaction():
-        if daily_tokens is None:
-            registry.db.execute("DELETE FROM metadata WHERE key=?", (CAP_PREFIX + pip_id,))
-        else:
-            registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (CAP_PREFIX + pip_id, str(daily_tokens)))
-        workspace = registry.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()[0]
-        registry.event(workspace, "pip_daily_cap_changed", pip_id=pip_id, payload={"daily_tokens": daily_tokens, "actor": actor})
+    if daily_tokens is not None:
+        raise RegistryError("invalid_request", "Pips have no daily token limit: each one runs until its work is done.")
     return usage(registry, pip_id)
 
 
@@ -118,11 +84,10 @@ def usage(registry, pip_id, *, now=None) -> dict:
         if day >= first_day:
             by_day.setdefault(day, [0, 0])[0] += tokens
     today_tokens, today_runs = by_day.get(today, [0, 0])
-    limit = cap(registry, pip_id)
     return {"pip_id": pip_id, "today": {"day": today, "tokens": today_tokens, "runs": today_runs},
             "last_30_days": {"tokens": sum(v[0] for v in by_day.values()), "runs": sum(v[1] for v in by_day.values())},
             "days": [{"day": day, "tokens": v[0], "runs": v[1]} for day, v in sorted(by_day.items())][-WINDOW_DAYS:],
-            "daily_cap": limit, "capped_today": limit is not None and today_tokens >= limit}
+            "daily_cap": None, "capped_today": False}
 
 
 EXTERNAL_PREFIX = "pip_troupe_tokens:"   # + pip id + ":" + local day: a troupe routine's tokens (troupe_routines)
@@ -139,7 +104,7 @@ def _external(registry, pip_id):
 
 
 def add_external(registry, pip_id, tokens: int, *, now=None) -> None:
-    """Charge work the Pip started outside its runs (a troupe routine) to its day, so its daily limit counts it."""
+    """Count work the Pip started outside its runs (a troupe routine) in its day's usage."""
     from .pip_digest import local_day
     if type(tokens) is not int or tokens <= 0:
         return
@@ -156,13 +121,3 @@ def add_external(registry, pip_id, tokens: int, *, now=None) -> None:
         registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (prefix + day, str(before + tokens)))
         registry.db.execute("DELETE FROM metadata WHERE substr(key,1,?)=? AND substr(key,?)<?",
                             (len(prefix), prefix, len(prefix) + 1, oldest))
-
-
-def over_daily_cap(registry, pip_id) -> bool:
-    """True when the Pip's runs today already reached its limit. Never raises."""
-    try:
-        if cap(registry, pip_id) is None:
-            return False
-        return usage(registry, pip_id)["capped_today"]
-    except (RegistryError, ValueError, TypeError):
-        return False

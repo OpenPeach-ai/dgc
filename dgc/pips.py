@@ -1038,12 +1038,6 @@ class PipStore:
         executable = not personal and pip["pip_type"] in ("patch", "pulse") and conversation_request is None
         standalone = (not personal and pip['pip_type'] == 'pulse' and handoff is None
                       and (pulse_request is not None or schedule_occurrence is not None))
-        if (schedule_occurrence is not None or event_occurrence is not None) and not standalone:
-            # The user's daily limit stops automatic runs only; anything they start still runs. A
-            # standalone Pulse runs its reviewed commands without a model, so it spends no tokens.
-            from .pip_spend import over_daily_cap
-            if over_daily_cap(self.registry, pip_id):
-                raise RegistryError("daily_cap_reached", "This Pip reached its daily token limit, so this scheduled run was skipped. Raise or remove the limit in its Settings.")
         if pulse_request is not None and pip['pip_type'] != 'pulse':
             raise RegistryError('invalid_request', 'Verification-plan run pins apply only to standalone Pulse.')
         if standalone:

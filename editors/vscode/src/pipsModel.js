@@ -1010,7 +1010,8 @@ export function pipsKeepRunning(value) {
   return value;
 }
 
-// A Pip's token usage and daily limit (API 41): exact shapes, since the Job tab draws them.
+// A Pip's token usage (API 41): exact shapes, since the Job tab draws them. daily_cap is always null since Pips
+// lost their daily limit (2026-10-14); one from an older DGC is accepted and not shown.
 export function pipUsage(value, pip) {
   const fail = () => { throw Error("This Pip's usage is invalid. Refresh this Pip."); };
   const count = (n) => Number.isSafeInteger(n) && n >= 0;

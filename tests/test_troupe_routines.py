@@ -176,13 +176,6 @@ class TroupeRoutineTests(unittest.TestCase):
     def turns_in_chat(self):
         return [m for m in pip_chat.list_messages(self.store, self.pip["id"], limit=50)["messages"] if m.get("intro")]
 
-    def test_a_capped_pip_skips_its_troupe(self):
-        routine = self.add()
-        self.at(7 * 24 * 60)
-        with patch("dgc.pip_spend.over_daily_cap", return_value=True), \
-                patch.object(troupe_routines, "start", side_effect=AssertionError("must not start")):
-            self.assertEqual(pip_routines.tick(self.registry, self.cfg), {routine["id"]: "daily_cap"})
-
     # ---------------------------------------------------------------- the job's end
 
     def test_the_job_hands_the_pip_its_report_charges_its_tokens_and_remembers_the_commit(self):
@@ -220,7 +213,7 @@ class TroupeRoutineTests(unittest.TestCase):
                                   {"root": str(self.root.resolve())}, self.first)
         self.assertIsNone(json.loads(self.row(routine["id"])["troupe"])["last_commit"])
 
-    def test_a_troupe_routines_tokens_count_toward_the_pips_day_and_old_days_go(self):
+    def test_a_troupe_routines_tokens_show_in_the_pips_usage_and_old_days_go(self):
         now = pip_routines._instant(self.registry.clock())
         pip_spend.add_external(self.registry, self.pip["id"], 1000, now=now)
         pip_spend.add_external(self.registry, self.pip["id"], 500, now=now)
@@ -229,11 +222,7 @@ class TroupeRoutineTests(unittest.TestCase):
         pip_spend.add_external(self.registry, self.pip["id"], 7, now=now + timedelta(days=40))
         keys = [r[0] for r in self.registry.db.execute("SELECT key FROM metadata WHERE key LIKE 'pip_troupe_tokens:%'")]
         self.assertEqual(len(keys), 1, "a day older than the window is pruned")
-        with self.registry.transaction():
-            self.registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
-                                     (pip_spend.CAP_PREFIX + self.pip["id"], "1000"))
-        pip_spend.add_external(self.registry, self.pip["id"], 2000)
-        self.assertTrue(pip_spend.over_daily_cap(self.registry, self.pip["id"]))
+        self.assertIsNone(pip_spend.usage(self.registry, self.pip["id"])["daily_cap"], "counted, never limited")
 
     # ---------------------------------------------------------------- from a chat
 

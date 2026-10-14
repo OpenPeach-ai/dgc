@@ -107,12 +107,6 @@ class PulseIntegrationTests(unittest.TestCase):
         self.assertEqual(grant['trigger'],'schedule')
         self.assertEqual(grant['request']['occurrence']['scheduled_at'],self.now)
 
-    def test_a_daily_token_limit_never_skips_a_model_free_schedule(self):
-        job=self.planned(schedule={'type':'interval','minutes':5})
-        self.now='2026-10-01T10:15:00.000Z'
-        with patch('dgc.pip_spend.over_daily_cap',return_value=True):
-            self.assertEqual(schedules.tick(self.registry,self.cfg)['enqueued'],1,'a standalone Pulse spends no tokens')
-
     def test_legacy_unplanned_and_other_roles_cannot_get_standing_grant(self):
         job=self.create()
         with self.assertRaises(RegistryError):self.enqueue(job)

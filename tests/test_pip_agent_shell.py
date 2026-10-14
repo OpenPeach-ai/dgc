@@ -139,13 +139,12 @@ class AgentShellCommandTests(unittest.TestCase):
             with self.subTest(argv=argv[:3]):
                 self.assertFalse(pip_cli.agent_shell_allows(parse(*argv)))
 
-    def test_a_daily_limit_too_large_to_count_is_refused_plainly(self):
+    def test_usage_has_no_daily_limit_to_set(self):
+        """Pips have no daily token limit (founder, 2026-10-14): the option is gone, not ignored."""
         pip_id = self.personal()
-        for raw in ("inf", "1e400k", "nan"):
-            with self.subTest(raw=raw):
-                code, _, err = self.cli("usage", pip_id, "--daily-limit", raw)
-                self.assertNotEqual(code, 0)
-                self.assertIn("Give the daily limit in tokens", err)
+        code, _, err = self.cli("usage", pip_id, "--daily-limit", "200k")
+        self.assertNotEqual(code, 0)
+        self.assertIn("--daily-limit", err)
 
     def test_every_allowed_name_is_a_real_read_command(self):
         """The allow list names only commands and actions that exist, and only reading ones."""

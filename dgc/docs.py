@@ -1364,7 +1364,7 @@ When it is due, the troupe runs as a job of its own, with your model, on a snaps
 committed code: one troupe routine at a time, for at most an hour. Each time it works through the
 files changed since it last ran (the first time, the last seven days), the tracked files matching a
 pattern, or a fixed list. The Pip then tells you what it found in its chat; the full results are in
-`~/.dgc/troupes/`. Its tokens count toward the Pip's daily limit, and a Pip over its limit skips it.
+`~/.dgc/troupes/`. Its tokens show in the Pip's usage.
 
 A scheduled troupe only reads: review, research, compare, or stages without a worker. Rename it,
 change its time or turn it off in the Pip's Settings, Routines; to change what it does, ask for a

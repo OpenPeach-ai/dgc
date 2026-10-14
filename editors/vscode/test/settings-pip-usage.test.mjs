@@ -36,7 +36,7 @@ test('the Pips view shows each Pip and its share of everything in the same range
  assert.match(text,/part of the Everything total, not added to it/);
  const rows=[...x.d.querySelectorAll('#pip-usage-rows tr')];
  assert.equal(rows.length,2);
- assert.match(rows[0].textContent,/Market brief/);assert.match(rows[0].textContent,/lens · Personal · limit 200K\/day/);
+ assert.match(rows[0].textContent,/Market brief/);assert.match(rows[0].textContent,/lens · Personal/);assert.doesNotMatch(rows[0].textContent,/limit/,'an older DGC\'s limit is not shown');
  assert.match(rows[0].textContent,/75%/,'share of the Pips’ tokens');
  assert.match(rows[1].textContent,/rook · demo_project · paused/);
 });

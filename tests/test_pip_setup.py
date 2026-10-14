@@ -464,10 +464,9 @@ class PipSetupTests(unittest.TestCase):
             self.review(draft)
         self.assertEqual(before, self.state())
 
-    def test_an_allowed_setup_creates_the_pip_with_a_default_daily_limit(self):
+    def test_an_allowed_setup_creates_the_pip_with_no_daily_limit(self):
         # Auto mode, an allow rule or the user's Allow on an ask rule: the agent marks the call, and
-        # that permission is the approval.
-        from dgc import pip_spend
+        # that permission is the approval. Pips have no daily token limit (founder, 2026-10-14).
         with patch('dgc.pip_runtime.require_supervisor', return_value={'online': True}):
             result = self.tool({**self.request(), '_dgc_create_now': True})
         self.assertTrue(result['created'])
@@ -478,9 +477,10 @@ class PipSetupTests(unittest.TestCase):
         pip_id = result['setup']['receipt']['pip_id']
         self.assertEqual(self.store.get(pip_id)['status'], 'active')
         self.assertEqual(result['setup']['receipt']['actor'], 'chat-permission:default')
-        self.assertEqual(result['daily_token_limit'], pip_spend.DEFAULT_CHAT_CAP)
-        self.assertEqual(pip_spend.cap(self.registry, pip_id), pip_spend.DEFAULT_CHAT_CAP)
-        self.assertIn('daily limit of 200,000 tokens', result['message'])
+        self.assertNotIn('daily_token_limit', result)
+        self.assertNotIn('limit', result['message'])
+        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM metadata WHERE key LIKE 'pip_daily_token_cap:%'")
+                         .fetchone()[0], 0, 'no limit is stored')
 
     def test_outside_auto_mode_a_setup_is_a_card_whose_create_is_the_approval(self):
         # The founder: the setup "can come in the chat and user can click it to approve". Without the
@@ -538,15 +538,6 @@ class PipSetupTests(unittest.TestCase):
         self.assertEqual(line, 'Create Pip “Morning source review” · rook, this project · weekdays at 08:30 (Asia/Kolkata) · runs now')
         self.assertIn('Change Pip', arg_summary('pips_setup', self.existing_request()))
         self.assertEqual(arg_summary('pips_propose', {'pip_id': 'p', 'changes': {'goal': 'Inspect auth.'}}), 'Change a Pip: goal → Inspect auth.')
-
-    def test_changing_an_existing_pip_keeps_its_own_limit(self):
-        from dgc import pip_spend
-        pip = self.create()
-        with patch('dgc.pip_runtime.require_supervisor', return_value={'online': True}):
-            result = self.tool({**self.existing_request(pip, run_now=False), '_dgc_create_now': True})
-        self.assertTrue(result['created'])
-        self.assertIsNone(result['daily_token_limit'])
-        self.assertIsNone(pip_spend.cap(self.registry, pip['id']))
 
     def test_invalid_source_ref_acceptance_leaves_no_job(self):
         draft = self.draft(self.request(source_ref='missing-branch', run_now=False))

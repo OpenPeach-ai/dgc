@@ -65,7 +65,8 @@ test("a Pip setup's permission card shows the job and what Allow does, not JSON"
   assert.match(text, /Before the open, brief me/);
   assert.match(text, /https:\/\/example\.com\/markets/);
   assert.match(text, /Search: Infosys results/);
-  assert.match(text, /Allow creates this Pip and turns it on, with a daily limit of 200,000 tokens/);
+  assert.match(text, /Allow creates this Pip and turns it on\./);
+  assert.doesNotMatch(text, /daily limit/, "Pips have no daily limit");
   assert.equal(await card.locator("pre").count(), 0, "no raw JSON");
   assert.doesNotMatch(text, /request_key|target_root/);
   await card.locator('button[data-d="once"]').click();

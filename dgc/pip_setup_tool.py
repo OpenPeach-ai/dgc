@@ -31,11 +31,7 @@ def _create(registry, setup, request, config):
         accepted = pip_setup.review(registry, setup['id'], setup['workspace_id'], setup['digest'], actor, config, True)
     except RegistryError as exc:
         return None, str(exc)
-    limit = None
-    if not request.get('pip_id') and accepted['receipt'] and accepted['receipt'].get('pip_id'):
-        from .pip_spend import apply_default
-        limit = apply_default(registry, accepted['receipt']['pip_id'])
-    return {'setup': accepted, 'daily_token_limit': limit}, ''
+    return {'setup': accepted}, ''
 
 
 def propose(args, ctx) -> str:
@@ -74,11 +70,8 @@ def propose(args, ctx) -> str:
                 if created is not None:
                     return json.dumps({'setup': created['setup'], 'created': True, 'review_required': False,
                                        'job_changed_by_this_call': True, 'execution_started': created['setup']['receipt']['run_id'] is not None,
-                                       'daily_token_limit': created['daily_token_limit'],
                                        'message': 'Created and on. Tell the user it exists, when it runs, and that they can pause, '
-                                                  'change or delete it in Pips' + (f', and that it starts with a daily limit of '
-                                                  f'{created["daily_token_limit"]:,} tokens they can change in its Job tab'
-                                                  if created['daily_token_limit'] else '') + '.'},
+                                                  'change or delete it in Pips.'},
                                       ensure_ascii=False, separators=(',', ':'))
                 return json.dumps({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
                                    'execution_started': False,

@@ -33,7 +33,7 @@ export const pipUsageMarkup = `<section class="set-section usage-section pip-usa
     </div>
     <p id="pip-usage-models-empty" class="set-note" hidden>No model requests from the Pips were recorded in this range.</p>
   </div>
-  <p class="set-note">Each task counts on the day it finished. Set a Pip&rsquo;s daily limit in its Settings in Pips.</p>
+  <p class="set-note">Each task counts on the day it finished. Pips have no daily limit.</p>
 </section>`;
 
 export function createPipUsage(root, vscode) {
@@ -126,8 +126,7 @@ export function createPipUsage(root, vscode) {
       const name = node('th', 'usage-model');
       name.setAttribute('scope', 'row');
       const where = p.scope === 'personal' ? 'Personal' : String(p.project || 'project').slice(0, 120);
-      const notes = [p.status === 'paused' ? 'paused' : p.status === 'archived' ? 'archived' : p.status === 'removed' ? 'removed' : '',
-        Number.isSafeInteger(p.daily_cap) ? `limit ${compact(p.daily_cap)}/day` : ''].filter(Boolean).join(' · ');
+      const notes = p.status === 'paused' ? 'paused' : p.status === 'archived' ? 'archived' : p.status === 'removed' ? 'removed' : '';
       const line = node('span', 'usage-clip usage-name');
       line.append(node('span', 'usage-head', String(p.name || 'Pip').slice(0, 120)));
       const sub = node('span', 'usage-clip usage-where');

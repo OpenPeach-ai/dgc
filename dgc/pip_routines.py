@@ -19,7 +19,7 @@ chat, where the user approves it, and only on a schedule.
 
 A routine the user adds in the Pip's Settings is on at once. One the Pip suggests in its chat
 (add_routine) waits for the user's Add on its card. A busy Pip keeps a due routine for the next
-check; a Pip over its daily token limit skips it, and says so in Settings.
+check.
 """
 from __future__ import annotations
 
@@ -480,11 +480,6 @@ def _fire(store, row, config, extra: str, occurrence: str) -> None:
     pip_chat.send(store, row["pip_id"], text[:7900], key, ACTOR, config, _intro=True)
 
 
-def _over_cap(registry, pip_id) -> bool:
-    from .pip_spend import over_daily_cap
-    return over_daily_cap(registry, pip_id)
-
-
 def check(registry, config, row, *, reader=None, now=None) -> str:
     """One due routine: run it, or check its app. Returns what happened, for logs and tests."""
     from .pips import PipStore
@@ -501,10 +496,6 @@ def check(registry, config, row, *, reader=None, now=None) -> str:
         if plan is None:
             return "not_due"
         due, following = plan["scheduled_at"], plan["next_due_at"]     # one latest occurrence, never a backlog
-        if _over_cap(registry, row["pip_id"]):
-            _record(registry, row, next_due_at=following, last_checked_at=stamp(now),
-                    last_error="Skipped: it reached its daily token limit.")
-            return "daily_cap"
         status = "on" if following is not None else "off"         # a one-time routine is done
         if _troupe(row):
             # A job of its own, not one of the Pip's runs (troupe_routines). One at a time: a due one waits for
@@ -565,10 +556,6 @@ def check(registry, config, row, *, reader=None, now=None) -> str:
     taken = list(reversed(new[:MAX_ITEMS]))          # oldest first
     keys = [item["key"] for item in taken]
     remembered = json.dumps((keys + [k for k in seen if k not in keys])[:MAX_SEEN])
-    if _over_cap(registry, row["pip_id"]):
-        _record(registry, row, seen=remembered, baselined=1, last_checked_at=stamp(now), next_due_at=stamp(now + every),
-                last_error="Skipped: it reached its daily token limit.")
-        return "daily_cap"
     more = len(new) - len(taken)
     extra = APP_ITEMS.format(count=len(taken), what=("emails" if len(taken) > 1 else "email") if trigger["kind"] == "email"
                              else ("events" if len(taken) > 1 else "event"),

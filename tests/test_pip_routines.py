@@ -149,7 +149,7 @@ class RoutineTests(unittest.TestCase):
         self.assertGreater(after["next_due_at"], pip_routines.stamp(self.registry.clock()), "its next morning")
         self.assertEqual(pip_routines.tick(self.registry, self.cfg), {}, "never twice for one morning")
 
-    def test_a_busy_pip_keeps_the_routine_and_a_capped_one_skips_it(self):
+    def test_a_busy_pip_keeps_the_routine_for_its_next_try(self):
         routine = pip_routines.add(self.store, self.pip["id"], "Brief", "Send me the news.",
                                    {"kind": "schedule", "schedule": {"type": "interval", "minutes": 60}})
         pip_chat.send(self.store, self.pip["id"], "Hello", "chat-1", "editor-user", self.cfg)   # a reply is pending
@@ -159,10 +159,6 @@ class RoutineTests(unittest.TestCase):
         self.finish_turn()
         self.assertEqual(pip_routines.tick(self.registry, self.cfg), {routine["id"]: "ran"}, "its next try, once")
         self.finish_turn()
-        with patch("dgc.pip_spend.over_daily_cap", return_value=True):
-            self.at(61)
-            self.assertEqual(pip_routines.tick(self.registry, self.cfg), {routine["id"]: "daily_cap"})
-        self.assertIn("daily token limit", pip_routines.listing(self.store, self.pip["id"])["routines"][0]["last_error"])
 
     def test_a_one_time_routine_turns_itself_off_after_it_runs(self):
         at = pip_routines._instant(self.registry.clock()) + timedelta(minutes=30)

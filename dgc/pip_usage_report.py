@@ -79,7 +79,6 @@ def report(range_name: str = "7d", *, now: float | None = None) -> dict:
                     used[0] += m_in
                     used[1] += m_out
                     used[2] += requests
-            from .pip_spend import cap
             pips = []
             for pip_id, (inp, outp, runs) in per.items():
                 meta = registry.db.execute(
@@ -95,7 +94,7 @@ def report(range_name: str = "7d", *, now: float | None = None) -> dict:
                              "project": "" if not meta or meta[1] == "personal" else str(meta[2] or "")[:120],
                              "status": str(meta[0]) if meta else "removed",
                              "input_tokens": inp, "output_tokens": outp, "runs": runs,
-                             "daily_cap": cap(registry, pip_id),
+                             "daily_cap": None,      # Pips have no daily limit; kept for editors since API 41
                              # Its runs since runs recorded their models; [] for a Pip whose runs
                              # all predate that (its totals above still count them).
                              "models": [{"model": str(m)[:256], "provider": str(pv)[:64], "host": str(h)[:255],

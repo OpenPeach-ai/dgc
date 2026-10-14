@@ -395,7 +395,7 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `set_pips_desktop_notifications` | M | `enabled` (bool) |
 | `get_pip_usage` | R | `pip_id` |
 | `export_pip` | R | `pip_id`; returns a shareable `dgc-pip` file (no accounts, IDs, memory or history) |
-| `set_pip_daily_cap` | M | `pip_id`, `daily_tokens` (1,000 to 1,000,000,000, or null) |
+| `set_pip_daily_cap` | M | `pip_id`, `daily_tokens`: only null since 2026-10-14 (Pips have no daily limit; a number is refused) |
 | `list_pip_feedback` | R | `pip_id`; the newest 20 ratings |
 | `always_allow_pip_app_action` | M | `action_id`, `expected_digest`; runs it and lets its Pip run the same kind without asking |
 | `list_pip_action_grants` | R | `pip_id`; what the Pip runs without asking |

@@ -119,9 +119,10 @@ backend, like `propose_starter_pip`: it saves the file as a pending setup card f
 and returns `{setup, left_out}`. The extension host reads and writes the files itself
 (`export_pip_file`, `import_pip_file` from the Pips view).
 
-`get_pip_usage {pip_id}` and `set_pip_daily_cap {pip_id, daily_tokens}` (API 41, local
-only) return `{usage: {pip_id, today, last_30_days, days, daily_cap, capped_today}}`; the
-Job tab draws it as Usage with the limit field.
+`get_pip_usage {pip_id}` (API 41, local only) returns `{usage: {pip_id, today,
+last_30_days, days, daily_cap, capped_today}}`; the Job tab draws it as Usage. Pips have no
+daily limit: `daily_cap` is always null and `capped_today` false, and `set_pip_daily_cap`
+(kept for older editors) refuses a number.
 
 `get_pips_desktop_notifications {}` and `set_pips_desktop_notifications {enabled}` (API 41,
 local only) return `{desktop_notifications: {on, available, platform, last}}`; `last` is
