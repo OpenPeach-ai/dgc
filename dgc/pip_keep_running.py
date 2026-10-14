@@ -236,7 +236,9 @@ def _wsl_spec(home, *, python_executable=None, package_root=None, **_systemd_opt
                f"  sleep {int(WSL_RESTART_SECONDS)}\n"
                "done\n")
     launcher = wsl.windows_path(wsl.windows_program("wslg.exe") or Path("/nonexistent"))
-    arguments = ["-d", distro, "--exec", "/bin/sh", str(script)]
+    # wslg.exe has no --exec (wsl.exe does): handed one, it shows its usage in a dialog at every sign-in and starts
+    # nothing (Windows 11, WSL 3.0.3). --shell-type none runs the command without a shell; `--` ends its options.
+    arguments = ["-d", distro, "--shell-type", "none", "--", "/bin/sh", str(script)]
     key = hashlib.sha256(os.fsencode(home)).hexdigest()[:12]
     return {"distro": distro, "script": script, "mark": mark, "content": content, "launcher": launcher,
             "arguments": subprocess.list2cmdline(arguments),

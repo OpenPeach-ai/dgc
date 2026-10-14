@@ -544,12 +544,26 @@ class KeepRunningTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(spec["script"].stat().st_mode), 0o700)
         self.assertTrue(spec["mark"].is_file())
         wslg = "C:\\Program Files\\WSL\\wslg.exe"
-        self.assertEqual(self.fake.registry(), {spec["name"]: f'"{wslg}" -d Ubuntu-24.04 --exec /bin/sh {spec["script"]}'})
+        self.assertEqual(self.fake.registry(), {spec["name"]: f'"{wslg}" -d Ubuntu-24.04 --shell-type none -- /bin/sh {spec["script"]}'})
         self.assertRegex(spec["name"], r"^DGC-Pips-Ubuntu-24\.04-[0-9a-f]{12}$")
         starts = [e for e in self.fake.log() if e["op"] == "start"]
         self.assertEqual(starts, [{"pid": starts[0]["pid"], "op": "start", "file": wslg,
-                                   "arguments": f"-d Ubuntu-24.04 --exec /bin/sh {spec['script']}"}])
+                                   "arguments": f"-d Ubuntu-24.04 --shell-type none -- /bin/sh {spec['script']}"}])
         self.assertTrue(keep.status(dgc_home=self.home, **self.options)["on"])
+
+    def test_wslg_is_given_only_the_options_it_has(self):
+        """wslg.exe takes --cd, -d, -u, --shell-type and `--` (its own usage, on Windows 11 with WSL 3.0.3). Handed
+        --exec, which only wsl.exe has, it showed that usage in a dialog at every sign-in and started nothing."""
+        import shlex as _shlex
+        words = _shlex.split(self.spec()["arguments"])
+        options, command = words[:words.index("--")], words[words.index("--") + 1:]
+        known = {"--cd": 1, "-d": 1, "--distribution": 1, "-u": 1, "--user": 1, "--shell-type": 1}
+        index = 0
+        while index < len(options):
+            self.assertIn(options[index], known, f"wslg.exe has no {options[index]}")
+            index += 1 + known[options[index]]
+        self.assertIn("none", options, "no shell between wslg and the script")
+        self.assertEqual(command, ["/bin/sh", str(self.spec()["script"])])
 
     def test_a_runner_already_running_is_not_started_twice(self):
         keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
