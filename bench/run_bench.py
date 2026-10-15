@@ -35,7 +35,9 @@ MODEL_METADATA_LIMIT = 2 * 1024 * 1024
 EXPECTED_PROVIDER_TRANSPORTS = {
     "dgc": "ollama_chat", "goose": "ollama_chat", "codex": "responses",
     "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
+    "claude": "anthropic_messages",
 }
+CONTEXT_POLICIES = ("baked", "provider-fixed")
 _PROVIDER_TRANSPORTS = frozenset(EXPECTED_PROVIDER_TRANSPORTS.values())
 _REQUEST_REASON_LABELS = frozenset({
     "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
@@ -188,21 +190,50 @@ def _safe_base_url(value: str) -> str:
     return urlunsplit((p.scheme, host, p.path, "", ""))
 
 
-def provider_context_preflight(base_url: str, model: str, api_key: str,
-                               requested: int) -> dict:
-    """Verify a baked Ollama context so every transport uses the same model allocation.
+def _ollama_tag(base_url: str, model: str, headers: dict) -> dict | None:
+    """The model's /api/tags entry (bounded), or None when the endpoint does not list it."""
+    parsed = urlsplit(str(base_url).rstrip("/"))
+    root_path = parsed.path.rstrip("/")
+    if root_path.lower().endswith("/v1"):
+        root_path = root_path[:-3]
+    endpoint = urlunsplit((parsed.scheme, parsed.netloc, root_path + "/api/tags", "", ""))
+    with urlopen(Request(endpoint, headers=headers, method="GET"), timeout=10) as response:
+        body = response.read(MODEL_METADATA_LIMIT + 1)
+    if len(body) > MODEL_METADATA_LIMIT:
+        raise ValueError("model list exceeded 2 MiB")
+    models = json.loads(body.decode("utf-8")).get("models")
+    for entry in models if isinstance(models, list) else []:
+        if isinstance(entry, dict) and model in (entry.get("name"), entry.get("model")):
+            return entry
+    return None
 
-    OpenAI-compatible requests cannot set Ollama's ``num_ctx``. A publishable league therefore
+
+def provider_context_preflight(base_url: str, model: str, api_key: str,
+                               requested: int, policy: str = "baked") -> dict:
+    """Verify that every transport gets the same model context.
+
+    ``baked``: OpenAI-compatible requests cannot set Ollama's ``num_ctx``, so a publishable league
     uses a dedicated model alias whose Modelfile declares the context, while the proxy pins native
-    requests to the same value. Metadata is bounded and never includes the key or model body.
+    requests to the same value.
+
+    ``provider-fixed``: an Ollama Cloud model runs remotely at its full context, which no request
+    can change. The model must be listed as remote, and the declared context must equal its limit.
+    The cloud manifest digest is recorded so a mid-league model update cannot go unnoticed.
+
+    Metadata is bounded and never includes the key or model body.
     """
     try:
         expected = int(requested or 0)
     except (TypeError, ValueError, OverflowError):
         expected = 0
-    result = {"status": "unverified", "source": "ollama_show",
+    result = {"status": "unverified",
+              "source": "ollama_tags+show" if policy == "provider-fixed" else "ollama_show",
               "requested_context": expected, "configured_context": 0,
               "model_context_limit": 0}
+    if policy not in CONTEXT_POLICIES:
+        result["status"] = "failed"
+        result["error"] = f"unknown context policy {policy!r}"
+        return result
     if not 2_048 <= expected <= 10_000_000:
         result["error"] = "set --context-size to 2048..10000000"
         return result
@@ -256,6 +287,30 @@ def provider_context_preflight(base_url: str, model: str, api_key: str,
             limits.append(limit)
     trained = max(limits, default=0)
     result.update(configured_context=configured, model_context_limit=trained)
+    if policy == "provider-fixed":
+        try:
+            tag = _ollama_tag(base_url, model, headers)
+        except Exception as exc:
+            result["status"] = "failed"
+            result["error"] = f"model list unavailable ({type(exc).__name__})"
+            return result
+        remote = str((tag or {}).get("remote_host") or "")
+        digest = str((tag or {}).get("digest") or "")
+        result.update(remote_host=remote or None, model_digest=digest or None)
+        if not remote:
+            result["status"] = "failed"
+            result["error"] = (f"{model} is not a cloud model; use --context-policy baked "
+                               "with a baked num_ctx alias")
+        elif not trained:
+            result["status"] = "failed"
+            result["error"] = "cloud model metadata has no context length"
+        elif expected != trained:
+            result["status"] = "failed"
+            result["error"] = (f"a cloud model runs at its full context {trained}; "
+                               f"declare --context-size {trained}")
+        else:
+            result["status"] = "pass"
+        return result
     if configured != expected:
         result["status"] = "failed"
         result["error"] = (f"model alias declares num_ctx={configured or 'none'}, "
@@ -354,7 +409,9 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
     path, offset = mark
     totals = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0,
               "cached_input_tokens": 0, "requests": 0,
-              "client_disconnected_requests": 0, "provider_duration_s": 0.0,
+              "client_disconnected_requests": 0, "unnormalized_requests": 0,
+              "reasoning_observed_requests": 0, "provider_errors": 0,
+              "provider_duration_s": 0.0,
               "provider_wall_s": 0.0, "provider_max_duration_s": 0.0,
               "provider_transports": {},
               "synchronized": synchronized}
@@ -378,8 +435,17 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
+        transport = str(record.get("transport") or "")
         if not record.get("normalization"):
-            continue
+            if not transport:
+                continue  # metadata (/api/show, /api/tags, token counting), not a generation
+            # A generation the proxy could not normalize ran under the provider's default policy.
+            totals["unnormalized_requests"] += 1
+        if record.get("reasoning_observed") is True:
+            totals["reasoning_observed_requests"] += 1
+        status = record.get("status")
+        if status is not None and not 200 <= int(status or 0) < 300:
+            totals["provider_errors"] += 1
         duration = max(0.0, finite_float(record.get("duration_s")))
         finished = finite_float(record.get("time"))
         started = finite_float(record.get("started_at"))
@@ -392,7 +458,6 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
             provider_intervals.append((finished - duration, finished))
         usage = record.get("usage") if isinstance(record.get("usage"), dict) else {}
         totals["requests"] += 1
-        transport = str(record.get("transport") or "")
         if transport in _PROVIDER_TRANSPORTS:
             transports = totals["provider_transports"]
             transports[transport] = transports.get(transport, 0) + 1
@@ -461,7 +526,8 @@ def build_manifest(a, langs: list[str], preflight: dict) -> dict:
         "thinking": os.environ.get("DGC_BENCH_THINKING_POLICY", "harness-default"),
         "usage_source": os.environ.get("DGC_BENCH_USAGE_SOURCE", "harness-output-if-available"),
         "context_tokens": int(a.context_size or 0),
-        "context_policy": "baked-model-alias+native-proxy",
+        "context_policy": ("provider-fixed-cloud" if a.context_policy == "provider-fixed"
+                           else "baked-model-alias+native-proxy"),
         "home_isolation": "per-exercise",
         "round_two_context": "resume-harness-session",
     }
@@ -548,6 +614,15 @@ def bench_env() -> dict:
         env["RUSTUP_HOME"] = str(TOOLS / "rustup")
     env["GOTOOLCHAIN"] = "local"
     env["PYTHONDONTWRITEBYTECODE"] = "1"  # never dirty the vendored benchmark dataset with pyc files
+    # Harnesses run under a throwaway HOME, which would leave Gradle, Go and npm caches cold on every
+    # exercise: each harness would spend its own time budget re-downloading the same build tools and
+    # test dependencies. One benchmark-owned cache gives every harness, and the grader, the same warm
+    # start. (Rust's CARGO_HOME above is shared the same way.)
+    for name, sub in (("GRADLE_USER_HOME", "gradle"), ("GOMODCACHE", "go-mod"),
+                      ("GOCACHE", "go-build"), ("npm_config_cache", "npm")):
+        path = TOOLS / "cache" / sub
+        path.mkdir(parents=True, exist_ok=True)
+        env[name] = str(path)
     # `bench-tools/boost` may be a user-owned extraction of distro packages. This keeps the benchmark
     # hermetic and avoids requiring root while allowing CMake's FindBoost to locate headers/libs.
     boost = TOOLS / "boost" / "usr"
@@ -632,9 +707,9 @@ def preflight_environment(langs: list[str], engine: str, env: dict, dry_run: boo
             else:
                 missing.append(f"{lang}:{command}")
 
-    from engines import AIDER, CODEX, GOOSE, OPENCODE, PI
+    from engines import AIDER, CLAUDE, CODEX, GOOSE, OPENCODE, PI
     engine_cmd = {"dgc": DGC, "aider": AIDER, "codex": CODEX, "goose": GOOSE,
-                  "opencode": OPENCODE, "pi": PI}[engine]
+                  "opencode": OPENCODE, "pi": PI, "claude": CLAUDE}[engine]
     engine_path = _resolve_command(engine_cmd, env)
     if not dry_run and not engine_path:
         missing.append(f"engine:{engine_cmd}")
@@ -1183,7 +1258,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(allow_abbrev=False)
     ap.add_argument("--model", required=True)
     ap.add_argument("--engine", default="dgc",
-                    choices=["dgc", "aider", "codex", "goose", "opencode", "pi"],
+                    choices=["dgc", "aider", "codex", "goose", "opencode", "pi", "claude"],
                     help="which coding harness to drive (all on the same model + tasks + scoring)")
     ap.add_argument("--base-url", default="http://localhost:11434/v1")
     ap.add_argument("--api-key-env", metavar="NAME",
@@ -1196,11 +1271,18 @@ def main() -> None:
     ap.add_argument("--langs", default="all", help="'all' or comma list of: " + ",".join(LANGS))
     ap.add_argument("-n", "--limit", type=int, default=0, help="cap exercises per language (0=all)")
     ap.add_argument("--exercises", default="", help="explicit comma list (use with a single --langs)")
+    ap.add_argument("--block-langs", default="",
+                    help="run only these of the selected languages now; the run's settings still "
+                         "name every selected language (a league interleaving its harnesses)")
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-turns", type=int, default=40, help="DGC tool-use iterations per session")
     ap.add_argument("--context-size", type=int,
                     default=os.environ.get("DGC_BENCH_CONTEXT_SIZE", "0"),
-                    help="verified baked model context shared by every harness (required for scoring)")
+                    help="verified model context shared by every harness (required for scoring)")
+    ap.add_argument("--context-policy", choices=CONTEXT_POLICIES,
+                    default=os.environ.get("DGC_BENCH_CONTEXT_POLICY", "baked"),
+                    help="'baked': a local alias with a baked num_ctx; 'provider-fixed': an Ollama "
+                         "Cloud model at its full context")
     ap.add_argument("--dgc-timeout", type=int, default=600)
     ap.add_argument("--test-timeout", type=int, default=300)
     ap.add_argument("--out", required=True)
@@ -1219,6 +1301,9 @@ def main() -> None:
     langs = LANGS if a.langs == "all" else [l.strip() for l in a.langs.split(",") if l.strip()]
     if a.exercises and len(langs) != 1:
         ap.error("--exercises requires exactly one selected language")
+    block = [l.strip() for l in a.block_langs.split(",") if l.strip()]
+    if set(block) - set(langs):
+        ap.error("--block-langs must be a subset of --langs")
     if not 2_048 <= a.context_size <= 10_000_000:
         ap.error("--context-size is required and must be between 2048 and 10000000")
     env = bench_env()
@@ -1232,10 +1317,14 @@ def main() -> None:
             "requested_context": a.context_size}
     else:
         provider_context = provider_context_preflight(
-            a.base_url, a.model, a.api_key, a.context_size)
+            a.base_url, a.model, a.api_key, a.context_size, a.context_policy)
         preflight["provider_context"] = provider_context
         if provider_context.get("status") != "pass":
             ap.error(str(provider_context.get("error") or "provider context preflight failed"))
+        cloud_digest = provider_context.get("model_digest")
+        if cloud_digest and a.model_digest and cloud_digest != a.model_digest:
+            ap.error(f"the cloud model changed: its digest is {cloud_digest}, "
+                     f"the league declared {a.model_digest}")
     outdir = Path(a.out)
     outdir.mkdir(parents=True, exist_ok=True)
     safe_model = re.sub(r"[^A-Za-z0-9._-]", "_", a.model)
@@ -1269,7 +1358,7 @@ def main() -> None:
           f"# run_id={manifest['run_id']}  HOME(isolated)={home}\n# results -> {jsonl_path}\n")
 
     started = time.time()
-    for lang in langs:
+    for lang in (block or langs):
         exs = ([e.strip() for e in a.exercises.split(",") if e.strip()]
                if a.exercises else list_exercises(lang))
         if a.limit:

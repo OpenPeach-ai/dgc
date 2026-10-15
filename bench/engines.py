@@ -31,6 +31,7 @@ GOOSE    = _binary("GOOSE", _HARNESS_ROOT / "goose" / "bin" / "goose", "goose")
 CODEX    = _binary("CODEX", _NPM_BIN / "codex", "codex")
 OPENCODE = _binary("OPENCODE", _NPM_BIN / "opencode", "opencode")
 PI       = _binary("PI", _NPM_BIN / "pi", "pi")
+CLAUDE   = _binary("CLAUDE", _NPM_BIN / "claude", "claude")
 
 
 def _cap(args, workdir, env, timeout):
@@ -65,6 +66,10 @@ def aider_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
             "--yes-always", "--no-git", "--no-auto-commits", "--no-check-update",
             "--no-show-release-notes", "--no-browser",
             "--no-show-model-warnings", "--no-stream", "--map-tokens", "0",
+            # Exercise docs link to exercism.org. By default Aider offers to scrape every URL in the
+            # message, and --yes-always accepts: it installs Playwright and, under the throwaway
+            # HOME, downloads a browser on every exercise. No other harness fetches links unasked.
+            "--no-detect-urls",
             "--reasoning-effort", "none", "--thinking-tokens", "0",
             "--no-check-model-accepts-settings",
             # match DGC/Codex/goose (agentic): let Aider RUN the tests and self-correct in a loop,
@@ -180,7 +185,34 @@ def pi_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     return _result(t0, rc, out, to, (a.api_key,))
 
 
+# ---------------------------------------------------------------- Claude Code -
+def claude_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
+    """Anthropic Claude Code headless (`claude -p`) through Ollama's Anthropic-compatible Messages
+    endpoint. Every model slot (main, background, subagent) is the benchmark model, and inherited
+    Anthropic/Claude settings are dropped, so no request can reach a hosted Claude model or use a
+    real key. Fully agentic, like codex/goose: its own shell tool runs the tests."""
+    e = {key: value for key, value in env.items()
+         if not key.startswith(("ANTHROPIC_", "CLAUDE_CODE_", "CLAUDE_CONFIG"))}
+    model_slots = ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                   "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL",
+                   "CLAUDE_CODE_SUBAGENT_MODEL")
+    e.update({slot: a.model for slot in model_slots})
+    e.update(HOME=str(home), ANTHROPIC_BASE_URL=a.base_url.rstrip("/").removesuffix("/v1"),
+             ANTHROPIC_AUTH_TOKEN=(a.api_key or "ollama"), MAX_THINKING_TOKENS="0",
+             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_AUTOUPDATER="1",
+             DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1")
+    args = [CLAUDE, "-p", "--output-format", "stream-json", "--verbose",
+            "--dangerously-skip-permissions", "--model", a.model]
+    if cont:
+        args.append("--continue")
+    args.append(prompt)
+    t0 = time.time()
+    rc, out, _err, to = _cap(args, workdir, e, a.dgc_timeout)
+    return _result(t0, rc, out, to, (a.api_key,))
+
+
 ENGINES = {
     "dgc": dgc_engine, "aider": aider_engine, "codex": codex_engine,
     "goose": goose_engine, "opencode": opencode_engine, "pi": pi_engine,
+    "claude": claude_engine,
 }

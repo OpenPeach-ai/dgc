@@ -11880,6 +11880,29 @@ def test_benchmark_integrity():
         check("benchmark publication gate rejects an unverified cross-harness context",
               any("verified shared provider context" in error
                   for error in _BC.publication_errors(publish_runs)))
+        cloud_runs = json.loads(json.dumps(
+            [{key: value for key, value in run.items()} for run in publish_runs]))
+        for run in cloud_runs:
+            run["manifest"]["settings"].update(context_policy="provider-fixed-cloud",
+                                               context_tokens=1048576)
+            run["manifest"]["preflight"]["provider_context"] = {
+                "status": "pass", "requested_context": 1048576, "configured_context": 0,
+                "model_context_limit": 1048576, "remote_host": "https://ollama.com"}
+            run["manifest"]["runner"]["dirty"] = False
+        check("benchmark publication gate accepts a cloud model at its full provider context",
+              _BC.publication_errors(cloud_runs) == [])
+        cloud_runs[0]["manifest"]["preflight"]["provider_context"]["remote_host"] = None
+        check("benchmark publication gate rejects a provider-fixed context on a local model",
+              any("verified shared provider context" in error
+                  for error in _BC.publication_errors(cloud_runs)))
+        cloud_runs[0]["manifest"]["preflight"]["provider_context"]["remote_host"] = "https://ollama.com"
+        cloud_runs[1].update(reasoning_observed_requests=2, unnormalized_requests=1,
+                             provider_error_tasks=["go/bowling"])
+        gate = " ".join(_BC.publication_errors(cloud_runs))
+        check("benchmark publication gate refuses reasoning, unnormalized requests, and provider errors",
+              "reasoning seen in 2 responses" in gate
+              and "1 requests outside the reasoning policy" in gate
+              and "re-run tasks touched by provider errors: go/bowling" in gate)
         import validate_harness as _VH
         reference = root / "reference"; meta = reference / ".meta"
         meta.mkdir(parents=True)
@@ -11955,7 +11978,9 @@ def test_benchmark_integrity():
               and loaded_timing["builtin_tool_s"] == 0.25
               and loaded_timing["by_tool_us"] == {"read_file": 50000, "bash": 200000}
               and loaded_timing["by_request_reason"] == {
-                  "user_turn": 2, "tool_result": 1})
+                  "user_turn": 2, "tool_result": 1}
+              and loaded_timing["provider_error_tasks"] == []
+              and loaded_timing["reasoning_observed_requests"] == 0)
         duplicate_results = root / "results-duplicate.jsonl"
         duplicate_results.write_text(
             "\n".join([results.read_text().splitlines()[0]] * 2) + "\n")
@@ -12214,21 +12239,41 @@ def test_benchmark_integrity():
         peer_home = root / "peer-home"; peer_home.mkdir()
         peer_args = _NS(model="m", base_url="http://localhost:11434/v1", api_key="ollama",
                         dgc_timeout=10, max_turns=7)
-        captured = []
+        captured, captured_env = [], []
         old_cap = _BE._cap
         _BE._cap = lambda argv, cwd, env, timeout: (captured.append(list(argv)) or
+                                                    captured_env.append(dict(env)) or
                                                     (0, "ok", "", False))
+        inherited = {"ANTHROPIC_API_KEY": "sk-ant-real", "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+                     "CLAUDE_CODE_USE_BEDROCK": "1", "PATH": "/usr/bin"}
         try:
             for fn in (_BE.aider_engine, _BE.codex_engine, _BE.goose_engine,
-                       _BE.opencode_engine, _BE.pi_engine):
+                       _BE.opencode_engine, _BE.pi_engine, _BE.claude_engine):
                 fn("first", work, ["solution.py"], "pytest -q", peer_args,
-                   peer_home, False, {})
+                   peer_home, False, dict(inherited))
                 fn("second", work, ["solution.py"], "pytest -q", peer_args,
-                   peer_home, True, {})
+                   peer_home, True, dict(inherited))
         finally:
             _BE._cap = old_cap
         aider_first, aider_second, codex_first, codex_second, goose_first, goose_second, \
-            opencode_first, opencode_second, pi_first, pi_second = captured
+            opencode_first, opencode_second, pi_first, pi_second, claude_first, claude_second = captured
+        claude_env = captured_env[10]
+        check("benchmark Claude Code runs headless with structured traces and resumes round two",
+              claude_first[1] == "-p" and "stream-json" in claude_first
+              and "--dangerously-skip-permissions" in claude_first
+              and "--continue" not in claude_first and "--continue" in claude_second
+              and claude_first[-1] == "first" and claude_second[-1] == "second")
+        check("benchmark Claude Code cannot reach hosted Claude or use an inherited key",
+              claude_env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+              and claude_env["ANTHROPIC_AUTH_TOKEN"] == "ollama"
+              and "ANTHROPIC_API_KEY" not in claude_env
+              and "CLAUDE_CODE_USE_BEDROCK" not in claude_env
+              and claude_env["PATH"] == "/usr/bin"
+              and all(claude_env[slot] == "m" for slot in (
+                  "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                  "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                  "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"))
+              and claude_env["HOME"] == str(peer_home))
         check("benchmark Aider round two restores chat history",
               "--restore-chat-history" not in aider_first and "--restore-chat-history" in aider_second)
         check("benchmark Aider explicitly disables reasoning",
@@ -12261,7 +12306,7 @@ def test_benchmark_integrity():
               "--thinking" in pi_first and "off" in pi_first and "json" in pi_first)
 
         # The provider boundary is the only common place to enforce the same reasoning policy and
-        # measure usage across all six harnesses. Exercise both OpenAI-compatible and native Ollama
+        # measure usage across every harness. Exercise both OpenAI-compatible and native Ollama
         # payloads through the real loopback proxy, without persisting request/response content.
         import http.client as _HC
         import provider_proxy as _PP
@@ -12270,12 +12315,30 @@ def test_benchmark_integrity():
         sse = (b'data: {"usage":{"prompt_tokens":11,"completion_tokens":4,'
                b'"completion_tokens_details":{"reasoning_tokens":2}}}\n\ndata: [DONE]\n\n')
         native = b'{"done":true,"prompt_eval_count":7,"eval_count":3}\n'
+        messages_sse = (b'event: message_start\ndata: {"type":"message_start","message":{"usage":'
+                        b'{"input_tokens":25,"cache_read_input_tokens":4,"output_tokens":1}}}\n\n'
+                        b'event: message_delta\ndata: {"type":"message_delta","usage":'
+                        b'{"output_tokens":9}}\n\n')
         check("benchmark proxy extracts OpenAI streaming usage",
               _PP.extract_usage(sse) == {"input_tokens": 11, "output_tokens": 4,
                                          "reasoning_tokens": 2, "cached_input_tokens": 0})
         check("benchmark proxy extracts native Ollama usage",
               _PP.extract_usage(native) == {"input_tokens": 7, "output_tokens": 3,
                                             "reasoning_tokens": 0, "cached_input_tokens": 0})
+        check("benchmark proxy joins Anthropic usage split across stream events",
+              _PP.extract_usage(messages_sse) == {"input_tokens": 25, "output_tokens": 9,
+                                                  "reasoning_tokens": 0, "cached_input_tokens": 4})
+        reasoning_wire = (b'{"message":{"thinking":"hmm"}}',
+                          b'data: {"choices":[{"delta":{"reasoning":"x"}}]}',
+                          b'data: {"type":"response.reasoning_text.delta","delta":"x"}',
+                          b'{"type":"reasoning","summary":[]}',
+                          b'data: {"type":"content_block_start","content_block":{"type":"thinking","thinking":""}}')
+        clean_wire = (b'{"message":{"content":"a \\"thinking\\":\\"faked\\" key","thinking":""}}',
+                      b'{"reasoning":{"effort":"none"},"reasoning_effort":"none"}',
+                      b'data: {"choices":[{"delta":{"content":"type: reasoning"}}]}')
+        check("benchmark proxy recognises reasoning on every wire format, not in generated text",
+              all(_PP._REASONING_EVIDENCE.search(raw) for raw in reasoning_wire)
+              and not any(_PP._REASONING_EVIDENCE.search(raw) for raw in clean_wire))
 
         received = []
 
@@ -12283,20 +12346,43 @@ def test_benchmark_integrity():
             def log_message(self, _format, *_args):
                 return
 
+            def do_GET(self):
+                reply = {"models": [{"name": "fixture", "digest": "local"},
+                                    {"name": "cloudy", "remote_host": "https://ollama.com",
+                                     "digest": "cloud-digest"}]}
+                encoded = json.dumps(reply).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", "0") or 0))
-                received.append((self.path, json.loads(body)))
-                if self.path.endswith("/api/chat"):
+                try:
+                    payload = json.loads(body)
+                except ValueError:
+                    payload = {}
+                received.append((self.path, payload))
+                status = 200
+                if payload.get("model") == "busy":
+                    status, reply = 429, {"error": "you have reached your session usage limit"}
+                elif self.path.endswith("/api/chat"):
                     reply = {"done": True, "prompt_eval_count": 5, "eval_count": 2}
+                    if payload.get("model") == "thinker":
+                        reply["message"] = {"role": "assistant", "thinking": "it thought anyway"}
                 elif self.path.endswith("/api/show"):
-                    reply = {"capabilities": ["completion", "tools"],
-                             "parameters": "temperature 0.7\nnum_ctx 32768",
-                             "model_info": {"fixture.context_length": 131072}}
+                    reply = ({"capabilities": ["completion", "tools"], "parameters": "",
+                              "model_info": {"cloudy.context_length": 1048576}}
+                             if payload.get("model") == "cloudy" else
+                             {"capabilities": ["completion", "tools"],
+                              "parameters": "temperature 0.7\nnum_ctx 32768",
+                              "model_info": {"fixture.context_length": 131072}})
                 else:
                     reply = {"usage": {"input_tokens": 8, "output_tokens": 3,
                                        "output_tokens_details": {"reasoning_tokens": 0}}}
                 encoded = json.dumps(reply).encode()
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
@@ -12313,23 +12399,46 @@ def test_benchmark_integrity():
         for thread in threads:
             thread.start()
         round_usage = None
+        provider_base = f"http://127.0.0.1:{upstream.server_port}/v1"
         try:
-            context_probe = _RB.provider_context_preflight(
-                f"http://127.0.0.1:{upstream.server_port}/v1", "fixture", "ollama", 32768)
-            context_mismatch = _RB.provider_context_preflight(
-                f"http://127.0.0.1:{upstream.server_port}/v1", "fixture", "ollama", 65536)
+            context_probe = _RB.provider_context_preflight(provider_base, "fixture", "ollama", 32768)
+            context_mismatch = _RB.provider_context_preflight(provider_base, "fixture", "ollama", 65536)
             context_unsafe = _RB.provider_context_preflight(
                 "https://user:secret@example.com/v1", "fixture", "ollama", 32768)
+            cloud_probe = _RB.provider_context_preflight(
+                provider_base, "cloudy", "ollama", 1048576, "provider-fixed")
+            cloud_short = _RB.provider_context_preflight(
+                provider_base, "cloudy", "ollama", 32768, "provider-fixed")
+            cloud_local = _RB.provider_context_preflight(
+                provider_base, "fixture", "ollama", 131072, "provider-fixed")
             conn = _HC.HTTPConnection("127.0.0.1", proxy.server_port, timeout=5)
             secret_prompt = "TOP-SECRET-BENCH-PROMPT"
-            for path in ("/v1/chat/completions", "/api/chat", "/v1/responses", "/api/show"):
+            # (path, model, content type, body override): every generation transport, metadata,
+            # a JSON body sent under a form type, a response that reasons anyway, a provider error,
+            # and a body the proxy cannot parse.
+            requests_plan = (
+                ("/v1/chat/completions", "fixture", "application/json", None),
+                ("/api/chat", "fixture", "application/json", None),
+                ("/v1/responses", "fixture", "application/json", None),
+                ("/v1/messages", "fixture", "application/json", None),
+                ("/api/show", "fixture", "application/json", None),
+                ("/api/generate", "fixture", "application/x-www-form-urlencoded", None),
+                ("/api/chat", "thinker", "application/json", None),
+                ("/v1/chat/completions?retry=1", "busy", "application/json", None),
+                ("/v1/chat/completions/", "fixture", "application/json", b"not json"),
+            )
+            statuses = []
+            for path, model_name, content_type, raw_body in requests_plan:
                 conn.request("POST", path,
-                             json.dumps({"model": "fixture", "messages": [
-                                 {"role": "user", "content": secret_prompt}]}),
-                             {"Content-Type": "application/json"})
+                             raw_body or json.dumps({"model": model_name, "reasoning_effort": "high",
+                                                     "messages": [{"role": "user",
+                                                                   "content": secret_prompt}]}),
+                             {"Content-Type": content_type})
                 response = conn.getresponse()
                 response.read()
-                check(f"benchmark provider proxy forwards {path}", response.status == 200)
+                statuses.append(response.status)
+            check("benchmark provider proxy forwards every request and passes statuses through",
+                  statuses == [200, 200, 200, 200, 200, 200, 200, 429, 200])
             conn.request("GET", "/__dgc_bench__/flush")
             barrier = conn.getresponse()
             barrier.read()
@@ -12347,12 +12456,17 @@ def test_benchmark_integrity():
         by_path = dict(received)
         log_text = proxy_log.read_text()
         records = [json.loads(line) for line in log_text.splitlines()]
-        check("benchmark proxy enforces OpenAI reasoning off",
-              by_path["/v1/chat/completions"]["reasoning_effort"] == "none"
-              and by_path["/v1/responses"]["reasoning_effort"] == "none")
+        check("benchmark proxy enforces reasoning off on every OpenAI-compatible transport",
+              by_path["/v1/chat/completions"].get("reasoning_effort") == "none"
+              and by_path["/v1/responses"].get("reasoning") == {"effort": "none"}
+              and "reasoning_effort" not in by_path["/v1/responses"])
+        check("benchmark proxy disables Anthropic Messages thinking (Claude Code)",
+              by_path["/v1/messages"].get("thinking") == {"type": "disabled"})
         check("benchmark proxy enforces native Ollama thinking off",
-              by_path["/api/chat"]["think"] is False
-              and by_path["/api/chat"]["options"]["num_ctx"] == 32768)
+              by_path["/api/chat"].get("think") is False
+              and (by_path["/api/chat"].get("options") or {}).get("num_ctx") == 32768)
+        check("benchmark proxy normalizes a generation by its path, whatever its Content-Type",
+              by_path["/api/generate"].get("think") is False)
         check("benchmark verifies a baked context before scoring any provider generation",
               context_probe == {"status": "pass", "source": "ollama_show",
                                 "requested_context": 32768, "configured_context": 32768,
@@ -12361,32 +12475,49 @@ def test_benchmark_integrity():
               and "expected 65536" in context_mismatch["error"]
               and context_unsafe["status"] == "failed"
               and "embedded credentials" in context_unsafe["error"])
+        check("benchmark accepts a cloud model only at its full provider context",
+              cloud_probe["status"] == "pass" and cloud_probe["model_context_limit"] == 1048576
+              and cloud_probe["remote_host"] == "https://ollama.com"
+              and cloud_probe["model_digest"] == "cloud-digest"
+              and cloud_short["status"] == "failed"
+              and "declare --context-size 1048576" in cloud_short["error"]
+              and cloud_local["status"] == "failed"
+              and "not a cloud model" in cloud_local["error"])
         check("benchmark proxy records exact provider usage without prompt content",
               secret_prompt not in log_text
-              and [record["usage"]["input_tokens"] for record in records] == [8, 5, 8, 0]
-              and [record["usage"]["output_tokens"] for record in records] == [3, 2, 3, 0]
+              and [record["usage"]["input_tokens"] for record in records] == [8, 5, 8, 8, 0, 8, 5, 0, 8]
+              and [record["usage"]["output_tokens"] for record in records] == [3, 2, 3, 3, 0, 3, 2, 0, 3]
               and [record["transport"] for record in records]
-              == ["chat_completions", "ollama_chat", "responses", None]
+              == ["chat_completions", "ollama_chat", "responses", "anthropic_messages", None,
+                  "ollama_chat", "ollama_chat", "chat_completions", "chat_completions"]
               and records[1]["normalization"] == "think=false;num_ctx=32768"
+              and records[8]["normalization"] is None
+              and [record["reasoning_observed"] for record in records]
+              == [False] * 6 + [True, False, False]
               and all(record.get("started_at", 0) > 0
                       and record.get("duration_s", -1) >= 0 for record in records))
         check("benchmark accounting excludes metadata discovery from generation totals",
-              len(records) == 4 and records[-1]["path"] == "/api/show"
-              and records[-1]["normalization"] is None
-              and round_usage["requests"] == 3)
+              len(records) == 9 and records[4]["path"] == "/api/show"
+              and records[4]["normalization"] is None
+              and round_usage["requests"] == 8)
         check("benchmark runner synchronizes and attributes provider usage by round",
               {key: round_usage[key] for key in (
                   "input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens",
                   "requests", "client_disconnected_requests", "synchronized")} == {
-                      "input_tokens": 21, "output_tokens": 8,
+                      "input_tokens": 50, "output_tokens": 19,
                       "reasoning_tokens": 0, "cached_input_tokens": 0,
-                      "requests": 3, "client_disconnected_requests": 0,
+                      "requests": 8, "client_disconnected_requests": 0,
                       "synchronized": True}
               and round_usage["provider_transports"] == {
-                  "chat_completions": 1, "ollama_chat": 1, "responses": 1}
+                  "chat_completions": 3, "ollama_chat": 3, "responses": 1,
+                  "anthropic_messages": 1}
               and round_usage["provider_duration_s"] >= round_usage["provider_wall_s"] >= 0
               and round_usage["provider_duration_s"] >=
               round_usage["provider_max_duration_s"] >= 0)
+        check("benchmark rounds count unnormalized requests, reasoning, and provider errors",
+              round_usage["unnormalized_requests"] == 1
+              and round_usage["reasoning_observed_requests"] == 1
+              and round_usage["provider_errors"] == 1)
 
         overlap_log = root / "overlapping-provider-usage.jsonl"
         overlap_log.write_text("\n".join(json.dumps(record) for record in (
@@ -12434,7 +12565,9 @@ def test_benchmark_integrity():
                   len(barrier_calls) == 2 and delayed_usage == {
                       "input_tokens": 21, "output_tokens": 8, "reasoning_tokens": 0,
                       "cached_input_tokens": 0, "requests": 1,
-                      "client_disconnected_requests": 0, "provider_duration_s": 0.0,
+                      "client_disconnected_requests": 0, "unnormalized_requests": 0,
+                      "reasoning_observed_requests": 0, "provider_errors": 0,
+                      "provider_duration_s": 0.0,
                       "provider_wall_s": 0.0, "provider_max_duration_s": 0.0,
                       "provider_transports": {},
                       "synchronized": True})

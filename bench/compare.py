@@ -8,11 +8,12 @@ import math
 import re
 from pathlib import Path
 
-REQUIRED_ENGINES = {"dgc", "aider", "codex", "goose", "opencode", "pi"}
+REQUIRED_ENGINES = {"dgc", "aider", "codex", "goose", "opencode", "pi", "claude"}
 REQUIRED_LANGS = {"cpp", "go", "java", "javascript", "python", "rust"}
 EXPECTED_PROVIDER_TRANSPORTS = {
     "dgc": "ollama_chat", "goose": "ollama_chat", "codex": "responses",
     "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
+    "claude": "anthropic_messages",
 }
 _PROVIDER_TRANSPORTS = frozenset(EXPECTED_PROVIDER_TRANSPORTS.values())
 _REQUEST_REASON_LABELS = frozenset({
@@ -105,6 +106,17 @@ def load(path: Path) -> dict:
     provider_requests = sum(
         max(0, int(usage.get("requests", 0) or 0))
         for usage in attributed_usages)
+    # Evidence that the shared policy held on every request, and that no task was decided by the
+    # provider rather than the harness. A task touched by a provider error is listed by name.
+    unnormalized_requests = sum(max(0, int(usage.get("unnormalized_requests", 0) or 0))
+                                for usage in attributed_usages)
+    reasoning_observed_requests = sum(max(0, int(usage.get("reasoning_observed_requests", 0) or 0))
+                                      for usage in attributed_usages)
+    provider_error_tasks = sorted(
+        f"{record.get('lang')}/{record.get('ex')}" for record in records
+        if any(int((((rd.get("agent") or rd.get("dgc") or {}).get("usage") or {})
+                    .get("provider_errors", 0)) or 0) > 0
+               for rd in (record.get("rounds") or [])))
     provider_transports: dict[str, int] = {}
     for usage in attributed_usages:
         values = usage.get("provider_transports")
@@ -159,6 +171,9 @@ def load(path: Path) -> dict:
             "provider_duration_s": provider_duration_s, "provider_wall_s": provider_wall_s,
             "provider_max_duration_s": provider_max_duration_s,
             "provider_requests": provider_requests, "provider_transports": provider_transports,
+            "unnormalized_requests": unnormalized_requests,
+            "reasoning_observed_requests": reasoning_observed_requests,
+            "provider_error_tasks": provider_error_tasks,
             "builtin_timing_rounds": builtin_timing_rounds,
             "builtin_tool_s": builtin_tool_s, "builtin_tool_samples": builtin_tool_samples,
             "by_tool_us": by_tool_us, "by_tool_samples": by_tool_samples,
@@ -488,14 +503,28 @@ def publication_errors(runs: list[dict]) -> list[str]:
             context_tokens = int(settings.get("context_tokens") or 0)
             requested_context = int(context_preflight.get("requested_context") or 0)
             configured_context = int(context_preflight.get("configured_context") or 0)
+            model_context_limit = int(context_preflight.get("model_context_limit") or 0)
         except (TypeError, ValueError, OverflowError):
-            context_tokens = requested_context = configured_context = 0
-        if (settings.get("context_policy") != "baked-model-alias+native-proxy"
+            context_tokens = requested_context = configured_context = model_context_limit = 0
+        policy = settings.get("context_policy")
+        # Baked: a local alias declares num_ctx. Cloud: the provider runs the model at its full
+        # context, which must be what every harness was told.
+        enforced_context = (model_context_limit if policy == "provider-fixed-cloud"
+                            else configured_context)
+        if (policy not in ("baked-model-alias+native-proxy", "provider-fixed-cloud")
+                or (policy == "provider-fixed-cloud" and not context_preflight.get("remote_host"))
                 or context_tokens < 2_048
                 or context_preflight.get("status") != "pass"
                 or requested_context != context_tokens
-                or configured_context != context_tokens):
+                or enforced_context != context_tokens):
             missing.append("verified shared provider context")
+        if int(run.get("unnormalized_requests") or 0):
+            missing.append(f"{run['unnormalized_requests']} requests outside the reasoning policy")
+        if int(run.get("reasoning_observed_requests") or 0):
+            missing.append(f"reasoning seen in {run['reasoning_observed_requests']} responses")
+        if run.get("provider_error_tasks"):
+            missing.append("re-run tasks touched by provider errors: "
+                           + ", ".join(run["provider_error_tasks"][:12]))
         expected_transport = EXPECTED_PROVIDER_TRANSPORTS[run["engine"]]
         if manifest.get("provider_transport") != expected_transport:
             missing.append(f"declared {expected_transport} provider transport")
@@ -571,7 +600,7 @@ def main() -> None:
     print(f"{'engine':12s} {'n':>4} {'pass@1 (95% CI)':>24} {'pass@2 (95% CI)':>24} "
           f"{'avg_s':>8} {'prov_s':>8} {'other_s':>8} {'tool_s':>8} {'req/t':>6} "
           f"{'avg_in':>9} {'avg_out':>9} {'out/req':>8} {'t/o':>5} {'errors':>7} "
-          f"{'editfail':>9}")
+          f"{'editfail':>9} {'perr':>5}")
     comparison = []
     for run in sorted(runs, key=lambda r: (-r["p2"], r["agent_s"], r["engine"])):
         lo1, hi1 = wilson(run["p1"], run["n"])
@@ -597,7 +626,8 @@ def main() -> None:
               f"{100*run['p2']/run['n']:5.1f}% [{100*lo2:4.1f},{100*hi2:4.1f}] "
               f"{avg:8.1f} {avg_provider:>8} {avg_outside_provider:>8} {avg_tool:>8} "
               f"{avg_requests:>6} {avg_in:>9} {avg_out:>9} {output_per_request:>8} "
-              f"{run['timeouts']:5d} {run['errors']:7d} {run['edit_fails']:9d}")
+              f"{run['timeouts']:5d} {run['errors']:7d} {run['edit_fails']:9d} "
+              f"{len(run['provider_error_tasks']):5d}")
         comparison.append({k: run[k] for k in
                            ("engine", "n", "p1", "p2", "timeouts", "agent_s", "errors", "edit_fails",
                             "input_tokens", "output_tokens", "reasoning_tokens", "usage_rounds", "rounds")}
@@ -606,6 +636,8 @@ def main() -> None:
                               "provider_max_duration_s", "builtin_timing_rounds",
                               "builtin_tool_s", "builtin_tool_samples",
                               "provider_requests", "provider_transports",
+                              "unnormalized_requests", "reasoning_observed_requests",
+                              "provider_error_tasks",
                               "by_tool_us", "by_tool_samples", "by_request_reason")}
                           | {"pass1_ci95": [lo1, hi1], "pass2_ci95": [lo2, hi2],
                              "efficiency": efficiency,

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Loopback benchmark proxy that normalizes reasoning and records provider usage.
 
-The six harnesses expose different (and sometimes ineffective) reasoning flags. A controlled
-league routes every provider request through this proxy, which enforces the setting at the actual
-Ollama transport boundary and records only request metadata/usage — never prompts or responses.
+The harnesses expose different (and sometimes ineffective) reasoning flags. A controlled league
+routes every provider request through this proxy, which enforces the setting at the actual Ollama
+transport boundary and records only request metadata/usage — never prompts or responses. It also
+records whether a response carried reasoning anyway, so the policy is verified, not assumed.
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import argparse
 import http.client
 import json
 import os
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +23,12 @@ _HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authori
                 "te", "trailer", "transfer-encoding", "upgrade"}
 _LOG_LOCK = threading.Lock()
 _CONTROL_PATH = "/__dgc_bench__/flush"
+# Wire evidence that a response carried model reasoning: a non-empty thinking/reasoning field, or a
+# reasoning/thinking item or event. These match JSON keys and event types only; quotes inside
+# generated text or tool arguments are escaped on the wire, so model output cannot fake or hide them.
+_REASONING_EVIDENCE = re.compile(
+    rb'"(?:thinking|reasoning|reasoning_content)"\s*:\s*"[^"]'
+    rb'|"type"\s*:\s*"(?:reasoning|thinking|thinking_delta|response\.reasoning[^"]*)"')
 
 
 def _usage_candidate(value) -> dict | None:
@@ -37,8 +45,9 @@ def _usage_candidate(value) -> dict | None:
                     "input_tokens": int(usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0),
                     "output_tokens": int(usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0),
                     "reasoning_tokens": int(details.get("reasoning_tokens", 0) or 0),
-                    "cached_input_tokens": int(usage.get("cached_input_tokens",
-                                                         prompt_details.get("cached_tokens", 0)) or 0),
+                    "cached_input_tokens": int(usage.get(
+                        "cached_input_tokens", usage.get("cache_read_input_tokens",
+                                                         prompt_details.get("cached_tokens", 0))) or 0),
                 })
             if "prompt_eval_count" in node or "eval_count" in node:
                 found.append({"input_tokens": int(node.get("prompt_eval_count", 0) or 0),
@@ -55,7 +64,12 @@ def _usage_candidate(value) -> dict | None:
 
 
 def extract_usage(raw: bytes) -> dict:
-    """Extract the final/largest usage snapshot from JSON, NDJSON, or SSE bytes."""
+    """Extract the final usage from JSON, NDJSON, or SSE bytes.
+
+    Usage counters only grow within one response, so each field takes its largest reported value.
+    Anthropic Messages streams split them across events: input tokens arrive in ``message_start``
+    and output tokens in ``message_delta``.
+    """
     candidates: list[dict] = []
     for raw_line in raw.decode("utf-8", "replace").splitlines():
         line = raw_line.strip()
@@ -77,10 +91,8 @@ def extract_usage(raw: bytes) -> dict:
                 candidates.append(candidate)
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass
-    return max(candidates,
-               key=lambda item: item["input_tokens"] + item["output_tokens"],
-               default={"input_tokens": 0, "output_tokens": 0,
-                        "reasoning_tokens": 0, "cached_input_tokens": 0})
+    keys = ("input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens")
+    return {key: max((item[key] for item in candidates), default=0) for key in keys}
 
 
 class ProxyServer(ThreadingHTTPServer):
@@ -135,16 +147,28 @@ class ProxyHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         model = None
         normalization = None
+        # Generation endpoints are classified by path, never by Content-Type: a harness that sends
+        # JSON under another type must not slip past the policy. A body that cannot be normalized
+        # keeps its transport and no normalization, which the runner counts and reports.
+        path = urlsplit(self.path).path.rstrip("/")
         transport = None
-        if body and "json" in self.headers.get("Content-Type", "application/json").lower():
+        if self.command == "POST":
+            if path.endswith("/api/chat") or path.endswith("/api/generate"):
+                transport = "ollama_chat"
+            elif path.endswith("/chat/completions"):
+                transport = "chat_completions"
+            elif path.endswith("/responses"):
+                transport = "responses"
+            elif path.endswith("/messages"):
+                transport = "anthropic_messages"
+        if body and transport:
             try:
                 payload = json.loads(body)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 payload = None
             if isinstance(payload, dict):
                 model = payload.get("model")
-                path = urlsplit(self.path).path.rstrip("/")
-                if path.endswith("/api/chat") or path.endswith("/api/generate"):
+                if transport == "ollama_chat":
                     payload["think"] = False
                     normalized = ["think=false"]
                     context_size = max(0, int(getattr(self.server, "context_size", 0) or 0))
@@ -156,19 +180,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         options["num_ctx"] = context_size
                         normalized.append(f"num_ctx={context_size}")
                     normalization = ";".join(normalized)
-                    transport = "ollama_chat"
-                elif path.endswith("/chat/completions"):
+                elif transport == "chat_completions":
                     payload["reasoning_effort"] = "none"
                     normalization = "reasoning_effort=none"
-                    transport = "chat_completions"
                     if payload.get("stream"):
                         stream_options = payload.setdefault("stream_options", {})
                         if isinstance(stream_options, dict):
                             stream_options["include_usage"] = True
-                elif path.endswith("/responses"):
-                    payload["reasoning_effort"] = "none"
-                    normalization = "reasoning_effort=none"
-                    transport = "responses"
+                elif transport == "responses":
+                    # Ollama's Responses API reads reasoning.effort; a top-level reasoning_effort is
+                    # silently ignored and the model keeps thinking.
+                    payload.pop("reasoning_effort", None)
+                    reasoning = payload.get("reasoning")
+                    payload["reasoning"] = dict(reasoning if isinstance(reasoning, dict) else {},
+                                                effort="none")
+                    normalization = "reasoning.effort=none"
+                else:
+                    # Anthropic Messages (Claude Code). Without an explicit setting Ollama thinks.
+                    payload["thinking"] = {"type": "disabled"}
+                    normalization = "thinking=disabled"
                 body = json.dumps(payload, separators=(",", ":")).encode()
 
         upstream = self.server.upstream  # type: ignore[attr-defined]
@@ -187,6 +217,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         captured = bytearray()
         capture_limit = 2_000_000
         disconnected = False
+        # Scan every chunk (with a seam from the previous one) so evidence near the start of a
+        # long stream survives the bounded capture tail.
+        reasoning_observed = False
+        seam = b""
         try:
             connection.request(self.command, self.path, body=body or None, headers=headers)
             response = connection.getresponse()
@@ -201,6 +235,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 chunk = response.read1(65536)
                 if not chunk:
                     break
+                if not reasoning_observed and _REASONING_EVIDENCE.search(seam + chunk):
+                    reasoning_observed = True
+                seam = chunk[-64:]
                 captured.extend(chunk)
                 if len(captured) > capture_limit:
                     del captured[:-capture_limit]
@@ -226,7 +263,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                       "method": self.command, "path": urlsplit(self.path).path,
                       "model": model, "status": status, "normalization": normalization,
                       "transport": transport,
-                      "client_disconnected": disconnected, "usage": usage}
+                      "client_disconnected": disconnected,
+                      "reasoning_observed": reasoning_observed, "usage": usage}
             log_path = self.server.usage_log  # type: ignore[attr-defined]
             if log_path:
                 with _LOG_LOCK:

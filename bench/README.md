@@ -78,6 +78,13 @@ Then run `ollama create qwen3.8-bench-64k -f Modelfile.bench`. The runner verifi
 `num_ctx` through bounded `/api/show` metadata before any scored task, and the accounting proxy pins
 native DGC/Goose requests to it as well. A missing or mismatched value fails before model generation.
 
+An Ollama Cloud model (a `:cloud` tag) runs remotely at its full context, which no request can
+change. Use it with `--context-policy provider-fixed` (`DGC_BENCH_CONTEXT_POLICY=provider-fixed`) and
+declare that full context as `--context-size`. The runner checks that `/api/tags` lists the model as
+remote and that its declared context equals the model's limit, and it records the cloud manifest
+digest. If `DGC_BENCH_MODEL_DIGEST` is set and the digest changes mid-league, the next harness run
+stops before any generation.
+
 ```bash
 # a quick taste — 3 python exercises on a local ollama model
 python3 run_bench.py --model qwen3.8-bench-64k --context-size 65536 \
@@ -88,7 +95,7 @@ python3 run_bench.py --model <baked-context-model-alias> --context-size 65536 \
   --base-url <openai-compatible-url> \
   --langs all --rounds 2 --out results/ --tag run1
 
-# publishable same-model league (validates references, then runs all six harnesses)
+# publishable same-model league (validates references, then runs all seven harnesses)
 export DGC_BENCH_MODEL_DIGEST=<immutable-model-digest>
 export DGC_BENCH_HARDWARE=<stable-machine-label>
 export DGC_BENCH_ACCELERATOR=<gpu-or-accelerator-description>
@@ -197,15 +204,33 @@ termination still wins the race. Once that deadline is set, a response-header ti
 DGC does not retry the already-abandoned request and multiply provider work after the turn has ended.
 
 `run_league.sh` requires clean DGC and dataset checkouts, runs DGC, Aider, Codex, Goose, OpenCode,
-and Pi sequentially, then writes a task-set/provenance-checked comparison with Wilson 95% confidence
-intervals. By default it starts a loopback provider proxy that enforces reasoning off at the actual
-Ollama/OpenAI transport, drains final usage events, and records request metadata/usage without
-prompts or responses. `DGC_BENCH_NORMALIZE_THINKING=0` disables it only for a documented diagnostic.
+Pi and Claude Code, then writes a task-set/provenance-checked comparison with Wilson 95% confidence
+intervals. Harnesses run one after another by default. With `DGC_BENCH_PARALLEL=1` they all run at
+once, one language at a time, and the next language starts only when every harness has finished, so
+a provider that slows down or changes during a long league affects every harness alike.
+
+Each harness gets its own loopback provider proxy. The proxy enforces reasoning off at the actual
+transport (`think: false` on native Ollama, `reasoning_effort: "none"` on Chat Completions,
+`reasoning: {effort: "none"}` on Responses, `thinking: {type: "disabled"}` on Anthropic Messages),
+drains final usage events, and records request metadata/usage without prompts or responses. It
+classifies a generation by its path, never by its Content-Type, and it also records whether each
+response carried reasoning anyway, so the policy is verified rather than assumed.
+`DGC_BENCH_NORMALIZE_THINKING=0` disables the proxy only for a documented diagnostic.
+
+Harnesses run under a throwaway HOME per exercise. Gradle, Go and npm therefore use one
+benchmark-owned cache under `$BENCH_TOOLS/cache`, as Cargo already does, shared by every harness and
+the grader, so no harness re-downloads build tools or test dependencies on its own clock. Claude
+Code runs with every model slot set to the benchmark model, through Ollama's Anthropic-compatible
+endpoint, and inherited `ANTHROPIC_*`/`CLAUDE_CODE_*` settings are dropped. Aider runs with
+`--no-detect-urls`: otherwise it installs a browser to scrape the documentation links in each
+exercise.
 The isolated DGC profile explicitly selects native Ollama because the accounting proxy's URL hides
 the upstream family; otherwise `api_mode: auto` would measure generic Chat Completions instead of
 DGC's native local-model path. The proxy labels every generation as `ollama_chat`,
-`chat_completions`, or `responses`, and the publication gate requires every recorded request to match
-the transport declared for that harness.
+`chat_completions`, `responses`, or `anthropic_messages`, and the publication gate requires every
+recorded request to match the transport declared for that harness. Each round also counts requests
+the proxy could not normalize, responses that carried reasoning, and provider errors (any non-2xx
+status, such as a 429 usage limit).
 If a deadline-cancelled harness disconnects while the provider is still generating, the runner waits
 for the proxy to drain that request before taking the next round's log offset. It aborts fail-closed
 if quiescence cannot be proven. DGC rows independently reconcile provider requests with the
@@ -214,13 +239,15 @@ every extra request is explained by a proxy-observed client disconnect. All prov
 compute remains charged and visible in the row. Any unexplained difference is unsynchronized, so
 late usage can never silently leak into the next task.
 
-Without `DGC_BENCH_ALLOW_PARTIAL=1`, comparison rejects anything except all six engines, all 225
+Without `DGC_BENCH_ALLOW_PARTIAL=1`, comparison rejects anything except all seven engines, all 225
 tasks, a clean runner and dataset revision, immutable model digest, hardware label, transport
-normalization, and synchronized provider usage for every model round. `DGC_BENCH_ENGINES`,
+normalization, and synchronized provider usage for every model round. It also rejects any request
+outside the reasoning policy, any response that carried reasoning, and any task touched by a provider
+error. Re-run such a task for that harness, and keep the re-run's result whatever it is. `DGC_BENCH_ENGINES`,
 `DGC_BENCH_LANGS`, `DGC_BENCH_LIMIT`, and `DGC_BENCH_EXERCISES` are trial controls, not shortcuts to
-a publishable claim. `install_harnesses.sh` pins Aider, Codex, Goose, OpenCode, and Pi in the
-user-owned benchmark toolchain; explicit `AIDER`, `CODEX`, `GOOSE`, `OPENCODE`, or `PI` environment
-variables still override those binaries.
+a publishable claim. `install_harnesses.sh` pins Aider, Codex, Goose, OpenCode, Pi and Claude Code
+in the user-owned benchmark toolchain; explicit `AIDER`, `CODEX`, `GOOSE`, `OPENCODE`, `PI`, or
+`CLAUDE` environment variables still override those binaries.
 
 ## Read the results
 

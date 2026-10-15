@@ -9,10 +9,11 @@ HARNESS_ROOT=${DGC_HARNESS_ROOT:-"$BENCH_ROOT/harnesses"}
 PYTHON=${DGC_BENCH_INSTALL_PYTHON:-python3}
 
 AIDER_VERSION=0.86.2
-CODEX_VERSION=0.149.1
-GOOSE_VERSION=v1.47.0
-OPENCODE_VERSION=1.18.22
-PI_VERSION=0.84.3
+CODEX_VERSION=0.162.1
+GOOSE_VERSION=v1.54.0
+OPENCODE_VERSION=1.19.0
+PI_VERSION=1.2.0
+CLAUDE_CODE_VERSION=2.1.300
 
 for command in "$PYTHON" npm node curl jq tar; do
   command -v "$command" >/dev/null 2>&1 || {
@@ -29,11 +30,12 @@ echo "== Aider $AIDER_VERSION =="
   "aider-chat==$AIDER_VERSION"
 "$HARNESS_ROOT/aider/venv/bin/python" -m pip check
 
-echo "== Codex $CODEX_VERSION · OpenCode $OPENCODE_VERSION · Pi $PI_VERSION =="
+echo "== Codex $CODEX_VERSION · OpenCode $OPENCODE_VERSION · Pi $PI_VERSION · Claude Code $CLAUDE_CODE_VERSION =="
 npm install --prefix "$HARNESS_ROOT/npm" --no-audit --no-fund \
   "@openai/codex@$CODEX_VERSION" \
   "opencode-ai@$OPENCODE_VERSION" \
-  "@earendil-works/pi-coding-agent@$PI_VERSION"
+  "@earendil-works/pi-coding-agent@$PI_VERSION" \
+  "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
 npm ls --prefix "$HARNESS_ROOT/npm" --depth=0
 
 case "$(uname -s)" in
@@ -81,3 +83,4 @@ echo "Installed peer harnesses under $HARNESS_ROOT"
 "$HARNESS_ROOT/goose/bin/goose" --version
 "$HARNESS_ROOT/npm/node_modules/.bin/opencode" --version
 "$HARNESS_ROOT/npm/node_modules/.bin/pi" --version
+"$HARNESS_ROOT/npm/node_modules/.bin/claude" --version
