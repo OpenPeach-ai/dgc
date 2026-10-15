@@ -1487,8 +1487,10 @@ class PipStore:
 
     def runs(self, pip_id):
         self.get(pip_id)
+        # Fetch first: _run rolls back its read transaction, and Python 3.10's sqlite3 resets every open cursor on
+        # a rollback ("Cursor needed to be reset because of commit/rollback").
         return [self._run(row, full=False) for row in self.db.execute(
-            "SELECT id FROM pip_runs WHERE pip_id=? ORDER BY created_at DESC,id DESC LIMIT 40", (pip_id,))]
+            "SELECT id FROM pip_runs WHERE pip_id=? ORDER BY created_at DESC,id DESC LIMIT 40", (pip_id,)).fetchall()]
 
     def _transition_row(self, run_id):
         row = self.db.execute("""SELECT id,

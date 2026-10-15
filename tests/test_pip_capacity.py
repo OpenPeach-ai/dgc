@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import sqlite3
 import tempfile
 import unittest
@@ -390,7 +391,10 @@ class CapacityTests(unittest.TestCase):
         self.registry.directory.chmod(0o700)
 
     def test_existing_opener_unsupported_platform_has_no_fallback(self):
-        with patch.object(pip_export.os,'name','nt'),self.assertRaises(RegistryError) as caught:self.inspect()
+        # Only the opener sees Windows: patching the shared os module would also make every Path() a WindowsPath,
+        # which Python 3.10 and 3.11 refuse to create on a POSIX host.
+        windows=SimpleNamespace(**{**vars(os),'name':'nt'})
+        with patch.object(pip_export,'os',windows),self.assertRaises(RegistryError) as caught:self.inspect()
         self.assertEqual(caught.exception.code,'unsupported_platform')
         self.assertIn('capacity inspection',str(caught.exception))
         self.assertNotIn('export',str(caught.exception).lower())
