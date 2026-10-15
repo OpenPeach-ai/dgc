@@ -171,6 +171,10 @@ export class DgcBackend extends EventEmitter {
   private pendingBytes = 0;
   private activeRequests = new Map<string, string>();
   private respondedRequests = new Set<string>();
+  /** Sign-ins the user accepted (the browser opened) that may still be cancelled once: the backend is still waiting
+   *  for the service's redirect, and the editor's Cancel is a second answer to the same request, which the backend
+   *  turns into that connection's own cancel. Kept past a turn's end: plugin installs run beside turns. */
+  private acceptedSignIns = new Set<string>();
   /** Which chat each open request belongs to. A Stop or a turn_end ends ITS chat's requests only:
    *  once one backend holds several chats, clearing them all forgot another chat's open approval
    *  card, and the user's answer to it was then refused as stale. */
@@ -222,7 +226,7 @@ export class DgcBackend extends EventEmitter {
     this.lastSeq = -1;
     this.buf = "";
     this.activeRequests.clear();
-    this.respondedRequests.clear();
+    this.respondedRequests.clear(); this.acceptedSignIns.clear();
     this.requestChats.clear();
     this.ignoredUnknownTypes.clear();
     let child: ChildProcessWithoutNullStreams;
@@ -294,7 +298,7 @@ export class DgcBackend extends EventEmitter {
       this.lastSeq = -1;
       this.buf = "";
       this.activeRequests.clear();
-      this.respondedRequests.clear();
+      this.respondedRequests.clear(); this.acceptedSignIns.clear();
       this.requestChats.clear();
       this.ignoredUnknownTypes.clear();
       this.rejectPending("the backend command stream failed before queued commands could run");
@@ -328,7 +332,7 @@ export class DgcBackend extends EventEmitter {
       this.lastSeq = -1;
       this.buf = "";
       this.activeRequests.clear();
-      this.respondedRequests.clear();
+      this.respondedRequests.clear(); this.acceptedSignIns.clear();
       this.requestChats.clear();
       this.ignoredUnknownTypes.clear();
       this.rejectPending("the backend failed before queued commands could run");
@@ -367,7 +371,7 @@ export class DgcBackend extends EventEmitter {
       this.lastSeq = -1;
       this.buf = "";
       this.activeRequests.clear();
-      this.respondedRequests.clear();
+      this.respondedRequests.clear(); this.acceptedSignIns.clear();
       this.requestChats.clear();
       this.ignoredUnknownTypes.clear();
       if (!this.stopping) {
@@ -588,6 +592,7 @@ export class DgcBackend extends EventEmitter {
     } else if (ev.type === "request_expired") {
       this.activeRequests.delete(requestId);
       this.respondedRequests.delete(requestId);
+      this.acceptedSignIns.delete(requestId);
       this.requestChats.delete(requestId);
       this.dropQueuedResponse(requestId);
     } else if (ev.type === "turn_end") {
@@ -828,12 +833,15 @@ export class DgcBackend extends EventEmitter {
     }
     const isResponse = RESPONSE_COMMANDS.has(item.type);
     const isControl = CONTROL_COMMANDS.has(item.type);
+    const signInAnswer = item.type === "mcp_input_response" ? String((cmd as any)?.action || "") : "";
     if (isResponse) {
+      const lateCancel = signInAnswer === "cancel" && this.acceptedSignIns.has(item.requestId || "");
       const expected = item.requestId ? this.activeRequests.get(item.requestId) : undefined;
-      if (expected !== item.type || this.respondedRequests.has(item.requestId || "")) {
+      if (!lateCancel && (expected !== item.type || this.respondedRequests.has(item.requestId || ""))) {
         this.reject("DGC ignored a stale, duplicate, or mismatched approval response", 1, item.chat);
         return false;
       }
+      if (lateCancel) this.acceptedSignIns.delete(item.requestId || "");   // once
     }
     if (item.type === "cancel" || item.type === "interrupt") {
       // The chat that was stopped: another chat's open approvals and queued prompts are not this
@@ -860,6 +868,7 @@ export class DgcBackend extends EventEmitter {
       const accepted = this.enqueue(item, false, isControl);
       if (accepted && isResponse && item.requestId) {
         this.respondedRequests.add(item.requestId);
+        this.noteAcceptedSignIn(item.requestId, signInAnswer);
       }
       if (accepted && this.ready && this.released && !this.draining) {
         this.flushPending();
@@ -872,8 +881,15 @@ export class DgcBackend extends EventEmitter {
     }
     if (isResponse && item.requestId) {
       this.respondedRequests.add(item.requestId);
+      this.noteAcceptedSignIn(item.requestId, signInAnswer);
     }
     return true;
+  }
+
+  private noteAcceptedSignIn(requestId: string, answer: string): void {
+    if (answer !== "accept") return;
+    this.acceptedSignIns.add(requestId);
+    if (this.acceptedSignIns.size > 64) this.acceptedSignIns.delete(this.acceptedSignIns.values().next().value as string);
   }
 
   /** Send a query/state command and settle only from the response belonging to this request.
@@ -949,7 +965,7 @@ export class DgcBackend extends EventEmitter {
     this.pending = [];
     this.pendingBytes = 0;
     this.activeRequests.clear();
-    this.respondedRequests.clear();
+    this.respondedRequests.clear(); this.acceptedSignIns.clear();
     this.requestChats.clear();
     const p = this.proc;
     this.proc = undefined;

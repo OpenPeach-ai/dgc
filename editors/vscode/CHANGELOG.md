@@ -232,6 +232,10 @@
 - **Asana and Docusign** in Apps, with a guided setup for the app you create for DGC in your own account: the steps,
   the redirect URL to register with a Copy button, and fields for its ID and secret (kept in secret storage). For
   Docusign, choose a developer or a production account.
+- **Cancel on "Finish connecting … in your browser" works.** Once the browser had opened, Cancel cleared the banner
+  but never reached DGC: the editor's connection to DGC refused a second answer to the same sign-in. DGC went on
+  waiting for the service for up to two minutes, and the next Connect was refused as "unavailable while a turn is
+  running". One Cancel after the browser opens now goes through; nothing else is answered twice.
 - **Save and connect** on an MCP server that needs a sign-in now says "Finish connecting … in your browser" under
   the form, with Open browser and Cancel. Nothing on the page said a browser was waiting before.
 - Typing in the plugin search boxes keeps every letter in order. Each key rebuilt the list and put

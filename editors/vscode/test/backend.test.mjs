@@ -196,6 +196,43 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   active.dispose();
 });
 
+test("a sign-in the browser opened can still be cancelled once; nothing else is answered twice", async () => {
+  // Found live (2026-10-15): Cancel on "Finish connecting … in your browser" never reached the backend. The browser
+  // opening answers the request (accept); the Cancel after it is a second answer to the same id, which the backend
+  // turns into that connection's own cancel (headless._cancel_opened_sign_in). This transport refused every second
+  // answer, so the connection went on waiting for the service and the next Connect was refused as busy.
+  const command = executable("sign-in-cancel-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+send(ready);
+send({ type: "mcp_input_request", id: "s1", server: "asana", kind: "elicitation",
+  payload: { mode: "url", message: "Sign in", url: "https://app.asana.com/-/oauth_authorize" } });
+send({ type: "permission_request", id: "p1", name: "bash", args: { command: "ls" },
+  command: "ls", suggested_rule: "bash(ls)", choices: ["once", "always", "deny"] });
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const cmd = JSON.parse(line);
+  if (cmd.type === "shutdown") process.exit(0);
+  send({ type: "info", message: "echo:" + JSON.stringify(cmd) });
+});`);
+  const backend = new DgcBackend(scratch, command);
+  const echoes = [];
+  backend.on("event", (event) => { const echoed = echoedCommand(event); if (echoed) echoes.push(echoed); });
+  backend.on("ready", () => backend.completeHandshake());
+  backend.start();
+  try {
+  await waitFor(backend, "permission_request");
+  assert.equal(backend.send({ type: "mcp_input_response", id: "s1", action: "accept" }), true, "the browser opened");
+  assert.equal(backend.send({ type: "mcp_input_response", id: "s1", action: "accept" }), false, "never accepted twice");
+  assert.equal(backend.send({ type: "mcp_input_response", id: "s1", action: "cancel" }), true, "Cancel reaches it");
+  assert.equal(backend.send({ type: "mcp_input_response", id: "s1", action: "cancel" }), false, "and only once");
+  assert.equal(backend.send({ type: "permission_response", id: "p1", decision: "once" }), true);
+  assert.equal(backend.send({ type: "permission_response", id: "p1", decision: "deny" }), false,
+    "an approval is still never answered twice");
+  await waitFor(backend, "info", (event) => echoedCommand(event)?.type === "permission_response");
+  assert.deepEqual(echoes.filter((c) => c.type === "mcp_input_response").map((c) => c.action), ["accept", "cancel"]);
+  } finally { backend.dispose(); }                 // a failure must report, not leave the child holding the run open
+});
+
 // A history snapshot taken for a reloaded webview is followed by the decisions the turn still waits
 // on, with their original ids. The transport shows such a request again until it is answered, and
 // still fails closed when an active id comes back as a different kind of request.
