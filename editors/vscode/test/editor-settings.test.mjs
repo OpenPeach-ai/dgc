@@ -244,11 +244,48 @@ test('installed server identities do not hide manual servers named after a plugi
 
 const connectorCatalog=JSON.parse(readFileSync(new URL('../../../dgc/connector_catalog.json',import.meta.url),'utf8'));
 const connectorRows=Object.entries(connectorCatalog).map(([name,def])=>({name,display_name:def.name,summary:def.summary,connector:name,installed:false,apps:[],skills:[],mcps:[]}));
+test('Asana: the guided own-app setup shows each step, the exact redirect URL to copy, and sends the app',()=>{
+  const x=setup();x.message({type:'plugins',items:connectorRows});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');
+  x.click('[data-connector-setup=asana]');
+  const dialogText=x.d.querySelector('dialog').textContent;
+  assert.match(dialogText,/Create new app/);assert.match(dialogText,/MCP app/);assert.match(dialogText,/Manage distribution/);
+  assert.equal(x.d.querySelector('#own-app-redirect').textContent,'http://localhost:3334/oauth/callback','the port DGC signs in on');
+  assert.equal(x.d.querySelector('dialog a[href="https://app.asana.com/0/my-apps"]').textContent,'Open My apps in Asana');
+  x.d.querySelector('[data-copy-redirect]').click();
+  assert.deepEqual({...x.sent.at(-1)},{type:'copy',text:'http://localhost:3334/oauth/callback'});
+  x.d.querySelector('#own-app-id').value=' 1209876543210 ';x.d.querySelector('#own-app-secret').value='s3cret-value';
+  x.d.querySelector('#connector-form').dispatchEvent(new x.w.Event('submit',{cancelable:true}));
+  const sent=x.sent.at(-1);
+  assert.deepEqual({...sent},{type:'saveConnector',name:'asana',url:'https://mcp.asana.com/v2/mcp',auth:'own-app',client_id:'1209876543210',client_secret:'s3cret-value'});
+  assert.equal(x.d.querySelector('#own-app-secret')?.value ?? '','','the secret leaves the form once sent');
+  assert.doesNotMatch(x.d.body.innerHTML,/s3cret-value/);
+});
+
+test('Docusign: the account choice picks the endpoint and says what production needs; a saved app keeps its secret',()=>{
+  const x=setup();x.message({type:'plugins',items:connectorRows});
+  x.message({type:'event',event:{type:'mcp_servers',items:[{name:'docusign',url:'https://mcp.docusign.com/mcp',transport:'remote',oauth_client_id:'ik-123',oauth_port:3335}]}});
+  x.click('[data-nav=plugins]');x.click('[data-lane=apps]');x.click('[data-connector-setup=docusign]');
+  assert.equal(x.d.querySelector('#own-app-env').value,'production','reopens on the saved account');
+  assert.match(x.d.querySelector('#own-app-env-note').textContent,/Go-Live/);
+  assert.equal(x.d.querySelector('#own-app-id').value,'ik-123');
+  assert.equal(x.d.querySelector('#own-app-secret').required,false,'blank keeps the saved secret key');
+  assert.equal(x.d.querySelector('#own-app-redirect').textContent,'http://localhost:3335/oauth/callback');
+  const env=x.d.querySelector('#own-app-env');env.value='demo';env.dispatchEvent(new x.w.Event('change'));
+  assert.match(x.d.querySelector('#own-app-env-note').textContent,/developer account/i);
+  x.d.querySelector('#connector-form').dispatchEvent(new x.w.Event('submit',{cancelable:true}));
+  assert.equal(x.sent.at(-1).url,'https://mcp-d.docusign.com/mcp');assert.equal(x.sent.at(-1).client_secret,'');
+});
+
 test('Apps offers named provider marks and routes each to its own setup',()=>{
  const x=setup();x.message({type:'plugins',items:[...connectorRows,{name:'composio',display_name:'Composio',apps:[],skills:[]}]});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');
  for(const row of connectorRows){
   const card=x.d.querySelector(`[aria-label="${row.display_name} connector"]`);assert.ok(card);assert.ok(card.querySelector('img.logo').src.startsWith('data:'));
   x.click(`[data-connector-setup=${row.name}]`);assert.ok(x.d.querySelector('.connection-art img[alt=DGC]'));assert.ok(x.d.querySelector(`.connection-art img[alt="${row.display_name}"]`));
+  if(connectorCatalog[row.name].own_app){
+   // Your own app (Asana, Docusign): the guided steps and the app's ID and secret, never a URL or token field.
+   assert.ok(x.d.querySelector('.own-app-steps li'));assert.ok(x.d.querySelector('#own-app-id'));assert.ok(x.d.querySelector('#own-app-secret'));
+   assert.equal(x.d.querySelector('#connector-url'),null);assert.equal(x.d.querySelector('#connector-token-field'),null);x.click('#dialog-cancel');continue;
+  }
   assert.equal(!!x.d.querySelector('#connector-url'),!connectorCatalog[row.name].url);
   assert.equal(x.d.querySelector('#connector-token-field').hidden,row.name!=='zapier');x.click('#dialog-cancel');
  }

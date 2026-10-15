@@ -5946,6 +5946,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const previous = this.managedMcpServers().find(s => s.name === id && s.target === target);
       if (auth === "token" && !token && !(previous && (await this.mcpSecrets(previous)).token))
         throw new Error("Enter the connection token from your provider");
+      // Your own app (Asana, Docusign): its ID and secret, and the callback port the setup told you to register.
+      const ownApp = auth === "own-app" && def.own_app ? def.own_app : undefined;
+      const clientId = ownApp ? String(msg.client_id || "").trim() : "";
+      const clientSecret = ownApp ? String(msg.client_secret || "").trim() : "";
+      const field = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);   // "client ID", "secret key"
+      if (ownApp && !clientId) throw new Error(`Enter the ${field(ownApp.id_label)} from ${def.name}`);
+      if (ownApp && !clientSecret && !(previous?.oauth?.clientId === clientId && (await this.mcpSecrets(previous)).oauthSecret))
+        throw new Error(`Enter the ${field(ownApp.secret_label)} from ${def.name}`);
       if (!this.settingsCatalog.some(row => row.name === id && row.installed)) {
         const answer = await vscode.window.showWarningMessage(
           `Connect ${def.name} under ${def.license}?`,
@@ -5955,7 +5963,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.settingsMcpOperation++;
       try {
         const saved = await this.saveMcpServer({name:id, original_name:id, transport:"remote", target,
-          token, clear_secrets:auth === "oauth"}, {id, license:def.license});
+          token, clear_secrets:auth === "oauth",
+          ...(ownApp ? { oauth_client_id: clientId, oauth_client_secret: clientSecret, oauth_port: String(ownApp.port) } : {}),
+        }, {id, license:def.license});
         if (!saved) throw new Error("Connection setup did not finish. Review the editor error, check your provider settings, and try again.");
       } finally { this.settingsMcpOperation--; }
       this.sendPluginCommand({ type: "list_plugins", request_id:this.nextRequestId("connectors")});
@@ -5973,6 +5983,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.showEditorSettings();
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {});
+    } else if (msg?.type === "copy") {
+      const text = String(msg.text || "");
+      if (text.length <= 2048) await vscode.env.clipboard.writeText(text);
     } else if (msg?.type === "saveConnector") {
       await this.saveConnector(msg);
     } else if (msg?.type === "connectorManage") {

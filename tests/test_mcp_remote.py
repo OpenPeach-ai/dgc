@@ -42,6 +42,11 @@ class Vendor:
         self.write_scope = False          # tools/call needs "write" (step-up)
         self.secret = ""                  # a confidential client: the token address wants this secret
         self.redirect = ""                # "same": /mcp answers 307 to /mcp/; "other": 307 to another host
+        self.rbac = False                 # Docusign: a request without a token gets 403 and no challenge
+        self.cimd = False                 # the authorization server takes client metadata documents
+        self.document = True              # ... and DGC's document is published (at /dgc-client.json here)
+        self.iss = ""                     # "right" / "wrong": the redirect names its issuer (RFC 9207)
+        self.iss_supported = False
         self.expired = False
         self.access = "fixture-access"
         self.issued = 0
@@ -91,21 +96,35 @@ class Vendor:
                 path = urlsplit(self.path).path
                 vendor.requests.append(("GET", path))
                 base = vendor.base
-                if path == "/.well-known/oauth-protected-resource/mcp":
+                if path == "/.well-known/oauth-protected-resource/mcp" and vendor.rbac:
+                    return self.reply({"error": "RBAC: access denied"}, 403)
+                if path == "/.well-known/oauth-protected-resource/mcp" or (
+                        path == "/.well-known/oauth-protected-resource" and vendor.rbac):
                     return self.reply({"resource": base + "/mcp", "authorization_servers": [base + "/as"],
                                        "scopes_supported": ["read"]})
+                if path == "/dgc-client.json" and vendor.document:
+                    return self.reply({"client_id": base + "/dgc-client.json", "client_name": "DGC",
+                                       "application_type": "native", "token_endpoint_auth_method": "none",
+                                       "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"],
+                                       "redirect_uris": [f"http://127.0.0.1:{mcp_remote.CLIENT_METADATA_PORT}/oauth/callback",
+                                                         "http://127.0.0.1/oauth/callback", "http://localhost/oauth/callback"]})
                 if path == "/.well-known/oauth-authorization-server/as":
                     return self.reply({
                         "issuer": base + "/as", "authorization_endpoint": base + "/as/authorize",
                         "token_endpoint": base + "/as/token", "registration_endpoint": base + "/as/register",
                         "revocation_endpoint": base + "/as/revoke", "code_challenge_methods_supported": ["S256"],
-                        "token_endpoint_auth_methods_supported": ["client_secret_basic", "none"]})
+                        "token_endpoint_auth_methods_supported": ["client_secret_basic", "none"],
+                        **({"client_id_metadata_document_supported": True} if vendor.cimd else {}),
+                        **({"authorization_response_iss_parameter_supported": True} if vendor.iss_supported else {})})
                 if path == "/as/authorize":
                     params = {k: v[0] for k, v in parse_qs(urlsplit(self.path).query).items()}
                     vendor.authorize_params.append(params)
                     vendor.challenge = params["code_challenge"]
                     vendor.scopes.append(params.get("scope", ""))
-                    target = params["redirect_uri"] + "?" + urlencode({"code": "fixture-code", "state": params["state"]})
+                    answer = {"code": "fixture-code", "state": params["state"]}
+                    if vendor.iss:
+                        answer["iss"] = vendor.base + "/as" if vendor.iss == "right" else "https://elsewhere.example/as"
+                    target = params["redirect_uri"] + "?" + urlencode(answer)
                     return self.reply({}, 302, {"Location": target})
                 if path == "/mcp" and vendor.legacy:
                     if not self.authorized():
@@ -207,6 +226,8 @@ class Vendor:
                 if vendor.legacy:
                     return self.reply({}, 405)
                 if not self.authorized():
+                    if vendor.rbac and not self.headers.get("Authorization"):
+                        return self.reply({"error": "RBAC: access denied"}, 403)
                     return self.challenge_401()
                 request = json.loads(data)
                 vendor.protocol_headers.append(self.headers.get("MCP-Protocol-Version"))
@@ -453,6 +474,56 @@ class RemoteClientTests(unittest.TestCase):
         self.assertEqual(self.vendor.scopes[-1].split(), ["read", "write"], "one sign-in for both scopes")
         self.assertNotIn("step_up_scope", self.saved())
         self.assertIn("fixture tool worked", again.call_tool("echo", {}))
+
+    def test_a_service_that_answers_an_unsigned_request_with_403_still_signs_in(self):
+        # Docusign's MCP server answers a request without a token with 403 "RBAC: access denied" and no challenge,
+        # and its path-specific resource metadata is forbidden too: only the root document names its sign-in.
+        self.vendor.mode = "oauth"
+        self.vendor.rbac = True
+        server = self.server(auth=self.browser)
+        self.assertTrue(server.start(timeout=30), (server.error, server.diagnostics))
+        self.assertEqual(len(self.browsers), 1)
+        self.assertIn(("GET", "/.well-known/oauth-protected-resource"), self.vendor.requests)
+        self.assertIn("fixture tool worked", server.call_tool("echo", {}))
+
+    def test_a_client_metadata_document_is_used_where_the_service_takes_one(self):
+        self.vendor.mode = "oauth"
+        self.vendor.cimd = True
+        port = mcp_remote.free_port()
+        with patch.object(mcp_remote, "CLIENT_METADATA_URL", self.vendor.base + "/dgc-client.json"), \
+                patch.object(mcp_remote, "CLIENT_METADATA_PORT", port), patch.dict(mcp_remote._document_checked, clear=True):
+            server = self.server(auth=self.browser)
+            self.assertTrue(server.start(timeout=30), (server.error, server.diagnostics))
+        query = self.vendor.authorize_params[0]
+        self.assertEqual(query["client_id"], self.vendor.base + "/dgc-client.json", "DGC names itself by its document")
+        self.assertEqual(query["redirect_uri"], f"http://127.0.0.1:{port}/oauth/callback", "the IP literal, the fixed port")
+        self.assertEqual(self.vendor.registrations, [], "no registration where a document is taken")
+        self.assertEqual(self.saved()["client"]["client_id"], self.vendor.base + "/dgc-client.json")
+
+    def test_without_a_published_document_dgc_registers_itself_as_before(self):
+        self.vendor.mode = "oauth"
+        self.vendor.cimd = True
+        self.vendor.document = False                     # vibedgc.com not deployed yet, or unreachable
+        with patch.object(mcp_remote, "CLIENT_METADATA_URL", self.vendor.base + "/dgc-client.json"), \
+                patch.dict(mcp_remote._document_checked, clear=True):
+            server = self.server(auth=self.browser)
+            self.assertTrue(server.start(timeout=30), (server.error, server.diagnostics))
+        self.assertEqual(len(self.vendor.registrations), 1)
+        self.assertEqual(self.vendor.authorize_params[0]["client_id"], "fixture-client")
+        self.assertTrue(self.vendor.authorize_params[0]["redirect_uri"].startswith("http://localhost:"))
+
+    def test_a_sign_in_that_comes_back_from_another_issuer_is_refused(self):
+        # RFC 9207: the redirect names the service that issued the code; a mix-up shows as another name.
+        self.vendor.mode = "oauth"
+        for iss, supported, ok in (("right", True, True), ("wrong", False, False), ("", True, False)):
+            with self.subTest(iss=iss, supported=supported):
+                plugin_credentials.delete("fixture")
+                self.vendor.iss, self.vendor.iss_supported = iss, supported
+                server = self.server(auth=self.browser)
+                self.assertEqual(server.start(timeout=30), ok, server.error)
+                if not ok:
+                    self.assertIn("different service", server.error or server.diagnostics)
+                server.stop()
 
     def test_declining_stops_the_connection_and_keeps_nothing(self):
         self.vendor.mode = "oauth"

@@ -67,5 +67,77 @@
   "placeholder": "https://api.arcade.dev/mcp/your-gateway",
   "license": "Arcade service terms",
   "cloud_execution": true
+ },
+ "asana": {
+  "name": "Asana",
+  "kind": "Work management",
+  "url": "https://mcp.asana.com/v2/mcp",
+  "auth": [
+   "own-app"
+  ],
+  "own_app": {
+   "port": 3334,
+   "console": "https://app.asana.com/0/my-apps",
+   "console_label": "Open My apps in Asana",
+   "id_label": "Client ID",
+   "secret_label": "Client secret",
+   "steps": [
+    "In Asana's developer console, choose Create new app. Name it DGC, set the app type to MCP app, and create it.",
+    "Under OAuth, add this redirect URL: {redirect}",
+    "Under Manage distribution, choose Specific workspaces, add your workspace, and save.",
+    "Copy the app's client ID and client secret into the fields below."
+   ]
+  },
+  "manage": "https://app.asana.com/0/my-apps",
+  "docs": "https://developers.asana.com/docs/connecting-mcp-clients-to-asanas-v2-server",
+  "terms": "https://asana.com/terms",
+  "privacy": "https://asana.com/privacy",
+  "summary": "Your Asana tasks, projects and goals, through an Asana app you create for DGC.",
+  "setup": "Asana's MCP server admits only apps registered in Asana, so you create one for DGC in your own Asana account. It takes about two minutes, and it is the setup Asana documents for Claude Code, Codex, Cursor and VS Code.",
+  "placeholder": "",
+  "license": "Asana service terms",
+  "cloud_execution": true
+ },
+ "docusign": {
+  "name": "Docusign",
+  "kind": "Agreements",
+  "url": "",
+  "environments": {
+   "demo": {
+    "label": "Developer account (demo)",
+    "url": "https://mcp-d.docusign.com/mcp",
+    "note": "A free Docusign developer account works straight away."
+   },
+   "production": {
+    "label": "Production account",
+    "url": "https://mcp.docusign.com/mcp",
+    "note": "A production account accepts the app only after it passes Docusign's Go-Live review and your Docusign admin approves it for MCP. Add the redirect URI and a secret key in the production account's Apps and Keys too."
+   }
+  },
+  "auth": [
+   "own-app"
+  ],
+  "own_app": {
+   "port": 3335,
+   "console": "https://admindemo.docusign.com/authenticate?goTo=appsAndKeys",
+   "console_label": "Open Apps and Keys in Docusign",
+   "id_label": "Integration key",
+   "secret_label": "Secret key",
+   "steps": [
+    "In Apps and Keys, choose Add App and Integration Key, and name it DGC.",
+    "Under Authentication, choose User Application: Yes (Authorization Code Grant), then Add Secret Key. Copy the secret key now: Docusign shows it once.",
+    "Under Additional settings, add this redirect URI: {redirect} Save. Docusign can take up to five minutes to apply it.",
+    "Copy the integration key and the secret key into the fields below."
+   ]
+  },
+  "manage": "https://admindemo.docusign.com/authenticate?goTo=appsAndKeys",
+  "docs": "https://developers.docusign.com/platform/mcp-server/",
+  "terms": "https://www.docusign.com/legal/terms-and-conditions/web-site",
+  "privacy": "https://www.docusign.com/privacy",
+  "summary": "Envelopes, agreements and templates in your Docusign account, through a Docusign app you create for DGC.",
+  "setup": "Docusign's MCP server admits only apps that hold a secret key, so you create one for DGC in your Docusign account. It is the setup Docusign documents for VS Code and other MCP clients.",
+  "placeholder": "",
+  "license": "Docusign service terms",
+  "cloud_execution": true
  }
 }

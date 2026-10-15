@@ -2412,6 +2412,34 @@ test('connector requires native terms consent and stores only runtime tokens in 
  assert.equal(h.catalog()[0].connector,'zapier');assert.doesNotMatch(JSON.stringify(h.catalog()),/fixture-token/);assert.match(h.rawSecrets.get('dgc.mcp.zapier'),/fixture-token/);
  h.provider.settingsCatalog=[{name:'zapier',installed:true}];h.clearEvidence();await h.provider.saveConnector({name:'zapier',token:'',auth:'token'});assert.equal(h.commands[0].runtime.env.DGC_MCP_BEARER_TOKEN,'fixture-token');
 });
+test('own-app connector: the Asana app ID and port go into its server, the secret only to SecretStorage and the owner-only file',async()=>{
+ const home=mkdtempSync(join(scratch,'own-app-home-')),priorHome=process.env.HOME;process.env.HOME=home;
+ const fsm=await import('node:fs');
+ try{
+  const h=connectorHarness();
+  await h.provider.saveConnector({name:'asana',auth:'own-app',url:'https://mcp.asana.com/v2/mcp',client_id:'1209876543210',client_secret:''});
+  assert.match(h.posted.findLast(m=>m.type==='connectorError').message,/client secret from Asana/);
+  await h.provider.saveConnector({name:'asana',auth:'own-app',url:'https://mcp.asana.com/v2/mcp',client_id:'',client_secret:'x'});
+  assert.match(h.posted.findLast(m=>m.type==='connectorError').message,/client ID from Asana/);
+  assert.equal(h.commands.length,0,'nothing is sent without the app');
+  notices.warningResponses.push('Accept and connect');
+  await h.provider.saveConnector({name:'asana',auth:'own-app',url:'https://mcp.asana.com/v2/mcp',client_id:'1209876543210',client_secret:'fixture-secret'});
+  const cmd=h.commands.find(c=>c.type==='upsert_mcp_server');
+  assert.equal(cmd.connector,'asana');assert.equal(cmd.accept_license,'Asana service terms');
+  assert.deepEqual(cmd.persisted.args.slice(0,5),['-y','mcp-remote','https://mcp.asana.com/v2/mcp','3334','--static-oauth-client-info']);
+  const file=cmd.persisted.args[5].slice(1);
+  assert.match(file,/mcp-oauth\/asana-[0-9a-f]{8}-[0-9a-f]{16}\.json$/);
+  assert.deepEqual(JSON.parse(fsm.readFileSync(file,'utf8')),{client_id:'1209876543210',client_secret:'fixture-secret',redirect_uris:['http://localhost:3334/oauth/callback']});
+  assert.equal(fsm.statSync(file).mode&0o777,0o600);
+  assert.doesNotMatch(JSON.stringify(cmd.persisted),/fixture-secret/);assert.doesNotMatch(JSON.stringify(h.catalog()),/fixture-secret/);
+  assert.match(h.rawSecrets.get('dgc.mcp.asana'),/fixture-secret/);
+  // Reopened with the same app: a blank secret keeps the saved one.
+  h.provider.settingsCatalog=[{name:'asana',installed:true}];h.clearEvidence();
+  await h.provider.saveConnector({name:'asana',auth:'own-app',url:'https://mcp.asana.com/v2/mcp',client_id:'1209876543210',client_secret:''});
+  assert.equal(h.posted.filter(m=>m.type==='connectorError').length,2,'no new error');
+  assert.equal(JSON.parse(fsm.readFileSync(h.commands.find(c=>c.type==='upsert_mcp_server').persisted.args[5].slice(1),'utf8')).client_secret,'fixture-secret');
+ }finally{process.env.HOME=priorHome;}
+});
 test('generic MCP save cannot forge connector license acceptance',async()=>{
  const h=connectorHarness();await h.provider.saveMcpServer({name:'zapier',transport:'remote',target:'https://mcp.zapier.com/api/v1/connect',token:'fixture-token',connector:'zapier',connectorLicense:'Zapier service terms'});
  assert.equal(h.commands[0].connector,undefined);assert.equal(h.catalog()[0].connector,undefined);

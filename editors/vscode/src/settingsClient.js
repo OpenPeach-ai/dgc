@@ -4,6 +4,8 @@ import zapierLogo from '../media/plugin-logos/zapier.ico';
 import makeLogo from '../media/plugin-logos/make.ico';
 import n8nLogo from '../media/plugin-logos/n8n.ico';
 import arcadeLogo from '../media/plugin-logos/arcade.svg';
+import asanaLogo from '../media/plugin-logos/asana.png';
+import docusignLogo from '../media/plugin-logos/docusign.png';
 import composioLogo from '../media/plugin-logos/composio.svg';
 import googleLogo from '../media/plugin-logos/google.png';
 import figmaLogo from '../media/plugin-logos/figma.png';
@@ -12,7 +14,7 @@ import calendarLogo from '../media/plugin-logos/calendar.png';
 import contactsLogo from '../media/plugin-logos/contacts.png';
 import driveLogo from '../media/plugin-logos/drive.png';
 import dgcLogo from '../media/dgc-mark.svg';
-const connectorLogos = {zapier:zapierLogo, make:makeLogo, n8n:n8nLogo, arcade:arcadeLogo};
+const connectorLogos = {zapier:zapierLogo, make:makeLogo, n8n:n8nLogo, arcade:arcadeLogo, asana:asanaLogo, docusign:docusignLogo};
 const serviceLogos = {gmail:gmailLogo, calendar:calendarLogo, contacts:contactsLogo, drive:driveLogo};
 import { renderFields } from './settingsFields.js';
 import { createUsage } from './settingsUsage.js';
@@ -541,10 +543,38 @@ function connectorPanels(only = '') {
         return `<section class="connector-panel" aria-label="${esc(def.name)} connector"><div class="connector-heading">${logo(row)}<div class="copy"><h3>${esc(def.name)}</h3><p>${esc(def.kind)} · ${esc(def.summary)}</p></div><span class="status${row.connected ? ' connected' : ''}">${row.connected ? 'Connected' : row.installed ? state?.enabled === false ? 'Disabled' : 'Not connected' : 'Not connected'}</span></div><div class="actions"><button class="${row.connected ? 'secondary' : 'save'}" data-connector-setup="${id}">${row.connected ? 'Configure' : 'Connect '+esc(def.name)}</button><button class="secondary" data-connector-manage="${id}">${id==='n8n' && !row.installed ? 'Setup instructions' : def.kind==='Workflow connector' ? 'Manage workflows' : 'Manage apps'}</button>${!only ? `<button class="link" data-open="${id}">Details</button>` : ''}${row.installed ? `<button class="link" data-uninstall="${id}">Disconnect</button>` : ''}</div>${row.connection_error ? `<p class="error-message" role="status">${esc(row.connection_error)}</p>` : ''}</section>`;
     }).join('');
 }
+// Asana and Docusign admit only apps registered with them, so the user creates one for DGC, as the vendors document
+// for Claude Code, Codex, Cursor and VS Code: each step, the exact redirect URL to register (with Copy), and the ID and
+// secret it gives back. The secret goes to the editor's secret storage; the sign-in itself is DGC's, in the keychain.
+function openOwnApp(id, def, row, server) {
+    const app=def.own_app, envs=def.environments || null;
+    const redirect=`http://localhost:${app.port}/oauth/callback`;
+    const envKeys=envs ? Object.keys(envs) : [];
+    const current=envs ? (envKeys.find(k => envs[k].url === server?.url) || envKeys[0]) : '';
+    const steps=app.steps.map(step => `<li>${esc(step).replace('{redirect}', `<span class="redirect-copy"><code id="own-app-redirect">${esc(redirect)}</code> <button type="button" class="secondary" data-copy-redirect>Copy</button></span>`)}</li>`).join('');
+    const keptId=server?.oauth_client_id || '';
+    const envField=envs ? `<label>${esc(def.name)} account<select id="own-app-env">${envKeys.map(k => `<option value="${esc(k)}"${k===current ? ' selected' : ''}>${esc(envs[k].label)}</option>`).join('')}</select></label><p class="note" id="own-app-env-note"></p>` : '';
+    dialog('connector', 'Connect '+def.name, `${connectionArt(row)}<h2 class="connection-title" id="connector-title">Connect ${esc(def.name)}</h2>${cloudNotice({name:id, display_name:def.name, cloud_execution:def.cloud_execution})}<p>${esc(def.setup)}</p><p>${link(app.console, app.console_label)} · ${link(def.docs,'Setup instructions')} · ${link(def.terms,'Terms')} · ${link(def.privacy,'Privacy')}</p><form id="connector-form" class="own-app">${envField}<ol class="own-app-steps">${steps}</ol><label>${esc(app.id_label)}<input id="own-app-id" required autocomplete="off" spellcheck="false" value="${esc(keptId)}"></label><label>${esc(app.secret_label)}<input id="own-app-secret" type="password" autocomplete="off" spellcheck="false"${keptId ? ` placeholder="Leave blank to keep the saved ${esc(app.secret_label.toLowerCase())}"` : ' required'}></label><p class="note">The ${esc(app.secret_label.toLowerCase())} is kept in the editor’s secret storage and used only to sign in to ${esc(def.name)}. Your sign-in is kept by DGC in your system keychain.</p><button class="save" id="connector-submit">${row.installed ? 'Save and connect' : 'Connect '+esc(def.name)}</button></form>`);
+    modal.classList.add('connection-dialog');
+    modal.dataset.connector = id;
+    modal.setAttribute('aria-labelledby','connector-title');
+    modal.querySelector('[data-copy-redirect]').onclick = () => send({type:'copy', text:redirect});
+    const note=() => { if (envs) $('own-app-env-note').textContent = envs[$('own-app-env').value]?.note || ''; };
+    if (envs) { $('own-app-env').onchange = note; note(); }
+    $('connector-form').onsubmit=e=>{
+        e.preventDefault(); if(operationPending)return;
+        operationPending=true;
+        send({type:'saveConnector', name:id, url: envs ? envs[$('own-app-env').value].url : def.url, auth:'own-app',
+              client_id:$('own-app-id').value.trim(), client_secret:$('own-app-secret').value.trim()});
+        $('own-app-secret').value='';
+        statusDialog('Connecting…');$('dialog-cancel').textContent='Hide';
+    };
+}
 function openConnector(id) {
     const def=APP_CONNECTORS[id]; if(!def)return;
     const row=items.find(r=>r.name===id) || {name:id,display_name:def.name};
     const server=servers.find(s=>s.name===id);
+    if (def.own_app) { openOwnApp(id, def, row, server); return; }
     const url=server?.url || row.mcps?.[0]?.url || def.url;
     // This dialog is the consent moment for the three connectors reviewPlugin() sends straight
     // here, so the disclosure belongs on it and not only on the detail page they skip. It reads

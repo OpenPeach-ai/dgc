@@ -687,6 +687,24 @@ A pasted connector token is kept in the editor's secret storage under DGC's own 
 and bound to the exact URL it was given for, never written to the config file. A URL carrying
 credentials, a query or a fragment is refused outright.
 
+## Asana and Docusign: your own app
+
+Asana's and Docusign's MCP servers admit only apps registered with them, and each needs a secret, which an
+open-source app can't ship. So you create an app for DGC in your own account, as both vendors document for Claude
+Code, Codex, Cursor and VS Code. **Settings → Plugins → Apps → Connect** shows each step:
+
+- **Asana:** in **My apps**, create an app named DGC of type **MCP app**; under **OAuth** add the redirect URL DGC
+  shows (`http://localhost:3334/oauth/callback`, with a Copy button); under **Manage distribution** choose your
+  workspace; then paste the **client ID** and **client secret**.
+- **Docusign:** in **Apps and Keys**, add an app and integration key named DGC, choose **User Application: Yes**,
+  add a **secret key**, and add the redirect URI DGC shows (`http://localhost:3335/oauth/callback`); then paste the
+  **integration key** and **secret key**. A developer (demo) account works at once. A production account accepts the
+  app only after Docusign's Go-Live review and your Docusign admin's approval for MCP.
+
+The secret is kept in the editor's secret storage and handed to DGC in an owner-only file when it connects; the
+sign-in that follows is kept in your system keychain like any other. Reopening the setup keeps the saved secret if
+you leave it blank.
+
 Two consequences, and DGC now states both rather than leaving you to discover them:
 
 - **The work happens in their cloud.** A connector holds the app's credentials and runs the app

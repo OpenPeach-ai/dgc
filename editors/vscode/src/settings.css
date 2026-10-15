@@ -16,6 +16,9 @@ body.vscode-high-contrast{--line:#888;--border-strong:#fff;--muted:#ddd}
 .connection-dialog .dialog-heading{height:44px;padding:10px 16px;justify-content:flex-end}
 .connection-dialog .dialog-heading h2{display:none}
 .connection-dialog .dialog-body{padding:0 36px;max-height:none;overflow:visible}
+.connection-dialog .own-app-steps{margin:4px 0 14px;padding-left:20px;display:grid;gap:8px;line-height:1.45}
+.connection-dialog .redirect-copy{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
+.connection-dialog .redirect-copy code{user-select:all;word-break:break-all}
 .connection-art{display:flex;justify-content:center;align-items:center;gap:16px;margin:6px 0 25px}
 .connection-tile{display:grid;place-items:center;width:76px;height:76px;border:1px solid #333;border-radius:19px;background:#191919}
 .connection-tile img{object-fit:contain}

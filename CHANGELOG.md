@@ -22,6 +22,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   sign-in (PKCE, resource metadata, the resource indicator, registration as "DGC", your own app's client), refresh
   before a token expires, and one sign-in at a time across windows and Pips. A tool that needs more access says so,
   and the next Connect asks for it. Saved plugins keep working unchanged.
+- **DGC's client metadata document.** Where a service takes OAuth client metadata documents (Notion, Linear, Sentry,
+  Granola, Airtable, Canva, Adapter and others), DGC names itself by `https://vibedgc.com/oauth/dgc-client.json`
+  instead of registering a new client each time, as MCP now prefers. Only once that document is published and says
+  what DGC expects; until then DGC registers itself as before. Sign-ins also check the issuer the service returns
+  (RFC 9207), and a service that answers without a token with `403` (Docusign) is signed in to like any other.
 - **Removing a plugin signs you out of it.** Removing the server (`/mcp remove`, the editor, or uninstalling its plugin)
   asks the service to revoke DGC's token (RFC 7009, at the address saved at sign-in or found through the service's
   OAuth metadata), then deletes the sign-in, and says which happened. Before, the token stayed on disk in the bridge's
@@ -532,6 +537,11 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 
 ### Plugins
 
+- **Asana and Docusign**, set up the way both vendors document for coding tools: you create an app for DGC in your
+  own account, and **Settings → Plugins → Apps → Connect** walks you through it: each step, the exact redirect URL
+  to register (with Copy), and the ID and secret it gives you. The secret stays in the editor's secret storage.
+  Docusign works with a developer account at once; a production account needs Docusign's Go-Live review and your
+  admin's MCP approval, which the setup says.
 - **The vendors' own plugins.** Settings → Plugins (and `dgc plugin list`) offers 41 more plugins
   published by the services themselves, each pinned to a reviewed commit of the vendor's package:
   Airtable, Coda, Craft, Read AI, Granola, Adobe App Builder, Mobbin, Refero, Mural, Intercom,

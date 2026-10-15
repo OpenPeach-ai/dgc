@@ -1916,6 +1916,54 @@
    "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
    "terms_url": "https://www.airwallex.com/global/terms/sign-up-terms",
    "privacy_url": "https://www.airwallex.com/global/terms/privacy-policy"
+  },
+  {
+   "name": "asana",
+   "display_name": "Asana",
+   "summary": "Your Asana tasks, projects and goals, through an Asana app you create for DGC.",
+   "source_kind": "preset",
+   "connector": "asana",
+   "license": "Asana service terms",
+   "install": "accept",
+   "auth": "own-app",
+   "terms_url": "https://asana.com/terms",
+   "license_url": "https://asana.com/terms",
+   "privacy_url": "https://asana.com/privacy",
+   "upstream": "https://developers.asana.com/docs/connecting-mcp-clients-to-asanas-v2-server",
+   "developer": "Asana",
+   "category": "Work management",
+   "requirements": "An Asana account, and an Asana MCP app you create for DGC (about two minutes; DGC shows each step).",
+   "verification": "Documented own-app setup implemented. Your own app's sign-in and a tool call verify access for your account.",
+   "cloud_execution": true,
+   "metadata": {
+    "long_summary": "Your Asana tasks, projects and goals, through an Asana app you create for DGC. An Asana account, and an Asana MCP app you create for DGC (about two minutes; DGC shows each step).",
+    "apps": [],
+    "mcps": []
+   }
+  },
+  {
+   "name": "docusign",
+   "display_name": "Docusign",
+   "summary": "Envelopes, agreements and templates in your Docusign account, through a Docusign app you create for DGC.",
+   "source_kind": "preset",
+   "connector": "docusign",
+   "license": "Docusign service terms",
+   "install": "accept",
+   "auth": "own-app",
+   "terms_url": "https://www.docusign.com/legal/terms-and-conditions/web-site",
+   "license_url": "https://www.docusign.com/legal/terms-and-conditions/web-site",
+   "privacy_url": "https://www.docusign.com/privacy",
+   "upstream": "https://developers.docusign.com/platform/mcp-server/",
+   "developer": "Docusign",
+   "category": "Agreements",
+   "requirements": "A Docusign developer or production account, and a Docusign app you create for DGC (DGC shows each step). A production account also needs Docusign's Go-Live review and your admin's MCP approval.",
+   "verification": "Documented own-app setup implemented. Your own app's sign-in and a tool call verify access for your account.",
+   "cloud_execution": true,
+   "metadata": {
+    "long_summary": "Envelopes, agreements and templates in your Docusign account, through a Docusign app you create for DGC. A Docusign developer or production account, and a Docusign app you create for DGC (DGC shows each step). A production account also needs Docusign's Go-Live review and your admin's MCP approval.",
+    "apps": [],
+    "mcps": []
+   }
   }
  ]
 }

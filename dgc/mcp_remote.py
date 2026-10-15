@@ -47,6 +47,13 @@ MAX_WORKERS = 64                   # requests to one server in flight at once
 CLIENT_NAME = "DGC"
 CLIENT_URI = "https://vibedgc.com"
 CREDENTIALS_VERSION = 1
+# DGC's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document; MCP's preferred way for a
+# client to identify itself). Used only where the service supports it AND the published document says what DGC
+# expects; otherwise DGC registers itself as before. Its fixed callback port suits services that match redirects
+# exactly; any other port relies on RFC 8252's loopback port exception.
+CLIENT_METADATA_URL = "https://vibedgc.com/oauth/dgc-client.json"
+CLIENT_METADATA_PORT = 29167
+_document_checked: dict = {}                       # url -> (time checked, usable)
 
 
 class RemoteError(RuntimeError):
@@ -289,7 +296,7 @@ class _Callback:
 
     def __init__(self, port: int, state: str):
         self.port, self.state = port, state
-        self.code = self.error = None
+        self.code = self.error = self.iss = None
         self.done = threading.Event()
         outer = self
 
@@ -312,6 +319,7 @@ class _Callback:
                     ok, message = False, "The service didn't sign you in: " + str(outer.error)[:200]
                 elif query.get("code"):
                     outer.code = query["code"]
+                    outer.iss = query.get("iss")
                     ok, message = True, "DGC is signed in. You can close this tab."
                 else:
                     ok, message = False, "The service sent no sign-in code. Start again from DGC."
@@ -376,6 +384,36 @@ def authenticated(client: dict, methods, data: dict) -> tuple[dict, tuple | None
     if method == "client_secret_post":
         data["client_secret"] = client["client_secret"]
     return data, None
+
+
+def client_document_live(session=None) -> bool:
+    """Whether DGC's client metadata document is published and says what this client relies on (cached)."""
+    url = CLIENT_METADATA_URL
+    checked = _document_checked.get(url)
+    if checked and time.monotonic() - checked[0] < (3600 if checked[1] else 600):
+        return checked[1]
+    usable = False
+    try:
+        import requests
+        response = (session or requests).get(url, timeout=(5, 10), allow_redirects=False,
+                                             headers={"Accept": "application/json"})
+        value = response.json() if response.status_code == 200 and len(response.content) <= 5000 else None
+        usable = (isinstance(value, dict) and value.get("client_id") == url
+                  and value.get("token_endpoint_auth_method") == "none"
+                  and f"http://127.0.0.1:{CLIENT_METADATA_PORT}/oauth/callback" in (value.get("redirect_uris") or [])
+                  and "http://127.0.0.1/oauth/callback" in (value.get("redirect_uris") or []))
+    except Exception:                                    # noqa: BLE001 -- unreachable means: register instead
+        usable = False
+    _document_checked[url] = (time.monotonic(), usable)
+    return usable
+
+
+def uses_client_document(metadata: dict, session=None) -> bool:
+    """MCP's order: a registered app, then a client metadata document where the service takes one, then registration.
+    Only for a service that also accepts public clients ('none'), as Codex checks."""
+    methods = metadata.get("token_endpoint_auth_methods_supported")
+    return (metadata.get("client_id_metadata_document_supported") is True
+            and isinstance(methods, list) and "none" in methods and client_document_live(session))
 
 
 class RemoteAuth:
@@ -603,10 +641,11 @@ class RemoteAuth:
             if saved.get("step_up_scope"):               # more access a tool asked for since the last sign-in
                 scope = " ".join(dict.fromkeys([*scope.split(), *str(saved["step_up_scope"]).split()]))
             state = secrets.token_urlsafe(24)
+            document = not self.options.static_client and uses_client_document(metadata, self.session)
             port = self.options.callback_port
             if port is None:
                 kept = (saved.get("client") or {}).get("redirect_uris") or []
-                port = (urlsplit(kept[0]).port if kept else None) or free_port()
+                port = CLIENT_METADATA_PORT if document else ((urlsplit(kept[0]).port if kept else None) or free_port())
             try:
                 callback = _Callback(port, state)
             except OSError:
@@ -615,9 +654,11 @@ class RemoteAuth:
                                       "on it; close what uses it and connect again") from None
                 port = free_port()
                 callback = _Callback(port, state)
-            redirect = f"http://localhost:{port}/oauth/callback"
+            # RFC 8252's loopback port exception is written for the IP literal, so a document client uses it.
+            redirect = f"http://{'127.0.0.1' if document else 'localhost'}:{port}/oauth/callback"
             try:
-                client = self._client(found, redirect)
+                client = ({"client_id": CLIENT_METADATA_URL, "issuer": found["issuer"], "redirect_uris": [redirect],
+                           "document": True} if document else self._client(found, redirect))
                 verifier = secrets.token_urlsafe(64)
                 code_challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=")
                 resource = self.options.resource or (found["resource_metadata"].get("resource")
@@ -646,6 +687,11 @@ class RemoteAuth:
                         raise RemoteError("sign-in wasn't finished in time; connect again to retry")
                 if not callback.code:
                     raise RemoteError(f"the service didn't sign you in ({str(callback.error)[:80]})")
+                # RFC 9207: a service that names itself on the redirect must be the one DGC opened.
+                issuer = metadata.get("issuer")
+                if issuer and (callback.iss is not None or metadata.get("authorization_response_iss_parameter_supported")) \
+                        and callback.iss != issuer:
+                    raise RemoteError("the sign-in came back from a different service than the one DGC opened")
                 data = {"grant_type": "authorization_code", "code": callback.code, "redirect_uri": redirect,
                         "code_verifier": verifier}
                 if resource:
@@ -936,6 +982,15 @@ class RemoteConnection:
                 if refusals > 2:
                     raise RemoteError("the server refused the new sign-in (HTTP 401)")
                 self._unauthorized(response, stale, refusals == 1)
+                continue
+            if status == 403 and not stale.get("access_token") and "Authorization" not in self.options.headers \
+                    and parse_www_authenticate(response.headers.get("WWW-Authenticate", "")).get("error") \
+                    != "insufficient_scope" and refusals < 2:
+                # Some services answer a request that carries no token with 403, not 401, and no challenge
+                # (Docusign: "RBAC: access denied"): that is a sign-in to start, found the standard way.
+                response.close()
+                refusals += 1
+                self._unauthorized(response, stale, False)
                 continue
             if status == 403 and not stepped_up \
                     and self.auth.on_forbidden(response.headers.get("WWW-Authenticate", ""), stale):

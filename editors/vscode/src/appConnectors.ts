@@ -1,7 +1,11 @@
 /** Provider-owned setup. Public descriptions are shared with the Python package. */
+/** Your own app at the vendor (Asana, Docusign): the steps to create it, and the callback port it is registered with. */
+export type OwnApp = { port: number; console: string; console_label: string; id_label: string; secret_label: string;
+  steps: string[] };
 export type AppConnector = { name: string; kind: string; url: string; auth: string[];
   manage: string; docs: string; terms: string; privacy: string; summary: string;
-  setup: string; placeholder: string; license: string; cloud_execution: boolean };
+  setup: string; placeholder: string; license: string; cloud_execution: boolean;
+  own_app?: OwnApp; environments?: Record<string, { label: string; url: string; note?: string }> };
 export const APP_CONNECTORS: Record<string, AppConnector> = require('../../../dgc/connector_catalog.json');
 export function connectorUrl(id: string, input: unknown): string {
   const def = APP_CONNECTORS[id];
@@ -16,6 +20,8 @@ export function connectorUrl(id: string, input: unknown): string {
     throw new Error('Use HTTPS (or loopback HTTP for n8n), without credentials or query parameters');
   if (def.url && url.href.replace(/\/$/,'') !== def.url.replace(/\/$/,''))
     throw new Error('Use the published connector endpoint');
+  if (def.environments && !Object.values(def.environments).some((e) => e.url.replace(/\/$/,'') === url.href.replace(/\/$/,'')))
+    throw new Error('Use one of the published connector endpoints');
   if (id === 'arcade' && (url.hostname !== 'api.arcade.dev' || url.port || !/^\/mcp\/[^/]+/.test(url.pathname)))
     throw new Error('Paste an Arcade Cloud gateway URL from api.arcade.dev/mcp/');
   if (id === 'n8n' && !url.pathname.replace(/\/$/,'').endsWith('/mcp-server/http'))

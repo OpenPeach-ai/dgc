@@ -82,9 +82,15 @@ callback port, `--header`, `--static-oauth-client-info`, `--static-oauth-client-
   servers.
 - **Sign-in:** OAuth 2.1 with PKCE (S256). A `401` names the server's protected-resource metadata
   (RFC 9728), checked to describe this server, which names its authorization server (RFC 8414 or
-  OpenID discovery, path-aware). DGC registers itself as "DGC" (RFC 7591) unless the entry names your
-  own app, sends the resource indicator (RFC 8707), and asks for the scope the challenge or metadata
-  names. Tokens refresh before they expire and after a `401`. A `403 insufficient_scope` signs in
+  OpenID discovery, path-aware). How DGC identifies itself follows MCP's order: your own app when the
+  entry names one; else DGC's client metadata document (`https://vibedgc.com/oauth/dgc-client.json`)
+  where the service advertises `client_id_metadata_document_supported` and accepts public clients, and
+  only once that document is published and says what DGC expects; else it registers itself as "DGC"
+  (RFC 7591). With the document, the callback is `http://127.0.0.1:29167/oauth/callback` (any port where
+  29167 is busy, under RFC 8252's loopback exception). DGC sends the resource indicator (RFC 8707), asks
+  for the scope the challenge or metadata names, and checks the `iss` the service returns (RFC 9207). A
+  service that answers a request without a token with `403` and no challenge (Docusign) is signed in to
+  the same way as one that answers `401`. Tokens refresh before they expire and after a `401`. A `403 insufficient_scope` signs in
   again for the larger scope while you are connecting; in the middle of a conversation the call says
   so, and the next Connect asks for it.
 - **Where sign-ins live:** the system keychain (macOS Keychain through the Security framework; the
@@ -120,5 +126,8 @@ OAuth and revocation) with a temporary DGC home and a stand-in keychain: public 
 SSE answers, sessions and a forgotten session, the older SSE transport, cancellation, sign-in with
 PKCE and the resource indicator, reuse of a kept sign-in, refresh before expiry and after a `401`,
 step-up at the next Connect, declining, startup with nobody to ask, your own app's secret (never
-stored), two windows signing in at once (one browser), and revocation on removal. The macOS Keychain
-calls were also run on a real Mac against a temporary keychain file.
+stored), two windows signing in at once (one browser), revocation on removal, the client metadata
+document (and registering instead when it isn't published), a `403` without a challenge, and a sign-in
+that comes back naming another issuer. The macOS Keychain calls were also run on a real Mac against a
+temporary keychain file, and the Linux path against a real gnome-keyring (Secret Service) through
+`secret-tool`, signing in, reusing the sign-in, revoking and deleting it.

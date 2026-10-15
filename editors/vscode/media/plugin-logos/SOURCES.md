@@ -76,3 +76,12 @@ Anthropic's own plugins (frontend-design, feature-dev, code-review, commit-comma
 pr-review-toolkit) declare no logo; they show Anthropic's mark as their developer:
 
 - anthropic: https://cdn.prod.website-files.com/67ce28cfec624e2b733f8a52/67d31dd7aa394792257596c5_webclip.png
+
+# Own-app connector marks
+
+Downloaded unchanged on 15 October 2026, only resized to 128×128 (fit inside, centred on a transparent square). Used
+only to identify the service; no partnership implied. Bundled locally.
+
+- Asana: https://avatars.githubusercontent.com/u/1472111 (Asana's own GitHub organisation mark; asana.com's
+  high-resolution icons refuse requests from outside a browser session)
+- Docusign: https://www.docusign.com/assets/images/apple-touch-icon-180x180.png

@@ -9,12 +9,18 @@ from dgc.editor_protocol import command_error
 from tests import test_plugin_lifecycle as lifecycle
 
 
+OWN_APP_FILE = '@/home/user/.dgc/mcp-oauth/{name}-1a2b3c4d-0123456789abcdef.json'
+
+
 def spec(name, url=None, token=None):
-    url = url or connectors.CATALOG[name]['url'] or {
+    definition = connectors.CATALOG[name]
+    url = url or definition['url'] or next(iter((definition.get('environments') or {}).values()), {}).get('url') or {
         'n8n': 'https://team.app.n8n.cloud/mcp-server/http',
         'arcade': 'https://api.arcade.dev/mcp/fixture'}[name]
     token = name == 'zapier' if token is None else token
-    result = dict(transport='remote', command='npx', args=['-y','mcp-remote',url], url=url,
+    own_app = [str(definition['own_app']['port']), '--static-oauth-client-info', OWN_APP_FILE.format(name=name)] \
+        if definition.get('own_app') else []
+    result = dict(transport='remote', command='npx', args=['-y','mcp-remote',url,*own_app], url=url,
                   env_names=['DGC_MCP_BEARER_TOKEN'] if token else [], defer_until_setup=token)
     if token: result['auth_env'] = 'DGC_MCP_BEARER_TOKEN'
     return result
@@ -65,6 +71,38 @@ class ConnectorValidationTests(unittest.TestCase):
                    'args':public['args']+['--header','Authorization: Bearer ${DGC_MCP_BEARER_TOKEN}']}
         self.assertIsNone(command_error(dict(type='upsert_mcp_server',request_id='fixture',name='zapier',connector='zapier',
                           accept_license=connectors.CATALOG['zapier']['license'],runtime=runtime,persisted=public)))
+
+
+    def test_your_own_app_connectors_take_the_app_and_nothing_else(self):
+        # Asana and Docusign admit only apps registered with them: the saved server names its fixed callback port
+        # and the owner-only file holding the app (never the secret itself), on a published endpoint only.
+        for name, port in (('asana', '3334'), ('docusign', '3335')):
+            with self.subTest(name=name):
+                good = spec(name)
+                self.assertEqual(connectors.validate(name, good)['args'][3], port)
+                for broken in (good['args'][:3], good['args'][:3] + ['9999'] + good['args'][4:],
+                               good['args'][:5] + ['@/home/user/notes.json'],
+                               good['args'][:5] + ['{"client_id":"x","client_secret":"y"}']):
+                    with self.assertRaises(plugins.PluginError):
+                        connectors.validate(name, {**good, 'args': broken})
+                with self.assertRaises(plugins.PluginError):
+                    connectors.validate(name, {**good, 'env_names': ['DGC_MCP_BEARER_TOKEN'], 'auth_env': 'DGC_MCP_BEARER_TOKEN'})
+        for url in ('https://mcp-d.docusign.com/mcp', 'https://mcp.docusign.com/mcp'):
+            connectors.validate('docusign', spec('docusign', url))
+        with self.assertRaisesRegex(plugins.PluginError, 'published endpoints'):
+            connectors.validate('docusign', spec('docusign', 'https://mcp.docusign.com.evil.example/mcp'))
+        with self.assertRaisesRegex(plugins.PluginError, 'published endpoint'):
+            connectors.validate('asana', spec('asana', 'https://mcp.asana.com/sse'))
+
+    def test_every_connector_is_offered_in_the_plugin_catalog(self):
+        rows = {row['name']: row for row in plugins.load_catalog()['plugins']}
+        for name, definition in connectors.CATALOG.items():
+            with self.subTest(name=name):
+                self.assertEqual(rows[name].get('connector'), name)
+                self.assertEqual(rows[name]['license'], definition['license'])
+                if definition.get('own_app'):
+                    self.assertEqual(rows[name]['auth'], 'own-app')
+                    self.assertIn('{redirect}', ' '.join(definition['own_app']['steps']), 'a step names the redirect')
 
 
 class ConnectorLifecycleTests(unittest.TestCase):

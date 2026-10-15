@@ -1,6 +1,7 @@
 """Validated user-owned connectors, using the existing MCP and plugin stores."""
 from __future__ import annotations
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 from .mcp_config import validate_mcp_spec
@@ -22,22 +23,36 @@ def validate(name, spec):
         port = parsed.port
     except ValueError:
         raise PluginError('Invalid connector URL') from None
+    own_app = definition.get('own_app')
+    args = clean.get('args')
+    base_args = ['-y', 'mcp-remote', url]
     if (clean.get('transport') != 'remote' or clean.get('command') != 'npx'
-            or clean.get('args') != ['-y', 'mcp-remote', url]
+            or not isinstance(args, list) or args[:3] != base_args
             or not parsed.hostname or parsed.query or parsed.fragment or parsed.username or parsed.password
             or any(ord(c) <= 32 or ord(c) == 127 for c in url) or '\\' in url):
+        raise PluginError('Use a connector server URL without credentials or query parameters')
+    if own_app:
+        # Your own app at the vendor: its fixed callback port, and the owner-only file the editor writes its client
+        # ID and secret to (never the secret itself in the configuration).
+        if (len(args) != 6 or args[3] != str(own_app['port']) or args[4] != '--static-oauth-client-info'
+                or not re.fullmatch(r'@/.*/mcp-oauth/[a-z0-9_.-]{1,64}-[0-9a-f]{8}-[0-9a-f]{16}\.json', args[5])):
+            raise PluginError(f"Connect {definition['name']} with your own app, from its setup form")
+    elif args != base_args:
         raise PluginError('Use a connector server URL without credentials or query parameters')
     loopback = parsed.hostname in ('localhost', '127.0.0.1', '::1')
     if parsed.scheme != 'https' and not (name == 'n8n' and parsed.scheme == 'http' and loopback):
         raise PluginError('Use HTTPS, or loopback HTTP for a local n8n instance')
     if definition['url'] and url.rstrip('/') != definition['url'].rstrip('/'):
         raise PluginError('The connector URL must match its published endpoint')
+    environments = definition.get('environments') or {}
+    if environments and url.rstrip('/') not in {e['url'].rstrip('/') for e in environments.values()}:
+        raise PluginError('The connector URL must be one of its published endpoints')
     if name == 'arcade' and (parsed.hostname != 'api.arcade.dev' or port not in (None,443)
                              or not parsed.path.startswith('/mcp/') or not parsed.path[5:].strip('/')):
         raise PluginError('Paste an Arcade Cloud gateway URL from api.arcade.dev/mcp/')
     if name == 'n8n' and not parsed.path.rstrip('/').endswith('/mcp-server/http'):
         raise PluginError('Paste the n8n instance MCP URL ending in /mcp-server/http')
-    auth = 'token' if clean.get('auth_env') else 'oauth'
+    auth = 'token' if clean.get('auth_env') else 'own-app' if own_app else 'oauth'
     if auth not in definition['auth']:
         raise PluginError('This connector requires ' + ('a connection token' if name == 'zapier' else 'browser sign-in'))
     expected_env = ['DGC_MCP_BEARER_TOKEN'] if auth == 'token' else []
