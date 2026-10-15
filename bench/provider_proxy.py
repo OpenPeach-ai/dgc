@@ -278,6 +278,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
 def main() -> None:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--upstream", required=True, help="provider origin, e.g. http://localhost:11434")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="bind address; a LAN address only when the harnesses run on another "
+                             "machine (Terminal-Bench task containers on a Docker host)")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--ready-file", type=Path, required=True)
     parser.add_argument("--usage-log", type=Path, required=True)
@@ -292,7 +295,7 @@ def main() -> None:
         parser.error("--context-size must be between 2048 and 10000000")
     args.usage_log.parent.mkdir(parents=True, exist_ok=True)
     args.usage_log.touch(mode=0o600, exist_ok=True)
-    server = ProxyServer(("127.0.0.1", args.port), ProxyHandler)
+    server = ProxyServer((args.host, args.port), ProxyHandler)
     server.upstream = upstream  # type: ignore[attr-defined]
     server.usage_log = args.usage_log  # type: ignore[attr-defined]
     server.context_size = max(0, args.context_size)  # type: ignore[attr-defined]
