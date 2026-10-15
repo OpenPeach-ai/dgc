@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import urlopen
 
 from dgc import mcp_remote, plugin_credentials, plugin_signin
-from dgc.mcp import MCPServer
+from dgc.mcp import CONNECTION_CANCELLED, SIGN_IN_CANCELLED, MCPManager, MCPServer
 from dgc.mcp_context import get_context
 
 
@@ -404,6 +404,7 @@ class RemoteClientTests(unittest.TestCase):
         self.assertFalse(server.start(timeout=20, cancel=cancel))
         self.assertLess(time.monotonic() - began, 4)
         self.assertIsNone(server.proc)
+        self.assertEqual(server.error, CONNECTION_CANCELLED, "no sign-in was asked, so it was the connection")
 
     # sign-in ----------------------------------------------------------------------------------------------------
     def test_oauth_signs_in_once_keeps_it_in_the_keychain_and_refreshes(self):
@@ -539,8 +540,34 @@ class RemoteClientTests(unittest.TestCase):
         self.assertLess(time.monotonic() - began, 5)
         self.assertEqual(seen, ["127.0.0.1"])
         self.assertIsNone(server.proc)
+        self.assertEqual(server.error, SIGN_IN_CANCELLED, "said in words, not 'initialize failed: cancelled by user'")
         self.assertEqual(self.keyring.items, {})
         self.assertEqual(self.vendor.grants, [])
+
+    def test_cancel_after_the_browser_opened_says_the_sign_in_was_cancelled(self):
+        # What the plugin's card and /mcp show once the person pressed Cancel on "Finish connecting … in your
+        # browser": it used to be the raw "initialize failed: cancelled by user".
+        self.vendor.mode = "oauth"
+        cancel = threading.Event()
+        opened = threading.Event()
+
+        def browser_opened(_server, _method, _params, _cancel):
+            opened.set()
+            return {"action": "accept"}                  # the browser opened; nobody signs in
+
+        manager = MCPManager(self.root)
+        self.addCleanup(manager.stop_all)
+        spec = {"transport": "remote", "command": "npx", "args": ["-y", "mcp-remote", self.vendor.base + "/mcp"],
+                "url": self.vendor.base + "/mcp", "env_names": [], "log_level": "warning"}
+        worker = threading.Thread(target=manager.connect_all, args=({"fixture": spec},),
+                                  kwargs={"cancel": cancel, "input_handler": browser_opened})
+        worker.start()
+        self.assertTrue(opened.wait(15))
+        cancel.set()
+        worker.join(15)
+        self.assertEqual(manager.failures["fixture"], SIGN_IN_CANCELLED)
+        row = next(r for r in manager.status() if r["name"] == "fixture")
+        self.assertNotIn("initialize failed", json.dumps(row))
 
     def test_with_nobody_to_ask_it_says_it_needs_sign_in_at_once(self):
         self.vendor.mode = "oauth"

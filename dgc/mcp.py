@@ -44,6 +44,9 @@ _CATALOG_RETRY_SECONDS = 5.0
 _SUBSCRIPTION_ACK_SECONDS = 5.0
 _SUBSCRIPTION_ID_META = "io.modelcontextprotocol/subscriptionId"
 _MAX_WRITE_SECONDS = 2.0
+# What a connection that was stopped says, in words a person reads on the plugin's card and in /mcp.
+CONNECTION_CANCELLED = "Connection cancelled."
+SIGN_IN_CANCELLED = "Sign-in cancelled. Connect again when you're ready."
 _CLIENT_INFO = {"name": "dgc", "version": __version__}
 _LOG_LEVELS = ("debug", "info", "notice", "warning", "error", "critical", "alert", "emergency")
 _INPUT_ORIGIN_METHODS = {"tools/call", "prompts/get", "resources/read"}
@@ -578,7 +581,7 @@ class MCPServer:
     def _start(self, timeout: float, cancel: threading.Event | None) -> bool:
         self.error = None
         if cancel is not None and cancel.is_set():
-            self.error = "connection cancelled"
+            self.error = CONNECTION_CANCELLED
             return False
         if not self._launch():
             return False
@@ -592,7 +595,7 @@ class MCPServer:
         discovered, discover_error = (None, None) if self.remote_bridge else self._request(
             "server/discover", {}, probe_timeout, cancel, modern=True)
         if cancel is not None and cancel.is_set():
-            self.error = "connection cancelled"
+            self.error = CONNECTION_CANCELLED
             self.stop()
             return False
         supported = (discovered or {}).get("supportedVersions")
@@ -637,6 +640,10 @@ class MCPServer:
             }, timeout, cancel, modern=False)
             if init is None:
                 self.stop()
+                if (cancel is not None and cancel.is_set()) or err == "sign-in was cancelled":
+                    # Stopped, not broken: the person cancelled (or declined) the sign-in, or the connection.
+                    self.error = SIGN_IN_CANCELLED if self._sign_in_count else CONNECTION_CANCELLED
+                    return False
                 # Join the readers before inspecting stderr, so an exit does not discard
                 # the bridge's actual error. Never expose OAuth URLs or credential values.
                 from .redaction import redact_text
@@ -670,7 +677,7 @@ class MCPServer:
                     self._append_diagnostic(f"logging/setLevel failed: {log_error}")
 
         if cancel is not None and cancel.is_set():
-            self.error = "connection cancelled"
+            self.error = CONNECTION_CANCELLED
             self.stop()
             return False
         if "tools" not in self.server_capabilities:

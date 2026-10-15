@@ -537,6 +537,9 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 
 ### Plugins
 
+- **A cancelled sign-in says so.** A plugin whose sign-in you cancelled or declined now reads "Sign-in cancelled.
+  Connect again when you're ready." on its card and in `/mcp`, and any other connection you stop reads "Connection
+  cancelled.", instead of the raw "initialize failed: cancelled by user".
 - **Asana and Docusign**, set up the way both vendors document for coding tools: you create an app for DGC in your
   own account, and **Settings → Plugins → Apps → Connect** walks you through it: each step, the exact redirect URL
   to register (with Copy), and the ID and secret it gives you. The secret stays in the editor's secret storage.
