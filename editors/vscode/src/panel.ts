@@ -545,7 +545,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private composerScope = "";
   private pendingWebviewActions: Array<() => void> = [];
   private testProbeNonce = "";
-  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string; kind?: string; attempt?: number; retryId?: string }> = [];
+  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; route?: string; label?: string; detail?: string; kind?: string; attempt?: number; retryId?: string }> = [];
   private settingsSaveInFlight = false;
   private commandOverrideWarningShown = false;
   private changesRefreshTimer?: NodeJS.Timeout;
@@ -3630,6 +3630,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         type: String(msg?.type || ""),
         ...(["workspace_changes", "chat_changes"].includes(msg?.type) ? { fileCount: Array.isArray(msg.files) ? msg.files.length : 0 } : {}),
         ...(msg?.type === "attach" ? { label: String(msg.label || "").slice(0, 200) } : {}),
+        ...(msg?.type === "state" ? { route: String(msg.state?.subscriptionEngine || "") } : {}),
         ...(event ? { eventType: String(event.type || ""),
           ...(event.id === undefined ? {} : { id: String(event.id) }),
           ...(event.command === undefined ? {} : { command: String(event.command) }),
@@ -3678,7 +3679,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return true;
   }
 
-  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string; kind?: string; attempt?: number; retryId?: string }> {
+  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; route?: string; label?: string; detail?: string; kind?: string; attempt?: number; retryId?: string }> {
     if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
       throw new Error("DGC extension test bridge is unavailable");
     }

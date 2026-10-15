@@ -438,6 +438,12 @@ async function run() {
   // why this wait was never needed before and is not a weakening now.
   await waitFor(() => backendCommands(backendLogPath)
     .filter((command) => command.type === "get_config").length > configReadsBefore);
+  // Sent is not applied. The request reaching the backend says nothing about its `config` reply having
+  // reached the panel, and until it has, routeState is empty and listModels rightly asks the native
+  // endpoint: the check failed about one run in four under load, and every time once the fixture
+  // answered get_config 800ms late. Wait for the panel's own state to carry the route.
+  await waitFor(() => testApi.testOnlyPostedMessages(testToken)
+    .filter((message) => message.type === "state").at(-1)?.route === "codex");
   const nativeListCount = backendCommands(backendLogPath)
     .filter((command) => command.type === "list_models").length;
   const modelsPostsBefore = testApi.testOnlyPostedMessages(testToken)
