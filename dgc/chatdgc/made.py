@@ -571,7 +571,8 @@ def _xlsx_cell(ref: str, value, style: int) -> str:
     s = f' s="{style}"' if style else ""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         thousands = not style and float(value).is_integer() and abs(value) >= 1000
-        return (f'<c r="{ref}"{" s=\"2\"" if thousands else s}><v>'
+        attr = ' s="2"' if thousands else s            # no backslash inside the f-string: Python 3.10/3.11
+        return (f'<c r="{ref}"{attr}><v>'
                 f'{int(value) if float(value).is_integer() else repr(float(value))}</v></c>')
     text = str(value)
     if not text:
