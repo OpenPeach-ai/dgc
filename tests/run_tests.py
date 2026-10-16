@@ -12336,6 +12336,15 @@ def test_benchmark_integrity():
         clean_wire = (b'{"message":{"content":"a \\"thinking\\":\\"faked\\" key","thinking":""}}',
                       b'{"reasoning":{"effort":"none"},"reasoning_effort":"none"}',
                       b'data: {"choices":[{"delta":{"content":"type: reasoning"}}]}')
+        error_wire = (b'{"error":"you have reached your session usage limit"}',
+                      b'data: {"error":{"message":"overloaded"}}',
+                      b'event: error\ndata: {"type":"error","error":{"type":"overloaded_error"}}')
+        quiet_wire = (b'data: {"type":"response.completed","response":{"error":null}}',
+                      b'data: {"choices":[{"delta":{"content":"the error was: none"}}]}',
+                      b'{"function":{"arguments":"{\\"error\\": \\"x\\"}"}}')
+        check("benchmark proxy recognises a provider error inside a 200 stream, not in generated text",
+              all(_PP._STREAM_ERROR.search(raw) for raw in error_wire)
+              and not any(_PP._STREAM_ERROR.search(raw) for raw in quiet_wire))
         check("benchmark proxy recognises reasoning on every wire format, not in generated text",
               all(_PP._REASONING_EVIDENCE.search(raw) for raw in reasoning_wire)
               and not any(_PP._REASONING_EVIDENCE.search(raw) for raw in clean_wire))
@@ -12367,6 +12376,8 @@ def test_benchmark_integrity():
                 status = 200
                 if payload.get("model") == "busy":
                     status, reply = 429, {"error": "you have reached your session usage limit"}
+                elif payload.get("model") == "streamfail":
+                    reply = {"error": "upstream connection lost"}  # 200, then an error event
                 elif self.path.endswith("/api/chat"):
                     reply = {"done": True, "prompt_eval_count": 5, "eval_count": 2}
                     if payload.get("model") == "thinker":
@@ -12426,6 +12437,7 @@ def test_benchmark_integrity():
                 ("/api/chat", "thinker", "application/json", None),
                 ("/v1/chat/completions?retry=1", "busy", "application/json", None),
                 ("/v1/chat/completions/", "fixture", "application/json", b"not json"),
+                ("/api/chat?attempt=2", "streamfail", "application/json", None),
             )
             statuses = []
             for path, model_name, content_type, raw_body in requests_plan:
@@ -12438,7 +12450,7 @@ def test_benchmark_integrity():
                 response.read()
                 statuses.append(response.status)
             check("benchmark provider proxy forwards every request and passes statuses through",
-                  statuses == [200, 200, 200, 200, 200, 200, 200, 429, 200])
+                  statuses == [200, 200, 200, 200, 200, 200, 200, 429, 200, 200])
             conn.request("GET", "/__dgc_bench__/flush")
             barrier = conn.getresponse()
             barrier.read()
@@ -12485,31 +12497,33 @@ def test_benchmark_integrity():
               and "not a cloud model" in cloud_local["error"])
         check("benchmark proxy records exact provider usage without prompt content",
               secret_prompt not in log_text
-              and [record["usage"]["input_tokens"] for record in records] == [8, 5, 8, 8, 0, 8, 5, 0, 8]
-              and [record["usage"]["output_tokens"] for record in records] == [3, 2, 3, 3, 0, 3, 2, 0, 3]
+              and [record["usage"]["input_tokens"] for record in records] == [8, 5, 8, 8, 0, 8, 5, 0, 8, 0]
+              and [record["usage"]["output_tokens"] for record in records] == [3, 2, 3, 3, 0, 3, 2, 0, 3, 0]
               and [record["transport"] for record in records]
               == ["chat_completions", "ollama_chat", "responses", "anthropic_messages", None,
-                  "ollama_chat", "ollama_chat", "chat_completions", "chat_completions"]
+                  "ollama_chat", "ollama_chat", "chat_completions", "chat_completions", "ollama_chat"]
               and records[1]["normalization"] == "think=false;num_ctx=32768"
               and records[8]["normalization"] is None
               and [record["reasoning_observed"] for record in records]
-              == [False] * 6 + [True, False, False]
+              == [False] * 6 + [True, False, False, False]
+              and [record["stream_error"] for record in records]
+              == [False] * 7 + [True, False, True]
               and all(record.get("started_at", 0) > 0
                       and record.get("duration_s", -1) >= 0 for record in records))
         check("benchmark accounting excludes metadata discovery from generation totals",
-              len(records) == 9 and records[4]["path"] == "/api/show"
+              len(records) == 10 and records[4]["path"] == "/api/show"
               and records[4]["normalization"] is None
-              and round_usage["requests"] == 8)
+              and round_usage["requests"] == 9)
         check("benchmark runner synchronizes and attributes provider usage by round",
               {key: round_usage[key] for key in (
                   "input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens",
                   "requests", "client_disconnected_requests", "synchronized")} == {
                       "input_tokens": 50, "output_tokens": 19,
                       "reasoning_tokens": 0, "cached_input_tokens": 0,
-                      "requests": 8, "client_disconnected_requests": 0,
+                      "requests": 9, "client_disconnected_requests": 0,
                       "synchronized": True}
               and round_usage["provider_transports"] == {
-                  "chat_completions": 3, "ollama_chat": 3, "responses": 1,
+                  "chat_completions": 3, "ollama_chat": 4, "responses": 1,
                   "anthropic_messages": 1}
               and round_usage["provider_duration_s"] >= round_usage["provider_wall_s"] >= 0
               and round_usage["provider_duration_s"] >=
@@ -12517,7 +12531,7 @@ def test_benchmark_integrity():
         check("benchmark rounds count unnormalized requests, reasoning, and provider errors",
               round_usage["unnormalized_requests"] == 1
               and round_usage["reasoning_observed_requests"] == 1
-              and round_usage["provider_errors"] == 1)
+              and round_usage["provider_errors"] == 2)
 
         overlap_log = root / "overlapping-provider-usage.jsonl"
         overlap_log.write_text("\n".join(json.dumps(record) for record in (

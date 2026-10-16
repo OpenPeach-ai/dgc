@@ -29,6 +29,10 @@ _CONTROL_PATH = "/__dgc_bench__/flush"
 _REASONING_EVIDENCE = re.compile(
     rb'"(?:thinking|reasoning|reasoning_content)"\s*:\s*"[^"]'
     rb'|"type"\s*:\s*"(?:reasoning|thinking|thinking_delta|response\.reasoning[^"]*)"')
+# A provider can fail after answering 200: Ollama ends the stream with {"error": ...}, SSE APIs send an
+# error event. A non-null error object or message counts; the Responses API's "error": null does not,
+# and an escaped "error" inside generated text or tool arguments cannot match.
+_STREAM_ERROR = re.compile(rb'"error"\s*:\s*(?:\{|"[^"])|event:\s*error\b')
 
 
 def _usage_candidate(value) -> dict | None:
@@ -220,6 +224,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Scan every chunk (with a seam from the previous one) so evidence near the start of a
         # long stream survives the bounded capture tail.
         reasoning_observed = False
+        stream_error = False
         seam = b""
         try:
             connection.request(self.command, self.path, body=body or None, headers=headers)
@@ -237,6 +242,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     break
                 if not reasoning_observed and _REASONING_EVIDENCE.search(seam + chunk):
                     reasoning_observed = True
+                if not stream_error and _STREAM_ERROR.search(seam + chunk):
+                    stream_error = True
                 seam = chunk[-64:]
                 captured.extend(chunk)
                 if len(captured) > capture_limit:
@@ -264,7 +271,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                       "model": model, "status": status, "normalization": normalization,
                       "transport": transport,
                       "client_disconnected": disconnected,
-                      "reasoning_observed": reasoning_observed, "usage": usage}
+                      "reasoning_observed": reasoning_observed,
+                      "stream_error": stream_error, "usage": usage}
             log_path = self.server.usage_log  # type: ignore[attr-defined]
             if log_path:
                 with _LOG_LOCK:

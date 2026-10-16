@@ -11,7 +11,7 @@ from pathlib import Path
 REQUIRED_ENGINES = {"dgc", "aider", "codex", "goose", "opencode", "pi", "claude"}
 REQUIRED_LANGS = {"cpp", "go", "java", "javascript", "python", "rust"}
 EXPECTED_PROVIDER_TRANSPORTS = {
-    "dgc": "ollama_chat", "goose": "ollama_chat", "codex": "responses",
+    "dgc": "ollama_chat", "goose": "chat_completions", "codex": "responses",
     "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
     "claude": "anthropic_messages",
 }
@@ -525,9 +525,10 @@ def publication_errors(runs: list[dict]) -> list[str]:
         if run.get("provider_error_tasks"):
             missing.append("re-run tasks touched by provider errors: "
                            + ", ".join(run["provider_error_tasks"][:12]))
+        # The proxy's observation is the evidence. A manifest records only the runner's expectation
+        # when the run began, which a harness release can make stale: Goose 1.54's Ollama provider
+        # speaks Chat Completions, while the runner still expected the native API.
         expected_transport = EXPECTED_PROVIDER_TRANSPORTS[run["engine"]]
-        if manifest.get("provider_transport") != expected_transport:
-            missing.append(f"declared {expected_transport} provider transport")
         observed_transports = run.get("provider_transports") or {}
         if (set(observed_transports) != {expected_transport}
                 or sum(observed_transports.values()) != int(run.get("provider_requests") or 0)):

@@ -33,7 +33,7 @@ RESULT_SCHEMA_VERSION = 3
 TRACE_LIMIT = 120_000
 MODEL_METADATA_LIMIT = 2 * 1024 * 1024
 EXPECTED_PROVIDER_TRANSPORTS = {
-    "dgc": "ollama_chat", "goose": "ollama_chat", "codex": "responses",
+    "dgc": "ollama_chat", "goose": "chat_completions", "codex": "responses",
     "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
     "claude": "anthropic_messages",
 }
@@ -444,7 +444,8 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
         if record.get("reasoning_observed") is True:
             totals["reasoning_observed_requests"] += 1
         status = record.get("status")
-        if status is not None and not 200 <= int(status or 0) < 300:
+        if ((status is not None and not 200 <= int(status or 0) < 300)
+                or record.get("stream_error") is True):
             totals["provider_errors"] += 1
         duration = max(0.0, finite_float(record.get("duration_s")))
         finished = finite_float(record.get("time"))

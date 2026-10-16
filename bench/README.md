@@ -76,7 +76,7 @@ PARAMETER num_ctx 65536
 
 Then run `ollama create qwen3.8-bench-64k -f Modelfile.bench`. The runner verifies that exact
 `num_ctx` through bounded `/api/show` metadata before any scored task, and the accounting proxy pins
-native DGC/Goose requests to it as well. A missing or mismatched value fails before model generation.
+native DGC requests to it as well. (Goose 1.54's Ollama provider uses Chat Completions.) A missing or mismatched value fails before model generation.
 
 An Ollama Cloud model (a `:cloud` tag) runs remotely at its full context, which no request can
 change. Use it with `--context-policy provider-fixed` (`DGC_BENCH_CONTEXT_POLICY=provider-fixed`) and
@@ -228,7 +228,7 @@ The isolated DGC profile explicitly selects native Ollama because the accounting
 the upstream family; otherwise `api_mode: auto` would measure generic Chat Completions instead of
 DGC's native local-model path. The proxy labels every generation as `ollama_chat`,
 `chat_completions`, `responses`, or `anthropic_messages`, and the publication gate requires every
-recorded request to match the transport declared for that harness. Each round also counts requests
+recorded request to match the transport expected for that harness. Each round also counts requests
 the proxy could not normalize, responses that carried reasoning, and provider errors (any non-2xx
 status, such as a 429 usage limit).
 If a deadline-cancelled harness disconnects while the provider is still generating, the runner waits
