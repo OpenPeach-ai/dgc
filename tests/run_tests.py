@@ -10028,9 +10028,18 @@ def test_isolated_subagents():
         parent.mcp.stop_all()
     task_branches = [w for w in _list_worktrees(repo)
                      if str(w.get("branch", "")).startswith("dgc/task-")]
+    # A foreground child has a stop of its own (so the user can stop just it), which the parent's
+    # Stop still sets: that is the shared cancellation this check has always been about.
+    from dgc.agent import _ChildStop as _ChildStopEvent
+    child_cancel = observed.get("cancel")
+    parent_stop_reaches_child = False
+    if isinstance(child_cancel, _ChildStopEvent) and child_cancel.parent is parent.cancelled:
+        parent.cancelled.set()
+        parent_stop_reaches_child = child_cancel.is_set() and not child_cancel.closed
+        parent.cancelled.clear()
     check("agent task uses a transient rooted config, fresh MCP, and shared cancellation",
           observed.get("root") != repo and observed.get("persist") is False
-          and observed.get("cancel") is parent.cancelled and observed.get("mcp") is not parent.mcp)
+          and parent_stop_reaches_child and observed.get("mcp") is not parent.mcp)
     check("agent task integrates, cleans up, and rolls child metrics into the parent",
           "completed and integrated 1 path" in outcome
           and (repo / "delegated.txt").read_text() == "landed\n" and not task_branches
