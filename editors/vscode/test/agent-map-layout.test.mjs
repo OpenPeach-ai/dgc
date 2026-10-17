@@ -187,3 +187,28 @@ test("on end, the main agent stays in view while a long column scrolls under it"
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
+
+test("Stop on a shell, then Esc: the card goes back to the map though the Stop button left with the focus", async (t) => {
+  // Real VS Code, 2026-10-18: Stop hid itself once the shell ended, the focus it held fell to the page behind every
+  // layer, and the card's own Esc never heard a key, so the stopped shell's card would not close. jsdom moves no
+  // focus when a control is hidden; a real browser does, so this lives here.
+  if (skipOrFail(t)) return;
+  const { page, errors } = await openMapScene(browser, { width: 460, theme: "dark-modern" });
+  try {
+    const top = () => page.evaluate(() => ["agent-transcript", "agent-card", "agent-map"].find((id) => !document.getElementById(id).hidden) || "none");
+    await page.click('.am-row[data-am-key="shell:bg3"]');
+    await page.locator("#agent-card-body .am-actions button", { hasText: /^Stop/ }).click();
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: {
+      type: "background_shells", items: [{ id: "bg3", command: "npm run dev", state: "killed", started_at: Date.now() / 1000 - 20,
+        ended_at: Date.now() / 1000, exit_code: -15, agent_id: null }] } } })));
+    await page.waitForTimeout(100);
+    assert.equal(await top(), "agent-card");
+    assert.notEqual(await page.evaluate(() => document.activeElement === document.body), true, "focus is back in the card");
+    assert.doesNotMatch(await page.locator("#agent-card-body").textContent(), /Exit code/, "a stopped shell's -15 isn't shown");
+    await page.keyboard.press("Escape");
+    assert.equal(await top(), "agent-map", "Esc goes back one level");
+    await page.keyboard.press("Escape");
+    assert.equal(await top(), "none");
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});

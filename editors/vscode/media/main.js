@@ -9434,9 +9434,17 @@
   function paintAmCard() {
     const host = $("agent-card-body");
     $("agent-card-box").dataset.kind = amCard.kind;
-    if (amCard.kind === "root") return paintRootCard(host);
-    if (amCard.kind === "agent") return paintAgentCard(host);
-    return paintTaskCard(host);
+    if (amCard.kind === "root") paintRootCard(host);
+    else if (amCard.kind === "agent") paintAgentCard(host);
+    else paintTaskCard(host);
+    amKeepFocus();
+  }
+  // A control that leaves as the card updates (Stop, once the shell has stopped) takes focus with it, to the
+  // page behind every layer, where no focusin fires and the window's own Esc never hears a key (real VS Code,
+  // 2026-10-18: the stopped shell's card would not close). Focus goes back to the window on top.
+  function amKeepFocus() {
+    const top = amTopLayer(), active = document.activeElement;
+    if (top && (!active || active === document.body || !active.isConnected)) focusQuietly($(`${top}-box`), { preventScroll: true });
   }
   function amFresh(host) {
     if (amCard.nodes) return null;
@@ -9663,7 +9671,9 @@
     if (task.kind === "shell") {
       const owner = task.item.agent_id ? agentRecords.get(String(task.item.agent_id)) : null;
       return [["Command", task.name], ["Started by", owner ? agentDisplayName(owner) : task.item.agent_id ? "A sub-agent" : "The main agent"],
-        ...(Number.isInteger(task.item.exit_code) ? [["Exit code", String(task.item.exit_code)]] : []), ["Id", task.id]];
+        // A stopped shell's code is the signal's number (-15), which says nothing the header's "Stopped" doesn't.
+        ...(Number.isInteger(task.item.exit_code) && task.item.state !== "killed" ? [["Exit code", String(task.item.exit_code)]] : []),
+        ["Id", task.id]];
     }
     if (task.kind === "troupe") {
       const ev = task.ev, planned = Number(ev.agents_planned) || 0;
@@ -10001,6 +10011,13 @@
     layer.addEventListener("click", (event) => { if (event.target === layer && amTopLayer() === id) amGoBack(); });
     layer.addEventListener("keydown", (event) => amLayerKey(event, id));
   }
+  // Keys that reach the page with no layer focused (a focused control removed as it updated) still belong to
+  // the window on top: Esc goes back a level from there too.
+  document.addEventListener("keydown", (event) => {
+    const top = amTopLayer();
+    if (!top || event.defaultPrevented || AM_LAYERS.some((id) => $(id).contains(event.target))) return;
+    amLayerKey(event, top);
+  });
   // Focus stays in the window on top: anything that moves it elsewhere (a click on the page behind, a
   // control focusing itself as it updates) hands it back.
   document.addEventListener("focusin", (event) => {
