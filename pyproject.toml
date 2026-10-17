@@ -21,7 +21,7 @@ Issues = "https://github.com/OpenPeach-ai/dgc/issues"
 version = { attr = "dgc.__version__" }
 
 [project.scripts]
-dgc = "dgc.cli:main"
+dgc = "dgc.launch:main"
 
 [tool.setuptools.packages.find]
 include = ["dgc*"]
