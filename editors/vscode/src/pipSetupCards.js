@@ -17,7 +17,7 @@ export function mountSetupCards(options) {
   pending.set(id,{resolve,reject,timer});options.postMessage({type:'pipsRequest',id,generation,request:{type,...fields}});
  });
  const emails=mountEmailCards({document:doc,request,onOpen:options.onOpenRun,ready:()=>options.postMessage({type:'pipsReady'})});
- const runs=mountRunCards({document:doc,request,onOpen:options.onOpenRun,ready:()=>options.postMessage({type:'pipsReady'})});
+ const runs=mountRunCards({document:doc,request,onOpen:options.onOpenRun,ready:()=>options.postMessage({type:'pipsReady'}),onChange:options.onRunsChange});
  function repaint(entry){for(const view of entry.views){if(view.root.isConnected)paint(entry,view);}if(dockView?.entry===entry&&entry.setup?.status==='pending')paintDock(dockView);else refreshDock();}
  function remap(entry,id){for(const view of entry.views){const tool=view.root.closest('[data-pip-setup]');if(tool)tool.dataset.pipSetup=id;view.root.dataset.setupId=id;}entries.delete(entry.id);entry.id=id;entries.set(id,entry);}
  function load(entry){
@@ -229,5 +229,5 @@ export function mountSetupCards(options) {
  function reset(){emails.reset();runs.reset();if(dockView){options.dock?.hide(dockView.root);dockView=null;}epoch++;for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('The conversation changed.'));}pending.clear();for(const e of entries.values())for(const v of e.views){v.dispose?.();v.root.remove();}entries.clear();}
  // The host's dock was taken by a question (yieldDock) or is free again (dockFree).
  function yieldDock(){if(dockView){const old=dockView;dockView=null;options.dock?.hide(old.root);repaint(old.entry);}}
- return {receive,toolResult,finish,reset,yieldDock,dockFree:()=>refreshDock(),dispose(){reset();runs.dispose();disposed=true;}};
+ return {receive,toolResult,finish,reset,yieldDock,dockFree:()=>refreshDock(),runs:()=>runs.list(),openRun:id=>runs.open(id),dispose(){reset();runs.dispose();disposed=true;}};
 }

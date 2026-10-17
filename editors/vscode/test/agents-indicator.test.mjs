@@ -1,10 +1,11 @@
-// The agents indicator in the webview: the "● 2 agents" pill (Claude Code's counting rule), its
-// dialog, row jumps to each agent's task card, announcements, chat boundaries and backend exits.
+// The agents indicator in the webview: the "● 2 agents" pill (Claude Code's counting rule: the
+// agents working now, for the whole chat), the agent map it opens, rows that open each agent's card
+// and page, announcements, chat boundaries and backend exits. The map itself is agent-map.test.mjs's.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { contrastRatio, mainCss, makeDom, panelSrc } from "./support/webview-dom.mjs";
 
-const PILL_HINT = "Click to see the agents";
+const PILL_HINT = "Click to open the agent map";
 
 function view(options = {}) {
   const v = makeDom(options);
@@ -23,13 +24,23 @@ function view(options = {}) {
     title: $("agents-pill").title, aria: $("agents-pill").getAttribute("aria-label"),
     need: !$("agents-pill").querySelector(".agents-need").hidden,
   });
+  const mapOpen = () => !$("agent-map").hidden;
+  // The map's agent rows, root excluded, in the order they are drawn.
+  const agentRows = () => [...v.doc.querySelectorAll("#agent-map-tree .am-agent")];
+  // A row opens its agent's card; the card's "Open transcript" opens the window over it.
+  const openTranscript = (id) => {
+    v.doc.querySelector(`#agent-map .am-row[data-agent-id="${id}"]`).click();
+    [...$("agent-card-body").querySelectorAll("button")].find((b) => b.textContent === "Open transcript").click();
+  };
+  // An agent's page opens from its name in the chat.
+  const openPage = (id) => v.doc.querySelector(`#log .agent-name[data-agent-id="${id}"]`).click();
   const frame = () => new Promise((resolve) => v.dom.window.requestAnimationFrame(() => resolve()));
-  return { ...v, event, $, start, update, end, pill, frame };
+  return { ...v, event, $, start, update, end, pill, mapOpen, agentRows, openTranscript, openPage, frame };
 }
 
 const sid = (n) => `sub-${String(n).padStart(12, "0")}`;
 
-test("the pill keeps every agent in the current turn, then clears when the turn ends", () => {
+test("the pill counts the agents working now and stays for the whole chat once it has one", () => {
   const { event, start, update, end, pill, errors } = view();
   assert.equal(pill().hidden, true, "hidden while the chat has no agents");
   start(sid(1));
@@ -43,12 +54,15 @@ test("the pill keeps every agent in the current turn, then clears when the turn 
   assert.equal(pill().title, `An agent is waiting for your permission · ${PILL_HINT}`);
   assert.equal(pill().aria, `2 agents · An agent is waiting for your permission · ${PILL_HINT}`);
   update(sid(2), { state: "running" });
-  end(sid(1)); end(sid(2));
-  assert.equal(pill().hidden, false, "finished and failed rows stay until the turn ends");
-  assert.equal(pill().label, "2 agents");
+  end(sid(1));
+  assert.equal(pill().label, "1 agent", "a finished agent no longer counts");
+  end(sid(2));
+  assert.equal(pill().hidden, false, "every agent ended: the pill stays");
+  assert.equal(pill().label, "0 agents");
   assert.equal(pill().state, "idle");
+  assert.equal(pill().title, `No agents working · ${PILL_HINT}`);
   event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 });
-  assert.equal(pill().hidden, true, "the pill clears when the turn ends; history stays in the transcript");
+  assert.deepEqual([pill().hidden, pill().label], [false, "0 agents"], "and stays after the turn ends");
   start(sid(3));
   assert.equal(pill().label, "1 agent");
   assert.equal(pill().state, "running");
@@ -69,29 +83,32 @@ test("waiting for an answer has its own tooltip; unknown ids and duplicates chan
   assert.deepEqual(errors, []);
 });
 
-test("a new chat hides the pill and closes its dialog; a fork keeps it; a big snapshot counts past its items", () => {
-  const { $, doc, event, start, pill, errors } = view();
+test("a new chat hides the pill and closes the map; a fork keeps it; a big snapshot counts past its items", () => {
+  const { $, doc, event, start, pill, mapOpen, errors } = view();
   start(sid(1));
   $("agents-pill").click();
-  assert.equal($("agentsmenu").hidden, false);
+  assert.equal(mapOpen(), true);
   event({ type: "session", kind: "new", message_count: 0, session_id: "s2" });
   assert.equal(pill().hidden, true, "the wrapper carries hidden");
-  assert.equal($("agentsmenu").hidden, true);
+  assert.equal(mapOpen(), false);
   assert.equal(doc.activeElement, $("input"), "focus goes back to the prompt");
 
   const items = Array.from({ length: 64 }, (_, i) => ({ id: sid(100 + i), parent_id: null, call_id: `c${i}`,
     description: `a${i}`, depth: 1, state: "finished", tool_calls: 1, isolated: false, parallel: false,
     restored: false, duration_ms: 1000 }));
   event({ type: "agents", items, total: 70, active: 0 });
-  assert.equal(pill().hidden, true, "finished snapshot totals never resurrect the count");
+  assert.deepEqual([pill().hidden, pill().label, pill().state], [false, "0 agents", "idle"],
+    "a chat whose agents all ended shows the pill at 0: the map is still worth opening");
   event({ type: "session", kind: "forked", message_count: 3, session_id: "s3" });
-  assert.equal(pill().hidden, true);
+  assert.equal(pill().label, "0 agents", "a fork keeps the chat's agents");
   event({ type: "agents", items, total: 73, active: 3 });
   assert.equal(pill().label, "3 agents", "active agents omitted from a bounded snapshot still count");
   $("agents-pill").click();
-  assert.equal($("agents-more").textContent, "+3 active agents not listed");
+  assert.equal($("agent-map-subtitle").textContent, "73 agents · click an agent for details");
+  assert.equal($("agent-map-more").textContent, "9 more agents not listed, 3 of them working.");
   event({ type: "session", kind: "cleared", message_count: 0, session_id: "s4" });
   assert.equal(pill().hidden, true);
+  assert.equal(mapOpen(), false);
   assert.deepEqual(errors, []);
 });
 
@@ -103,30 +120,33 @@ test("the pill is the first control of the right cluster and the markup follows 
   assert.ok($("agents-picker").classList.contains("picker") && $("agents-picker").classList.contains("agents-picker"));
   const button = $("agents-pill");
   assert.equal(button.getAttribute("aria-haspopup"), "dialog");
-  assert.equal(button.getAttribute("aria-controls"), "agentsmenu");
-  assert.equal($("agentsmenu").getAttribute("role"), "dialog");
-  assert.equal($("agentsmenu").getAttribute("aria-labelledby"), "agents-title");
+  assert.equal(button.getAttribute("aria-controls"), "agent-map");
+  assert.equal($("agent-map").getAttribute("role"), "dialog");
+  assert.equal($("agent-map").getAttribute("aria-modal"), "true");
+  assert.equal($("agent-map").getAttribute("aria-labelledby"), "agent-map-title");
+  assert.equal($("agents-picker").querySelector("[role=dialog]"), null, "no dropdown inside the picker any more");
   const rail = [...$("composer-rail").children].map((node) => node.id);
   assert.ok(!rail.includes("agents-picker"), "not a composer-rail row");
 });
 
-test("the dialog lists agents as a nested list, is keyboard driven, and Esc never stops the turn", async () => {
-  const { $, doc, dom, start, update, posted, frame, errors } = view();
+test("the map nests agents under their parents, is keyboard driven, and Esc never stops the turn", async () => {
+  const { $, doc, dom, event, start, update, posted, frame, agentRows, errors } = view();
+  doc.getElementById("send").dataset.mode = "default";
+  event({ type: "turn_start", turn_id: "t1", prompt: "go" });
   start(sid(1), { description: "review auth module", agent_type: "reviewer" });
   start(sid(2), { description: "<img src=x onerror=alert(1)>", parent_id: sid(1), depth: 2, call_id: `${sid(1)}:c1` });
   start(sid(3), { description: "write migration" });
   $("agents-pill").click();
   assert.equal($("agents-pill").getAttribute("aria-expanded"), "true");
-  assert.match($("agents-summary").textContent, /^3 agents · 3 working/);
-  const rows = [...doc.querySelectorAll("#agents-tree .agent-row")];
+  assert.equal($("agent-map-subtitle").textContent, "3 agents · click an agent for details");
+  const rows = agentRows();
   assert.equal(rows.length, 3);
-  assert.equal(doc.activeElement, rows[0], "focus moves to the first row");
-  const nested = doc.querySelector("#agents-tree > li > ul > li > .agent-row");
+  assert.equal(doc.activeElement, rows[0], "focus moves to the first agent");
+  const nested = doc.querySelector(".am-root-node > .am-children > li > .am-children > li > .am-self > .am-row");
   assert.equal(nested.dataset.agentId, sid(2), "a child sits in a list nested inside its parent's item");
-  assert.equal(nested.querySelector(".agent-desc").textContent, "<img src=x onerror=alert(1)>");
-  assert.equal(doc.querySelector("#agents-tree img"), null, "descriptions are text");
-  assert.match(rows[0].querySelector(".agent-meta").textContent, /^reviewer · \d+s$/);
-  assert.equal($("agents-stop-note").hidden, false);
+  assert.equal(nested.querySelector(".am-desc").textContent, "<img src=x onerror=alert(1)>");
+  assert.equal(doc.querySelector("#agent-map img"), null, "descriptions are text");
+  assert.match(rows[0].querySelector(".am-meta").textContent, /^(Working|\d+s)$/);
 
   const key = (target, name) => target.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true }));
   key(doc.activeElement, "ArrowDown");
@@ -134,31 +154,34 @@ test("the dialog lists agents as a nested list, is keyboard driven, and Esc neve
   key(doc.activeElement, "End");
   assert.equal(doc.activeElement.dataset.agentId, sid(3));
   key(doc.activeElement, "Home");
+  assert.equal(doc.activeElement.dataset.amKey, "root", "the main agent is the first row");
+  key(doc.activeElement, "ArrowDown");
   assert.equal(doc.activeElement.dataset.agentId, sid(1));
-  key(doc.activeElement, "ArrowUp");
-  assert.equal(doc.activeElement.dataset.agentId, sid(1), "stays on the first row");
   update(sid(3), { state: "waiting", waiting_for: "permission" });
   await frame();
   assert.equal(doc.activeElement.dataset.agentId, sid(1), "a live re-render keeps the focused row");
 
-  // Esc with a turn running: the dialog closes and focus returns to the pill; nothing is posted.
-  $("input").focus();
-  doc.getElementById("send").dataset.mode = "default";
-  $("agents-pill").click();
+  // A foreground agent's card says what its Stop does: there is no Stop for one agent in a turn here.
+  doc.activeElement.click();
+  assert.match($("agent-card-body").textContent, /Stop ends the whole turn, including every agent\./);
+  key(doc.activeElement, "Escape");
+  assert.equal(doc.activeElement.dataset.agentId, sid(1), "Esc on the card goes back to its row");
+
+  // Esc with a turn running: the map closes and focus returns to the pill; nothing is posted.
   const before = posted.length;
   const escape = new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
   doc.activeElement.dispatchEvent(escape);
   assert.equal(escape.defaultPrevented, true);
-  assert.equal($("agentsmenu").hidden, true);
+  assert.equal($("agent-map").hidden, true);
   assert.equal(doc.activeElement, $("agents-pill"));
   assert.deepEqual(posted.slice(before), [], "no cancel, no stop");
 
-  // Tab out of the dialog closes it; moving between its own controls does not.
+  // Tab cannot leave the dialog: focus that goes elsewhere while it is open is handed back.
   $("agents-pill").click();
-  $("agents-settings").focus();
-  assert.equal($("agentsmenu").hidden, false);
+  $("agent-map-settings").focus();
   $("input").focus();
-  assert.equal($("agentsmenu").hidden, true);
+  assert.equal($("agent-map").hidden, false);
+  assert.ok($("agent-map").contains(doc.activeElement));
   assert.deepEqual(errors, []);
 });
 
@@ -169,55 +192,65 @@ test("a finished agent's row stays a status line: no report text, no file links"
     message: "## Frontend authenticated rerun: 37 failures\nFILES: reports/frontend-auth.log, "
       + "frontend/test-results/ (40 × error-context.md), frontend/tests/customer-360.spec.ts" });
   $("agents-pill").click();
-  const row = doc.querySelector("#agents-tree .agent-row");
-  assert.equal(row.querySelector(".agent-meta").textContent, "Finished · critic · 8m 53s · 44 tools · 972,064 tokens");
-  assert.equal($("agentsmenu").querySelector(".agent-file, .agent-files"), null, "files live on the agent's page");
-  assert.ok(!/##|FILES/.test($("agentsmenu").textContent), $("agentsmenu").textContent);
+  const row = doc.querySelector(`.am-row[data-agent-id="${sid(1)}"]`);
+  assert.equal(row.querySelector(".am-meta").textContent, "Finished · 8m 53s · 972.1k tokens");
+  assert.equal($("agent-map-body").querySelector(".agent-file, .agent-files"), null, "files live on the agent's card and page");
+  assert.ok(!/##|FILES/.test($("agent-map-body").textContent), $("agent-map-body").textContent);
   assert.deepEqual(errors, []);
 });
 
-test("a failure reason in the dialog drops a markdown heading marker", () => {
+test("a failure reason on a row's label drops a markdown heading marker", () => {
   const { $, doc, start, end, errors } = view();
   start(sid(1));
   end(sid(1), "failed", { message: "## Could not reach the model\nHTTP 502", duration_ms: 1000, tool_calls: 0 });
   $("agents-pill").click();
-  assert.equal(doc.querySelector(".agent-meta").textContent, "Failed · 1s · Could not reach the model");
+  const row = doc.querySelector(`.am-row[data-agent-id="${sid(1)}"]`);
+  assert.equal(row.querySelector(".am-meta").textContent, "Failed · 1s");
+  assert.equal(row.title, `agent ${sid(1)}\nCould not reach the model`);
   assert.deepEqual(errors, []);
 });
 
-test("the model menu and the agents dialog close each other, and an outside click closes it", () => {
-  const { $, doc, dom, start, errors } = view();
+test("opening the map closes the menus; a click inside keeps it, the backdrop closes it, Sub-agent settings leaves it", () => {
+  const { $, dom, start, posted, mapOpen, errors } = view();
   start(sid(1));
-  $("agents-pill").click();
   $("btn-model").click();
-  assert.equal($("agentsmenu").hidden, true);
   assert.equal($("modelmenu").hidden, false);
   $("agents-pill").click();
-  assert.equal($("agentsmenu").hidden, false);
-  assert.equal($("modelmenu").hidden, true);
-  $("agents-summary").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-  assert.equal($("agentsmenu").hidden, false, "a click inside the dialog keeps it open");
-  $("log").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-  assert.equal($("agentsmenu").hidden, true);
+  assert.equal(mapOpen(), true);
+  assert.equal($("modelmenu").hidden, true, "the model menu closed");
+  $("agent-map-subtitle").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  assert.equal(mapOpen(), true, "a click inside the dialog keeps it open");
+  $("agent-map").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  assert.equal(mapOpen(), false, "the backdrop closes it");
   $("agents-pill").click();
-  $("agents-settings").click();
-  assert.equal($("agentsmenu").hidden, true);
-  void doc;
+  $("agent-map-settings").click();
+  assert.equal(mapOpen(), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "slash" && m.action === "subagent"))),
+    [{ type: "slash", action: "subagent" }],
+    "it opens Settings ▸ Agents, as the dropdown's link did");
   assert.deepEqual(errors, []);
 });
 
-test("a row opens the agent page; Back and Escape return to the chat", () => {
-  const { $, doc, dom, event, start, errors } = view();
+test("a row opens the agent's card and its transcript inside the map; the page still opens from the chat; Back and Escape return to the chat", () => {
+  const { $, doc, dom, event, start, openTranscript, openPage, errors } = view();
   event({ type: "turn_start", turn_id: "t1", prompt: "go" });
   event({ type: "tool_call", call_id: "call_0", name: "task", args: { description: "one" }, summary: "one" });
   start(sid(1), { call_id: "call_0", description: "one" });
   start(sid(2), { call_id: "never_on_screen", description: "two" });
   $("agents-pill").click();
-  const [first, second] = doc.querySelectorAll("#agents-tree .agent-row");
+  const first = doc.querySelector(`.am-row[data-agent-id="${sid(1)}"]`);
   assert.equal(first.getAttribute("aria-disabled"), null);
-  assert.equal(second.getAttribute("aria-disabled"), null, "a page still opens without a task card");
+  assert.equal(doc.querySelector(`.am-row[data-agent-id="${sid(2)}"]`).getAttribute("aria-disabled"), null,
+    "an agent without a task card opens too");
   first.click();
-  assert.equal($("agentsmenu").hidden, true);
+  assert.equal($("agent-card-title").textContent, "one", "the card first");
+  $("agent-card-back").click();
+  openTranscript(sid(2));
+  assert.equal($("agent-transcript-title").textContent, "two", "and its transcript, without a task card");
+  assert.ok(!doc.body.dataset.agentPage, "the map never navigates away");
+  for (let i = 0; i < 3; i++) doc.activeElement.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal($("agent-map").hidden, true, "three Escapes: transcript, card, map");
+  openPage(sid(1));
   assert.equal(doc.body.dataset.agentPage, sid(1));
   assert.equal($("agent-page").hidden, false);
   assert.equal($("thread-title").textContent, "one");
@@ -225,8 +258,7 @@ test("a row opens the agent page; Back and Escape return to the chat", () => {
   $("agent-back").click();
   assert.ok(!doc.body.dataset.agentPage);
   assert.equal($("agent-page").hidden, true);
-  $("agents-pill").click();
-  second.click();
+  openPage(sid(2));
   assert.equal(doc.body.dataset.agentPage, sid(2));
   doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
   assert.equal($("agent-page").hidden, true);
@@ -234,10 +266,9 @@ test("a row opens the agent page; Back and Escape return to the chat", () => {
 });
 
 test("Escape in Pips does not close the hidden ordinary specialist page", () => {
-  const { $, doc, dom, send, start, errors } = view();
+  const { $, doc, dom, send, start, openPage, errors } = view();
   start(sid(1));
-  $("agents-pill").click();
-  doc.querySelector("#agents-tree .agent-row").click();
+  openPage(sid(1));
   assert.equal(doc.body.dataset.agentPage, sid(1));
   dom.window.DgcPips = {mount: () => ({setVisible() {}})};
   send({type:"pipsOpen"});
@@ -255,8 +286,20 @@ test("Escape in Pips does not close the hidden ordinary specialist page", () => 
   dom.window.close();
 });
 
-test("call_0 in two turns jumps to the right card, and a nested card that arrives later enables its row", async () => {
-  const { $, doc, event, start, errors } = view();
+test("an Escape that closes the map over an agent's page leaves the page open", () => {
+  const { $, doc, dom, start, openPage, errors } = view();
+  start(sid(1));
+  openPage(sid(1));
+  $("agents-pill").click();
+  assert.equal($("agent-map").hidden, false);
+  doc.activeElement.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal($("agent-map").hidden, true);
+  assert.equal(doc.body.dataset.agentPage, sid(1), "one Escape, one layer");
+  assert.deepEqual(errors, []);
+});
+
+test("call_0 in two turns opens the right agent, and a nested card that arrives later still opens its agent", async () => {
+  const { $, doc, event, start, openTranscript, errors } = view();
   event({ type: "turn_start", turn_id: "t1", prompt: "first" });
   event({ type: "tool_call", call_id: "call_0", name: "task", args: {}, summary: "first" });
   start(sid(1), { call_id: "call_0", description: "first turn" });
@@ -270,13 +313,14 @@ test("call_0 in two turns jumps to the right card, and a nested card that arrive
   // A parallel child's own task card replays after its agent already started.
   start(sid(3), { call_id: `${sid(2)}:c1`, parent_id: sid(2), depth: 2, description: "nested" });
   $("agents-pill").click();
-  const nested = () => doc.querySelector(`.agent-row[data-agent-id="${sid(3)}"]`);
+  const nested = () => doc.querySelector(`.am-row[data-agent-id="${sid(3)}"]`);
   assert.equal(nested().getAttribute("aria-disabled"), null);
   event({ type: "tool_call", call_id: `${sid(2)}:c1`, name: "task", args: {}, summary: "nested" });
   await new Promise((resolve) => setTimeout(resolve, 40));
-  doc.querySelector(`.agent-row[data-agent-id="${sid(2)}"]`).click();
-  assert.equal(doc.body.dataset.agentPage, sid(2));
-  assert.equal($("thread-title").textContent, "second turn");
+  openTranscript(sid(2));
+  assert.equal($("agent-transcript-title").textContent, "second turn");
+  assert.ok($("agent-transcript-log").querySelector(`.agent-name[data-agent-id="${sid(3)}"]`),
+    "the nested agent, its card claimed late, is on its parent's transcript");
   assert.deepEqual(errors, []);
 });
 
@@ -297,7 +341,8 @@ test("restored records claim replayed cards newest to newest; history alone neve
     total: 2, active: 0 });
   const cards = [...doc.querySelectorAll('.tool[data-tool-name="task"]')];
   assert.deepEqual(cards.map((card) => card.dataset.agentId), [sid(1), sid(2)]);
-  assert.equal(pill().hidden, true, "restored finished/failed records do not reopen the pill");
+  assert.deepEqual([pill().hidden, pill().label, pill().state], [false, "0 agents", "idle"],
+    "the restored agents are the chat's: the pill is back, counting none working");
   assert.deepEqual(errors, []);
 });
 
@@ -326,18 +371,18 @@ test("announcements: a batch speaks once when it starts and once when it ends; w
 });
 
 test("a backend exit marks working agents stopped without a word; the new backend's snapshot wins", () => {
-  const { $, doc, send, event, start, pill, advance, errors } = view({ clock: true });
+  const { $, doc, send, event, start, pill, advance, mapOpen, agentRows, errors } = view({ clock: true });
   start(sid(1)); start(sid(2));
   advance(800);
   doc.getElementById("announcer").textContent = "";
   $("agents-pill").click();
   send({ type: "backend_exit", code: 1, recovering: true, resumes: "offer" });
   assert.equal(pill().state, "idle");
-  assert.equal(pill().label, "2 agents");
-  assert.equal($("agentsmenu").hidden, true, "the dialog closes");
+  assert.equal(pill().label, "0 agents", "none working");
+  assert.equal(mapOpen(), false, "the map closes");
   $("agents-pill").click();
-  assert.deepEqual([...doc.querySelectorAll(".agent-meta")].map((node) => node.textContent),
-    ["Stopped · DGC's backend stopped", "Stopped · DGC's backend stopped"]);
+  assert.deepEqual(agentRows().map((row) => [row.querySelector(".am-meta").textContent, row.title]),
+    [["Stopped", `agent ${sid(1)}\nDGC's backend stopped`], ["Stopped", `agent ${sid(2)}\nDGC's backend stopped`]]);
   advance(1000);
   const said = doc.getElementById("announcer").textContent;
   assert.ok(!/agent/i.test(said), `no agents announcement (${said})`);
@@ -354,19 +399,20 @@ test("elapsed time counts from receipt, never from the backend's clock", () => {
     state: "running", tool_calls: 0, isolated: false, parallel: false, restored: false,
     started_at: 1, elapsed_ms: 61000 }], total: 1, active: 1 });
   doc.getElementById("agents-pill").click();
-  assert.equal(doc.querySelector(".agent-meta").textContent, "1m 1s");
+  const meta = () => doc.querySelector(`.am-row[data-agent-id="${sid(1)}"] .am-meta`).textContent;
+  assert.equal(meta(), "1m 1s");
   now += 5000;
   event({ type: "agent_updated", id: sid(1), state: "running", tool_calls: 3 });
-  return new Promise((resolve) => dom.window.requestAnimationFrame(() => {
-    assert.equal(doc.querySelector(".agent-meta").textContent, "1m 6s · 3 tools");
-    assert.deepEqual(errors, []);
-    resolve();
-  }));
+  assert.equal(meta(), "1m 6s");
+  doc.querySelector(`.am-row[data-agent-id="${sid(1)}"]`).click();
+  assert.match(doc.getElementById("agent-card-body").textContent, /1m 6s/);
+  assert.match(doc.getElementById("agent-card-body").textContent, /Tool calls \(3\)/);
+  assert.deepEqual(errors, []);
 });
 
 test("a queued agent that starts running restarts its clock; ended rows lead with their state", () => {
-  const { dom, doc, event, start, update, end, errors } = view();
-  let now = 0;
+  const { dom, doc, start, update, end, agentRows, errors } = view();
+  let now = 1;
   dom.window.performance.now = () => now;
   start(sid(1), { state: "queued", parallel: true, isolated: true });
   now = 9000;
@@ -374,11 +420,10 @@ test("a queued agent that starts running restarts its clock; ended rows lead wit
   start(sid(2));
   end(sid(2), "failed", { message: "the sub-agent stopped without a final summary", duration_ms: 48000, tool_calls: 9, tokens: 18200 });
   doc.getElementById("agents-pill").click();
-  const metas = [...doc.querySelectorAll(".agent-meta")].map((node) => node.textContent);
-  assert.equal(metas[0], "qwen3.8:27b · 0s");
-  assert.equal(metas[1], "Failed · 48s · 9 tools · 18,200 tokens · the sub-agent stopped without a final summary",
-    "the reason goes last, so a two-line clamp only ever cuts the reason");
-  void event;
+  const rows = agentRows();
+  assert.equal(rows[0].querySelector(".am-meta").textContent, "qwen3.8:27b", "0s is not said");
+  assert.equal(rows[1].querySelector(".am-meta").textContent, "Failed · 48s · 18.2k tokens");
+  assert.equal(rows[1].title, `agent ${sid(2)}\nthe sub-agent stopped without a final summary`, "the reason is on the row's label");
   assert.deepEqual(errors, []);
 });
 
@@ -451,7 +496,7 @@ test("after a rewind in a chat whose task calls all share call_0, each row jumps
   const cards = [...doc.querySelectorAll('.tool[data-tool-name="task"]')];
   assert.equal(cards.length, 2);
   assert.deepEqual(cards.map((card) => card.dataset.agentId), [sid(1), sid(2)]);
-  assert.equal($("agents-picker").hidden, true);
+  assert.equal($("agents-count").textContent, "0", "the kept agents are the chat's; none is working");
   for (const [index, card] of cards.entries()) {
     card.querySelector(".tool-toggle").click();
     assert.match(card.textContent, new RegExp(`turn${index}`));
@@ -470,36 +515,37 @@ test("a rewind in a chat with no agents holds nothing back, so a later agent sti
   assert.deepEqual(errors, []);
 });
 
-test("the dialog updates rows in place: a live render keeps the focused node, its label and its click", async () => {
-  const { $, doc, dom, start, update, end, frame, errors } = view();
+test("the map updates rows in place: a live render keeps the focused node, its label and its click", async () => {
+  const { $, doc, dom, start, update, end, frame, agentRows, errors } = view();
   start(sid(1), { description: "one" });
   start(sid(2), { description: "two" });
   $("agents-pill").click();
-  const rows = [...doc.querySelectorAll("#agents-tree .agent-row")];
+  const rows = agentRows();
   rows[1].focus();
   let focusins = 0, removed = 0;
   doc.addEventListener("focusin", () => { focusins += 1; });
   new dom.window.MutationObserver((records) => {
     for (const r of records) removed += [...r.removedNodes].filter((n) => n.nodeType === 1).length;
   })
-    .observe($("agents-tree"), { childList: true, subtree: true });
+    .observe($("agent-map-tree"), { childList: true, subtree: true });
   update(sid(2), { state: "running", activity: "reading files" });
   update(sid(1), { state: "waiting", waiting_for: "permission" });
   await frame();
-  end(sid(1), "failed", { message: "boom" });
+  end(sid(2), "failed", { message: "boom" });
   await frame();
   start(sid(3), { description: "three" });
   await frame();
-  const after = [...doc.querySelectorAll("#agents-tree .agent-row")];
+  const after = agentRows();
   assert.equal(after[0], rows[0], "the same row node");
-  assert.equal(after[1], rows[1], "the same row node");
+  assert.equal(after[2], rows[1], "the same row node, below the new working agent");
   assert.equal(doc.activeElement, rows[1], "focus never left the row");
   assert.equal(focusins, 0, "no focus event re-fired");
   assert.equal(removed, 0, "no row or item element was removed (only text changed)");
   assert.equal(after.length, 3);
-  assert.match(rows[1].querySelector(".agent-meta").textContent, /^reading files/);
-  assert.equal(rows[0].querySelector(".agent-dot").dataset.state, "failed");
-  assert.deepEqual(after.map((row) => row.tabIndex), [-1, 0, -1], "one tab stop, on the focused row");
+  assert.equal(rows[0].querySelector(".am-meta").textContent.split(" · ")[0], "Waiting for your permission");
+  assert.equal(rows[1].querySelector(".agent-dot").dataset.state, "failed");
+  assert.deepEqual([...doc.querySelectorAll("#agent-map-tree .am-row")].map((row) => row.tabIndex), [-1, -1, -1, 0],
+    "one tab stop, on the focused row");
   assert.deepEqual(errors, []);
 });
 
@@ -519,7 +565,7 @@ test("a snapshot mid-batch keeps agents that already ended in the batch's 'finis
   assert.deepEqual(errors, []);
 });
 
-test("a long multi-line failure message shows one bounded line; the row's label carries all of it", () => {
+test("a long multi-line failure message: one bounded line on the row's label, all of it on the card", () => {
   const { $, doc, start, end, errors } = view();
   start(sid(1), { description: "one" });
   const first = `HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: {"error": {"message": "denied ${"x".repeat(200)}"}}`;
@@ -527,17 +573,20 @@ test("a long multi-line failure message shows one bounded line; the row's label 
   start(sid(2), { description: "two" });
   end(sid(2), "failed", { message: `${"y".repeat(110)} [REDACTED] tail`, duration_ms: 1000, tool_calls: 0 });
   $("agents-pill").click();
-  const [row, marked] = doc.querySelectorAll("#agents-tree .agent-row");
-  const meta = row.querySelector(".agent-meta").textContent;
-  assert.ok(meta.startsWith("Failed · 1s · HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: "), meta);
-  assert.ok(meta.endsWith("…"), meta);
-  assert.ok(!meta.includes("rejected the key"), "only the first line");
-  assert.ok(meta.length <= "Failed · 1s · ".length + 120, `bounded (${meta.length})`);
-  assert.ok(row.title.includes("\n  → the endpoint rejected the key") || row.title.includes("→ the endpoint rejected the key"), row.title);
-  assert.ok(row.title.startsWith("Open this agent\nHTTP 401"), row.title);
-  assert.ok(!/\[REDA(?!CTED\])/.test(marked.querySelector(".agent-meta").textContent), "never half a redaction marker");
-  assert.match(mainCss, /\.agent-meta \{[^}]*-webkit-line-clamp: 2/);
-  assert.match(mainCss, /\.agent-row\[aria-disabled="true"\] \.agent-desc \{ color: var\(--muted\); \}/);
+  const row = doc.querySelector(`.am-row[data-agent-id="${sid(1)}"]`);
+  const marked = doc.querySelector(`.am-row[data-agent-id="${sid(2)}"]`);
+  assert.equal(row.querySelector(".am-meta").textContent, "Failed · 1s", "the row says the state, never the reason");
+  const [name, reason] = row.title.split("\n");
+  assert.equal(name, "one");
+  assert.ok(reason.startsWith("HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: "), reason);
+  assert.ok(reason.endsWith("…"), reason);
+  assert.ok(!row.title.includes("rejected the key"), "only the first line");
+  assert.ok(reason.length <= 120, `bounded (${reason.length})`);
+  assert.ok(!/\[REDA(?!CTED\])/.test(marked.title), "never half a redaction marker");
+  row.click();
+  assert.equal(doc.querySelector("#agent-card-body .am-failure").textContent, `${first}\n  → the endpoint rejected the key`,
+    "the card has the whole message");
+  assert.match(mainCss, /\.am-desc, \.am-meta \{[^}]*text-overflow: ellipsis; white-space: nowrap; \}/);
   assert.deepEqual(errors, []);
 });
 
@@ -568,15 +617,18 @@ test("the pill's probe answers only the host bridge's nonce, and panel.ts keeps 
 });
 
 
-test("failed and finished rows stay for the whole turn, then the next turn starts empty", () => {
-  const { event, start, end, advance, pill, errors } = view({ clock: true });
+test("failed and finished agents stay on the map for the whole chat, across turns", () => {
+  const { $, event, start, end, advance, pill, agentRows, errors } = view({ clock: true });
   start(sid(1)); start(sid(2)); end(sid(1)); end(sid(2), "failed");
-  assert.equal(pill().label, "2 agents");
+  assert.equal(pill().label, "0 agents");
   advance(60000);
-  assert.equal(pill().hidden, false, "a clock tick does not drop them while the turn is live");
+  assert.equal(pill().hidden, false, "a clock tick does not drop them");
   event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 });
-  assert.equal(pill().hidden, true);
+  assert.equal(pill().hidden, false, "nor does the turn ending");
   start(sid(3));
-  assert.equal(pill().label, "1 agent");
+  assert.equal(pill().label, "1 agent", "the next turn counts its working agent");
+  $("agents-pill").click();
+  assert.deepEqual(agentRows().map((row) => row.dataset.agentId), [sid(3), sid(2), sid(1)],
+    "and the map still lists the earlier turn's agents");
   assert.deepEqual(errors, []);
 });

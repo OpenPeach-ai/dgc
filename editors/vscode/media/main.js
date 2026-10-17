@@ -525,6 +525,8 @@
         // A waiting Pip docks where questions dock (the founder chose it over a card in the reply).
         // A question docked first keeps the place; the Pip docks again when it is answered.
         dock: { show: dockPipCard, hide: undockPipCard },
+        // The Pip runs this chat started are background tasks in the agent map.
+        onRunsChange: () => agentMapChanged(),
       });
     }
     return pipSetupCards;
@@ -996,6 +998,9 @@
   // The backend reports its sub-agents as agent frames (capabilities.agents): their lines in the
   // transcript then say what the backend's own spawn notices used to.
   let agentsLive = false;
+  // What the agent map may ask for: stopping one agent (`agent_control`; a foreground one only with
+  // `agent_control_foreground`), and the background shells with their output (`background_tasks`).
+  let agentControlLive = false, agentControlForeground = false, backgroundTasksLive = false;
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
@@ -1042,8 +1047,11 @@
     cached_input_tokens: 0, reasoning_tokens: 0, requests: 0, compact_threshold: .85 };
   let lastCompaction = null, compacting = false;
 
+  // The chat's own name, without the "New chat" fallback: the agent map's root says "This chat" then.
+  let chatTitleName = "";
   function setThreadTitle(name, sessionId = "", fresh = false) {
     const safeName = String(name || "").replace(/\s+/g, " ").trim();
+    chatTitleName = safeName.slice(0, 200);
     const safeId = String(sessionId || "").replace(/[^A-Za-z0-9_-]/g, "");
     const fallback = fresh ? "New chat" : (safeId ? `Chat · ${safeId.slice(-8)}` : "Untitled chat");
     const title = (safeName || fallback).slice(0, 200);
@@ -1052,6 +1060,7 @@
     node.title = `${title} — click to rename`;
     node.setAttribute("aria-label", `Current chat: ${title}. Click to rename`);
     document.title = `${title} — DGC`;
+    agentMapChanged();
   }
 
   function applyMode(m) {
@@ -1472,6 +1481,13 @@
     { name: "view-plan", description: "reopen the saved plan", action: "viewPlan" },
   ];
 
+  // `/agents` is the agent map, opened in the panel (the CLI's own /agents opened the sub-agent
+  // settings, which the map links to). `/tasks` keeps its meaning: retained worktrees.
+  function agentMapCommands(list) {
+    const entry = { name: "agents", description: "open the agent map: every agent and background task in this chat", action: "agentMap" };
+    const out = list.map((c) => (c && c.name === "agents" ? { ...c, ...entry, accepts_args: false } : c));
+    return out.some((c) => c && c.name === "agents") ? out : [...out, entry];
+  }
   let streaming = false, turn = null;
   let viewerStreaming = null;          // set by the image viewer: keeps its Stop in step with the turn
   // A custom slash command sent while idle shows Stop before its turn exists. Holds the command's
@@ -3839,6 +3855,9 @@
     // (dgc/ui.py arg_summary has no key for it), and a refused one carries the refusal there.
     const described = canonicalTool(ev.name) === "task" && typeof ev.args?.description === "string"
       ? ev.args.description.replace(/\s+/g, " ").trim() : "";
+    // The prompt a delegation was given, which its agent's card in the agent map shows. Not drawn on
+    // the card itself: the transcript names the agent, its page shows the work.
+    if (canonicalTool(ev.name) === "task" && typeof ev.args?.prompt === "string") c._agentPrompt = ev.args.prompt.slice(0, 20000);
     const detail = [copy.target, described || ev.summary || ""].filter(Boolean).join(" · ");
     const bodyId = `tool-output-${++disclosureId}`;
     const pluginMark = pluginLogoHtml(ev.name);
@@ -4050,6 +4069,7 @@
       troupesOpen = false; panel.innerHTML = ""; bar.hidden = true;
       paintTroupesOpen(); syncComposerRail();
       if (hadFocus) input.focus();
+      agentMapChanged();
       return;
     }
     const running = runs.filter((ev) => String(ev.state || "running") === "running");
@@ -4090,6 +4110,7 @@
     bar.hidden = false;
     paintTroupesOpen();
     syncComposerRail();
+    agentMapChanged();                 // a running troupe is one of the map's background tasks
   }
   function paintTroupesOpen() {
     const label = troupesOpen ? "Hide the troupe's stages" : "Show the troupe's stages";
@@ -5084,6 +5105,10 @@
         liveSteering = ev.capabilities?.live_steering === true;
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
         agentsLive = ev.capabilities?.agents === true;
+        agentControlLive = ev.capabilities?.agent_control === true;
+        agentControlForeground = agentControlLive && ev.capabilities?.agent_control_foreground === true;
+        backgroundTasksLive = Number(ev.capabilities?.background_tasks?.version) >= 1;
+        agentMapCapabilities();
         imageSpool = ev.capabilities?.image_spool === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
         pipsOffered = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
@@ -5100,6 +5125,7 @@
       case "context": {
         contextState = { ...contextState, ...ev };
         renderContext();
+        agentMapChanged();                       // the map's root says how much is in context
         if (!$("ctxmenu").hidden) vscode.postMessage({ type: "contextBreakdown" });     // the parts, as the window changes
         break;
       }
@@ -5587,6 +5613,7 @@
         renderTodos(ev.todos);
         return;   // the transcript did not change: no follow scroll, no "New" on the pill
       case "monitor_event": {
+        amNoteMonitorLines(ev);
         ensureTurn();
         appendTurnContent(monitorEventCard(ev)); breakText();
         if (ev.delivery === "wake" && turn.wake) paintWakeNote(turn.wake, ev);
@@ -5602,7 +5629,16 @@
         break;
       case "monitors":
         renderMonitors(ev);
+        agentMapChanged();
         break;
+      // The agent map's background shells and the output of the task whose card is open. Neither
+      // changes the transcript.
+      case "background_shells":
+        amShells(ev);
+        return;
+      case "background_output":
+        amOutputAnswer(ev);
+        return;
       // An agent's line changes in place: a reader following the end stays pinned to it, and one
       // who scrolled back is neither moved nor told there is something "New". Only a top-level
       // agent starting in the live turn is new content at the bottom, with the usual tail.
@@ -5677,6 +5713,7 @@
         break;
       }
       case "artifact_ready": {
+        amPreviewReady(ev);
         ensureTurn();
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
         c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon("app-window")}</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl">${esc(ev.url)}</button>`;
@@ -5691,6 +5728,7 @@
         break;
       }
       case "artifacts": {
+        amPreviewList(ev);
         const items = ev.items || [];
         if (!items.length) {
           if (!String(ev.request_id || "").startsWith("artifact-stop-")) {
@@ -5807,6 +5845,10 @@
         if (!replaying) sysLine(ev.message, ev.decision === "no"); break;
       case "prompt_pips": receivePromptPips(ev); break;
       case "command_rejected":
+        // The agent map asked, and the map says what became of it (the output not available, a Stop
+        // that did not take): a refusal of its polling must not fill the chat with lines.
+        if (["get_background_output", "list_background_shells", "stop_background_shell"].includes(ev.command)
+            || (ev.command === "agent_control" && String(ev.request_id || "").startsWith("agent-stop-"))) break;
         if (ev.command === "list_prompt_pips") {
           if (pipPicker.active && ev.request_id === pipPicker.id) { pipPicker.loading=false; pipPicker.error=String(ev.message || "Pip references are unavailable."); renderPipPicker(); }
           break;
@@ -6033,6 +6075,10 @@
 
   function submit(delivery = nativeSteering ? "steer" : "queue") {
     if (composerLocked) return;
+    // /agents opens the agent map, here in the panel: it needs no backend, so not even a reconnect waits.
+    if (/^\/agents\s*$/i.test(composerText().trim()) && !attachments.length) {
+      clearComposer(); persistDraft(); openAgentMap({ command: true }); return;
+    }
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
     if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
     // A folded paste is part of the message, not a side-channel: append it in chip order so the
@@ -6306,6 +6352,12 @@
       renderAtts();
       insertComposerPill(popStart, popEnd, "file", it.label);
     } else if (popMode === "/") {
+      if (it.action === "agentMap") {
+        // The map is the panel's own: the token goes, the rest of the draft stays.
+        replacePopToken(); hidePop();
+        openAgentMap({ command: true });
+        return;
+      }
       if (it.action?.startsWith("workflow:")) {
         // One edit, so one Ctrl+Z returns to what was typed: removing the token and adding the
         // prefix as two edits left a blank box between them in the undo history.
@@ -6599,7 +6651,7 @@
         label: "$" + s.name, detail: s.description || "Reusable agent instructions",
         skill: s.name, kind: s.source ? `${s.source} skill` : "skill", aliases: [],
       }));
-      const all = popMode === "$" ? skillItems : builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
+      const all = popMode === "$" ? skillItems : agentMapCommands(builtinCommands).map((c) => ({ label: "/" + c.name, detail: c.description,
         action: c.action, acceptsArgs: c.accepts_args === true,
         kind: "command",
         aliases: Array.isArray(c.aliases) ? c.aliases : [] }))
@@ -7519,6 +7571,7 @@
       curSubscription = msg.state.subscriptionEngine || "";
       curUltra = msg.state.ultra === true;
       updateModelControl();
+      agentMapChanged();                         // the map's root names the model
       if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
@@ -7616,7 +7669,15 @@
       renderContext();
       if (msg.error) sysLine(String(msg.error), true);
     }
-    else if (msg.type === "artifact_stop_state") settleArtifactStop(msg);
+    else if (msg.type === "artifact_stop_state") { settleArtifactStop(msg); amPreviewStopState(msg); }
+    // The agent map's own answers from the host: a Stop that did not take, an output it could not get.
+    else if (msg.type === "agent_stop_state") {
+      if (msg.state === "error" && agentStopping.has(String(msg.id || ""))) { agentStopping.set(String(msg.id), "failed"); agentMapChanged(); }
+    }
+    else if (msg.type === "background_stop_state") {
+      if (msg.state === "error") { taskStopping.set(`${msg.kind === "shell" ? "shell" : "monitor"}:${String(msg.id || "")}`, "failed"); agentMapChanged(); }
+    }
+    else if (msg.type === "background_output_failed") amOutputFailed(msg.id);
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
       if (canAttach()) { attachments.push({ label: msg.label, resource: msg.resource }); renderAtts(); }
     }
@@ -7913,7 +7974,9 @@
     const line = log.querySelector(`.agent-line[data-agent-ids~="${cssEscape(id)}"]`);
     (line?.closest(".msg") || log).appendChild(card);
   }
-  function newAgentLine({ provisional = false, page = false } = {}) {
+  // `open`: what a name does when clicked, for lines drawn somewhere other than the chat or its page
+  // (the agent map's transcript); without it, a name opens that agent's page.
+  function newAgentLine({ provisional = false, page = false, open = null } = {}) {
     const node = el("div", "agent-line");
     node.setAttribute("role", "group");
     node.setAttribute("aria-label", "Sub-agent");
@@ -7924,7 +7987,7 @@
     text.appendChild(tail);
     node.append(faces, text);
     const line = { node, faces, text, tail, ids: [], names: new Map(), marks: new Map(), glues: new Map(),
-      more: null, moreGlue: null, expanded: false, timer: 0, provisional, page, sig: "" };
+      more: null, moreGlue: null, expanded: false, timer: 0, provisional, page, open, sig: "" };
     if (!page) agentLines.add(line);
     return line;
   }
@@ -8047,7 +8110,7 @@
       button.type = "button";
       button.dataset.agentId = record.id;
       const id = record.id, opener = button;
-      button.addEventListener("click", () => openAgentPage(id, { from: opener, nested: line.page }));
+      button.addEventListener("click", () => (line.open ? line.open(id, opener) : openAgentPage(id, { from: opener, nested: line.page })));
       line.names.set(record.id, button);
     }
     const name = agentDisplayName(record);
@@ -8178,7 +8241,8 @@
   function agentAnswerText(record) {
     return String(record.message || "").split("\n").filter((line) => !/^\s*FILES:/i.test(line)).join("\n").trim();
   }
-  function rebindAgentClone(node, source) {
+  // `images` collects the image records the clone's chips hold, so whoever drew it can let them go.
+  function rebindAgentClone(node, source, images = agentPageImageRecords) {
     if (node.classList.contains("tool")) {
       // cloneNode copies the painted chips but none of the image records or listeners behind them.
       // Give this page its own lightweight records so opening a cloned image cannot steal the live
@@ -8189,7 +8253,7 @@
           const copy = { ...record, owner: node, chip: null };
           if (copy.state === "loading") copy.state = "pending";
           if (copy.ref) trackImageRef(copy);
-          agentPageImageRecords.push(copy);
+          images.push(copy);
           return copy;
         });
         node._imagesOmitted = source._imagesOmitted || 0;
@@ -8222,17 +8286,22 @@
       };
     });
   }
-  function paintAgentTranscript(id, into) {
+  // An agent's steps, into `into`: its own cards from the chat, else its step log. `lines` collects the
+  // nested agents' lines drawn here and `images` the image records of the cloned cards; `open` is what
+  // a nested agent's name does. `told`: the agent's report is drawn beside these (above them on its
+  // page, after them in the map's transcript, `below`).
+  function paintAgentTranscript(id, into, { lines = agentPageLines, images = agentPageImageRecords, open = null,
+    told = null, below = false } = {}) {
     let cloned = 0;
     const placed = new Set();
     // A nested agent's spawn is drawn on its parent's page as the chat draws its own: a line, its
     // name opening the child's page. Spawns with nothing of the parent's between them share one.
     const pageLine = (childId) => {
-      let line = agentPageLines.find((l) => l.node === into.lastElementChild && l.ids.length < AGENT_LINE_CAP);
+      let line = lines.find((l) => l.node === into.lastElementChild && l.ids.length < AGENT_LINE_CAP);
       if (!line) {
-        line = newAgentLine({ page: true });
+        line = newAgentLine({ page: true, open });
         into.appendChild(line.node);
-        agentPageLines.push(line);
+        lines.push(line);
       }
       if (!line.ids.includes(childId)) line.ids.push(childId);
       placed.add(childId);
@@ -8247,7 +8316,7 @@
       if (node.classList.contains("tool") && node.dataset.toolName === "task"
           && innermostAgentId(node.dataset.callId) !== id) continue;
       const clone = node.cloneNode(true);
-      rebindAgentClone(clone, node);
+      rebindAgentClone(clone, node, images);
       into.appendChild(clone);
       cloned += 1;
     }
@@ -8282,9 +8351,9 @@
           setToolOutput(card, String(ev.output || "").slice(0, 4000));
         }
       }
-      if (record?.restored && ![...into.children].some((node) => !node.classList.contains("agent-page-outcome"))) {
+      if (record?.restored && !(told ?? [...into.children].some((node) => !node.classList.contains("agent-page-outcome")))) {
         const note = el("div", "sys hist");
-        note.textContent = "This agent's tool steps were not kept in the parent chat. The summary above is what it reported.";
+        note.textContent = `This agent's tool steps were not kept in the parent chat. The summary ${below ? "below" : "above"} is what it reported.`;
         into.appendChild(note);
       }
     }
@@ -8293,7 +8362,50 @@
     for (const child of [...agentRecords.values()].filter((r) => r.parent_id === id && !placed.has(r.id)).sort(agentByStart)) {
       pageLine(child.id);
     }
-    for (const line of agentPageLines) paintAgentLine(line);
+    for (const line of lines) paintAgentLine(line);
+  }
+  // The prompt an agent was given, drawn as the chat draws a prompt: its bubble, with the time the
+  // agent started under it. A restored agent may not have kept it.
+  function agentPromptMessage(record) {
+    const prompt = agentPromptOf(record);
+    if (!prompt) {
+      const note = el("div", "sys hist");
+      note.textContent = "This agent's prompt was not kept in the chat.";
+      return note;
+    }
+    const m = el("div", "msg user agent-prompt");
+    const role = m.appendChild(el("div", "role"));
+    role.textContent = record.parent_id ? "its parent agent" : "the main agent";
+    const bubble = m.appendChild(el("div", "bubble"));
+    fillUserBubble(bubble, prompt, []);
+    stampPrompt(m, Number(record.started_at) * 1000);
+    return m;
+  }
+  // One builder for an agent's work, wherever it is drawn: its page, and the agent map's transcript.
+  // `into` is emptied and filled. The page leads with what the agent reported, then its steps; a
+  // transcript (`conversation`) reads in the order it happened: the prompt it was given, its steps,
+  // then its report.
+  function buildAgentWork(id, into, { lines = agentPageLines, images = agentPageImageRecords, open = null, conversation = false } = {}) {
+    into.replaceChildren();
+    const record = agentRecords.get(id);
+    if (!record) return;
+    const report = [];
+    const outcome = agentOutcomeNote(id);
+    if (outcome) report.push(outcome);
+    const answer = agentAnswerText(record);
+    if (answer) {
+      const block = el("div", "text agent-answer");
+      block.innerHTML = md(answer);
+      report.push(block);
+    }
+    const files = document.createDocumentFragment();
+    paintAgentFiles(files, record);
+    report.push(...files.childNodes);
+    const told = report.some((node) => !node.classList.contains("agent-page-outcome"));
+    if (conversation) into.appendChild(agentPromptMessage(record));
+    else into.append(...report);
+    paintAgentTranscript(id, into, { lines, images, open, told, below: conversation });
+    if (conversation) into.append(...report);
   }
   function paintAgentFiles(into, record) {
     const items = agentHandoffFiles(record.message);
@@ -8373,17 +8485,7 @@
     }
     paintAgentPageMeta(id);
     clearAgentPageImages();
-    agentLog.replaceChildren();
-    const outcome = agentOutcomeNote(id);
-    if (outcome) agentLog.appendChild(outcome);
-    const answer = agentAnswerText(record);
-    if (answer) {
-      const block = el("div", "text agent-answer");
-      block.innerHTML = md(answer);
-      agentLog.appendChild(block);
-    }
-    paintAgentFiles(agentLog, record);
-    paintAgentTranscript(id, agentLog);
+    buildAgentWork(id, agentLog, { lines: agentPageLines, images: agentPageImageRecords });
     syncAgentPageTick();
     page.scrollTop = keepBottom ? page.scrollHeight : keep;
     if (focused) focusQuietly(agentLog.querySelector(`.agent-name[data-agent-id="${cssEscape(focused)}"]`), { preventScroll: true });
@@ -8398,13 +8500,17 @@
     hoverTip.retitle(back, label);
     back.setAttribute("aria-label", label);
   }
-  function clearAgentPageImages() {
-    for (const record of agentPageImageRecords) {
+  // Image records a drawing of an agent's work held, let go of when that drawing is replaced.
+  function clearImageRecords(list) {
+    for (const record of list) {
       if (!record.ref) continue;
       const records = imageRefs.get(record.ref);
       records?.delete(record);
       if (records?.size === 0) imageRefs.delete(record.ref);
     }
+  }
+  function clearAgentPageImages() {
+    clearImageRecords(agentPageImageRecords);
     agentPageImageRecords = [];
   }
   function lockAgentComposer(locked) {
@@ -8427,7 +8533,6 @@
   function openAgentPage(id, { from = null, nested = false } = {}) {
     const record = agentRecords.get(id);
     if (!record) return;
-    agentsHideMenu();
     if (!agentPageId) {
       agentPageParentTitle = $("thread-title")?.textContent || "";
       agentPageScroll = log.scrollTop;
@@ -8511,38 +8616,18 @@
   }
   const agentAnchors = new Map();          // id -> the task card this record claimed
   let agentTotalExtra = 0, agentActiveExtra = 0;   // a snapshot's records it did not itemise
-  let agentOrder = 0, agentsRenderQueued = false, agentsTick = null;
+  let agentOrder = 0;
   let agentsAnnounceTimer = null, agentsSpokenActive = false;
-  let agentsTurnLive = false, agentsEpoch = 0;   // pill belongs to the live turn; turn_end advances the epoch
   const agentsBatch = new Set();           // ids active since the last "working" announcement
-  const agentRowNodes = new Map();         // id -> that record's dialog row, kept across renders
   let agentStepRepaint = 0;                // coalesces live-step repaints into one per frame
   // Set by a rewind until its snapshot arrives: the replayed cards must not be claimed by records
   // the rewind is about to prune (call_0 repeats in every turn of a provider that sends no ids).
   let agentsHoldClaims = false;
 
-  function agentsLabelCount(active, total) { return total; }
-  function agentVisible(record) {
-    if (record.background && AGENT_ACTIVE.has(record.state)) return true;
-    if (!agentsTurnLive || record.epoch !== agentsEpoch) return false;
-    if (AGENT_ACTIVE.has(record.state)) return true;
-    return record.seenLive === true;
-  }
-  function agentsTurnBegin() {
-    agentsTurnLive = true;
-    renderAgents();
-  }
-  function agentsTurnEnd() {
-    agentsTurnLive = false;
-    agentsEpoch += 1;
-    for (const record of agentRecords.values()) {
-      if (record.background && AGENT_ACTIVE.has(record.state)) {
-        record.epoch = agentsEpoch;
-        agentsTurnLive = true;
-      }
-    }
-    renderAgents();
-  }
+  // A turn starting or ending changes no agent, but it is what the map's root shows: the main agent
+  // working or idle. The pill and the map belong to the whole chat, so neither clears here.
+  function agentsTurnBegin() { renderAgents(); }
+  function agentsTurnEnd() { renderAgents(); }
 
   function agentNow() { return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now(); }
   function agentPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
@@ -8556,24 +8641,24 @@
   function agentLiveMs(record) {
     return Number(record.elapsed_ms || 0) + Math.max(0, agentNow() - Number(record.receivedAt || agentNow()));
   }
-  function agentCounts(visibleOnly = false) {
+  // Every agent in the chat, in any state: what the pill and the map count. `total` and `active`
+  // include the ones a bounded snapshot did not itemise.
+  function agentCounts() {
     const c = { queued: 0, running: 0, waiting: 0, waitingPermission: 0, waitingAnswer: 0,
       finished: 0, failed: 0, stopped: 0 };
     for (const record of agentRecords.values()) {
-      if (visibleOnly && !agentVisible(record)) continue;
       if (record.state in c) c[record.state] += 1;
       if (record.state === "waiting") {
         if (record.waiting_for === "answer") c.waitingAnswer += 1; else c.waitingPermission += 1;
       }
     }
     c.active = c.queued + c.running + c.waiting + agentActiveExtra;
-    c.total = visibleOnly ? c.active + c.finished + c.failed + c.stopped : agentRecords.size + agentTotalExtra;
+    c.total = agentRecords.size + agentTotalExtra;
     return c;
   }
 
   function agentRecordFrom(fields, receivedAt) {
-    const record = { ...fields, receivedAt, order: agentOrder++, epoch: agentsEpoch,
-      seenLive: fields.seenLive === true };
+    const record = { ...fields, receivedAt, order: agentOrder++ };
     delete record.type; delete record.seq; delete record.request_id;
     record.description = String(record.description || "");
     record.tool_calls = Number(record.tool_calls || 0);
@@ -8591,10 +8676,9 @@
     if (ev.type === "agent_started") {
       if (record) return;
       agentsHoldClaims = false;
-      agentsTurnLive = true;
       // The start of its "started working" window -- unless it is queued behind a worker, when the
       // window opens as one takes it (below).
-      agentRecords.set(id, agentRecordFrom({ ...ev, elapsed_ms: 0, seenLive: true,
+      agentRecords.set(id, agentRecordFrom({ ...ev, elapsed_ms: 0,
         startedLiveAt: ev.state === "queued" ? undefined : now }, now));
       agentsBatch.add(id);
       pagePainted = claimAgentAnchors();
@@ -8610,10 +8694,11 @@
       if (!record) { if (agentActiveExtra > 0) agentActiveExtra -= 1; renderAgents(); return; }
       if (!AGENT_ACTIVE.has(record.state)) return;
       record.state = String(ev.state || "finished");
-      record.seenLive = true;
       record.endedAt = now;
+      record.endedWall = Date.now();
       for (const key of ["duration_ms", "tool_calls", "tokens", "message"]) if (key in ev) record[key] = ev[key];
       delete record.waiting_for; delete record.activity;
+      agentStopping.delete(id);
     }
     const current = agentRecords.get(id);
     if (current) agentLineChanged(current, ev.type, pagePainted);
@@ -8636,18 +8721,18 @@
         // whatever order the backend happened to list them, and the rows moved around mid-turn.
         if (prior && typeof prior.order === "number") record.order = prior.order;
         record.endedAt = prior?.endedAt;
+        record.endedWall = prior?.endedWall;
         // A snapshot carries a live start window over and never opens one: a reload, a resume or a
         // chat switch never says "started working".
         record.startedLiveAt = prior?.startedLiveAt;
-        record.seenLive = prior?.seenLive === true && prior.epoch === agentsEpoch;
-        if (prior?.epoch === agentsEpoch) record.epoch = prior.epoch;
+        // The step log an agent's page collected live is not in the snapshot of a running agent.
+        if (!Array.isArray(record.log) && Array.isArray(prior?.log)) record.log = prior.log;
         agentRecords.set(String(item.id), record);
       }
     }
     const listedActive = [...agentRecords.values()].filter((r) => AGENT_ACTIVE.has(r.state)).length;
     agentTotalExtra = Math.max(0, Number(ev.total || 0) - agentRecords.size);
     agentActiveExtra = Math.max(0, Number(ev.active || 0) - listedActive);
-    if (listedActive > 0 || agentActiveExtra > 0) agentsTurnLive = true;
     let pagePainted = false;
     holdReadingPlace(() => {
       // A record the snapshot no longer lists (it holds 64 at most: the active, then the newest
@@ -8746,7 +8831,7 @@
     }
     if (card.dataset.toolName !== "task" || !agentRecords.size) return;
     // A replayed page is built detached and inserted when it is complete; claim once it is.
-    const claim = () => { claimAgentAnchors(); scheduleAgentsMenuRender(); };
+    const claim = () => { claimAgentAnchors(); agentMapChanged(); };
     if (replaying || !card.isConnected) queueMicrotask(claim);
     else claim();
   }
@@ -8754,27 +8839,27 @@
   // ---- the pill ----
   function renderAgents() {
     renderAgentsPill();
-    scheduleAgentsMenuRender();
+    agentMapChanged();
   }
+  // Claude Code's counting rule: the number is the agents working NOW, and once the chat has had an
+  // agent the pill stays for the rest of it -- "0 agents" when every one has ended -- so the map is
+  // always one click away. A chat with no agent shows no pill; /agents still opens the map.
   function renderAgentsPill() {
     const picker = $("agents-picker"), pill = $("agents-pill");
     if (!picker || !pill) return;
-    const c = agentCounts(true);
+    const c = agentCounts();
     if (c.total <= 0) {
       hoverTip.hide();
-      agentsHideMenu();
       picker.hidden = true;
       return;
     }
     picker.hidden = false;
-    const n = agentsLabelCount(c.active, c.total);
+    const n = c.active;
     const state = c.waiting > 0 ? "waiting" : c.active > 0 ? "running" : "idle";
-    const hint = "Click to see the agents";
+    const hint = "Click to open the agent map";
     const title = state === "waiting"
       ? `${c.waitingPermission > 0 ? "An agent is waiting for your permission" : "An agent is waiting for your answer"} · ${hint}`
-      : state === "running"
-        ? `Agents are working${c.active !== c.total ? ` (${c.active} of ${c.total} working)` : ""} · ${hint}`
-        : `No agents working · ${hint}`;
+      : state === "running" ? `Agents are working · ${hint}` : `No agents working · ${hint}`;
     pill.dataset.state = state;
     $("agents-count").textContent = String(n);
     pill.querySelector(".agents-word").textContent = n === 1 ? " agent" : " agents";
@@ -8783,14 +8868,6 @@
     pill.setAttribute("aria-label", `${agentPlural(n, "agent")} · ${title}`);
   }
 
-  // ---- the list ----
-  function agentsMenuOpen() { const menu = $("agentsmenu"); return !!menu && !menu.hidden; }
-  function scheduleAgentsMenuRender() {
-    if (!agentsMenuOpen() || agentsRenderQueued) return;
-    agentsRenderQueued = true;
-    const run = () => { agentsRenderQueued = false; if (agentsMenuOpen()) renderAgentsMenu(); };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run); else setTimeout(run, 16);
-  }
   function agentSummary(c) {
     const parts = [agentPlural(c.total, "agent")];
     for (const [count, label] of [[c.running, "working"], [c.waitingPermission, "waiting for your permission"],
@@ -8800,29 +8877,7 @@
     }
     return parts.join(" · ");
   }
-  function agentMeta(record) {
-    const parts = [];
-    const state = record.state;
-    if (AGENT_ENDED_WORD[state]) parts.push(AGENT_ENDED_WORD[state]);
-    else if (state === "waiting") parts.push(record.waiting_for === "answer" ? "waiting for your answer" : "waiting for your permission");
-    else if (state === "queued") parts.push("Queued");
-    else if (record.activity) parts.push(String(record.activity));
-    // A failed or stopped row's reason goes last: the meta is clamped to two lines, and what gets
-    // cut should be the tail of a long provider message (the row's label has all of it), never the
-    // stats. A finished agent's report is not a reason: it stays on the agent's page.
-    const why = (state === "failed" || state === "stopped") && record.message ? agentFirstLine(record.message) : "";
-    if (record.restored && record.duration_ms == null && record.tokens == null) return [...parts, ...(why ? [why] : [])].join(" · ");
-    if (record.agent_type) parts.push(String(record.agent_type));
-    if (record.model && record.model !== curModel) parts.push(String(record.model));
-    if (state === "running" || state === "waiting") parts.push(agentElapsed(agentLiveMs(record)));
-    else if (AGENT_ENDED_WORD[state] && record.duration_ms !== undefined) parts.push(agentElapsed(record.duration_ms));
-    const tools = Number(record.tool_calls || 0);
-    if (tools > 0) parts.push(agentPlural(tools, "tool"));
-    if (Number(record.tokens || 0) > 0) parts.push(`${fmtTokens(record.tokens)} tokens`);
-    if (why) parts.push(why);
-    return parts.join(" · ");
-  }
-  // A failure message can be many lines of provider JSON: the row shows one bounded line and the
+  // A failure message can be many lines of provider JSON: a row shows one bounded line and the
   // row's label carries the whole (already redacted and URL-scrubbed) text.
   function agentFirstLine(text, limit = 120) {
     const line = (String(text || "").split("\n").find((part) => part.trim()) || "")
@@ -8833,43 +8888,10 @@
     if (marker >= 0 && marker < cut && cut < marker + 10) cut = marker;   // never half a marker
     return `${line.slice(0, cut).trimEnd()}…`;
   }
-  function agentTree() {
-    const children = new Map();
-    const records = [...agentRecords.values()].filter(agentVisible);
-    const ids = new Set(records.map((r) => r.id));
-    // By start, children under their parent. A restored record has no start time: it began before
-    // anything this backend saw, so it sorts first.
-    const key = (r) => [r.started_at === undefined || r.started_at === null ? -Infinity : Number(r.started_at), r.order];
-    records.sort((a, b) => { const [x1, y1] = key(a), [x2, y2] = key(b); return x1 - x2 || y1 - y2; });
-    for (const record of records) {
-      const parent = record.parent_id && ids.has(record.parent_id) ? record.parent_id : "";
-      if (!children.has(parent)) children.set(parent, []);
-      children.get(parent).push(record);
-    }
-    return children;
-  }
   // Rows are kept per record and updated in place: the 1 s tick and every frame change only the
   // text, dot and label that changed, so a focused row keeps its focus (a screen reader does not
   // re-read it), its hover label stays put and a click that spans a tick still lands.
   function agentsSetText(node, text) { if (node.textContent !== text) node.textContent = text; }
-  function agentRowEntry(record) {
-    let entry = agentRowNodes.get(record.id);
-    if (entry) return entry;
-    const item = document.createElement("li");
-    const row = document.createElement("button");
-    row.type = "button"; row.className = "agent-row"; row.dataset.agentId = record.id; row.tabIndex = -1;
-    const dot = document.createElement("span");
-    dot.className = "agent-dot"; dot.setAttribute("aria-hidden", "true");
-    const text = document.createElement("span"); text.className = "agent-text";
-    const desc = document.createElement("span"); desc.className = "agent-desc";
-    const meta = document.createElement("span"); meta.className = "agent-meta";
-    text.append(desc, meta); row.append(dot, text); item.append(row);
-    const id = record.id;
-    row.addEventListener("click", () => agentJump(id));
-    entry = { item, row, dot, desc, meta, nested: null };
-    agentRowNodes.set(id, entry);
-    return entry;
-  }
   // The FILES line of an agent's handoff: files it wrote or files worth opening. A model may
   // annotate an entry ("frontend/test-results/ (40 × error-context.md)"): the note is kept apart
   // from the path, and a folder is named but not offered as a file to open.
@@ -8883,15 +8905,6 @@
       return { path, note: annotated ? annotated[2] : "", folder: /[\\/]$/.test(path) };
     }).filter((item) => item.path).slice(0, 8);
   }
-  function agentRowUpdate(entry, record) {
-    const { row, dot, desc, meta } = entry;
-    if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
-    agentsSetText(desc, record.description || "(no description)");
-    agentsSetText(meta, agentMeta(record));
-    if (row.hasAttribute("aria-disabled")) row.removeAttribute("aria-disabled");
-    const why = AGENT_ENDED_WORD[record.state] && record.message ? String(record.message).trim() : "";
-    hoverTip.retitle(row, "Open this agent" + (why ? `\n${why}` : ""));
-  }
   // Put `nodes` in `list` in order, moving only the ones out of place (a moved node loses focus).
   function agentsPlace(list, nodes) {
     const wanted = new Set(nodes);
@@ -8902,102 +8915,1125 @@
       list.insertBefore(node, cursor);
     }
   }
-  function renderAgentsMenu() {
-    const menu = $("agentsmenu");
-    if (!menu) return;
-    claimAgentAnchors();
-    const c = agentCounts(true);
-    agentsSetText($("agents-summary"), agentSummary(c));
-    const tree = $("agents-tree");
-    const active = document.activeElement;
-    const focusedRow = active && tree.contains(active) ? active.closest(".agent-row") : null;
-    for (const id of [...agentRowNodes.keys()]) if (!agentRecords.has(id)) agentRowNodes.delete(id);
-    const children = agentTree();
+
+  // ---- the agent map ----
+  // Claude Code's map, drawn DGC's way. A dialog over the chat: the main agent, its sub-agents in a
+  // column beside it and theirs a column further on, as deep as the nesting goes; below that, what
+  // runs in the background. Every agent the chat has had is on it, in any state, until the chat
+  // resets. A dialog too narrow for the columns (a side bar) stands the tree on end instead: the
+  // root on top and each level indented under a spine. Which of the two is decided by measuring the
+  // dialog, never the window, so an editor tab and a side bar each draw the one that fits them.
+  const AM_ROOT_MIN = 220, AM_ROOT_MAX = 300;   // the root's width, beside its columns
+  const AM_ROW_MIN = 200, AM_ROW_MAX = 300;     // an agent's, in a column
+  const AM_GUTTER = 32;                         // from a row to its column: a stub, the spine, an elbow
+  const AM_STACK_MIN = 180;                     // the narrowest a row gets when the tree stands on end
+  const amRows = new Map();                     // agent id -> its row and nested list, kept across renders
+  const amTaskRows = new Map();                 // task key -> its row
+  const agentStopping = new Map();              // agent id -> "stopping" | "failed", until it ends
+  const taskStopping = new Map();               // task key -> "stopping" | "failed", while it runs
+  const taskEndedWall = new Map();              // task key -> when this page first saw it ended
+  let amOpen = false, amOpener = null, amByCommand = false, amCard = null, amTx = null, amWidth = 0;
+  let amTick = 0, amObserver = null, amRoot = null, amPainting = false;
+  // The open shell's or monitor's output: asked for each second while its card is open, the task
+  // runs and the panel is on screen, and once more when it ends.
+  let amOutput = null;
+  // What runs in the background, from the snapshots the panel already receives. Background shells
+  // come only from a CLI with `background_tasks`; their list is the backend's, ended ones included.
+  let shellItems = [];
+  const monitorLines = new Map();               // monitor id -> the lines its events brought, newest last
+  const previews = new Map();                   // artifact id -> what this chat knows of that preview
+
+  function agentMapOpen() { return amOpen; }
+  function agentMapChanged() { if (amOpen && !amPainting) renderAgentMap(); }
+  function agentMapCapabilities() {
+    if (!backgroundTasksLive) shellItems = [];
+    agentMapChanged();
+  }
+  // Tokens the way the map writes them: "950", "142.6k", "1.2M".
+  function amTokens(n) {
+    const value = Math.max(0, Math.floor(Number(n) || 0));
+    if (value < 1000) return String(value);
+    if (value < 1e6) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+    return `${(value / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  function amBytes(n) {
+    const value = Math.max(0, Number(n) || 0);
+    if (value < 1024) return `${value} bytes`;
+    if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+    return `${(value / 1024 / 1024).toFixed(1).replace(/\.0$/, "")} MB`;
+  }
+  // Under a second is not worth saying, and nor is a count of none.
+  function amDuration(ms) { return Number(ms) >= 1000 ? agentElapsed(ms) : ""; }
+  function amAgentMs(record) {
+    if (record.state === "running" || record.state === "waiting") return agentLiveMs(record);
+    return AGENT_ACTIVE.has(record.state) || record.duration_ms == null ? 0 : Number(record.duration_ms);
+  }
+  const AM_STATE_WORD = { running: "Working", queued: "Queued", finished: "Finished", failed: "Failed", stopped: "Stopped" };
+  function amStateWord(record) {
+    if (record.state === "waiting") return record.waiting_for === "answer" ? "Waiting for your answer" : "Waiting for your permission";
+    return AM_STATE_WORD[record.state] || String(record.state || "");
+  }
+  // How long and how much, plus the model when it is not the chat's. A restored record that kept no
+  // numbers says none.
+  function amAgentStats(record) {
+    const parts = [];
+    if (!(record.restored && record.duration_ms == null && record.tokens == null)) {
+      const time = amDuration(amAgentMs(record));
+      if (time) parts.push(time);
+      if (Number(record.tokens || 0) > 0) parts.push(`${amTokens(record.tokens)} tokens`);
+    }
+    if (record.model && record.model !== curModel) parts.push(String(record.model));
+    return parts;
+  }
+
+  // ---- the tree ----
+  function amRank(record) { return AGENT_ACTIVE.has(record.state) ? 0 : record.state === "failed" ? 1 : 2; }
+  // When an agent ended, on one clock: this page's for one it saw end, else its start plus its run.
+  function amEndedWall(record) {
+    if (Number.isFinite(record.endedWall)) return record.endedWall;
+    const start = Number(record.started_at);
+    return Number.isFinite(start) && start > 0 ? start * 1000 + Number(record.duration_ms || 0) : -Infinity;
+  }
+  // Working agents first, oldest first; then failed ones; then finished and stopped, newest end first.
+  function amOrder(a, b) {
+    const rank = amRank(a) - amRank(b);
+    if (rank) return rank;
+    if (amRank(a) === 2) return (amEndedWall(b) - amEndedWall(a)) || agentByStart(a, b);
+    return agentByStart(a, b);
+  }
+  // parent id ("" for the main agent) -> its children, in the map's order. An agent whose parent the
+  // map does not hold (a snapshot keeps 64) is drawn under the root, and so is one whose parents loop.
+  function amTree() {
+    const parentOf = (record) => {
+      const parent = record.parent_id && agentRecords.has(String(record.parent_id)) ? String(record.parent_id) : "";
+      const seen = new Set([record.id]);
+      for (let at = parent; at;) {
+        if (seen.has(at)) return "";
+        seen.add(at);
+        const up = agentRecords.get(at)?.parent_id;
+        at = up && agentRecords.has(String(up)) ? String(up) : "";
+      }
+      return parent;
+    };
+    const children = new Map();
+    for (const record of agentRecords.values()) {
+      const parent = parentOf(record);
+      if (!children.has(parent)) children.set(parent, []);
+      children.get(parent).push(record);
+    }
+    for (const list of children.values()) list.sort(amOrder);
+    return children;
+  }
+  function amDepth(children, id = "") {
+    let depth = 0;
+    for (const record of children.get(id) || []) depth = Math.max(depth, 1 + amDepth(children, record.id));
+    return depth;
+  }
+  // Side by side when the root and one column per level fit at their narrowest; each then takes an
+  // equal share of what is left, up to its widest. Otherwise on end, the indent per level shrinking as
+  // the tree deepens so the deepest row keeps a readable width.
+  function amLayout(depth) {
+    const box = $("agent-map-box"), tree = $("agent-map-tree");
+    const need = AM_ROOT_MIN + depth * (AM_GUTTER + AM_ROW_MIN);
+    const across = depth > 0 && amWidth >= need;
+    if (across) {
+      const share = Math.floor((amWidth - need) / (depth + 1));
+      tree.style.setProperty("--am-root-w", `${Math.min(AM_ROOT_MAX, AM_ROOT_MIN + share)}px`);
+      tree.style.setProperty("--am-row-w", `${Math.min(AM_ROW_MAX, AM_ROW_MIN + share)}px`);
+    } else {
+      // Even, so the spine at half the indent sits on a whole pixel.
+      const indent = depth ? Math.max(8, Math.min(20, Math.floor((amWidth - AM_STACK_MIN) / depth))) : 20;
+      tree.style.setProperty("--am-indent", `${indent - (indent % 2)}px`);
+    }
+    const layout = across ? "horizontal" : "vertical";
+    if (box.dataset.layout !== layout) box.dataset.layout = layout;
+  }
+  // One row: a real button, so Tab, Enter and Space work. The dot is the state; the words say it too.
+  function amRowNode(key, cls) {
+    const row = el("button", `am-row ${cls}`);
+    row.type = "button"; row.tabIndex = -1; row.dataset.amKey = key;
+    const dot = el("span", "agent-dot"); dot.setAttribute("aria-hidden", "true");
+    const text = el("span", "am-text"), desc = el("span", "am-desc"), meta = el("span", "am-meta");
+    text.append(desc, meta);
+    row.append(dot, text);
+    return { row, dot, desc, meta, tip: "", label: "" };
+  }
+  function amLabel(entry, label, tip) {
+    if (entry.label !== label) { entry.label = label; entry.row.setAttribute("aria-label", label); }
+    if (entry.tip !== tip) { entry.tip = tip; hoverTip.retitle(entry.row, tip); }
+  }
+  function amRootEntry() {
+    if (amRoot?.node.isConnected) return amRoot;
+    const node = el("div", "am-node am-root-node"), self = el("div", "am-self");
+    const parts = amRowNode("root", "am-root");
+    parts.row.addEventListener("click", () => amOpenCard({ kind: "root" }, parts.row));
+    self.appendChild(parts.row);
+    const kids = el("ul", "am-children");
+    kids.setAttribute("aria-label", "Started by the main agent");
+    node.append(self, kids);
+    $("agent-map-tree").replaceChildren(node);
+    amRoot = { node, kids, ...parts };
+    return amRoot;
+  }
+  function amChatName() { return chatTitleName || "This chat"; }
+  function amRootMeta() {
+    const parts = [curModel || "dgc"];
+    const used = Math.max(0, Number(contextState.used || 0));
+    if (used > 0) parts.push(`${amTokens(used)} tokens in context`);
+    return parts;
+  }
+  function amPaintRoot(root) {
+    const state = streaming ? "running" : "idle";
+    if (root.dot.dataset.state !== state) root.dot.dataset.state = state;
+    const name = amChatName(), meta = amRootMeta();
+    agentsSetText(root.desc, name);
+    agentsSetText(root.meta, meta.join(" · "));
+    amLabel(root, `${name}, the main agent, ${streaming ? "working" : "idle"}, ${meta.join(", ")}`, `${name}\nThe main agent`);
+  }
+  function amAgentEntry(record) {
+    let entry = amRows.get(record.id);
+    if (entry) return entry;
+    const item = el("li", "am-node"), self = el("div", "am-self");
+    const parts = amRowNode(`agent:${record.id}`, "am-agent");
+    parts.row.dataset.agentId = record.id;
+    const face = el("span", "agent-mark am-face"); face.setAttribute("aria-hidden", "true");
+    parts.row.insertBefore(face, parts.row.lastChild);
+    const id = record.id;
+    parts.row.addEventListener("click", () => amOpenCard({ kind: "agent", id }, parts.row));
+    self.appendChild(parts.row);
+    item.appendChild(self);
+    entry = { item, kids: null, face, ...parts };
+    amRows.set(record.id, entry);
+    return entry;
+  }
+  function amPaintAgentRow(entry, record) {
+    const { row, dot, desc, meta, face } = entry;
+    if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
+    if (row.dataset.state !== record.state) row.dataset.state = record.state;
+    paintAgentMark(face, record.id, AGENT_ACTIVE.has(record.state));
+    const name = agentDisplayName(record), stats = amAgentStats(record), word = amStateWord(record);
+    agentsSetText(desc, name);
+    // The word leads for every state but working, so no state rests on the dot's colour alone.
+    agentsSetText(meta, (record.state === "running" ? stats : [word, ...stats]).join(" · ") || word);
+    const why = (record.state === "failed" || record.state === "stopped") && record.message ? agentFirstLine(record.message) : "";
+    amLabel(entry, [name, word, ...stats].join(", "), `${name}${why ? `\n${why}` : ""}`);
+  }
+
+  // ---- what runs in the background ----
+  const MONITOR_ENDS = { exited: "Exited", stopped: "Stopped", timeout: "Timed out", flood: "Stopped: too much output",
+    error: "Failed", shutdown: "Stopped" };
+  // A task's time: from its start to now while it runs, frozen at the moment it was seen to end.
+  function amTaskMs(key, startWall, running, endWall) {
+    if (!running && !taskEndedWall.has(key)) taskEndedWall.set(key, Number.isFinite(endWall) && endWall > 0 ? endWall : Date.now());
+    if (!(Number.isFinite(startWall) && startWall > 0)) return 0;
+    return Math.max(0, (running ? Date.now() : taskEndedWall.get(key)) - startWall);
+  }
+  function amMonitorTask(item) {
+    const id = String(item.id), key = `monitor:${id}`;
+    const running = item.state === "running" || item.state === "stopping";
+    const ms = amTaskMs(key, Number(item.started_at) * 1000, running);
+    const word = item.state === "running" ? "Running" : item.state === "stopping" ? "Stopping" : MONITOR_ENDS[item.end_reason] || "Ended";
+    return { key, kind: "monitor", id, running, name: String(item.description || id), word, label: "monitor", ms,
+      stoppable: item.state === "running", output: true, item,
+      meta: ["monitor", amDuration(ms), eventCount(item.events)].filter(Boolean) };
+  }
+  function amShellTask(item) {
+    const id = String(item.id), key = `shell:${id}`;
+    const running = item.state === "running";
+    const ms = amTaskMs(key, Number(item.started_at) * 1000, running, Number(item.ended_at) * 1000);
+    const word = running ? "Running" : item.state === "killed" ? "Stopped"
+      : `Exited${Number.isInteger(item.exit_code) ? ` · code ${item.exit_code}` : ""}`;
+    return { key, kind: "shell", id, running, name: String(item.command || id), word, label: "shell", ms,
+      stoppable: running, output: true, item, meta: ["shell", amDuration(ms)].filter(Boolean) };
+  }
+  function amTroupeTask(ev) {
+    const id = String(ev.run_id), state = String(ev.state || "running"), running = state === "running";
+    return { key: `troupe:${id}`, kind: "troupe", id, running, name: String(ev.title || "Troupe"), word: troupeStateWords(ev),
+      label: "troupe", ms: 0, stoppable: running && !troupeStopping.has(id), stopping: troupeStopping.has(id), ev,
+      meta: ["troupe", troupeSummary(ev).text] };
+  }
+  function amPipTask(run) {
+    return { key: `pip:${run.id}`, kind: "pip", id: run.id, running: run.active === true, name: String(run.name || "Pip"),
+      word: String(run.label || "Working"), label: "Pip run", ms: 0, run, meta: ["Pip run", String(run.label || "")].filter(Boolean) };
+  }
+  function amPreviewTask(preview) {
+    const key = `preview:${preview.id}`, running = preview.state !== "stopped";
+    const up = Number.isFinite(preview.readyWall) ? agentElapsed(Date.now() - preview.readyWall) : String(preview.uptime || "");
+    return { key, kind: "preview", id: preview.id, running, name: String(preview.name || preview.id), word: running ? "Running" : "Stopped",
+      label: "preview", ms: 0, stoppable: running, preview, meta: ["preview", up ? `up ${up}` : ""].filter(Boolean) };
+  }
+  function amPipRuns() {
+    try { return (pipSetupCards?.runs?.() || []).filter((run) => run && typeof run.id === "string"); } catch { return []; }
+  }
+  // Every task this chat knows, running or not: monitors, background shells, troupes, the Pip runs it
+  // started and its artifact previews, in that order.
+  function amAllTasks() {
+    return [...monitorItems.map(amMonitorTask), ...shellItems.map(amShellTask),
+      ...[...troupeRuns.values()].map(amTroupeTask), ...amPipRuns().map(amPipTask), ...[...previews.values()].map(amPreviewTask)];
+  }
+  function amTaskEntry(task) {
+    let entry = amTaskRows.get(task.key);
+    if (entry) return entry;
+    const item = el("li", "am-task-item");
+    const parts = amRowNode(task.key, "am-task");
+    const key = task.key;
+    parts.row.addEventListener("click", () => amOpenCard({ kind: "task", key }, parts.row));
+    item.appendChild(parts.row);
+    entry = { item, ...parts };
+    amTaskRows.set(task.key, entry);
+    return entry;
+  }
+  function amTaskState(task) {
+    if (!task.running) return task.word === "Stopped" ? "stopped" : task.word.startsWith("Failed") ? "failed" : "finished";
+    return task.word === "Stopping" || task.stopping || taskStopping.get(task.key) === "stopping" ? "stopping" : "running";
+  }
+  function amPaintTaskRow(entry, task) {
+    const state = amTaskState(task);
+    if (entry.dot.dataset.state !== state) entry.dot.dataset.state = state;
+    agentsSetText(entry.desc, task.name);
+    agentsSetText(entry.meta, task.meta.join(" · "));
+    amLabel(entry, [task.name, task.word, ...task.meta].join(", "), task.name);
+  }
+
+  // ---- the three levels ----
+  // The map; an agent's or a task's card over it; an agent's transcript (or a task's output) over that.
+  // Each is its own window over a dimmed backdrop. ←, Esc and a click on the backdrop each go back
+  // exactly one level -- transcript, card, map, closed -- and focus goes back to whatever opened the
+  // level the reader comes back to: the card's Open button, the row, the pill or the prompt box.
+  const AM_LAYERS = ["agent-map", "agent-card", "agent-transcript"];
+  function amTopLayer() { return !amOpen ? "" : amTx ? "agent-transcript" : amCard ? "agent-card" : "agent-map"; }
+  function amSyncLayers() {
+    $("agent-map").hidden = !amOpen;
+    $("agent-card").hidden = !amOpen || !amCard;
+    $("agent-transcript").hidden = !amOpen || !amTx;
+    // A covered window is out of reach until it is on top again: no focus, no clicks, nothing read out.
+    const top = amTopLayer();
+    for (const id of AM_LAYERS) {
+      const covered = !$(id).hidden && id !== top;
+      if (covered !== $(id).hasAttribute("inert")) $(id).toggleAttribute("inert", covered);
+      if (covered) $(id).setAttribute("aria-hidden", "true"); else $(id).removeAttribute("aria-hidden");
+    }
+  }
+  function amGoBack() {
+    if (amTx) amCloseTranscript();
+    else if (amCard) amCloseCard();
+    else closeAgentMap();
+  }
+
+  // ---- painting ----
+  function renderAgentMap() {
+    if (!amOpen) return;
+    amPainting = true;
+    try {
+      for (const [id] of agentStopping) if (!AGENT_ACTIVE.has(agentRecords.get(id)?.state)) agentStopping.delete(id);
+      // Every open level stays live: the ones underneath show through the dimmed backdrop.
+      paintAmMap();
+      if (amCard) paintAmCard();
+      if (amTx) paintAmTranscript();
+    } finally { amPainting = false; }
+    // Durations tick once a second; nothing is painted while the panel is out of sight.
+    clearTimeout(amTick);
+    amTick = setTimeout(function tick() {
+      amTick = 0;
+      if (!amOpen) return;
+      if (document.hidden) { amTick = setTimeout(tick, 1000); return; }
+      renderAgentMap();
+    }, 1000);
+  }
+  function amSubtitle() {
+    const total = agentCounts().total;
+    return total > 0 ? `${agentPlural(total, "agent")} · click an agent for details` : "No agents in this chat yet";
+  }
+  function paintAmMap() {
+    agentsSetText($("agent-map-subtitle"), amSubtitle());
+    const body = $("agent-map-body"), active = document.activeElement;
+    const focusedKey = active && body.contains(active) ? active.dataset?.amKey || "" : "";
+    for (const id of [...amRows.keys()]) if (!agentRecords.has(id)) amRows.delete(id);
+    const children = amTree();
+    amLayout(amDepth(children));
+    const root = amRootEntry();
+    amPaintRoot(root);
     const fill = (parentId, list) => {
       const items = [];
       for (const record of children.get(parentId) || []) {
-        const entry = agentRowEntry(record);
-        agentRowUpdate(entry, record);
+        const entry = amAgentEntry(record);
+        amPaintAgentRow(entry, record);
         if (children.has(record.id)) {
-          if (!entry.nested) entry.nested = document.createElement("ul");
-          if (entry.nested.parentNode !== entry.item) entry.item.appendChild(entry.nested);
-          fill(record.id, entry.nested);
-        } else if (entry.nested) {
-          entry.nested.remove(); entry.nested = null;
+          if (!entry.kids) entry.kids = el("ul", "am-children");
+          const label = `Started by ${agentDisplayName(record)}`;
+          if (entry.kids.getAttribute("aria-label") !== label) entry.kids.setAttribute("aria-label", label);
+          if (entry.kids.parentNode !== entry.item) entry.item.appendChild(entry.kids);
+          fill(record.id, entry.kids);
+        } else if (entry.kids) {
+          entry.kids.remove(); entry.kids = null;
         }
         items.push(entry.item);
       }
       agentsPlace(list, items);
     };
-    fill("", tree);
-    const rows = [...tree.querySelectorAll(".agent-row")];
-    const kept = focusedRow && focusedRow.isConnected ? focusedRow : null;
-    const tabbable = kept || rows.find((row) => row.tabIndex === 0) || rows[0];
-    for (const row of rows) { const want = row === tabbable ? 0 : -1; if (row.tabIndex !== want) row.tabIndex = want; }
-    // Focus is put back only when this render took it: a focused row that moved, or one whose
-    // agent a snapshot dropped (then the list keeps it, on the row that is now tabbable).
-    if (focusedRow && document.activeElement !== focusedRow) (kept || tabbable || $("agents-settings")).focus();
-    $("agents-more").hidden = agentActiveExtra <= 0;
-    agentsSetText($("agents-more"), agentActiveExtra > 0 ? `+${agentActiveExtra} active agents not listed` : "");
-    $("agents-stop-note").hidden = c.active <= 0;
-    if (c.active > 0 && !agentsTick) agentsTick = setInterval(() => { if (agentsMenuOpen()) renderAgentsMenu(); }, 1000);
-    if (c.active <= 0 && agentsTick) { clearInterval(agentsTick); agentsTick = null; }
+    fill("", root.kids);
+    root.kids.hidden = !root.kids.childElementCount;
+    const more = $("agent-map-more");
+    more.hidden = agentTotalExtra <= 0;
+    agentsSetText(more, agentTotalExtra > 0
+      ? `${agentPlural(agentTotalExtra, "more agent")} not listed${agentActiveExtra > 0 ? `, ${agentActiveExtra} of them working` : ""}.` : "");
+    // Only what runs now: a task that ends drops out of the list (its card, if open, keeps it).
+    const tasks = amAllTasks().filter((task) => task.running);
+    const keys = new Set(tasks.map((task) => task.key));
+    for (const key of [...amTaskRows.keys()]) if (!keys.has(key)) amTaskRows.delete(key);
+    for (const key of [...taskStopping.keys()]) if (!keys.has(key)) taskStopping.delete(key);
+    agentsPlace($("agent-map-task-list"), tasks.map((task) => {
+      const entry = amTaskEntry(task);
+      amPaintTaskRow(entry, task);
+      return entry.item;
+    }));
+    $("agent-map-tasks").hidden = !tasks.length;
+    agentsSetText($("agent-map-tasks-title"), `${agentPlural(tasks.length, "background task")} · click a task for details`);
+    // One tab stop in the tree and one in the tasks; the arrow keys move within each.
+    amRove($("agent-map-tree"), focusedKey);
+    amRove($("agent-map-task-list"), focusedKey);
+    // A row that moved (an agent that ended goes down its column) lost focus with the move: give it back.
+    if (focusedKey && document.activeElement?.dataset?.amKey !== focusedKey) {
+      focusQuietly(amRowByKey(focusedKey) || amFirstRow(), { preventScroll: true });
+    }
   }
-  function openAgentsMenu() {
-    const menu = $("agentsmenu");
-    if (!menu || agentCounts().total <= 0) return;
-    hideModelMenu(); hideModeMenu(); hideContextMenu(); hideAddMenu();
-    menu.hidden = false;
+  function amRowByKey(key) {
+    return [...$("agent-map-body").querySelectorAll(".am-row")].find((row) => row.dataset.amKey === key) || null;
+  }
+  function amFirstRow() {
+    return $("agent-map-tree").querySelector(".am-agent") || $("agent-map-tree").querySelector(".am-row") || $("agent-map-close");
+  }
+  function amRove(list, focusedKey) {
+    const rows = [...list.querySelectorAll(".am-row")];
+    const keep = rows.find((row) => row.dataset.amKey === focusedKey) || rows.find((row) => row.tabIndex === 0) || rows[0];
+    for (const row of rows) { const want = row === keep ? 0 : -1; if (row.tabIndex !== want) row.tabIndex = want; }
+  }
+  // Focus the map puts somewhere is quiet; a row the reader moves to with the arrows shows its label,
+  // which is the whole name of a row that clips it.
+  function amFocusRow(row, { quiet = true } = {}) {
+    if (!row) return;
+    const list = row.closest(".am-tree, .am-task-list");
+    if (list) amRove(list, row.dataset.amKey);
+    if (quiet) focusQuietly(row, { preventScroll: true }); else row.focus();
+  }
+
+  // ---- opening and closing ----
+  // `from`: the control that opened it, which gets focus back; `command`: opened by /agents, so focus
+  // goes back to the prompt box.
+  function openAgentMap({ from = null, command = false } = {}) {
+    const layer = $("agent-map");
+    if (!layer || pipsOpen) return;
+    hideModelMenu(); hideModeMenu(); hideContextMenu(); hideAddMenu(); hidePop(); hoverTip.hide();
+    if (!amOpen) { amOpener = from; amByCommand = command; }
+    amOpen = true;
+    amDropLevels();
+    amSyncLayers();
     $("agents-pill").setAttribute("aria-expanded", "true");
-    renderAgentsMenu();
-    const rows = [...menu.querySelectorAll(".agent-row")];
-    (rows.find((row) => row.getAttribute("aria-disabled") !== "true") || rows[0] || $("agents-settings")).focus();
+    amObserve();
+    const measured = Math.round($("agent-map-tree").clientWidth || 0);
+    if (measured > 0) amWidth = measured;
+    if (backgroundTasksLive) vscode.postMessage({ type: "listBackgroundShells" });
+    renderAgentMap();
+    amFocusRow(amFirstRow());
   }
-  function agentsHideMenu(event) {
-    const menu = $("agentsmenu");
-    if (!menu || menu.hidden) return;
-    if (event && event.target && $("agents-picker").contains(event.target)) return;
-    menu.hidden = true;
+  function closeAgentMap({ restoreFocus = true } = {}) {
+    if (!amOpen) return;
+    amOpen = false;
+    amDropLevels();
+    clearTimeout(amTick); amTick = 0;
+    hoverTip.hide();
+    amSyncLayers();
     $("agents-pill").setAttribute("aria-expanded", "false");
-    if (agentsTick) { clearInterval(agentsTick); agentsTick = null; }
+    const opener = amOpener, byCommand = amByCommand;
+    amOpener = null; amByCommand = false;
+    if (!restoreFocus) return;
+    focusQuietly(!byCommand && opener?.isConnected && !opener.closest("[hidden]") ? opener : input);
   }
-  function agentJump(id) {
-    if (!agentRecords.get(id)) return;
-    agentsHideMenu();
-    openAgentPage(id, { from: $("agents-pill") });
+  // The card and the transcript, gone at once (the map closing, or opening afresh).
+  function amDropLevels() {
+    amClearTranscript();
+    amTx = null; amCard = null;
+    amResetOutput();
   }
+  // The layout follows the dialog's own width: a side bar dragged wider turns the tree on its side.
+  function amObserve() {
+    if (amObserver || typeof ResizeObserver !== "function") return;
+    amObserver = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      const width = Math.round(Number(entry?.contentRect?.width ?? entry?.target?.clientWidth ?? 0));
+      if (width > 0 && width !== amWidth) { amWidth = width; agentMapChanged(); }
+    });
+    amObserver.observe($("agent-map-tree"));
+  }
+
+  // ---- the card ----
+  // A smaller window over the dimmed map. `card`: {kind: "root"} | {kind: "agent", id} | {kind: "task", key};
+  // `from`: the row that opened it.
+  function amOpenCard(card, from) {
+    if (!amOpen) return;
+    amClearTranscript();
+    amTx = null;
+    amCard = { ...card, from, nodes: null, last: null };
+    amResetOutput();
+    hoverTip.hide();
+    amSyncLayers();
+    renderAgentMap();
+    $("agent-card-back").focus();
+    if (amCard?.kind === "task") amPollOutput();
+  }
+  function amCloseCard() {
+    if (!amCard) return;
+    const from = amCard.from;
+    amDropLevels();
+    amSyncLayers();
+    renderAgentMap();
+    // The row that opened it; one a snapshot has since dropped hands the focus to the first row.
+    amFocusRow(from?.isConnected && $("agent-map").contains(from) ? from : amFirstRow());
+  }
+  function amFold(host, title, open) {
+    const fold = host.appendChild(el("details", "am-fold"));
+    const summary = fold.appendChild(el("summary"));
+    summary.textContent = title;
+    fold.open = open;
+    return { fold, summary };
+  }
+  function amButton(host, label, onClick, cls = "act") {
+    const button = host.appendChild(el("button", cls));
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+  function amFacts(dl, facts) {
+    const sig = JSON.stringify(facts);
+    if (dl._sig === sig) return;
+    dl._sig = sig;
+    dl.replaceChildren(...facts.flatMap(([term, value]) => {
+      const dt = el("dt"), dd = el("dd");
+      dt.textContent = term; dd.textContent = value;
+      return [dt, dd];
+    }));
+    dl.hidden = !facts.length;
+  }
+  // A window's head: the dot, the title (whole in its hover label when it is clipped), the meta line.
+  function amWindowHead(prefix, { title, state, meta, sub = null }) {
+    const dot = $(`${prefix}-dot`);
+    if (dot.dataset.state !== state) dot.dataset.state = state;
+    const heading = $(`${prefix}-title`);
+    agentsSetText(heading, title);
+    if (heading.title !== title) heading.title = title;
+    agentsSetText($(`${prefix}-meta`), meta);
+    if (sub !== null) {
+      agentsSetText($(`${prefix}-sub`), sub);
+      $(`${prefix}-sub`).hidden = !sub;
+    }
+  }
+  function paintAmCard() {
+    const host = $("agent-card-body");
+    $("agent-card-box").dataset.kind = amCard.kind;
+    if (amCard.kind === "root") return paintRootCard(host);
+    if (amCard.kind === "agent") return paintAgentCard(host);
+    return paintTaskCard(host);
+  }
+  function amFresh(host) {
+    if (amCard.nodes) return null;
+    host.replaceChildren();
+    host.scrollTop = 0;
+    amCard.nodes = {};
+    return amCard.nodes;
+  }
+  function paintRootCard(host) {
+    const fresh = amFresh(host), n = amCard.nodes;
+    if (fresh) {
+      n.summary = host.appendChild(el("p", "am-card-line"));
+      n.states = host.appendChild(el("ul", "am-states"));
+      n.tasks = host.appendChild(el("p", "am-card-line"));
+      n.context = host.appendChild(el("p", "am-card-line am-quiet"));
+    }
+    const c = agentCounts();
+    amWindowHead("agent-card", { title: amChatName(), state: streaming ? "running" : "idle",
+      meta: [streaming ? "Working" : "Idle", ...amRootMeta()].join(" · ") });
+    agentsSetText(n.summary, c.total ? `${agentPlural(c.total, "agent")} in this chat` : "No agents in this chat yet.");
+    const lines = [[c.running, "working"], [c.waitingPermission, "waiting for your permission"], [c.waitingAnswer, "waiting for your answer"],
+      [c.queued, "queued"], [c.finished, "finished"], [c.failed, "failed"], [c.stopped, "stopped"]]
+      .filter(([count]) => count > 0).map(([count, label]) => `${count} ${label}`);
+    const sig = lines.join("\n");
+    if (n.states._sig !== sig) {
+      n.states._sig = sig;
+      n.states.replaceChildren(...lines.map((line) => { const li = el("li"); li.textContent = line; return li; }));
+    }
+    n.states.hidden = !lines.length;
+    const running = amAllTasks().filter((task) => task.running).length;
+    agentsSetText(n.tasks, running ? `${agentPlural(running, "background task")} running` : "Nothing running in the background");
+    const size = Math.max(0, Number(contextState.size || 0)), used = Math.max(0, Number(contextState.used || 0));
+    agentsSetText(n.context, size ? `${fmtTokens(used)} of ${fmtTokens(size)} tokens in its context window` : "");
+    n.context.hidden = !size;
+  }
+
+  // ---- an agent's card ----
+  // The prompt it was given: the spawn's own `prompt` argument, kept on its card; a nested agent of a
+  // parallel parent has its spawn in the parent's step log instead. A restored agent may have neither.
+  function agentPromptOf(record) {
+    const card = agentAnchor(record.id);
+    if (card?._agentPrompt) return card._agentPrompt;
+    const parent = record.parent_id ? agentRecords.get(String(record.parent_id)) : null;
+    const step = (Array.isArray(parent?.log) ? parent.log : [])
+      .find((ev) => ev?.type === "tool_call" && ev.call_id === record.call_id && typeof ev.args?.prompt === "string");
+    return step ? String(step.args.prompt).slice(0, 20000) : "";
+  }
+  // The calls it made, from the same source its page draws: its own cards in the chat (a child's call
+  // id carries its agent's id), else its step log.
+  function amToolCalls(record) {
+    const cards = [...log.querySelectorAll(".tool[data-call-id]")]
+      .filter((card) => innermostAgentId(card.dataset.callId) === record.id);
+    if (cards.length) {
+      return cards.map((card) => ({ status: card.dataset.status || "",
+        text: `${card.querySelector(".verb")?.textContent || ""} ${card.querySelector(".arg")?.textContent || ""}`.trim() }));
+    }
+    const calls = new Map();
+    for (const ev of Array.isArray(record.log) ? record.log : []) {
+      if (!ev || typeof ev !== "object") continue;
+      const key = ev.call_id || ev.name;
+      if (ev.type === "tool_call") {
+        const copy = toolCopy(ev.name);
+        calls.set(key, { status: "running", text: [copy.past, copy.target, String(ev.summary || ev.args?.description || "")].filter(Boolean).join(" ") });
+      } else if (ev.type === "tool_result" && calls.has(key)) {
+        calls.get(key).status = ev.is_error ? "failed" : "completed";
+      }
+    }
+    return [...calls.values()];
+  }
+  // Stop on a card: one agent, when the CLI can stop just that one; otherwise, for an agent working
+  // inside the turn, the turn's own Stop, which ends every agent with it -- and the card says so.
+  function amStopMode(record) {
+    if (record.background) return agentControlLive ? "agent" : "";
+    if (agentControlForeground) return "agent";
+    return streaming ? "turn" : "";
+  }
+  function amStopAgent(id) {
+    const record = agentRecords.get(id);
+    if (!record || !AGENT_ACTIVE.has(record.state) || agentStopping.get(id) === "stopping") return;
+    const mode = amStopMode(record);
+    if (!mode) return;
+    agentStopping.set(id, "stopping");
+    if (mode === "turn") doStop();
+    else vscode.postMessage({ type: "stopAgent", id });
+    renderAgentMap();
+  }
+  // "Finished · general-purpose · qwen3.8:27b · background": the card's and the transcript's meta line.
+  function amAgentMetaLine(record) {
+    return [amStateWord(record), record.agent_type ? String(record.agent_type) : "", String(record.model || curModel || ""),
+      record.background ? "background" : "foreground"].filter(Boolean).join(" · ");
+  }
+  function amAgentNumbers(record) {
+    return [amDuration(amAgentMs(record)), Number(record.tokens || 0) > 0 ? `${amTokens(record.tokens)} tokens` : ""].filter(Boolean);
+  }
+  function amSpawnedBy(record) {
+    const parent = record.parent_id ? agentRecords.get(String(record.parent_id)) : null;
+    return parent ? `Spawned by ${agentDisplayName(parent)}` : "Spawned by the main agent";
+  }
+  function paintAgentCard(host) {
+    const record = agentRecords.get(amCard.id) || amCard.last;
+    if (!record) { amCloseCard(); return; }
+    amCard.last = record;
+    const id = record.id, working = AGENT_ACTIVE.has(record.state);
+    const fresh = amFresh(host), n = amCard.nodes;
+    if (fresh) {
+      n.spawned = host.appendChild(el("p", "am-card-line am-spawned"));
+      n.stats = host.appendChild(el("p", "am-card-line"));
+      n.activity = host.appendChild(el("p", "am-card-line am-activity"));
+      n.failure = host.appendChild(el("p", "am-card-line am-failure"));
+      n.result = host.appendChild(el("div", "am-result"));
+      // The prompt is open while the agent works and folded once it has ended; the calls are open.
+      ({ fold: n.promptFold } = amFold(host, "Prompt", working));
+      n.prompt = n.promptFold.appendChild(el("pre", "am-prompt"));
+      ({ fold: n.callsFold, summary: n.callsTitle } = amFold(host, "Tool calls", true));
+      n.calls = n.callsFold.appendChild(el("ul", "am-calls"));
+      n.callsNote = n.callsFold.appendChild(el("p", "am-note"));
+      const actions = host.appendChild(el("div", "am-actions"));
+      n.stop = amButton(actions, "Stop agent", () => amStopAgent(id));
+      n.stopNote = actions.appendChild(el("p", "am-note"));
+      n.open = amButton(actions, "Open transcript", () => amOpenTranscript({ kind: "agent", id }, n.open), "act am-wide");
+    }
+    amWindowHead("agent-card", { title: agentDisplayName(record), state: record.state, meta: amAgentMetaLine(record) });
+    const parent = record.parent_id ? agentRecords.get(String(record.parent_id)) : null;
+    const spawnSig = parent ? `${parent.id}\n${agentDisplayName(parent)}` : "main";
+    if (n.spawned._sig !== spawnSig) {
+      n.spawned._sig = spawnSig;
+      n.spawned.replaceChildren(document.createTextNode("Spawned by "));
+      if (parent) {
+        // The parent's card, in this one's place: Back still goes to the map, to the row first used.
+        const link = amButton(n.spawned, agentDisplayName(parent), () => {
+          amCard = { kind: "agent", id: parent.id, from: amCard.from, nodes: null, last: null };
+          renderAgentMap();
+          $("agent-card-back").focus();
+        }, "am-link");
+        link.title = `Open ${agentDisplayName(parent)}'s details`;
+      } else n.spawned.appendChild(document.createTextNode("the main agent"));
+    }
+    const tools = Number(record.tool_calls || 0);
+    const stats = amAgentNumbers(record);
+    agentsSetText(n.stats, stats.join(" · "));
+    n.stats.hidden = !stats.length;
+    const activity = record.state === "waiting"
+      ? (record.waiting_for === "answer" ? "Waiting for your answer. Answer it in the chat's question card."
+        : "Waiting for your permission. Answer it in the chat's permission card.")
+      : record.state === "queued" ? "Queued: it starts when a worker is free."
+        : record.state === "running" ? (record.activity ? `Now: ${record.activity}` : "Working.") : "";
+    agentsSetText(n.activity, activity);
+    n.activity.hidden = !activity;
+    const failure = record.state === "failed" || record.state === "stopped" ? String(record.message || "").trim().slice(0, 4000) : "";
+    agentsSetText(n.failure, failure);
+    n.failure.hidden = !failure;
+    // What it reported, with what became of its changes, as its page shows them.
+    const resultSig = record.state === "finished" ? `${record.message || ""}\n${agentAnchor(id)?.querySelector(".body pre")?.textContent.length || 0}` : "";
+    if (n.result._sig !== resultSig) {
+      n.result._sig = resultSig;
+      n.result.replaceChildren();
+      if (record.state === "finished") {
+        const outcome = agentOutcomeNote(id);
+        if (outcome) n.result.appendChild(outcome);
+        const answer = agentAnswerText(record);
+        if (answer) {
+          const block = el("div", "text agent-answer");
+          block.innerHTML = md(answer);
+          n.result.appendChild(block);
+        }
+        paintAgentFiles(n.result, record);
+      }
+    }
+    n.result.hidden = !n.result.childElementCount;
+    const prompt = agentPromptOf(record);
+    if (n.prompt._text !== prompt) {
+      n.prompt._text = prompt;
+      n.prompt.textContent = prompt || "This agent's prompt was not kept in the chat.";
+      n.prompt.classList.toggle("am-quiet", !prompt);
+    }
+    const calls = amToolCalls(record);
+    agentsSetText(n.callsTitle, `Tool calls (${Math.max(calls.length, tools)})`);
+    const callSig = JSON.stringify(calls);
+    if (n.calls._sig !== callSig) {
+      n.calls._sig = callSig;
+      n.calls.replaceChildren(...calls.slice(-200).map((call) => {
+        const li = el("li", "am-call");
+        const dot = li.appendChild(el("span", "agent-dot"));
+        dot.setAttribute("aria-hidden", "true");
+        dot.dataset.state = call.status === "running" ? "running" : call.status === "failed" ? "failed" : "finished";
+        const text = li.appendChild(el("span", "am-call-text"));
+        text.textContent = call.text || "Tool call";
+        if (call.status === "running" || call.status === "failed") li.appendChild(el("span", "sr-only")).textContent = `, ${call.status}`;
+        return li;
+      }));
+    }
+    n.calls.hidden = !calls.length;
+    agentsSetText(n.callsNote, calls.length ? "" : tools > 0 ? "Its steps were not kept in this chat. Its transcript has its report."
+      : working ? "No tool calls yet." : "It made no tool calls.");
+    n.callsNote.hidden = !n.callsNote.textContent;
+    const mode = working ? amStopMode(record) : "";
+    const stopping = agentStopping.get(id) === "stopping";
+    n.stop.hidden = !mode;
+    n.stop.disabled = stopping;
+    agentsSetText(n.stop, stopping ? "Stopping…" : mode === "turn" ? "Stop the turn" : "Stop agent");
+    agentsSetText(n.stopNote, agentStopping.get(id) === "failed" ? "The agent could not be stopped. It may have finished already."
+      : mode === "turn" ? "Stop ends the whole turn, including every agent."
+        : working && !mode && record.background ? "This DGC CLI cannot stop one agent. Update DGC to stop agents one at a time." : "");
+    n.stopNote.hidden = !n.stopNote.textContent;
+    n.stopNote.classList.toggle("am-failure", agentStopping.get(id) === "failed");
+  }
+
+  // ---- a task's card ----
+  function amTaskFor(key) {
+    const task = amAllTasks().find((t) => t.key === key);
+    if (task) return task;
+    // Gone from every list (a preview stopped, a troupe dismissed): the card keeps its last snapshot.
+    const last = amCard?.kind === "task" && amCard.key === key ? amCard.last : null;
+    return last ? { ...last, running: false, stoppable: false, word: last.running ? "Ended" : last.word } : null;
+  }
+  function amTaskFacts(task) {
+    if (task.kind === "monitor") {
+      const item = task.item;
+      return [["Command", String(item.command || "")], ["Events", String(Math.max(0, Number(item.events) || 0))],
+        ...(Number(item.pending_events) > 0 ? [["Waiting for DGC", eventCount(item.pending_events)]] : []),
+        ["Ends", item.persistent ? "When it is stopped" : `After ${agentElapsed(Number(item.timeout_ms) || 0)}`], ["Id", task.id]]
+        .filter(([, value]) => value);
+    }
+    if (task.kind === "shell") {
+      const owner = task.item.agent_id ? agentRecords.get(String(task.item.agent_id)) : null;
+      return [["Command", task.name], ["Started by", owner ? agentDisplayName(owner) : task.item.agent_id ? "A sub-agent" : "The main agent"],
+        ...(Number.isInteger(task.item.exit_code) ? [["Exit code", String(task.item.exit_code)]] : []), ["Id", task.id]];
+    }
+    if (task.kind === "troupe") {
+      const ev = task.ev, planned = Number(ev.agents_planned) || 0;
+      return [["Agents", planned ? `About ${planned}` : ""], ["Results", String(ev.journal || "")]].filter(([, value]) => value);
+    }
+    if (task.kind === "pip") return [["Status", task.word], ["Details", String(task.run.detail || "")]].filter(([, value]) => value);
+    return [["Address", String(task.preview.url || "")], ["Files", String(task.preview.rel || "")]].filter(([, value]) => value);
+  }
+  function amStopTask(task) {
+    if (!task?.running || !task.stoppable || taskStopping.get(task.key) === "stopping") return;
+    if (task.kind === "troupe") stopTroupe(task.id);
+    else {
+      taskStopping.set(task.key, "stopping");
+      if (task.kind === "monitor") vscode.postMessage({ type: "stopMonitor", id: task.id });
+      else if (task.kind === "shell") vscode.postMessage({ type: "stopBackgroundShell", id: task.id });
+      else if (task.kind === "preview") vscode.postMessage({ type: "stopArtifact", id: task.id });
+    }
+    renderAgentMap();
+  }
+  function amOpenTask(task) {
+    if (task.kind === "preview" && task.preview.url) vscode.postMessage({ type: "openExternal", url: task.preview.url });
+    if (task.kind === "pip") {
+      closeAgentMap({ restoreFocus: false });
+      pipSetupCards?.openRun?.(task.id);
+    }
+  }
+  function amTaskHead(task) {
+    return { title: task.name, state: amTaskState(task), meta: [task.word, task.label, amDuration(task.ms)].filter(Boolean).join(" · ") };
+  }
+  // An output box: pinned to the end unless the reader scrolls up to read; back at the end, it follows again.
+  function amOutputBox(host, n, task, cls = "am-output") {
+    n.output = host.appendChild(el("pre", cls));
+    n.output.tabIndex = 0;
+    n.output.setAttribute("aria-label", `Output of ${task.name}`);
+    n.pinned = true;
+    n.output.addEventListener("scroll", () => {
+      n.pinned = n.output.scrollHeight - n.output.scrollTop - n.output.clientHeight < 8;
+    }, { passive: true });
+    n.outputNote = host.appendChild(el("p", "am-note"));
+  }
+  function paintTaskCard(host) {
+    const task = amTaskFor(amCard.key);
+    if (!task) { amCloseCard(); return; }
+    amCard.last = task;
+    const fresh = amFresh(host), n = amCard.nodes;
+    if (fresh) {
+      n.facts = host.appendChild(el("dl", "am-facts"));
+      if (task.kind === "troupe") n.stages = host.appendChild(el("ol", "troupe-stages am-stages"));
+      if (task.output) {
+        const { fold } = amFold(host, "Output", true);
+        amOutputBox(fold, n, task);
+      }
+      const actions = host.appendChild(el("div", "am-actions"));
+      if (task.kind === "preview") n.open = amButton(actions, "Open in browser", () => amOpenTask(amTaskFor(amCard.key)));
+      if (task.kind === "pip") n.open = amButton(actions, "Open in Pips", () => amOpenTask(amTaskFor(amCard.key)));
+      if (task.kind !== "pip") n.stop = amButton(actions, "Stop", () => amStopTask(amTaskFor(amCard.key)));
+      n.stopNote = actions.appendChild(el("p", "am-note am-failure"));
+      // Its output in a large window, as an agent's card opens its transcript.
+      if (task.output) n.full = amButton(actions, "Open output", () => amOpenTranscript({ kind: "output", key: task.key }, n.full), "act am-wide");
+    }
+    if (!task.running) taskStopping.delete(task.key);
+    amWindowHead("agent-card", amTaskHead(task));
+    amFacts(n.facts, amTaskFacts(task));
+    if (n.stages) {
+      const html = troupeStageRows(task.ev);
+      if (n.stages._html !== html) { n.stages._html = html; n.stages.innerHTML = html; }
+    }
+    if (n.output) amPaintOutput(n, task);
+    if (n.stop) {
+      const stopping = taskStopping.get(task.key) === "stopping" || task.stopping || task.word === "Stopping";
+      n.stop.hidden = !task.running;
+      n.stop.disabled = stopping || !task.stoppable;
+      agentsSetText(n.stop, stopping ? "Stopping…" : "Stop");
+    }
+    agentsSetText(n.stopNote, taskStopping.get(task.key) === "failed" ? "It could not be stopped. It may have finished already." : "");
+    n.stopNote.hidden = !n.stopNote.textContent;
+    if (n.open) n.open.disabled = task.kind === "preview" ? !task.running : false;
+    amLastLook(task);
+  }
+  // The last look at a task's output once it has ended.
+  function amLastLook(task) {
+    if (amOutput?.key === task.key && !task.running && !amOutput.final && !amOutput.inflight) amPollOutput();
+  }
+  function amPaintOutput(n, task) {
+    let text = "", note = "";
+    if (backgroundTasksLive) {
+      const o = amOutput?.key === task.key ? amOutput : null;
+      text = o?.text || "";
+      if (o?.truncated && text) note = `Showing the last ${amBytes(new TextEncoder().encode(text).length)} of ${amBytes(o.total)} of output.`;
+      else if (!text) note = o?.state === "failed" ? "Output is not available." : task.running ? "No output yet." : "No output.";
+    } else if (task.kind === "monitor") {
+      // A CLI that cannot send the output: the lines the monitor's events brought to the chat.
+      text = (monitorLines.get(task.id) || []).join("\n");
+      note = text ? "The lines this monitor reported to the chat." : task.running ? "No output yet." : "No output.";
+    } else note = "Output is not available.";
+    const pre = n.output;
+    pre.hidden = !text;                          // shown first: a hidden box has nothing to scroll
+    if (pre._text !== text) {
+      pre._text = text;
+      pre.textContent = text;
+      if (n.pinned) pre.scrollTop = pre.scrollHeight;
+    }
+    agentsSetText(n.outputNote, note);
+    n.outputNote.hidden = !note;
+  }
+
+  // ---- the transcript ----
+  // A large window over the card: the agent's whole conversation, drawn by the builder its page uses
+  // (buildAgentWork), in the order it happened, and live while it works. A nested agent's name in it
+  // opens that agent's transcript in its place, and Back steps out one at a time. For a task, its output.
+  function amOpenTranscript(tx, from) {
+    if (!amCard) return;
+    amClearTranscript();
+    amTx = { ...tx, from, stack: [], built: false, sig: "", lines: [], images: [], last: null, nodes: null };
+    hoverTip.hide();
+    amSyncLayers();
+    renderAgentMap();
+    $("agent-transcript-back").focus();
+    if (tx.kind === "output") amPollOutput();
+  }
+  function amClearTranscript() {
+    if (!amTx) return;
+    for (const line of amTx.lines) clearTimeout(line.timer);
+    clearImageRecords(amTx.images);
+    amTx.lines = []; amTx.images = [];
+    $("agent-transcript-log").replaceChildren();
+  }
+  function amCloseTranscript() {
+    if (!amTx) return;
+    if (amTx.stack.length) {
+      const left = amTx.id;
+      amClearTranscript();
+      Object.assign(amTx, { id: amTx.stack.pop(), built: false, sig: "", last: null });
+      renderAgentMap();
+      const name = $("agent-transcript-log").querySelector(`.agent-name[data-agent-id="${cssEscape(left)}"]`);
+      focusQuietly(name || $("agent-transcript-back"), { preventScroll: true });
+      return;
+    }
+    const from = amTx.from;
+    amClearTranscript();
+    amTx = null;
+    amSyncLayers();
+    renderAgentMap();
+    focusQuietly(from?.isConnected && $("agent-card").contains(from) ? from : $("agent-card-back"), { preventScroll: true });
+  }
+  function amNestedTranscript(id, opener) {
+    if (!amTx || !agentRecords.has(id) || amTx.id === id) return;
+    amTx.stack.push(amTx.id);
+    amClearTranscript();
+    Object.assign(amTx, { id, built: false, sig: "", last: null });
+    renderAgentMap();
+    $("agent-transcript-back").focus();
+    void opener;
+  }
+  // What the transcript draws, in brief: when it changes the transcript is drawn again. The chat's own
+  // cards for this agent change in place (a call finishing, output arriving), so their states and sizes
+  // are part of it, and so are its nested agents' states, which its lines say.
+  function amTranscriptSig(record) {
+    const id = record.id;
+    const nodes = [...log.querySelectorAll(".agent-owned")]
+      .filter((node) => (node.dataset.agentId || node.dataset.agent) === id || innermostAgentId(node.dataset.callId) === id);
+    const kids = [...agentRecords.values()].filter((r) => r.parent_id === id);
+    return JSON.stringify([record.state, String(record.message || "").length, Array.isArray(record.log) ? record.log.length : 0,
+      nodes.map((node) => `${node.dataset.status || ""}:${node.textContent.length}`).join(","),
+      kids.map((r) => `${r.id}:${r.state}:${agentDisplayName(r)}`).join(","),
+      agentAnchor(id)?.querySelector(".body pre")?.textContent.length || 0, agentPromptOf(record).length]);
+  }
+  function paintAmTranscript() {
+    const box = $("agent-transcript-box"), body = $("agent-transcript-body");
+    box.dataset.kind = amTx.kind;
+    // Back says where it goes: out of a nested agent's transcript to its parent's, else to the card.
+    const back = $("agent-transcript-back");
+    const label = amTx.stack.length ? "Back to the parent agent's transcript" : amTx.kind === "output" ? "Back to the task" : "Back to the agent";
+    hoverTip.retitle(back, label);
+    if (back.getAttribute("aria-label") !== label) back.setAttribute("aria-label", label);
+    if (amTx.kind === "output") return paintOutputWindow(body);
+    const record = agentRecords.get(amTx.id) || amTx.last;
+    if (!record) { amCloseTranscript(); return; }
+    amTx.last = record;
+    amWindowHead("agent-transcript", { title: agentDisplayName(record), state: record.state, meta: amAgentMetaLine(record),
+      sub: [amSpawnedBy(record), ...amAgentNumbers(record)].join(" · ") });
+    const sig = amTranscriptSig(record);
+    if (amTx.built && sig === amTx.sig) return;
+    const into = $("agent-transcript-log");
+    // Drawn again: the reader keeps their place (or the end, when they were at it), the cards they
+    // opened stay open, and a nested agent's name that had focus gets it back.
+    const keepBottom = !amTx.built || body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+    const keep = body.scrollTop;
+    const opened = new Set([...into.querySelectorAll(".tool.open")].map((card) => card.dataset.callId));
+    const active = document.activeElement;
+    const focusedName = active && into.contains(active) ? active.closest(".agent-name")?.dataset.agentId || "" : "";
+    for (const line of amTx.lines) clearTimeout(line.timer);
+    clearImageRecords(amTx.images);
+    amTx.lines = []; amTx.images = [];
+    buildAgentWork(record.id, into, { lines: amTx.lines, images: amTx.images, conversation: true,
+      open: (id, opener) => amNestedTranscript(id, opener) });
+    for (const card of into.querySelectorAll(".tool")) {
+      if (opened.has(card.dataset.callId) && !card.classList.contains("open")) card.querySelector(".tool-toggle")?.click();
+    }
+    amTx.built = true;
+    amTx.sig = sig;
+    body.scrollTop = keepBottom ? body.scrollHeight : keep;
+    if (focusedName) focusQuietly(into.querySelector(`.agent-name[data-agent-id="${cssEscape(focusedName)}"]`), { preventScroll: true });
+  }
+  function paintOutputWindow(body) {
+    const task = amTaskFor(amTx.key);
+    if (!task) { amCloseTranscript(); return; }
+    amWindowHead("agent-transcript", { ...amTaskHead(task), sub: task.kind === "shell" || task.kind === "monitor" ? String(task.item.command || "") : "" });
+    const into = $("agent-transcript-log");
+    if (!amTx.nodes) {
+      into.replaceChildren();
+      amTx.nodes = {};
+      amOutputBox(into, amTx.nodes, task, "am-output am-output-full");
+    }
+    amPaintOutput(amTx.nodes, task);
+    void body;
+    amLastLook(task);
+  }
+
+  // ---- live output ----
+  function amResetOutput() {
+    if (amOutput) clearTimeout(amOutput.timer);
+    amOutput = null;
+  }
+  // The task whose output is on screen: the output window's, else the open task card's.
+  function amOutputKey() {
+    if (amTx?.kind === "output") return amTx.key;
+    return amCard?.kind === "task" ? amCard.key : "";
+  }
+  function amPollOutput() {
+    const key = amOutputKey();
+    if (!amOpen || !key || !backgroundTasksLive) return;
+    const task = amTaskFor(key);
+    if (!task?.output) return;
+    if (!amOutput || amOutput.key !== task.key) {
+      amOutput = { key: task.key, id: task.id, text: "", total: 0, truncated: false, state: "loading",
+        inflight: false, sentAt: 0, timer: 0, final: false };
+    }
+    clearTimeout(amOutput.timer); amOutput.timer = 0;
+    if (document.hidden) return;                 // the panel coming back into view picks it up again
+    const now = agentNow();
+    if (amOutput.inflight && now - amOutput.sentAt > 6000) amOutput.inflight = false;   // an answer that never came
+    if (!amOutput.inflight && (task.running || !amOutput.final)) {
+      amOutput.inflight = true;
+      amOutput.sentAt = now;
+      if (!task.running) amOutput.final = true;
+      vscode.postMessage({ type: "getBackgroundOutput", id: task.id });
+    }
+    if (task.running) amOutput.timer = setTimeout(amPollOutput, 1000);
+  }
+  function amOutputAnswer(ev) {
+    if (!amOutput || String(ev.id || "") !== amOutput.id) return;
+    amOutput.inflight = false;
+    amOutput.text = String(ev.output || "");
+    amOutput.total = Math.max(0, Number(ev.total_bytes) || 0);
+    amOutput.truncated = ev.truncated === true;
+    amOutput.state = "ready";
+    agentMapChanged();
+  }
+  function amOutputFailed(id) {
+    if (!amOutput || String(id || "") !== amOutput.id) return;
+    amOutput.inflight = false;
+    amOutput.state = "failed";
+    agentMapChanged();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || !amOpen) return;
+    renderAgentMap();
+    amPollOutput();
+  });
+
+  // ---- the task sources ----
+  function amShells(ev) {
+    if (!backgroundTasksLive) return;
+    shellItems = (Array.isArray(ev.items) ? ev.items : [])
+      .filter((item) => item && typeof item === "object" && typeof item.id === "string" && item.id).slice(0, 64);
+    agentMapChanged();
+  }
+  function amNoteMonitorLines(ev) {
+    const id = String(ev.id || "");
+    if (!id || ev.kind === "background_exit") return;
+    const lines = monitorLines.get(id) || [];
+    lines.push(...(Array.isArray(ev.lines) ? ev.lines : []).map(String));
+    monitorLines.set(id, lines.slice(-200));
+    agentMapChanged();
+  }
+  function amPreviewReady(ev) {
+    const id = String(ev.id || "");
+    if (!id) return;
+    previews.set(id, { id, name: String(ev.name || id), url: String(ev.url || ""), rel: String(ev.rel || ""),
+      readyWall: Date.now(), state: "running" });
+    agentMapChanged();
+  }
+  // The answer to /artifacts or to a Stop: the previews running now. One this chat knew that is not
+  // listed has stopped.
+  function amPreviewList(ev) {
+    const listed = new Set();
+    for (const item of Array.isArray(ev.items) ? ev.items : []) {
+      const id = String(item?.id || "");
+      if (!id) continue;
+      listed.add(id);
+      const known = previews.get(id);
+      previews.set(id, { ...known, id, name: String(item.name || id), url: String(item.url || ""), rel: String(item.rel || ""),
+        uptime: String(item.uptime || ""), state: "running" });
+    }
+    for (const [id, preview] of previews) if (!listed.has(id)) preview.state = "stopped";
+    agentMapChanged();
+  }
+  function amPreviewStopState(msg) {
+    const id = String(msg.id || ""), preview = previews.get(id);
+    if (!preview) return;
+    if (msg.state === "stopped") preview.state = "stopped";
+    else if (msg.state === "error") taskStopping.set(`preview:${id}`, "failed");
+    agentMapChanged();
+  }
+  function amTasksReset() {
+    shellItems = []; monitorLines.clear(); previews.clear(); taskStopping.clear(); taskEndedWall.clear();
+    amTaskRows.clear();
+  }
+
   $("agents-pill").addEventListener("click", (event) => {
     event.stopPropagation();
-    if (agentsMenuOpen()) agentsHideMenu(); else openAgentsMenu();
+    openAgentMap({ from: $("agents-pill") });
   });
-  $("agents-settings").addEventListener("click", () => {
-    agentsHideMenu();
+  $("agent-map-close").addEventListener("click", () => closeAgentMap());
+  $("agent-card-back").addEventListener("click", () => amCloseCard());
+  $("agent-transcript-back").addEventListener("click", () => amCloseTranscript());
+  $("agent-map-settings").addEventListener("click", () => {
+    closeAgentMap({ restoreFocus: false });
     vscode.postMessage({ type: "slash", action: "subagent" });
   });
-  $("agentsmenu").addEventListener("keydown", (event) => {
-    const rows = [...$("agentsmenu").querySelectorAll(".agent-row")];
-    const at = rows.indexOf(document.activeElement);
-    const move = (index) => {
-      if (!rows.length) return;
-      const next = rows[Math.max(0, Math.min(rows.length - 1, index))];
-      rows.forEach((row) => { row.tabIndex = row === next ? 0 : -1; });
-      next.focus();
-    };
+  for (const id of AM_LAYERS) {
+    const layer = $(id);
+    // A click on the dimmed space around the window on top goes back one level; one inside it does not.
+    layer.addEventListener("click", (event) => { if (event.target === layer && amTopLayer() === id) amGoBack(); });
+    layer.addEventListener("keydown", (event) => amLayerKey(event, id));
+  }
+  // Focus stays in the window on top: anything that moves it elsewhere (a click on the page behind, a
+  // control focusing itself as it updates) hands it back.
+  document.addEventListener("focusin", (event) => {
+    const top = amTopLayer();
+    if (!top || $(top).contains(event.target)) return;
+    focusQuietly($(`${top}-box`), { preventScroll: true });
+  });
+  function amLayerKey(event, id) {
     if (event.key === "Escape") {
-      // Esc in the composer is Stop: this one must never reach it.
+      // Esc in the composer is Stop: this one must never reach it. It goes back one level.
       event.preventDefault(); event.stopPropagation();
-      agentsHideMenu();
-      focusQuietly($("agents-pill"));
-    } else if (event.key === "ArrowDown" && rows.length) { event.preventDefault(); move(at < 0 ? 0 : at + 1); }
-    else if (event.key === "ArrowUp" && rows.length) { event.preventDefault(); move(at < 0 ? rows.length - 1 : at - 1); }
-    else if (event.key === "Home" && rows.length) { event.preventDefault(); move(0); }
-    else if (event.key === "End" && rows.length) { event.preventDefault(); move(rows.length - 1); }
-  });
-  $("agentsmenu").addEventListener("focusout", (event) => {
-    // Tab out of the dialog closes it; a click inside that lands on no control does not.
-    const next = event.relatedTarget;
-    if (next && !$("agents-picker").contains(next)) agentsHideMenu();
-  });
+      amGoBack();
+      return;
+    }
+    if (event.key === "Tab") {
+      const nodes = [...$(`${amTopLayer()}-box`).querySelectorAll("button, summary, a[href], [tabindex]")]
+        .filter((node) => node.tabIndex >= 0 && !node.disabled && !node.closest("[hidden]"));
+      if (!nodes.length) return;
+      const first = nodes[0], last = nodes[nodes.length - 1], at = nodes.indexOf(document.activeElement);
+      if (at < 0) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
+      else if (event.shiftKey && at === 0) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && at === nodes.length - 1) { event.preventDefault(); first.focus(); }
+      return;
+    }
+    if (id !== "agent-map") return;
+    const row = event.target.closest?.(".am-row");
+    const list = row?.closest(".am-tree, .am-task-list");
+    if (!list) return;
+    const rows = [...list.querySelectorAll(".am-row")], at = rows.indexOf(row);
+    const next = event.key === "ArrowDown" ? rows[Math.min(rows.length - 1, at + 1)]
+      : event.key === "ArrowUp" ? rows[Math.max(0, at - 1)]
+        : event.key === "Home" ? rows[0] : event.key === "End" ? rows[rows.length - 1] : null;
+    if (!next) return;
+    event.preventDefault();
+    amFocusRow(next, { quiet: false });
+  }
 
   // ---- announcements (debounced so a batch speaks once) ----
   function agentAnnounce() {
@@ -9026,6 +10062,10 @@
 
   // ---- chat boundaries and backend exits ----
   function agentsSessionReset(kind) {
+    // The map belongs to the chat on screen: any reset closes it, and the prompt box takes the focus.
+    const mapWasOpen = agentMapOpen();
+    closeAgentMap({ restoreFocus: false });
+    agentStopping.clear();
     closeAgentPage({ all: true });
     // Every kind empties the transcript (a rewind and a chat switch too), and with it every line.
     for (const line of agentLines) clearTimeout(line.timer);
@@ -9039,19 +10079,18 @@
       agentAnchors.clear();
       for (const card of document.querySelectorAll(".tool[data-agent-id]")) delete card.dataset.agentId;
       agentsHoldClaims = agentRecords.size > 0 || agentTotalExtra > 0;
-      scheduleAgentsMenuRender();
+      if (mapWasOpen) input.focus();
       return;
     }
-    const wasOpen = agentsMenuOpen();
     agentsHoldClaims = false;
-    agentsTurnLive = false;
-    agentsEpoch += 1;
-    agentRecords.clear(); agentAnchors.clear(); agentsBatch.clear(); agentRowNodes.clear();
-    $("agents-tree")?.replaceChildren();
+    agentRecords.clear(); agentAnchors.clear(); agentsBatch.clear(); amRows.clear();
+    amRoot?.kids.replaceChildren();
+    // What ran in the background of the chat that was left is not this chat's.
+    amTasksReset();
     agentTotalExtra = 0; agentActiveExtra = 0;
     clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null; agentsSpokenActive = false;
     renderAgentsPill();
-    if (wasOpen) input.focus();
+    if (mapWasOpen) input.focus();
   }
   function agentsBackendExit() {
     for (const record of agentRecords.values()) {
@@ -9059,11 +10098,17 @@
       record.state = "stopped";
       record.endedAt = agentNow();
       record.message = "DGC's backend stopped";
+      record.endedWall = Date.now();
       delete record.waiting_for; delete record.activity; delete record.duration_ms;
     }
     agentActiveExtra = 0;
     clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null; agentsSpokenActive = false; agentsBatch.clear();
-    agentsHideMenu();
+    // The map closes; nothing it could stop is running any more. The background commands went with
+    // the process that ran them.
+    closeAgentMap();
+    agentStopping.clear();
+    const gone = Date.now() / 1000;
+    shellItems = shellItems.map((item) => (item.state === "running" ? { ...item, state: "killed", ended_at: gone } : item));
     // Their lines say "stopped", with why on each name, until the new backend's snapshot says more.
     repaintAgentLines();
     if (agentPageId) paintAgentPage(agentPageId);
@@ -9082,16 +10127,16 @@
   });
 
   // The four seams above stay the foundation's no-op stubs (lane-hooks.test.mjs instruments them in
-  // place); the agents indicator chains its handlers onto them.
+  // place); the agents indicator chains its handlers onto three. `hideAgentsMenu` closed the agents
+  // dropdown, which the agent map replaced: the map is modal, so no other menu can open over it.
   function agentsChain(stub, handler) { return function (...args) { stub(...args); return handler(...args); }; }
   agentsOnSessionReset = agentsChain(agentsOnSessionReset, agentsSessionReset);
   agentsOnBackendExit = agentsChain(agentsOnBackendExit, agentsBackendExit);
   agentsOnToolCard = agentsChain(agentsOnToolCard, agentsToolCard);
-  hideAgentsMenu = agentsChain(hideAgentsMenu, agentsHideMenu);
   $("agent-back")?.addEventListener("click", () => closeAgentPage());
   document.addEventListener("keydown", (event) => {
     if (pipsOpen || event.key !== "Escape" || !agentPageId) return;
-    if (agentsMenuOpen()) return;
+    if (agentMapOpen()) return;             // the map over the page takes its own Escape
     event.preventDefault();
     event.stopPropagation();
     closeAgentPage();

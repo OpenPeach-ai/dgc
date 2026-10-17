@@ -267,11 +267,13 @@ test("only the names open pages; Back and Escape return focus to the name that w
   p.doc.dispatchEvent(new p.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
   assert.equal(p.doc.body.dataset.agentPage, undefined);
   assert.equal(p.doc.activeElement, b);
-  // From the agents list, Back returns to the pill.
+  // The agent map opens an agent's transcript in its own windows, not its page; backing out of them,
+  // one Escape a level, returns to the pill.
   p.$("agents-pill").click();
-  p.doc.querySelector(`.agent-row[data-agent-id="${sid(3)}"]`).click();
-  assert.equal(p.doc.body.dataset.agentPage, sid(3));
-  p.$("agent-back").click();
+  p.doc.querySelector(`#agent-map .am-row[data-agent-id="${sid(3)}"]`).click();
+  [...p.$("agent-card-body").querySelectorAll("button")].find((b) => b.textContent === "Open transcript").click();
+  assert.equal(p.doc.body.dataset.agentPage, undefined);
+  for (let i = 0; i < 3; i++) p.doc.activeElement.dispatchEvent(new p.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
   assert.equal(p.doc.activeElement, p.$("agents-pill"));
   assert.deepEqual(p.errors, []);
 });
@@ -435,12 +437,17 @@ test("a nested agent is a line on its parent's page, and Back steps back one pag
   p.$("agent-back").click();
   assert.equal(p.doc.body.dataset.agentPage, undefined, "and again to the chat");
   assert.equal(p.doc.activeElement, parentName, "with focus on the parent's name in the chat");
-  // A page opened from the agents list starts over: Back goes straight to the chat.
+  // The agent map opened over a nested page and closed again leaves the pages as they were: Back
+  // still steps to the parent's page, then to the chat.
   parentName.click();
   page.querySelector(`.agent-name[data-agent-id="${sid(2)}"]`).click();
   p.$("agents-pill").click();
-  p.doc.querySelector(`.agent-row[data-agent-id="${sid(1)}"]`).click();
-  assert.equal(p.$("agent-back").getAttribute("title"), "Back to chat");
+  p.doc.activeElement.dispatchEvent(new p.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal(p.$("agent-map").hidden, true);
+  assert.equal(p.doc.body.dataset.agentPage, sid(2));
+  assert.equal(p.$("agent-back").getAttribute("title"), "Back to Parent work");
+  p.$("agent-back").click();
+  assert.equal(p.doc.body.dataset.agentPage, sid(1));
   p.$("agent-back").click();
   assert.equal(p.doc.body.dataset.agentPage, undefined);
   assert.deepEqual(p.errors, []);

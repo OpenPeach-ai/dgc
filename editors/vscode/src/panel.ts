@@ -1261,6 +1261,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (be && this.lastReadyEvent?.capabilities?.agents) {
         be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
       }
+      // Nor the background commands the agent map lists.
+      if (be && this.backgroundTasks()) {
+        be.send({ type: "list_background_shells", request_id: this.nextRequestId("shells-restore") } as any);
+      }
       // Nor the messages queued behind the running turn: without them a Stop (or the backend going
       // away) had nothing to hand back, and the user's words were lost.
       const queued = [...this.unstartedPrompts.values()].filter((prompt) => prompt.queued);
@@ -1746,6 +1750,54 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.requestState(this.ensureBackend(), "troupe-stop", { type: "stop_troupe", run_id: runId }, "troupes", 5000);
     } catch (err: any) {
       this.post({ type: "event", event: { type: "error", message: err?.message || "DGC could not stop the troupe." } });
+    }
+  }
+
+  /** Stop ONE sub-agent from the agent map. A background agent always could be (`agent_control`); a foreground one
+   *  only when the CLI says so (`agent_control_foreground`), otherwise the map offers the turn's own Stop instead
+   *  and never sends this. The backend answers with an `agents` snapshot and, later, the agent's own agent_ended;
+   *  only a refusal needs saying here, so the map can put its Stop back. */
+  private async stopAgent(id: string): Promise<void> {
+    const agentId = String(id || "");
+    if (!/^sub-[0-9a-f]{12}$/i.test(agentId) || !(this.lastReadyEvent?.capabilities as any)?.agent_control) { return; }
+    try {
+      await this.ensureBackend().request({ type: "agent_control", action: "close", id: agentId,
+        request_id: this.nextRequestId("agent-stop") }, "agents", 5000);
+    } catch (err: any) {
+      this.post({ type: "agent_stop_state", id: agentId, state: "error",
+        error: err?.message || "DGC could not stop the agent." });
+    }
+  }
+
+  /** Background shells (`bash` with background:true) reach the map only from a CLI that advertises
+   *  `background_tasks`. The commands are new in that version, so nothing here is sent to one that is not. */
+  private backgroundTasks(): boolean {
+    return Number((this.lastReadyEvent?.capabilities as any)?.background_tasks?.version) >= 1;
+  }
+
+  private async stopBackgroundShell(id: string): Promise<void> {
+    const shellId = String(id || "").slice(0, 64);
+    if (!shellId || !this.backgroundTasks()) { return; }
+    try {
+      await this.ensureBackend().request({ type: "stop_background_shell", id: shellId,
+        request_id: this.nextRequestId("shell-stop") } as any, "background_shells" as DgcEvent["type"], 5000);
+    } catch (err: any) {
+      this.post({ type: "background_stop_state", kind: "shell", id: shellId, state: "error",
+        error: err?.message || "DGC could not stop the command." });
+    }
+  }
+
+  /** The tail of a background shell's or a monitor's output, for the map's open task card. The answer is an
+   *  ordinary `background_output` event, which reaches the webview like any other; a refusal or a timeout is
+   *  said separately, so the card can say the output is not available instead of waiting. */
+  private async getBackgroundOutput(id: string): Promise<void> {
+    const taskId = String(id || "").slice(0, 64);
+    if (!taskId || !this.backgroundTasks()) { return; }
+    try {
+      await this.ensureBackend().request({ type: "get_background_output", id: taskId, max_bytes: 65536,
+        request_id: this.nextRequestId("task-output") } as any, "background_output" as DgcEvent["type"], 5000);
+    } catch {
+      this.post({ type: "background_output_failed", id: taskId });
     }
   }
 
@@ -4341,6 +4393,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "stopTroupe":
         void this.stopTroupe(String(msg.run_id || ""));
+        break;
+      case "stopAgent":
+        void this.stopAgent(String(msg.id || ""));
+        break;
+      case "listBackgroundShells":
+        if (this.backgroundTasks()) {
+          be.send({ type: "list_background_shells", request_id: this.nextRequestId("shells-list") } as any);
+        }
+        break;
+      case "stopBackgroundShell":
+        void this.stopBackgroundShell(String(msg.id || ""));
+        break;
+      case "getBackgroundOutput":
+        void this.getBackgroundOutput(String(msg.id || ""));
         break;
       case "copy":
         vscode.env.clipboard.writeText(String(msg.text || ""));
@@ -7001,6 +7067,43 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div id="goal-review-body" class="surface-markdown" tabindex="0"></div>
   </div>
 </div>
+<div id="agent-map" class="modal-layer agent-map-layer" role="dialog" aria-modal="true" aria-labelledby="agent-map-title" aria-describedby="agent-map-subtitle" hidden>
+  <div id="agent-map-box" class="agent-map" data-layout="vertical" tabindex="-1">
+    <div class="agent-map-head">
+      <div class="agent-map-titles"><h2 id="agent-map-title">Agent map</h2><p id="agent-map-subtitle" class="agent-map-subtitle"></p></div>
+      <button type="button" id="agent-map-close" class="fbtn agent-map-close" title="Close" aria-label="Close the agent map"><span class="codicon codicon-close" aria-hidden="true"></span></button>
+    </div>
+    <div id="agent-map-body" class="agent-map-body">
+      <div id="agent-map-tree" class="am-tree"></div>
+      <p id="agent-map-more" class="am-note" hidden></p>
+      <section id="agent-map-tasks" class="am-tasks" aria-labelledby="agent-map-tasks-title" hidden>
+        <h3 id="agent-map-tasks-title" class="agent-map-subtitle"></h3>
+        <ul id="agent-map-task-list" class="am-task-list"></ul>
+      </section>
+      <button type="button" id="agent-map-settings" class="link am-settings" title="Open Settings ▸ Agents to change the sub-agent model and host">Sub-agent settings</button>
+    </div>
+  </div>
+</div>
+<div id="agent-card" class="modal-layer agent-map-layer am-card-layer" role="dialog" aria-modal="true" aria-labelledby="agent-card-title" aria-describedby="agent-card-meta" hidden>
+  <div id="agent-card-box" class="agent-map am-window am-card-window" tabindex="-1">
+    <div class="agent-map-head">
+      <button type="button" id="agent-card-back" class="fbtn agent-map-back" title="Back to the agent map" aria-label="Back to the agent map"><span class="codicon codicon-arrow-left" aria-hidden="true"></span></button>
+      <span id="agent-card-dot" class="agent-dot agent-map-head-dot" aria-hidden="true"></span>
+      <div class="agent-map-titles"><h2 id="agent-card-title"></h2><p id="agent-card-meta" class="agent-map-subtitle"></p></div>
+    </div>
+    <div id="agent-card-body" class="agent-map-body am-card"></div>
+  </div>
+</div>
+<div id="agent-transcript" class="modal-layer agent-map-layer am-transcript-layer" role="dialog" aria-modal="true" aria-labelledby="agent-transcript-title" aria-describedby="agent-transcript-meta" hidden>
+  <div id="agent-transcript-box" class="agent-map am-window am-transcript-window" tabindex="-1">
+    <div class="agent-map-head">
+      <button type="button" id="agent-transcript-back" class="fbtn agent-map-back" title="Back" aria-label="Back"><span class="codicon codicon-arrow-left" aria-hidden="true"></span></button>
+      <span id="agent-transcript-dot" class="agent-dot agent-map-head-dot" aria-hidden="true"></span>
+      <div class="agent-map-titles"><h2 id="agent-transcript-title"></h2><p id="agent-transcript-meta" class="agent-map-subtitle"></p><p id="agent-transcript-sub" class="agent-map-subtitle"></p></div>
+    </div>
+    <div id="agent-transcript-body" class="agent-map-body am-transcript-body"><div id="agent-transcript-log" class="am-transcript-log"></div></div>
+  </div>
+</div>
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
 <div id="queued" role="status" aria-live="polite"></div>
 <footer>
@@ -7106,15 +7209,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div class="cf-right">
       <div class="picker agents-picker" id="agents-picker" hidden>
-        <button type="button" id="agents-pill" class="fbtn agents-pill" data-state="idle" title="No agents working · Click to see the agents" aria-label="0 agents · No agents working · Click to see the agents" aria-haspopup="dialog" aria-expanded="false" aria-controls="agentsmenu"><span class="agents-dot" aria-hidden="true"></span><span class="agents-label"><span id="agents-count">0</span><span class="agents-word"> agents</span><span class="agents-need" hidden> · needs you</span></span></button>
-        <section id="agentsmenu" class="cmenu agents-menu" role="dialog" aria-labelledby="agents-title" hidden>
-          <div id="agents-title" class="agents-title">Agents</div>
-          <p id="agents-summary" class="agents-summary"></p>
-          <ul id="agents-tree" class="agent-tree"></ul>
-          <p id="agents-more" class="agents-more" hidden></p>
-          <p id="agents-stop-note" class="agents-note" hidden>Stop ends the whole turn, including every agent.</p>
-          <button type="button" id="agents-settings" class="link agents-settings" title="Open Settings ▸ Agents to change the sub-agent model and host">Sub-agent settings</button>
-        </section>
+        <button type="button" id="agents-pill" class="fbtn agents-pill" data-state="idle" title="No agents working · Click to open the agent map" aria-label="0 agents · No agents working · Click to open the agent map" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-map"><span class="agents-dot" aria-hidden="true"></span><span class="agents-label"><span id="agents-count">0</span><span class="agents-word"> agents</span><span class="agents-need" hidden> · needs you</span></span></button>
       </div>
       <div class="picker">
         <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-zap model-icon" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>

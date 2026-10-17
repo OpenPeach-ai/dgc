@@ -191,20 +191,20 @@ test("300px: a recovering backend exit undocks the question, keeps the viewer qu
   } finally { await page.close(); }
 });
 
-test("300px: Escape out of the agents dialog puts focus back on the pill without a label over the docked question", async (t) => {
+test("300px: Escape out of the agent map puts focus back on the pill without a label over the docked question", async (t) => {
   if (skipOrFail(t)) return;
   const { page, errors } = await openCrossLane(browser, { width: 300, height: 620, scenario: "footer" });
   try {
     await page.focus("#agents-pill");
     await page.keyboard.press("Enter");
-    await page.waitForSelector("#agentsmenu:not([hidden])");
+    await page.waitForSelector("#agent-map:not([hidden])");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(500);                // past the label's show delay
     const facts = await page.evaluate(() => {
       const pager = document.querySelector("#cbox > .ask .ask-foot");
       const box = pager.getBoundingClientRect();
       const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-      return { menu: document.getElementById("agentsmenu").hidden, focus: document.activeElement?.id,
+      return { menu: document.getElementById("agent-map").hidden, focus: document.activeElement?.id,
                tip: !document.getElementById("hover-tip").hidden, pagerHit: pager.contains(hit),
                docked: !!document.querySelector("#cbox > .ask") };
     });

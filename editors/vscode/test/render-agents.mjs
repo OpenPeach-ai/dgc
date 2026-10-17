@@ -111,9 +111,10 @@ async function capture(browser, out, options) {
   }
   const facts = await page.evaluate(() => {
     const pill = document.getElementById("agents-pill"), footer = document.getElementById("cfooter");
-    const menu = document.getElementById("agentsmenu").getBoundingClientRect();
+    // The pill opens the agent map (render-agent-map.mjs captures the map itself).
+    const menu = document.getElementById("agent-map-box").getBoundingClientRect();
     return { state: pill.dataset.state, aria: pill.getAttribute("aria-label"), text: pill.innerText.trim(),
-      overflow: footer.scrollWidth - footer.clientWidth, menu: document.getElementById("agentsmenu").hidden ? null
+      overflow: footer.scrollWidth - footer.clientWidth, menu: document.getElementById("agent-map").hidden ? null
         : { left: Math.round(menu.left), right: Math.round(menu.right), inner: window.innerWidth } };
   });
   await page.screenshot({ path: out, fullPage: false });

@@ -108,7 +108,7 @@ for (const width of [300, 360, 460]) {
       assert.equal(g.flexShrink, "0", "the pill never shrinks");
       assert.ok(g.pill.width > 0, "the pill is laid out");
       assert.ok(!intersects(g.pill, g.model), `the pill does not overlap the model picker (${JSON.stringify([g.pill, g.model])})`);
-      assert.match(g.aria, /^2 agents · Agents are working · Click to see the agents$/);
+      assert.match(g.aria, /^2 agents · Agents are working · Click to open the agent map$/);
       if (width <= 360) {
         assert.equal(g.word, "none");
         assert.equal(g.need, "none");
@@ -120,19 +120,19 @@ for (const width of [300, 360, 460]) {
   });
 }
 
-test("at 300px a waiting pill keeps the sentence in its label and the open dialog stays on screen", async (t) => {
+test("at 300px a waiting pill keeps the sentence in its label and the open map stays on screen", async (t) => {
   if (skipOrFail(t)) return;
   const page = await panel(300, { state: "waiting" });
   try {
     const g = await geometry(page);
     assert.equal(g.need, "none", "the visible 'needs you' gives way at 300px");
-    assert.match(g.aria, /^2 agents · An agent is waiting for your permission · Click to see the agents$/);
+    assert.match(g.aria, /^2 agents · An agent is waiting for your permission · Click to open the agent map$/);
     await page.click("#agents-pill");
     await page.waitForTimeout(60);
-    const box = await page.evaluate(() => ({ menu: document.getElementById("agentsmenu").getBoundingClientRect().toJSON(),
+    const box = await page.evaluate(() => ({ menu: document.getElementById("agent-map-box").getBoundingClientRect().toJSON(),
       inner: window.innerWidth, focused: document.activeElement?.className }));
     assert.ok(box.menu.left >= 0 && box.menu.right <= box.inner, `the dialog fits (${JSON.stringify(box)})`);
-    assert.equal(box.focused, "agent-row");
+    assert.equal(box.focused, "am-row am-agent", "on the first agent's row");
   } finally { await page.close(); }
 });
 
@@ -212,7 +212,7 @@ const startAgent = (page, n, fields = {}) => page.evaluate(([k, extra]) => {
     description: `part ${k}`, depth: 1, state: "running", started_at: k, isolated: false, parallel: true, ...extra });
 }, [n, fields]);
 
-test("with the dialog open and an agent working, the 1 s tick keeps the focused row, its label and a long click", async (t) => {
+test("with the map open and an agent working, the 1 s tick keeps the focused row, its label and a long click", async (t) => {
   if (skipOrFail(t)) return;
   const page = await blank(460);
   try {
@@ -221,41 +221,43 @@ test("with the dialog open and an agent working, the 1 s tick keeps the focused 
     await page.evaluate(() => window.__event({ type: "agent_ended", id: "sub-000000000001", state: "failed", duration_ms: 900, tool_calls: 1, message: "boom" }));
     await page.focus("#agents-pill");
     await page.keyboard.press("Enter");
+    // The working agent is first in its column and the failed one below it: down and back, by keyboard.
     await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
     await page.waitForTimeout(100);                 // the row's own label paints once, on focus
     const before = await page.evaluate(() => {
       window.__focusins = 0; window.__removed = 0; window.__tips = 0;
       window.__row = document.activeElement;
-      document.addEventListener("focusin", (e) => { if (e.target.classList?.contains("agent-row")) window.__focusins += 1; });
+      document.addEventListener("focusin", (e) => { if (e.target.classList?.contains("am-row")) window.__focusins += 1; });
       new MutationObserver((ms) => { for (const m of ms) window.__removed += [...m.removedNodes].filter((n) => n.nodeType === 1).length; })
-        .observe(document.getElementById("agents-tree"), { childList: true, subtree: true });
+        .observe(document.getElementById("agent-map-tree"), { childList: true, subtree: true });
       const tip = document.getElementById("hover-tip");
       new MutationObserver(() => { if (!tip.hidden) window.__tips += 1; }).observe(tip, { attributes: true, attributeFilter: ["hidden"] });
-      return { id: document.activeElement.dataset.agentId, meta: document.activeElement.querySelector(".agent-meta").textContent,
+      return { id: document.activeElement.dataset.agentId, meta: document.activeElement.querySelector(".am-meta").textContent,
         tip: !tip.hidden };
     });
     assert.equal(before.id, "sub-000000000002");
     assert.equal(before.tip, true, "keyboard focus shows the row's label");
     await page.waitForTimeout(2200);
     const after = await page.evaluate(() => ({ same: document.activeElement === window.__row, focusins: window.__focusins,
-      removed: window.__removed, tips: window.__tips, meta: document.activeElement.querySelector(".agent-meta").textContent }));
+      removed: window.__removed, tips: window.__tips, meta: document.activeElement.querySelector(".am-meta").textContent }));
     assert.deepEqual([after.same, after.focusins, after.removed, after.tips], [true, 0, 0, 0],
       `focus, rows and the label stay put across ticks (${JSON.stringify(after)})`);
     assert.notEqual(after.meta, before.meta, "the elapsed time still counts");
-    // A press held across a tick still jumps.
-    const box = await page.locator('.agent-row[data-agent-id="sub-000000000002"]').boundingBox();
+    // A press held across a tick still opens the agent's card.
+    const box = await page.locator('.am-row[data-agent-id="sub-000000000002"]').boundingBox();
     await page.mouse.move(box.x + 20, box.y + 8);
     await page.mouse.down();
     await page.waitForTimeout(1100);
     await page.mouse.up();
     await page.waitForTimeout(50);
-    const jumped = await page.evaluate(() => ({ open: !document.getElementById("agentsmenu").hidden,
-      page: document.body.dataset.agentPage || "", hidden: document.getElementById("agent-page").hidden }));
-    assert.deepEqual(jumped, { open: false, page: "sub-000000000002", hidden: false });
+    const jumped = await page.evaluate(() => ({ open: !document.getElementById("agent-map").hidden,
+      card: !document.getElementById("agent-card").hidden, title: document.getElementById("agent-card-title").textContent }));
+    assert.deepEqual(jumped, { open: true, card: true, title: "part 2" });
   } finally { await page.close(); }
 });
 
-test("the pill's hover label follows its state: agents ending under the pointer keep the idle sentence until the turn ends", async (t) => {
+test("the pill's hover label follows its state: agents ending under the pointer turn it to the idle sentence, which stays after the turn", async (t) => {
   if (skipOrFail(t)) return;
   const page = await blank(460);
   try {
@@ -266,7 +268,7 @@ test("the pill's hover label follows its state: agents ending under the pointer 
     await page.waitForSelector("#hover-tip:not([hidden])", { timeout: 10000 });
     const during = await page.evaluate(() => ({ tip: document.getElementById("hover-tip").textContent,
       shown: !document.getElementById("hover-tip").hidden, title: document.getElementById("agents-pill").getAttribute("title") }));
-    assert.deepEqual(during, { tip: "Agents are working · Click to see the agents", shown: true, title: null });
+    assert.deepEqual(during, { tip: "Agents are working · Click to open the agent map", shown: true, title: null });
     await page.evaluate(() => {
       for (const id of ["sub-000000000001", "sub-000000000002"]) window.__event({ type: "agent_ended", id, state: "finished", duration_ms: 1000, tool_calls: 1 });
     });
@@ -274,18 +276,19 @@ test("the pill's hover label follows its state: agents ending under the pointer 
     const ended = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
       tip: document.getElementById("hover-tip").textContent,
       state: document.getElementById("agents-pill").dataset.state }));
-    assert.deepEqual(ended, { hidden: false, tip: "No agents working · Click to see the agents", state: "idle" },
-      "finished rows stay on the pill until the turn ends");
+    assert.deepEqual(ended, { hidden: false, tip: "No agents working · Click to open the agent map", state: "idle" },
+      "the label on screen changes with the state");
     await page.evaluate(() => window.__event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 }));
     await page.waitForTimeout(60);
     const after = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
-      tipHidden: document.getElementById("hover-tip").hidden }));
-    assert.deepEqual(after, { hidden: true, tipHidden: true }, "the pill and tooltip clear when the turn ends");
+      tip: document.getElementById("hover-tip").textContent, text: document.getElementById("agents-pill").innerText.trim() }));
+    assert.deepEqual(after, { hidden: false, tip: "No agents working · Click to open the agent map", text: "0 agents" },
+      "the pill stays for the whole chat, counting none working");
   } finally { await page.close(); }
 });
 
 for (const light of [false, true]) {
-  test(`${light ? "light" : "dark"}: a row that cannot jump reads quieter and still clears 4.5:1; a long failure stays two lines`, async (t) => {
+  test(`${light ? "light" : "dark"}: map rows clear 4.5:1 and a long failure leaves its row one line of stats`, async (t) => {
     if (skipOrFail(t)) return;
     const page = await blank(300, { light });
     try {
@@ -293,7 +296,7 @@ for (const light of [false, true]) {
       await page.evaluate(() => {
         window.__event({ type: "agent_started", id: "sub-000000000009", parent_id: null, call_id: "never_on_screen",
           description: "not on screen", depth: 1, state: "running", started_at: 9, isolated: false, parallel: false });
-        window.__event({ type: "agent_ended", id: "sub-000000000001", state: "failed", duration_ms: 1200, tool_calls: 3,
+        window.__event({ type: "agent_ended", id: "sub-000000000001", state: "failed", duration_ms: 1200, tool_calls: 3, tokens: 18200,
           message: `HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: {"error": {"message": "denied ${"x".repeat(300)}"}}\n  → the endpoint rejected the key` });
       });
       await page.click("#agents-pill");
@@ -302,29 +305,27 @@ for (const light of [false, true]) {
         const rgb = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number);
         const lum = (c) => { const v = c.map((p) => p / 255).map((x) => x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
         const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-        let ground = document.getElementById("agentsmenu");
+        const row = (id) => document.querySelector(`.am-row[data-agent-id="${id}"]`);
+        let ground = row("sub-000000000001");
         while (ground && getComputedStyle(ground).backgroundColor === "rgba(0, 0, 0, 0)") ground = ground.parentElement;
         const bg = rgb(getComputedStyle(ground || document.body).backgroundColor);
-        const row = (id) => document.querySelector(`.agent-row[data-agent-id="${id}"]`);
-        const desc = (id) => getComputedStyle(row(id).querySelector(".agent-desc")).color;
-        const meta = row("sub-000000000001").querySelector(".agent-meta");
-        const lineHeight = parseFloat(getComputedStyle(meta).lineHeight);
-        const node = meta.firstChild, at = node.textContent.indexOf("3 tools"), range = document.createRange();
-        range.setStart(node, at); range.setEnd(node, at + "3 tools".length);
-        const statsVisible = at >= 0 && range.getBoundingClientRect().bottom <= meta.getBoundingClientRect().bottom + 0.5;
-        return { enabled: desc("sub-000000000001"),
+        const meta = row("sub-000000000001").querySelector(".am-meta");
+        return { desc: ratio(rgb(getComputedStyle(row("sub-000000000001").querySelector(".am-desc")).color), bg),
+          meta: ratio(rgb(getComputedStyle(meta).color), bg), metaText: meta.textContent,
+          metaHeight: meta.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(meta).lineHeight),
+          rowHeights: [row("sub-000000000001"), row("sub-000000000009")].map((r) => r.getBoundingClientRect().height),
           disabledAttr: row("sub-000000000009").getAttribute("aria-disabled"),
-          metaHeight: meta.getBoundingClientRect().height, lineHeight, statsVisible,
-          rowHeight: row("sub-000000000001").getBoundingClientRect().height,
-          menu: document.getElementById("agentsmenu").getBoundingClientRect().toJSON(), inner: innerWidth };
+          menu: document.getElementById("agent-map-box").getBoundingClientRect().toJSON(), inner: innerWidth };
       });
-      assert.equal(facts.disabledAttr, null, "a row without a task card still opens the agent page");
-      assert.ok(facts.metaHeight <= facts.lineHeight * 2 + 1, `the meta is two lines at most (${facts.metaHeight} / ${facts.lineHeight})`);
-      assert.ok(facts.rowHeight < 80, `a failed row stays short (${facts.rowHeight}px)`);
-      assert.equal(facts.statsVisible, true, "the clamp cuts the reason, never the duration and tool count");
+      assert.equal(facts.disabledAttr, null, "a row without a task card still opens its card");
+      assert.ok(facts.desc >= 4.5, `the name clears 4.5:1 (${facts.desc.toFixed(2)})`);
+      assert.ok(facts.meta >= 4.5, `the stats clear 4.5:1 (${facts.meta.toFixed(2)})`);
+      assert.equal(facts.metaText, "Failed · 1s · 18.2k tokens", "the reason is on the label and the card, never in the row");
+      assert.ok(facts.metaHeight <= facts.lineHeight + 1, `the stats are one line (${facts.metaHeight} / ${facts.lineHeight})`);
+      assert.equal(facts.rowHeights[0], facts.rowHeights[1], `a failed row is as tall as any other (${facts.rowHeights})`);
       assert.ok(facts.menu.left >= 0 && facts.menu.right <= facts.inner);
       if (process.env.DGC_AGENTS_SHOTS) {
-        await page.screenshot({ path: `${process.env.DGC_AGENTS_SHOTS}/review-dialog-${light ? "light" : "dark"}-300.png` });
+        await page.screenshot({ path: `${process.env.DGC_AGENTS_SHOTS}/review-map-${light ? "light" : "dark"}-300.png` });
       }
     } finally { await page.close(); }
   });

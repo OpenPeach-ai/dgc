@@ -359,7 +359,8 @@ body[data-agent-page] #to-latest { display: none; }
 #agent-page { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
 #agent-page[hidden] { display: none; }
 .agent-page-meta { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-#agent-log { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+/* An agent's work, on its page and in the agent map's transcript window (one builder draws both). */
+#agent-log, .am-transcript-log { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .agent-change-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3); background: var(--surface); }
 .agent-change-title { display: flex; align-items: center; gap: var(--sp-2); font: var(--w-med) var(--t-sm)/1.3 var(--sans); margin: 0 0 var(--sp-2); }
 #log .agent-owned { display: none; }
@@ -1825,12 +1826,14 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.tu
 .goal-detail-evidence li { margin-bottom: 2px; }
 
 /* ---- 0.40 agents ------------------------------------------------------------------------------ */
-/* The "● 2 agents" pill and its list. Green, blue and a grey ring distinguish working,
+/* The "● 2 agents" pill and the agent map it opens. Green, blue and a grey ring distinguish working,
    waiting and idle agents; the light theme takes darker steps (Claude's #89D185 is 1.8:1 on white).
-   Shape and a visible "needs you" carry the state too, so it never rests on hue alone. */
-:root { --agent-run:#89D185; --agent-wait:#3B82F6; --agent-idle:var(--faint); }
-body.vscode-light, body.vscode-high-contrast-light { --agent-run:#1E7F46; --agent-wait:#2563EB; }
-body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --agent-wait:var(--vscode-charts-blue, #3B82F6); }
+   Shape and a visible "needs you" carry the state too, so it never rests on hue alone. A failure's
+   words take their own red: --del-text is for diff counts on the dark grounds and reads 2.6:1 on white. */
+:root { --agent-run:#89D185; --agent-wait:#3B82F6; --agent-idle:var(--faint); --agent-fail-text:#F0747E; }
+body.vscode-light, body.vscode-high-contrast-light { --agent-run:#1E7F46; --agent-wait:#2563EB; --agent-fail-text:#B42318; }
+body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --agent-wait:var(--vscode-charts-blue, #3B82F6);
+  --agent-fail-text:var(--vscode-errorForeground, #F48771); }
 /* Never shrinks: `.cf-right > .picker` lets pickers give way, and the model name is the one that
    truncates instead. The wrapper carries `hidden`, so an empty chat adds no item and no gap. */
 .cf-right > .picker.agents-picker { flex: 0 0 auto; min-width: auto; }
@@ -1843,21 +1846,6 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   border-radius: 1px; transform: rotate(45deg); }
 .agents-pill[data-state="idle"] .agents-dot { background: transparent; border: 1px solid var(--agent-idle); }
 .agents-need { color: var(--agent-wait); }
-.agents-menu { width: min(340px, calc(100vw - 20px)); padding: var(--sp-2); }
-.agents-title { padding: var(--sp-1) var(--sp-2) 0; color: var(--text-strong);
-  font: var(--w-semi) var(--t-sm)/1.2 var(--sans); }
-.agents-summary { margin: var(--sp-1) var(--sp-2) var(--sp-2); color: var(--muted);
-  font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.agent-tree, .agent-tree ul { list-style: none; margin: 0; padding: 0; }
-.agent-tree ul { padding-left: var(--sp-3); }
-.agent-row { display: flex; align-items: flex-start; gap: var(--sp-2); width: 100%; padding: var(--sp-1) var(--sp-2);
-  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); text-align: left;
-  cursor: pointer; font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
-.agent-row:hover { background: var(--surface2); }
-.agent-row[aria-disabled="true"] { cursor: default; }
-.agent-row[aria-disabled="true"]:hover { background: transparent; }
-/* A row with no card on screen to jump to reads quieter than one that jumps (its label says why). */
-.agent-row[aria-disabled="true"] .agent-desc { color: var(--muted); }
 /* One path per line, left-aligned: a long path wraps under itself, never centred like a button label. */
 .agent-files { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; min-width: 0; }
 .agent-file-row { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); max-width: 100%; min-width: 0; }
@@ -1871,7 +1859,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agent-dot[data-state="running"] { background: var(--agent-run); }
 .agent-dot[data-state="waiting"] { width: 6px; height: 6px; border-radius: 1px; transform: rotate(45deg);
   background: var(--agent-wait); }
-.agent-dot[data-state="queued"] { background: transparent; border: 1px solid var(--agent-idle); }
+.agent-dot[data-state="queued"], .agent-dot[data-state="stopping"] { background: transparent; border: 1px solid var(--agent-idle); }
 .agent-dot[data-state="failed"], .agent-dot[data-state="stopped"] { background: var(--del); }
 /* Sub-agents in the transcript: stable lines of at most four per batch. Faces first, then a
    sentence whose names -- only the names -- open each agent's page. Same type and tone as a tool
@@ -1901,20 +1889,130 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 /* What became of an agent's changes, above its report on its page. */
 .agent-page-outcome { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
 .agent-page-outcome[data-held] { color: var(--text); }
-.agent-text { min-width: 0; display: grid; gap: 2px; }
-.agent-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-/* The meta line carries one line of a failure message, and two rows of it at most: the whole
-   message is in the row's label. */
-.agent-meta { color: var(--faint); font-size: var(--t-xs); overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
-.agents-more, .agents-note { margin: var(--sp-1) var(--sp-2) 0; color: var(--faint);
-  font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.agents-settings { margin: var(--sp-2) var(--sp-2) var(--sp-1); }
 /* A row jump marks the task card for a moment; with reduced motion the outline alone says it. */
 .tool.flash { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-md);
   animation: agent-flash 1.2s ease-out; }
 @keyframes agent-flash { from { background: var(--accent-soft); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .tool.flash { animation: none; } }
+
+/* The agent map. A dialog over the chat, as wide as the panel lets it be up to 1200px, that scrolls
+   inside itself. Every row is a button of one fixed height, so a connector meets a row's middle by
+   arithmetic alone: a stub out of the parent's middle, a spine from the first child's middle to the
+   last's (none for an only child), and an elbow into each child. The lines are borders in the input
+   border's colour, which forced colours keep. Side by side or on end is main.js's choice, made from
+   the dialog's own width (data-layout); the widths it settles on arrive as --am-root-w, --am-row-w
+   and --am-indent. */
+.agent-map-layer { padding: clamp(var(--sp-2), 3vw, var(--sp-4)); }
+.agent-map { --am-ground: var(--vscode-editorWidget-background, var(--surface)); --am-line: var(--border-strong);
+  --am-row-h: calc((var(--t-sm) + var(--t-xs)) * 1.35 + 16px);
+  position: relative; display: flex; flex-direction: column; width: min(1200px, 100%); min-width: 0;
+  max-height: calc(100vh - 2 * clamp(var(--sp-2), 3vw, var(--sp-4))); overflow: hidden;
+  border: 1px solid var(--border-strong); border-radius: var(--r-xl); background: var(--am-ground);
+  box-shadow: 0 24px 70px rgba(0,0,0,.48); }
+.agent-map-head { flex: none; display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-2) var(--sp-2) clamp(var(--sp-3), 3vw, var(--sp-4)); }
+.agent-map-head .fbtn { flex: none; margin-top: -4px; color: var(--muted); }
+.agent-map-head .fbtn:hover { color: var(--text); }
+.agent-map-back { margin-left: calc(-1 * var(--sp-2)); }
+.agent-map-head-dot { margin-top: 6px; }
+.agent-map-titles { flex: 1 1 auto; min-width: 0; }
+.agent-map h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-strong);
+  font: var(--w-semi) var(--t-base)/1.35 var(--sans); }
+.agent-map-subtitle { margin: 2px 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
+/* The gutter is kept for the scroll bar, so a tree that grows tall does not narrow the dialog under
+   the layout that was chosen for it. */
+.agent-map-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable;
+  padding: var(--sp-1) clamp(var(--sp-2), 3vw, var(--sp-4)) var(--sp-4); }
+.am-tree { --am-root-w: 260px; --am-row-w: 260px; --am-indent: 20px; min-width: 0; }
+.am-node { position: relative; min-width: 0; }
+.am-self { position: relative; min-width: 0; }
+.am-children { position: relative; display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.am-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-width: 0; height: var(--am-row-h);
+  padding: 0 var(--sp-3) 0 var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--am-ground); color: var(--text); text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
+.am-row:hover { background: var(--surface2); }
+.am-row .agent-dot { margin-top: 0; }
+.am-face { width: 16px; height: 16px; }
+.am-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+/* One line each, clipped with an ellipsis: the row's label and hover title carry the whole name. */
+.am-desc, .am-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-desc { color: var(--text); }
+.am-meta { color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
+.am-root .am-desc { color: var(--text-strong); font-weight: var(--w-semi); }
+/* Side by side: the root, then one column per level; the root stays in view down a long column. */
+.agent-map[data-layout="horizontal"] .am-node { display: flex; align-items: flex-start; }
+.agent-map[data-layout="horizontal"] .am-self { flex: none; width: var(--am-row-w); }
+.agent-map[data-layout="horizontal"] .am-root-node > .am-self { width: var(--am-root-w); position: sticky; top: 0; z-index: 1; }
+.agent-map[data-layout="horizontal"] .am-children { flex: none; padding-left: 32px; }
+.agent-map[data-layout="horizontal"] .am-children::before { content: ""; position: absolute; left: 0; width: 16px;
+  top: calc(var(--am-row-h) / 2); border-top: 1px solid var(--am-line); }
+.agent-map[data-layout="horizontal"] .am-children > .am-node::before { content: ""; position: absolute; left: -16px; width: 16px;
+  top: calc(var(--am-row-h) / 2); border-top: 1px solid var(--am-line); }
+.agent-map[data-layout="horizontal"] .am-children > .am-node::after { content: ""; position: absolute; left: -16px;
+  top: 0; bottom: calc(-1 * var(--sp-2)); border-left: 1px solid var(--am-line); }
+.agent-map[data-layout="horizontal"] .am-children > .am-node:first-child::after { top: calc(var(--am-row-h) / 2); }
+.agent-map[data-layout="horizontal"] .am-children > .am-node:last-child::after { bottom: auto; height: calc(var(--am-row-h) / 2); }
+.agent-map[data-layout="horizontal"] .am-children > .am-node:only-child::after { display: none; }
+/* On end: the root on top, held there while the tree scrolls under it, and each level indented under
+   a spine that comes down out of its parent's row. */
+.agent-map[data-layout="vertical"] .am-self { max-width: 560px; }
+.agent-map[data-layout="vertical"] .am-root-node > .am-self { position: sticky; top: 0; z-index: 1; background: var(--am-ground); }
+.agent-map[data-layout="vertical"] .am-children { margin-top: var(--sp-2); padding-left: var(--am-indent); }
+.agent-map[data-layout="vertical"] .am-children > .am-node::before { content: ""; position: absolute;
+  left: calc(var(--am-indent) / -2); width: calc(var(--am-indent) / 2); top: calc(var(--am-row-h) / 2); border-top: 1px solid var(--am-line); }
+.agent-map[data-layout="vertical"] .am-children > .am-node::after { content: ""; position: absolute;
+  left: calc(var(--am-indent) / -2); top: calc(-1 * var(--sp-2)); bottom: 0; border-left: 1px solid var(--am-line); }
+.agent-map[data-layout="vertical"] .am-children > .am-node:last-child::after { bottom: auto;
+  height: calc(var(--sp-2) + var(--am-row-h) / 2); }
+.am-note { margin: var(--sp-2) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
+.am-tasks { margin-top: var(--sp-5); }
+.am-tasks > .agent-map-subtitle { margin: 0 0 var(--sp-2); }
+.am-task-list { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.am-task-item { width: min(100%, 420px); }
+.am-settings { display: block; margin-top: var(--sp-5); }
+/* A card's body: an agent's, a task's or the main agent's. */
+.am-card { display: flex; flex-direction: column; gap: var(--sp-3); }
+.am-card-line { margin: 0; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); overflow-wrap: anywhere; }
+.am-quiet { color: var(--muted); }
+.am-failure { color: var(--agent-fail-text); white-space: pre-wrap; }
+.am-link { margin: 0; padding: 0; border: 0; background: none; color: var(--link); font: inherit; cursor: pointer;
+  text-align: left; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.am-states { margin: 0; padding-left: 1.2em; color: var(--text); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); }
+.am-result { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.am-fold { min-width: 0; padding-top: var(--sp-2); border-top: 1px solid var(--border); }
+.am-fold > summary { cursor: pointer; color: var(--text-strong); font: var(--w-med) var(--t-sm)/1.45 var(--sans); }
+.am-prompt, .am-output { margin: var(--sp-2) 0 0; padding: var(--sp-2); max-height: 320px; overflow: auto;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--code); color: var(--text); font: var(--w-reg) var(--t-xs)/1.5 var(--mono);
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.am-calls { display: grid; gap: var(--sp-1); margin: var(--sp-2) 0 0; padding: 0; list-style: none; }
+.am-call { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.am-call .agent-dot { margin-top: 0; }
+.am-call-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-1) var(--sp-3); margin: 0;
+  font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.am-facts dt { color: var(--muted); }
+.am-facts dd { margin: 0; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.am-stages { margin: 0; }
+.am-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.am-actions > .am-note { flex-basis: 100%; margin: 0; }
+.am-wide { flex-basis: 100%; justify-content: center; text-align: center; }
+/* The card and the transcript: each its own window over the one below, which shows through dimmed.
+   The card is a smaller window; the transcript takes about nine tenths of the panel each way and
+   scrolls inside itself. */
+.am-card-layer { z-index: 51; }
+.am-transcript-layer { z-index: 52; }
+.am-card-window { width: min(560px, 100%); }
+.am-transcript-window { width: 90vw; height: 90vh; max-width: 100%; }
+.am-transcript-body { padding-top: var(--sp-2); }
+.am-transcript-window[data-kind="output"] .am-transcript-body { display: flex; flex-direction: column; overflow: hidden; }
+.am-transcript-window[data-kind="output"] .am-transcript-log { flex: 1 1 auto; min-height: 0; }
+.am-output-full { flex: 1 1 auto; min-height: 0; max-height: none; margin: 0; }
+@media (forced-colors: active) {
+  .agent-map { --am-line: CanvasText; border-color: CanvasText; }
+  .am-row { border-color: CanvasText; }
+  .am-failure { color: CanvasText; font-weight: var(--w-semi); }
+  .am-link { color: LinkText; }
+}
 @media (forced-colors: active) {
   .agents-dot, .agent-dot { forced-color-adjust: none; background: CanvasText; border: 1px solid CanvasText; }
   .agents-pill[data-state="running"] .agents-dot, .agent-dot[data-state="running"] { background: Highlight; border-color: Highlight; }
@@ -1923,7 +2021,6 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   .agent-dot[data-state="failed"], .agent-dot[data-state="stopped"] { background: Canvas; border: 2px solid CanvasText; border-radius: 0; }
   .agents-pill[data-state="waiting"] .agents-need { color: CanvasText; font-weight: var(--w-bold); text-decoration: underline; }
   .tool.flash { outline-color: Highlight; }
-  .agent-row[aria-disabled="true"] .agent-desc { color: GrayText; }
   .agent-name, .agent-line-more { color: LinkText; }
   .agent-name:focus-visible, .agent-line-more:focus-visible { outline: 2px solid Highlight; }
   .agent-state[data-state="waiting"], .agent-state[data-state="failed"] { color: CanvasText; font-weight: var(--w-semi); }

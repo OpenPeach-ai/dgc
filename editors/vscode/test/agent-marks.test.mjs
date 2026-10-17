@@ -23,14 +23,14 @@ const snapshot = (p, ids, extra = {}) => p.event({
   total: ids.length, active: ids.length,
 });
 
-// The menu re-renders through requestAnimationFrame, which jsdom never fires -- so reading the
-// rows straight after a snapshot reads the PREVIOUS render. An earlier version of these tests did
-// exactly that and passed with the fix removed. Close and reopen, which renders synchronously.
+// The agent map's agent rows, read from a fresh open: opening renders the map synchronously, and
+// closing it again leaves the next snapshot nothing open to repaint behind the test's back.
 function rows(p) {
   const pill = p.doc.getElementById("agents-pill");
-  pill.dispatchEvent(new p.dom.window.MouseEvent("click", { bubbles: true }));  // close
   pill.dispatchEvent(new p.dom.window.MouseEvent("click", { bubbles: true }));  // open, rendering
-  return [...p.doc.querySelectorAll(".agent-row")].map((row) => row.textContent.trim());
+  const text = [...p.doc.querySelectorAll("#agent-map .am-agent")].map((row) => row.textContent.trim());
+  p.doc.getElementById("agent-map-close").click();
+  return text;
 }
 
 // ---- order ---------------------------------------------------------------------------------

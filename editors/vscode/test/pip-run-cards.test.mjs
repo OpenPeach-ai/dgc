@@ -6,11 +6,11 @@ const bundle=buildSync({entryPoints:[new URL('../src/pipRunCards.js',import.meta
 const pip='pip_'+'a'.repeat(32),run='run_'+'b'.repeat(32),workspace='ws_'+'c'.repeat(32);
 const saved=status=>({id:run,pip_id:pip,workspace_id:workspace,status,manifest:{run_kind:'audit'}});
 const flush=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
-function harness(t){
+function harness(t,options={}){
  const dom=new JSDOM('<main><div class="tool"><span class="verb"></span><span class="badge"></span><button class="tool-toggle"></button><div class="body"></div></div></main>',{runScripts:'outside-only',pretendToBeVisual:true});
  const w=dom.window;w.eval(bundle+';window.Runs=Runs;');w.HTMLCanvasElement.prototype.getContext=()=>null;
  const pending=[],opened=[],timers=new Map();let seq=0;
- const cards=w.Runs.mountRunCards({document:w.document,request:(type,args)=>new Promise((resolve,reject)=>pending.push({type,args,resolve,reject})),onOpen:v=>opened.push(v),setInterval:fn=>{timers.set(++seq,fn);return seq;},clearInterval:id=>timers.delete(id)});
+ const cards=w.Runs.mountRunCards({document:w.document,request:(type,args)=>new Promise((resolve,reject)=>pending.push({type,args,resolve,reject})),onOpen:v=>opened.push(v),setInterval:fn=>{timers.set(++seq,fn);return seq;},clearInterval:id=>timers.delete(id),...options});
  t.after(()=>{cards.dispose();w.close();});cards.connection(true);
  const send=(extra={})=>cards.toolResult(w.document.querySelector('.tool'),{name:'run_pip_now',output:JSON.stringify({run_id:run,pip_id:pip,status:'succeeded',name:'Forged title'}),...extra});
  const reply=async(status='running',online=true)=>{
@@ -58,6 +58,17 @@ test('run is a single inline tool line and stays at its call position after the 
  x.send();assert.equal(x.d.querySelectorAll('.pip-run-line').length,1);
  assert.equal(row.nextElementSibling,answer);assert.equal(x.d.querySelector('.pip-run-results'),null);
  x.d.querySelector('.pip-run-open').click();assert.deepEqual(JSON.parse(JSON.stringify(x.opened[0])),{pip,section:'runs',run});
+});
+test('the agent map reads the runs this chat started, in the words their lines use, and is told when they change',async t=>{
+ let changes=0;const x=harness(t,{onChange:()=>{changes+=1;}});
+ x.send();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.cards.list())),[{id:run,pipId:pip,name:'Pip',status:'',label:'Checking…',detail:'Loading…',active:true}],'started, not yet loaded: listed as at work');
+ const before=changes;await x.reply('running');
+ assert.ok(changes>before,'a repaint tells the map');
+ assert.deepEqual(JSON.parse(JSON.stringify(x.cards.list())),[{id:run,pipId:pip,name:'Review changes',status:'running',label:'Working',detail:'Working on its own. You can keep chatting.',active:true}]);
+ x.cards.open(run);assert.deepEqual(JSON.parse(JSON.stringify(x.opened)),[{pip,section:'runs',run}]);
+ x.cards.tick();await x.reply('succeeded');
+ assert.equal(x.cards.list()[0].active,false,'a finished run is no longer at work');
 });
 test('grouped tool receipt places the run outside the disclosure',async t=>{
  const x=harness(t),tool=x.d.querySelector('.tool'),group=x.d.createElement('details');group.className='tool-group';tool.before(group);group.append(tool);

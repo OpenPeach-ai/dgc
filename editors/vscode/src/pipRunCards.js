@@ -36,6 +36,7 @@ export function mountRunCards(options) {
   e.open.title=`Open ${e.pip?.name||'this Pip'} · ${e.status.textContent}`;
   e.open.setAttribute('aria-label',e.open.title);
   e.refresh.hidden=!e.error;
+  options.onChange?.();
  }
  async function load(e){
   if(disposed||!connected||e.loading||!e.root.isConnected)return;
@@ -85,6 +86,9 @@ export function mountRunCards(options) {
  function connection(value){epoch++;connected=value===true;for(const e of entries.values()){e.loading=false;paint(e);if(connected)load(e);}}
  const tick=()=>{if(visible&&!doc.hidden&&connected)for(const e of entries.values())if(!e.run||active(e.run.status))void load(e);};
  const wake=()=>{if(!doc.hidden)tick();};doc.addEventListener('visibilitychange',wake);
+ // What the agent map lists as this chat's Pip runs: the same words the run's line says.
+ function list(){return [...entries.values()].map(e=>({id:e.id,pipId:e.pipId,name:e.pip?.name||'Pip',status:e.run?.status||'',label:e.status.textContent,detail:e.detail.textContent,active:!e.error&&(!e.run||active(e.run.status))}));}
+ function open(runId){const e=entries.get(runId);if(e?.run&&connected)options.onOpen?.({pip:e.pipId,section:'runs',run:e.id});}
  function reset(){epoch++;if(timer!==null)(options.clearInterval||clearInterval)(timer);timer=null;for(const e of entries.values()){e.cleanup?.();e.root.remove();}entries.clear();}
- return {add,toolResult,finish,connection,tick,reset,setVisible(v){visible=v===true;if(visible)tick();},dispose(){disposed=true;reset();doc.removeEventListener('visibilitychange',wake);}};
+ return {add,toolResult,finish,connection,tick,reset,list,open,setVisible(v){visible=v===true;if(visible)tick();},dispose(){disposed=true;reset();doc.removeEventListener('visibilitychange',wake);}};
 }
