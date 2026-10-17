@@ -707,6 +707,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.dictation ??= new Dictation(new VoiceClient({
       send: (cmd) => this.voiceSend(cmd),
       openSettings: (section) => this.openSettings(section),
+      where: () => ({ remote: vscode.env.remoteName || "", app: vscode.env.appName || "" }),
       offerInstall: (message) => {
         void vscode.window.showInformationMessage(message, "Install DGC Voice").then((install) => {
           if (!install) return;

@@ -29,6 +29,8 @@ export interface VoiceDeps {
   /** vscode.commands.executeCommand, and the editor's notifications (tests replace them). */
   execute?: (command: string, ...args: unknown[]) => Thenable<any>;
   offerInstall?: (message: string) => void;
+  /** Where the editor is: a remote name ("ssh-remote") when DGC runs on another computer, and the editor's name. */
+  where?: () => { remote?: string; app?: string };
 }
 
 interface Waiter { resolve(ev: any): void; timer: ReturnType<typeof setTimeout>; }
@@ -108,9 +110,14 @@ export class VoiceClient {
     try {
       started = await this.execute(START);
     } catch {
-      const error = "Dictation records on the computer you're at, with the DGC Voice extension. Install it, then press the microphone again.";
-      this.deps.offerInstall?.(error);
-      return { ok: false, code: "no_recorder", error };
+      // The notification explains and carries the Install button; the chat only points to it, so the same words
+      // don't appear twice. In a Remote window the microphone is on this computer while DGC runs on the host.
+      const { remote = "", app = "" } = this.deps.where?.() || {};
+      const editor = app || "this editor";
+      this.deps.offerInstall?.(remote
+        ? `Dictation needs DGC Voice, a small extension that records your microphone on this computer while DGC runs on the remote host. It isn't installed in ${editor} on this computer yet. Install it, then press the microphone again.`
+        : `Dictation needs DGC Voice, a small extension that records your microphone. It isn't installed in ${editor} yet. Install it, then press the microphone again.`);
+      return { ok: false, code: "no_recorder", error: "Dictation needs DGC Voice. Install it from the notification, then press the microphone again." };
     }
     if (!started?.ok) return { ok: false, code: started?.code === "busy" ? "busy" : started?.code === "no_recorder" ? "no_recorder" : "record_failed", error: String(started?.error || "Recording didn't start.") };
     this.recording = true;

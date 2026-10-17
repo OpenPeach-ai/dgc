@@ -29,7 +29,7 @@ after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: 
 const MODELS = (installed) => [{ id: "moonshine-base-en", role: "dictation", installed }, { id: "kitten-mini-en", role: "read_aloud", installed: false }];
 
 /** A `dgc serve` that answers voice_* as dgc/voice/service.py does. */
-function world({ installed = true, chosen = "moonshine-base-en", voice = "", voiceInstalled = false, hears = "book a table for two", recorder, sendAnswer = "sent" } = {}) {
+function world({ installed = true, chosen = "moonshine-base-en", voice = "", voiceInstalled = false, hears = "book a table for two", recorder, sendAnswer = "sent", remote = "", app = "Cursor" } = {}) {
   const w = { sent: [], settings: [], offered: [], executed: [], uploads: new Map(), client: null };
   const answer = (ev) => setTimeout(() => w.client.onEvent(ev), 5);
   w.client = new VoiceClient({
@@ -52,6 +52,7 @@ function world({ installed = true, chosen = "moonshine-base-en", voice = "", voi
     },
     openSettings: (section) => w.settings.push(section),
     offerInstall: (message) => w.offered.push(message),
+    where: () => ({ remote, app }),
     execute: async (command) => {
       w.executed.push(command);
       if (!recorder) throw new Error(`command '${command}' not found`);
@@ -108,6 +109,15 @@ test("no DGC Voice on this computer: it says so and offers to install it", async
   assert.equal(result.code, "no_recorder");
   assert.match(result.error, /DGC Voice/);
   assert.equal(w.offered.length, 1);
+  assert.match(w.offered[0], /isn't installed in Cursor yet/);
+  // The chat points to the notification instead of repeating it.
+  assert.notEqual(result.error, w.offered[0]);
+  assert.match(result.error, /from the notification/);
+  // In a Remote SSH window the notification says the recording happens on this computer, not the host.
+  const remote = world({ recorder: null, remote: "ssh-remote" });
+  await remote.client.start();
+  assert.match(remote.offered[0], /on this computer while DGC runs on the remote host/);
+  assert.match(remote.offered[0], /isn't installed in Cursor on this computer/);
   assert.equal(VOICE_EXTENSION, "vibedgc.dgc-voice");
   assert.equal((await w.client.stop()).code, "idle", "nothing was recording");
 });
