@@ -88,7 +88,7 @@ export async function openAgentLines(browser, { width = 460, height = 900, theme
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
   await page.route(`${MARKS}/**`, (route) => {
     const file = new URL(route.request().url()).pathname.split("/").pop();
-    if (!/^agent-0[1-8]-[a-z]+\.svg$/.test(file)) return route.fulfill({ status: 404, body: "" });
+    if (!/^agent-0[1-8]-[a-z]+(?:-animated)?\.svg$/.test(file)) return route.fulfill({ status: 404, body: "" });
     return route.fulfill({ status: 200, contentType: "image/svg+xml", body: readFileSync(join(root, "media/agents", file)) });
   });
   if (forcedColors || reducedMotion) {

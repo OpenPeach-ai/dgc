@@ -187,7 +187,8 @@ test("a live face breathes, and stops for a reader who asked for less motion; th
   const faces = (page) => page.evaluate(async () => {
     const marks = [...document.querySelectorAll("#log .agent-line .agent-mark.is-live")];
     await Promise.all(marks.map((m) => m.querySelector("img")?.decode?.().catch(() => {})));
-    return marks.map((m) => ({ img: !!m.querySelector("img"), animation: getComputedStyle(m).animationName }));
+    return marks.map((m) => ({ img: !!m.querySelector("img"), animation: getComputedStyle(m).animationName,
+      src: m.querySelector("img")?.getAttribute("src") || "" }));
   });
   const moving = await live(false), still = await live(true);
   try {
@@ -195,6 +196,9 @@ test("a live face breathes, and stops for a reader who asked for less motion; th
     assert.ok(a.length > 0 && a.every((f) => f.img), "the live faces are the shipped SVGs");
     assert.ok(a.every((f) => f.animation === "agent-mark-breathe"), JSON.stringify(a));
     assert.ok(b.length === a.length && b.every((f) => f.animation === "none"), JSON.stringify(b));
+    // The artwork swirls too (founder, 2026-10-18), and a reader who asked for less motion gets the still frame.
+    assert.ok(a.every((f) => f.src.endsWith("-animated.svg")), JSON.stringify(a));
+    assert.ok(b.every((f) => f.img && !f.src.includes("-animated")), JSON.stringify(b));
     const m = await still.evaluate(measure, CONTRAST_SOURCE);
     assert.deepEqual(m.lines.map((line) => line.text), LINES_EXPECTED);
   } finally { await moving.close(); await still.close(); }
