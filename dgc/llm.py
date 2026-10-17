@@ -175,6 +175,11 @@ _IMAGE_REFUSAL_RE = re.compile(
     r"image_url|input_image|image input|images? (?:are|is) not supported|does not support images?|"
     r"multimodal|multi-modal|vision|unknown variant .?image|content type .?image", re.IGNORECASE)
 _VISION_REJECTION_MIN_TTL_S = 3600.0
+# The provider could not read this image's data (Ollama: "illegal base64 data at input byte N"). The model can
+# still read images; this request goes again without them, and the model is told why.
+_IMAGE_DATA_ERROR_RE = re.compile(
+    r"illegal base64|invalid base64|base64 data|image: unknown format|(?:decode|load|read) (?:the )?image|"
+    r"invalid image|image (?:data|decod)", re.IGNORECASE)
 
 
 def _is_image_part(part) -> bool:
@@ -199,9 +204,10 @@ def _image_parts_in(messages) -> int:
     return count
 
 
-def _strip_images_with_note(messages: list, model: str) -> tuple[list, int]:
+def _strip_images_with_note(messages: list, model: str, *, unreadable: bool = False) -> tuple[list, int]:
     """A copy of ``messages`` with every image part replaced by a note the model can act on. The
-    transcript itself is never changed: this is applied to the outgoing request only."""
+    transcript itself is never changed: this is applied to the outgoing request only. ``unreadable``:
+    the model reads images, but the provider rejected these images' data."""
     out: list = []
     dropped = 0
     for message in messages:
@@ -213,7 +219,12 @@ def _strip_images_with_note(messages: list, model: str) -> tuple[list, int]:
         count = len(content) - len(kept)
         dropped += count
         seen = message.get("_dgc_vision")
-        if isinstance(seen, dict) and str(seen.get("text") or "").strip():
+        if unreadable:
+            note = (f"[{count} image{'s were' if count > 1 else ' was'} attached here, but the model provider "
+                    "could not read the image data, so it was not sent. Work from the file name and the rest of "
+                    "the context, or ask for a smaller or different image. Do not pretend to have seen "
+                    f"{'them' if count > 1 else 'it'}.]")
+        elif isinstance(seen, dict) and str(seen.get("text") or "").strip():
             # A vision model already looked at these for this model (dgc/vision.py): its report
             # stands in for the pixels. Counted as dropped all the same: the pixels did not go.
             from .vision import replacement_note
@@ -708,6 +719,15 @@ def explain_llm_error(message: str, *, model: str = "", base_url: str = "") -> s
         # endpoint stripped of credentials and query strings before it is printed.
         hint = hint_for(kind, model=model, base_url=base_url)
     return f"{text}\n  → {hint}" if hint else text
+
+
+class _ProviderStreamError(Exception):
+    """The provider answered 200 and then failed inside the stream. ``emitted``: text, thinking or a
+    tool call already reached the caller, so sending the request again would show it twice."""
+
+    def __init__(self, message: str, emitted: bool):
+        super().__init__(message)
+        self.emitted = emitted
 
 
 class LLMError(Exception):
@@ -1702,14 +1722,14 @@ class LLMClient:
         """Record that images were withheld, so a frontend can tell the user once."""
         self.dropped_images = getattr(self, "dropped_images", 0) + count
 
-    def _without_images(self, messages: list, *, refused: bool = False) -> list:
+    def _without_images(self, messages: list, *, refused: bool = False, unreadable: bool = False) -> list:
         """The outgoing copy of ``messages`` for a model that cannot read images. ``refused`` records
         the endpoint's refusal first: a text-only endpoint does not grow vision within a session, so
         the rejection is remembered for at least an hour and later requests skip the failed try."""
         if refused:
             self._mark_rejected("vision", ttl_s=max(float(self.capability_cache_ttl_s or 0),
                                                     _VISION_REJECTION_MIN_TTL_S))
-        stripped, dropped = _strip_images_with_note(messages, self.model)
+        stripped, dropped = _strip_images_with_note(messages, self.model, unreadable=unreadable)
         if dropped:
             self._note_dropped_images(dropped)
         return stripped
@@ -3155,7 +3175,8 @@ class LLMClient:
             if done is not None and not isinstance(done, bool):
                 raise LLMError("Ollama emitted a non-boolean done field")
             if obj.get("error"):
-                raise LLMError(f"Ollama stream error: {str(obj['error'])[:400]}")
+                raise _ProviderStreamError(f"Ollama stream error: {str(obj['error'])[:400]}",
+                                           produced or bool(native_thinking) or bool(native_calls))
             message = obj.get("message") or {}
             if not isinstance(message, dict):
                 raise LLMError("Ollama emitted a non-object message")
@@ -3519,6 +3540,11 @@ class LLMClient:
                     messages = self._without_images(messages, refused=True)
                     payload["messages"] = self._ollama_messages(messages)
                     continue
+                if _image_parts_in(messages) and _IMAGE_DATA_ERROR_RE.search(body):
+                    # This image's data, not the model: the turn goes on without it, and the model is told.
+                    messages = self._without_images(messages, unreadable=True)
+                    payload["messages"] = self._ollama_messages(messages)
+                    continue
                 if (r.status_code == 400 and self.tools_supported and "tools" in payload
                         and re.search(r"tool|function", low)):
                     self._mark_rejected("tools")
@@ -3596,6 +3622,22 @@ class LLMClient:
             try:
                 result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget,
                                               watch=watch)
+            except _ProviderStreamError as exc:
+                # Ollama answered 200, then failed inside the stream ("Internal Server Error"). Until
+                # anything reached the screen, the same request is as safe to send again as one that got
+                # a 5xx before streaming, and it shares that retry budget. Once output was shown, it stops.
+                if exc.emitted or (cancel is not None and cancel.is_set()):
+                    raise LLMError(str(exc)) from exc
+                transient += 1
+                last_err = str(exc)
+                delay = 0.5 * transient
+                last_cause = self._status_cause(500, str(exc), {}, self._ollama_url, delay)
+                if transient < 4:
+                    if not self._retry_transport(last_cause, transient, delay, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
+                raise _with_cause(LLMError(f"Ollama request failed repeatedly: {last_err}"),
+                                  last_cause, transient) from exc
             finally:
                 _close_response(r)
                 watch.stop()
@@ -3756,6 +3798,14 @@ class LLMClient:
                         and _IMAGE_REFUSAL_RE.search(body)):
                     # images: the endpoint refused the image part, not tools. Retry once without it.
                     messages = self._without_images(messages, refused=True)
+                    payload["messages"] = (_repair_for_retry(messages) if repaired else
+                                           [{k: v for k, v in message.items() if not str(k).startswith("_")}
+                                            for message in messages])
+                    continue
+                if (r.status_code in (400, 422) and _image_parts_in(payload["messages"])
+                        and _IMAGE_DATA_ERROR_RE.search(body)):
+                    # This image's data, not the model: the turn goes on without it, and the model is told.
+                    messages = self._without_images(messages, unreadable=True)
                     payload["messages"] = (_repair_for_retry(messages) if repaired else
                                            [{k: v for k, v in message.items() if not str(k).startswith("_")}
                                             for message in messages])
