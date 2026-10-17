@@ -66,12 +66,6 @@ dgc           # start the interactive agent
 /model qwen3.6:27b-q8_0
 ```
 
-## Benchmarks
-
-The retained Aider-polyglot measured slice covers 90 problems—15 in each of six languages—with pass@2. Every harness records the same `qwen3.8:27b-orig` alias, caller-declared digest, endpoint URL, and settings; the runner verified context size, but not the endpoint's actual model weights. DGC solved 85/90 (94.4%); Goose solved 86/90 (95.6%). The saved run lacks its runner revision, so it is disclosed as a measured slice rather than release-gating evidence.
-
-The SWE-bench Lite result is founder-published as 184/300. The retained files contain 300 predictions, 292 with non-empty patches, but no grading report or resolved-instance list; they cannot independently reproduce 184/300. See the complete disclosures and sanitized evidence bundles at **[vibedgc.com/benchmark](https://vibedgc.com/benchmark)**.
-
 ## Native local/API permission modes
 
 Switch live with `/mode` (cycles) or `/mode <name>`, or launch with `--mode`:
