@@ -2260,20 +2260,41 @@ body.ask-docked #tasks-panel { display: none; }
 @media (max-width: 360px) {
   .ask { padding-right: var(--sp-1); padding-left: var(--sp-1); }
 }
-/* The answered questions, inside the propose_options step (collapsed until opened). */
+/* The answered questions, inside the propose_options step: open until the reader closes it, every option
+   still listed and the picks marked, as Claude Code keeps them. The unpicked rows go quiet through their
+   colours, not opacity, so their words keep their contrast. */
 .tool.asked-card:not(.open) .body { display: none; }
 .tool.asked-card .body { padding-top: var(--sp-1); }
-.asked-list { margin: 0; padding: 0 0 0 var(--sp-4); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
-.asked-list li { margin: 0 0 var(--sp-2); }
-.asked-list li:last-child { margin-bottom: 0; }
-.asked-q { color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
-.asked-a { color: var(--text-strong); overflow-wrap: anywhere; }
-.asked-a .ask-badge { margin-left: 4px; }
-.asked-words { display: block; white-space: pre-wrap; }
-.asked-words-label { margin-right: 4px; color: var(--muted); font-size: var(--t-xs); }
+/* Standing in the transcript (appendTool), it is a heading and its panel: no tool frame and no output rail,
+   so the panel is the one box. */
+.tool.asked-standalone, .tool.asked-standalone:hover, .tool.asked-standalone.open { border-color: transparent; background: transparent; }
+.tool.asked-standalone .body { margin-left: var(--sp-2); padding-left: 0; border-left: 0; }
+.asked-panel { display: grid; gap: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); }
+.asked-question { min-width: 0; }
+.asked-q { margin: 0 0 var(--sp-2); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); overflow-wrap: anywhere; white-space: pre-wrap; }
+.asked-options { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.asked-opt { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
+.asked-mark { position: relative; flex: none; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid var(--border-strong); }
+.asked-mark.radio { border-radius: var(--r-full); }
+.asked-mark.check { border-radius: 4px; }
+.asked-opt.picked .asked-mark { border-color: var(--accent); }
+.asked-opt.picked .asked-mark.radio::after { content: ""; position: absolute; inset: 2.5px; border-radius: var(--r-full); background: var(--accent); }
+.asked-opt.picked .asked-mark.check { background: var(--accent); }
+.asked-opt.picked .asked-mark.check::after { content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.asked-opt-text { display: block; min-width: 0; overflow-wrap: anywhere; }
+.asked-opt-label { color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.asked-opt.picked .asked-opt-label { color: var(--text-strong); font-weight: var(--w-med); }
+.asked-opt .ask-badge { margin-left: 6px; }
+.asked-opt-desc { display: block; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.asked-words .asked-opt-desc { color: var(--text); white-space: pre-wrap; }
 .asked-skipped, .asked-outcome { color: var(--muted); }
+.asked-skipped { margin: var(--sp-2) 0 0; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .asked-outcome { margin: 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 @media (forced-colors: active) {
+  .asked-mark { forced-color-adjust: none; border-color: CanvasText; }
+  .asked-opt.picked .asked-mark { border-color: Highlight; }
+  .asked-opt.picked .asked-mark.radio::after, .asked-opt.picked .asked-mark.check { background: Highlight; }
+  .asked-opt.picked .asked-mark.check::after { border-color: HighlightText; }
   .ask-opt { border: 1px solid transparent; }
   .ask-opt.hot { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
   .ask-opt.hot * { color: HighlightText; }

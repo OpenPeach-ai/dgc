@@ -3740,6 +3740,15 @@
     // group the moment its agent starts; a replay draws every call of the step before any result,
     // and without this a [task, bash] step put the bash group above the line after a reload and
     // below it live. The group the spawn left folds when the model moves on, like any other.
+    // A question the chat's own model asked you is part of the conversation, not tool work: it stands in the
+    // transcript between the groups around it (Claude Code's "Questions"), rather than folding away inside
+    // "Used 1 tool" when the model moves on. A sub-agent's question stays with that agent's steps.
+    if (card.dataset.toolName === "propose_options" && !agentIdFromCall(card.dataset.callId)) {
+      if (turn.toolGroup) { (turn.leftGroups ||= []).push(turn.toolGroup); turn.toolGroup = null; }
+      card.classList.add("asked-standalone");
+      appendTurnContent(card);
+      return;
+    }
     const spawn = isTopLevelSpawn(card) || (card.dataset.toolName === "run_pip_now" && !agentIdFromCall(card.dataset.callId));
     if (spawn && turn.toolGroup) { (turn.leftGroups ||= []).push(turn.toolGroup); turn.toolGroup = null; }
     if (!turn.toolGroup) {
@@ -10012,7 +10021,7 @@
   // The fit rule's last resorts: the options list keeps one label line, the question two lines.
   const ASK_LIST_MIN = 44, ASK_QUESTION_MIN = 40;
   let ask = null, askSerial = 0;
-  const askedOpen = new Set();            // answered cards the reader opened, by turn id + call
+  const askedClosed = new Set();          // answered cards the reader collapsed, by turn id + call
 
   function askValid(ev) {
     const qs = Array.isArray(ev.questions) ? ev.questions : [];
@@ -10505,32 +10514,49 @@
   }
 
   // ---- the answered state, inside the step's tool card ----
+  // As Claude Code keeps it (founder, 2026-10-17): "Questions · Answered · 4 questions", open, with every
+  // question and every option still there, the ones picked marked (a filled circle for one choice, a ticked
+  // box for several) and the rest quieter, so the transcript says what was asked as well as what was chosen.
   function askedSummary(ev) {
     const qs = Array.isArray(ev.questions) ? ev.questions : [];
-    if (ev.outcome === "dismissed") return qs.length === 1 ? "· Dismissed" : `${askCountLabel(qs.length)} · dismissed`;
-    if (ev.outcome !== "answered") return qs.length === 1 ? "· Not answered" : `${askCountLabel(qs.length)} · not answered`;
-    if (qs.length !== 1) return askCountLabel(qs.length);
-    const a = (ev.answers || {})[qs[0].id] || {};
-    const picks = (Array.isArray(a.selected) ? a.selected : []).map((k) => qs[0].options?.[k]).filter(Boolean).map(askLabel);
-    const words = String(a.other || "").trim();
-    const text = picks.join(", ") || (words ? `“${words.length > 60 ? `${words.slice(0, 59)}…` : words}”` : "Skipped");
-    return `· ${text}`;
+    const n = askCountLabel(qs.length);
+    if (ev.outcome === "dismissed") return `· Dismissed · ${n}`;
+    if (ev.outcome !== "answered") return `· Not answered · ${n}`;
+    return `· Answered · ${n}`;
+  }
+  // The card's head says what it holds once it is answered (setToolStatus writes "Asked" over it otherwise).
+  function askedHead(card) {
+    const verb = card.querySelector(".verb");
+    const count = Array.isArray(card._asked?.questions) ? card._asked.questions.length : 0;
+    if (verb) verb.textContent = count === 1 ? "Question" : "Questions";
+  }
+  function askedOption(option, picked, multi, extra = "") {
+    const desc = option.words ?? askDesc(option);
+    return `<li class="asked-opt${picked ? " picked" : ""}${extra}"><span class="asked-mark ${multi ? "check" : "radio"}" aria-hidden="true"></span>`
+      + `<span class="asked-opt-text"><span class="sr-only">${picked ? "Chosen: " : "Not chosen: "}</span>`
+      + `<span class="asked-opt-label">${esc(option.words !== undefined ? option.label : askLabel(option))}</span>`
+      + `${option.words === undefined && askFlagged(option) ? '<span class="ask-badge">Recommended</span>' : ""}`
+      + `${desc ? `<span class="asked-opt-desc">${esc(desc)}</span>` : ""}</span></li>`;
   }
   function askedBody(ev) {
     const qs = Array.isArray(ev.questions) ? ev.questions : [];
     if (ev.outcome === "dismissed") return '<p class="asked-outcome">Dismissed without an answer</p>';
     if (ev.outcome === "unavailable") return '<p class="asked-outcome">Not answered: nobody could answer here</p>';
     if (ev.outcome !== "answered") return '<p class="asked-outcome">Not answered: the turn stopped</p>';
-    return `<ol class="asked-list">${qs.map((q) => {
+    return `<div class="asked-panel">${qs.map((q) => {
       const a = (ev.answers || {})[q.id] || {};
       const options = Array.isArray(q.options) ? q.options : [];
-      const picks = (Array.isArray(a.selected) ? a.selected : []).map((k) => options[k]).filter(Boolean);
+      const multi = !!q.multi_select;
       const words = String(a.other || "").trim();
-      const chosen = picks.map((o) => `<span class="asked-pick">${esc(askLabel(o))}</span>${askFlagged(o) ? '<span class="ask-badge">Recommended</span>' : ""}`).join('<span class="asked-sep">, </span>');
-      const said = words ? `<span class="asked-words"><span class="asked-words-label">Your words</span> “${esc(words)}”</span>` : "";
-      const answer = chosen || said ? `${chosen}${said}` : '<span class="asked-skipped">Skipped</span>';
-      return `<li><div class="asked-q">${esc(q.question)}</div><div class="asked-a">${answer}</div></li>`;
-    }).join("")}</ol>`;
+      const selected = Array.isArray(a.selected) ? a.selected : [];
+      // In a single choice, written words replace the pick (askPicked): only one row is marked.
+      const picked = new Set(multi ? selected : words ? [] : selected.slice(0, 1));
+      const rows = options.map((o, k) => askedOption(o, picked.has(k), multi)).join("");
+      const said = words ? askedOption({ label: "Your words", words: `“${words}”` }, true, multi, " asked-words") : "";
+      const skipped = !picked.size && !words ? '<p class="asked-skipped">Skipped</p>' : "";
+      return `<section class="asked-question"><div class="asked-q">${esc(q.question)}</div>`
+        + `<ul class="asked-options">${rows}${said}</ul>${skipped}</section>`;
+    }).join("")}</div>`;
   }
   // ---- an open question ------------------------------------------------------------------------
   // The turn did not stop for this, so the card lives in the transcript rather than docking over
@@ -10758,6 +10784,7 @@
     card.classList.add("has-output");
     const badge = card.querySelector(".badge"); if (badge) badge.textContent = "";
     const arg = card.querySelector(".arg"); if (arg) arg.textContent = askedSummary(ev);
+    askedHead(card);
     // Remembered per turn and call: call ids repeat across turns (call_0 style), and a text-protocol
     // step has none, so those count within their turn. Replayed turn ids are stable across reloads.
     if (!card._askedKey) {
@@ -10767,18 +10794,19 @@
     }
     const key = card._askedKey;
     const toggle = card.querySelector(".tool-toggle");
-    const open = askedOpen.has(key);
+    const open = !askedClosed.has(key);       // open, as Claude Code shows it, unless the reader closed it
     card.classList.toggle("open", open);
     toggle.setAttribute("aria-expanded", String(open));
     if (!card._askedToggle) {
       card._askedToggle = true;
-      toggle.addEventListener("click", () => { if (card.classList.contains("open")) askedOpen.add(key); else askedOpen.delete(key); });
+      toggle.addEventListener("click", () => { if (card.classList.contains("open")) askedClosed.delete(key); else askedClosed.add(key); });
     }
   }
   // A tool_result for a step whose questions are already rendered keeps the structured body.
   function askedResultShown(card, ev) {
     if (!card._asked || ev.is_error) return false;
     setToolStatus(card, "completed");
+    askedHead(card);
     return true;
   }
   // ---- end 0.40 options ---------------------------------------------------------------------------

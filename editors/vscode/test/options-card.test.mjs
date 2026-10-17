@@ -411,26 +411,37 @@ test("the answered state renders inside the tool card, identical live, replayed 
       open: card.classList.contains("open") };
   };
   const expected = shape(live);
-  assert.equal(expected.verb, "Asked");
-  assert.equal(expected.arg, "2 questions");
+  assert.equal(expected.verb, "Questions");
+  assert.equal(expected.arg, "· Answered · 2 questions");
   assert.equal(expected.glyph, "circle-help");
-  assert.equal(expected.open, false, "collapsed by default");
+  assert.equal(expected.open, true, "open, as Claude Code keeps an answered question (founder, 2026-10-17)");
   assert.equal(expected.badge, "");
   assert.deepEqual(shape(reversed), expected);
   assert.deepEqual(shape(replayed), expected);
   for (const p of [live, reversed, replayed]) {
     const card = p.doc.querySelector('.tool[data-call-id="call_q"]');
     assert.equal(card.querySelector(".body pre"), null, "the raw model-facing result is not shown");
-    const items = [...card.querySelectorAll(".asked-list li")];
+    // Every question, every option still listed; the picks marked, a circle for one choice and a box for several.
+    const items = [...card.querySelectorAll(".asked-question")];
     assert.equal(items.length, 2);
+    const rows = (item) => [...item.querySelectorAll(".asked-opt")].map((row) => ({
+      label: row.querySelector(".asked-opt-label").textContent, picked: row.classList.contains("picked"),
+      mark: row.querySelector(".asked-mark").classList.contains("check") ? "box" : "circle",
+      said: row.querySelector(".sr-only").textContent, desc: row.querySelector(".asked-opt-desc")?.textContent || "",
+      badge: !!row.querySelector(".ask-badge") }));
     assert.equal(items[0].querySelector(".asked-q").textContent, STORAGE.question);
-    assert.equal(items[0].querySelector(".asked-a").textContent, "SQLite fileRecommended");
-    assert.ok(items[0].querySelector(".ask-badge"));
-    assert.equal(items[1].querySelector(".asked-words-label").textContent, "Your words");
-    assert.match(items[1].querySelector(".asked-a").textContent, /“also a size cap”/);
+    assert.deepEqual(rows(items[0]), [
+      { label: "SQLite file", picked: true, mark: "circle", said: "Chosen: ", desc: STORAGE.options[0].description, badge: true },
+      { label: "JSON on disk", picked: false, mark: "circle", said: "Not chosen: ", desc: STORAGE.options[1].description, badge: false }]);
+    assert.equal(items[1].querySelector(".asked-q").textContent, EXTRAS.question);
+    assert.deepEqual(rows(items[1]).map((r) => [r.label, r.picked, r.mark]), [
+      ["Conflict prompt", false, "box"], ["Sync history", false, "box"], ["Export button", false, "box"],
+      ["Your words", true, "box"]]);
+    assert.equal(rows(items[1]).at(-1).desc, "“also a size cap”");
+    assert.equal(card.querySelector(".asked-skipped"), null, "an answer in words is not a skip");
     assert.deepEqual(p.errors, []);
   }
-  // The open state is remembered per turn and call when the card is drawn again (a history reload)...
+  // A card the reader closed stays closed when it is drawn again (a history reload)...
   const page = [{ type: "turn_start", turn_id: "h1", prompt: "go", kind: "prompt" }, call, { ...RESOLVED, id: null }, RESULT,
     { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: null }];
   replayed.doc.querySelector('.tool[data-call-id="call_q"] .tool-toggle').click();
@@ -438,14 +449,44 @@ test("the answered state renders inside the tool card, identical live, replayed 
   replayed.send({ type: "event", event: { type: "history", items: page } });
   const reloaded = replayed.doc.querySelectorAll('.tool[data-call-id="call_q"]');
   assert.equal(reloaded.length, 1);
-  assert.equal(reloaded[0].classList.contains("open"), true);
-  // ...but a later turn that reuses the call id (call_0 style) starts collapsed.
+  assert.equal(reloaded[0].classList.contains("open"), false);
+  // ...but a later turn that reuses the call id (call_0 style) starts open.
   live.doc.querySelector('.tool[data-call-id="call_q"] .tool-toggle').click();
   live.event({ type: "turn_start", turn_id: "t2", prompt: "again" });
   live.event(call);
   live.event(RESOLVED);
   const opens = [...live.doc.querySelectorAll('.tool[data-call-id="call_q"]')].map((card) => card.classList.contains("open"));
-  assert.deepEqual(opens, [true, false]);
+  assert.deepEqual(opens, [false, true]);
+});
+
+test("a question the model asked stands in the transcript, between the tool groups, not folded inside one", () => {
+  // Founder, 2026-10-17: kept the way Claude Code keeps "Questions". Inside "Used 1 tool" it folded away the
+  // moment the model moved on. A sub-agent's question is that agent's step, and stays with its other steps.
+  const bash = (id) => ({ type: "tool_call", call_id: id, name: "bash", args: { command: "ls" }, summary: "ls" });
+  const done = (id) => ({ type: "tool_result", call_id: id, name: "bash", output: "a.txt", is_error: false, is_diff: false, diff: "" });
+  const p = transcript([{ type: "turn_start", turn_id: "t1", prompt: "go" }, bash("b1"), done("b1"),
+    { type: "tool_call", call_id: "call_q", name: "propose_options", args: {}, summary: "2 questions" }, RESOLVED, RESULT,
+    bash("b2"), done("b2"),
+    { type: "tool_call", call_id: "sub-0123456789ab:call_q", name: "propose_options", args: {}, summary: "1 question" }]);
+  const block = p.doc.querySelector(".msg.dgc");
+  const asked = p.doc.querySelector('.tool[data-call-id="call_q"]');
+  assert.equal(asked.closest(".tool-group"), null, "not inside a tool group");
+  assert.equal(asked.parentElement, block, "a step of the turn itself");
+  assert.ok(asked.classList.contains("asked-standalone"));
+  const kids = [...block.children];
+  const groups = kids.filter((n) => n.matches(".tool-group"));
+  assert.ok(groups.length >= 2, "the bash before it and the bash after it are in groups of their own");
+  assert.ok(kids.indexOf(groups[0]) < kids.indexOf(asked) && kids.indexOf(asked) < kids.indexOf(groups.at(-1)), "in the order it happened");
+  const child = p.doc.querySelector('.tool[data-call-id="sub-0123456789ab:call_q"]');
+  assert.ok(!child.classList.contains("asked-standalone"), "a sub-agent's question is grouped with its steps");
+  assert.deepEqual(p.errors, []);
+});
+
+test("the standalone answered card is a heading and one panel: no tool frame, no output rail", () => {
+  const rule = (selector) => mainCss.match(new RegExp(`(?:^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] || "";
+  assert.match(rule(".tool.asked-standalone, .tool.asked-standalone:hover, .tool.asked-standalone.open"), /border-color: transparent; background: transparent/);
+  assert.match(rule(".tool.asked-standalone .body"), /border-left: 0/);
+  assert.match(rule(".asked-panel"), /border: 1px solid var\(--border\)/);
 });
 
 test("keyboard focus returns to the composer when the answered card closes", () => {
@@ -472,10 +513,14 @@ test("answered variants: one question, skipped, dismissed, cancelled, text proto
   p.event({ type: "options_resolved", id: null, call_id: "a", outcome: "answered", questions: [STORAGE],
     answers: { q1: { selected: [1], other: "" } } });
   const one = p.doc.querySelector('.tool[data-call-id="a"]');
-  assert.equal(`${one.querySelector(".verb").textContent} ${one.querySelector(".arg").textContent}`, "Asking · JSON on disk");
+  assert.equal(`${one.querySelector(".verb").textContent} ${one.querySelector(".arg").textContent}`, "Question · Answered · 1 question");
   p.event({ type: "tool_result", call_id: "a", name: "propose_options", output: "ok", is_error: false, is_diff: false, diff: "" });
-  assert.equal(`${one.querySelector(".verb").textContent} ${one.querySelector(".arg").textContent}`, "Asked · JSON on disk");
-  assert.equal(one.querySelector(".ask-badge"), null, "no badge when the pick was not the recommendation");
+  assert.equal(`${one.querySelector(".verb").textContent} ${one.querySelector(".arg").textContent}`, "Question · Answered · 1 question",
+    "the result's status does not write \"Asked\" back over it");
+  const [recommended, chosen] = one.querySelectorAll(".asked-opt");
+  assert.ok(recommended.querySelector(".ask-badge") && !recommended.classList.contains("picked"),
+    "the recommendation keeps its badge though it wasn't picked");
+  assert.ok(chosen.classList.contains("picked") && !chosen.querySelector(".ask-badge"));
   p.event({ type: "tool_call", call_id: "b", name: "propose_options", args: {}, summary: "" });
   p.event({ type: "options_resolved", id: null, call_id: "b", outcome: "answered", questions: [STORAGE],
     answers: { q1: { selected: [], other: "" } } });
@@ -490,8 +535,8 @@ test("answered variants: one question, skipped, dismissed, cancelled, text proto
     answers: { q1: { selected: [0], other: "" } } });
   const orphan = [...p.doc.querySelectorAll('.tool[data-tool-name="propose_options"]')].at(-1);
   assert.equal(orphan.dataset.callId, "");
-  assert.equal(orphan.querySelector(".verb").textContent, "Asked");
-  assert.ok(orphan.querySelector(".asked-list .ask-badge"));
+  assert.equal(orphan.querySelector(".verb").textContent, "Question");
+  assert.ok(orphan.querySelector(".asked-panel .asked-opt.picked .ask-badge"));
   assert.deepEqual(p.errors, []);
 });
 
