@@ -327,6 +327,12 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-page-label{margin:0;padding:10px 14px 2px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .pip-page-row{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:10px 14px;border:0;border-radius:0;background:transparent;color:var(--vscode-foreground);text-align:left}
 button.pip-page-row:hover{background:var(--pip-wash)}
+/* The page-wide input rule sets width:100%; in a row that would claim the whole row and crush the
+   words beside it to one letter per line. A control in a row takes its own size. */
+.pip-page-row>input,.pip-page-row>select{width:auto;flex:0 1 auto;max-width:100%}
+#pips-limit-form{flex-wrap:wrap}
+#pips-limit-form .row-words{flex:1 1 220px}
+#pips-limit-form input[type=number]{width:96px;flex:0 0 96px}
 .pip-page-group>.pip-page-row+.pip-page-row,.pip-page-list>li+li{border-top:1px solid var(--pip-edge)}
 .pip-page-row.sub{min-height:40px;padding:6px 14px 6px 56px}
 .row-words{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
