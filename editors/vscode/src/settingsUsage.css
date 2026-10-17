@@ -1,5 +1,7 @@
 .usage-section > .set-group:first-child { margin-top: 0; }
-.usage-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 40px; padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); }
+/* In a narrow tab Refresh wraps under the status rather than squeezing it: "Updated 08:56 PM" broke a
+   syllable per line beside the button. Wide, the two share the line as before. */
+.usage-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 40px; padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); }
 .usage-status { min-width: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
 .usage-refresh { display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; height: 28px; color: var(--muted); border: 1px solid var(--border-strong); }
 .usage-refresh:hover { color: var(--text); background: var(--surface2); }
@@ -16,6 +18,8 @@
 .usage-empty-all[hidden] { display: none; }
 .usage-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-2); }
 @media (min-width: 560px) { .usage-figures { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* Below ~120px a figure clips its big number ("17.3k" read "17.3l"): a narrow tab stacks them, one per row. */
+@media (max-width: 360px) { .usage-figures { grid-template-columns: minmax(0, 1fr); } }
 .usage-figure { min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); }
 .usage-figure-label { display: block; color: var(--muted); font: var(--w-med) var(--t-xs)/1.2 var(--sans); }
 .usage-figure-value { display: block; margin-top: var(--sp-1); color: var(--text-strong); font: var(--w-semi) var(--t-xl)/1.2 var(--sans); font-variant-numeric: tabular-nums; }
@@ -75,6 +79,8 @@
 .usage-axis { display: flex; justify-content: space-between; gap: var(--sp-2); margin-top: 7px; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
 .usage-readout { min-height: 1.45em; margin: var(--sp-1) 0 0; color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
 .usage-privacy { margin-top: var(--sp-4); padding-top: var(--sp-2); border-top: 1px solid var(--border); }
+/* The filter box takes its own width, but never more than the page has: it scrolled a narrow tab sideways. */
+.usage-find { max-width: 100%; }
 
 /* Everything / Pips: which usage the page shows. The range below is shared. */
 .usage-views { margin: 0 0 var(--sp-3, 12px); }

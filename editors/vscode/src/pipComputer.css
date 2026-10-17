@@ -10,9 +10,11 @@ button:disabled{opacity:.5;cursor:default}
 button:focus-visible,input:focus-visible,.pc-screen:focus-visible{outline:2px solid var(--vscode-focusBorder,var(--accent));outline-offset:2px}
 .pc-quiet{color:var(--vscode-foreground);background:transparent;border:1px solid var(--line)}
 input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--line));border-radius:6px;padding:6px 9px;min-width:0}
-.pc-header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex:none}
+/* A narrow tab gave the title a few pixels, and "Core · Computer" ran word by word under Stop computer:
+   the title keeps a readable column and the button wraps underneath it instead. */
+.pc-header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex:none}
 .pc-face{width:42px;height:42px;flex:none}
-.pc-title{flex:1;min-width:0}.pc-title h1{font-size:14px;font-weight:600;margin:0}.pc-status{margin:2px 0 0;color:var(--muted);font-size:12px}
+.pc-title{flex:1 1 100px;min-width:0}.pc-title h1{font-size:14px;font-weight:600;margin:0;overflow-wrap:anywhere}.pc-status{margin:2px 0 0;color:var(--muted);font-size:12px}
 .pc-icon{display:inline-grid;place-items:center;width:18px;font-family:var(--mono);font-size:12px;opacity:.85}
 .pc-pane{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 16px;overflow:auto}
 .pc-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pc-bar input{flex:1}
