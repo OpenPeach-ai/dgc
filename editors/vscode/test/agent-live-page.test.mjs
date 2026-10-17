@@ -25,8 +25,8 @@ const pageText = (h) => h.doc.getElementById("agent-log")?.textContent || "";
 // Repaints are coalesced to one per frame — rebuilding the whole page per step is quadratic and
 // ran the panel out of memory at 600 steps. So a test must let that frame pass.
 const painted = () => new Promise((r) => setTimeout(r, 120));
-// What the page actually renders per step is a tool card carrying the call id — the path lives in
-// the card's summary, which the backend fills in and a bare step does not.
+// What the page actually renders per step is a tool card carrying the call id. A bare step has no summary,
+// so the page makes one from its arguments (stepSummary), as the backend's arg_summary does.
 const cardIds = (h) => [...h.doc.querySelectorAll("#agent-log .tool")].map((n) => n.dataset.callId);
 
 test("a step arriving mid-run reaches the agent's page", async () => {
@@ -41,6 +41,8 @@ test("a step arriving mid-run reaches the agent's page", async () => {
   const card = h.doc.querySelector("#agent-log .tool");
   assert.equal(card.dataset.toolName, "read_file", "and say which tool it was");
   assert.match(pageText(h), /Reading/, "in the reader's words, not the tool's");
+  assert.equal(card.querySelector(".arg").textContent, "src/clamp.py",
+    "and what it read: a bare step has no summary, so the page makes one from its arguments (real VS Code, 2026-10-18)");
 });
 
 test("steps accumulate in order", async () => {

@@ -8293,6 +8293,17 @@
   // nested agents' lines drawn here and `images` the image records of the cloned cards; `open` is what
   // a nested agent's name does. `told`: the agent's report is drawn beside these (above them on its
   // page, after them in the map's transcript, `below`).
+  // A step's one-line summary when it came without one: a parallel sub-agent's live steps (agent_step) carry
+  // the call's name and arguments only, so its page and the map's transcript drew a bare "Read" where Claude Code
+  // shows "Read README.md" (real VS Code, 2026-10-18). The same rule as dgc/ui.py arg_summary's general case.
+  const STEP_SUMMARY_KEYS = ["path", "command", "pattern", "url", "name", "memory", "symbol", "operation"];
+  function stepSummary(name, args) {
+    if (!args || typeof args !== "object") return "";
+    const one = (value) => { const text = String(value ?? "").replace(/\n/g, " "); return text.length > 120 ? `${text.slice(0, 120)}…` : text; };
+    if (name === "message_task" || name === "close_task") return one(args.agent || args.id || "");
+    const key = STEP_SUMMARY_KEYS.find((k) => k in args);
+    return key ? one(args[key]) : "";
+  }
   function paintAgentTranscript(id, into, { lines = agentPageLines, images = agentPageImageRecords, open = null,
     told = null, below = false } = {}) {
     let cloned = 0;
@@ -8336,7 +8347,8 @@
         if (ev.type === "tool_call") {
           const child = nested(ev);
           if (child) { pageLine(child.id); continue; }
-          const card = toolCard({ name: ev.name, call_id: ev.call_id, args: ev.args || {}, summary: ev.summary }, { detached: true });
+          const card = toolCard({ name: ev.name, call_id: ev.call_id, args: ev.args || {},
+                                  summary: ev.summary || stepSummary(ev.name, ev.args) }, { detached: true });
           card.classList.add("agent-owned");
           card.dataset.agentId = id;
           store[ev.call_id || ev.name] = card;
@@ -9507,7 +9519,8 @@
       const key = ev.call_id || ev.name;
       if (ev.type === "tool_call") {
         const copy = toolCopy(ev.name);
-        calls.set(key, { status: "running", text: [copy.past, copy.target, String(ev.summary || ev.args?.description || "")].filter(Boolean).join(" ") });
+        calls.set(key, { status: "running", text: [copy.past, copy.target,
+          String(ev.summary || stepSummary(ev.name, ev.args) || ev.args?.description || "")].filter(Boolean).join(" ") });
       } else if (ev.type === "tool_result" && calls.has(key)) {
         calls.get(key).status = ev.is_error ? "failed" : "completed";
       }
