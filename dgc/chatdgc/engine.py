@@ -11,6 +11,7 @@ import copy
 import json
 import re
 import threading
+import unicodedata
 import uuid
 from typing import Callable
 
@@ -271,6 +272,29 @@ MAX_PICTURES = 4
 PICTURE_BYTES = 400_000                 # one thumbnail at most; a search engine's copy is a few tens of KB
 PICTURE_WAIT = 8.0                      # seconds a finished reply waits for its pictures before it's saved without
 PICTURE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+# Words that say nothing about what a picture shows, so sharing only these with the search isn't a match.
+_PICTURE_FILLER = frozenset("the and for with from into near over photo photos image images picture pictures pic pics "
+                            "wallpaper wallpapers stock free best top view views jpg jpeg png webp www com http https "
+                            "html".split())
+
+
+def _picture_words(text: str) -> set[str]:
+    """The words of a search or of what a result says about itself, without case or accents ("Belém" is "belem")."""
+    folded = "".join(c for c in unicodedata.normalize("NFKD", str(text or "").casefold()) if not unicodedata.combining(c))
+    return {w for w in re.findall(r"\w+", folded) if (len(w) >= 3 or w.isdigit()) and w not in _PICTURE_FILLER}
+
+
+def _about_the_search(item: dict, wanted: set[str]) -> bool:
+    """Whether an image result is about the search at all: a word of the query is in its title, its page's address or
+    the picture's own. An image search sometimes answers with pictures of something else entirely: asked for "Lisbon
+    Portugal cityscape" (2026-10-17), DuckDuckGo gave four portraits of Basavanna from Kannada news sites, and ChatDGC
+    showed them above a reply about Lisbon. No pictures is better than those."""
+    if not wanted:
+        return True                           # a search of filler words only: nothing to tell them apart by
+    said = " ".join(_picture_words(" ".join(str(item.get(k) or "") for k in ("title", "url", "image"))))
+    return any(word in said for word in wanted)
+
+
 PICTURES_SHOWN = ("The user sees pictures from a web image search for \"{query}\" above your reply. You haven't "
                   "seen them, so don't describe them or point to them; answer as you would without them.")
 PROJECTS_FRESH = 300          # seconds a list of the user's projects is reused
@@ -2091,7 +2115,9 @@ class ChatEngine:
         """An image search's first pictures that load (MAX_PICTURES), each fetched here: (what it is and the page
         it's on, its bytes), for the chat to keep as an image of its own."""
         from concurrent.futures import ThreadPoolExecutor
-        found = [x for x in self._image_searcher(query) or [] if isinstance(x, dict)][:MAX_PICTURES * 2]
+        wanted = _picture_words(query)
+        found = [x for x in self._image_searcher(query) or []
+                 if isinstance(x, dict) and _about_the_search(x, wanted)][:MAX_PICTURES * 2]
 
         def fetch(item):
             if cancel is not None and cancel.is_set():

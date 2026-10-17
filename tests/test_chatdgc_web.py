@@ -20,8 +20,8 @@ JPEG = b"\xff\xd8\xff\xe0" + bytes(200)
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(200)
 
 
-def found_pictures(n=6):
-    return [{"title": f"Hagia Sophia {i}", "image": f"https://img{i}.example/full.jpg",
+def found_pictures(n=6, subject="Hagia Sophia"):
+    return [{"title": f"{subject} {i}", "image": f"https://img{i}.example/full.jpg",
              "thumbnail": f"https://thumbs.example/t{i}", "url": f"https://site{i}.example/page", "site": f"site{i}.example",
              "width": 1600, "height": 1200} for i in range(n)]
 
@@ -282,6 +282,7 @@ class PictureTests(Engine):
 
     def test_search_first_still_shows_pictures_and_web_search_off_shows_none(self):
         self.world["decide"] = {"needs_search": True, "query": "ignored", "images": "red panda"}
+        self.world["pictures"] = found_pictures(subject="Red panda")
         chat = self.engine.open()
         self.assertEqual(len(self.engine.send(chat["id"], "Show me a red panda", search="on")["images"]["items"]), 4)
         self.config["chatdgc_web"] = False
@@ -291,14 +292,38 @@ class PictureTests(Engine):
 
     def test_a_temporary_chat_keeps_its_pictures_in_memory_only(self):
         self.world["decide"] = {"needs_search": False, "query": "", "images": "kingfisher"}
+        self.world["pictures"] = found_pictures(subject="Common kingfisher")
         chat = self.engine.open(temporary=True)
         reply = self.engine.send(chat["id"], "What does a kingfisher look like?", search="auto")
         first = reply["images"]["items"][0]["id"]
         self.assertTrue(self.engine.image(chat["id"], first, limit=10**6).startswith("data:image/jpeg;base64,"))
         self.assertFalse((self.store.files_dir(chat["id"])).exists(), "nothing written")
 
+    def test_pictures_of_something_else_are_dropped(self):
+        # What DuckDuckGo answered on 2026-10-17 for the model's "Lisbon Portugal cityscape": four portraits of Basavanna.
+        off_topic = [
+            {"title": "ದೇವೇಂದ್ರ ಕಟ್ಟಿಮನಿ ಅವರು ಬರೆದ ಕವಿತೆ \"ಉತ್ಕ್ರಾಂತಿ\"", "url": "https://minchulli.com/2023/05/kavite/"},
+            {"title": "50+ Basavanna Photos, Images HD || Basaveshwar Wallpapers ...", "url": "https://in.pinterest.com/pin/1234/"},
+            {"title": "ಮೇ 3 ರಂದು ಜಿಲ್ಲಾಧಿಕಾರಿ ಕಚೇರಿಯಲ್ಲಿ ಬಸವ ಜಯಂತಿ - Udupixpress", "url": "https://udupixpress.com/basava-jayanthi/"},
+            {"title": "INSIGHTS DAILY CURRENT AFFAIRS + PIB SUMMARY- 27 April 2020", "url": "https://www.insightsonindia.com/2020/04/27/"}]
+        def picture(row, i):
+            return {**row, "image": f"https://img{i}.example/full.jpg", "thumbnail": f"https://thumbs.example/t{i}x",
+                    "site": "x.example", "width": 800, "height": 600}
+        self.world["decide"] = {"needs_search": False, "query": "", "images": "Lisbon Portugal cityscape"}
+        self.world["pictures"] = [picture(row, i) for i, row in enumerate(off_topic)]
+        chat = self.engine.open()
+        reply = self.engine.send(chat["id"], "Three tips for a weekend in Lisbon", search="auto")
+        self.assertNotIn("images", reply, "none rather than pictures of something else")
+        # Among them, the ones about the search stay: by title (accents aside) or by the page's address.
+        self.world["decide"] = {"needs_search": False, "query": "", "images": "Pastéis de Belém Lisbon"}
+        self.world["pictures"] = [picture(off_topic[1], 0),
+                                  picture({"title": "PASTEIS DE BELEM - A Very Lisbon Experience", "url": "https://a.example/p"}, 3),
+                                  picture({"title": "Custard tarts", "url": "https://b.example/pasteis-de-belem-guide"}, 4)]
+        kept = self.engine.send(chat["id"], "And the custard tarts?", search="auto")["images"]["items"]
+        self.assertEqual([x["title"] for x in kept], ["PASTEIS DE BELEM - A Very Lisbon Experience", "Custard tarts"])
+
     def test_pictures_found_after_the_reply_is_saved_are_dropped_not_shown(self):
-        self.world["decide"] = {"needs_search": False, "query": "", "images": "slow pictures"}
+        self.world["decide"] = {"needs_search": False, "query": "", "images": "Hagia Sophia"}
         release, started = threading.Event(), threading.Event()
         quick = self.engine._image_searcher
 
