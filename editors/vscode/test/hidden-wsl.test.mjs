@@ -17,8 +17,11 @@ const load = async (name) => {
   await build({ entryPoints: [join(here, `../src/${name}.ts`)], bundle: true, outfile, platform: "node", format: "cjs", logLevel: "silent" });
   return createRequire(import.meta.url)(outfile);
 };
+// All three before any test is defined: a build awaited between tests let the earlier ones finish and the
+// cleanup below delete the scratch folder first ("Cannot find module …/wslBridge.cjs", ~/dgc-release 2026-10-17).
 const paths = await load("wslPaths");
 const host = await load("wslHost");
+const wire = await load("wslBridge");
 
 test("a Windows path is the distro's /mnt path, and back", () => {
   const map = paths.pathMap("DGC");
@@ -88,8 +91,6 @@ test("setting it up: the distro, then prepared as root from fixed text, then DGC
   assert.deepEqual(host.setupSteps("ready", "DGC"), []);
   assert.deepEqual(host.setupSteps("no-wsl", "DGC"), [], "turning WSL on needs an administrator: never a silent step");
 });
-
-const wire = await load("wslBridge");
 
 test("commands: the Windows paths the backend reads or compares become the distro's, nothing else", () => {
   const b = wire.bridge(paths.pathMap("DGC"));
