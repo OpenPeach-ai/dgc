@@ -697,6 +697,50 @@ class ForegroundStopTests(BackendCase):
         self.assertEqual((frame["type"], frame["reason"]), ("command_rejected", "unknown_agent"))
 
 
+class RealServeTests(unittest.TestCase):
+    """The same wire through a real `dgc serve` process: a Host's default chat, its own emitter."""
+
+    def test_a_shell_the_model_starts_is_listed_read_and_stopped_over_stdio(self):
+        from test_monitors import MockModel, Serve, ends_with_user, sse_call, sse_text
+
+        def script(body):
+            if ends_with_user(body):
+                return sse_call("bash", {"command": "echo serve-ready; sleep 60", "background": True})
+            return sse_text("Started it.")
+
+        with MockModel(script) as model:
+            serve = Serve(self, model)
+            serve.auto()
+            ready = serve.wait(lambda e: e["type"] == "ready")
+            self.assertEqual(ready["capabilities"]["background_tasks"], {"version": 1})
+            self.assertIs(ready["capabilities"]["agent_control_foreground"], True)
+            serve.send({"type": "list_background_shells", "request_id": "l1"})
+            self.assertEqual(serve.wait(lambda e: e.get("request_id") == "l1")["items"], [])
+            serve.send({"type": "prompt", "text": "start the server", "request_id": "p1"})
+            self.assertEqual(serve.wait(lambda e: e["type"] == "turn_end")["reason"], "completed")
+            pushed = serve.wait(lambda e: e["type"] == "background_shells" and "request_id" not in e
+                                and any(i["state"] == "running" for i in e["items"]))
+            self.assertIsNotNone(pushed, "the start was not pushed")
+            (item,) = pushed["items"]
+            self.assertEqual((item["command"], item["agent_id"]), ("echo serve-ready; sleep 60", None))
+            for attempt in range(50):
+                serve.send({"type": "get_background_output", "id": item["id"],
+                            "request_id": f"o{attempt}"})
+                output = serve.wait(lambda e: e.get("request_id") == f"o{attempt}")
+                if "serve-ready" in output.get("output", ""):
+                    break
+                time.sleep(0.1)
+            self.assertEqual(output["output"], "serve-ready\n")
+            serve.send({"type": "stop_background_shell", "id": item["id"], "request_id": "s1"})
+            stopped = serve.wait(lambda e: e.get("request_id") == "s1")
+            self.assertEqual(shells(stopped)[item["id"]]["state"], "killed")
+            reaped = serve.wait(lambda e: e["type"] == "background_shells" and "request_id" not in e
+                                and shells(e).get(item["id"], {}).get("ended_at") is not None)
+            self.assertIsNotNone(reaped, "the reap was not pushed")
+            self.assertFalse([e for e in serve.events if e["type"] == "command_rejected"])
+            serve.assert_valid_stream(self)
+
+
 class ChildStopTests(unittest.TestCase):
     def test_the_turns_stop_reaches_every_depth_and_a_childs_stop_reaches_only_down(self):
         turn = threading.Event()
