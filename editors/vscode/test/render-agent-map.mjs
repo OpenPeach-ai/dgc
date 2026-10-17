@@ -15,7 +15,7 @@ const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox",
 const report = [];
 for (const theme of ["dark-modern", "light-modern"]) {
   for (const width of [300, 460, 900]) {
-    const { page, errors } = await openMapScene(browser, { width, height: width === 900 ? 760 : 720, theme, root });
+    const { page, errors } = await openMapScene(browser, { width, height: width === 900 ? 760 : 720, theme, root, faces: true });
     const name = `${prefix}-${theme.split("-")[0]}-${width}`;
     await page.screenshot({ path: `${out}/${name}.png` });
     const facts = root ? {} : await measureMap(page);

@@ -405,8 +405,8 @@ body.vscode-light .agent-mark:not(:has(img)).is-live {
 /* A working mark is drawn from its own SVG, and `:has(img)` above turns every filter off -- so an
    agent that was actually RUNNING looked exactly like one that had finished. The glow belongs to
    the state, not to the fallback geometry, so it is put back here for the image case and made to
-   breathe. The still frame is kept deliberately: the -animated swirl reads as a colour smear at
-   16px, so the motion is this pulse rather than the artwork. */
+   breathe. The artwork swirls too (the -animated file, agentMarkSrc), everywhere, chips included:
+   0.26.3 kept the still frame at 16px, and the founder chose the swirl back on 2026-10-18. */
 .agent-mark:has(img).is-live {
   filter: drop-shadow(0 0 2px color-mix(in srgb, var(--mark, #7D8CA3) 60%, transparent));
   animation: agent-mark-breathe 2.6s ease-in-out infinite;

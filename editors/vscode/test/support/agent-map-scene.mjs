@@ -5,7 +5,7 @@
 // setContent only; no port is opened. `root` points at another checkout's editors/vscode, so the
 // same chat can be drawn by the panel as it was before the map.
 import { readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { THEMES } from "./options-scene.mjs";
@@ -45,13 +45,20 @@ export const AGENTS = [
 // agents pill. The agents arrive live, so the panel as it was before the map lists every one of
 // them too; the page's clock is moved on between them so the durations read like a real run.
 export async function openMapScene(browser, { width, height = 720, theme = "dark-modern", root = here, open = true,
-  forcedColors = false, reducedMotion = true } = {}) {
+  forcedColors = false, reducedMotion = true, faces = false } = {}) {
   const { html, mainJs, markdownJs } = mapPanelHtml(root);
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2,
     reducedMotion: reducedMotion ? "reduce" : "no-preference", forcedColors: forcedColors ? "active" : "none" });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
+  if (faces) {
+    // The real face marks (media/agents), as the panel loads them from data-agent-marks. Without them
+    // the panel draws its fallback shapes, which is what a layout test wants and a screenshot doesn't.
+    await page.route("https://marks.test/**", (route) => route.fulfill({ contentType: "image/svg+xml",
+      body: readFileSync(join(root, "media", "agents", new URL(route.request().url()).pathname.slice(1))) }));
+  }
   await page.setContent(html, { waitUntil: "load" });
+  if (faces) await page.evaluate(() => { document.body.dataset.agentMarks = "https://marks.test"; });
   await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }` });
   await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
   await page.evaluate(([mjs, mdjs]) => {

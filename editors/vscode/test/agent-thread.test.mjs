@@ -64,7 +64,7 @@ test("agent-mark CSS does not clip or bloom the SVG face", () => {
   assert.doesNotMatch(mainCss, /\.agent-mark[^{]*\{[^}]*(?:box-shadow|outline)/);
 });
 
-test("a live line and its inner page share the still identity face", () => {
+test("a live line and its inner page share the identity face, swirling while it works and still once it ends", () => {
   const { $, doc, event } = view();
   doc.body.dataset.agentMarks = "vscode-file://agents";
   event({ type: "turn_start", turn_id: "t1", prompt: "go" });
@@ -75,15 +75,30 @@ test("a live line and its inner page share the still identity face", () => {
   const lineImg = lineMark.querySelector("img");
   assert.ok(lineMark.classList.contains("is-live"));
   assert.ok(lineImg, "the line paints the SVG face");
-  assert.match(lineImg.getAttribute("src"), /agent-0[1-8]-[a-z]+\.svg$/);
-  assert.ok(!lineImg.getAttribute("src").includes("-animated"),
-    "live agents keep the still face; motion is CSS");
+  assert.match(lineImg.getAttribute("src"), /agent-0[1-8]-[a-z]+-animated\.svg$/,
+    "a working agent's face swirls, in the chat's chip too (founder, 2026-10-18)");
   doc.querySelector(`.agent-name[data-agent-id="${sid(4)}"]`).click();
   const pageMark = $("agent-mark");
   const pageImg = pageMark.querySelector("img");
   assert.equal(pageMark.hidden, false);
   assert.equal(pageMark.dataset.face, lineMark.dataset.face);
   assert.equal(pageImg.getAttribute("src"), lineImg.getAttribute("src"));
+  event({ type: "agent_ended", id: sid(4), state: "finished", duration_ms: 900, tool_calls: 1 });
+  const ended = $("agent-mark").querySelector("img").getAttribute("src");   // the page stays open on it
+  assert.match(ended, /agent-0[1-8]-[a-z]+\.svg$/);
+  assert.ok(!ended.includes("-animated"), "a finished agent's face is still");
+});
+
+test("under reduced motion a working agent's face is the still frame", () => {
+  const { doc, event, dom } = view();
+  dom.window.matchMedia = (query) => ({ matches: /prefers-reduced-motion:\s*reduce/.test(query), addEventListener() {}, removeEventListener() {} });
+  doc.body.dataset.agentMarks = "vscode-file://agents";
+  event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  event({ type: "agent_started", id: sid(4), parent_id: null, call_id: "call_0",
+    description: "Invoice workflow cards UI", depth: 1, state: "running", started_at: 1, isolated: true, parallel: false });
+  const mark = doc.querySelector(".agent-line .agent-line-faces .agent-mark");
+  assert.ok(mark.classList.contains("is-live"), "still marked as working");
+  assert.ok(!mark.querySelector("img").getAttribute("src").includes("-animated"));
 });
 
 test("the same agent id keeps the same identity mark after a second paint", () => {

@@ -7871,11 +7871,14 @@
   function agentMarkMotionOk() {
     return !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
+  // A working agent's face swirls (its -animated artwork) everywhere it is drawn, chips included: the founder
+  // chose it back on 2026-10-18 after 0.26.3 had kept the still frame at chip size. `live` is false once the
+  // agent ends, and under reduced motion (paintAgentMark), so those get the still frame.
   function agentMarkSrc(index, live) {
     const base = (document.body.dataset.agentMarks || "").replace(/\/$/, "");
     if (!base) return "";
     const name = AGENT_MARK_NAMES[index];
-    const file = `agent-${String(index + 1).padStart(2, "0")}-${name}.svg`;
+    const file = `agent-${String(index + 1).padStart(2, "0")}-${name}${live ? "-animated" : ""}.svg`;
     return `${base}/${file}`;
   }
   function paintAgentMark(node, id, live) {
