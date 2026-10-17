@@ -41,7 +41,10 @@ function screenHtml() {
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
-  const js = ["chart.js", "breakdown.js", "voicebar.js", "readaloud.js", "voicemode.js", "chatdgc.js"].map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n");
+  // The page's own scripts, in the order chatdgc.ts loads them: a list kept here by hand misses the next one added.
+  const scripts = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
+  assert.equal(scripts.at(-1), "chatdgc.js");
+  const js = scripts.map((f) => readFileSync(join(root, "media", f), "utf8")).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   cached = { html: doc.replace("</head>", `<style>${codicon}</style><style>${css}</style><style>${own}</style></head>`), js, markdownJs };
@@ -332,6 +335,38 @@ test("read aloud: a speaker under each reply asks for that reply's words; it sho
     await s.page.locator(`[data-read-aloud="${M(2)}"]`).click();
     await s.send({ type: "speak", id: M(2), state: "idle", kind: "info", error: "Choose a voice for reading aloud in Settings → Voice, then press Read aloud again." });
     assert.match(await s.page.locator("#cd-notice").textContent(), /Choose a voice for reading aloud/);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("each message says when it was sent or written, and the time stays while your message's buttons wait for the pointer", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 700 });
+  try {
+    const sent = "2026-10-17T09:12:00.000Z", written = "2026-10-17T09:12:41.000Z";
+    await s.send({ type: "opened", conversation: conversation({ title: "Lisbon" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Plan Lisbon", created_at: sent },
+      { id: M(2), role: "assistant", text: "Belém first.", model: "qwen3:32b", created_at: written }] });
+    await s.page.mouse.move(0, 0);
+    const look = (selector) => s.page.evaluate((sel) => {
+      const n = document.querySelector(sel);
+      if (!n) return null;
+      const opacity = (el) => { let o = 1; for (let e = el; e; e = e.parentElement) o *= Number(getComputedStyle(e).opacity); return o; };
+      return { text: n.textContent, when: n.getAttribute("datetime"), title: n.title, opacity: opacity(n),
+               first: n === n.parentElement.firstElementChild, last: n === n.parentElement.lastElementChild,
+               buttons: Math.max(0, ...[...n.parentElement.querySelectorAll("button")].map(opacity)) };
+    }, selector);
+    const mine = await look(".cd-user .cd-actions > time.cd-time"), reply = await look(".cd-assistant .cd-actions > time.cd-time");
+    assert.equal(mine.when, sent);
+    assert.equal(reply.when, written);
+    assert.ok(mine.last && reply.first, "at the message's own edge: after your buttons, before the reply's");
+    assert.ok(mine.title.includes("2026") && reply.title.includes("2026"), "the whole date is the tooltip");
+    assert.equal(mine.opacity, 1, "your message's time shows without the pointer");
+    assert.equal(mine.buttons, 0, "its buttons still wait for it");
+    await s.page.locator(".cd-user .cd-bubble").hover();
+    assert.equal((await look(".cd-user .cd-actions > time.cd-time")).buttons, 1, "pointed at, the buttons come back");
+    await s.send({ type: "message", conversation_id: ID, message: { id: M(3), role: "user", text: "no time" } });
+    assert.equal(await s.page.locator(`[data-id="${M(3)}"] time`).count(), 0, "no saved time, no time");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

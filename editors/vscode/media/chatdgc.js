@@ -1236,6 +1236,9 @@
         actions.append(idleOnly(action("edit", "Edit", () => { state.editing = message.id; state.editingFresh = true; render(); })));
       }
       if (versions) actions.classList.add("cd-actions-shown");
+      // When it was sent, at the row's right edge, under the bubble (media/msgtime.js). It stays when the buttons hide.
+      const sentAt = window.DgcTime?.node(Date.parse(message.created_at), "cd-time");
+      if (sentAt) actions.append(sentAt);
       node.append(actions);
       return node;
     }
@@ -1280,6 +1283,9 @@
       const branch = branchAction(message);
       if (branch) actions.append(branch);
       if (message.model) actions.append(el("span", "cd-meta", String(message.model)));
+      // When it was written, first in the row, where the reply begins (media/msgtime.js).
+      const writtenAt = window.DgcTime?.node(Date.parse(message.created_at), "cd-time");
+      if (writtenAt) actions.prepend(writtenAt);
       node.append(actions);
     }
     if (next) node.append(next);

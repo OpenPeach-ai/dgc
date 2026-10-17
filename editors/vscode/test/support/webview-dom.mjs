@@ -12,6 +12,7 @@ const dir = fileURLToPath(new URL("../", import.meta.url));
 export const panelSrc = readFileSync(dir + "../src/panel.ts", "utf8");
 export const mainJs = readFileSync(dir + "../media/main.js", "utf8");
 export const breakdownJs = readFileSync(dir + "../media/breakdown.js", "utf8");   // the panel loads it before main.js
+export const msgTimeJs = readFileSync(dir + "../media/msgtime.js", "utf8");     // a message's time (DgcTime), also before
 export const markdownJs = buildSync({ entryPoints: [dir + "../src/markdown.ts"], bundle: true,
   format: "iife", globalName: "DgcMarkdown", platform: "browser", write: false }).outputFiles[0].text;
 export const mainCss = readFileSync(dir + "../media/main.css", "utf8");
@@ -153,6 +154,7 @@ export function makeDom(options = {}) {
     : () => { throw new Error("resize() needs makeDom({ resizeObservers: true })"); };
   dom.window.eval(markdownJs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
   dom.window.eval(breakdownJs);
+  dom.window.eval(msgTimeJs);
   dom.window.eval(options.script ?? mainJs); // runs the webview IIFE against this DOM
   const send = (data) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
   return { dom, errors, posted, send, advance, layout, resize, doc: dom.window.document, savedState: () => savedState };

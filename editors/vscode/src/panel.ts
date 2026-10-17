@@ -6925,6 +6925,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const voicebarCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "voicebar.css"));
     const voicebarJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "voicebar.js"));
     const readAloudJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "readaloud.js"));
+    const msgTimeJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "msgtime.js"));
     // `https:` in img-src is what lets a favicon load beside a link the user typed, and it is
     // the same allowance Codex ships. It is NOT what keeps model output from phoning home: the
     // markdown renderer never emits an <img> for model content -- it turns every image into a
@@ -7133,6 +7134,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${breakdownScript}"></script>
 <script nonce="${nonce}" src="${pipsScript}"></script>
 <script nonce="${nonce}" src="${voicebarJs}"></script>
+<script nonce="${nonce}" src="${msgTimeJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;

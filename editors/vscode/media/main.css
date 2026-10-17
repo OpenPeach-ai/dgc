@@ -726,6 +726,11 @@ body.vscode-light, body.vscode-high-contrast-light {
    hovered, because it sits under every response and must never compete with the answer. */
 .response-actions { display: flex; align-items: center; gap: var(--sp-1); margin-top: var(--sp-2); opacity: .62; transition: opacity .12s; }
 .msg.dgc:hover .response-actions, .response-actions:focus-within { opacity: 1; }
+/* When a prompt was sent (under its bubble) and a reply written (first in its row): media/msgtime.js. The whole
+   date is the tooltip. */
+.msg-time { color: var(--muted); font-size: 11px; line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.msg.user > .msg-time { margin-top: 2px; }
+.response-actions > .msg-time { padding: 0 var(--sp-1); }
 .ract { height: var(--control-sm); min-width: var(--control-sm); border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 0 var(--sp-1); border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; transition: background .12s, color .12s; }
 .ract:hover { color: var(--text); background: var(--surface2); }
 .ract.on { color: var(--accent-text); background: var(--accent-soft); }

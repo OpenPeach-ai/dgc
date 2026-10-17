@@ -1418,7 +1418,7 @@ class AgentRunReviewTests(RetryTestCase):
         self.assertEqual([i["state"] for i in retries], ["recovered"] * _MAX_CONTINUE + ["gave_up"])
         self.assertEqual((retries[-1]["attempt"], retries[-1]["max_attempts"]), (_MAX_CONTINUE, _MAX_CONTINUE))
         self.assertEqual(len({i["retry_id"] for i in retries}), len(retries))
-        types_ = [i.get("type") for i in items]
+        types_ = [i.get("type") for i in items if i.get("type")]   # events only: not the {"role": "time"} marks
         last_text = max(n for n, t in enumerate(types_) if t == "text_delta")
         self.assertGreater(types_.index("model_retry", last_text), last_text, "the give-up follows the partial")
         end = [i for i in items if i.get("type") == "turn_end"]

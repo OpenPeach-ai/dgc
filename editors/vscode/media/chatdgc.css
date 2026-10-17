@@ -145,8 +145,12 @@ body.cd-blank .cd-fine { display: none; }
 .cd-sources-heading { margin: var(--sp-3) 0 0; color: var(--muted); font: var(--w-semi) var(--t-xs)/1.4 var(--sans); letter-spacing: .02em; }
 
 .cd-actions { display: flex; align-items: center; gap: var(--sp-1); min-height: var(--control-sm); }
-.cd-user .cd-actions { opacity: 0; }
-.cd-user:hover .cd-actions, .cd-user:focus-within .cd-actions, .cd-user .cd-actions.cd-actions-shown { opacity: 1; }
+/* A message you sent shows its buttons when pointed at or focused; its time always. Hiding them only while it isn't
+   (rather than showing them on hover) leaves a disabled one its own dimmer look. */
+.cd-user:not(:hover):not(:focus-within) .cd-actions:not(.cd-actions-shown) > :not(.cd-time) { opacity: 0; }
+/* When a message was sent or written (media/msgtime.js); the whole date is its tooltip. */
+.cd-time { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); font-variant-numeric: tabular-nums; white-space: nowrap;
+  padding: 0 var(--sp-1); }
 .cd-action:disabled { opacity: .45; cursor: default; background: transparent; }
 /* ‹ 2 / 3 ›: the version of the conversation from this point. */
 .cd-versions { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--sans);

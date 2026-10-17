@@ -28,7 +28,7 @@ const bundled = await build({ entryPoints: [new URL("../src/pipsClient.js", impo
 const js = bundled.outputFiles.find((f) => f.path.endsWith(".js")).text;
 const css = bundled.outputFiles.filter((f) => f.path.endsWith(".css")).map((f) => f.text).join("\n");
 const PIP = "pip_" + "g".repeat(32);
-const host = `(${function (PIP) {
+const hostFor = (opts = {}) => `(${function (PIP, opts) {
   const PW = "ws_" + "p".repeat(32);
   const types = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].map((id, character_index) => ({ id, character_index, name: id, role: id,
     description: "Reads", available: true, unavailable_reason: null, default_name: id, default_goal: "Help",
@@ -39,7 +39,8 @@ const host = `(${function (PIP) {
   const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: "off" }, options_source: "last_message",
     inherited_context_size: 1048576, effective_context_size: 8192, context_min: 2048, context_max: 32768,
     thinking_levels: ["off", "low", "medium", "high", "xhigh"], reasoning_control: "provider_dependent", reasoning_note: "n", context_note: "n" };
-  const reply = { id: "a1", pip_id: PIP, workspace_id: PW, role: "assistant", text: "Here is what I found about your week.",
+  const reply = { id: "a1", pip_id: PIP, workspace_id: PW, role: "assistant",
+    text: opts.long ? Array.from({ length: 30 }, (_, i) => `Point ${i + 1}: something worth knowing about your week.`).join("\n\n") : "Here is what I found about your week.",
     run_id: "run_" + "5".repeat(32), status: "succeeded", model: "deepseek-v4.1-flash:cloud", created_at: "2026-10-17T09:00:00.000Z" };
   const answers = {
     list_workspaces: () => ({ workspaces: [{ id: PW, name: "Personal", kind: "personal" }], current_workspace_id: PW }),
@@ -48,7 +49,9 @@ const host = `(${function (PIP) {
     get_pip_runner: () => ({ runner: { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 } } }),
     get_workspace_context: () => ({ context: { workspace_id: PW, revision: 0, entries: [] } }),
     list_pip_models: () => ({ default_model: "m", models: [], connection: "configured" }),
-    list_pip_messages: () => ({ pip_id: PIP, workspace_id: PW, messages: [reply], next_before_id: null, active_run: null,
+    list_pip_messages: () => ({ pip_id: PIP, workspace_id: PW, messages: opts.prompt ? [{ id: "u1", pip_id: PIP, workspace_id: PW, role: "user",
+      text: "How was my week?", run_id: reply.run_id, status: "succeeded", model: reply.model, created_at: "2026-10-17T08:59:30.000Z" }, reply] : [reply],
+      next_before_id: null, active_run: null,
       history_context_omitted_count: 0, chat_controls: controls }),
     list_pip_apps: () => ({ apps: [] }),
     get_pips_limit: () => ({ max_pips: 100, default: 100, maximum: 100000 }),
@@ -59,12 +62,13 @@ const host = `(${function (PIP) {
     if (make) setTimeout(() => window.postMessage({ type: "pipsReply", id: m.id, ok: true, result: make() }, "*"), 1);
   } });
   setTimeout(() => window.postMessage({ type: "pipsConnection", apiVersion: 44, generation: 1, connected: true, supported: true, enabled: true }, "*"), 5);
-}})(${JSON.stringify(PIP)});`;
-const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head><body><main id="app"></main><div id="review-root"></div>`
-  + `<script>${host}</script><script>${js.replace(/<\/script/g, "<\\/script")}</script></body></html>`;
+}})(${JSON.stringify(PIP)}, ${JSON.stringify(opts)});`;
+const pageFor = (opts) => `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head><body><main id="app"></main><div id="review-root"></div>`
+  + `<script>${hostFor(opts)}</script><script>${js.replace(/<\/script/g, "<\\/script")}</script></body></html>`;
 
-async function open(width) {
-  const context = await browser.newContext({ viewport: { width, height: 800 }, reducedMotion: "reduce" });
+async function open(width, opts = {}) {
+  const html = pageFor(opts);
+  const context = await browser.newContext({ viewport: { width, height: opts.height || 800 }, reducedMotion: "reduce" });
   const p = await context.newPage();
   await p.route("https://pips.test/**", (r) => r.fulfill({ body: html, contentType: "text/html" }));
   await p.goto("https://pips.test/view");
@@ -114,5 +118,51 @@ test("a reply's details open to a whole row, not a few pixels beside its buttons
     });
     assert.ok(widths.panel >= 160, `the details panel is ${widths.panel}px wide in a ${widths.message}px message`);
     assert.ok(widths.list >= 140, `its Saved/Model/Status list is ${widths.list}px wide`);
+  } finally { await close(); }
+});
+
+test("in the chat, each message's time shows without the pointer while the buttons beside it wait for it", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, close } = await open(320, { prompt: true });
+  try {
+    await p.click(`[data-job="${PIP}"]`);
+    await p.waitForSelector("article.pip-message.user time.msg-time");
+    await p.mouse.move(0, 0);
+    const look = (who) => p.evaluate((who) => {
+      const n = document.querySelector(`article.pip-message.${who} .response-actions > time.msg-time`);
+      const opacity = (el) => { let o = 1; for (let e = el; e; e = e.parentElement) o *= Number(getComputedStyle(e).opacity); return o; };
+      return { when: n.getAttribute("datetime"), opacity: opacity(n), buttons: Math.max(0, ...[...n.parentElement.querySelectorAll("button, summary")].map(opacity)),
+               simple: !!n.closest(".simple-pips"), right: Math.round(n.getBoundingClientRect().right), edge: Math.round(n.closest("article").getBoundingClientRect().right) };
+    }, who);
+    const mine = await look("user"), reply = await look("assistant");
+    assert.ok(mine.simple, "the chat a personal Pip opens in");
+    assert.equal(mine.when, "2026-10-17T08:59:30.000Z");
+    assert.equal(reply.when, "2026-10-17T09:00:00.000Z");
+    assert.equal(mine.opacity, 1, "your message's time");
+    assert.equal(reply.opacity, 1, "the reply's time");
+    assert.equal(mine.buttons, 0, "the buttons wait for the pointer");
+    assert.ok(mine.edge - mine.right <= 6, `your time sits at the message's right edge (${mine.right} of ${mine.edge})`);
+    await p.hover("article.pip-message.user .bubble");
+    await p.waitForTimeout(300);                             // their .12s fade
+    assert.equal((await look("user")).buttons, 1, "pointed at, they come back");
+  } finally { await close(); }
+});
+
+test("a reply's details opened at the bottom of the conversation come into view", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, close } = await open(320, { prompt: true, long: true });   // a long reply: its buttons end the conversation
+  try {
+    await p.click(`[data-job="${PIP}"]`);
+    await p.waitForSelector("article.pip-message.assistant details.message-details > summary");
+    await p.evaluate(() => { const log = document.querySelector(".conversation-log"); log.scrollTop = 0; });
+    await p.click("article.pip-message.assistant details.message-details > summary");
+    await p.waitForTimeout(150);
+    const fit = await p.evaluate(() => {
+      const log = document.querySelector(".conversation-log").getBoundingClientRect();
+      const panel = document.querySelector("article.pip-message.assistant .message-provenance").getBoundingClientRect();
+      return { logBottom: Math.round(log.bottom), panelBottom: Math.round(panel.bottom), logHeight: Math.round(log.height) };
+    });
+    assert.ok(fit.logHeight > 0);
+    assert.ok(fit.panelBottom <= fit.logBottom + 1, `the panel ends at ${fit.panelBottom}, the conversation at ${fit.logBottom}`);
   } finally { await close(); }
 });

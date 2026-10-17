@@ -1,4 +1,5 @@
 import {esc,activityLabel,personalStatusLabel} from './pipsModel.js';
+import '../media/msgtime.js';   // globalThis.DgcTime: a message's time, the same in all three chats
 
 // These controls mirror the main conversation's action row. They are SVG rather
 // than font glyphs so they also work inside the Pip client's isolated ShadowRoot.
@@ -45,8 +46,10 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${esc(m.status)}">${phase(m.status)}${m.status==='failed'&&m.error?` · ${esc(m.error)}`:m.status==='failed'||m.status==='cancelled'?' · No reply':''}</p>`:'';
   const options=!user&&prompt?`${action('retry','Ask again',m.id,!canSend)}${action('edit','Edit message',m.id,false)}`:'';
   const details=`<details class="message-details" data-details="message-${esc(m.id)}"><summary title="${user?'Message details':'Response details'}" aria-label="${user?'Message details':'Response details'}">${transcriptIcon('info')}<span class="sr-only">${user?'Message details':'Response details'}</span></summary><div class="message-provenance"><dl><dt>${user?'Sent':'Saved'}</dt><dd>${esc(formatDate(m.created_at))}</dd>${!user&&m.model?`<dt>Model</dt><dd>${esc(m.model)}</dd>`:''}<dt>Status</dt><dd>${esc(({queued:'Waiting',running:'Working',cancelling:'Stopping',succeeded:'Done',failed:'Failed',cancelled:'Stopped'})[m.status]||m.status)}</dd></dl><button type="button" data-chat-run="${esc(m.run_id)}">${m.status==='failed'?'View error':'Details'}</button></div></details>`;
+  // When it was sent or written, at the message's own edge: after a prompt's buttons, before a reply's.
+  const at=Date.parse(m.created_at),time=globalThis.DgcTime?.markup(at)||'';
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}" data-message="${esc(m.id)}"><span class="sr-only role">${esc(label)}</span>${activityRow}${body}${used}${offered}${status}<div class="response-actions">${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${!user&&stats?replyStats(stats):''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}" data-message="${esc(m.id)}"><span class="sr-only role">${esc(label)}</span>${activityRow}${body}${used}${offered}${status}<div class="response-actions">${user?'':time}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${!user&&stats?replyStats(stats):''}${user?time:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

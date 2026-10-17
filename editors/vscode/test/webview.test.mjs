@@ -1552,6 +1552,7 @@ test("a turn replayed from history renders identically to the live turn it came 
     .replace(/reasoning-\d+/g, "reasoning-N")
     .replace(/\b[a-z]\d+:(\d+)\b/g, "m:$1")          // t1:2 and h1:2 are the same block
     .replace(/Worked for \d+s/g, "Worked")            // a replayed turn has no clock to print
+    .replace(/<time class="msg-time"[^>]*>[^<]*<\/time>/g, "")   // nor times, from a history saved without them
     .replace(/ hist\b/g, "")
     .replace(/\s+/g, " ").trim();
   const pages = restored.doc.querySelector(".history-pages").cloneNode(true);

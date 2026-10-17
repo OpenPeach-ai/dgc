@@ -653,6 +653,15 @@ def _history_steering_texts(message: dict) -> list[str] | None:
     return texts
 
 
+def _history_written_at(message) -> float | None:
+    """When a saved prompt was sent or reply written (``_dgc_at``, agent._written_at), if it is a time at all.
+    A session saved before DGC kept these has none, and the chat then shows no time for that message."""
+    at = message.get("_dgc_at") if isinstance(message, dict) else None
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
+        return None
+    return float(at) if 946_684_800 <= at <= time.time() + 172_800 else None   # 2000 .. two days ahead
+
+
 def _history_vision_items(seen) -> list:
     """The view_image card DGC drew when a vision model looked at a prompt's attachments for a
     model that cannot see (``_dgc_vision`` on the prompt's message), as live tool events."""
@@ -3850,6 +3859,10 @@ class Backend:
             if pause:
                 finished = False
                 items.append({"type": "info", "message": pause})
+            if turn["written_at"] is not None:
+                # When its last reply was written: the panel shows it on the answer, and with the prompt's
+                # time, how long the turn worked. A marker, not an event, as a turn_start field would be.
+                items.append({"role": "time", "of": "reply", "at": turn["written_at"]})
             items.append({"type": "turn_end", "turn_id": turn["id"],
                           "reason": "paused" if pause else "completed" if finished else "cancelled",
                           "token_estimate": 0,
@@ -3861,7 +3874,7 @@ class Backend:
             close_turn()
             turn_n += 1
             turn = {"id": f"h{turn_n}", "n": 0, "r": 0, "final": None, "interrupted": False,
-                    "at": position, "item": len(items)}
+                    "at": position, "item": len(items), "written_at": None}
             items.append({"type": "turn_start", "turn_id": turn["id"],
                           "prompt": prompt, "kind": kind})
 
@@ -3988,11 +4001,17 @@ class Backend:
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
                 open_turn(text, "prompt")
+                sent_at = _history_written_at(m)
+                if sent_at is not None:
+                    items.append({"role": "time", "of": "prompt", "at": sent_at})
                 # A vision model looked at this prompt's attachments for a model that cannot see
                 # (dgc/vision.py): its view_image card comes back, as it was drawn live.
                 items.extend(_history_vision_items(m.get("_dgc_vision")))
             elif role == "assistant":
                 current = ensure_turn()
+                written_at = _history_written_at(m)
+                if written_at is not None:
+                    current["written_at"] = written_at
                 text = str(content or "")
                 text = self._history_display_text(m, text)
                 tool_calls = list(m.get("tool_calls") or [])[:16]

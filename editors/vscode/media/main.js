@@ -2841,6 +2841,10 @@
              id: String(id || ""), activity: null, phaseT0: t0, handoff: false,
              prompt: String(prompt || ""), edits: new Map() };
     if (wakeNote) turn.wake = { note: wakeNote, label: String(prompt || "").slice(0, 200), kinds: [], ids: new Set() };
+    // The prompt's time goes under its bubble: when its turn started, live. A saved turn's comes with its
+    // history (a {role: "time"} item, legacyItem), so a reopened chat says when each prompt was sent.
+    turn.head = head?.matches?.(".msg.user") ? head : null;
+    if (!replaying) stampPrompt(turn.head, Date.now());
     if (!replaying) {
       turn.timer = setInterval(renderTurnMeta, 200);
       renderTurnMeta();
@@ -2850,6 +2854,14 @@
       // the "New" pill, like every other event.
       if (following || (kind === "prompt" && !promptNode)) scroll(); else noteNewContent();
     }
+  }
+  // When a prompt was sent (media/msgtime.js), under its bubble; the whole date is the tooltip.
+  function stampPrompt(node, at) {
+    const time = node && window.DgcTime?.node(at);
+    if (!time) return;
+    const old = node.querySelector(":scope > .msg-time");
+    const bubble = node.querySelector(":scope > .bubble");
+    if (old) old.replaceWith(time); else if (bubble) bubble.after(time); else node.appendChild(time);
   }
   // ---- the box a turn goes in (0.47 pinned prompt) ----
   // A prompt opens a box: its row, then anything the log wrote between that prompt and its turn
@@ -3054,17 +3066,24 @@
       box.appendChild(answer);
       const summary = complete ? turnSummaryCard(turn.edits, turn.prompt) : null;
       if (summary) box.appendChild(summary);
-      box.appendChild(responseActions(answer, turn.prompt, !complete));
+      const actions = responseActions(answer, turn.prompt, !complete);
+      // When the reply was written, first in its row: now, live; a saved turn's from its history.
+      const writtenAt = window.DgcTime?.node(turn.replyAt ?? (replaying ? NaN : Date.now()));
+      if (writtenAt) actions.prepend(writtenAt);
+      box.appendChild(actions);
       // The work summary separates the collapsed activity from the final response.
       turn.block.insertBefore(turn.act, box);
     }
     turn.act.classList.add("done");
     turn.act.removeAttribute("title");
     const outcome = reason === "paused" ? "Paused" : reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked";
-    // A replayed turn has no clock — the session file never recorded when it began — so it says
-    // what happened and stops there rather than printing a fabricated 0s.
-    turn.act.textContent = turn.t0 == null ? outcome
-      : `${outcome} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
+    // A replayed turn has no running clock. A finished one whose history says when the prompt was sent and the
+    // reply written worked from one to the other. A stopped or failed one ended some time after its last message,
+    // which the session file doesn't say, and a session saved before DGC kept times says nothing: those say what
+    // happened and stop there rather than printing a made-up number.
+    const took = turn.t0 != null ? Date.now() - turn.t0
+      : reason === "completed" && turn.promptAt > 0 && turn.replyAt >= turn.promptAt ? turn.replyAt - turn.promptAt : null;
+    turn.act.textContent = took == null ? outcome : `${outcome} for ${Math.floor(took / 1000)}s`;
     const finished = turn.block;
     pipSetupCards?.finish(finished);
     pipDigestBar?.refresh();
@@ -7261,6 +7280,13 @@
   }
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
+    if (it.role === "time") {
+      // When a saved turn's prompt was sent and its reply written (seconds since 1970, from the session file).
+      const at = Number(it.at) * 1000;
+      if (!turn || !Number.isFinite(at) || at <= 0) return;
+      if (it.of === "prompt") { turn.promptAt = at; stampPrompt(turn.head, at); } else if (it.of === "reply") turn.replyAt = at;
+      return;
+    }
     if (it.role === "goal_edit") { sysLine(String(it.text || "")); return; }
     if (it.role === "steering") {
       ensureTurn();

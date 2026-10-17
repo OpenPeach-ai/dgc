@@ -962,6 +962,12 @@ THINK_KEYWORDS = [
 ]
 
 
+def _written_at() -> float:
+    """When a prompt was sent or a reply written, for the chat to show (``_dgc_at``, seconds since 1970).
+    Like every ``_dgc_`` key it stays in the session file and never reaches the model."""
+    return round(time.time(), 3)
+
+
 def _assistant_content_with_thinking(result, preserve_thinking: bool) -> str:
     """Content persisted to history for one assistant turn.
 
@@ -5197,9 +5203,10 @@ class Agent(GoalLifecycle):
                         self._record_usage(turn_result["usage"], "user_turn")
                     return turn_result
                 finally:
-                    self.messages.append({"role": "user", "content": prompt})
+                    self.messages.append({"role": "user", "content": prompt, "_dgc_at": _written_at()})
                     if isinstance(turn_result, dict) and str(turn_result.get("text") or "").strip():
-                        self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"]))})
+                        self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"])),
+                                              "_dgc_at": _written_at()})
             try:
                 self.reload_skills()
                 try:
@@ -6548,7 +6555,7 @@ class Agent(GoalLifecycle):
                                    [{"type": "image_url", "image_url": {"url": u}} for u in images])
             else:
                 content = prompt_text
-            prompt_message = {"role": "user", "content": content}
+            prompt_message = {"role": "user", "content": content, "_dgc_at": _written_at()}
             if pip_setup_notice is not None:
                 prompt_message["_dgc_pip_setup"] = dict(pip_setup_notice)
             self.messages.append(prompt_message)
@@ -6835,7 +6842,7 @@ class Agent(GoalLifecycle):
                         final += f", plus {omitted} more file{'s' if omitted != 1 else ''}"
                     final += "."
                 final += "\n\nVerification: the test command passed."
-                self.messages.append({"role": "assistant", "content": final})
+                self.messages.append({"role": "assistant", "content": final, "_dgc_at": _written_at()})
                 self.ui.on_text(final)
                 self.ui.end_stream("answer")
                 return True
@@ -6970,7 +6977,8 @@ class Agent(GoalLifecycle):
             if result.finish_reason == "cancelled" or self.cancelled.is_set():
                 partial = str(result.content or "")
                 if partial.strip():
-                    cancelled_message = self._attach_reasoning({"role": "assistant", "content": partial})
+                    cancelled_message = self._attach_reasoning({"role": "assistant", "content": partial,
+                                                                "_dgc_at": _written_at()})
                     self.messages.append(cancelled_message)
                     if defer_completion:
                         hold_final(cancelled_message)
@@ -7017,7 +7025,8 @@ class Agent(GoalLifecycle):
             self._normalize_ultra_task_batch(result.tool_calls)
             assistant: dict = {"role": "assistant",
                                "content": _assistant_content_with_thinking(
-                                   result, bool(self.config.get("preserve_thinking", False)))}
+                                   result, bool(self.config.get("preserve_thinking", False))),
+                               "_dgc_at": _written_at()}
             splice = _thinking_splice_marker(result, assistant["content"])
             if splice:
                 assistant["_dgc_think_splice"] = splice
