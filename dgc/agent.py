@@ -964,8 +964,9 @@ THINK_KEYWORDS = [
 
 def _written_at() -> float:
     """When a prompt was sent or a reply written, for the chat to show (``_dgc_at``, seconds since 1970).
-    Like every ``_dgc_`` key it stays in the session file and never reaches the model."""
-    return round(time.time(), 3)
+    Like every ``_dgc_`` key it stays in the session file and never reaches the model. Read from the clock the
+    prompt's own time line uses (clock.attach_turn_clock), so the two never disagree."""
+    return round(datetime.now().timestamp(), 3)
 
 
 def _assistant_content_with_thinking(result, preserve_thinking: bool) -> str:
