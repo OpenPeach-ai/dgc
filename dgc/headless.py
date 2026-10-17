@@ -27,7 +27,7 @@ from pathlib import Path
 from . import __version__
 from . import sessions as sessions_mod
 from .chatdgc.window import WINDOWS as CHATDGC_WINDOWS
-from .agent import Agent
+from .agent import Agent, interaction_cancel
 from .attachments import (MAX_EDITOR_IMAGE_TOTAL_BYTES, editor_image_mentions,
                           read_spooled_images, spool_root, validate_image_data_uris)
 from .editor_context import _editor_context_json, _format_editor_context, _strip_editor_context
@@ -219,6 +219,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
     "get_config", "status", "get_history", "list_monitors", "stop_monitor", "list_mcp_context",
     "list_agents", "get_image", "list_troupes", "stop_troupe",
+    # The Agent map's task list reads like the monitors list beside it, and its Stop is stop_monitor's.
+    "list_background_shells", "stop_background_shell", "get_background_output",
     # A liveness ping is the editor breathing, not the user acting. Left out of this set, every
     # ping ran the suppression pair around itself: _suppress_wakes(True) cancels any pending wake
     # timer, and the matching False tells the monitor policy a user command just landed. With a
@@ -282,6 +284,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
     "get_memory", "add_memory", "list_monitors", "stop_monitor", "list_agents", "list_troupes", "stop_troupe",
+    "list_background_shells", "stop_background_shell", "get_background_output",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
 })
@@ -439,6 +442,38 @@ def _mcp_url_has_credentials(value: str) -> bool:
 def _request_fields(request_id: str | None) -> dict[str, str]:
     """Attach a correlation ID only when the optional command field was present and valid."""
     return {"request_id": request_id} if request_id else {}
+
+
+# get_background_output: the tail it sends by default, and the most it ever sends.
+_BACKGROUND_OUTPUT_DEFAULT_BYTES = 65_536
+_BACKGROUND_OUTPUT_MAX_BYTES = 1 << 20
+_MAX_BACKGROUND_SHELLS_LISTED = 256
+
+
+def _output_tail(text: str, max_bytes: int) -> tuple[str, bool]:
+    """The end of ``text``: at most ``max_bytes`` UTF-8 bytes that also fit one frame. (tail, cut)
+
+    It starts on a whole character and never inside a ``[REDACTED]`` marker. The frame check is
+    real: JSON writes a control character as six bytes, so a megabyte of terminal colour codes is
+    about six on the wire -- past the 4 MB ceiling, where the emitter would send a placeholder
+    instead of any output at all.
+    """
+    from .redaction import REDACTED
+    data = text.encode("utf-8", "replace")
+    limit = min(len(data), max(0, int(max_bytes)))
+    budget = int(MAX_EVENT_BYTES * 0.9) - 4096     # room for the envelope and the other fields
+    while True:
+        tail = data[len(data) - limit:].decode("utf-8", "ignore")
+        size = len(json.dumps(tail, ensure_ascii=False).encode("utf-8"))
+        if size <= budget or limit == 0:
+            break
+        limit = max(0, min(limit - 1, limit * budget // size))
+    if len(tail) < len(text) and text.endswith(tail):
+        start = len(text) - len(tail)
+        marker = text.find(REDACTED, max(0, start - len(REDACTED) + 1))
+        if 0 <= marker < start:
+            tail = text[marker + len(REDACTED):]
+    return tail, len(tail) < len(text)
 
 
 def _prompt_thread_title(text: str) -> str:
@@ -1638,8 +1673,12 @@ class HeadlessUI:
         # Only an explicit reply, Stop, or disconnection ends a native human decision.
         deadline = None if human else time.monotonic() + self.approval_timeout_s
         cancel = cancel if cancel is not None else self.cancelled
+        # A sub-agent's card also ends when the user stops that one sub-agent (agent_control close):
+        # its own stop, which this turn-wide `cancelled` does not see.
+        child = interaction_cancel()
+        stops = tuple(event for event in (cancel, child) if event is not None)
         while not ev.wait(0.1 if deadline is None else min(0.1, max(0.0, deadline - time.monotonic()))):
-            if cancel is not None and cancel.is_set():
+            if any(event.is_set() for event in stops):
                 self.pending.value(rid)
                 self.em.emit("request_expired", id=rid)
                 return None
@@ -2018,6 +2057,14 @@ class Backend:
         self.agent.on_detached_ended = self._on_detached_ended
         self._agent_wakes: list[dict] = []
         self.ui.monitor_wake_enabled = True
+        # Background shells (bash with background:true), for the editor's task list. Pushed only
+        # once this chat's client has sent one of the commands that answer with them, so a client
+        # that has never heard of `background_shells` is never sent one (see _on_background_shell).
+        self._background_shells_on = False
+        self._background_since = 0.0            # ended shells before this (the last reset) are gone
+        self._background_timer: threading.Timer | None = None
+        self._background_timer_lock = threading.Lock()
+        self.agent.ctx.on_background = self._on_background_shell
 
     def _add_rule(self, rule_text: str) -> None:
         try:
@@ -2077,6 +2124,13 @@ class Backend:
                           # needed: `agent_message` is only ever a reply to this command, so a
                           # client that cannot send it can never receive the event.
                           "agent_control": True,
+                          # agent_control close also stops ONE foreground sub-agent, and the turn
+                          # goes on: its parent is told the user stopped it. Without this a client
+                          # can only end the whole turn to stop a foreground child.
+                          "agent_control_foreground": True,
+                          # The Agent map's task list: background_shells, and list_background_shells,
+                          # stop_background_shell and get_background_output (shell or monitor ids).
+                          "background_tasks": {"version": 1},
                           "editor_liveness": True, "produced_files": True, "agent_steps": True,
                           # The chat panel can say what is on screen, so a takeover stops being
                           # decided by whether a process is alive. Gated: an older CLI would answer
@@ -2800,6 +2854,120 @@ class Backend:
             self._monitors_timer = timer
             timer.start()
 
+    # ---- background shells and task output (the Agent map's task list) ---------------------------
+    def _chat_tool_owners(self) -> dict:
+        """This chat's tool owners -- the main agent's and every sub-agent's, at any depth -- each
+        with the sub-agent id it belongs to (None for the main agent). Shells are process-wide, and
+        one `dgc serve` can hold several chats: only these are this chat's to list, stop and read."""
+        agent = self.agent
+        owners = {}
+        resources = agent.__dict__.get("_chat_tool_resources")
+        if resources is not None:
+            owners.update(resources.owners())
+        owners[str(agent.ctx.tool_owner)] = None
+        return owners
+
+    def _chat_monitor_hubs(self) -> list:
+        """The main agent's monitors first, then each sub-agent's."""
+        agent = self.agent
+        resources = agent.__dict__.get("_chat_tool_resources")
+        hubs = [getattr(agent, "monitors", None)] + (resources.hubs() if resources is not None else [])
+        return [hub for hub in hubs if hub is not None]
+
+    def _background_items(self) -> list:
+        """`background_shells.items`: this chat's shells, oldest first, minus those that had ended
+        before the chat was last reset. Labels were redacted when the shell started; again here,
+        for a secret the user added since."""
+        from . import tools
+        since = getattr(self, "_background_since", 0.0)
+        items = [item for item in tools.background_shells(self._chat_tool_owners())
+                 if item["ended_at"] is None or item["ended_at"] >= since]
+        # Bounded like every list on the wire. The oldest ended shells go first: never drop a running
+        # one to make room for one that has ended.
+        drop = len(items) - _MAX_BACKGROUND_SHELLS_LISTED
+        if drop > 0:
+            kept = []
+            for item in items:
+                if drop > 0 and item["state"] != "running":
+                    drop -= 1
+                    continue
+                kept.append(item)
+            items = kept[-_MAX_BACKGROUND_SHELLS_LISTED:]
+        secrets = secret_values(self.config)
+        for item in items:
+            item["command"] = redact_value(item["command"], secrets)
+        return items
+
+    def _emit_background_shells(self, request_id: str | None = None) -> None:
+        self.em.emit("background_shells", items=self._background_items(),
+                     **_request_fields(request_id))
+
+    def _on_background_shell(self) -> None:
+        """A shell of this chat started, was killed or ended (tool and reader threads)."""
+        if getattr(self, "_background_shells_on", False):
+            self._schedule_background_shells()
+
+    def _schedule_background_shells(self) -> None:
+        """Coalesce a kill and the reap that follows it, or a burst of starts, into one list."""
+        lock = getattr(self, "_background_timer_lock", None)
+        if lock is None:
+            return
+        with lock:
+            if self._background_timer is not None:
+                return
+
+            def fire():
+                with lock:
+                    self._background_timer = None
+                try:
+                    if getattr(self, "_background_shells_on", False):
+                        self._emit_background_shells()
+                except Exception:
+                    pass
+            timer = threading.Timer(0.25, fire)
+            timer.daemon = True
+            self._background_timer = timer
+            timer.start()
+
+    def _forget_ended_shells(self) -> None:
+        """A new, cleared or resumed chat: shells that have ended leave its list (running ones stay,
+        as they keep running), and a client that is listening gets the list that is left."""
+        self._background_since = time.time()
+        if getattr(self, "_background_shells_on", False):
+            self._emit_background_shells()
+
+    def _emit_background_output(self, cmd: dict, request_id: str) -> None:
+        """get_background_output: the tail of one shell's or monitor's retained output, redacted."""
+        from . import tools
+        target = str(cmd.get("id") or "")
+        max_bytes = cmd.get("max_bytes", _BACKGROUND_OUTPUT_DEFAULT_BYTES)
+        if max_bytes < 1:                        # command_error has already made it an integer
+            self.em.emit("command_rejected", command="get_background_output",
+                         reason="invalid_max_bytes", request_id=request_id,
+                         message="max_bytes must be at least 1")
+            return
+        owners = self._chat_tool_owners()
+        found = tools.background_shell_output(target, owners)
+        if found is None:
+            for hub in self._chat_monitor_hubs():
+                found = hub.output(target)
+                if found is not None:
+                    break
+        if found is None:
+            listed = any(item["id"] == target for item in tools.background_shells(owners))
+            self.em.emit(
+                "command_rejected", command="get_background_output", reason="unknown_task",
+                request_id=request_id,
+                message=(f"the output of '{target[:64]}' is no longer kept: DGC keeps a background "
+                         "shell's output for 30 minutes after it ends" if listed else
+                         f"this chat has no background shell or monitor '{target[:64]}'"))
+            return
+        text = redact_value(found["text"], secret_values(self.config))
+        output, cut = _output_tail(text, min(int(max_bytes), _BACKGROUND_OUTPUT_MAX_BYTES))
+        self.em.emit("background_output", request_id=request_id, id=target, output=output,
+                     total_bytes=max(0, min(MAX_SAFE_INTEGER, int(found["total_bytes"]))),
+                     truncated=bool(cut or found["dropped"]))
+
     def _cancel_wake_timer_locked(self) -> None:
         timer, self._wake_timer = getattr(self, "_wake_timer", None), None
         if timer is not None:
@@ -3498,6 +3666,9 @@ class Backend:
             self._pips_commands = []
         for command in abandoned:
             self._pips_failure(command, "chat_closed", "This chat closed before its Pip control could run.")
+        # Its background shells are killed below, and their ends are news to nobody now: a closed
+        # chat publishes no more task lists.
+        self._background_shells_on = False
         streams = self.__dict__.get("_desktop_streams")
         if streams is not None:
             streams.close_all()
@@ -5562,6 +5733,7 @@ class Backend:
             self._emit_goal()
             self._emit_monitors()
             self._emit_agents()
+            self._forget_ended_shells()
         elif t == "fork_session":
             # "Branch from here" keeps the conversation and hands it a new identity, so the
             # chat it came from stops where the branch began instead of being overwritten.
@@ -5604,6 +5776,7 @@ class Backend:
             self._emit_goal()
             self._emit_monitors()
             self._emit_agents()
+            self._forget_ended_shells()
         elif t == "resume_session":
             path = cmd.get("path")
             if not path and cmd.get("latest"):
@@ -5634,6 +5807,7 @@ class Backend:
                 # until the first event it does not know as one, and mode_changed is new to a
                 # resume -- sent first, the whole history landed in the app's first stream().
                 self._emit_mode_if_changed(mode_before)
+                self._forget_ended_shells()
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
@@ -5824,6 +5998,26 @@ class Backend:
             elif not hub.stop(target, "stopped"):
                 self.em.emit("info", message=f"no running monitor '{target[:64]}'")
             self._emit_monitors(request_id)
+        elif t == "list_background_shells":
+            self._background_shells_on = True
+            self._emit_background_shells(request_id)
+        elif t == "stop_background_shell":
+            # Like stop_monitor, never blocks the command loop: the group is signalled here and
+            # reaped on its own thread, and the shell's end is pushed as it lands.
+            from . import tools
+            self._background_shells_on = True
+            target = str(cmd.get("id") or "")
+            if tools.stop_background_shell(target, self._chat_tool_owners()) == "unknown":
+                self.em.emit("command_rejected", command=t, reason="unknown_task",
+                             message=f"this chat has no background shell '{target[:64]}'",
+                             **_request_fields(request_id))
+                return
+            # "ended" is answered like "stopping": a Stop that lands as the shell exits is not an
+            # error, and the list it gets back shows how it ended.
+            self._emit_background_shells(request_id)
+        elif t == "get_background_output":
+            self._background_shells_on = True
+            self._emit_background_output(cmd, request_id)
         elif t == "list_artifacts":
             self._emit_artifacts(request_id)
         elif t == "stop_artifact":
@@ -6100,7 +6294,11 @@ class Backend:
         return items[:idx] + cards + items[idx:]
 
     def _agent_control(self, cmd: dict) -> None:
-        """Steer or stop ONE background sub-agent, for the user.
+        """Steer or stop ONE background sub-agent, for the user -- or stop one foreground one.
+
+        `close` on a FOREGROUND child (capabilities.agent_control_foreground) stops that child alone:
+        its parent's `task` call returns saying the user stopped it, and the turn goes on to its next
+        model round. Its siblings, its parent and the turn are untouched (Agent.close_foreground).
 
         DELIBERATELY NOT IN `_BUSY_MUTATIONS`, and this is the reason, because the next reader will
         want to put it there beside resolve_retained_task. A background child mostly exists WHILE a
@@ -6131,17 +6329,20 @@ class Backend:
         if not agent_id or len(agent_id) > 128:
             self.em.emit("command_rejected", command="agent_control", reason="unknown_agent",
                          request_id=request_id,
-                         message="id must name one background sub-agent")
+                         message="id must name one sub-agent")
             return
         if str(cmd.get("action") or "") == "close":
             signalled, why = self.agent.close_detached(agent_id)
+            if not signalled and why == "unknown":
+                # Not a background child: a foreground one, at any depth, or nothing at all.
+                signalled, why = self.agent.close_foreground(agent_id)
             if not signalled:
                 self.em.emit(
                     "command_rejected", command="agent_control",
                     reason="already_ended" if why == "finished" else "unknown_agent",
                     request_id=request_id,
                     message=(f"sub-agent {agent_id} has already finished" if why == "finished"
-                             else f"no background sub-agent {agent_id} is running"))
+                             else f"no sub-agent {agent_id} is running"))
                 return
             # The correlated `request_id` IS the acknowledgement, and the refreshed `agents`
             # snapshot carries it. Be precise about what that snapshot says: NOTHING has changed at

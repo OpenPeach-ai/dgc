@@ -37,7 +37,7 @@ from .skills import (discover_skills, matching_skill_names, explicit_skill_instr
                      format_skill_instructions)
 from .scheduler import acquire_cancellable, workspace_mutation_lock
 from .monitors import MonitorHub, Notification, NOTICE_CLOSE, NOTICE_OPEN, plural
-from .subagents import SubagentRegistry
+from .subagents import ENDED as ENDED_AGENT_STATES, SubagentRegistry
 from .presentation import RESPONSE_GUIDANCE
 from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clean_report, new_details, record_transition
 from .workflows import STREAM_RECOVERY_TEXT, notice_kind as _notice_kind
@@ -82,6 +82,7 @@ _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty 
 _MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a pathological batch
 _CLEANUP_LEASE_WAIT_S = 5.0  # bounded wait for the write lease before REMOVING a finished checkout
 _FINISHED_JOBS_KEPT = 8      # detached outcomes kept addressable by id after the job entry is gone
+_STOPPED_BY_USER = "stopped by the user"   # a foreground child the user stopped alone (agent_control)
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
                      "add_skill", "save_memory", "remember", "forget"}
 _FILE_EDIT_CALLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
@@ -673,6 +674,55 @@ class _DeadlineCancel:
 
     def is_set(self) -> bool:
         return self.parent.is_set() or time.monotonic() >= self.deadline
+
+
+class _ChildStop(threading.Event):
+    """A foreground sub-agent's own stop, which its parent's stop also sets.
+
+    A foreground child used to run on its parent's very Event, so the only way to stop one child was
+    to stop the whole turn. Now each has one of these: the user's Stop on that child (agent_control
+    close) sets it alone, the child winds down, and its parent's turn carries on with a task result
+    saying the user stopped it. ``is_set`` still reads the parent's, so Stop on the turn reaches
+    every child at every depth exactly as before.
+
+    A real Event, not a view: a child's tools, model requests and grandchildren all take it where
+    they took the parent's, and some of them wait on it.
+    """
+
+    def __init__(self, parent):
+        super().__init__()
+        self.parent = parent
+
+    @property
+    def closed(self) -> bool:
+        """This child alone was stopped -- the user's Stop on it, not on the turn."""
+        return super().is_set()
+
+    def is_set(self) -> bool:
+        return super().is_set() or bool(self.parent is not None and self.parent.is_set())
+
+    def wait(self, timeout: float | None = None) -> bool:
+        # The parent is a separate Event, so its set() cannot wake this one's waiters: look at both
+        # in short slices. Nothing that waits on a cancel token needs it sooner than 50 ms.
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
+        while not self.is_set():
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return False
+            super().wait(0.05 if remaining is None else min(0.05, remaining))
+        return True
+
+
+# The stop of the sub-agent whose question a frontend is waiting on, for the thread that asked it.
+# A child's approval card is shown and waited on by the TOP-LEVEL UI, which only knows the turn's
+# Stop; without this, stopping a child that sat on a permission card did nothing until the user
+# answered the card. _SubUI._interact sets it; HeadlessUI._await reads it (interaction_cancel).
+_INTERACTION = threading.local()
+
+
+def interaction_cancel():
+    """The stop token of the innermost sub-agent asking a question on this thread, or None."""
+    return getattr(_INTERACTION, "cancel", None)
 
 
 class _RouteGate:
@@ -1370,6 +1420,9 @@ class AgentContext:
     seen_lock: threading.RLock = field(default_factory=threading.RLock)
     # The agent's background monitors (dgc.monitors.MonitorHub); tools reach it through the context.
     monitors: object = None
+    # Called with no arguments when one of this context's background shells starts, is killed or
+    # ends: the editor's task list. A sub-agent gets its parent's, so the chat hears every depth.
+    on_background: object = None
     # Trusted owning-chat provenance, never supplied through a model tool argument.
     pip_proposal_origin: object = None
     # Controller-only, cloned for one configured foreground verifier; never a tool argument.
@@ -1597,7 +1650,15 @@ class _SubUI:
 
     def _interact(self, name: str, fallback, *args, feedback_attr: str = ""):
         def invoke():
-            value = self._direct(name, *args)
+            # The innermost child sets it first and a parent _SubUI leaves it alone: the innermost
+            # child's token already reads every ancestor's stop.
+            outer = getattr(_INTERACTION, "cancel", None)
+            if outer is None and self._cancel is not None:
+                _INTERACTION.cancel = self._cancel
+            try:
+                value = self._direct(name, *args)
+            finally:
+                _INTERACTION.cancel = outer
             if not feedback_attr:
                 return value
             feedback = str(getattr(self._parent, feedback_attr, "") or "")
@@ -1733,6 +1794,19 @@ class _ChatToolResources:
         self.lock = threading.Lock()
         self.closed = False
         self.children = {}
+        # owner -> the sub-agent it belongs to: the editor lists a chat's background shells and
+        # reads its monitors' output across every depth, and says which agent started each.
+        self.agent_ids = {}
+
+    def owners(self) -> dict:
+        """Every sub-agent tool owner of this chat, and the sub-agent id it belongs to."""
+        with self.lock:
+            return dict(self.agent_ids)
+
+    def hubs(self) -> list:
+        """The sub-agents' monitor hubs (the main agent's is its own `monitors`)."""
+        with self.lock:
+            return [hub for hub in self.children.values() if hub is not None]
 
     @staticmethod
     def stop(owner, hub):
@@ -1754,6 +1828,7 @@ class _ChatToolResources:
             closed = self.closed
             if not closed:
                 self.children[owner] = hub
+                self.agent_ids[owner] = getattr(child, "_subagent_id", None)
         if closed:
             self.stop(owner, hub)
         return not closed
@@ -1762,6 +1837,7 @@ class _ChatToolResources:
         with self.lock:
             self.closed = True
             children, self.children = self.children, {}
+            self.agent_ids = {}
         for owner, hub in children.items():
             self.stop(owner, hub)
 
@@ -9371,6 +9447,11 @@ class Agent(GoalLifecycle):
                 sub._parent_agent = self
                 sub._parent_call_id = call_id
                 sub._chat_tool_resources = resources
+                # The editor's Stop on one foreground child reaches the top-level agent whatever
+                # depth the child runs at, so every depth registers its children in one map; and the
+                # editor's task list hears about every depth's background shells.
+                sub._fg_stops = self._foreground_stops()
+                sub.ctx.on_background = getattr(self.ctx, "on_background", None)
                 resources.add(sub)
                 if getattr(self, "_monitor_turn", False) or unattended:
                     # Nobody is at the keyboard for a turn DGC started on a monitor event, and that holds
@@ -9409,6 +9490,11 @@ class Agent(GoalLifecycle):
 
             failure = thrown or sub_ui.failure()
             result = sub_ui.result()
+            if failure and isinstance(cancel, _ChildStop) and cancel.closed:
+                # The user stopped this one child. However its turn happened to unwind -- "turn
+                # cancelled", or still queued in a parallel batch -- that is what it was, and the
+                # agents list and the parent's task result both say it in those words.
+                failure = _STOPPED_BY_USER
             if not failure and not result:
                 failure = "the sub-agent stopped without a final summary"
             return failure, result, ""
@@ -9531,8 +9617,11 @@ class Agent(GoalLifecycle):
     def _finalize_subagent(self, description: str, workspace, failure: str, result: str,
                            start_error: str = "", *,
                            cancel: threading.Event | None = None,
-                           keeper=None) -> _TaskOutcome:
+                           keeper=None, stopped_by_user: bool = False) -> _TaskOutcome:
         """Integrate one stopped child, or retain it safely, and return structured convergence state.
+
+        `stopped_by_user`: the user stopped this one foreground child (agent_control close) and its
+        parent's turn goes on, so the result says that, with whatever the child had reported.
 
         `keeper` is the checkpoint manager the work belongs to, captured when the child started.
         A detached child can still be running when the user opens a new chat, and `self.checkpoints`
@@ -9554,6 +9643,16 @@ class Agent(GoalLifecycle):
         if failure:
             kept = self._preserve_task_workspace(workspace, failure, cancel=cancel)
             shared = " Partial changes may remain in the shared checkout." if not isolated else ""
+            if stopped_by_user:
+                # The user's decision, not a fault. "error: ... did not complete" read as something
+                # to work around, and a model that reads it that way starts the same child again.
+                # Not an error result either: the card is not red for a Stop the user pressed.
+                found = (f"\nWhat it had reported before it was stopped:\n{result}" if result
+                         else "\nIt had reported nothing before it was stopped.")
+                return _TaskOutcome(
+                    f"The user stopped sub-task '{description}' before it finished. That was the "
+                    "user's choice, not a failure: carry on with the rest of the work without it, "
+                    f"and do not start it again unless the user asks.{kept}{shared}{found}")
             return _TaskOutcome(f"error: Sub-task '{description}' did not complete: {failure}.{kept}{shared}")
         if workspace is None:
             return _TaskOutcome(
@@ -9701,10 +9800,15 @@ class Agent(GoalLifecycle):
         from .ultra import worker_limit
         cap = worker_limit(self.config)
         detach = bool(background) and self.depth == 0 and len(jobs) < cap and not self.stopping
-        own_cancel = threading.Event() if detach else self.cancelled
+        # A foreground child has a stop of its own that the turn's Stop also sets (_ChildStop), so
+        # the user can stop just this child and this turn carries on.
+        own_cancel = threading.Event() if detach else _ChildStop(self.cancelled)
         sub_ui = _SubUI(self.ui, description, cancel=own_cancel)
         registry = getattr(self, "subagents", None)
         sub_ui._registry = registry
+        if not detach:
+            # Before agent_started reaches the editor, so its Stop works from the first frame.
+            self._foreground_stops()[sub_ui.agent_id] = own_cancel
         if registry is not None:
             registry.start(id=sub_ui.agent_id, parent_id=getattr(self, "_subagent_id", None),
                            call_id=_wire_call_id(self.ui, call_id), description=description,
@@ -9713,9 +9817,14 @@ class Agent(GoalLifecycle):
                            turn_hint=getattr(self.ui, "turn_id", ""),
                            background=detach)
         if not detach:
-            execution = self._execute_prepared_subagent(
-                description, prompt, agent_name, workspace, sub_ui, call_id)
-            outcome = self._finalize_subagent(description, workspace, *execution)
+            try:
+                execution = self._execute_prepared_subagent(
+                    description, prompt, agent_name, workspace, sub_ui, call_id, cancel=own_cancel)
+            finally:
+                # Its record has ended: a Stop from here on is answered "already finished".
+                self._foreground_stops().pop(sub_ui.agent_id, None)
+            outcome = self._finalize_subagent(description, workspace, *execution,
+                                              stopped_by_user=own_cancel.closed)
             self._last_task_integrated = outcome.integrated
             return outcome.output
         return self._spawn_detached_subagent(
@@ -9989,6 +10098,37 @@ class Agent(GoalLifecycle):
         if self.stop_detached(agent_id) == 1:
             return True, ("isolated" if isolated else "shared")
         return False, ("finished" if self._knows_finished(agent_id) else "unknown")
+
+    def _foreground_stops(self) -> dict:
+        """agent id -> _ChildStop of every foreground child of this chat running now, any depth.
+
+        One map per chat, handed to each child (`_execute_prepared_subagent`), because the editor's
+        Stop on a child arrives at the TOP-LEVEL agent whatever depth the child runs at. Entries are
+        added before the child's agent_started and removed once its record has ended.
+        """
+        stops = self.__dict__.get("_fg_stops")
+        if stops is None:
+            stops = self.__dict__.setdefault("_fg_stops", {})
+        return stops
+
+    def close_foreground(self, agent_id: str) -> tuple[bool, str]:
+        """Stop ONE running foreground child for the user. Returns (signalled, reason).
+
+        Only that child's own stop is set: its parent, its siblings and the turn run on, and the
+        parent's `task` result says the user stopped it (`_finalize_subagent`). Its own children
+        stop with it, because each child's stop reads its parent's. Like close_detached it takes no
+        lease and waits for nothing -- `dgc serve` calls it from the loop that reads stdin.
+        """
+        key = str(agent_id or "")
+        stop = self._foreground_stops().get(key)
+        registry = getattr(self, "subagents", None)
+        state = registry.state(key) if registry is not None else ""
+        if state in ENDED_AGENT_STATES:
+            return False, "finished"
+        if stop is None:
+            return False, "unknown"
+        stop.set()
+        return True, ""
 
     def _message_task_result(self, args: dict) -> str:
         """`message_task`: the parent's words into a running child's next round, as a tool result."""
@@ -10556,11 +10696,15 @@ class Agent(GoalLifecycle):
         interaction_lock = threading.Lock()
         executions: dict[int, tuple[str, str, str]] = {}
         registry = getattr(self, "subagents", None)
+        # Each child's own stop, which the turn's Stop also sets: the user can stop one of the batch
+        # (even one still queued for a worker) and its siblings run on.
+        stops = {i: _ChildStop(self.cancelled) for i in prepared}
         sub_uis = {i: _SubUI(
             self.ui, self._safe_text(str(calls[i].arguments.get("description", ""))), buffered=True,
-            interaction_lock=interaction_lock, cancel=self.cancelled) for i in prepared}
-        for sub_ui in sub_uis.values():
+            interaction_lock=interaction_lock, cancel=stops[i]) for i in prepared}
+        for i, sub_ui in sub_uis.items():
             sub_ui._registry = registry
+            self._foreground_stops()[sub_ui.agent_id] = stops[i]
         replay_errors: list[str] = []
         if prepared:
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10587,7 +10731,7 @@ class Agent(GoalLifecycle):
                                 turn_hint=getattr(self.ui, "turn_id", ""))
                         future = pool.submit(
                             self._execute_prepared_subagent, description, prompt,
-                            agent_name, workspace, sub_uis[i], calls[i].id)
+                            agent_name, workspace, sub_uis[i], calls[i].id, cancel=stops[i])
                         pending[future] = i
                     for future in as_completed(pending):
                         i = pending[future]
@@ -10603,6 +10747,8 @@ class Agent(GoalLifecycle):
                         self.subagents.end(sub_uis[i].agent_id, "failed", self._safe_text(failure))
                     executions.setdefault(i, (failure, "", ""))
                     replay_errors.extend(sub_uis[i].replay())
+        for sub_ui in sub_uis.values():
+            self._foreground_stops().pop(sub_ui.agent_id, None)   # every one of them has ended
         if replay_errors:
             self.ui.info(self._safe_text(
                 "parallel task UI replay warning: " + "; ".join(replay_errors[:4])))
@@ -10612,7 +10758,8 @@ class Agent(GoalLifecycle):
         for i in sorted(prepared):
             description = self._safe_text(str(calls[i].arguments.get("description", "")))
             execution = executions.get(i, ("parallel task worker did not return a result", "", ""))
-            outcomes[i] = self._finalize_subagent(description, prepared[i], *execution)
+            outcomes[i] = self._finalize_subagent(description, prepared[i], *execution,
+                                                  stopped_by_user=stops[i].closed)
         for i, call in enumerate(calls):
             outcome = outcomes.get(i, _TaskOutcome("Sub-task failed without a result."))
             outcome = _TaskOutcome(_clamp(self._safe_text(outcome.output)), outcome.integrated,

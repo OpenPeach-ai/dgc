@@ -294,12 +294,14 @@ class _Ring:
         self.parts: deque = deque()
         self.chars = 0
         self.dropped = 0
+        self.written_bytes = 0                  # everything appended, kept or since dropped (UTF-8)
 
     def append(self, text: str) -> None:
         if not text:
             return
         self.parts.append(text)
         self.chars += len(text)
+        self.written_bytes += len(text.encode("utf-8", "replace"))
         while self.chars > self.limit and self.parts:
             first = self.parts[0]
             excess = self.chars - self.limit
@@ -1131,6 +1133,27 @@ class MonitorHub:
         entry = {"text": text, "proc": monitor.proc, "command": monitor.command_label,
                  "finished": finished, "dropped_chars": monitor.ring_out.dropped}
         return _render_output(mid, entry, args, background=True)
+
+    def output(self, mid: str) -> dict | None:
+        """A monitor's retained output for the editor's task card: the text bash_output reads
+        (stdout, then a [stderr] section), as ``{"text", "total_bytes", "dropped"}``.
+
+        Lines were redacted as they were read. ``total_bytes`` counts everything the monitor kept
+        a line of, including what the rings have since dropped; ``dropped`` says they dropped some.
+        """
+        monitor = self.get(mid)
+        if monitor is None:
+            return None
+        with monitor.lock:
+            out, err = monitor.ring_out.text(), monitor.ring_err.text()
+            partial = monitor._err_partial.decode("utf-8", errors="replace") if monitor._err_partial else ""
+            total = (monitor.ring_out.written_bytes + monitor.ring_err.written_bytes
+                     + len(partial.encode("utf-8", "replace")))
+            dropped = bool(monitor.ring_out.dropped or monitor.ring_err.dropped)
+        err += partial
+        text = out + (("[stderr]\n" + err) if err.strip() else "")
+        return {"text": text, "total_bytes": max(total, len(text.encode("utf-8", "replace"))),
+                "dropped": dropped}
 
     # ---- stopping -------------------------------------------------------------------------------
     def stop(self, mid: str, reason: str = "stopped") -> bool:

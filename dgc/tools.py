@@ -1701,6 +1701,11 @@ _BG_N = _itertools.count(1)
 _BG_LOCK = _threading.Lock()
 _BG_BUFFER_CHARS = 120_000
 _BG_RETAIN_S = 1800
+# What the editor's task list still shows of a shell whose output has been reaped: its label and how
+# it ended, no output. The list keeps ended shells until the chat is reset, which can be long after
+# the 30 minutes its output is kept for; bounded, oldest first out.
+_BG_ENDED: dict[str, dict] = {}
+_BG_ENDED_KEPT = 256
 
 # Oversized foreground results are process-local, already redacted, owner-scoped, TTL-bound, and
 # capacity-bound. This is deliberately not a host temp file: a confined command cannot reliably see
@@ -2256,10 +2261,12 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
         workspace_lock.release()
     safe_command = _safe_command_label(command, ctx)
     hub = getattr(ctx, "monitors", None) if notify_exit else None
-    entry = {"proc": proc, "buf": [], "buf_chars": 0, "dropped_chars": 0,
+    entry = {"proc": proc, "buf": [], "buf_chars": 0, "dropped_chars": 0, "bytes_written": 0,
              "lock": _threading.Lock(), "command": safe_command, "owner": _tool_owner(ctx),
              "started": time.time(), "finished": None, "thread": None, "killed": False,
-             "notify_epoch": getattr(hub, "epoch", 0)}
+             "notify_epoch": getattr(hub, "epoch", 0),
+             # The editor's task list: told when this shell starts, is killed and ends.
+             "on_change": getattr(ctx, "on_background", None)}
     with _BG_LOCK:
         _BG[bid] = entry
 
@@ -2272,6 +2279,8 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
             with entry["lock"]:
                 entry["buf"].append(chunk)
                 entry["buf_chars"] += len(chunk)
+                # Everything it printed, kept or since dropped: the editor shows "the last X of Y".
+                entry["bytes_written"] += len(chunk.encode("utf-8", "replace"))
                 excess = entry["buf_chars"] - _BG_BUFFER_CHARS
                 while excess > 0 and entry["buf"]:
                     first = entry["buf"][0]
@@ -2313,11 +2322,13 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
                                           entry["notify_epoch"])
             except Exception:
                 pass
+        _bg_changed(entry)
 
     reader_thread = _threading.Thread(target=reader, daemon=True,
                                       name=f"dgc-background-{bid}")
     entry["thread"] = reader_thread
     reader_thread.start()
+    _bg_changed(entry)
     return (f"started background task {bid}: {safe_command}\n"
             f"Read its output with bash_output(id=\"{bid}\"). It holds no workspace lease once "
             "started, so do not use it to change files."
@@ -2365,6 +2376,7 @@ def bash_kill(args: dict, ctx) -> str:
     if e.get("finished") is not None:
         return f"{bid} already finished (exit code {e['proc'].poll()})"
     e["killed"] = True                      # a kill the model asked for is not news to deliver
+    _bg_changed(e)
     _terminate_background(e["proc"], sweep_exited_group=True)
     if not _join_background_reader(e):
         return f"error: killed {bid}, but its output reader did not close and cleanup is incomplete"
@@ -2451,7 +2463,106 @@ def _reap_background(now: float | None = None) -> None:
         stale = [bid for bid, e in _BG.items()
                  if e.get("finished") is not None and e["finished"] < cutoff]
         for bid in stale:
-            _BG.pop(bid, None)
+            e = _BG.pop(bid, None)
+            if e is None:
+                continue
+            # The output goes; the line in the editor's list does not (see _BG_ENDED).
+            _BG_ENDED[bid] = {"owner": e.get("owner"), "command": e.get("command", ""),
+                              "started": e.get("started"), "finished": e.get("finished"),
+                              "killed": bool(e.get("killed")),
+                              "returncode": getattr(e.get("proc"), "returncode", None)}
+        while len(_BG_ENDED) > _BG_ENDED_KEPT:
+            _BG_ENDED.pop(next(iter(_BG_ENDED)))
+
+
+def _bg_changed(entry: dict) -> None:
+    """Tell the frontend that lists this shell that it started, was killed or ended. Never raises:
+    it runs on the tool's own thread and on the shell's reader thread."""
+    callback = entry.get("on_change")
+    if callable(callback):
+        try:
+            callback()
+        except Exception:
+            pass
+
+
+def _bg_item(bid: str, entry: dict, agent_id) -> dict:
+    """One shell as the editor's task list shows it (protocol `background_shells.items`)."""
+    finished = entry.get("finished")
+    code = None
+    if finished is not None:
+        proc = entry.get("proc")
+        code = proc.returncode if proc is not None else entry.get("returncode")
+    # Killed wins over exited: the user (or the model) stopped it, whatever code the signal left.
+    # A killed shell can still be dying for a moment, so ended_at stays null until it is reaped.
+    state = "killed" if entry.get("killed") else ("running" if finished is None else "exited")
+    return {"id": bid, "command": str(entry.get("command") or ""), "state": state,
+            "started_at": round(float(entry.get("started") or 0.0), 3),
+            "ended_at": round(float(finished), 3) if finished is not None else None,
+            "exit_code": code if isinstance(code, int) and not isinstance(code, bool) else None,
+            "agent_id": agent_id}
+
+
+def background_shells(owners: dict) -> list[dict]:
+    """These owners' background shells, oldest first, running and ended.
+
+    ``owners`` maps each tool owner of one chat to the sub-agent id it belongs to (None for the main
+    agent): the shells are process-wide, and only that chat's are its to list."""
+    _reap_background()
+    with _BG_LOCK:
+        live = [(bid, dict(e)) for bid, e in _BG.items() if e.get("owner") in owners]
+        gone = [(bid, dict(e)) for bid, e in _BG_ENDED.items()
+                if e.get("owner") in owners and bid not in _BG]
+    rows = [_bg_item(bid, e, owners.get(e.get("owner"))) for bid, e in live + gone]
+    # bg<n> counts up as shells start, so the number orders them where two share a start time.
+    number = lambda bid: int(bid[2:]) if bid[2:].isdigit() else 0
+    return sorted(rows, key=lambda row: (row["started_at"], number(row["id"])))
+
+
+def stop_background_shell(bid: str, owners: dict) -> str:
+    """The user's Stop on one of these owners' shells: "stopping", "ended" or "unknown".
+
+    It kills exactly what bash_kill kills -- the whole process group, grandchildren included -- but
+    never waits for it: the editor's command loop calls this, and a handler that waits there stalls
+    every later command, cancel included. The group is signalled and reaped on a thread of its own,
+    and the reader's end reports the shell gone. Like bash_kill, it sends the model no exit notice.
+    """
+    key = str(bid or "")
+    with _BG_LOCK:
+        e = _BG.get(key)
+        if e is None or e.get("owner") not in owners:
+            ended = key in _BG_ENDED and _BG_ENDED[key].get("owner") in owners
+            return "ended" if ended else "unknown"
+        if e.get("finished") is not None or e.get("killed"):
+            return "ended"
+        e["killed"] = True
+    _bg_changed(e)
+
+    def reap():
+        _terminate_background(e["proc"], sweep_exited_group=True)
+        _join_background_reader(e)
+
+    _threading.Thread(target=reap, daemon=True, name=f"dgc-background-stop-{key}").start()
+    return "stopping"
+
+
+def background_shell_output(bid: str, owners: dict) -> dict | None:
+    """What one of these owners' shells has printed, as kept for bash_output.
+
+    ``{"text", "total_bytes", "dropped"}``: the retained text (redacted as it was read), how many
+    UTF-8 bytes it printed in all, and whether earlier output was discarded to bound the buffer.
+    None for an id that is not one of these owners' shells, or whose output has been reaped."""
+    _reap_background()
+    with _BG_LOCK:
+        e = _BG.get(str(bid or ""))
+    if e is None or e.get("owner") not in owners:
+        return None
+    with e["lock"]:
+        text = "".join(e["buf"])
+        total = int(e.get("bytes_written") or 0)
+        dropped = bool(e.get("dropped_chars"))
+    return {"text": text, "total_bytes": max(total, len(text.encode("utf-8", "replace"))),
+            "dropped": dropped}
 
 
 def _shutdown_background(owner: str | None = None) -> None:

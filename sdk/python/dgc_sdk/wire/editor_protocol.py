@@ -450,6 +450,21 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # persistent, timeout_ms, started_at (epoch s), end_reason?, exit_code?}
     "monitors": {"items": _A(), "wake_paused": _B(), "pending_events": _I(),
                  "request_id": _S(False)},
+    # ---- background tasks (the Agent map; ready.capabilities.background_tasks = {version: 1}) ----
+    # Every background shell (`bash` with background: true) of this chat, the whole list each time:
+    # items {id "bg<n>", command (the redacted label, never the raw command), state running|exited|
+    # killed, started_at, ended_at (epoch s, null while running or while a killed one is reaped),
+    # exit_code (null until reaped), agent_id (the sub-agent that started it, null for the main
+    # agent)}. Oldest first; ended shells stay until the chat is reset. Pushed when one starts, is
+    # killed or ends -- but only to a client that has sent one of the three commands below, so a
+    # client that cannot send them never receives this -- and in answer to list_background_shells
+    # and stop_background_shell, with their request_id.
+    "background_shells": {"items": _A(), "request_id": _S(False)},
+    # Only ever the answer to get_background_output. `output` is the tail of what DGC kept of the
+    # shell's or monitor's output, redacted, at most max_bytes; `total_bytes` is all it printed;
+    # `truncated` says `output` is not the whole of it.
+    "background_output": {"request_id": _S(), "id": _S(), "output": _S(), "total_bytes": _I(),
+                          "truncated": _B()},
     # ---- troupes (dgc/troupe.py): many sub-agents on one work order, in the background --------
     # Sent only to a client whose ready.capabilities has `troupe`. Each carries the run's snapshot:
     # state running|done|stopped|failed, reason (why it stopped), stages [{name, total, done, failed,
@@ -752,6 +767,14 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # running monitor. Wake settings travel in set_config (monitor_wake and three bounded integers).
     "list_monitors": {"request_id": _S(False)},
     "stop_monitor": {"id": _S(), "request_id": _S(False)},
+    # Background tasks (capabilities.background_tasks): read and stop only, allowed while a turn runs.
+    # list_ and stop_background_shell answer with `background_shells`; an id this chat does not have
+    # is command_rejected (reason unknown_task). get_background_output answers with exactly one
+    # `background_output`; `id` is a background shell's or a monitor's, and max_bytes (default 65536)
+    # is capped at 1 MiB.
+    "list_background_shells": {"request_id": _S(False)},
+    "stop_background_shell": {"id": _S(), "request_id": _S(False)},
+    "get_background_output": {"id": _S(), "request_id": _S(), "max_bytes": _I(False)},
     # Troupes: both answer with `troupes`; stop_troupe stops one run (its agents stop, its report says what it
     # finished) and is allowed while a turn runs.
     "list_troupes": {"request_id": _S(False)},
@@ -774,7 +797,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "list_agents": {"request_id": _S(False)},
     "get_image": {"request_id": _S(), "ref": _S()},
     # Steer or stop ONE background sub-agent, for the USER. `id` is the child's `sub-<12 hex>`, as
-    # `agent_started.id` and `agents.items[].id` carry it.
+    # `agent_started.id` and `agents.items[].id` carry it. With capabilities.agent_control_foreground,
+    # "close" also stops one FOREGROUND sub-agent at any depth without ending the turn.
     #
     # The `action` enum is declared HERE on purpose: _dispatch validates with command_error(cmd)
     # before any arm runs, so an action the CLI does not implement is rejected as invalid_command

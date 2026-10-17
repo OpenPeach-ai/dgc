@@ -257,15 +257,21 @@ class SharedShapeTests(unittest.TestCase):
                 forwarded = []
                 with patch("dgc.worktree.repo_root", return_value=None), \
                         patch.object(agent, "_execute_prepared_subagent",
-                                     side_effect=lambda *args: forwarded.append(args) or ("", "done", "")):
+                                     side_effect=lambda *args, **kwargs: forwarded.append((args, kwargs))
+                                     or ("", "done", "")):
                     agent._run_subagent("d", "p", "", "task-8")
-                self.assertEqual(forwarded[0][-1], "task-8")
+                args, kwargs = forwarded[0]
+                self.assertEqual(args[-1], "task-8")
+                # ...with a stop of its own, so the user can stop that one child (agent_control).
+                from dgc.agent import _ChildStop
+                self.assertIsInstance(kwargs.get("cancel"), _ChildStop)
+                self.assertIs(kwargs["cancel"].parent, agent.cancelled)
             finally:
                 agent.mcp.stop_all()
 
     def test_parallel_batch_threads_each_call_id(self):
         source = (ROOT / "dgc" / "agent.py").read_text()
-        self.assertIn("agent_name, workspace, sub_uis[i], calls[i].id)", source)
+        self.assertIn("agent_name, workspace, sub_uis[i], calls[i].id, cancel=stops[i])", source)
 
 
 class LiveTurnFrameTests(unittest.TestCase):

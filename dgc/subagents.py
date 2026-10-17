@@ -645,6 +645,12 @@ class SubagentRegistry:
             record = self._records.get(str(id))
             return record.description if record is not None else ""
 
+    def state(self, id: str) -> str:
+        """This chat's agent `id`'s state (queued … stopped); "" for an id it has no record of."""
+        with self._lock:
+            record = self._records.get(str(id))
+            return record.state if record is not None else ""
+
     def counts(self) -> dict:
         with self._lock:
             return self._counts_locked()

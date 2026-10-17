@@ -998,7 +998,7 @@ class TerminalStateTests(HarnessCase):
         calls = [ToolCall(f"x{n}", "task", {"description": f"x{n}", "prompt": "p"}) for n in range(2)]
         import concurrent.futures as futures
         with patch.object(futures, "as_completed", side_effect=RuntimeError("pool broke")), \
-                patch.object(Agent, "_execute_prepared_subagent", lambda *args: time.sleep(0.05) or ("", "ok", "")), \
+                patch.object(Agent, "_execute_prepared_subagent", lambda *args, **kwargs: time.sleep(0.05) or ("", "ok", "")), \
                 patch.object(Config, "clone_for_root", clone_fixture):
             h.agent._parallel_task_outputs(calls)
         self.assertEqual([f["state"] for f in h.of("agent_ended")], ["failed", "failed"])
