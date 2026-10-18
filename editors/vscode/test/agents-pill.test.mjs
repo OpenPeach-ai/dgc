@@ -40,14 +40,15 @@ const MODEL = "qwen3.8-coder-instruct-128k-q8_0-local-gguf-with-a-long-name"; //
 const LIGHT = `--vscode-sideBar-background:#F3F3F3; --vscode-editor-background:#FFFFFF; --vscode-input-background:#FFFFFF;
   --vscode-foreground:#3B3B3B; --vscode-descriptionForeground:#616161; --vscode-disabledForeground:#6E6E6E;`;
 
-async function panel(width, { light = false, state = "running" } = {}) {
+// `agents`: how many task agents start; `tasks`: how many background monitors are running.
+async function panel(width, { light = false, state = "running", agents = 2, tasks = 0 } = {}) {
   const page = await browser.newPage({ viewport: { width, height: 700 } });
   await page.setContent(html, { waitUntil: "load" });
   if (light) {
     await page.addStyleTag({ content: `:root { ${LIGHT} }` });
     await page.evaluate(() => document.body.classList.add("vscode-light"));
   }
-  await page.evaluate(([mjs, mdjs, model, agentState]) => {
+  await page.evaluate(([mjs, mdjs, model, agentState, agentCount, taskCount]) => {
     window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
@@ -59,10 +60,15 @@ async function panel(width, { light = false, state = "running" } = {}) {
       commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
     post({ type: "state", state: { model, mode: "default", think: "high" } });
     event({ type: "turn_start", turn_id: "t1", prompt: "split the work" });
-    for (const n of [1, 2]) {
+    for (let n = 1; n <= agentCount; n += 1) {
       event({ type: "tool_call", call_id: `call_${n}`, name: "task", args: { description: `part ${n}` }, summary: `part ${n}` });
       event({ type: "agent_started", id: `sub-00000000000${n}`, parent_id: null, call_id: `call_${n}`,
         description: `part ${n}`, depth: 1, state: "running", started_at: n, isolated: true, parallel: true });
+    }
+    if (taskCount > 0) {
+      event({ type: "monitors", wake_paused: false, pending_events: 0, items: Array.from({ length: taskCount }, (_, i) => ({
+        id: `mon${i + 1}`, description: `watch ${i + 1}`, command: "tail -f log", state: "running", events: 0,
+        pending_events: 0, persistent: true, timeout_ms: 0, started_at: 1 })) });
     }
     if (agentState === "waiting") {
       event({ type: "agent_updated", id: "sub-000000000002", state: "waiting", waiting_for: "permission" });
@@ -73,7 +79,7 @@ async function panel(width, { light = false, state = "running" } = {}) {
     const input = document.getElementById("input");
     input.value = "and then the docs";
     input.dispatchEvent(new Event("input", { bubbles: true }));
-  }, [mainJs, markdownJs, MODEL, state]);
+  }, [mainJs, markdownJs, MODEL, state, agents, tasks]);
   await page.waitForTimeout(120);
   return page;
 }
@@ -81,15 +87,19 @@ async function panel(width, { light = false, state = "running" } = {}) {
 const geometry = (page) => page.evaluate(() => {
   const rect = (id) => document.getElementById(id).getBoundingClientRect().toJSON();
   const footer = document.getElementById("cfooter");
-  const word = getComputedStyle(document.querySelector(".agents-word")).display;
+  const label = document.querySelector(".agents-label");
+  const word = getComputedStyle(label.firstElementChild).display;     // the words: "2 agents", "1 agent · 2 tasks"
+  const short = label.querySelector(".agents-short");                  // the narrow footer's total
   const need = getComputedStyle(document.querySelector(".agents-need")).display;
   return {
     footerScroll: footer.scrollWidth, footerClient: footer.clientWidth,
     send: rect("send"), cbox: rect("cbox"), pill: rect("agents-pill"), model: rect("btn-model"),
+    queue: rect("queue-send"), stop: rect("stop-run"),
     flexShrink: getComputedStyle(document.getElementById("agents-picker")).flexShrink,
     queueHidden: document.getElementById("queue-send").hidden, stopHidden: document.getElementById("stop-run").hidden,
-    word, need, aria: document.getElementById("agents-pill").getAttribute("aria-label"),
-    pillText: document.getElementById("agents-pill").innerText.trim(),
+    word, need, short: short ? getComputedStyle(short).display : "", aria: document.getElementById("agents-pill").getAttribute("aria-label"),
+    pillText: document.getElementById("agents-pill").innerText.trim(), state: document.getElementById("agents-pill").dataset.state,
+    hidden: document.getElementById("agents-picker").hidden,
   };
 });
 const intersects = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
@@ -108,6 +118,8 @@ for (const width of [300, 360, 460]) {
       assert.equal(g.flexShrink, "0", "the pill never shrinks");
       assert.ok(g.pill.width > 0, "the pill is laid out");
       assert.ok(!intersects(g.pill, g.model), `the pill does not overlap the model picker (${JSON.stringify([g.pill, g.model])})`);
+      assert.ok(!intersects(g.model, g.queue) && !intersects(g.model, g.stop),
+        `the model picker gives way rather than run under Queue or Stop (${JSON.stringify([g.model, g.queue, g.stop])})`);
       assert.match(g.aria, /^2 agents · Agents are working · Click to open the agent map$/);
       if (width <= 360) {
         assert.equal(g.word, "none");
@@ -133,6 +145,72 @@ test("at 300px a waiting pill keeps the sentence in its label and the open map s
       inner: window.innerWidth, focused: document.activeElement?.className }));
     assert.ok(box.menu.left >= 0 && box.menu.right <= box.inner, `the dialog fits (${JSON.stringify(box)})`);
     assert.equal(box.focused, "am-row am-agent", "on the first agent's row");
+  } finally { await page.close(); }
+});
+
+// ---- background tasks on the pill: its words where the footer has room, the total running where not ----
+const fits = (g) => {
+  assert.ok(g.footerScroll <= g.footerClient, `the footer does not overflow (${g.footerScroll} > ${g.footerClient})`);
+  assert.ok(g.send.left >= g.cbox.left - 0.5 && g.send.right <= g.cbox.right + 0.5
+    && g.send.bottom <= g.cbox.bottom + 0.5, "Send stays inside the prompt box");
+  assert.ok(g.pill.width > 0, "the pill is laid out");
+  assert.ok(!intersects(g.pill, g.model), `the pill does not overlap the model picker (${JSON.stringify([g.pill, g.model])})`);
+  // The longer label takes room from the model picker, whose name truncates; it never runs under Queue or Stop.
+  assert.ok(!intersects(g.model, g.queue) && !intersects(g.model, g.stop),
+    `the model picker gives way rather than run under Queue or Stop (${JSON.stringify([g.model, g.queue, g.stop])})`);
+};
+const shot = async (page, name) => {
+  if (process.env.DGC_AGENTS_SHOTS) await page.locator("#cbox").screenshot({ path: `${process.env.DGC_AGENTS_SHOTS}/${name}.png` });
+};
+
+for (const width of [300, 360, 460]) {
+  test(`at ${width}px an agent and two background tasks read "1 agent · 2 tasks" where there is room, the total "3" where not, and fit`, async (t) => {
+    if (skipOrFail(t)) return;
+    const page = await panel(width, { agents: 1, tasks: 2 });
+    try {
+      const g = await geometry(page);
+      assert.deepEqual([g.hidden, g.state], [false, "running"]);
+      assert.equal(g.aria, "1 agent · 2 tasks · 1 agent working and 2 background tasks running · Click to open the agent map");
+      fits(g);
+      if (width <= 360) {
+        assert.deepEqual([g.word, g.short, g.need], ["none", "inline", "none"], "the words give way to the total");
+        assert.equal(g.pillText, "3", "everything running, never the agents' number alone");
+      } else {
+        assert.equal(g.short, "none", "the total is the narrow footer's alone");
+        assert.equal(g.pillText, "1 agent · 2 tasks");
+      }
+      await shot(page, `pill-agent-and-tasks-${width}`);
+    } finally { await page.close(); }
+  });
+}
+
+test("a chat that never had an agent shows the pill while its tasks run: \"2 tasks\", or \"2\" at 300px", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const width of [300, 460]) {
+    const page = await panel(width, { agents: 0, tasks: 2 });
+    try {
+      const g = await geometry(page);
+      assert.deepEqual([g.hidden, g.state], [false, "running"], `${width}px: shown, green`);
+      assert.equal(g.aria, "2 tasks · 2 background tasks running · Click to open the agent map");
+      fits(g);
+      assert.equal(g.pillText, width <= 360 ? "2" : "2 tasks");
+      await shot(page, `pill-tasks-${width}`);
+    } finally { await page.close(); }
+  }
+});
+
+test("an agent waiting while a task runs: the blue dot and \"· needs you\" win, and the task is still counted", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await panel(460, { state: "waiting", tasks: 1 });
+  try {
+    const g = await geometry(page);
+    const dot = await page.evaluate(() => ({ bg: getComputedStyle(document.querySelector(".agents-dot")).backgroundColor,
+      wait: getComputedStyle(document.body).getPropertyValue("--agent-wait").trim() }));
+    assert.equal(g.state, "waiting");
+    assert.equal(hex(dot.bg), dot.wait.toUpperCase());
+    assert.equal(g.pillText, "2 agents · 1 task · needs you");
+    assert.equal(g.aria, "2 agents · 1 task · An agent is waiting for your permission · 1 background task running · Click to open the agent map");
+    fits(g);
   } finally { await page.close(); }
 });
 

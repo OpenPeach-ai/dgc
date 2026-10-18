@@ -1228,6 +1228,9 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .fbtn.mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fbtn .codicon { font-size: var(--t-lg); }
 .model-control { height: var(--control); max-width: 100%; min-width: 0; padding: 0 var(--sp-1) 0 var(--sp-2); gap: var(--sp-1); }
+/* `.fbtn.mode` (210px) outranks `.model-control`, so its 100% never applied: the button kept 210px
+   inside a picker that had shrunk for the agents pill, and the model name ran under Queue. Both caps. */
+.fbtn.mode.model-control { max-width: min(210px, 100%); }
 .model-control .model-copy { min-width: 0; display: flex; align-items: center; gap: var(--sp-1); }
 .model-control #modelname { min-width: 0; color: var(--text); font: var(--w-med) var(--t-sm)/1 var(--sans); }
 /* The reasoning profile is the short half of the label, so it keeps its width and the model name
@@ -1384,7 +1387,8 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   .model-control { width: var(--control); max-width: var(--control) !important; padding: 0; }
   .model-control .model-copy, .model-control .model-chevron { display: none; }
   .model-control .model-icon { display: inline-block; }
-  .agents-word, .agents-need { display: none; }
+  .agents-text, .agents-need { display: none; }
+  .agents-pill .agents-short { display: inline; }
   #workspace-changes .workspace-changes-label { display: none; }
   #workspace-changes .codicon { display: inline-block; }
 }
@@ -1843,6 +1847,8 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agents-pill { color: var(--muted); gap: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .agents-pill:hover { color: var(--text); }
 .agents-label { white-space: nowrap; }
+/* The narrow footer's form (the 420px query above): the total running, "3" for "1 agent · 2 tasks". */
+.agents-short { display: none; }
 .agents-dot { box-sizing: border-box; width: 7px; height: 7px; border-radius: var(--r-full); flex: none;
   background: var(--agent-run); }
 .agents-pill[data-state="waiting"] .agents-dot { width: 6px; height: 6px; background: var(--agent-wait);

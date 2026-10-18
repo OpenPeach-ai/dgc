@@ -1479,6 +1479,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.lastReadyEvent?.capabilities?.agents) {
       be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
     }
+    // And about its background commands. The CLI pushes a shell's start and end only to a client
+    // that has asked for the list once; the agents pill counts the running ones, so it asks now
+    // rather than when the agent map first opens.
+    if (this.backgroundTasks()) {
+      be.send({ type: "list_background_shells", request_id: this.nextRequestId("shells-restore") } as any);
+    }
     this.scheduleWorkspaceChanges(0);
     if (this.settingsEditor) this.refreshEditorSettings();   // new backend, same page the user is on
     this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
@@ -7216,7 +7222,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div class="cf-right">
       <div class="picker agents-picker" id="agents-picker" hidden>
-        <button type="button" id="agents-pill" class="fbtn agents-pill" data-state="idle" title="No agents working · Click to open the agent map" aria-label="0 agents · No agents working · Click to open the agent map" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-map"><span class="agents-dot" aria-hidden="true"></span><span class="agents-label"><span id="agents-count">0</span><span class="agents-word"> agents</span><span class="agents-need" hidden> · needs you</span></span></button>
+        <button type="button" id="agents-pill" class="fbtn agents-pill" data-state="idle" title="No agents working · Click to open the agent map" aria-label="0 agents · No agents working · Click to open the agent map" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-map"><span class="agents-dot" aria-hidden="true"></span><span class="agents-label"><span class="agents-text">0 agents</span><span class="agents-short">0</span><span class="agents-need" hidden> · needs you</span></span></button>
       </div>
       <div class="picker">
         <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-zap model-icon" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>

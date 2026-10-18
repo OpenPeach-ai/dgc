@@ -18,6 +18,13 @@
     map, closed.
   - **Stop agent** stops one sub-agent without ending the turn (with a CLI that says it can); the main agent is told
     and carries on. A command's card shows its output, updated every second.
+- **The pill counts the background tasks too.** Two commands running in the background read "2 tasks" (it said
+  "0 agents" while the map listed them), beside an agent "1 agent · 2 tasks". It counts the map's own list, so the
+  two always agree, and changes as each task starts and ends. A chat with no agent shows it while a task runs.
+  - **Its label says it in words:** "1 agent working and 2 background tasks running". The dot is blue while an agent
+    needs you, green while anything runs.
+  - **A narrow footer** keeps the dot and the number of things running ("3"). Where the footer is only short of
+    room, the model name truncates instead of running under Queue.
 
 ### ChatDGC
 

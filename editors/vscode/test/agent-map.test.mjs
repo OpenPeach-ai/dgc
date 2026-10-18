@@ -39,8 +39,10 @@ function view(options = {}, capabilities = { agents: true, agent_control: true }
     return e;
   };
   const posts = (type) => v.posted.filter((m) => m.type === type).map((m) => JSON.parse(JSON.stringify(m)));
+  // The pill's words where the footer has room (not the narrow footer's total, not "· needs you").
   const pill = () => ({ hidden: $("agents-picker").hidden, state: $("agents-pill").dataset.state,
-    label: $("agents-pill").querySelector(".agents-label").textContent.replace(/ · needs you$/, "") });
+    label: [...$("agents-pill").querySelector(".agents-label").children]
+      .filter((node) => !node.matches(".agents-short, .agents-need")).map((node) => node.textContent).join("") });
   return { ...v, event, $, start, update, end, open, isOpen, rows, keys, row, tasks, card, visible, button, key, posts, pill };
 }
 

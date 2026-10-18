@@ -525,8 +525,8 @@
         // A waiting Pip docks where questions dock (the founder chose it over a card in the reply).
         // A question docked first keeps the place; the Pip docks again when it is answered.
         dock: { show: dockPipCard, hide: undockPipCard },
-        // The Pip runs this chat started are background tasks in the agent map.
-        onRunsChange: () => agentMapChanged(),
+        // The Pip runs this chat started are background tasks: the pill counts them, the map lists them.
+        onRunsChange: () => renderAgents(),
       });
     }
     return pipSetupCards;
@@ -4069,7 +4069,7 @@
       troupesOpen = false; panel.innerHTML = ""; bar.hidden = true;
       paintTroupesOpen(); syncComposerRail();
       if (hadFocus) input.focus();
-      agentMapChanged();
+      renderAgents();
       return;
     }
     const running = runs.filter((ev) => String(ev.state || "running") === "running");
@@ -4110,7 +4110,7 @@
     bar.hidden = false;
     paintTroupesOpen();
     syncComposerRail();
-    agentMapChanged();                 // a running troupe is one of the map's background tasks
+    renderAgents();                    // a running troupe is a background task: the pill counts it, the map lists it
   }
   function paintTroupesOpen() {
     const label = troupesOpen ? "Hide the troupe's stages" : "Show the troupe's stages";
@@ -5629,7 +5629,7 @@
         break;
       case "monitors":
         renderMonitors(ev);
-        agentMapChanged();
+        renderAgents();                          // its running monitors are background tasks on the pill and the map
         break;
       // The agent map's background shells and the output of the task whose card is open. Neither
       // changes the transcript.
@@ -8856,31 +8856,38 @@
     renderAgentsPill();
     agentMapChanged();
   }
-  // Claude Code's counting rule: the number is the agents working NOW, and once the chat has had an
-  // agent the pill stays for the rest of it -- "0 agents" when every one has ended -- so the map is
-  // always one click away. A chat with no agent shows no pill; /agents still opens the map.
+  // The pill says what runs NOW: the agents working (Claude Code's counting rule) and the background
+  // tasks the map lists, counted from the map's own list so the two never disagree -- "2 agents",
+  // "2 tasks", "1 agent · 2 tasks". Once the chat has had an agent the pill stays for the rest of it
+  // -- "0 agents" when nothing runs -- so the map is always one click away; a chat that never had one
+  // shows it only while a task runs (/agents still opens the map). With no task running it reads as
+  // it always did. A narrow footer keeps only the total running (`.agents-short`) beside the dot.
   function renderAgentsPill() {
     const picker = $("agents-picker"), pill = $("agents-pill");
     if (!picker || !pill) return;
-    const c = agentCounts();
-    if (c.total <= 0) {
+    const c = agentCounts(), tasks = amRunningTasks().length;
+    if (c.total <= 0 && tasks <= 0) {
       hoverTip.hide();
       picker.hidden = true;
       return;
     }
     picker.hidden = false;
     const n = c.active;
-    const state = c.waiting > 0 ? "waiting" : c.active > 0 ? "running" : "idle";
-    const hint = "Click to open the agent map";
-    const title = state === "waiting"
-      ? `${c.waitingPermission > 0 ? "An agent is waiting for your permission" : "An agent is waiting for your answer"} · ${hint}`
-      : state === "running" ? `Agents are working · ${hint}` : `No agents working · ${hint}`;
+    const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 ? "running" : "idle";
+    const label = n > 0 && tasks > 0 ? `${agentPlural(n, "agent")} · ${agentPlural(tasks, "task")}`
+      : tasks > 0 ? agentPlural(tasks, "task") : agentPlural(n, "agent");
+    const inBackground = tasks > 0 ? `${agentPlural(tasks, "background task")} running` : "";
+    const said = state === "waiting"
+      ? [c.waitingPermission > 0 ? "An agent is waiting for your permission" : "An agent is waiting for your answer", inBackground]
+      : state === "idle" ? ["No agents working"]
+      : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "agent")} working and ${inBackground}` : "Agents are working") : inBackground];
+    const title = [...said.filter(Boolean), "Click to open the agent map"].join(" · ");
     pill.dataset.state = state;
-    $("agents-count").textContent = String(n);
-    pill.querySelector(".agents-word").textContent = n === 1 ? " agent" : " agents";
+    agentsSetText(pill.querySelector(".agents-text"), label);
+    agentsSetText(pill.querySelector(".agents-short"), String(n + tasks));
     pill.querySelector(".agents-need").hidden = state !== "waiting";
     hoverTip.retitle(pill, title);
-    pill.setAttribute("aria-label", `${agentPlural(n, "agent")} · ${title}`);
+    pill.setAttribute("aria-label", `${label} · ${title}`);
   }
 
   function agentSummary(c) {
@@ -8962,7 +8969,7 @@
   function agentMapChanged() { if (amOpen && !amPainting) renderAgentMap(); }
   function agentMapCapabilities() {
     if (!backgroundTasksLive) shellItems = [];
-    agentMapChanged();
+    renderAgents();
   }
   // Tokens the way the map writes them: "950", "142.6k", "1.2M".
   function amTokens(n) {
@@ -9186,6 +9193,9 @@
     return [...monitorItems.map(amMonitorTask), ...shellItems.map(amShellTask),
       ...[...troupeRuns.values()].map(amTroupeTask), ...amPipRuns().map(amPipTask), ...[...previews.values()].map(amPreviewTask)];
   }
+  // The ones running now: the map's "N background tasks" list, its root card and the pill all count
+  // this, so no two of them can disagree.
+  function amRunningTasks() { return amAllTasks().filter((task) => task.running); }
   function amTaskEntry(task) {
     let entry = amTaskRows.get(task.key);
     if (entry) return entry;
@@ -9293,7 +9303,7 @@
     agentsSetText(more, agentTotalExtra > 0
       ? `${agentPlural(agentTotalExtra, "more agent")} not listed${agentActiveExtra > 0 ? `, ${agentActiveExtra} of them working` : ""}.` : "");
     // Only what runs now: a task that ends drops out of the list (its card, if open, keeps it).
-    const tasks = amAllTasks().filter((task) => task.running);
+    const tasks = amRunningTasks();
     const keys = new Set(tasks.map((task) => task.key));
     for (const key of [...amTaskRows.keys()]) if (!keys.has(key)) amTaskRows.delete(key);
     for (const key of [...taskStopping.keys()]) if (!keys.has(key)) taskStopping.delete(key);
@@ -9486,7 +9496,7 @@
       n.states.replaceChildren(...lines.map((line) => { const li = el("li"); li.textContent = line; return li; }));
     }
     n.states.hidden = !lines.length;
-    const running = amAllTasks().filter((task) => task.running).length;
+    const running = amRunningTasks().length;
     agentsSetText(n.tasks, running ? `${agentPlural(running, "background task")} running` : "Nothing running in the background");
     const size = Math.max(0, Number(contextState.size || 0)), used = Math.max(0, Number(contextState.used || 0));
     agentsSetText(n.context, size ? `${fmtTokens(used)} of ${fmtTokens(size)} tokens in its context window` : "");
@@ -9959,11 +9969,13 @@
   });
 
   // ---- the task sources ----
+  // Each snapshot that can start or end a task repaints the pill as well as the map (renderAgents);
+  // one that only adds output (a monitor's lines) repaints the map alone.
   function amShells(ev) {
     if (!backgroundTasksLive) return;
     shellItems = (Array.isArray(ev.items) ? ev.items : [])
       .filter((item) => item && typeof item === "object" && typeof item.id === "string" && item.id).slice(0, 64);
-    agentMapChanged();
+    renderAgents();
   }
   function amNoteMonitorLines(ev) {
     const id = String(ev.id || "");
@@ -9978,7 +9990,7 @@
     if (!id) return;
     previews.set(id, { id, name: String(ev.name || id), url: String(ev.url || ""), rel: String(ev.rel || ""),
       readyWall: Date.now(), state: "running" });
-    agentMapChanged();
+    renderAgents();
   }
   // The answer to /artifacts or to a Stop: the previews running now. One this chat knew that is not
   // listed has stopped.
@@ -9993,14 +10005,14 @@
         uptime: String(item.uptime || ""), state: "running" });
     }
     for (const [id, preview] of previews) if (!listed.has(id)) preview.state = "stopped";
-    agentMapChanged();
+    renderAgents();
   }
   function amPreviewStopState(msg) {
     const id = String(msg.id || ""), preview = previews.get(id);
     if (!preview) return;
     if (msg.state === "stopped") preview.state = "stopped";
     else if (msg.state === "error") taskStopping.set(`preview:${id}`, "failed");
-    agentMapChanged();
+    renderAgents();
   }
   function amTasksReset() {
     shellItems = []; monitorLines.clear(); previews.clear(); taskStopping.clear(); taskEndedWall.clear();
@@ -10112,6 +10124,7 @@
       agentAnchors.clear();
       for (const card of document.querySelectorAll(".tool[data-agent-id]")) delete card.dataset.agentId;
       agentsHoldClaims = agentRecords.size > 0 || agentTotalExtra > 0;
+      renderAgentsPill();               // the Pip runs' lines went with the transcript, and off the count
       if (mapWasOpen) input.focus();
       return;
     }
@@ -10148,15 +10161,16 @@
     renderAgents();
   }
 
-  // Installed-host tests (extension-host/index.cjs) ask what the pill shows. Only the host's test
-  // bridge sends `agentsProbe` (while its token is set), with a fresh nonce it checks on the reply;
-  // anything else is ignored.
+  // Installed-host tests (extension-host/index.cjs) ask what the pill shows: its state and its words
+  // ("1 agent · 2 tasks", as a footer with room shows them). Only the host's test bridge sends
+  // `agentsProbe` (while its token is set), with a fresh nonce it checks on the reply; anything else
+  // is ignored.
   globalThis.addEventListener("message", (event) => {
     const probe = event.data?.type === "agentsProbe" ? event.data.probe : "";
     if (typeof probe !== "string" || !/^[0-9a-f]{32}$/.test(probe)) return;
     const pill = $("agents-pill");
     vscode.postMessage({ type: "agentsProbeResult", probe, hidden: $("agents-picker").hidden, state: pill.dataset.state,
-      label: `${$("agents-count").textContent}${pill.querySelector(".agents-word").textContent}` });
+      label: pill.querySelector(".agents-text").textContent });
   });
 
   // The four seams above stay the foundation's no-op stubs (lane-hooks.test.mjs instruments them in

@@ -487,12 +487,24 @@ async function run() {
     const at = items.map((item) => item.eventType).lastIndexOf("monitor_event");
     return at === -1 ? [] : items.slice(at + 1).map((item) => item.eventType);
   };
+  // What the live agents pill shows, read through the test-only probe (the webview answers, the
+  // host records it with the delivery evidence).
+  const pillProbe = async () => {
+    const before = posted().filter((item) => item.type === "agentsProbeResult").length;
+    await testApi.testOnlyWebviewMessage(testToken, { type: "agentsProbeRequest" });
+    await waitFor(() => posted().filter((item) => item.type === "agentsProbeResult").length > before);
+    return posted().filter((item) => item.type === "agentsProbeResult").at(-1);
+  };
   const compactsBefore = backendCommands(backendLogPath).filter((command) => command.type === "compact").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host monitor probe" });
   await waitFor(() => afterMonitorEvent().includes("monitors"));
   assert.ok(posted().some((item) => item.type === "event" && item.eventType === "monitor_started"),
     "monitor_started reaches the webview");
   assert.equal(afterMonitorEvent().includes("turn_end"), false, "the wake turn is still running");
+  // This chat has had no agent; its running monitor is a background task, so the pill says so.
+  const monitorProbe = await pillProbe();
+  assert.deepEqual([monitorProbe.state, monitorProbe.label], ["running", "1 task"],
+    "a running monitor shows the pill in a chat that never had an agent");
   // Compact while only a monitor turn runs: the panel sends it (the backend yields) instead of
   // answering "waits until the current turn is complete".
   await testApi.testOnlyWebviewMessage(testToken, { type: "slash", action: "compact" });
@@ -506,20 +518,14 @@ async function run() {
   assert.match(String(stopCommand.request_id || ""), /^monitor-stop-/,
     "Stop on a monitor chip is a correlated stop_monitor command");
   await waitFor(() => posted().some((item) => item.type === "event" && item.eventType === "monitor_ended"));
+  assert.equal((await pillProbe()).state, "hidden", "with the monitor stopped and no agent ever, no pill");
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/monitors" });
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
     command.type === "list_monitors" && /^monitors-list-/.test(String(command.request_id || ""))));
 
   // ---- 0.40 agents (installed-host checks; run before the backend-exit paths below) ----
   {
-    // What the live pill shows, read through the test-only probe (the webview answers, the host
-    // records it with the delivery evidence).
-    const probe = async () => {
-      const before = posted().filter((item) => item.type === "agentsProbeResult").length;
-      await testApi.testOnlyWebviewMessage(testToken, { type: "agentsProbeRequest" });
-      await waitFor(() => posted().filter((item) => item.type === "agentsProbeResult").length > before);
-      return posted().filter((item) => item.type === "agentsProbeResult").at(-1);
-    };
+    const probe = pillProbe;
     const protocolStops = () => logCount(/\[extension: stopping the backend — protocol:/);
     const stopsBefore = protocolStops();
 

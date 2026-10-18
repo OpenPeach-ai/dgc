@@ -1580,6 +1580,24 @@ test("a reloaded webview asks for the monitors list, so its rail and monitor ids
   }
 });
 
+test("a backend handshake asks for the background shells once, so the agents pill hears every start and end", async () => {
+  // The CLI pushes a shell's start and end only to a client that has asked for the list; before
+  // this, the pill said "0 agents" over two running shells until the agent map was first opened.
+  for (const version of [1, 0]) {
+    const h = recoveryProvider();
+    h.provider.scheduleWorkspaceChanges = () => {};
+    h.provider.startPipsAttention = () => {};
+    h.provider.resumeInterruptedWork = async () => {};
+    h.be.completeHandshake = () => {};
+    h.provider.lastReadyEvent = { type: "ready", capabilities: { agents: true, ...(version ? { background_tasks: { version } } : {}) } };
+    h.provider.finishSessionHandshake(h.be);
+    const listed = h.sent.filter((c) => c.type === "list_background_shells");
+    if (!version) { assert.deepEqual(listed, [], "a CLI without background_tasks is not asked"); continue; }
+    assert.equal(listed.length, 1);
+    assert.match(listed[0].request_id, /^shells-restore-/);
+  }
+});
+
 test("a webview reloaded while a turn runs is told about that turn before its history arrives", async () => {
   for (const running of [true, false]) {
     const h = recoveryProvider();

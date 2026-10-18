@@ -1,11 +1,16 @@
 // The agents indicator in the webview: the "● 2 agents" pill (Claude Code's counting rule: the
-// agents working now, for the whole chat), the agent map it opens, rows that open each agent's card
-// and page, announcements, chat boundaries and backend exits. The map itself is agent-map.test.mjs's.
+// agents working now, for the whole chat, and beside them the background tasks running now, "1 agent
+// · 2 tasks"), the agent map it opens, rows that open each agent's card and page, announcements,
+// chat boundaries and backend exits. The map itself is agent-map.test.mjs's.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { contrastRatio, mainCss, makeDom, panelSrc } from "./support/webview-dom.mjs";
 
 const PILL_HINT = "Click to open the agent map";
+// What the pill reads where the footer has room: its words, without the narrow footer's total and
+// without "· needs you" (a span of its own, shown only while an agent waits).
+const pillWords = (button) => [...button.querySelector(".agents-label").children]
+  .filter((node) => !node.matches(".agents-short, .agents-need")).map((node) => node.textContent).join("");
 
 function view(options = {}) {
   const v = makeDom(options);
@@ -20,7 +25,7 @@ function view(options = {}) {
     tool_calls: 2, ...fields });
   const pill = () => ({
     hidden: $("agents-picker").hidden, state: $("agents-pill").dataset.state,
-    label: $("agents-pill").querySelector(".agents-label").textContent.replace(/ · needs you$/, ""),
+    label: pillWords($("agents-pill")),
     title: $("agents-pill").title, aria: $("agents-pill").getAttribute("aria-label"),
     need: !$("agents-pill").querySelector(".agents-need").hidden,
   });
@@ -439,6 +444,9 @@ test("panel.ts restores the list on reload and after a backend handshake, with n
   const handshake = panelSrc.slice(panelSrc.indexOf("private finishSessionHandshake("));
   const handshakeBlock = handshake.slice(0, handshake.indexOf("\n  }\n"));
   assert.match(handshakeBlock, /capabilities\?\.agents\)\s*\{\s*be\.send\(\{ type: "list_agents", request_id: this\.nextRequestId\("agents-restore"\) \}\);/);
+  // The CLI pushes background shells only to a client that has asked for them once: the pill
+  // counts them, so the handshake asks, not the map's first opening.
+  assert.match(handshakeBlock, /if \(this\.backgroundTasks\(\)\) \{\s*be\.send\(\{ type: "list_background_shells", request_id: this\.nextRequestId\("shells-restore"\) \} as any\);/);
   const roots = [...panelSrc.matchAll(/type: "set_workspace_roots"[^}]*\}/g)].map((m) => m[0]);
   assert.ok(roots.length > 0);
   for (const command of roots) assert.doesNotMatch(command, /\bagents\s*:/);
@@ -460,7 +468,8 @@ test("the palette clears 3:1 and forced colours keep each state distinct", () =>
   for (const state of ["running", "waiting", "idle"]) assert.match(forced, new RegExp(`\\.agents-pill\\[data-state="${state}"\\] \\.agents-dot`));
   assert.match(forced, /\.agents-need \{[^}]*text-decoration: underline/);
   assert.match(section, /\.cf-right > \.picker\.agents-picker \{ flex: 0 0 auto; min-width: auto; \}/);
-  assert.match(mainCss, /@media \(max-width: 420px\) \{[\s\S]*?\.agents-word, \.agents-need \{ display: none; \}/);
+  assert.match(mainCss, /@media \(max-width: 420px\) \{[\s\S]*?\.agents-text, \.agents-need \{ display: none; \}\s*\.agents-pill \.agents-short \{ display: inline; \}/);
+  assert.match(section, /\.agents-short \{ display: none; \}/, "the total is the narrow footer's alone");
   assert.match(section, /prefers-reduced-motion: reduce\) \{ \.tool\.flash \{ animation: none; \} \}/);
 });
 
@@ -496,7 +505,7 @@ test("after a rewind in a chat whose task calls all share call_0, each row jumps
   const cards = [...doc.querySelectorAll('.tool[data-tool-name="task"]')];
   assert.equal(cards.length, 2);
   assert.deepEqual(cards.map((card) => card.dataset.agentId), [sid(1), sid(2)]);
-  assert.equal($("agents-count").textContent, "0", "the kept agents are the chat's; none is working");
+  assert.equal(pillWords($("agents-pill")), "0 agents", "the kept agents are the chat's; none is working");
   for (const [index, card] of cards.entries()) {
     card.querySelector(".tool-toggle").click();
     assert.match(card.textContent, new RegExp(`turn${index}`));
@@ -631,4 +640,174 @@ test("failed and finished agents stay on the map for the whole chat, across turn
   assert.deepEqual(agentRows().map((row) => row.dataset.agentId), [sid(3), sid(2), sid(1)],
     "and the map still lists the earlier turn's agents");
   assert.deepEqual(errors, []);
+});
+
+// ---- background tasks on the pill ------------------------------------------------------------
+// The pill says what runs now: the agents working and the background tasks the map lists, counted
+// from the map's own list -- "2 agents", "2 tasks", "1 agent · 2 tasks". Where the footer is narrow
+// only the total running is left (`.agents-short`); the label says it in words.
+const TASKS_READY = { type: "ready", model: "m", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
+  workspace_trusted: true, commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 1,
+  capabilities: { agents: true, agent_control: true, monitors: true, troupe: true, background_tasks: { version: 1 } } };
+const secondsAgo = (s) => Date.now() / 1000 - s;
+const monitor = (id, state = "running") => ({ id, description: `watch ${id}`, command: "tail -f log", state, events: 0,
+  pending_events: 0, persistent: true, timeout_ms: 0, started_at: Math.floor(secondsAgo(60)),
+  ...(state === "running" ? {} : { end_reason: "exited", exit_code: 0 }) });
+const shell = (id, state = "running") => ({ id, command: `npm run ${id}`, state, started_at: secondsAgo(30),
+  ended_at: state === "running" ? null : secondsAgo(1), exit_code: state === "exited" ? 0 : null, agent_id: null });
+const troupe = (state) => ({ type: state === "running" ? "troupe_started" : "troupe_finished", run_id: "tr-0123456789",
+  title: "Review every handler", state, reason: "", stages: [{ name: "review", total: 2, done: state === "running" ? 0 : 2,
+    failed: 0, kept: 0 }], agents_planned: 2, reused: 0, journal: ".dgc/troupes/tr-0123456789" });
+const preview = (id) => ({ type: "artifact_ready", id, name: `${id} preview`, url: `http://127.0.0.1:8765/?a=${id}`, rel: id });
+function tasksView(options, ready = TASKS_READY) {
+  const v = view(options);
+  v.event(ready);
+  const monitors = (...items) => v.event({ type: "monitors", wake_paused: false, pending_events: 0, items });
+  const shells = (...items) => v.event({ type: "background_shells", items });
+  const short = () => v.$("agents-pill").querySelector(".agents-short")?.textContent ?? null;
+  // Pip runs come from the Pips bundle's run cards; this stands in for them the way agent-map.test.mjs does.
+  const runs = [];
+  let pipOptions = null;
+  v.dom.window.DgcPips = { mountSetupCards: (o) => { pipOptions = o; return { toolResult() { o.onRunsChange(); }, finish() {},
+    reset() { runs.length = 0; }, receive() {}, runs: () => runs, openRun() {} }; } };
+  v.doc.documentElement.dataset.pipsDocumentId = "doc1";
+  const pipRun = (n) => {
+    runs.push({ id: `run_${String(n).repeat(32)}`, pipId: `pip_${"a".repeat(32)}`, name: `Pip ${n}`, status: "running",
+      label: "Working", detail: "", active: true });
+    v.event({ type: "tool_call", call_id: `pip_${n}`, name: "run_pip_now", args: {}, summary: "" });
+    v.event({ type: "tool_result", call_id: `pip_${n}`, name: "run_pip_now", output: "{}", is_error: false });
+  };
+  const pipRunsChanged = () => pipOptions.onRunsChange();
+  return { ...v, monitors, shells, short, runs, pipRun, pipRunsChanged };
+}
+
+test("a chat that never had an agent shows the pill while a task runs, in words, and hides it when the last one ends", () => {
+  const { monitors, shells, pill, short, errors } = tasksView();
+  assert.equal(pill().hidden, true, "nothing has run");
+  monitors(monitor("mon1"), monitor("mon2"));
+  assert.deepEqual(pill(), { hidden: false, state: "running", label: "2 tasks", need: false,
+    title: `2 background tasks running · ${PILL_HINT}`, aria: `2 tasks · 2 background tasks running · ${PILL_HINT}` });
+  assert.equal(short(), "2");
+  monitors(monitor("mon1"), monitor("mon2", "ended"));
+  assert.deepEqual([pill().label, pill().title], ["1 task", `1 background task running · ${PILL_HINT}`]);
+  shells(shell("bg3"));
+  assert.equal(pill().label, "2 tasks", "a background shell counts like a monitor");
+  shells(shell("bg3", "exited"));
+  monitors();
+  assert.equal(pill().hidden, true, "no agent ever and nothing running: no pill");
+  assert.deepEqual(errors, []);
+});
+
+test("agents and tasks together read \"1 agent · 2 tasks\"; waiting beats running; once nothing runs it is \"0 agents\"", () => {
+  const { start, update, end, monitors, shells, pill, short, errors } = tasksView();
+  start(sid(1));
+  monitors(monitor("mon1"));
+  shells(shell("bg3"));
+  assert.deepEqual(pill(), { hidden: false, state: "running", label: "1 agent · 2 tasks", need: false,
+    title: `1 agent working and 2 background tasks running · ${PILL_HINT}`,
+    aria: `1 agent · 2 tasks · 1 agent working and 2 background tasks running · ${PILL_HINT}` });
+  assert.equal(short(), "3", "the narrow footer's total is everything running");
+  update(sid(1), { state: "waiting", waiting_for: "permission" });
+  assert.deepEqual([pill().state, pill().need, pill().label], ["waiting", true, "1 agent · 2 tasks"]);
+  assert.equal(pill().title, `An agent is waiting for your permission · 2 background tasks running · ${PILL_HINT}`);
+  assert.equal(pill().aria, `1 agent · 2 tasks · An agent is waiting for your permission · 2 background tasks running · ${PILL_HINT}`);
+  update(sid(1), { state: "waiting", waiting_for: "answer" });
+  assert.equal(pill().title, `An agent is waiting for your answer · 2 background tasks running · ${PILL_HINT}`);
+  update(sid(1), { state: "running" });
+  end(sid(1));
+  assert.deepEqual([pill().state, pill().label, pill().title], ["running", "2 tasks", `2 background tasks running · ${PILL_HINT}`],
+    "the agent ended; the tasks keep the dot green");
+  assert.equal(short(), "2");
+  shells(shell("bg3", "killed"));
+  monitors();
+  assert.deepEqual(pill(), { hidden: false, state: "idle", label: "0 agents", need: false,
+    title: `No agents working · ${PILL_HINT}`, aria: `0 agents · No agents working · ${PILL_HINT}` }, "the chat had an agent: the pill stays");
+  assert.equal(short(), "0");
+  assert.deepEqual(errors, []);
+});
+
+test("every kind of task changes the pill as it starts and as it ends: monitors, shells, troupes, previews, Pip runs", () => {
+  const { event, send, monitors, shells, pill, runs, pipRun, pipRunsChanged, errors } = tasksView();
+  event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  const kinds = [
+    ["a monitor", () => monitors(monitor("mon1")), () => monitors(monitor("mon1", "ended"))],
+    ["a background shell", () => shells(shell("bg3")), () => shells(shell("bg3", "exited"))],
+    ["a troupe", () => event(troupe("running")), () => event(troupe("done"))],
+    ["a preview", () => event(preview("art1")), () => send({ type: "artifact_stop_state", id: "art1", state: "stopped" })],
+    ["a listed preview", () => event({ type: "artifacts", request_id: "artifacts-1", items: [{ id: "art2", name: "p",
+      url: "http://127.0.0.1:8765/?a=art2", rel: "p", uptime: "1s" }] }), () => event({ type: "artifacts", request_id: "artifacts-2", items: [] })],
+    ["a Pip run", () => pipRun(1), () => { runs[0].active = false; pipRunsChanged(); }],
+  ];
+  for (const [kind, startTask, endTask] of kinds) {
+    startTask();
+    assert.deepEqual([pill().hidden, pill().state, pill().label], [false, "running", "1 task"], `${kind} started`);
+    endTask();
+    assert.equal(pill().hidden, true, `${kind} ended`);
+  }
+  // A rewind takes the Pip runs' lines with the transcript, and the pill stops counting them.
+  pipRun(2);
+  assert.equal(pill().label, "1 task");
+  event({ type: "rewound", ok: true, message_count: 0 });
+  assert.equal(pill().hidden, true, "the rewound chat's Pip run is gone");
+  assert.deepEqual(errors, []);
+});
+
+test("the pill and the map count the same tasks, live while the map is open; so does the main agent's card", () => {
+  const { $, doc, event, send, start, end, monitors, shells, pill, errors } = tasksView();
+  const pillTasks = () => Number(/(\d+) tasks?$/.exec(pill().label)?.[1] || 0);
+  start(sid(1));
+  $("agents-pill").click();
+  const agree = (n, why) => {
+    assert.equal(pillTasks(), n, `the pill: ${why}`);
+    assert.equal($("agent-map-task-list").querySelectorAll(".am-row").length, n, `the map: ${why}`);
+    assert.equal($("agent-map-tasks").hidden, n === 0);
+    if (n) assert.equal($("agent-map-tasks-title").textContent, `${n} background task${n === 1 ? "" : "s"} · click a task for details`);
+  };
+  agree(0, "nothing in the background");
+  monitors(monitor("mon1"), monitor("mon2", "ended")); agree(1, "the running monitor, not the ended one");
+  shells(shell("bg3"), shell("bg4", "exited")); agree(2, "and the running shell");
+  event(troupe("running")); agree(3, "and the troupe");
+  event(preview("art1")); agree(4, "and the preview");
+  doc.querySelector('#agent-map .am-row[data-am-key="root"]').click();
+  assert.match($("agent-card-body").textContent, /4 background tasks running/, "the main agent's card says the same number");
+  $("agent-card-back").click();
+  end(sid(1)); agree(4, "an agent ending changes no task");
+  assert.equal(pill().label, "4 tasks");
+  send({ type: "artifact_stop_state", id: "art1", state: "stopped" }); agree(3, "the preview stopped");
+  event(troupe("done")); agree(2, "the troupe finished");
+  shells(); agree(1, "the shell is gone");
+  monitors(); agree(0, "the monitor is gone");
+  assert.equal(pill().label, "0 agents");
+  assert.deepEqual(errors, []);
+});
+
+test("a CLI without background_tasks: its shells are on neither the pill nor the map", () => {
+  const { $, monitors, shells, pill, errors } = tasksView({}, { ...TASKS_READY, capabilities: { agents: true, monitors: true } });
+  shells(shell("bg3"));
+  assert.equal(pill().hidden, true, "an older CLI's shells event is ignored");
+  monitors(monitor("mon1"));
+  assert.equal(pill().label, "1 task");
+  $("agents-pill").click();
+  assert.equal($("agent-map-task-list").querySelectorAll(".am-row").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("a new chat, a cleared one and a chat switch take the old chat's running tasks off the pill", () => {
+  for (const reset of [
+    (p) => p.event({ type: "session", kind: "new", message_count: 0, session_id: "s2" }),
+    (p) => p.event({ type: "session", kind: "cleared", message_count: 0, session_id: "s3" }),
+    (p) => p.send({ type: "chat_switched", slotId: "slot-2", label: "Other chat" }),
+  ]) {
+    const p = tasksView();
+    p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+    p.monitors(monitor("mon1"));
+    p.shells(shell("bg3"));
+    p.event(troupe("running"));
+    p.event(preview("art1"));
+    p.pipRun(1);
+    assert.equal(p.pill().label, "5 tasks");
+    reset(p);
+    assert.equal(p.pill().hidden, true, "none of them is this chat's");
+    assert.deepEqual(p.errors, []);
+  }
 });

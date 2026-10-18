@@ -44,6 +44,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
           pillHidden: document.getElementById("agents-picker").hidden,
           pillState: document.getElementById("agents-pill").dataset.state,
           pillText: document.getElementById("agents-pill").innerText.trim(),
+          pillAria: document.getElementById("agents-pill").getAttribute("aria-label"),
           pill: rect("agents-pill"), model: rect("btn-model"),
           sendLabel: send.getAttribute("aria-label"), sendHit: send.contains(hit),
           sendInView: s.bottom <= innerHeight + 0.5 && s.top >= 0,
@@ -56,7 +57,10 @@ for (const theme of ["dark-modern", "light-modern"]) {
       assert.notEqual(g.rail, "none", "the goal, tasks and monitors rail stays at 620 px");
       assert.equal(g.pillHidden, false, "the agents pill shows");
       assert.equal(g.pillState, "running");
-      assert.equal(g.pillText, "2", "a 300 px panel keeps the digit");
+      // Two agents and the dev server's monitor: the narrow footer keeps the total running, and the
+      // label says which is which.
+      assert.equal(g.pillText, "3", "a 300 px panel keeps the total running");
+      assert.equal(g.pillAria, "2 agents · 1 task · 2 agents working and 1 background task running · Click to open the agent map");
       assert.ok(g.footerScroll <= g.footerClient, `the footer does not overflow (${g.footerScroll} > ${g.footerClient})`);
       assert.equal(g.pageOverflow, false, "the panel does not scroll sideways");
       assert.equal(g.sendLabel, "Stop generation", "Send is Stop while the question is docked");
