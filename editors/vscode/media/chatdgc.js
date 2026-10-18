@@ -61,6 +61,13 @@
   let pinned = true;
   scroller.addEventListener("scroll", () => { pinned = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48; });
   const follow = () => { if (pinned) scroller.scrollTop = scroller.scrollHeight; };
+  // An open thinking box scrolls on its own (wheel, trackpad, or the keys once it has focus), and follows its words
+  // while it's at its end. Moved off its end by the reader, it stays where they put it, and so does the chat: the
+  // reply going on below doesn't pull what they're reading away. At its end, the wheel goes on to the chat as usual.
+  const atEnd = (box) => box.scrollHeight - box.clientHeight - box.scrollTop < 4;
+  log.addEventListener("scroll", (e) => {
+    if (e.target instanceof HTMLElement && e.target.classList.contains("cd-thought") && !atEnd(e.target)) pinned = false;
+  }, true);
 
   // ---- messages
   const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
@@ -670,6 +677,8 @@
     if (live) summary.append(wave("Thinking")); else summary.textContent = "Thought";
     const text = el("div", "cd-thought");
     text.textContent = message.thinking || "";
+    // Its own scroller, reached by Tab and scrolled by the keys as well as the wheel.
+    text.tabIndex = 0; text.setAttribute("role", "region"); text.setAttribute("aria-label", "The model's thinking");
     box.append(summary, text);
     box.dataset.id = message.id || "";
     box.dataset.live = live ? "1" : "";
@@ -1829,7 +1838,17 @@
     }
     if (state.conversation?.carried?.text) nodes.unshift(carriedNode());
     if (state.compacting) nodes.push(wave("Summarizing earlier messages to fit the context window…", "div", "cd-working cd-activity"));
+    // Each thinking box keeps the reader's place in it, and its focus, through a whole redraw (a reply finishing).
+    const places = [...log.querySelectorAll("details.cd-thinking")].map((d) => {
+      const words = d.querySelector(".cd-thought");
+      return [d.dataset.id, words.scrollTop, words === document.activeElement];
+    });
     log.replaceChildren(...nodes);
+    for (const [id, top, focused] of places) {
+      const words = log.querySelector(`details.cd-thinking[data-id="${CSS.escape(id)}"] .cd-thought`);
+      if (words && top) words.scrollTop = top;
+      if (words && focused) words.focus({ preventScroll: true });
+    }
     if (state.editingFresh) {
       // Just opened: the box takes the keys now, with the caret at the end. Doing it a frame later moved the
       // caret under whatever was typed in that frame, so a select-all-and-type appended instead of replacing.
@@ -1888,7 +1907,9 @@
         was.dataset.live = now.dataset.live;
         was.querySelector(".cd-thinking-label").replaceChildren(...now.querySelector(".cd-thinking-label").childNodes);
       }
-      setText(was.querySelector(".cd-thought"), now.querySelector(".cd-thought").textContent);
+      const words = was.querySelector(".cd-thought"), following = was.open && atEnd(words);
+      setText(words, now.querySelector(".cd-thought").textContent);
+      if (following) words.scrollTop = words.scrollHeight;     // at its end: it follows the words as they come
       if (was.open !== now.open) was.open = now.open;
       keep.set(now, was);
     }

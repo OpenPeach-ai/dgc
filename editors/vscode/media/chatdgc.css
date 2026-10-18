@@ -58,8 +58,11 @@ body.cd-blank .cd-fine { display: none; }
 .cd-thinking { border-left: 2px solid var(--border-strong); padding-left: var(--sp-3); }
 .cd-thinking-label { cursor: pointer; color: var(--muted); font: var(--w-med) var(--t-sm)/1.5 var(--sans); }
 .cd-thinking-label:hover, .cd-thinking-label:hover .verb { color: var(--text); }
-.cd-thought { margin-top: var(--sp-1); max-height: 320px; overflow-y: auto; color: var(--muted); white-space: pre-wrap;
-  overflow-wrap: anywhere; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); }
+/* Its own scroller. No overscroll containment: at its end the wheel goes on to the chat rather than being held. */
+.cd-thought { margin-top: var(--sp-1); max-height: 320px; overflow-y: auto; overscroll-behavior: auto; color: var(--muted); white-space: pre-wrap;
+  overflow-wrap: anywhere; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); border-radius: var(--r-sm); }
+.cd-thought:focus { outline: none; }
+.cd-thought:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 
 .cd-end { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0; color: var(--muted);
   font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }

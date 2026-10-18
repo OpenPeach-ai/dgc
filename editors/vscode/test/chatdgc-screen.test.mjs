@@ -241,6 +241,73 @@ test("while it thinks, no streamed part redraws 'Thinking' or the working line, 
   } finally { await s.page.close(); }
 });
 
+// "I am not able to scroll just the thinking section to read it all" (founder, 2026-10-18): each streamed part put a
+// new thinking box in the page, its scroll back at the top, and the chat's follow pulled it away as the answer came.
+test("an open thinking box scrolls on its own while it streams: wheel and keys, the chat doesn't pull it away, and at its end the wheel goes on to the chat", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ height: 640 });
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "message", message: { id: M(1), role: "user", text: "Plan a week in Goa" } });
+    await s.send({ type: "delta", messageId: M(2), thinking: "Line 0: where to start.\n" });
+    await s.frame();
+    await s.page.locator(".cd-thinking-label").click();
+    const words = s.page.locator(".cd-thought");
+    const part = async (i, kind = "thinking") => {
+      await s.send({ type: "delta", messageId: M(2), [kind]: kind === "thinking" ? `Line ${i}: the beaches, the forts, the food.\n` : `Day ${i}: a full day out.\n\n` });
+      await s.frame();
+    };
+    for (let i = 1; i <= 40; i++) await part(i);
+    const box = () => words.evaluate((n) => ({ top: n.scrollTop, end: n.scrollHeight - n.clientHeight, at: n.getBoundingClientRect().top }));
+    let b = await box();
+    assert.ok(b.end > 400, `it holds more than it shows (${b.end}px more)`);
+    assert.ok(b.end - b.top < 4, "open at its end, it follows its words as they come");
+    // The reader wheels up inside it while it goes on thinking.
+    const r = await words.boundingBox();
+    await s.page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+    await s.page.mouse.wheel(0, -300);
+    await s.page.waitForTimeout(250);
+    const read = (await box()).top;
+    assert.ok(read < b.end - 200, `the wheel scrolled the box itself (${read} of ${b.end})`);
+    for (let i = 41; i <= 60; i++) await part(i);
+    b = await box();
+    assert.ok(Math.abs(b.top - read) < 2, `the reader's place held while 20 more parts came (${b.top}, was ${read})`);
+    // The answer streams below: the chat no longer follows it, so the box stays where the reader is.
+    const before = b.at, page = await s.page.evaluate(() => document.getElementById("cd-scroll").scrollTop);
+    for (let i = 1; i <= 20; i++) await part(i, "text");
+    b = await box();
+    assert.equal(b.at, before, "the box didn't move on screen as the answer grew below it");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-scroll").scrollTop), page, "the chat stayed put");
+    assert.ok(Math.abs(b.top - read) < 2, "and nor did the reader's place in it");
+    // The keys, once it has focus.
+    await words.focus();
+    assert.equal(await words.evaluate((n) => [n.tabIndex, n.getAttribute("role"), n.getAttribute("aria-label")].join("|")), "0|region|The model's thinking");
+    await s.page.keyboard.press("Home");
+    await s.page.waitForTimeout(250);
+    assert.equal((await box()).top, 0, "Home: its first words");
+    await s.page.keyboard.press("PageDown");
+    await s.page.waitForTimeout(250);
+    assert.ok((await box()).top > 100, "Page Down scrolls it");
+    // At its end, the wheel isn't held: it goes on to the chat.
+    await words.evaluate((n) => { n.scrollTop = n.scrollHeight; });
+    await s.page.mouse.move(r.x + r.width / 2, (await words.boundingBox()).y + 40);
+    const chat0 = await s.page.evaluate(() => document.getElementById("cd-scroll").scrollTop);
+    await s.page.mouse.wheel(0, 400);
+    await s.page.waitForTimeout(300);
+    assert.ok(await s.page.evaluate(() => document.getElementById("cd-scroll").scrollTop) > chat0 + 100, "the chat scrolled on");
+    // The reply finishing draws the chat again: the box keeps the reader's place.
+    await words.evaluate((n) => { n.scrollTop = 150; });
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Day 1: a full day out.", thinking: (await words.textContent()), finish: "stop" } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-thinking-label").textContent(), "Thought");
+    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), "", "still open");
+    assert.equal(await words.evaluate((n) => n.scrollTop), 150, "and still where the reader was");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("for a reader who asked for less motion, the wave is still: all three slashes lit", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen({ reducedMotion: true });

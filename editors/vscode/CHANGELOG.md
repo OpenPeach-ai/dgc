@@ -46,6 +46,10 @@
   restarted. Now what a part doesn't change stays where it is. While the model works, "Thinking" and lines like
   "Searching the web for…" show Work's status mark: DGC's three slashes lighting in turn beside words that hold still
   (still too for a reader who asked for less motion).
+- **An open thinking box scrolls on its own**, with the wheel, a trackpad or the keys (Tab reaches it; the arrows,
+  Page Up and Down, Home and End move it). It follows the model's words while it's at its end; scroll it back and it
+  stays where you put it while the reply goes on, and the chat stops pulling it away as the answer streams below. At
+  its end, the wheel goes on to scroll the chat. The reply finishing keeps your place in it.
 - **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
   slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
   still for a reader who asked for less motion.
