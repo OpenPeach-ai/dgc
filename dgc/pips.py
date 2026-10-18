@@ -1089,10 +1089,14 @@ class PipStore:
         if executable and handoff is None and not standalone:
             raise RegistryError("review_required", "Patch and Pulse run only on a handoff you approve.")
         if executable:
-            from .pip_execution import capability
-            available = capability()
-            if not available.get("available"):
-                raise RegistryError("execution_unavailable", available.get("reason", "Commands can’t run in a sealed-off copy on this computer."))
+            from .pip_execution import capability, sandbox_required
+            planned_action = (plan['action'] if standalone and plan is not None else
+                              ((handoff or {}).get('payload') or {}).get('action') if isinstance(handoff, dict) else None)
+            # DGC's own local page checks run without the sandbox; commands never do.
+            if planned_action is None or sandbox_required(planned_action):
+                available = capability()
+                if not available.get("available"):
+                    raise RegistryError("execution_unavailable", available.get("reason", "Commands can’t run in a sealed-off copy on this computer."))
         from .pip_types import role_pin
         role = role_pin(pip["pip_type"])
         binding = self.registry.binding(pip["workspace_id"])
@@ -3042,7 +3046,7 @@ def _execute_pulse_plan(registry, row, manifest, config, deadline):
     """Controller-only command path. No Agent, provider, model route or prompt."""
     from . import pip_pulse_plans as plans
     from .pip_execution import (require_capability, prepare_isolated_repo, collect_artifacts,
-                                run_reviewed_tests, verify_unmodified)
+                                run_reviewed_tests, run_local_http_checks, sandbox_required, verify_unmodified)
     from .pip_daemon import is_runtime_paused
     from .redaction import redact_value, redact_text, secret_values
     plans.require_current(registry, row, manifest)
@@ -3050,7 +3054,10 @@ def _execute_pulse_plan(registry, row, manifest, config, deadline):
     action = manifest['job']['verification_plan']['action']
     if redact_value(action, secrets) != action:
         raise RegistryError('secret_detected', 'The approved commands now overlap configured credentials; no command was launched.')
-    require_capability()
+    # A plan of DGC's own local page checks runs no project code: no sandbox, and no copy of the code to make.
+    boxed = sandbox_required(action)
+    if boxed:
+        require_capability()
 
     class Cancellation:
         reason = None
@@ -3084,12 +3091,17 @@ def _execute_pulse_plan(registry, row, manifest, config, deadline):
     binding = registry.binding(row['workspace_id'])
     directory = registry.directory / 'runs' / row['id']
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
-    snapshot = directory / 'source'
-    snapshot_info = clean_snapshot(binding['canonical_root'], manifest['source_revision'], snapshot)
-    cancelled.check()
-    prepared = prepare_isolated_repo(snapshot, directory)
-    collect_artifacts(prepared, action)
-    verify_unmodified(prepared, action)
+    prepared = None
+    if boxed:
+        snapshot = directory / 'source'
+        snapshot_info = clean_snapshot(binding['canonical_root'], manifest['source_revision'], snapshot)
+        cancelled.check()
+        prepared = prepare_isolated_repo(snapshot, directory)
+        collect_artifacts(prepared, action)
+        verify_unmodified(prepared, action)
+    else:
+        # Nothing of the project is read: the receipt says so (no files), rather than copying code nobody uses.
+        snapshot_info = {'sha256': hashlib.sha256(b'').hexdigest(), 'files': 0, 'bytes': 0}
     plans.initialize_progress(registry, row['id'], snapshot_info)
 
     def before(index, command):
@@ -3104,9 +3116,13 @@ def _execute_pulse_plan(registry, row, manifest, config, deadline):
         safe['output_truncated'] = outcome['output_truncated'] or len(encoded) > 4096
         plans.complete_command(registry, row['id'], index, safe)
 
-    results = run_reviewed_tests(prepared, action, cancelled=cancelled,
-                                 before_command=before, after_command=after)
-    verify_unmodified(prepared, action)
+    if boxed:
+        results = run_reviewed_tests(prepared, action, cancelled=cancelled,
+                                     before_command=before, after_command=after)
+        verify_unmodified(prepared, action)
+    else:
+        results = run_local_http_checks(directory, action, cancelled=cancelled,
+                                        before_command=before, after_command=after)
     cancelled.check()
     for command in results:
         if command['status'] in ('cancelled', 'timed_out', 'output_limit', 'resource_limit'):
@@ -3174,7 +3190,7 @@ def _execute_run(registry, row, config):
         snapshot_info = clean_snapshot(binding["canonical_root"], manifest["source_revision"], snapshot)
     if action is not None:
         from .pip_execution import prepare_isolated_repo
-        prepared = prepare_isolated_repo(snapshot, run_dir)
+        prepared = prepare_isolated_repo(snapshot, run_dir, action=action)
         snapshot = Path(prepared["worktree"])
         if manifest["handoff"]["payload"]["type"] == "patch_artifact.v1":
             from .pip_handoffs import artifact_input

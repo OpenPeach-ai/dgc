@@ -101,7 +101,10 @@ def parser():
     starter.add_argument("--web-page", action="append", metavar="URL", help="Personal starters: an exact https page to read (repeat)")
     starter.add_argument("--web-search", action="append", metavar="QUERY", help="Personal starters: a fixed search (repeat)")
     starter.add_argument("--yes", action="store_true", help="approve the displayed job without the question")
-    command("execution", "inspect this runner’s bounded execution support and limits")
+    command("execution", "inspect this runner’s bounded execution support and limits").add_argument(
+        "--fix", action="store_true",
+        help="show the one-time fix when commands can't run in their sandbox here, and in a terminal, run it "
+             "with your own sudo prompt")
     command("models", "list models on the configured native connection")
     command("connections", "list existing Settings connections and scoped Pip support")
     command("accounts", "list connected account identities without reading app data").add_argument("server")
@@ -1167,7 +1170,8 @@ def _format(value):
         rows = value["pips"]
         if not rows:
             return 'No Pips in this workspace. Create one with: dgc pips create "Auditor" --goal "Inspect committed source"'
-        return "\n".join(f'{row["id"]}  {row["name"]}  {row.get("pip_type", "rook")}  {row["status"]}  v{row["current_version"]}\n  {row["goal"]}' for row in rows)
+        return "\n".join(f'{row["id"]}  {row["name"]}  {row.get("pip_type", "rook")}  {row["status"]}  v{row["current_version"]}\n  {row["goal"]}'
+                         + "".join("\n  " + line for line in _run_here_lines(row)) for row in rows)
     if "pip" in value:
         row = value["pip"]
         from .pip_sources import validate_policy as source_policy
@@ -1176,6 +1180,7 @@ def _format(value):
                         if source['mode'] == 'current_tree' else 'Committed ref: ' + row['source_ref'])
         lines = [f'{row["name"]} ({row["id"]})', f'{row["status"]} · version {row["current_version"]} · {row["policy"]} · {row["trigger"]}',
                  "Type: " + row.get("pip_type", "rook"), "Source: " + source_label, "Goal: " + row["goal"]]
+        lines += _run_here_lines(row)
         if row.get("verification_plan") is not None:
             lines += ["Reviewed Pulse plan (no model):", json.dumps(row["verification_plan"], ensure_ascii=False, indent=2),
                       "Plan digest: " + str(row.get("verification_plan_digest")),
@@ -1272,7 +1277,35 @@ def _format(value):
         if not context["entries"]:
             lines.append('No context records. Use dgc pips context record decision --title "Title" --content "Reference" --expected-revision ' + str(context["revision"]))
         return "\n".join(lines)
+    if {"available", "backend", "limits", "test_workspace"} <= set(value):
+        lines = ["Pulse and Patch commands can run in their sandbox here (" + str(value["backend"]) + ")."
+                 if value["available"] else "Pulse and Patch commands can't run here: " + str(value["reason"])]
+        if value.get("fix"):
+            lines.append("Fix it once: dgc pips execution --fix  (runs: " + value["fix"]["runs"] + ")")
+        if value.get("local_http_checks"):
+            lines.append("DGC's local page checks (dgc-http-check) need no sandbox and run either way.")
+        return "\n".join(lines) + "\n" + json.dumps(value, ensure_ascii=False, indent=2)
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def _run_here_lines(row):
+    """A Pip's "can't run here" and "schedule put off" lines, for dgc pips list and show (never raises)."""
+    lines = []
+    try:
+        from .pip_execution import run_here_notice
+        blocked = run_here_notice(row)
+        if blocked:
+            lines.append("Can't run here: " + blocked)
+        if row.get("schedule_state") or row.get("schedule"):
+            from .pip_schedules import deferral_status
+            with WorkspaceRegistry() as registry:
+                held = deferral_status(registry, row["id"])
+            if held:
+                lines.append(f"Schedule put off {held['attempts']} time(s) since {held['since']} ({held['code']}); "
+                             f"next try {held['next_try_at']}.")
+    except Exception:          # noqa: BLE001 - a status line, never the command's failure
+        pass
+    return lines
 
 
 def _workspace_command(config, args):
@@ -1619,6 +1652,8 @@ AGENT_SHELL_REFUSAL = ("This ran in a DGC chat's own shell, and changing Pips is
 
 def agent_shell_allows(args) -> bool:
     """True when a parsed `dgc pips` command only reads (or is the emergency stop)."""
+    if args.command == "execution" and getattr(args, "fix", False):
+        return False                 # changes the machine with sudo: only ever the user's own terminal
     if args.command in _AGENT_SHELL_READS:
         return True
     if args.command == "notify":
@@ -1687,6 +1722,11 @@ def handle_command(config, argv, *, in_chat=False):
         elif args.command == "status":
             with WorkspaceRegistry() as registry:
                 result = pip_daemon.runner_status(registry)
+        elif args.command == "execution" and getattr(args, "fix", False):
+            if in_chat:
+                raise RegistryError("separate_terminal", "Fix this computer from your own terminal: run dgc pips execution --fix there.")
+            from .pip_execution import fix_machine
+            return fix_machine()
         elif args.command == "workspace":
             result = _workspace_command(config, args)
         elif args.command == "starters":

@@ -356,16 +356,21 @@ def _build(registry, config=None) -> dict:
     actions = pending_count(registry, until_s)
     setups = registry.db.execute("SELECT count(*) FROM pip_setup_proposals WHERE status='pending' AND expires_at>?",
                                  (until_s,)).fetchone()[0]
+    # A scheduled Pip whose runs keep failing to start (pip_schedules): said in the headline while it lasts, and an
+    # alert once, when it first reaches the threshold after the user last looked.
+    from .pip_schedules import blocked_schedules
+    blocked = blocked_schedules(registry)
+    new_blocked = [item for item in blocked if str(item.get("alerted_at") or "") > since_s]
     ordered = sorted(pips.values(), key=lambda p: (not p["alert"], -p["new_total"], -p["runs"]["failed"],
                                                    -sum(p["runs"].values()), p["name"]))
     failed = sum(p["runs"]["failed"] for p in ordered)
-    alert = any(p["alert"] for p in ordered) or bool(new_held)
-    anything = bool(ordered) or reviews or setups or actions
+    alert = any(p["alert"] for p in ordered) or bool(new_held) or bool(new_blocked)
+    anything = bool(ordered) or reviews or setups or actions or bool(blocked)
     today = local_day(now)
     daily = anything and (state is None or state["seen_day"] != today)
     return {"schema_version": 1, "since": since_s, "until": until_s, "first": state is None,
             "due": bool(alert or daily), "reason": "alert" if alert else "daily" if daily else None,
-            "headline": _headline(ordered, failed, reviews + setups + actions, new_held),
+            "headline": _headline(ordered, failed, reviews + setups + actions, new_held, blocked),
             "pips": ordered[:MAX_PIPS], "omitted_pips": max(0, len(ordered) - MAX_PIPS),
             "failed_runs": failed, "pending_reviews": reviews, "pending_setups": setups, "pending_actions": actions,
             "truncated": truncated}
@@ -375,9 +380,12 @@ def _plural(count, word):
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def _headline(pips, failed, reviews, held=()) -> str:
+def _headline(pips, failed, reviews, held=(), blocked=()) -> str:
     """One line for a status bar or a terminal tip: what most needs attention first."""
     parts = []
+    if blocked:
+        parts.append(blocked[0]["said"].rstrip(".") if len(blocked) == 1
+                     else f"{len(blocked)} Pips can't start their scheduled runs (dgc pips list says why)")
     if held:
         parts.append(f"{held[0]} is waiting for your approval to send something" if len(set(held)) == 1
                      else f"{len(held)} things are waiting for your approval to send")
@@ -403,7 +411,8 @@ def _headline(pips, failed, reviews, held=()) -> str:
                          + (f" · {skipped} skipped, nothing changed" if skipped else ""))
         else:
             parts.append("No Pip work since you last looked")
-    return " · ".join(parts)
+    line = " · ".join(parts)
+    return line if len(line) <= 400 else line[:399] + "…"     # a status line, at most what the editor shows
 
 
 def mark_seen(registry, until, actor) -> dict:

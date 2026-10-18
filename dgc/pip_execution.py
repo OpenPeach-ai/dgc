@@ -40,6 +40,10 @@ MAX_ACTION_BYTES = 16384
 SCRATCH_BYTES = 64 * 1024 * 1024
 _PROBE_LOCK = threading.Lock()
 _PROBE_CACHE = {}
+# A failed probe is tried again after this long: the user may have just fixed the machine (dgc pips execution --fix),
+# and the supervisor that asks lives for days.
+FAILED_PROBE_SECONDS = 60
+FIX_COMMAND = "dgc pips execution --fix"
 
 
 def _error(message, code="invalid_execution"):
@@ -126,6 +130,38 @@ def validate_action(pip_type, value):
     if len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()) > MAX_ACTION_BYTES:
         raise _error("The complete execution action exceeds 16 KiB.")
     return result
+
+
+def sandbox_required(action) -> bool:
+    """Whether running ACTION needs the OS sandbox (bubblewrap, Seatbelt).
+
+    A Pulse plan whose every test is DGC's own loopback HTTP check (`loopback_http_v1`: each test validated by
+    pip_http_checks.validate_test, 127.0.0.1 only, no query, credentials or redirects) runs no project code and no argv
+    from the plan: only DGC's fixed checker with validated arguments, under its own timeout and rlimits. It never ran
+    inside the sandbox (see _run_command), yet a Pulse that only checked a local page was refused wherever the sandbox
+    can't start, as on stock Ubuntu 24.04, and its schedule was put off every 30 seconds (ERP session review,
+    2026-10-18). Anything else, every command and every Patch, still needs the sandbox."""
+    try:
+        canonical = _canonical_action(action)
+    except RegistryError:
+        return True
+    return not (canonical["kind"] == "test" and canonical.get("network") == "loopback_http_v1" and canonical["tests"])
+
+
+def run_here_notice(job) -> str | None:
+    """Why this Pulse or Patch can't do its work on this computer, or None (it can, or it runs no commands). For its
+    setup card and its status: a Pulse was accepted here and then put off every 30 seconds, and the model told the
+    user twice that it was working (ERP session review, 2026-10-18)."""
+    if not isinstance(job, dict) or job.get("pip_type") not in ("pulse", "patch"):
+        return None
+    if job.get("source_policy") in ({"mode": "personal"}, "personal"):
+        return None
+    plan = job.get("verification_plan")
+    if job["pip_type"] == "pulse" and isinstance(plan, dict) and isinstance(plan.get("action"), dict) \
+            and not sandbox_required(plan["action"]):
+        return None                      # DGC's own local page checks: no sandbox needed
+    found = capability()
+    return None if found.get("available") else str(found.get("reason") or "Commands can't run here.")
 
 
 def action_digest(action):
@@ -530,12 +566,12 @@ def capability():
         key = (backend, helper, info.st_size, info.st_mtime_ns, python, interpreter.st_size,
                interpreter.st_mtime_ns, os.getuid(), str(Path.home()))
         with _PROBE_LOCK:
-            cached = _PROBE_CACHE.get(key)
-            if cached is None:
+            cached, when = _PROBE_CACHE.get(key, (None, 0.0))
+            if cached is None or (not cached and time.monotonic() - when >= FAILED_PROBE_SECONDS):
                 cached = (_probe_darwin if seatbelt else _probe_bwrap)(helper, python)
                 if len(_PROBE_CACHE) >= 8:
                     _PROBE_CACHE.clear()
-                _PROBE_CACHE[key] = cached
+                _PROBE_CACHE[key] = (cached, time.monotonic())
         if not cached:
             raise _error("The sandbox helper is installed but its confinement probe failed. Execution is unavailable.", "execution_unavailable")
         result.update(available=True, backend=backend)
@@ -546,15 +582,107 @@ def capability():
                                 "Patch and Pulse commands. Switch it to WSL 2 in Windows: "
                                 f"`wsl --set-version {wsl.distro() or '<distro>'} 2`.")
             return result
+        fix = machine_fix() if backend == "bwrap" else None
         result["reason"] = (
             "Patch and Pulse on macOS require sandbox-exec Seatbelt confinement, the selected Xcode or "
             "Command Line Tools Python 3 and Git, and the runner's process sampler; this runner did not "
             "pass that probe." if seatbelt else
+            fix["reason"] if fix is not None else
             "Patch and Pulse require working Linux bubblewrap namespaces, isolated mounts and resource "
             "limits; this runner did not pass that probe." if backend == "bwrap" else
             "Patch and Pulse require Linux with bubblewrap or macOS with Seatbelt confinement; this "
             "platform has neither.")
+        if fix is not None:
+            result["fix"] = {"command": FIX_COMMAND, "runs": fix["shell"]}
+    # DGC's own loopback HTTP checks need none of this (sandbox_required): say so, so a heartbeat isn't given up on.
+    result["local_http_checks"] = True
     return result
+
+
+# Ubuntu's own profile for bubblewrap, shipped but off (as dgc/pip_computer_box.UBUNTU_BWRAP_PROFILE uses for a
+# Pip's computer): bwrap may make user namespaces, and what runs inside gets no capabilities.
+UBUNTU_BWRAP_STEPS = (
+    ("sudo", "apt", "update"),
+    ("sudo", "apt", "install", "apparmor-profiles"),
+    ("sudo", "install", "-m", "0644", "/usr/share/apparmor/extra-profiles/bwrap-userns-restrict", "/etc/apparmor.d/"),
+    ("sudo", "apparmor_parser", "-r", "/etc/apparmor.d/bwrap-userns-restrict"),
+)
+INSTALL_BWRAP_STEPS = (("sudo", "apt", "install", "bubblewrap"),)
+
+
+def machine_fix():
+    """What keeps Pulse and Patch commands out of the sandbox on this Linux machine, when DGC knows the one-time fix:
+    {reason, steps, shell}, else None. Never runs anything."""
+    if not sys.platform.startswith("linux"):
+        return None
+    if not Path("/usr/bin/bwrap").exists():
+        if shutil.which("apt") is None:
+            return None
+        steps = INSTALL_BWRAP_STEPS
+        reason = ("Pulse and Patch run commands in a sealed-off copy with bubblewrap, which isn't installed on this "
+                  f"computer. Install it once ({FIX_COMMAND} shows and runs the command), then check with "
+                  "`dgc pips execution`.")
+    else:
+        from .browser_setup import userns_restricted
+        if not userns_restricted():
+            return None
+        steps = UBUNTU_BWRAP_STEPS
+        reason = ("Ubuntu 23.10 and later (24.04 included) let only programs with an AppArmor profile make the user "
+                  "namespaces that bubblewrap, the sandbox Pulse and Patch run commands in, needs, and bubblewrap has "
+                  "none here, so commands can't run on this computer. Turn on Ubuntu's own profile for it once: "
+                  f"{FIX_COMMAND} shows and runs the commands (with your own sudo password), then check with "
+                  "`dgc pips execution`. DGC's local page checks (dgc-http-check) need no sandbox and run anyway.")
+    return {"reason": reason, "steps": [list(step) for step in steps],
+            "shell": " && ".join(" ".join(step) for step in steps)}
+
+
+def fix_machine(*, run=None, ask=None, out=None) -> int:
+    """`dgc pips execution --fix`: say what keeps commands from running and the exact fix; in a terminal, ask, then
+    run it with the user's own sudo prompt. DGC never runs sudo by itself: no terminal, no run."""
+    import builtins
+    out = out or (lambda text: print(text, flush=True))
+    with _PROBE_LOCK:
+        _PROBE_CACHE.clear()
+    if capability()["available"]:
+        out("Pulse and Patch commands already run in their sandbox on this computer. Nothing to fix.")
+        return 0
+    fix = machine_fix()
+    if fix is None:
+        out(capability()["reason"])
+        out("DGC knows no one-time fix for this computer.")
+        return 1
+    out(fix["reason"])
+    out("")
+    out("The fix, which needs administrator rights (sudo):")
+    for step in fix["steps"]:
+        out("  " + " ".join(step))
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    if ask is None:
+        if not interactive:
+            out("")
+            out("Run those commands in a terminal, or run `dgc pips execution --fix` in one to have DGC run them.")
+            return 1
+        ask = builtins.input
+    try:
+        answer = ask("Run them now? Your own sudo password prompt will appear. [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+    if str(answer).strip().lower() not in ("y", "yes"):
+        out("Nothing was changed.")
+        return 1
+    run = run or (lambda argv: subprocess.run(argv, check=False).returncode)
+    for step in fix["steps"]:
+        out("$ " + " ".join(step))
+        code = run(list(step))
+        if code != 0:
+            out(f"That step failed (exit {code}). Nothing after it was run.")
+            return code or 1
+    with _PROBE_LOCK:
+        _PROBE_CACHE.clear()
+    result = capability()
+    out("Pulse and Patch commands can run on this computer now." if result["available"]
+        else "The sandbox still can't start: " + str(result["reason"]))
+    return 0 if result["available"] else 1
 
 
 def require_capability():
@@ -880,9 +1008,10 @@ def _files(root):
     return sorted(files), total
 
 
-def prepare_isolated_repo(snapshot, run_dir):
+def prepare_isolated_repo(snapshot, run_dir, *, action=None):
     """Copy a clean committed snapshot; private Git metadata stays outside the edit root."""
-    require_capability()
+    if action is None or sandbox_required(action):
+        require_capability()
     source, run = _directory(snapshot), _directory(run_dir)
     if source.parent != run or source.name != "source":
         raise _error("Execution requires this run's private committed-source snapshot.", "unsafe_execution_path")
@@ -990,14 +1119,25 @@ def verify_unmodified(prepared, action):
         raise _error('The isolated Pulse copy changed during verification.', 'execution_denied')
 
 
+def _http_python():
+    """The interpreter for DGC's own loopback checker: this DGC's Python, isolated (-I) with an explicit environment.
+    It needs no sandbox helper, so a local page check runs where bubblewrap can't start."""
+    return sys.executable or "/usr/bin/python3"
+
+
+def _run_http_check(test, cancelled):
+    """DGC's fixed loopback HTTP checker (pip_http_checks.WORKER) for one validated test, in a plain subprocess."""
+    from .pip_http_checks import WORKER, WALL_SECONDS
+    return _capture([_http_python(), '-I', '-c', WORKER, *test['argv'][1:]], maximum=LIMITS["output_bytes"],
+                    timeout=WALL_SECONDS, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+                    cancelled=cancelled, monitor=True)
+
+
 def _run_command(runtime, run, root, directory, test, local_http, cancelled):
     """Launch one reviewed command under the platform's confinement."""
-    helper, python = runtime
     if local_http:
-        from .pip_http_checks import WORKER, WALL_SECONDS
-        return _capture([python, '-I', '-c', WORKER, *test['argv'][1:]], maximum=LIMITS["output_bytes"],
-                        timeout=WALL_SECONDS, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
-                        cancelled=cancelled, monitor=True)
+        return _run_http_check(test, cancelled)
+    helper, python = runtime
     if _backend() == "seatbelt":
         # No mount namespace: the command runs in the copy's real path, not /workspace.
         command = [python, "-I", "-c", _LIMIT_EXEC_DARWIN, *test["argv"]]
@@ -1016,12 +1156,26 @@ def _run_command(runtime, run, root, directory, test, local_http, cancelled):
 
 def run_reviewed_tests(prepared, action, *, cancelled=None, before_command=None, after_command=None):
     action = _canonical_action(action)
-    require_capability()
+    if sandbox_required(action):
+        require_capability()
     run, root = _prepared(prepared)
+    return _run_tests(run, root, action, cancelled, before_command, after_command)
+
+
+def run_local_http_checks(run_dir, action, *, cancelled=None, before_command=None, after_command=None):
+    """A Pulse plan of DGC's own loopback checks only (sandbox_required is False): no copy of the project, no sandbox.
+    Outcomes and artifacts are recorded exactly as run_reviewed_tests records them, in the run's private folder."""
+    action = _canonical_action(action)
+    if sandbox_required(action):
+        raise _error("Only DGC's own local page checks run without the sandbox.", "execution_denied")
+    return _run_tests(_directory(run_dir), None, action, cancelled, before_command, after_command)
+
+
+def _run_tests(run, root, action, cancelled, before_command, after_command):
     runtime, results = None, []
     for index, test in enumerate(action["tests"]):
-        directory = _inside(root, test["cwd"], directory=True)
         local_http = action['network'] == 'loopback_http_v1'
+        directory = _inside(root, test["cwd"], directory=True) if root is not None else None
         if local_http:
             from .pip_http_checks import validate_test
             validate_test(test)
@@ -1032,7 +1186,7 @@ def run_reviewed_tests(prepared, action, *, cancelled=None, before_command=None,
             # developer tools with a process).
             result = {"status": "cancelled", "exit_code": None, "data": b"", "truncated": False}
         else:
-            runtime = runtime or _runtime()
+            runtime = runtime or (None if local_http else _runtime())
             result = _run_command(runtime, run, root, directory, test, local_http, cancelled)
         artifact = _artifact(run, f"test-{index + 1}.txt", result["data"])
         output, truncated = _preview(result["data"], 4096)

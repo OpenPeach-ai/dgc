@@ -376,12 +376,23 @@ def _load(registry, setup_id, workspace_id):
     return dict(row), body, receipt
 
 
+def cannot_run_here(request):
+    """Why this setup's Pulse can't run its commands on this computer, or None. A scheduled Pulse was accepted on a
+    machine whose sandbox could never start, and then put off every 30 seconds without a word (ERP session review,
+    2026-10-18). Its card says so before Create Pip; DGC's own local page checks need no sandbox."""
+    if not isinstance(request, dict) or request.get('pip_type') != 'pulse' or request.get('scope') == 'personal':
+        return None
+    from .pip_execution import run_here_notice
+    return run_here_notice({'pip_type': 'pulse', 'verification_plan': request.get('verification_plan')})
+
+
 def _projection(registry, row, body, receipt):
     from .pip_schedules import timestamp
     req = body['request']
     status = row['status']
     if status == 'pending' and timestamp(registry.clock()) >= body['expires_at']:
         status = 'expired'
+    blocked = cannot_run_here(req) if status in ('pending', 'accepted') else None
     return {'id': row['id'], 'digest': row['digest'], 'workspace_id': row['workspace_id'],
             'project_root': body['project_root'], 'pip_id': req.get('pip_id'),
             **{key: req[key] for key in ('name', 'goal', 'pip_type', 'work_kind', 'source_ref', 'schedule', 'run_now', 'reason')},
@@ -396,9 +407,10 @@ def _projection(registry, row, body, receipt):
             **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' else {}),
             'scope_notice': ('It has its own computer (a browser, a Terminal and files), separate from yours, and sees only what you share with it. Anything it would send or change waits for your OK.' if req.get('scope')=='personal' and body['definition'].get('computer_plan')
                              else 'It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
-            'runner_notice': (f"While Pips are running, DGC checks {req['source_ref']} for new local commits and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Accepting this doesn’t start Pips."
+            'runner_notice': ((("It can’t run on this computer yet: " + blocked + " ") if blocked else "")
+                              + (f"While Pips are running, DGC checks {req['source_ref']} for new local commits and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Accepting this doesn’t start Pips."
                               if req.get('event_trigger') else 'It works while Pips are running on this computer. Creating it doesn’t start Pips.' if req.get('scope')=='personal'
-                              else 'Its schedule runs only while Pips are running on this computer. Accepting this doesn’t start Pips.'),
+                              else 'Its schedule runs only while Pips are running on this computer. Accepting this doesn’t start Pips.'))[:2000],
             'run_now_policy': (("Its first task counts as today's; the next one is on its next scheduled day." if req.get('scope')=='personal' else "This first run counts as today's; the next scheduled run is tomorrow.")
                                if body['counts_for_date'] else ('It also does its task once, right after you create it.' if req.get('scope')=='personal' else 'It also runs once right after you accept, as well as on the schedule shown.') if req['run_now'] else None)}
 
@@ -427,6 +439,7 @@ def propose(registry, request, root, session_id, actor='core_setup'):
     if actor != 'core_setup': _fail('Setup drafts need the trusted chat origin.', 'session_required')
     from .redaction import contains_secret
     if contains_secret(request): _fail('Do not include credentials in setup requests.', 'secret_detected')
+    cannot_run_here(request)       # the bounded OS probe, before SQLite's writer lock; the card reads it cached
     with registry.transaction():
         return _store_draft(registry, request, root, session_id)
 
@@ -598,6 +611,7 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
         choice = saved_body['definition']['model_choice']
         model_preparation = {'choice': choice,
                              'settings': _model_settings(config.clone_for_root(Path(saved_body['project_root'])), choice)}
+    cannot_run_here(saved_body['request'])   # warm the OS probe outside the writer lock: the result card says it
     planned_pip_id = saved_body['request'].get('pip_id') or identifier('pip')
     audit_preparation = None
     if accept and preview['status'] == 'pending' and saved_body['request']['run_now']:
@@ -614,8 +628,10 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
         if saved_body['request']['pip_type'] == 'pulse' and not personal:
             # Warm the bounded OS probe before holding SQLite's writer lock.
             # enqueue rechecks the cached capability and exact plan pins.
-            from .pip_execution import require_capability
-            require_capability()
+            # DGC's own local page checks need no sandbox (pip_execution.sandbox_required).
+            from .pip_execution import require_capability, sandbox_required
+            if sandbox_required(saved_body['request']['verification_plan']['action']):
+                require_capability()
         if saved_body['request']['pip_type'] in _AUDIT and not personal:
             audit_preparation = _prepare_immediate_audit(registry, saved_body, planned_pip_id)
     with registry.transaction():

@@ -124,13 +124,15 @@ class Notifier:
         from .pip_action_grants import ran_on_their_own
         ran = ran_on_their_own(registry)
         finished, asking = self._personal(registry, quiet)
+        blocked = self._blocked(registry, quiet)
         seen = self._seen(registry)
         new_alerts = [i for i in alerts if i not in seen["alerts"]]
         new_reviews = [i for i in reviews if i not in seen["reviews"]]
         new_ran = [(i, said) for i, said in ran if i not in seen["ran"]]
         new_finished = [(i, said) for i, said in finished if i not in seen["finished"]]
         new_asking = [(i, said) for i, said in asking if i not in seen["asking"]]
-        if not new_alerts and not new_reviews and not new_ran and not new_finished and not new_asking:
+        new_blocked = [(i, said) for i, said in blocked if i not in seen["blocked"]]
+        if not new_alerts and not new_reviews and not new_ran and not new_finished and not new_asking and not new_blocked:
             return None
         shown, body = False, None
         # While off, what arrives is still marked seen, so turning it on later announces only
@@ -138,6 +140,9 @@ class Notifier:
         if enabled(registry):
             if new_alerts:
                 body = headline
+            elif new_blocked:
+                # A scheduled Pip that can't run here: once per episode, never every retry.
+                body = new_blocked[0][1] + (f" And {len(new_blocked) - 1} more." if len(new_blocked) > 1 else "")
             elif new_ran:
                 # Something a Pip did on its own: say what, so it is never a surprise.
                 body = new_ran[0][1] + (f" And {len(new_ran) - 1} more." if len(new_ran) > 1 else "")
@@ -156,6 +161,7 @@ class Notifier:
         seen["ran"] = (seen["ran"] + [i for i, _ in new_ran])[-MAX_SEEN:]
         seen["finished"] = (seen["finished"] + [i for i, _ in new_finished])[-MAX_SEEN:]
         seen["asking"] = (seen["asking"] + [i for i, _ in new_asking])[-MAX_SEEN:]
+        seen["blocked"] = (seen["blocked"] + [i for i, _ in new_blocked])[-MAX_SEEN:]
         with registry.transaction():
             registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (SEEN_KEY, json.dumps(seen)))
             if body is not None:
@@ -173,6 +179,15 @@ class Notifier:
         ids = [f"{f['run_id']}:{f['finding_index']}" for item in digest["pips"] if item["alert"]
                for f in item["new_findings"]]
         return ids, digest["headline"]
+
+    def _blocked(self, registry, quiet=frozenset()):
+        """Scheduled Pips whose runs keep failing to start: [(id, sentence)], one id per episode."""
+        from .pip_schedules import blocked_schedules
+        try:
+            return [(f"blocked:{item['pip_id']}:{item['since']}", item["said"])
+                    for item in blocked_schedules(registry) if item["pip_id"] not in quiet]
+        except Exception:
+            return []                     # a registry from before this record, or one being upgraded
 
     def _quiet(self, registry) -> set:
         """Pips whose page says not to notify you."""
@@ -247,4 +262,5 @@ class Notifier:
                 "reviews": [i for i in value.get("reviews", []) if isinstance(i, str)],
                 "ran": [i for i in value.get("ran", []) if isinstance(i, str)],
                 "finished": [i for i in value.get("finished", []) if isinstance(i, str)],
-                "asking": [i for i in value.get("asking", []) if isinstance(i, str)]}
+                "asking": [i for i in value.get("asking", []) if isinstance(i, str)],
+                "blocked": [i for i in value.get("blocked", []) if isinstance(i, str)]}

@@ -93,16 +93,19 @@ class PulseSetupTests(unittest.TestCase):
         plans._definition(self.registry,job['id'],self.workspace['id'],2)
 
     def test_http_worker_dispatch_is_fixed_not_argv_execution(self):
-        from pathlib import Path
+        import sys
         prepared={'unused': True}
         output={'data':b'PASS','status':'passed','exit_code':0,'truncated':False}
-        with patch.object(pip_execution,'require_capability'),patch.object(pip_execution,'_prepared',return_value=(self.base,self.root)),patch.object(pip_execution,'_capture',return_value=output) as capture,patch.object(pip_execution,'_artifact',return_value={}), \
-             patch.object(pip_execution,'_runtime',return_value=('/usr/bin/sandbox-helper','/usr/bin/python3')):
+        # DGC's own checker needs no sandbox: neither the capability gate nor the sandbox runtime is consulted.
+        with patch.object(pip_execution,'require_capability',side_effect=AssertionError('no sandbox needed')),patch.object(pip_execution,'_prepared',return_value=(self.base,self.root)),patch.object(pip_execution,'_capture',return_value=output) as capture,patch.object(pip_execution,'_artifact',return_value={}), \
+             patch.object(pip_execution,'_runtime',side_effect=AssertionError('no sandbox helper needed')):
             pip_execution.run_reviewed_tests(prepared,plans.validate_plan(plan(True))['action'])
         argv=capture.call_args.args[0]
-        self.assertEqual(argv[:3],['/usr/bin/python3','-I','-c'])
+        self.assertEqual(argv[:3],[sys.executable,'-I','-c'])
         self.assertIn('HTTPConnection',argv[3]);self.assertNotIn('exec(',argv[3])
+        self.assertEqual(argv[4:],['http://127.0.0.1:3090/healthz','200'],'only the validated URL and status')
         self.assertEqual(capture.call_args.kwargs['timeout'],10)
+        self.assertEqual(capture.call_args.kwargs['env'],{'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'})
 
 
 class HTTPPlanBoundaryTests(unittest.TestCase):

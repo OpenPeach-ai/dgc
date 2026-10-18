@@ -710,6 +710,27 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   than 10 KB, which is the likely reason a broken report ("column 10898") stayed broken; it now gets room for the whole
   draft (up to 16,384 tokens, within the context window) and the time to write it (up to 10 minutes). When the repair
   fails too, the run's error says how ("the repair was cut off at its output limit").
+- **A heartbeat Pulse runs on stock Ubuntu 24.04.** A Pulse of local page checks only (`dgc-http-check`, e.g.
+  `/auth/me` answers 401 and `/` answers 200) was accepted on a computer where the command sandbox can't start, then
+  put off every 30 seconds, 43 times in 21 minutes, without a word, while the model said it was working. DGC's own
+  checker runs no project code and was never run inside the sandbox, so such a plan no longer needs it: it is
+  accepted, scheduled and run anywhere Pips run, with the same limits, on DGC's own Python, and copies no source.
+  Every other command, and every Patch, still runs only in the sandbox.
+- **When commands can't run here, DGC says so, why, and how to fix it.** On Ubuntu 23.10 and later, where AppArmor lets
+  only programs with a profile make user namespaces, the reason names that and the one-time fix (Ubuntu's own
+  `bwrap-userns-restrict` profile, as DGC already suggests for a Pip's computer):
+  - **`dgc pips execution --fix`** prints the exact commands and, in a terminal, asks and runs them with your own sudo
+    password, then checks again. DGC never runs sudo by itself; without a terminal it only prints them, and neither a
+    chat nor the model's shell can run it. `dgc doctor` and the end of `dgc setup` mention it once.
+  - A Pulse's setup card says "It can't run on this computer yet: …" before Create Pip, and the `pips_setup` result
+    tells the model to say so (`cannot_run_here`).
+  - Its status says it too: `cannot_run_here` and `schedule_deferred` (failures, since when, next try) in what the chat
+    reads (`pips_context`), and lines in `dgc pips list` and `show`.
+  - A due run that keeps failing to start is tried again after 30 s, then twice as long each time, up to an hour, not
+    every 30 seconds forever. From the third failure it is an alert, once: the Pips digest says it in its headline and
+    is due, and a desktop notification is shown. A run that starts ends the episode. A failed sandbox check is tried
+    again after a minute, so a fixed computer doesn't need Pips restarted.
+  - Pips API 49 (additive).
 - **No more `&amp;` in a Pip's name.** Some providers send a tool call's text HTML-escaped (deepseek through Ollama
   did), and two Pips were saved as "ERP daily audit — data &amp; Tally integrity". `pips_setup` (name, goal, reason)
   and `pips_propose` (name, goal) now decode standard entities (`&amp;`, `&lt;`, `&#8212;`, …) when every `&` in

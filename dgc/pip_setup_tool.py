@@ -61,6 +61,10 @@ def propose(args, ctx) -> str:
                     or origin['workspace_id'] != workspace['id']):
                 raise RegistryError('session_required', 'The setup chat does not match this project.')
             setup = pip_setup.propose(registry, request, root, origin['session_id'])
+            blocked = pip_setup.cannot_run_here(request)
+            warning = ({'cannot_run_here': blocked} if blocked else {})
+            caution = (" It can't run on this computer yet: " + blocked + " Tell the user that plainly, with the fix, "
+                       "and never say it is working or checking." if blocked else "")
             if setup['status'] == 'pending' and not pip_setup.needs_card(request) and not create_now:
                 return json.dumps({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
                                    'execution_started': False,
@@ -81,10 +85,10 @@ def propose(args, ctx) -> str:
                                    'message': 'Saved as a card for the user to review, because ' + note},
                                   ensure_ascii=False, separators=(',', ':'))
             return json.dumps({'setup': setup, 'review_required': setup['status'] == 'pending',
-                               'job_changed_by_this_call': False, 'execution_started': False,
+                               'job_changed_by_this_call': False, 'execution_started': False, **warning,
                                'message': ('This Pip runs commands on a schedule, so it is shown '
                                            'to the user as a card above the chat box, and it exists only once they choose Create Pip there. '
-                                           'Mention the card; never claim it is on.')},
+                                           'Mention the card; never claim it is on.' + caution)},
                               ensure_ascii=False, separators=(',', ':'))
     except RegistryError:
         raise

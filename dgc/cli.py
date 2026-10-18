@@ -2016,6 +2016,23 @@ class CLI:
                               failed=outcome["failed"], paused=bool(getattr(self.agent, "_last_turn_pause", "")))
 
 
+def pips_sandbox_note() -> str:
+    """One line when Pulse and Patch commands can't run in their sandbox here and DGC knows the one-time fix (stock
+    Ubuntu 23.10+ AppArmor, or no bubblewrap), else "". For `dgc doctor` and the end of `dgc setup`: a Pulse set up
+    on such a machine was put off every 30 seconds without a word (ERP session review, 2026-10-18)."""
+    try:
+        from .pip_execution import capability, machine_fix
+        fix = machine_fix()
+        if fix is None or capability()["available"]:
+            return ""
+        return ("Pips: Pulse and Patch commands can't run in their sandbox on this computer ("
+                + ("bubblewrap isn't installed" if "bubblewrap" in fix["steps"][0] else
+                   "Ubuntu's AppArmor blocks bubblewrap's user namespaces")
+                + "). Fix it once: dgc pips execution --fix. Local page checks run anyway.")
+    except Exception:            # noqa: BLE001 - a hint, never the check's failure
+        return ""
+
+
 def run_doctor(config: Config) -> int:
     """`dgc doctor` — verify the endpoint is reachable and the model is available.
 
@@ -2065,6 +2082,9 @@ def run_doctor(config: Config) -> int:
                 soft_wrap=True)
     for note in install_notes:
         c.print(f"  [yellow]![/yellow] {_markup_literal(note)}", highlight=False, soft_wrap=True)
+    pips_note = pips_sandbox_note()
+    if pips_note:
+        c.print(f"  [yellow]![/yellow] {_markup_literal(pips_note)}", highlight=False, soft_wrap=True)
     c.print("")
     # subscription engines — run your own plan through the official first-party CLI
     from . import subscriptions as _subs
@@ -2393,6 +2413,9 @@ def run_setup(config: Config) -> None:
             f"model {terminal_safe_text(config.model)}  ·  "
             f"context {config.get('context_size')}  ·  search {config.get('search_provider')}",
             markup=False, highlight=False)
+    pips_note = pips_sandbox_note()
+    if pips_note:
+        c.print(f"  [yellow]![/yellow] {_markup_literal(pips_note)}", highlight=False, soft_wrap=True)
     c.print("  run [bold]dgc[/bold] to start  ·  [bold]dgc doctor[/bold] to verify\n")
 
 

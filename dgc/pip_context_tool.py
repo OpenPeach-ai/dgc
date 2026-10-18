@@ -183,7 +183,10 @@ def read(args, ctx):
                 item['lifecycle_revision'] = lifecycle_revision(registry,item['id'])
                 from .pip_sources import validate_policy as source_policy
                 item['source_policy'] = source_policy(definition.get('source_policy', 'committed_only'))
-                item.update(_schedule_projection(registry, item['id'], definition))
+                item.update(_schedule_projection(registry, item['id'], definition, brief=True))
+                if item.get('cannot_run_here') and 'execution_notice' not in base:
+                    from .pip_execution import capability
+                    base['execution_notice'] = str(capability().get('reason') or '')[:1200]
                 latest = registry.db.execute("""SELECT id,status,created_at,finished_at FROM pip_runs
                     WHERE pip_id=? ORDER BY created_at DESC,id DESC LIMIT 1""", (item["id"],)).fetchone()
                 item["latest_run"] = dict(latest) if latest else None
@@ -315,12 +318,29 @@ def read(args, ctx):
         return _encode(base, ctx)
 
 
-def _schedule_projection(registry, pip_id, definition):
-    from .pip_schedules import validate_schedule
+def _schedule_projection(registry, pip_id, definition, *, brief=False):
+    from .pip_schedules import validate_schedule, deferral_status, deferral_reason
+    from .pip_execution import run_here_notice
     schedule = validate_schedule(definition.get('schedule'))
     state = registry.db.execute('SELECT next_due_at FROM pip_schedule_state WHERE pip_id=?', (pip_id,)).fetchone()
-    return {'schedule': schedule, 'next_run_at': state['next_due_at'] if state else None,
-            'schedule_notice': 'The saved calendar is not proof of execution. Paused jobs, a stopped or offline runner, and existing approvals can prevent a run.'}
+    result = {'schedule': schedule, 'next_run_at': state['next_due_at'] if state else None,
+              'schedule_notice': 'The saved calendar is not proof of execution. Paused jobs, a stopped or offline runner, and existing approvals can prevent a run.'}
+    # State, said plainly, so the model never tells the user a Pip is working when it can't run here.
+    # A list keeps each Pip short (its page shares one output budget) and says the reason once (execution_notice).
+    blocked = run_here_notice(definition)
+    if blocked:
+        result['cannot_run_here'] = ("can't run here: its commands need the sandbox, which can't start on this "
+                                     "computer" + (" (why, and the fix: execution_notice)" if brief else ". " + blocked))[:900]
+    deferred = deferral_status(registry, pip_id) if state else None
+    if deferred:
+        said = (f"Its due run has failed to start {deferred['attempts']} time(s) since {deferred['since']}; "
+                f"DGC tries again at {deferred['next_try_at']}.")
+        if not brief and not (blocked and deferred['code'] == 'execution_unavailable'):
+            said += " " + deferral_reason(deferred['code'])
+        result['schedule_deferred'] = {'since': deferred['since'], 'attempts': deferred['attempts'],
+                                       'next_try_at': deferred['next_try_at'], 'code': deferred['code'],
+                                       'said': said[:900]}
+    return result
 
 
 def _encoded(value, ctx):

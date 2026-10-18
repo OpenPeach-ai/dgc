@@ -22,6 +22,12 @@ MIN_INTERVAL_MINUTES = 5
 MAX_INTERVAL_MINUTES = 7 * 24 * 60
 MAX_TICK_ITEMS = 8
 ERROR_RETRY_SECONDS = 30
+# A due occurrence that can't start is tried again after 30 s, then twice as long each time, up to an hour. It was
+# put off every 30 seconds forever, silently: 43 times in 21 minutes for a Pulse whose sandbox could never start
+# here (ERP session review, 2026-10-18). From the third time, it is an alert the user sees (pip_digest, pip_desktop).
+MAX_RETRY_SECONDS = 3600
+ALERT_AFTER = 3
+DEFERRAL_KEY = "schedule_deferred:"     # metadata, per Pip: the occurrence that keeps failing to start, and since when
 UTC = timezone.utc
 MAX_CRON_CHARACTERS = 256
 MAX_CRON_DATE_GAP = 366
@@ -468,6 +474,83 @@ def _advance_skipped(registry, state, plan, reason):
         return bool(updated)
 
 
+def retry_delay(attempts: int) -> int:
+    """Seconds before a due occurrence that failed to start ATTEMPTS times in a row is tried again."""
+    return min(MAX_RETRY_SECONDS, ERROR_RETRY_SECONDS * 2 ** min(max(0, int(attempts) - 1), 16))
+
+
+def _deferral(registry, pip_id):
+    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (DEFERRAL_KEY + pip_id,)).fetchone()
+    try:
+        value = json.loads(row[0]) if row is not None and len(row[0]) <= 2048 else None
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) and type(value.get("attempts")) is int else None
+
+
+def _current(held, state) -> bool:
+    """A saved deferral still describes the occurrence the schedule is on (not an older version or occurrence)."""
+    return (held is not None and held.get("job_version") == state["job_version"]
+            and held.get("next_due_at") == state["next_due_at"])
+
+
+def _clear_deferral(registry, pip_id) -> None:
+    if _deferral(registry, pip_id) is not None:
+        with registry.transaction():
+            registry.db.execute("DELETE FROM metadata WHERE key=?", (DEFERRAL_KEY + pip_id,))
+
+
+def deferral_status(registry, pip_id) -> dict | None:
+    """How long this Pip's schedule has been unable to start its due run, or None: {code, attempts, since,
+    next_try_at, alert}. For the Pip's status (the model's pips_context, the CLI) and its alert."""
+    held = _deferral(registry, pip_id)
+    if held is None:
+        return None
+    state = registry.db.execute("SELECT job_version,next_due_at FROM pip_schedule_state WHERE pip_id=?",
+                                (pip_id,)).fetchone()
+    if state is None or not _current(held, state):
+        return None
+    return {"code": str(held.get("code") or "schedule_failed"), "attempts": held["attempts"],
+            "since": held.get("since"), "next_try_at": held.get("retry_at"),
+            "alert": held["attempts"] >= ALERT_AFTER, "alerted_at": held.get("alerted_at")}
+
+
+def blocked_schedules(registry, limit: int = 20) -> list[dict]:
+    """Pips whose due run has failed to start ALERT_AFTER times or more in a row, newest alert first: {pip_id,
+    workspace_id, name, code, attempts, since, alerted_at, said}. What the digest and the desktop alert say."""
+    found = []
+    rows = registry.db.execute("SELECT key FROM metadata WHERE key LIKE ? ESCAPE '\\' LIMIT 500",
+                               (DEFERRAL_KEY.replace("_", "\\_") + "%",)).fetchall()
+    for (key,) in rows:
+        pip_id = key[len(DEFERRAL_KEY):]
+        status = deferral_status(registry, pip_id)
+        if status is None or not status["alert"]:
+            continue
+        row = registry.db.execute("""SELECT p.workspace_id,p.status,json_extract(v.definition,'$.name') AS name
+            FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version WHERE p.id=?""",
+                                  (pip_id,)).fetchone()
+        if row is None or row["status"] == "archived":
+            continue
+        name = " ".join(str(row["name"] or "A Pip").split())[:80]
+        said = (f"{name} can't run on this computer: its commands need the sandbox, which can't start here. "
+                "Run `dgc pips execution --fix` in a terminal."
+                if status["code"] == "execution_unavailable" else
+                f"{name}'s scheduled run keeps failing to start ({status['code']}).")
+        found.append({"pip_id": pip_id, "workspace_id": row["workspace_id"], "name": name, **status, "said": said})
+    found.sort(key=lambda item: str(item.get("alerted_at") or ""), reverse=True)
+    return found[:limit]
+
+
+def deferral_reason(code: str) -> str:
+    """Why a scheduled run keeps failing to start, in words: the sandbox's own reason when that is it."""
+    if code == "execution_unavailable":
+        from .pip_execution import capability
+        found = capability()
+        return str(found.get("reason") or "") if not found.get("available") else (
+            "Its commands couldn't run in their sandbox; that works now, and the next try should start.")
+    return f"Its scheduled run keeps failing to start ({code})."
+
+
 def _defer_error(registry, state, checked_at, code):
     # Do not persist exception text, source paths, credentials or provider output.
     safe_code = code if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,64}", code) else "schedule_failed"
@@ -476,9 +559,22 @@ def _defer_error(registry, state, checked_at, code):
             WHERE pip_id=? AND job_version=? AND next_due_at=?""",
             (checked_at, state["pip_id"], state["job_version"], state["next_due_at"])).rowcount
         if updated:
+            prior = _deferral(registry, state["pip_id"])
+            same = _current(prior, state) and prior.get("code") == safe_code
+            attempts = prior["attempts"] + 1 if same else 1
+            delay = retry_delay(attempts)
+            record = {"job_version": state["job_version"], "next_due_at": state["next_due_at"], "code": safe_code,
+                      "attempts": attempts, "since": prior.get("since") if same else checked_at,
+                      "retry_at": timestamp(_instant(checked_at) + timedelta(seconds=delay)),
+                      # Raised once per episode: the alert's time is what the digest and the desktop compare.
+                      "alerted_at": (prior.get("alerted_at") if same else None)
+                                    or (checked_at if attempts >= ALERT_AFTER else None)}
+            registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                                (DEFERRAL_KEY + state["pip_id"], json.dumps(record, separators=(",", ":"))))
             registry.event(state["workspace_id"], "pip_schedule_deferred", pip_id=state["pip_id"],
                            payload={"job_version": state["job_version"], "code": safe_code,
-                                    "retry_after_seconds": ERROR_RETRY_SECONDS})
+                                    "retry_after_seconds": delay, "attempt": attempts,
+                                    **({"alert": True} if attempts == ALERT_AFTER else {})})
 
 
 def tick(registry, config, *, now=None, limit=MAX_TICK_ITEMS, stop_event=None):
@@ -505,13 +601,18 @@ def tick(registry, config, *, now=None, limit=MAX_TICK_ITEMS, stop_event=None):
         FROM pip_schedule_state s JOIN pips p ON p.id=s.pip_id
         JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version
         WHERE p.status!='archived' AND s.next_due_at<=? AND (s.last_checked_at IS NULL OR s.last_checked_at<=?)
-        ORDER BY s.next_due_at,s.pip_id LIMIT ?""", (checked, retry_before, limit)).fetchall()
+        ORDER BY s.next_due_at,s.pip_id LIMIT ?""", (checked, retry_before, limit * 8)).fetchall()
     store = PipStore(registry)
     for raw in rows:
         if (stop_event is not None and stop_event.is_set()) or is_runtime_paused(registry):
             result["stopped"] = True
             break
         state = dict(raw)
+        held = _deferral(registry, state["pip_id"])
+        if _current(held, state) and str(held.get("retry_at") or "") > checked:
+            continue                     # backing off; it doesn't take one of this tick's places either
+        if result["examined"] >= limit:
+            break
         result["examined"] += 1
         try:
             if state["job_version"] != state["current_version"]:
@@ -530,6 +631,7 @@ def tick(registry, config, *, now=None, limit=MAX_TICK_ITEMS, stop_event=None):
             if state["status"] != "active" or busy:
                 reason = "job_paused" if state["status"] != "active" else "job_busy"
                 result["skipped"] += int(_advance_skipped(registry, state, plan, reason))
+                _clear_deferral(registry, state["pip_id"])
                 continue
             occurrence = {key: plan[key] for key in ("expected_next_due", "scheduled_at", "next_due_at", "checked_at")}
             occurrence["job_version"] = state["job_version"]
@@ -540,6 +642,7 @@ def tick(registry, config, *, now=None, limit=MAX_TICK_ITEMS, stop_event=None):
                 if exc.code in ("paused", "schedule_busy", "source_unchanged"):
                     reason = {"paused": "job_paused", "schedule_busy": "job_busy"}.get(exc.code, exc.code)
                     result["skipped"] += int(_advance_skipped(registry, state, plan, reason))
+                    _clear_deferral(registry, state["pip_id"])
                     continue
                 if exc.code == "conflict":
                     result["stale"] += 1
@@ -549,6 +652,7 @@ def tick(registry, config, *, now=None, limit=MAX_TICK_ITEMS, stop_event=None):
                     break
                 raise
             result["enqueued"] += 1
+            _clear_deferral(registry, state["pip_id"])
         except (RegistryError, ValueError, TypeError) as exc:
             _defer_error(registry, state, checked, getattr(exc, "code", "invalid_schedule"))
             result["deferred"] += 1

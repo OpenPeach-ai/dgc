@@ -191,7 +191,19 @@ The runner does one run at a time.
 | Keep Pips running | systemd user service; also while logged out, where the system allows lingering | LaunchAgent, while you are logged in | Windows starts the runner when you sign in (`wslg.exe`, from your own Run list), which keeps WSL running |
 | Desktop notifications | `notify-send`, when a notification service is running | Notification Center | Windows notifications |
 
-`dgc pips execution` shows whether this runner passed its confinement check.
+`dgc pips execution` shows whether this runner passed its confinement check. A Pulse of
+local page checks only (`dgc-http-check`) needs no sandbox and runs anywhere Pips run.
+
+**Stock Ubuntu 23.10 and later (24.04 included)** let only programs with an AppArmor
+profile make user namespaces, so bubblewrap is installed but can't start the sandbox.
+`dgc pips execution --fix` says so and shows the one-time fix (Ubuntu's own
+`bwrap-userns-restrict` profile, as for a Pip's computer); in a terminal it asks, then
+runs it with your own sudo password. DGC never runs sudo by itself, and the model's shell
+can't run `--fix`. `dgc doctor` and the end of `dgc setup` mention it once. A Pulse set up
+on such a computer says on its card that it can't run here yet; if its schedule keeps
+failing to start, DGC tries again after 30 seconds, then twice as long each time (at most
+an hour), and from the third time tells you once: in the Pips digest and as a desktop
+notification. The Pip's status (`dgc pips list`, and what the chat reads) says why.
 
 **Windows means DGC inside WSL 2.** DGC installs into WSL (the installer is a shell script),
 and VS Code or Cursor connects to it there, so Pips are the Linux ones. Three things differ,

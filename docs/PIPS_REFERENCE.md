@@ -222,7 +222,11 @@ body; it reads at most 64 KiB and discards it. Limits: 10 seconds, 5 CPU seconds
 512 MiB (address space on Linux; sampled on macOS), 3-second socket timeout. The
 helper runs outside the sandbox because it must reach your loopback interface; the
 URL rules are an application-level allowlist, not a firewall. Pulse doesn't start your
-app, and the app may not be running the committed source recorded with the run.
+app, and the app may not be running the committed source recorded with the run. A plan
+of local HTTP checks only runs no project code, so it needs no sandbox at all: it is
+accepted, scheduled and run where bubblewrap can't start (stock Ubuntu 24.04), uses the
+interpreter DGC itself runs on, and copies no source (its receipt's snapshot is 0 files,
+0 bytes). Any other command, and every Patch, still requires the confinement probe.
 
 **Specialists.** A Patch action may add
 `"specialists": {"roles": ["explorer", "critic", "worker"], "max_calls": 1–3}`.
@@ -476,7 +480,7 @@ default `.config/systemd/user`).
 
 **Platforms.** Queueing and running work needs a POSIX system, so Windows can't run
 Pips work. Audits, Quill drafts, conversations and Personal tasks run on Linux and
-macOS. Patch, Pulse and local HTTP checks need Linux with bubblewrap, or macOS with
+macOS. Patch and Pulse commands need Linux with bubblewrap, or macOS with
 Seatbelt and Xcode or the Command Line Tools, with weaker guarantees (see **macOS**
 under Patch and Pulse commands). Current-tree source needs POSIX directory handles.
 `export-run` and `capacity` need Linux `/proc`. The service needs Linux with user
@@ -549,7 +553,13 @@ check.
   future when approved, and runs once.
 - Missed times collapse into one run for the latest. A paused or busy Pip skips the
   time. A failed or cancelled run is not replayed. A queue error retries after 30
-  seconds.
+  seconds, then 60, 120 and so on, doubling up to an hour, while the same time keeps
+  failing to start (each `pip_schedule_deferred` event has `attempt` and
+  `retry_after_seconds`; the third has `alert: true`). From the third failure the
+  digest says so in its headline and is due as an alert once, a desktop notification is
+  shown once, and the Pip's status in `pips_context` has `schedule_deferred` (and, for a
+  Pulse or Patch whose commands can't run here, `cannot_run_here`). A run that starts,
+  or a skipped time, ends the episode.
 
 **Event triggers:**
 
@@ -1254,3 +1264,4 @@ Clients check it before using a newer control.
 | 43 | A Pip's own apps (`connect_app`, `read_app`; `list_pip_app_links`, `start_pip_app_link`, `check_pip_app_link`, `decline_pip_app_link`, `disconnect_pip_app_link`); Simple Pips: `introduce_pip`; a Personal Pip with only a name; Core as the Primary Pip; `intro` on chat messages; images and files in a Personal Pip's chat (`send_pip_message` `images` and `files`, `get_pip_message_image`); a computer's Files and Terminal (`list_pip_computer_files`, `read_pip_computer_file`, `add_pip_computer_file`, `remove_pip_computer_file`, `run_pip_computer_command`, `list_pip_computer_terminal`), and the computer in a Pip's chat |
 | 44 | A Pip's plugins (`use_plugin`, `plugin_tools`, `call_plugin`; `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`); a plugin action is a connector draft on the plugin's server; payment plugins refuse Always allow; Needs attention (`list_pip_attention`); what a Pip remembers (`remember`; `list_pip_notes`, `add_pip_note`, `forget_pip_note`; schema 44); careful mode (`list_pip_sites`, `set_pip_careful`, `forget_pip_site`) |
 | 45 | Every plugin turned on is every Pip's (no `use_plugin`, no card); `set_plugin_permission` and each plugin's level (`always_ask`, `any_changes`, `important`, `never_ask`); `web_search` on the app socket; careful mode's `Lane` for unattended runs |
+| 49 | Additive, nothing to gate on: `list_pip_runs` rows carry a failed run's `error`; `get_pip_execution` has `local_http_checks` and, when DGC knows the one-time fix, `fix` (`dgc pips execution --fix`); a Pulse setup card's `runner_notice` says when it can't run on this computer |
