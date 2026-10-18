@@ -41,6 +41,11 @@
 - **Thinking is collapsed by default**, while the model thinks and once it has answered, in new replies and in chats
   you open again. Click "Thinking" (or press Enter on it) to read it; what you choose stays for that reply while it
   streams and after.
+- **"Thinking" no longer flickers.** Each streamed part drew the whole reply again, taking the thinking box out of the
+  page and putting it back, so the label lost the pointer's hover with every part and the working line's pulse
+  restarted. Now what a part doesn't change stays where it is. While the model works, "Thinking" and lines like
+  "Searching the web for…" show Work's status mark: DGC's three slashes lighting in turn beside words that hold still
+  (still too for a reader who asked for less motion).
 - **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
   slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
   still for a reader who asked for less motion.

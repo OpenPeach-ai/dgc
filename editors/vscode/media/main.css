@@ -830,26 +830,29 @@ body.vscode-light, body.vscode-high-contrast-light {
 .thinking .spin { color: var(--muted); display: inline-flex; flex: none; }
 
 /* animated DGC mark — the three stripes light up one-by-one, hold, then repeat
-   (~1.2s loop, single purple). Reduced-motion → all three lit, static. */
-.thinking .tmark { width: 15px; height: 15px; color: var(--muted); flex: none; }
-.thinking .tmark path { opacity: .16; fill: currentColor; }
-.thinking .tmark .s1 { animation: dgc-mark1 1.2s linear infinite; }
-.thinking .tmark .s2 { animation: dgc-mark2 1.2s linear infinite; }
-.thinking .tmark .s3 { animation: dgc-mark3 1.2s linear infinite; }
+   (~1.2s loop, single purple). Reduced-motion → all three lit, static.
+   ChatDGC's live lines wear it too ("Thinking", "Searching the web for…": .cd-wave in chatdgc.js), so each
+   rule names both rather than chatdgc.css keeping a copy that drifts. */
+.thinking .tmark, .cd-wave .tmark { width: 15px; height: 15px; color: var(--muted); flex: none; }
+.thinking .tmark path, .cd-wave .tmark path { opacity: .16; fill: currentColor; }
+.thinking .tmark .s1, .cd-wave .tmark .s1 { animation: dgc-mark1 1.2s linear infinite; }
+.thinking .tmark .s2, .cd-wave .tmark .s2 { animation: dgc-mark2 1.2s linear infinite; }
+.thinking .tmark .s3, .cd-wave .tmark .s3 { animation: dgc-mark3 1.2s linear infinite; }
 .thinking.waiting-input .tmark path { animation: none; opacity: 1; }
 @keyframes dgc-mark1 { 0%, 100% { opacity: .16; } 12%, 90% { opacity: 1; } }
 @keyframes dgc-mark2 { 0%, 30%, 100% { opacity: .16; } 42%, 90% { opacity: 1; } }
 @keyframes dgc-mark3 { 0%, 54%, 100% { opacity: .16; } 66%, 90% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .thinking .tmark .s1, .thinking .tmark .s2, .thinking .tmark .s3 { animation: none; }
-  .thinking .tmark path { opacity: 1; }
+  .thinking .tmark .s1, .thinking .tmark .s2, .thinking .tmark .s3,
+  .cd-wave .tmark .s1, .cd-wave .tmark .s2, .cd-wave .tmark .s3 { animation: none; }
+  .thinking .tmark path, .cd-wave .tmark path { opacity: 1; }
   #phead .pm .cur, .cd-head .pm .cur, .tool .dot.run { animation: none; }
   .tool .chev { transition: none; }
   #btn-ctx.busy .codicon { animation: none !important; }
   .context-track span { transition: none !important; }
 }
 
-.thinking .verb { color: var(--muted); }
+.thinking .verb, .cd-wave .verb { color: var(--muted); }
 .thinking .meta { color: var(--faint); }
 .thinking.done { color: var(--faint); font-size: var(--t-xs); }
 .disclosure { cursor: pointer; border: 0; padding: 0; background: transparent; text-align: left; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); max-width: 100%; }

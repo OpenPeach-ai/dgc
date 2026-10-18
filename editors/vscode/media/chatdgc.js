@@ -649,16 +649,30 @@
     document.body.append(panel);
     close.focus();
   }
+  // What it's doing while it works, as Work's status row says it (main.js): DGC's three slashes lighting one after
+  // another, then the words. The slashes' rules are Work's own (main.css names .cd-wave beside .thinking), still for a
+  // reader who asked for less motion. Drawn once per line: a redraw keeps the line, so the wave never restarts.
+  const MARK = '<svg class="tmark" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true">'
+    + '<path class="s1" d="M32 24 L20 30 L13 72 L25 66 Z"/><path class="s2" d="M54 18 L42 24 L35 72 L47 66 Z"/>'
+    + '<path class="s3" d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>';
+  function wave(words, tag = "span", cls = "") {
+    const line = el(tag, `cd-wave${cls ? ` ${cls}` : ""}`);
+    line.innerHTML = MARK;
+    line.append(el("span", "verb", words));
+    return line;
+  }
   // Collapsed, while it thinks and once it has answered: a click opens it, and what the reader chose holds for that
   // reply, as it streams and after.
   const thinkingChosen = new Map();
   function thinkingBlock(message, live) {
     const box = el("details", "cd-thinking");
-    const summary = el("summary", "cd-thinking-label", live ? "Thinking…" : "Thought");
+    const summary = el("summary", "cd-thinking-label");
+    if (live) summary.append(wave("Thinking")); else summary.textContent = "Thought";
     const text = el("div", "cd-thought");
     text.textContent = message.thinking || "";
     box.append(summary, text);
     box.dataset.id = message.id || "";
+    box.dataset.live = live ? "1" : "";
     box.open = thinkingChosen.get(message.id) === true;
     // It opens and closes on the press, not the click: a reply that streams redraws every delta, and Chromium drops a
     // click whose pressed element was moved in between. Enter and Space still come as a click (detail 0).
@@ -1259,10 +1273,10 @@
     for (const canvas of Array.isArray(message.canvases) ? message.canvases : []) node.append(canvasCard(canvas));
     for (const card of Array.isArray(message.actions) ? message.actions : []) node.append(actionCard(message, card, live));
     const doing = live && state.searching[message.id];
-    if (doing) node.append(el("div", "cd-working cd-activity", doing.kind === "looking"
+    if (doing) node.append(wave(doing.kind === "looking"
       ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "making" ? `Making ${doing.text || "the file"}…` : doing.kind === "canvas" ? `Writing in the canvas ${doing.text}…` : doing.kind === "analyzing" ? "Analyzing the data…" : doing.kind === "compacting"
-      ? "Summarizing earlier messages to fit the context window…" : `Searching the web for “${doing.text}”…`));
-    else if (live && !message.text && !message.thinking) node.append(el("div", "cd-working", "Thinking…"));
+      ? "Summarizing earlier messages to fit the context window…" : `Searching the web for “${doing.text}”…`, "div", "cd-working cd-activity"));
+    else if (live && !message.text && !message.thinking) node.append(wave("Thinking", "div", "cd-working"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
     if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
     if (!live) { const kept = memoryNote(message); if (kept) node.append(kept); }
@@ -1814,7 +1828,7 @@
       if (after >= 0) nodes.splice(after + 1, 0, branchedNode());
     }
     if (state.conversation?.carried?.text) nodes.unshift(carriedNode());
-    if (state.compacting) nodes.push(el("div", "cd-working cd-activity", "Summarizing earlier messages to fit the context window…"));
+    if (state.compacting) nodes.push(wave("Summarizing earlier messages to fit the context window…", "div", "cd-working cd-activity"));
     log.replaceChildren(...nodes);
     if (state.editingFresh) {
       // Just opened: the box takes the keys now, with the caret at the end. Doing it a frame later moved the
@@ -1847,33 +1861,69 @@
         const old = log.querySelector(`.cd-msg[data-id="${CSS.escape(each)}"]`);
         if (!message) continue;
         const fresh = messageNode(message);
-        // The same thinking box, its words and label brought up to date: its open or closed, and the reader's place in it.
-        const was = old?.querySelector("details.cd-thinking"), now = fresh.querySelector("details.cd-thinking");
-        if (was && now) {
-          const label = was.querySelector(".cd-thinking-label"), words = was.querySelector(".cd-thought");
-          const newLabel = now.querySelector(".cd-thinking-label").textContent, newWords = now.querySelector(".cd-thought").textContent;
-          if (label.textContent !== newLabel) label.textContent = newLabel;
-          if (words.textContent !== newWords) words.textContent = newWords;
-          if (was.open !== now.open) was.open = now.open;
-          now.replaceWith(was);
-        }
         // A field you're typing in (marked data-keep) keeps the keys and the caret: research redraws as it goes.
         const typing = old && old.contains(document.activeElement) ? document.activeElement : null;
         const key = typing?.dataset?.keep;
         const caret = key && typeof typing.selectionStart === "number" ? [typing.selectionStart, typing.selectionEnd] : null;
-        // The pictures, unchanged, stay the same nodes: a streaming reply redraws every frame, and a picture
-        // drawn again would flicker.
-        const strip = old?.querySelector(".cd-pictures"), stripNow = fresh.querySelector(".cd-pictures");
-        if (strip && stripNow && strip.dataset.key === stripNow.dataset.key) stripNow.replaceWith(strip);
-        if (old) old.replaceWith(fresh); else log.append(fresh);
-        const twin = key ? fresh.querySelector(`[data-keep="${CSS.escape(key)}"]`) : null;
-        if (twin) { twin.focus(); if (caret) twin.setSelectionRange(caret[0], caret[1]); }
+        const shown = old ? redrawIn(old, fresh) : (log.append(fresh), fresh);
+        const twin = key ? shown.querySelector(`[data-keep="${CSS.escape(key)}"]`) : null;
+        if (twin) { if (twin !== document.activeElement) twin.focus(); if (caret) twin.setSelectionRange(caret[0], caret[1]); }
       }
       redraw.clear();
       document.body.classList.remove("cd-blank");
       $("cd-empty").hidden = true;
       follow();
     });
+  }
+  /** A reply drawn again over what's on screen. A streaming reply is drawn again for every part that comes; what
+   *  hasn't changed stays the very same nodes, never taken out of the page and put back: the thinking box (open or
+   *  closed, the reader's place in it, the pointer over its label), the pictures, and the line saying what it's doing.
+   *  A node taken out and put back loses its hover and restarts its animation: "Thinking" flickered with every part. */
+  function redrawIn(old, fresh) {
+    const keep = new Map();                         // a fresh node -> the one on screen that stands for it
+    const was = old.querySelector(":scope > details.cd-thinking"), now = fresh.querySelector(":scope > details.cd-thinking");
+    if (was && now) {
+      // The same thinking box, its words and label brought up to date.
+      if (was.dataset.live !== now.dataset.live) {
+        was.dataset.live = now.dataset.live;
+        was.querySelector(".cd-thinking-label").replaceChildren(...now.querySelector(".cd-thinking-label").childNodes);
+      }
+      setText(was.querySelector(".cd-thought"), now.querySelector(".cd-thought").textContent);
+      if (was.open !== now.open) was.open = now.open;
+      keep.set(now, was);
+    }
+    // The pictures, unchanged: a picture drawn again would flicker.
+    const strip = old.querySelector(":scope > .cd-pictures"), stripNow = fresh.querySelector(":scope > .cd-pictures");
+    if (strip && stripNow && strip.dataset.key === stripNow.dataset.key) keep.set(stripNow, strip);
+    // What it's doing, unchanged: its wave goes on where it was.
+    const doing = old.querySelector(":scope > .cd-working"), doingNow = fresh.querySelector(":scope > .cd-working");
+    if (doing && doingNow && doing.className === doingNow.className && doing.textContent === doingNow.textContent) keep.set(doingNow, doing);
+    const order = [...fresh.childNodes].map((n) => keep.get(n) || n);
+    const kept = order.filter((n) => n.parentNode === old);
+    const onScreen = [...old.childNodes].filter((n) => kept.includes(n));
+    if (kept.some((n, i) => onScreen[i] !== n)) {
+      // Kept nodes in another order (never expected): the reply drawn afresh, the kept ones moved into it.
+      for (const [now2, was2] of keep) now2.replaceWith(was2);
+      old.replaceWith(fresh);
+      return fresh;
+    }
+    for (const child of [...old.childNodes]) if (!kept.includes(child)) child.remove();
+    let after = null;
+    for (const node of order) {
+      if (node.parentNode === old) { after = node; continue; }      // kept: already where it belongs
+      if (after) after.after(node); else old.prepend(node);
+      after = node;
+    }
+    old.className = fresh.className;
+    return old;
+  }
+  /** A node's text set to `text`; words that came at the end are added, not the whole text written again. */
+  function setText(node, text) {
+    const now = node.textContent;
+    if (now === text) return;
+    const only = node.childNodes.length === 1 && node.firstChild.nodeType === Node.TEXT_NODE ? node.firstChild : null;
+    if (only && now && text.startsWith(now)) only.appendData(text.slice(now.length));
+    else node.textContent = text;
   }
 
   // ---- the composer

@@ -179,6 +179,85 @@ test("with no click, the thinking is collapsed while it thinks, as the answer st
   } finally { await s.page.close(); }
 });
 
+// "The 'Thinking' word flickers a lot" (founder, 2026-10-18): every streamed part drew the reply again, taking the
+// thinking box out of the page and putting it back, so the pointer's hover over the label came and went with each part,
+// and the working line's pulse started over with each one. Now nothing a part doesn't change is touched, and the label
+// is Work's status line: DGC's slashes lighting in turn, beside words that hold still.
+test("while it thinks, no streamed part redraws 'Thinking' or the working line, and both are Work's wave: slashes lighting in turn, words still", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "message", message: { id: M(1), role: "user", text: "Plan a week in Goa" } });
+    await s.send({ type: "activity", messageId: M(2), kind: "searching", text: "goa in december" });
+    await s.send({ type: "delta", messageId: M(2), thinking: "First the beaches. " });
+    await s.frame();
+    const label = s.page.locator(".cd-thinking-label");
+    const at = await label.boundingBox();
+    await s.page.mouse.move(at.x + 30, at.y + at.height / 2);
+    // Watch for the label, the working line or anything holding them leaving the page, part by part.
+    await s.page.evaluate(() => {
+      window.__label = document.querySelector(".cd-thinking-label"); window.__doing = document.querySelector(".cd-working");
+      window.__out = 0;
+      new MutationObserver((records) => {
+        for (const r of records) for (const n of r.removedNodes) if (n.nodeType === 1 && (n.contains(window.__label) || n.contains(window.__doing))) window.__out++;
+      }).observe(document.getElementById("cd-log"), { childList: true, subtree: true });
+      for (const n of document.querySelectorAll(".cd-wave .tmark .s1")) n.getAnimations().forEach((a) => { a.id = "first"; });
+    });
+    const hovered = [];
+    for (let i = 0; i < 20; i++) {
+      await s.send({ type: "delta", messageId: M(2), thinking: `Part ${i}. ` });
+      await s.frame();
+      hovered.push(await s.page.evaluate(() => window.__label.matches(":hover")));
+    }
+    assert.equal(await s.page.evaluate(() => window.__out), 0, "20 parts streamed, and the label and the working line never left the page");
+    assert.deepEqual([...new Set(hovered)], [true], "the pointer's hover over the label held through every part (it came and went with each)");
+    assert.equal(await s.page.evaluate(() => window.__label.isConnected && document.querySelector(".cd-thinking-label") === window.__label
+                                          && document.querySelector(".cd-working") === window.__doing), true, "the same nodes");
+    assert.match(await s.page.locator(".cd-thought").textContent(), /^First the beaches\. Part 0\. .*Part 19\. $/, "the words kept up");
+    // Work's wave: the three slashes light in turn (Work's own keyframes), and the words beside them hold still.
+    const look = await s.page.evaluate(() => [".cd-thinking-label", ".cd-working"].map((sel) => {
+      const line = document.querySelector(sel), marks = [...line.querySelectorAll(".cd-wave .tmark path")];
+      return { marks: marks.map((p) => getComputedStyle(p).animationName), still: getComputedStyle(line.querySelector(".verb")).animationName,
+               line: getComputedStyle(line).animationName, kept: marks[0].getAnimations().map((a) => a.id), hidden: line.querySelector(".tmark").getAttribute("aria-hidden") };
+    }));
+    for (const one of look) {
+      assert.deepEqual(one.marks, ["dgc-mark1", "dgc-mark2", "dgc-mark3"], "Work's slashes, lit in turn");
+      assert.equal(one.still, "none"); assert.equal(one.line, "none", "no pulse: the words hold still");
+      assert.deepEqual(one.kept, ["first"], "the wave ran on through every part: never started over");
+      assert.equal(one.hidden, "true", "the slashes are drawing; the words are what a screen reader says");
+    }
+    assert.equal(await label.textContent(), "Thinking");
+    assert.equal(await s.page.locator(".cd-working").textContent(), "Searching the web for “goa in december”…");
+    await s.send({ type: "delta", messageId: M(2), text: "Day 1: the beaches." });
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Day 1: the beaches.", thinking: "First the beaches.", finish: "stop" } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.frame();
+    assert.equal(await label.textContent(), "Thought", "finished: the label is still, with no wave");
+    assert.equal(await s.page.locator(".cd-thinking-label .tmark").count(), 0);
+    assert.equal(await s.page.locator(".cd-working").count(), 0);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("for a reader who asked for less motion, the wave is still: all three slashes lit", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ reducedMotion: true });
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "activity", messageId: M(2), kind: "searching", text: "goa" });
+    await s.send({ type: "delta", messageId: M(2), thinking: "Hmm." });
+    await s.frame();
+    const marks = await s.page.evaluate(() => [...document.querySelectorAll(".cd-wave .tmark path")]
+      .map((p) => [getComputedStyle(p).animationName, getComputedStyle(p).opacity]));
+    assert.equal(marks.length, 6, "the label's and the working line's");
+    assert.deepEqual([...new Set(marks.map(([name]) => name))], ["none"]);
+    assert.deepEqual([...new Set(marks.map(([, opacity]) => opacity))], ["1"]);
+  } finally { await s.page.close(); }
+});
+
 // A narrow box drew Temporary as a bare native checkbox beside its icon: a stray white square in a dark theme
 // (seen in real VS Code, 2026-10-18). Without its word it is an icon button like its neighbours, lit when on.
 test("narrow, Temporary is an icon button: no bare checkbox, Space and a click still toggle it, and it lights when on", async (t) => {
@@ -522,7 +601,7 @@ test("a reply streams in as Markdown; your words and its words never become mark
     await s.send({ type: "delta", messageId: M(2), thinking: "The user greets me." });
     await s.frame();
     assert.equal(await s.page.locator(".cd-assistant details.cd-thinking").getAttribute("open"), null, "its thinking is there, collapsed");
-    assert.match(await s.page.locator(".cd-thinking-label").textContent(), /Thinking…/);
+    assert.match(await s.page.locator(".cd-thinking-label").textContent(), /^Thinking$/);
     await s.send({ type: "delta", messageId: M(2), text: "**Paris** is the capital. <img src=x onerror=\"window.__owned=2\">\n\n```js\nconst x = 1;\n```\n\nSee [the docs](https://example.com/paris)." });
     await s.frame();
     assert.equal(await s.page.locator(".cd-user .cd-bubble").textContent(), '<img src=x onerror="window.__owned=1"> hi');

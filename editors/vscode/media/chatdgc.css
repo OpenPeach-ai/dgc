@@ -50,12 +50,14 @@ body.cd-blank .cd-fine { display: none; }
   background: var(--prompt-fill, color-mix(in srgb, var(--accent) 14%, var(--surface))); color: var(--text-strong);
   font: var(--w-reg) var(--t-chat)/1.6 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cd-assistant .cd-body { font-size: calc(var(--t-chat) + 1px); }
-.cd-working { color: var(--muted); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); animation: pulse 1.6s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .cd-working { animation: none; } }
+/* What it's doing while it works, as Work's status row says it: DGC's slashes lighting in turn, then the words (the
+   slashes' rules are main.css's .thinking ones, which name .cd-wave too). The words hold still: no pulse. */
+.cd-wave { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; vertical-align: middle; }
+.cd-working { display: flex; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
 
 .cd-thinking { border-left: 2px solid var(--border-strong); padding-left: var(--sp-3); }
 .cd-thinking-label { cursor: pointer; color: var(--muted); font: var(--w-med) var(--t-sm)/1.5 var(--sans); }
-.cd-thinking-label:hover { color: var(--text); }
+.cd-thinking-label:hover, .cd-thinking-label:hover .verb { color: var(--text); }
 .cd-thought { margin-top: var(--sp-1); max-height: 320px; overflow-y: auto; color: var(--muted); white-space: pre-wrap;
   overflow-wrap: anywhere; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); }
 
