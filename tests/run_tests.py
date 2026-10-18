@@ -16456,8 +16456,11 @@ def e2e_plan_reported(port: int, tmp: Path) -> bool:
         [sys.executable, "-m", "dgc", "-p", "create the file please",
          "--mode", "plan", "--trust", "--base-url", f"http://127.0.0.1:{port}/v1", "--model", "mock-model"],
         cwd=str(work), env=env, capture_output=True, text=True, timeout=120, input="")
+    # Piped, stdout is the result alone, and a plan-mode run's result is the plan (not the model's last
+    # sentence, here the mock's "Plan executed."); the heading and the note are the display's, on stderr.
     ok = (proc.returncode == 0 and not (work / "planned.txt").exists()
-          and "proposed plan" in proc.stdout and "plan reported, not executed" in proc.stdout)
+          and proc.stdout == "1. write planned.txt\n"
+          and "proposed plan" in proc.stderr and "plan reported, not executed" in proc.stderr)
     if not ok:
         print("  --- stdout ---\n", proc.stdout[-2000:])
         print("  --- stderr ---\n", proc.stderr[-2000:])

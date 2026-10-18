@@ -26,7 +26,8 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   `dgc -p … | next-tool` used to receive the model's thinking ("· thinking (raw)…"), its tool steps and DGC's notices
   along with the answer. When standard output isn't a terminal, those now go to standard error, which a terminal still
   shows, and standard output holds only the final answer (the text `--output FILE` saves), as `codex exec` does. In a
-  terminal nothing changes. `--output-format json` is unchanged.
+  terminal nothing changes. `--output-format json` is unchanged. A `--mode plan` run's result is the plan it reported
+  (to standard output and `--output` alike), not the sentence the model ended on.
 - **The prompt stays off DGC's own command line.** `dgc -p "<prompt>"` restarts itself at once (same process, same
   terminal and pipes) with a placeholder where the prompt was; the prompt crosses in a temporary file with no name on
   disk, read and closed before anything else, so no command DGC runs inherits it. A model running

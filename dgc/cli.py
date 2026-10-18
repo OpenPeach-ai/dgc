@@ -438,6 +438,7 @@ class UI:
         section(self.console, "📋 proposed plan")
         self.console.print(render.render_markdown(terminal_safe_text(plan or "(empty plan)")))
         if getattr(self, "non_interactive", False):
+            self.reported_plan = str(plan or "")     # what `dgc -p --mode plan` gives a pipe or --output
             self.console.print(f"  [{DIM}]plan reported, not executed: a -p run cannot approve it — "
                                f"rerun with --mode acceptEdits|auto to build it[/]", highlight=False)
             self.plan_feedback = ("non-interactive run: the plan cannot be approved here; stop and "
@@ -3181,6 +3182,10 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
     # A preflight refusal on a resumed session has no new answer. Never export
     # the previous turn's assistant text as this failed request's result.
     text = "" if not ok and unchanged else _last_assistant_text(cli.agent)
+    # A plan-mode run's result is the plan it reported, not the sentence the model ended on.
+    reported_plan = getattr(cli.ui, "reported_plan", "")
+    if not json_mode and isinstance(reported_plan, str) and reported_plan.strip():
+        text = reported_plan
     if args.output:
         from pathlib import Path
         target = Path(args.output).expanduser()

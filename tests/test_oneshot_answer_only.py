@@ -97,6 +97,26 @@ class AnswerOnlyTests(unittest.TestCase):
         self.assertEqual(code, 0, err[-2000:])
         self.assertEqual(out, target.read_text(encoding="utf-8"))
 
+    def test_a_plan_mode_run_gives_the_plan(self):
+        plan = "1. Add the setting\n2. Test both directions"
+
+        def planned(body):
+            if not any(m.get("role") == "tool" for m in body.get("messages") or []):
+                return sse_call("present_plan", {"plan": plan})
+            return sse({"content": "Plan executed."}) + sse({}, "stop") + "data: [DONE]\n\n"
+        target = Path(tempfile.mkdtemp(prefix="dgc-answer-only-plan-")) / "plan.md"
+        with MockModel(planned) as model:
+            home = Path(tempfile.mkdtemp(prefix="dgc-answer-only-home-"))
+            work = Path(tempfile.mkdtemp(prefix="dgc-answer-only-work-"))
+            done = subprocess.run([sys.executable, "-m", "dgc", "-p", "Plan the settings change", "--trust", "--mode", "plan",
+                                   "--base-url", model.url, "--model", "mock-model", "--output", str(target)],
+                                  cwd=work, env=isolated_env(home), stdin=subprocess.DEVNULL, capture_output=True,
+                                  text=True, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        self.assertEqual(done.stdout, plan + "\n", "the plan it reported, not the sentence it ended on")
+        self.assertEqual(target.read_text(encoding="utf-8"), plan + "\n")
+        self.assertIn("plan reported, not executed", done.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
