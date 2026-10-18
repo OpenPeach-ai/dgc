@@ -217,6 +217,33 @@ class LocalPipsTests(unittest.TestCase):
         self.assertEqual(self.store.run(first["id"])["error"]["code"], "interrupted")
         self.assertIsNone(self.store.claim_next())
 
+    def test_run_list_says_why_a_run_failed(self):
+        """ERP session review (2026-10-18): `dgc pips runs --json` showed "error": null for three failed runs, and the
+        model opened the SQLite registry to learn their snapshot was over its limit."""
+        self.commit()
+        pip = self.create()
+        run = self.enqueue(pip)
+        self.store.claim_next()
+        reason = "Snapshot exceeds 10,000 entries, 4 MiB per file or 64 MiB total."
+        self.store.finish(run["id"], error={"code": "snapshot_limit", "message": reason})
+        listed = self.store.runs(pip["id"])
+        self.assertEqual(listed[0]["status"], "failed")
+        self.assertEqual(listed[0]["error"], {"code": "snapshot_limit", "message": reason})
+        self.assertIsNone(listed[0]["result"], "a list row stays lean: no report body")
+        self.assertEqual(self.store.get(pip["id"])["latest_run"]["error"]["code"], "snapshot_limit")
+        self.assertEqual(self.store.run(run["id"])["error"]["message"], reason)
+        from dgc.pip_cli import _format
+        self.assertIn("snapshot_limit: " + reason, _format({"runs": listed}))
+        succeeded = self.enqueue(pip, "second")
+        self.store.claim_next()
+        from dgc.pip_checkpoints import _SOURCE_VERIFICATION
+        self.store.finish(succeeded["id"], result={"summary": "fine", "findings": [], "limitations": [],
+                                                   "verification": _SOURCE_VERIFICATION, "tests_executed": False})
+        rows = {row["id"]: row for row in self.store.runs(pip["id"])}   # one fixed clock: order by id is arbitrary
+        self.assertEqual(rows[succeeded["id"]]["status"], "succeeded")
+        self.assertIsNone(rows[succeeded["id"]]["error"])
+        self.assertEqual(rows[run["id"]]["error"]["code"], "snapshot_limit")
+
     def test_succeeded_requires_result(self):
         self.commit()
         run = self.enqueue()

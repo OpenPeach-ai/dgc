@@ -1427,6 +1427,10 @@ class PipStore:
             result["manifest"]["context_revision"] = context_revision
         for key in ("result", "error"):
             result[key] = json.loads(result[key]) if result[key] and full else None
+        if not full and row['error']:
+            # A run list says why a run failed: its code and message, as a full read does. Listed as null, the model
+            # read the SQLite registry itself to learn a snapshot was over its limit (ERP session review, 2026-10-18).
+            result['error'] = _listed_error(row['error'])
         return result
 
     def run(self, run_id):
@@ -1667,6 +1671,19 @@ class PipStore:
             self.registry.event(run["workspace_id"], "pip_run_" + status, pip_id=run["pip_id"], run_id=run_id,
                                 payload={"status": status, "error": error})
         return self._transition_view(run_id)
+
+
+def _listed_error(raw):
+    """A run list's error: the stored code and message only, the message bounded as a list row is."""
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError, RecursionError):
+        return {'code': 'evidence_unavailable', 'message': 'The saved error is unreadable.'}
+    if not isinstance(value, dict):
+        return {'code': 'evidence_unavailable', 'message': 'The saved error is unreadable.'}
+    code = value.get('code') if isinstance(value.get('code'), str) and re.fullmatch(r'[a-z_]{1,64}', value.get('code')) else 'run_failed'
+    message = value.get('message') if isinstance(value.get('message'), str) else ''
+    return {'code': code, 'message': message[:600]}
 
 
 def _snapshot_path(raw: bytes) -> PurePosixPath:

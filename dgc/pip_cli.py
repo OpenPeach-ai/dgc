@@ -1259,7 +1259,10 @@ def _format(value):
             lines.append("Queued for the foreground supervisor. Read progress with dgc pips report " + run["id"])
         return "\n".join(lines)
     if "runs" in value:
-        return "\n".join(f'{row["id"]}  {row["status"]}  {row["created_at"]}' for row in value["runs"]) or "No runs yet. Use dgc pips run PIP_ID while the supervisor is running."
+        return "\n".join(f'{row["id"]}  {row["status"]}  {row["created_at"]}'
+                         + (f'  {row["error"].get("code")}: {row["error"].get("message")}'
+                            if isinstance(row.get("error"), dict) else '')
+                         for row in value["runs"]) or "No runs yet. Use dgc pips run PIP_ID while the supervisor is running."
     if "context" in value:
         context = value["context"]
         lines = [f'Workspace {context["workspace_id"]} · context revision {context["revision"]}']

@@ -666,6 +666,9 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   `{role: "pip_report", report}`, the commands `watch_pip_reports` (a client that draws them asks; an older client is
   sent none and none is taken) and `pip_report_dismiss {run_id}`, and `ready.capabilities.pip_reports: 1`;
   `get_pip` gives `pip.report_chats`. See [docs/PIPS.md](docs/PIPS.md#reports-reach-the-chat).
+- **A Pip's run list says why a run failed.** `dgc pips runs` (and `--json`, and `list_pip_runs`) showed `"error":
+  null` for failed runs, so a model that wanted the reason opened the SQLite registry itself. Each failed row now has
+  its error's code and message (the message up to 600 characters), as `dgc pips report` does.
 - **A Pip's run list works on Python 3.10** (Ubuntu 22.04's default). Listing runs read rows while a rollback ran,
   which Python 3.10's sqlite3 refuses: `dgc pip runs`, the Pips page and scheduled checks failed with "Cursor needed
   to be reset because of commit/rollback".
