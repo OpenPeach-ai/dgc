@@ -324,7 +324,7 @@ def plan_from_args(args: dict, agent_names=()) -> Plan:
             raise PlanError("give a template (with a goal) or stages")
         if len(stages_in) > MAX_STAGES:
             raise PlanError(f"at most {MAX_STAGES} stages")
-        stages = [_stage(raw, index, agent_names) for index, raw in enumerate(stages_in)]
+        stages = [_stage(raw, index, agent_names, stages_in) for index, raw in enumerate(stages_in)]
     for index, stage in enumerate(stages):
         if stage.split and index == len(stages) - 1:
             raise PlanError(f"stage {stage.name!r}: split only makes sense before another stage")
@@ -338,7 +338,30 @@ def plan_from_args(args: dict, agent_names=()) -> Plan:
     return plan
 
 
-def _stage(raw, index: int, agent_names) -> Stage:
+def _split_problem(index: int, raw: dict, split, returns: dict, stages_in) -> str:
+    """Why this split can't be used, and where it most likely belongs. A model put split on the stage that reads the
+    list instead of the one that produces it, twice, on an accurate but unhelpful message (ERP session review,
+    2026-10-18)."""
+    name = raw.get("name") if isinstance(raw.get("name"), str) else f"stages[{index}]"
+    fields = ", ".join(returns) or "no fields"
+    lists = [key for key, value in returns.items() if isinstance(value, list)]
+    said = (f"stages[{index}].split must name a list field in that stage's own returns; {name!r} returns "
+            f"{{{fields}}}" + (f", whose list fields are {', '.join(lists)}" if lists else ", with no list field")
+            + ". split goes on the stage that produces the list: each element becomes an item of the next stage")
+    wanted = split if isinstance(split, str) else ""
+    for other, candidate in enumerate(stages_in or []):
+        if other == index or not isinstance(candidate, dict) or not isinstance(candidate.get("returns"), dict):
+            continue
+        if wanted and isinstance(candidate["returns"].get(wanted), list):
+            label = candidate.get("name") if isinstance(candidate.get("name"), str) else f"stages[{other}]"
+            if other < len(stages_in) - 1:
+                return said + f". Did you mean \"split\": {wanted!r} on stages[{other}] ({label!r}), which returns it?"
+    if lists:
+        return said + f". Did you mean \"split\": {lists[0]!r}?"
+    return said
+
+
+def _stage(raw, index: int, agent_names, stages_in=None) -> Stage:
     where = f"stages[{index}]"
     if not isinstance(raw, dict):
         raise PlanError(f"{where} must be an object")
@@ -373,7 +396,7 @@ def _stage(raw, index: int, agent_names) -> Stage:
     split = raw.get("split", "")
     if split:
         if not isinstance(split, str) or not isinstance(returns.get(split), list):
-            raise PlanError(f"{where}.split must name a list field in returns")
+            raise PlanError(_split_problem(index, raw, split, returns, stages_in))
         if votes > 1:
             raise PlanError(f"{where}: split and votes can't be used together")
     return Stage(name, agent, prompt, returns, over, votes, keep, split or "")

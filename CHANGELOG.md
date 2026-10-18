@@ -451,6 +451,10 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   its own checkout, which has your uncommitted edits), edits nothing, and starts its answer with CONFIRMED, REFUTED
   or UNSURE. A troupe's verifier is unchanged: read only, answering in JSON. A `~/.dgc/agents/verifier.md` of your own
   still replaces it.
+- **A misplaced `split` says where it goes.** "stages[1].split must name a list field in returns" cost a model two
+  attempts: it had put split on the verify stage instead of the audit stage that returns the list. The refusal now
+  names the stage's fields, says split goes on the stage that produces the list, and suggests the fix (`Did you mean
+  "split": 'findings' on stages[0] ('audit')?`).
 
 ### Windows: the editor runs DGC in a WSL distro of its own
 

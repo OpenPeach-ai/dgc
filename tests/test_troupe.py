@@ -111,6 +111,26 @@ class PlanTests(unittest.TestCase):
                                       agent_names=["my-reviewer"])
         self.assertEqual(named.stages[0].agent, "my-reviewer")
 
+    def test_split_on_the_wrong_stage_says_where_it_goes(self):
+        """ERP session review (2026-10-18): two attempts were refused with "stages[1].split must name a list field in
+        returns": the model had put split on the verify stage, not on the audit stage that returns the list."""
+        audit = {"name": "audit", "agent": "worker", "prompt": "Audit {item}",
+                 "returns": {"area": "string", "findings": [{"title": "string"}], "severity": "string"}}
+        verify = {"name": "verify", "agent": "verifier", "prompt": "Check {item}", "votes": 3,
+                  "returns": {"finding": "string", "real": "boolean", "why": "string"}}
+        with self.assertRaises(troupe.PlanError) as raised:
+            troupe.plan_from_args({"title": "t", "items": ["x"], "stages": [audit, {**verify, "split": "findings"}]})
+        said = str(raised.exception)
+        self.assertIn("'verify' returns {finding, real, why}", said)
+        self.assertIn("split goes on the stage that produces the list", said)
+        self.assertIn("Did you mean \"split\": 'findings' on stages[0] ('audit')", said)
+        troupe.plan_from_args({"title": "t", "items": ["x"], "stages": [{**audit, "split": "findings"}, verify]})
+        # A field that isn't a list anywhere: the stage's own list fields are offered instead.
+        with self.assertRaises(troupe.PlanError) as raised:
+            troupe.plan_from_args({"title": "t", "items": ["x"], "stages": [{**audit, "split": "area"}, verify]})
+        self.assertIn("whose list fields are findings", str(raised.exception))
+        self.assertIn("Did you mean \"split\": 'findings'?", str(raised.exception))
+
     def test_too_many_agents_is_refused_before_anything_starts(self):
         with self.assertRaises(troupe.PlanError) as raised:
             troupe.plan_from_args({"title": "t", "items": [f"f{i}" for i in range(200)], "stages": [
