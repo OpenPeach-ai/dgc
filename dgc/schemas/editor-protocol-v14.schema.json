@@ -7674,6 +7674,72 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "set_plugin_key"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "env": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name",
+            "key"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "remove_plugin_key"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "env": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "list_plugin_marketplaces"
             },
             "chat_id": {

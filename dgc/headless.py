@@ -287,6 +287,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_background_shells", "stop_background_shell", "get_background_output",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
+    "set_plugin_key", "remove_plugin_key",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
 # Config fields added to protocol v14 after it first shipped. An editor validates every event it
@@ -2102,7 +2103,7 @@ class Backend:
                           # list_sessions takes limit, offset and query; an item found by what was said
                           # carries match (dgc/session_index).
                           "session_paging": True,
-                          "plugin_management": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
+                          "plugin_management": True, "plugin_keys": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
@@ -4534,7 +4535,7 @@ class Backend:
         raw = self.config.get("disabled_skills", [])
         disabled = {item for item in raw if isinstance(item, str)} if isinstance(raw, list) else set()
         current = set(self.agent.mcp.servers) if connected is None else connected
-        rows = catalog_for_editor(opening=opening, connected=current, disabled=disabled)
+        rows = catalog_for_editor(opening=opening, connected=current, disabled=disabled, config=self.config)
         for row in rows:
             failure = next((self.agent.mcp.failures.get(n) for n in row.get("server_names", [row["name"]]) if self.agent.mcp.failures.get(n)), None)
             if failure:
@@ -4615,7 +4616,14 @@ class Backend:
                             cancel=_AnyCancel(getattr(self, "_package_cancel", None), own))
                 finally:
                     self._install_cancel, self._installing_servers = None, set()
-                failure = next((self.agent.mcp.failures.get(n) for n in record_servers(record) if self.agent.mcp.failures.get(n)), None)
+                from .plugins import missing_key_message, missing_keys
+                # A plugin that waits for its key (GitHub's token) hasn't failed: its page asks for the key, beside
+                # the field, so installing it is not an error to report.
+                owned = record_servers(record)
+                waiting = {n for n, spec in (owned.items() if isinstance(owned, dict) else ()) if missing_keys(n, spec)
+                           and self.agent.mcp.failures.get(n) == missing_key_message(n, missing_keys(n, spec))}
+                failure = next((self.agent.mcp.failures.get(n) for n in record_servers(record)
+                                if self.agent.mcp.failures.get(n) and n not in waiting), None)
                 if failure:
                     detail = str(failure)
                     # A timeout/process exit is not evidence of a vendor approval rejection.
@@ -4634,6 +4642,30 @@ class Backend:
         except (PluginError, OSError, StopIteration, ValueError) as exc:
             message = str(exc)
             return lambda: self.em.emit("command_rejected", command="install_plugin", reason="plugin", request_id=request_id, message=message)
+
+    def _plugin_key(self, cmd: dict):
+        """Save or remove a plugin's key; answered with plugin_operation (never the key) and the plugin list."""
+        from . import plugins
+        request, action = str(cmd.get("request_id") or ""), cmd["type"]
+        name, server, env = str(cmd.get("name") or ""), str(cmd.get("server") or ""), str(cmd.get("env") or "")
+        try:
+            if action == "set_plugin_key":
+                result = plugins.save_key(self.config, self.agent.mcp, name, str(cmd.get("key") or ""), server=server,
+                                          env=env, input_handler=self.agent._handle_mcp_input)
+            else:
+                result = plugins.remove_key(self.config, self.agent.mcp, name, server=server, env=env,
+                                            input_handler=self.agent._handle_mcp_input)
+            items = self._editor_plugins()
+        except (plugins.PluginError, OSError, ValueError) as exc:
+            message = str(exc)
+            return lambda: self.em.emit("command_rejected", command=action, reason="plugin", request_id=request,
+                                        message=message)
+
+        def terminal():
+            self.em.emit("plugin_operation", request_id=request, action=action, name=name,
+                         message=result["message"])
+            self.em.emit("plugin_catalog", request_id=request, items=items)
+        return terminal
 
     def _plugin_operation(self, cmd: dict) -> None:
         from . import plugins, plugin_registry
@@ -6207,6 +6239,11 @@ class Backend:
             if callable(terminal): terminal()
         elif t == "list_plugins":
             self.em.emit("plugin_catalog", items=self._editor_plugins(), **_request_fields(request_id))
+        elif t in ("set_plugin_key", "remove_plugin_key"):
+            # On the package slot like Connect: saving a key changes what DGC can reach, not what a turn may do.
+            if not self._start_package_reader(lambda: self._plugin_key(cmd), label="plugin-key"):
+                self.em.emit("command_rejected", command=t, reason="busy", request_id=cmd.get("request_id"),
+                             message="Another plugin operation is running. Try again in a moment.")
         elif t == "install_plugin":
             # Beside the turn, on the package slot: "Wait for the current turn" was what the user got
             # for clicking Connect mid-turn. The new tools reach that turn's next model request.

@@ -613,6 +613,73 @@ test("a server-sent url elicitation is asked about, not opened", async () => {
   } finally { api.Uri = original.Uri; api.env = original.env; }
 });
 
+test("a plugin's key goes to dgc serve once, only to a CLI that keeps keys, and only its page hears back", async () => {
+  // The key field on GitHub's page. The extension stores nothing: the key goes to dgc serve, which keeps it in the
+  // system keychain, and the answer the page gets says THAT it was saved, never the key.
+  const settings = [], chat = [], commands = [];
+  const { provider } = catalogHarness([]);
+  provider.lastReadyEvent = { capabilities: { plugin_management: true, plugin_keys: true } };
+  provider.settingsEditor = { webview: { postMessage: m => settings.push(m) } };
+  provider.post = m => chat.push(m);
+  provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  await provider.onSettingsMessage({ type: "savePluginKey", name: "github", server: "github", env: "GITHUB_PAT_TOKEN", key: " github_pat_fixture " });
+  assert.equal(commands.length, 1);
+  assert.deepEqual({ ...commands[0], request_id: "" },
+    { type: "set_plugin_key", request_id: "", name: "github", server: "github", env: "GITHUB_PAT_TOKEN", key: "github_pat_fixture" });
+  provider.onEvent({ type: "plugin_operation", request_id: commands[0].request_id, action: "set_plugin_key",
+    name: "github", message: "Saved your GitHub personal access token in your system keychain." });
+  assert.deepEqual(settings.at(-1), { type: "pluginKeyResult", name: "github", server: "github",
+    message: "Saved your GitHub personal access token in your system keychain." });
+  assert.equal(chat.length, 0, "the chat never hears about a key");
+  await provider.onSettingsMessage({ type: "removePluginKey", name: "github", server: "github" });
+  assert.deepEqual({ ...commands[1], request_id: "" }, { type: "remove_plugin_key", request_id: "", name: "github", server: "github" });
+  provider.onEvent({ type: "command_rejected", request_id: commands[1].request_id, command: "remove_plugin_key",
+    reason: "plugin", message: "github is not installed." });
+  assert.deepEqual(settings.at(-1), { type: "pluginKeyResult", name: "github", server: "github", error: "github is not installed." });
+  assert.equal(JSON.stringify(settings).includes("github_pat_fixture"), false, "the page never gets the key back");
+  provider.lastReadyEvent = { capabilities: { plugin_management: true } };
+  await provider.onSettingsMessage({ type: "savePluginKey", name: "github", server: "github", key: "github_pat_fixture" });
+  assert.equal(commands.length, 2, "a CLI without plugin_keys is never sent a key");
+  assert.match(settings.at(-1).error, /can't keep a plugin's key yet\. Update it/);
+});
+
+test("Sign in with GitHub shows its code, copies it and opens GitHub only after the user agrees", async () => {
+  // A device sign-in: dgc serve's own client sets the code (as it sets the loopback callback), so the editor opens
+  // the page at once -- after saying the code, copying it, and the user choosing to go on.
+  const api = globalThis.__DGC_TEST_VSCODE;
+  const original = { Uri: api.Uri, env: api.env, info: api.window.showInformationMessage };
+  const sent = [], opened = [], copied = [], asked = [], settings = [];
+  let answer = "Copy code and open";
+  api.Uri = { parse: value => new URL(value) };
+  api.env = { remoteName: "ssh-remote", asExternalUri: async uri => uri, clipboard: { writeText: async text => { copied.push(text); } },
+    openExternal: async uri => { opened.push(uri.toString()); return true; } };
+  api.window.showInformationMessage = async (message, options, ...items) => { asked.push({ message, options, items }); return answer; };
+  const { provider } = catalogHarness([]);
+  provider.settingsCatalog = [{ name: "github", display_name: "GitHub", server_names: ["github"] }];
+  provider.settingsEditor = { webview: { postMessage: m => settings.push(m) } };
+  provider.backend = { ready: true, send: command => { sent.push(command); return true; } };
+  const signIn = id => ({ type: "mcp_input_request", id, server: "github", kind: "elicitation",
+    payload: { mode: "url", url: "https://github.com/login/device", message: "Enter the code WDJB-MJHT on the page that opens to sign in, then come back.",
+      _dgc_device_code: "WDJB-MJHT" } });
+  try {
+    provider.onEvent(signIn("device"));
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(asked[0].message, "Sign in to GitHub: enter the code WDJB-MJHT");
+    assert.equal(asked[0].options.modal, true);
+    assert.deepEqual(copied, ["WDJB-MJHT"]);
+    assert.deepEqual(opened, ["https://github.com/login/device"], "no loopback to forward: it works over Remote SSH too");
+    assert.deepEqual(settings[0], { type: "signin", title: "GitHub", host: "github.com", server: "github", id: "device", code: "WDJB-MJHT" });
+    assert.deepEqual(sent.map(c => [c.type, c.action]), [["mcp_input_response", "accept"]]);
+    answer = undefined;                                       // the user closed the dialog
+    provider.onEvent(signIn("closed"));
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(opened.length, 1, "nothing opens when the user doesn't go on");
+    assert.deepEqual(sent.at(-1), { type: "mcp_input_response", id: "closed", action: "cancel" });
+  } finally { api.Uri = original.Uri; api.env = original.env; api.window.showInformationMessage = original.info; }
+});
+
 test("a settings-side MCP save does not swallow a /mcp typed in chat", async () => {
   // The counter alone could not say which webview started the command, and it is held across a
   // request that may run for three minutes -- so a /mcp typed in chat during that window was

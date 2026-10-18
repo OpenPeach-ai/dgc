@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-export type McpBrowserRequest = { url: string; callbackUrl?: string; opening?: boolean };
+export type McpBrowserRequest = { url: string; callbackUrl?: string; deviceCode?: string; opening?: boolean };
 const loopback = (host: string): boolean => ["localhost", "127.0.0.1", "[::1]"].includes(host);
 
 /** Forward DGC's own loopback callback before opening its authorization page. Never rewrite

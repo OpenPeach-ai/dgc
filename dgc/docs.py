@@ -349,8 +349,8 @@ API-key environment reference is process-only:
 - `dgc mcp ...` — the same MCP catalog as `/mcp`, outside a chat. See **MCP servers**.
 - `dgc skills ...` — list, create, install, enable, disable, or show a skill package.
   See **Skills**.
-- `dgc plugin list|search TEXT|install NAME|sign-in NAME|uninstall NAME|installed` — the plugin
-  directory without the editor; `dgc plugin marketplace list|add SOURCE|remove NAME|refresh NAME`
+- `dgc plugin list|search TEXT|install NAME|sign-in NAME|key NAME [--remove]|uninstall NAME|installed` — the
+  plugin directory without the editor (`key` saves a plugin's key, typed at a hidden prompt or piped in); `dgc plugin marketplace list|add SOURCE|remove NAME|refresh NAME`
   manages catalogs. See **Plugins, apps and MCP**.
 - `dgc notes [QUERY]` — search this project's context notes. See **Context notes**.
 - `dgc trust` — list workspace-trust grants; `dgc trust revoke N|PATH|here` forgets one.
@@ -670,7 +670,7 @@ than no offer, so it is taken out rather than left to fail at the sign-in. One y
 or one that arrives from a marketplace you added yourself, does show — with the reason on its card.
 
 **Installing is not connecting.** **Connect** starts whatever sign-in the plugin declares — a
-browser handoff, or a token you name, such as `GITHUB_PAT_TOKEN` for GitHub. A plugin can sit
+browser handoff, or the key it takes. A plugin can sit
 installed for as long as you like with its server disconnected, and the model is told exactly that
 rather than left to infer it: *installed, MCP configured but not connected in this session*.
 
@@ -814,6 +814,21 @@ than you gave says so, and the next Connect asks for it. Removing the server or 
 plugin asks the service to revoke the token (OAuth token revocation, where the service offers it)
 and deletes the sign-in; DGC says which happened. Sign-ins other apps keep (such as
 `~/.mcp-auth`) are never read or changed.
+
+**Plugins that take a key.** GitHub (a personal access token), Brevo (an MCP server API key) and
+Arize AX (an API key) connect with a key you create at the service. Paste it into the field on the
+plugin's own page in Settings → Plugins and choose **Save**, then **Connect**; the page links to where
+the key is made and says what permissions it needs. DGC keeps the key with your sign-ins (the system
+keychain, or the owner-only file) and the page only ever shows **Saved**, never the key; **Remove**
+deletes it, and so does uninstalling the plugin. `dgc plugin key NAME` does the same in a terminal.
+A key in the environment DGC starts with (`GITHUB_PAT_TOKEN`, as Codex uses) still works; a saved
+key is used instead of it. A key saved for a server is only ever sent to that server's address.
+
+**Sign in with GitHub.** GitHub's sign-in server admits only apps registered with it and still
+wants the app's secret for a browser sign-in, so DGC uses GitHub's device sign-in, which needs only
+the app's public client id: DGC shows a short code, copies it and opens github.com/login/device, and
+you approve DGC there. It is offered once DGC has a GitHub app to sign in with (the catalog's, or
+`github_sign_in_client_id` in `~/.dgc/config.json`); until then, the token field is the way in.
 
 For desktop SSH/remote editors, DGC requests callback forwarding before opening sign-in. If the
 editor changes the callback port or address, forward the remote callback port to the same local

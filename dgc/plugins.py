@@ -513,7 +513,7 @@ def _skill_summaries(source: Path | None, names: list[str], disabled: set[str]) 
 
 
 def catalog_for_editor(opening: str = "", connected: set | None = None,
-                       disabled: set | None = None) -> list[dict]:
+                       disabled: set | None = None, config=None) -> list[dict]:
     installed = {row["name"]: row for row in _installed()}
     disabled_names = {str(name) for name in (disabled or set())}
     items = []
@@ -577,10 +577,94 @@ def catalog_for_editor(opening: str = "", connected: set | None = None,
             # of DGC's compatibility decisions: a package must not be able to un-declare it.
             "cloud_execution": bool(entry.get("cloud_execution")),
             "logo_file": (have or {}).get("logo_file") or "",
+            # The keys its servers take, for the field on its page: whether one is saved (never the key itself) or
+            # comes from the environment DGC started with.
+            "keys": _editor_keys(entry, have, config) if have else [],
             "apps": metadata.get("apps", []),
             "mcps": [{"name":name, "url":spec.get("url", ""), "command":spec.get("command", ""), "transport":spec.get("transport", "stdio")} for name,spec in record_servers(have).items()] if have else metadata.get("mcps", []),
         })
     return items
+
+
+def _editor_keys(entry: dict, record: dict, config=None) -> list[dict]:
+    from . import plugin_keys
+    rows = []
+    for server, spec in record_servers(record).items():
+        if spec.get('defer_until_setup'):
+            continue
+        saved = set(plugin_keys.saved_names(server, spec))
+        client = sign_in_client(server, spec, config, entry)
+        for name in plugin_keys.key_names(spec)[:8]:
+            described = plugin_keys.describe(entry, name)
+            rows.append({'server': server, 'env': name, 'saved': name in saved,
+                         # Where it was saved: the system keychain, or the owner-only file where there is none.
+                         'stored': plugin_keys.stored_where(server) if name in saved else '',
+                         'from_environment': name in os.environ,
+                         # Sign in with the service instead (GitHub), offered only once DGC has an app to do it with.
+                         'sign_in': client['provider'] or entry.get('display_name') or 'the service' if client else '',
+                         **{k: v for k, v in described.items() if k != 'sign_in'}})
+    return rows[:16]
+
+
+def _key_server(record: dict, server: str = '', env: str = '') -> tuple[str, dict, str]:
+    """The installed server (and variable) a key is for: named, or the plugin's only one."""
+    from . import plugin_keys
+    choices = [(name, spec, variable) for name, spec in record_servers(record).items()
+               for variable in plugin_keys.key_names(spec)
+               if (not server or name == server) and (not env or variable == env)]
+    if not choices:
+        raise PluginError(f"{record.get('display_name') or record['name']} doesn't take a key.")
+    if len(choices) > 1:
+        raise PluginError('Choose which key to save: this plugin takes more than one.')
+    return choices[0]
+
+
+def save_key(config, manager, name: str, key: str, *, server: str = '', env: str = '', input_handler=None,
+             cancel=None) -> dict:
+    """Save one installed plugin's key in the system keychain. A server connected with the old key connects again
+    with the new one; one that isn't connected waits for Connect."""
+    from . import plugin_keys
+    _availability_ok(name)
+    record = next((r for r in _installed() if r.get('name') == name), None)
+    if record is None:
+        raise PluginError(f'{name} is not installed.')
+    server, spec, variable = _key_server(record, server, env)
+    where = plugin_keys.save(server, spec, {variable: key})
+    label = plugin_keys.describe(_key_entry(server) or record, variable)['label']
+    if manager is not None:
+        # "Needs a key" or a refusal of the old one is no longer true of this server: the next Connect says what is.
+        getattr(manager, 'failures', {}).pop(server, None)
+    if manager is not None and server in getattr(manager, 'servers', {}):
+        connect(config, manager, record, input_handler=input_handler, cancel=cancel)
+    place = 'your system keychain' if where != 'file' else 'an owner-only file in DGC\'s folder (this computer has no keychain DGC can use)'
+    return {'server': server, 'env': variable, 'where': where,
+            'message': f'Saved your {label} in {place}.'}
+
+
+def remove_key(config, manager, name: str, *, server: str = '', env: str = '', input_handler=None, cancel=None) -> dict:
+    """Forget an installed plugin's saved key. A server connected with it is disconnected (or connects again with the
+    environment's key, where DGC was started with one)."""
+    from . import plugin_keys
+    record = next((r for r in _installed() if r.get('name') == name), None)
+    if record is None:
+        raise PluginError(f'{name} is not installed.')
+    server, spec, variable = _key_server(record, server, env)
+    had = plugin_keys.remove(server, [variable] if env else None)
+    if manager is not None:
+        getattr(manager, 'failures', {}).pop(server, None)
+    entry = _key_entry(server) or record
+    described = plugin_keys.describe(entry, variable)
+    if manager is not None and server in getattr(manager, 'servers', {}):
+        if variable in os.environ:
+            connect(config, manager, record, input_handler=input_handler, cancel=cancel)
+        else:
+            manager.disconnect(server)
+            getattr(manager, '_runtime_specs', {}).pop(server, None)
+    revoke = (f" To stop it working everywhere, delete it at {described['manage_url']}."
+              if described.get('manage_url') else '')
+    message = (f"Removed your {described['label']} from this computer.{revoke}" if had
+               else f"No {described['label']} was saved here.")
+    return {'server': server, 'env': variable, 'removed': had, 'message': message}
 
 
 def ensure_first_party() -> None:
@@ -610,6 +694,52 @@ def cli_mcp_input(ui):
     return handler
 
 
+def _key_entry(server: str) -> dict:
+    """The catalog entry that labels a server's key: the curated one now (an older install's record predates its
+    `keys`), else the installed record that owns the server."""
+    owner = next((r for r in _installed() if server in record_servers(r)), None)
+    if owner is None:
+        return {}
+    try:
+        current = next((e for e in sources.read_json(CATALOG_PATH)['plugins'] if e.get('name') == owner['name']), None)
+    except (OSError, sources.SourceError, KeyError, TypeError):
+        current = None
+    return {**owner, **(current or {})}
+
+
+def missing_keys(server: str, spec: dict, supplied=None) -> list[str]:
+    """The variables this server still lacks: not given to it, not saved on its page, not in the environment."""
+    from . import plugin_keys
+    supplied = supplied if isinstance(supplied, dict) else (spec.get('env') or {})
+    saved = set(plugin_keys.saved_names(server, spec))
+    return [key for key in spec.get('env_names', []) if isinstance(key, str)
+            and key not in supplied and key not in saved and key not in os.environ]
+
+
+def missing_key_message(server: str, missing: list[str]) -> str:
+    from . import plugin_keys
+    entry = _key_entry(server)
+    if not entry:
+        # A server you added yourself, not a plugin's: its key belongs in its own form.
+        return (f"Needs {missing[0] if missing else 'its key'}. Set it in the environment DGC starts with, or save a "
+                f"token for this server in Settings → MCP servers.")
+    return plugin_keys.missing_message(entry, missing[0] if missing else '', entry.get('display_name') or server)
+
+
+def refused_key_message(server: str, spec: dict, error: str) -> str:
+    """A server that turned its key away (HTTP 401), said plainly with what to check; else the error unchanged."""
+    from . import plugin_keys
+    if '(HTTP 401)' not in str(error) or not plugin_keys.key_names(spec):
+        return error
+    entry = _key_entry(server)
+    label = plugin_keys.describe(entry, plugin_keys.key_names(spec)[0])['label']
+    plugin = entry.get('display_name') or server
+    if label.lower().startswith(plugin.lower() + ' '):
+        label = label[len(plugin) + 1:]                  # "GitHub didn't accept this personal access token"
+    return (f"{plugin} didn't accept this {label} (HTTP 401). Check that you copied all of it and that it hasn't "
+            f"expired or been revoked, or create a new one, save it here, and connect again.")
+
+
 def connect(config, manager, record: dict, *, input_handler, cancel=None) -> None:
     _availability_ok(record['name'])
     specs = register_mcp(config, record)
@@ -618,13 +748,58 @@ def connect(config, manager, record: dict, *, input_handler, cancel=None) -> Non
     if not active: return
     runtime = config.mcp_runtime_servers(active) if hasattr(config, 'mcp_runtime_servers') else active
     available = {}
+    from . import plugin_keys
+    from .mcp import _has_device_sign_in
     for name, spec in runtime.items():
-        supplied = spec.get('env', {})
-        missing = [key for key in spec.get('env_names', []) if key not in supplied and key not in os.environ]
-        if missing:
-            manager.failures[name] = 'Configure ' + ', '.join(missing) + ' in MCP server settings before connecting.'
+        # A key saved on the plugin's page fills its variable (MCPManager.connect_all reads it from the keychain);
+        # the environment DGC started with is the fallback for anyone who already sets it.
+        missing = missing_keys(name, spec)
+        only_bearer = bool(missing) and spec.get('transport') == 'remote' and set(missing) <= set(plugin_keys.key_names(spec))
+        client = sign_in_client(name, spec, config) if only_bearer else None
+        if client:
+            # No key: sign in with the service instead (GitHub's device flow, with DGC's registered app).
+            available[name] = _signing_in(spec, client)
+        elif only_bearer and _has_device_sign_in(name, spec):
+            available[name] = spec                      # signed in before; connect_all sends that sign-in
+        elif missing:
+            manager.failures[name] = missing_key_message(name, missing)
         else: available[name] = spec
     if available: manager.connect_all(available, input_handler=input_handler, cancel=cancel)
+
+
+def sign_in_client(server: str, spec: dict, config=None, entry: dict | None = None) -> dict | None:
+    """The app a plugin signs in with instead of a key, when DGC has one: GitHub's device flow needs only a public
+    client id, from the setting the catalog names (``github_sign_in_client_id``) or shipped in the catalog itself.
+    None until one is set: DGC ships no client secret, and registers nothing at the vendor by itself."""
+    from . import plugin_keys
+    names = plugin_keys.key_names(spec)
+    if not names or spec.get('transport') != 'remote':
+        return None
+    found = plugin_keys.describe(entry if entry and entry.get('keys') else _key_entry(server), names[0]).get('sign_in') or {}
+    if found.get('kind') != 'device':
+        return None
+    client_id, setting = '', found.get('client_id_setting')
+    if config is not None and isinstance(setting, str) and re.fullmatch(r'[a-z0-9_]{1,64}', setting):
+        try:
+            client_id = str(config.get(setting, '') or '').strip()
+        except Exception:  # noqa: BLE001 -- a config that can't answer has no client id
+            client_id = ''
+    client_id = client_id or str(found.get('client_id') or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9._-]{1,128}', client_id):
+        return None
+    return {'client_id': client_id, 'grant': 'device', 'provider': str(found.get('provider') or '')[:40]}
+
+
+def _signing_in(spec: dict, client: dict) -> dict:
+    """This connection signs in with the service (DGC's own client runs the device flow) instead of sending a key."""
+    launch = {k: v for k, v in spec.items() if k != 'auth_env'}
+    launch['args'] = [*spec.get('args', []), '--static-oauth-client-info',
+                      json.dumps({'client_id': client['client_id'], 'grant': 'device'}, separators=(',', ':'))]
+    return launch
+
+
+_USAGE = ("dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME|key NAME [--remove]|"
+          "uninstall NAME|marketplace list|add SOURCE|remove NAME|refresh NAME|installed")
 
 
 def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
@@ -650,7 +825,41 @@ def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
         if result['retained_servers']: print('Kept edited/shared MCP servers: ' + ', '.join(result['retained_servers']))
         return 0
     if action in ("-h", "--help", "help"):
-        print("usage: dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME|uninstall NAME|marketplace list|add SOURCE|remove NAME|refresh NAME|installed")
+        print("usage: " + _USAGE)
+        return 0
+    if action == "key" and len(argv) >= 2:
+        # A plugin's key, kept in the system keychain like a sign-in: typed at a hidden prompt (or piped in), never
+        # an argument other users of this computer could read from the process list.
+        name, rest = argv[1], argv[2:]
+        server = rest[rest.index("--server") + 1] if "--server" in rest and rest.index("--server") + 1 < len(rest) else ""
+        if "--remove" in rest:
+            print(remove_key(config, manager, name, server=server)["message"])
+            return 0
+        record = next((r for r in _installed() if r.get("name") == name), None)
+        if record is None:
+            raise PluginError(f"{name} is not installed. Run: dgc plugin install {name}")
+        from . import plugin_keys
+        target, _spec, variable = _key_server(record, server)
+        described = plugin_keys.describe(_key_entry(target) or record, variable)
+        import sys
+        if sys.stdin.isatty():
+            if described.get("create_url"):
+                print(f"Create one at {described['create_url']}")
+            if described.get("permissions"):
+                print(described["permissions"])
+            from getpass import getpass
+            value = getpass(f"{described['label']} › ")
+        else:
+            value = sys.stdin.readline()
+        print(save_key(config, None, name, value, server=target)["message"])
+        if record.get("sign_in_url") and manager is not None and ui is not None:
+            connect(config, manager, record, input_handler=cli_mcp_input(ui))
+            names = set(record_servers(record))
+            if names <= set(manager.servers):
+                print(f"{record.get('display_name') or name} is connected. Its tools are ready.")
+            else:
+                raise PluginError("Saved, but not connected: " + "; ".join(
+                    str(manager.failures.get(n, "not connected")) for n in names - set(manager.servers)))
         return 0
     if action == "list":
         for row in search(""):
@@ -687,15 +896,19 @@ def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
         if record.get("sign_in_url") and manager is not None and ui is not None:
             connect(config, manager, record, input_handler=cli_mcp_input(ui))
             names = set(record_servers(record))
+            waiting = [n for n, spec in record_servers(record).items()
+                       if n not in manager.servers and missing_keys(n, spec)
+                       and manager.failures.get(n) == missing_key_message(n, missing_keys(n, spec))]
             if names <= set(manager.servers): print(f"{record['name']} is connected. Its tools are ready.")
             elif record.get('setup_required'): print(record.get('setup_instructions', 'MCP setup is required.'))
+            elif waiting and set(waiting) == names - set(manager.servers):
+                # Installed, and waiting for its key: that is the next step, not a failure.
+                print(f"Installed {record.get('display_name') or record['name']}. " + manager.failures[waiting[0]])
             else: raise PluginError('Plugin installed but not connected: ' + '; '.join(str(manager.failures.get(n, 'not connected')) for n in names - set(manager.servers)))
-        elif record.get("auth") == "pat":
-            print("Set GITHUB_PAT_TOKEN, then run: dgc plugin sign-in github")
         else:
             print("Reload DGC so the new skills are available.")
         return 0
-    raise PluginError("usage: dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME|uninstall NAME|marketplace list|add SOURCE|remove NAME|refresh NAME|installed")
+    raise PluginError("usage: " + _USAGE)
 
 
 def _skill_files(source: Path) -> list[Path]:
@@ -911,8 +1124,14 @@ def uninstall(name: str, *, config, manager=None) -> dict:
         state = _state()
         state['removed_defaults'] = sorted(set(state.get('removed_defaults', [])) | {name})
         sources.write_json(STATE_PATH,state)
-    from . import plugin_signin
+    from . import plugin_keys, plugin_signin
     signed_out = [message for message in (plugin_signin.forget(server)['message'] for server in removed) if message]
+    # A key saved on its page goes with it (a server another plugin or the user still keeps keeps its key). Only the
+    # vendor can revoke the key itself.
+    keyed = (set(record_servers(record)) | set(owned) | set(removed)) - set(retained)
+    if any([plugin_keys.remove(server) for server in sorted(keyed)]):
+        signed_out.append('Its saved key was deleted from this computer; revoke the key itself in your account '
+                          'at the service if you no longer use it.')
     return {'name':name, 'retained_servers':retained, 'removed_servers':removed, 'signed_out':signed_out}
 
 

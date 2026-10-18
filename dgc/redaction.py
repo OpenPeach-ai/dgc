@@ -162,6 +162,14 @@ def secret_values(config=None) -> tuple[str, ...]:
                     add(value)
         for value in getattr(config, "_session_secret_values", ()):
             add(value)
+    # A plugin's key saved on its page (plugin_keys): known here once this process saved or sent it, never by
+    # reading the keychain, so a server that echoes it back is redacted like any other credential.
+    try:
+        from .plugin_keys import known_values
+        for value in known_values():
+            add(value)
+    except Exception:  # noqa: BLE001 -- redaction never fails because a module couldn't load
+        pass
     for value in _environment_secret_values():
         add(value)
     return tuple(sorted(values, key=lambda item: (-len(item), item)))

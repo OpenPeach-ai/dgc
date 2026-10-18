@@ -64,4 +64,6 @@ body.vscode-high-contrast{--line:#888;--border-strong:#fff;--muted:#ddd}
    and the page and its cards give back a few pixels of their side padding.
    :where() keeps the row rules below any row's own; a logo or mark stays on the line with its words. */
 @media(max-width:480px){body{padding:0}main{padding-inline:12px}.card{padding-inline:12px}.field:has(.switch){flex-wrap:wrap}.field:has(.switch)>span{flex:1 1 150px}:where(.row){flex-wrap:wrap}:where(.row)>.copy:first-child,:where(.row)>.row-open{flex:1 1 150px}:where(.row)>:is(.logo,.mark)+.copy{flex:1 1 90px}.memory-edit input{flex-basis:100%}}
-
+/* A plugin's key field on its page (GitHub's token): the field and its Save/Remove in a row of their own. */
+.plugin-key .key-form{gap:12px;margin-top:12px}.plugin-key .key-form .actions{display:flex;gap:8px}.plugin-key .key-where{margin:10px 0 6px}.plugin-key .key-saved{margin-left:auto}.plugin-key .key-error,.plugin-key .key-note{margin:12px 0 0}.plugin-key code{overflow-wrap:anywhere}
+.plugin-key .key-sign-in{margin:12px 0}.banner .signin-code{font-size:14px;letter-spacing:.08em;user-select:all;padding:1px 6px;border-radius:6px;background:var(--surface,#2a2a2a)}

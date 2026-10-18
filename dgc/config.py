@@ -475,6 +475,9 @@ DEFAULTS: dict = {
     "disabled_mcp_servers": [],                # lifecycle state separate from credential identity
     "plugin_credentials_store": "auto",        # remote plugin sign-ins: auto (the system keychain, else an
                                                 # owner-only file) | keyring (keychain or fail) | file
+    # Sign in with GitHub on the GitHub plugin's page: the client id of a GitHub OAuth App with its device flow on
+    # (no secret). Blank until DGC ships OpenPeach's in plugin_catalog.json; set here to try one before then.
+    "github_sign_in_client_id": "",
     "language_servers": {},                     # language/ext -> {command, args, env, extensions}
     "code_intel_timeout": 15,                   # configured LSP request timeout (0.1-60s)
     "code_intel_lsp_idle_s": 120,               # reuse per-project LSP this long; 0 = one-shot

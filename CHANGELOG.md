@@ -584,6 +584,25 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 - **A cancelled sign-in says so.** A plugin whose sign-in you cancelled or declined now reads "Sign-in cancelled.
   Connect again when you're ready." on its card and in `/mcp`, and any other connection you stop reads "Connection
   cancelled.", instead of the raw "initialize failed: cancelled by user".
+- **GitHub, Brevo and Arize take their key on their own page.** Connect on GitHub said "Configure GITHUB_PAT_TOKEN in
+  MCP server settings before connecting." Now Settings → Plugins → GitHub has a field for your personal access token,
+  with a link to make one and the permissions it needs; Save keeps it where DGC keeps sign-ins (the system keychain,
+  else an owner-only file), the page shows Saved (never the token), and Remove forgets it. Connect then needs no
+  environment variable; `GITHUB_PAT_TOKEN` in the environment still works, and a saved key is used before it. A key is
+  only ever sent to the address it was saved for, uninstalling the plugin deletes it, and a key the service refuses
+  says so plainly ("GitHub didn't accept this personal access token (HTTP 401) …"). A plugin with no key yet
+  says "Needs a GitHub personal access token. Save it on GitHub's page in Settings → Plugins, or with: dgc plugin key
+  github." — also when a new chat starts, which used to say "header refers to GITHUB_PAT_TOKEN, which isn't set".
+- **`dgc plugin key NAME [--remove]`** saves a plugin's key from a terminal: typed at a hidden prompt, or piped in,
+  never an argument other users could read from the process list. Then it connects.
+- **Sign in with GitHub, ready for DGC's app.** GitHub's sign-in server lets no app register itself and wants an app's
+  secret for a browser sign-in, so DGC uses GitHub's device sign-in, which needs only a public client id: a short
+  code, copied for you, entered at github.com/login/device. DGC's own client runs it and refreshes the sign-in with no
+  secret. It turns on once OpenPeach's GitHub app id is in the catalog (or `github_sign_in_client_id` is set in
+  `~/.dgc/config.json`); until then the token field is the way in.
+- **Editor protocol:** `ready.capabilities.plugin_keys: true` offers `set_plugin_key {name, key, server?}` and
+  `remove_plugin_key {name, server?}`, answered with `plugin_operation` and `plugin_catalog`; plugin list items carry
+  `keys` (`server`, `env`, `saved`, `from_environment`, `sign_in`, and how to label and make the key), never a key.
 - **Asana and Docusign**, set up the way both vendors document for coding tools: you create an app for DGC in your
   own account, and **Settings → Plugins → Apps → Connect** walks you through it: each step, the exact redirect URL
   to register (with Copy), and the ID and secret it gives you. The secret stays in the editor's secret storage.

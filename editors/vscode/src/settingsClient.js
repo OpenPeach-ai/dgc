@@ -36,6 +36,10 @@ let directory = false, marketFilter = 'all', marketplaces = [], pluginNotice = '
 let operationPending = false;
 let connectingPlugin = null;
 const errors = new Map(), pending = new Map(), skillPending = new Map();
+// A plugin's key field (GitHub's token, Brevo's key): what is typed so far, survives the page redrawing under it;
+// a Save or Remove waiting on DGC; and what DGC said back. Keyed plugin|server|variable. The key itself goes to DGC
+// once and is never sent back here: the page only learns whether one is saved.
+const keyDrafts = new Map(), keyPending = new Map(), keyNotes = new Map();
 const send = m => vscode.postMessage(m);
 const switchHTML = (on, label, attrs = '', disabled = false) => `<button type="button" class="switch${on ? ' on' : ''}" role="switch" aria-checked="${!!on}" aria-label="${esc(label)}" ${attrs}${disabled ? ' disabled' : ''}><i></i></button>`;
 const ui = {
@@ -192,7 +196,9 @@ function appLogo(row, app) { return row.name === 'google-workspace' && serviceLo
 const logoPlates = {composio: 'dark', arcade: 'light', superpowers: 'light'};
 function logo(row, big = false) { if (connectorLogos[row.name]) row = {...row, logo:connectorLogos[row.name]}; if (row.name === 'composio') row = {...row, logo:composioLogo}; if (row.name === 'google-workspace') row = {...row, logo:googleLogo}; const plate = logoPlates[row.name]; return row.logo ? `<img class="logo${plate ? ' plate-' + plate : ''}" width="${big ? 72 : 40}" height="${big ? 72 : 40}" alt="${esc(row.display_name || row.name)}" src="${esc(row.logo)}">` : `<span class="mark" aria-hidden="true">${icon('plugins')}</span>`; }
 function banner(row) { if (!signin || row && signin.server !== row.name && !(row.server_names || []).includes(signin.server))
-    return ''; return `<div class="banner" role="status"><p>Finish connecting ${esc(signin.title)} in your browser</p><div class="actions"><button class="secondary" data-browser>Open browser</button><button class="secondary" data-cancel-connect>Cancel</button></div></div>`; }
+    return ''; const code = /^[A-Za-z0-9-]{4,24}$/.test(signin.code || '') ? signin.code : '';
+    // A device sign-in (GitHub's): the code to enter on the page that opened, to copy again if it was lost.
+    return `<div class="banner" role="status"><p>${code ? `Enter the code <code class="signin-code">${esc(code)}</code> on the page that opened to finish connecting ${esc(signin.title)}` : `Finish connecting ${esc(signin.title)} in your browser`}</p><div class="actions">${code ? `<button class="secondary" data-copy-code="${esc(code)}">Copy code</button>` : ''}<button class="secondary" data-browser>Open browser</button><button class="secondary" data-cancel-connect>Cancel</button></div></div>`; }
 function issue(row) { const message = errors.get(row.name) || row.connection_error; return message ? `<div class="banner error" role="alert"><p>${esc(message)}</p></div>` : ''; }
 function pluginControl(row) {
     if (!offered(row)) return '<span class="status">Unavailable</span>';
@@ -425,8 +431,10 @@ function reviewPlugin(name) {
     if (row && browserPlugin(row)) decorateConnection(row, `Install ${row.display_name || row.name}`);
     send({type:'inspectPlugin',name});
 }
+// A plugin that takes a key (row.auth 'pat') connects with what is saved on its page, never a browser.
+const keyPlugin = row => row.auth === 'pat' || !!row.keys?.length;
 function browserPlugin(row) {
-    return !row.setup_required && (row.auth === 'browser' || [...(row.mcps || []), ...Object.values(row.server_specs || {})].some(s => /^https:\/\//.test(s.url || '')));
+    return !row.setup_required && !keyPlugin(row) && (row.auth === 'browser' || [...(row.mcps || []), ...Object.values(row.server_specs || {})].some(s => /^https:\/\//.test(s.url || '')));
 }
 function connectionArt(row) {
     const name = row.display_name || row.name;
@@ -608,11 +616,13 @@ function bindPlugins(main) {
     main.querySelectorAll('[data-composio-catalog]').forEach(b => b.onclick = () => send({type:'composioCatalog'}));
     main.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { detail = b.dataset.open; render(); $('main').scrollTop = 0; });
     main.querySelectorAll('[data-install]').forEach(b => b.onclick = () => reviewPlugin(b.dataset.install));
-    main.querySelectorAll('[data-connect]').forEach(b => b.onclick = () => { const row=items.find(r=>r.name===b.dataset.connect); if(row) APP_CONNECTORS[row.name] ? openConnector(row.name) : showConnection(row); });
+    main.querySelectorAll('[data-connect]').forEach(b => b.onclick = () => { const row=items.find(r=>r.name===b.dataset.connect); if(!row) return; if (APP_CONNECTORS[row.name]) openConnector(row.name); else if (keyPlugin(row)) { pending.set(row.name, true); errors.delete(row.name); send({type: 'installPlugin', name: row.name}); render(); } else showConnection(row); });
     main.querySelectorAll('[data-uninstall]').forEach(b=>b.onclick=()=>{operationPending=true;b.disabled=true;send({type:'uninstallPlugin',name:b.dataset.uninstall});});
     main.querySelectorAll('[data-plugin]').forEach(b => b.onclick = () => { const row = items.find(r => r.name === b.dataset.plugin), enabled = !row.skills.every(s => s.enabled !== false); row.skills.filter(s => (s.enabled !== false) !== enabled).forEach(s => { skillPending.set(s.name, enabled); send({ type: 'skillToggle', name: s.name, enabled }); }); render(); });
     main.querySelectorAll('[data-skill]').forEach(b => b.onclick = () => { const enabled = b.getAttribute('aria-checked') !== 'true'; skillPending.set(b.dataset.skill, enabled); send({ type: 'skillToggle', name: b.dataset.skill, enabled }); b.disabled = true; });
     main.querySelectorAll('[data-browser]').forEach(b => b.onclick = () => send({ type: 'openSignIn' }));
+    main.querySelectorAll('[data-copy-code]').forEach(b => b.onclick = () => send({ type: 'copy', text: b.dataset.copyCode }));
+    main.querySelectorAll('[data-key-sign-in]').forEach(b => b.onclick = () => { const row = items.find(r => r.name === b.dataset.keySignIn); if (!row) return; pending.set(row.name, true); errors.delete(row.name); send({type: 'installPlugin', name: row.name}); render(); });
     main.querySelectorAll('[data-desktop-setup]').forEach(b => b.onclick = openDesktopSetup);
     main.querySelectorAll('[data-cancel-connect]').forEach(b => b.onclick = () => { send({ type: 'cancelSignIn' }); });
     main.querySelectorAll('a[data-external]').forEach(a => a.onclick = e => { e.preventDefault(); send({ type: 'openPluginLink', url: a.getAttribute('href') }); });
@@ -646,6 +656,61 @@ function openDesktopSetup() {
         render();
     };
 }
+const keyId = (row, k) => `${row.name}|${k.server}|${k.env}`;
+function keyPanels(row, keys) {
+    const failure = errors.get(row.name) || row.connection_error || '';
+    return keys.map((k, index) => {
+        const id = keyId(row, k), note = keyNotes.get(id) || {}, busy = keyPending.get(id) || '';
+        const label = k.label || 'API key';
+        const ready = k.saved || k.from_environment;
+        const signedIn = !ready && row.connected && k.sign_in;
+        const state = k.saved ? `<span class="status connected key-saved">Saved</span>` : signedIn ? `<span class="status connected key-saved">Signed in</span>` : '';
+        const kept = k.stored === 'file' ? "in an owner-only file on this computer (there's no system keychain DGC can use here)" : 'in your system keychain';
+        const where = k.saved ? `Your ${esc(label)} is saved ${kept}. It isn't shown again; paste a new one to replace it.`
+            : k.from_environment ? `DGC is using <code>${esc(k.env)}</code> from the environment it started with. A ${esc(label)} saved here is used instead.`
+            : signedIn ? `Connected with your ${esc(k.sign_in)} sign-in, kept in your system keychain. A ${esc(label)} saved here is used instead.`
+            : k.sign_in ? `Sign in with ${esc(k.sign_in)} in your browser, or paste your own ${esc(label)} here and choose Save, then Connect.`
+            : `${esc(row.display_name)} connects with your own ${esc(label)}. Paste it here and choose Save, then Connect.`;
+        const signInButton = k.sign_in && !ready && !row.connected
+            ? `<div class="actions key-sign-in"><button class="save" data-key-sign-in="${esc(row.name)}"${pending.has(row.name) ? ' disabled' : ''}>${pending.has(row.name) ? 'Signing in…' : `Sign in with ${esc(k.sign_in)}`}</button></div>` : '';
+        const links = [k.create_url ? link(k.create_url, k.create_label || 'Create one') : '', k.help_url ? link(k.help_url, 'How it works') : ''].filter(Boolean).join(' · ');
+        // A connection that failed for want of a key is this panel's own message above; any other is said here --
+        // but not while a new Connect is running: the last attempt's error is no longer the news.
+        const connecting = pending.has(row.name);
+        const problem = note.error || (!connecting && (ready || k.sign_in) && keys.length === index + 1 ? failure : '');
+        return `<section class="connector-panel plugin-key" aria-label="${esc(label)}"><div class="connector-heading"><div class="copy"><h3>${esc(label)}</h3></div>${state}</div>`
+            + `<p class="key-where">${where}</p>${signInButton}${links ? `<p>${links}</p>` : ''}`
+            + (k.permissions ? `<p class="note key-permissions"><strong>Permissions it needs.</strong> ${esc(k.permissions)}</p>` : '')
+            + `<form class="mcp-form key-form" data-key-form="${esc(id)}"><label>${esc(label)}<input type="password" id="plugin-key-${index}" data-key-input="${esc(id)}" autocomplete="off" spellcheck="false" placeholder="${esc(k.saved ? 'Saved. Paste a new one to replace it' : k.placeholder || 'Paste it here')}"${busy ? ' disabled' : ''}></label>`
+            + `<div class="actions"><button class="save" type="submit"${busy ? ' disabled' : ''}>${busy === 'save' ? 'Saving…' : 'Save'}</button>${k.saved ? `<button type="button" class="secondary" data-key-remove="${esc(id)}"${busy ? ' disabled' : ''}>${busy === 'remove' ? 'Removing…' : 'Remove'}</button>` : ''}</div></form>`
+            + (connecting && ready && keys.length === index + 1 ? `<p class="note key-note" role="status">Connecting to ${esc(row.display_name)}…</p>`
+                : note.message && !problem ? `<p class="note key-note" role="status">${esc(note.message)}</p>` : '')
+            + (problem ? `<p class="error-message key-error" role="alert">${esc(problem)}</p>` : '')
+            + '</section>';
+    }).join('');
+}
+function bindKeys(main, row) {
+    for (const k of row.keys || []) {
+        const id = keyId(row, k);
+        const form = [...main.querySelectorAll('[data-key-form]')].find(f => f.dataset.keyForm === id);
+        const input = form?.querySelector('[data-key-input]');
+        if (!form || !input) continue;
+        if (keyDrafts.has(id)) input.value = keyDrafts.get(id);
+        input.oninput = () => keyDrafts.set(id, input.value);
+        form.onsubmit = e => {
+            e.preventDefault();
+            const key = input.value.trim();
+            if (!key) { keyNotes.set(id, {error: 'Paste the key first.'}); render(); return; }
+            // Sent once, then gone from the page: the field, the draft and the message all forget it.
+            keyDrafts.delete(id); input.value = '';
+            keyPending.set(id, 'save'); keyNotes.delete(id); errors.delete(row.name);
+            send({type: 'savePluginKey', name: row.name, server: k.server, env: k.env, key});
+            render();
+        };
+        const remove = [...main.querySelectorAll('[data-key-remove]')].find(b => b.dataset.keyRemove === id);
+        if (remove) remove.onclick = () => { keyPending.set(id, 'remove'); keyNotes.delete(id); errors.delete(row.name); send({type: 'removePluginKey', name: row.name, server: k.server, env: k.env}); render(); };
+    }
+}
 function renderDetail(main) {
     const row = items.find(r => r.name === detail);
     if (!row) {
@@ -655,7 +720,9 @@ function renderDetail(main) {
     }
     const skills = row.skills || [], apps = row.apps || [], mcps = row.mcps || [];
     const connections = servers.filter(s => pluginServerNames(row).has(s.name));
-    main.innerHTML = `<div class="crumbs"><button id="back">Plugins</button><span aria-hidden="true">›</span><span>${esc(row.display_name)}</span></div>` + banner(row) + issue(row) + `<div class="hero">${logo(row, true)}<div class="copy"><h1>${esc(row.display_name)}</h1><p class="sub">${esc(row.summary)}</p></div><div class="actions">${pluginControl(row)}${row.installed && offered(row) && mcps.length && !row.setup_required && !row.connected && !pending.has(row.name) && !row.opening ? `<button class="install" data-connect="${esc(row.name)}">Connect</button>` : ''}${row.installed ? `<button class="secondary" data-uninstall="${esc(row.name)}">Uninstall</button>` : ''}</div></div>${row.connected ? '<p class="status connected">Connected</p>' : ''}${row.install === 'block' ? `<p class="note">${esc(row.block_reason)}</p>` : ''}`
+    const keys = row.installed && offered(row) ? row.keys || [] : [];
+    const keyReady = keys.every(k => k.saved || k.from_environment);
+    main.innerHTML = `<div class="crumbs"><button id="back">Plugins</button><span aria-hidden="true">›</span><span>${esc(row.display_name)}</span></div>` + banner(row) + (keys.length ? '' : issue(row)) + `<div class="hero">${logo(row, true)}<div class="copy"><h1>${esc(row.display_name)}</h1><p class="sub">${esc(row.summary)}</p></div><div class="actions">${pluginControl(row)}${row.installed && offered(row) && mcps.length && !row.setup_required && !row.connected && !pending.has(row.name) && !row.opening && keyReady ? `<button class="install" data-connect="${esc(row.name)}">Connect</button>` : ''}${row.installed ? `<button class="secondary" data-uninstall="${esc(row.name)}">Uninstall</button>` : ''}</div></div>${row.connected ? '<p class="status connected">Connected</p>' : ''}${row.install === 'block' ? `<p class="note">${esc(row.block_reason)}</p>` : ''}`
         + compatibilityDetails(row) + (row.setup_required && !row.connected ? `<div class="banner"><p>${esc(row.setup_instructions || 'Complete Google Cloud and OAuth setup before connecting.')}</p></div><p>${link(row.setup_url,'Setup instructions')}</p>` : '') + ((row.default_prompt || []).length ? `<div class="examples">${row.default_prompt.slice(0, 3).map(p => `<div class="example">${esc(p)}</div>`).join('')}</div>` : '') + `<p class="long-description">${esc(row.long_summary || row.summary)}</p>`
         + '<h3>Apps' + (apps.length ? ' · ' + apps.length : '') + '</h3>' + (apps.length ? apps.map(app => `<div class="row">${appLogo(row, app)}<span class="copy"><strong>${esc(typeof app === 'string' ? app : app.name)}</strong><span class="description">${mcps.length ? 'DGC connects to this service through the plugin’s MCP server.' : 'This package expects a ChatGPT app connection. It is unavailable in DGC without a standalone MCP server.'}</span></span></div>`).join('') : '<p class="note">No apps declared in this package.</p>')
         + `<h3>Skills${skills.length ? ' · ' + skills.length : ''}</h3>` + (skills.length ? skills.map(s => `<div class="row"><span class="copy"><strong>${esc(s.name)}</strong><span class="description skill-description" title="${esc(s.description)}">${esc(s.description || 'No description provided.')}</span></span>${row.installed && offered(row) ? switchHTML(s.enabled !== false, `Enable ${s.name}`, `data-skill="${esc(s.name)}"`, skillPending.has(s.name)) : ''}</div>`).join('') : '<p class="note">No instruction skills in this package.</p>')
@@ -663,6 +730,7 @@ function renderDetail(main) {
     if (row.installed && offered(row) && connections.length) {
         main.querySelector('.meta').previousElementSibling.insertAdjacentHTML('beforebegin', '<section class="plugin-connections"><h3>Connection</h3>' + serverRows(connections) + '</section>');
     }
+    if (keys.length) { main.querySelector('.hero').insertAdjacentHTML('afterend', keyPanels(row, keys)); bindKeys(main, row); }
     if (row.name === 'composio') main.querySelector('.hero').insertAdjacentHTML('afterend', composioPanel(true));
     if (APP_CONNECTORS[row.name]) main.querySelector('.hero').insertAdjacentHTML('afterend', connectorPanels(row.name));
     $('back').onclick = () => { detail = ''; render(); };
@@ -775,6 +843,16 @@ window.addEventListener('message', event => {
             render();
         else if (mcpEditing)
             formSignin();
+    }
+    else if (msg.type === 'pluginKeyResult') {
+        const row = items.find(r => r.name === msg.name);
+        for (const k of row?.keys || []) {
+            if (msg.server && k.server !== msg.server) continue;
+            const id = keyId(row, k);
+            keyPending.delete(id);
+            keyNotes.set(id, msg.error ? {error: msg.error} : {message: msg.message || ''});
+        }
+        if (section === 'plugins') render();
     }
     else if (msg.type === 'pluginResult') {
         pending.delete(msg.name);

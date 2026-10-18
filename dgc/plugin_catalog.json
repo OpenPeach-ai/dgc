@@ -390,7 +390,7 @@
   {
    "name": "github",
    "display_name": "GitHub",
-   "summary": "GitHub MCP with a personal access token named GITHUB_PAT_TOKEN. Not a browser login.",
+   "summary": "Repositories, issues and pull requests through GitHub's own MCP server. Connects with a GitHub personal access token you save on this page.",
    "source_kind": "codex",
    "upstream": "https://github.com/openai/plugins",
    "sha": "1dc195897af4161d039b80d8471ec0a10c9bbc89",
@@ -401,8 +401,25 @@
    "auth": "pat",
    "audited_on": "2026-09-23",
    "verification": "Package checked; authenticated tools not tested.",
-   "requirements": "A GitHub personal access token. Set GITHUB_PAT_TOKEN in the server environment or save a bearer token in MCP servers.",
+   "requirements": "A GitHub personal access token, saved on this page. GITHUB_PAT_TOKEN in the environment DGC starts with still works.",
    "terms_url": "https://docs.github.com/site-policy/github-terms/github-terms-of-service",
+   "keys": {
+    "GITHUB_PAT_TOKEN": {
+     "label": "GitHub personal access token",
+     "create_url": "https://github.com/settings/personal-access-tokens/new",
+     "create_label": "Create a fine-grained token on GitHub",
+     "manage_url": "https://github.com/settings/personal-access-tokens",
+     "help_url": "https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md",
+     "placeholder": "github_pat_…",
+     "permissions": "Repository access: the repositories DGC may use (or All repositories). Repository permissions: Contents, Issues and Pull requests set to Read and write (Metadata: Read-only is added for you); choose Read-only instead to let DGC only read. Add Actions, Workflows or others for those tools. An organization may need to approve the token. A classic token needs the repo and read:org scopes.",
+     "sign_in": {
+      "kind": "device",
+      "provider": "GitHub",
+      "client_id": "",
+      "client_id_setting": "github_sign_in_client_id"
+     }
+    }
+   },
    "privacy_url": "https://docs.github.com/site-policy/privacy-policies/github-privacy-statement",
    "cloud_execution": true
   },
@@ -1101,7 +1118,17 @@
    "auth": "pat",
    "audited_on": "2026-10-07",
    "compatibility_url": "https://developers.brevo.com/docs/mcp-protocol",
-   "requirements": "A Brevo account and an MCP server API key (Settings → SMTP & API → API Keys & MCP → Create MCP server API key). Save it as this server's token. The key has full access.",
+   "requirements": "A Brevo account and an MCP server API key (Settings → SMTP & API → API Keys & MCP → Create MCP server API key), saved on this page. The key has full access.",
+   "keys": {
+    "BREVO_MCP_TOKEN": {
+     "label": "Brevo MCP server API key",
+     "create_url": "https://app.brevo.com/settings/keys/api",
+     "create_label": "Open API Keys & MCP in Brevo",
+     "manage_url": "https://app.brevo.com/settings/keys/api",
+     "help_url": "https://developers.brevo.com/docs/mcp-protocol",
+     "permissions": "In Brevo: Settings → SMTP & API → API Keys & MCP → Create MCP server API key. The key has full access to your Brevo account."
+    }
+   },
    "verification": "The server refuses without a key, as it should; add your key to connect.",
    "cloud_execution": true,
    "source_kind": "preset",
@@ -1716,7 +1743,16 @@
    "auth": "pat",
    "audited_on": "2026-10-07",
    "compatibility_url": "https://arize.com/docs/api-clients/mcp/overview",
-   "requirements": "An Arize AX account and API key (Settings → API Keys), saved as this server's token. The skills need the ax CLI (uv or pipx) and ARIZE_SPACE.",
+   "requirements": "An Arize AX account and API key (Settings → API Keys), saved on this page. The skills need the ax CLI (uv or pipx) and ARIZE_SPACE.",
+   "keys": {
+    "ARIZE_API_KEY": {
+     "label": "Arize API key",
+     "create_url": "https://arize.com/docs/api-clients/mcp/authentication",
+     "create_label": "How to create one in Arize AX",
+     "help_url": "https://arize.com/docs/api-clients/mcp/overview",
+     "permissions": "In Arize AX: Settings → API Keys → New API Key. A user key reads every space you can see; Arize shows the key once."
+    }
+   },
    "verification": "The server refuses without a key, as it should; add your key to connect. 18 skills install.",
    "cloud_execution": true,
    "source_kind": "vendor",

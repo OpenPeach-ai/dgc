@@ -666,6 +666,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "composio_connection": {"request_id": _S(), "action": _f("string", enum=("connect", "check")), "toolkit": _f("string", enum=("gmail", "googlecalendar", "googledrive", "figma"))},
     "inspect_plugin": {"request_id": _S(), "name": _S()},
     "uninstall_plugin": {"request_id": _S(), "name": _S()},
+    # A plugin's own key (GitHub's personal access token, Brevo's MCP key), from the field on its page; offered when
+    # ready.capabilities.plugin_keys. The key goes to the system keychain and never comes back to the editor.
+    "set_plugin_key": {"request_id": _S(), "name": _S(), "key": _S(), "server": _S(False), "env": _S(False)},
+    "remove_plugin_key": {"request_id": _S(), "name": _S(), "server": _S(False), "env": _S(False)},
     "list_plugin_marketplaces": {"request_id": _S()},
     "add_plugin_marketplace": {"request_id": _S(), "source": _S()},
     "remove_plugin_marketplace": {"request_id": _S(), "name": _S()},

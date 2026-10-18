@@ -289,6 +289,13 @@
 
 - Hosted plugins no longer need Node.js: the CLI connects to them itself and keeps their sign-ins in your system
   keychain. The MCP server form's transport now reads **Remote (Streamable HTTP or SSE)**.
+- **A key field on the plugin's own page.** GitHub (personal access token), Brevo (MCP server API key) and Arize AX
+  (API key) show a masked field under the plugin's name, with a link to where the key is made and the permissions it
+  needs. Save hands it to DGC, which keeps it in your system keychain; the page then reads **Saved**, never the key,
+  with **Remove** beside it, and Connect appears. Anything missing is said beside the field, as is a key the service
+  refuses. The field comes with a CLI that offers `plugin_keys`.
+- **Sign in with GitHub** appears on GitHub's page once DGC has its GitHub app: the editor shows the code, copies it
+  and opens GitHub's device page, and the page shows the code again with Copy until you finish.
 - **Asana and Docusign** in Apps, with a guided setup for the app you create for DGC in your own account: the steps,
   the redirect URL to register with a Copy button, and fields for its ID and secret (kept in secret storage). For
   Docusign, choose a developer or a production account.

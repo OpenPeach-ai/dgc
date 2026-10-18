@@ -17,6 +17,12 @@ opens the sign-in through the same consent card the editor and terminal already 
 ``http://localhost:<port>/oauth/callback`` (or the loopback address a registered app names, such as Zoom's
 ``127.0.0.1``), and exchanges it with PKCE (S256) and the resource indicator (RFC 8707).
 Tokens refresh before they expire and after a 401; a 403 ``insufficient_scope`` signs in again for the larger scope.
+
+A service with no registration and no client metadata documents (GitHub) admits only apps registered with it, and
+GitHub still wants the app's secret for the code exchange, PKCE or not. Its device flow (RFC 8628) wants only the app's
+public client id: DGC shows a short code, opens the service's page for it, and polls until the user approves. That is
+used when DGC was given a client registered for it (``{"client_id": ..., "grant": "device"}``, the GitHub plugin's
+sign-in) and keeps that client with the sign-in, so refreshing needs nothing else.
 """
 from __future__ import annotations
 
@@ -524,6 +530,89 @@ class RemoteAuth:
                 continue
         return "localhost"
 
+    def _device_client(self) -> dict | None:
+        """A client registered for the device flow (no secret): given now, or kept with the sign-in."""
+        static = self.options.static_client or {}
+        saved = (self.saved or {}).get("client") or {}
+        for client in (static, saved):
+            if client.get("grant") == "device" and isinstance(client.get("client_id"), str) \
+                    and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", client["client_id"]):
+                return {"client_id": client["client_id"], "grant": "device"}
+        return None
+
+    def _device_sign_in(self, found: dict, client: dict, scope: str, saved: dict, step_up: bool) -> bool:
+        """RFC 8628: a short code the user enters on the service's own page; DGC polls until they approve."""
+        metadata = found["metadata"]
+        endpoint = metadata.get("device_authorization_endpoint")
+        if not isinstance(endpoint, str) or not _allowed(endpoint):
+            raise RemoteError("the service doesn't offer sign-in with a code")
+        body = {"client_id": client["client_id"], **({"scope": scope} if scope else {})}
+        response = self.session.post(endpoint, data=body, timeout=(CONNECT_TIMEOUT, 30), allow_redirects=False,
+                                     headers={"Accept": "application/json"})
+        try:
+            started = response.json() if len(response.content) <= MAX_METADATA else {}
+        except ValueError:
+            started = {}
+        if response.status_code != 200 or not isinstance(started, dict) \
+                or not all(isinstance(started.get(k), str) for k in ("device_code", "user_code", "verification_uri")):
+            reason = started.get("error") if isinstance(started, dict) else ""
+            raise RemoteError(f"the service didn't start the sign-in (HTTP {response.status_code}"
+                              f"{', ' + str(reason)[:60] if reason else ''})")
+        code, page = started["user_code"], started["verification_uri"]
+        if not re.fullmatch(r"[A-Za-z0-9-]{4,24}", code) or not _allowed(page) or len(page) > 300:
+            raise RemoteError("the service's sign-in code or page isn't one DGC can show")
+
+        def number(key, default, low, high):
+            value = started.get(key)
+            return max(low, min(int(value), high)) if isinstance(value, int) and not isinstance(value, bool) else default
+        interval, lasts = number("interval", 5, 1, 60), number("expires_in", 900, 60, 1800)
+        if not self.sign_in(page, None, code):
+            if step_up:
+                self._store({**saved, "step_up_scope": scope})
+                raise SignInDeclined(f"{urlsplit(self.options.url).hostname} needs more access for this. "
+                                     "Connect it again in Settings → Plugins to approve it.")
+            raise SignInDeclined("Needs sign-in. Connect it in Settings → Plugins.")
+        self.note("waiting for the code to be entered")
+        token_endpoint = metadata.get("token_endpoint")
+        deadline = time.monotonic() + lasts
+        while True:
+            wake = time.monotonic() + interval
+            while time.monotonic() < wake:
+                if self.cancelled():
+                    raise SignInDeclined("sign-in was cancelled")
+                time.sleep(0.2)
+            if time.monotonic() >= deadline:
+                raise RemoteError("the sign-in code expired before it was entered; connect again for a new one")
+            answer = self.session.post(token_endpoint, timeout=(CONNECT_TIMEOUT, 30), allow_redirects=False,
+                                       headers={"Accept": "application/json"},
+                                       data={"client_id": client["client_id"], "device_code": started["device_code"],
+                                             "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
+            try:
+                value = answer.json() if len(answer.content) <= MAX_METADATA else {}
+            except ValueError:
+                value = {}
+            value = value if isinstance(value, dict) else {}
+            if isinstance(value.get("access_token"), str) and value["access_token"]:
+                tokens = self._tokens(value)
+                break
+            error = str(value.get("error") or "")
+            if error == "authorization_pending":
+                continue
+            if error == "slow_down":
+                interval = min(interval + 5, 60)
+                continue
+            if error == "expired_token":
+                raise RemoteError("the sign-in code expired before it was entered; connect again for a new one")
+            if error == "access_denied":
+                raise SignInDeclined("sign-in was cancelled")
+            raise RemoteError(f"the service didn't sign you in ({error[:60] or 'HTTP ' + str(answer.status_code)})")
+        self._store({"client": client, "issuer": found["issuer"], "resource": "", "tokens": tokens,
+                     "server": {key: metadata.get(key) for key in (
+                         "token_endpoint", "revocation_endpoint", "token_endpoint_auth_methods_supported",
+                         "revocation_endpoint_auth_methods_supported") if metadata.get(key) is not None}})
+        self.note("signed in")
+        return True
+
     def _client(self, found: dict, redirect: str) -> dict:
         static = self._static()
         if static:
@@ -572,6 +661,10 @@ class RemoteAuth:
             reason = value.get("error") if isinstance(value, dict) else ""
             raise RemoteError(f"the service didn't issue a token (HTTP {response.status_code}"
                               f"{', ' + str(reason)[:60] if reason else ''})")
+        return self._tokens(value)
+
+    @staticmethod
+    def _tokens(value: dict) -> dict:
         if str(value.get("token_type") or "bearer").lower() != "bearer":
             raise RemoteError("the service issued a kind of token DGC can't use")
         tokens = {"access_token": value["access_token"], "token_type": "Bearer"}
@@ -661,6 +754,9 @@ class RemoteAuth:
                 scope = " ".join(dict.fromkeys([*held, *challenge["scope"].split()]))
             if saved.get("step_up_scope"):               # more access a tool asked for since the last sign-in
                 scope = " ".join(dict.fromkeys([*scope.split(), *str(saved["step_up_scope"]).split()]))
+            device = self._device_client()
+            if device is not None:
+                return self._device_sign_in(found, device, scope, saved, step_up)
             state = secrets.token_urlsafe(24)
             document = not self.options.static_client and uses_client_document(metadata, self.session)
             port = self.options.callback_port

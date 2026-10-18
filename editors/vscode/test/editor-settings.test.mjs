@@ -544,3 +544,112 @@ test('Settings -> Voice lists each model with its size and licence; Install show
   x.message({type:'voice_unavailable',message:'Update the DGC CLI to use voice.'});
   assert.match(x.d.querySelector('.banner.error').textContent,/Update the DGC CLI/);
 });
+
+// A plugin that connects with a key the user makes at the vendor (GitHub's personal access token). The founder got
+// "Configure GITHUB_PAT_TOKEN in MCP server settings before connecting." for Connect; the plugin's own page now has
+// the field. The rows are what dgc serve's plugin list says: whether a key is saved, never the key.
+const githubKey={server:'github',env:'GITHUB_PAT_TOKEN',saved:false,from_environment:false,sign_in:'',label:'GitHub personal access token',
+  create_url:'https://github.com/settings/personal-access-tokens/new',create_label:'Create a fine-grained token on GitHub',
+  manage_url:'https://github.com/settings/personal-access-tokens',help_url:'https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md',
+  permissions:'Repository permissions: Contents, Issues and Pull requests set to Read and write.',placeholder:'github_pat_…'};
+const github={name:'github',display_name:'GitHub',summary:'Repositories, issues and pull requests.',installed:true,auth:'pat',
+  server_names:['github'],mcps:[{name:'github',url:'https://api.githubcopilot.com/mcp/'}],skills:[],keys:[githubKey]};
+const openGithub=(x,row=github)=>{x.message({type:'plugins',items:[row]});x.click('[data-nav=plugins]');x.click('[data-open=github]');};
+const keyForm=x=>x.d.querySelector('[data-key-form]');
+
+test('GitHub: its page has a masked token field with where to make one and what it needs; no Connect until one is saved',()=>{
+  const x=setup();openGithub(x);
+  const field=x.d.querySelector('[data-key-input]');
+  assert.ok(field,'the field is on the plugin page itself');
+  assert.equal(field.type,'password','masked');
+  assert.equal(field.getAttribute('autocomplete'),'off');
+  assert.equal(field.value,'');
+  assert.match(field.closest('label').textContent,/GitHub personal access token/);
+  const make=[...x.d.querySelectorAll('a[data-external]')].find(a=>/Create a fine-grained token/.test(a.textContent));
+  assert.equal(make?.getAttribute('href'),'https://github.com/settings/personal-access-tokens/new');
+  make.click();assert.deepEqual({...x.sent.at(-1)},{type:'openPluginLink',url:'https://github.com/settings/personal-access-tokens/new'});
+  assert.match(x.d.querySelector('.key-permissions').textContent,/Contents, Issues and Pull requests/);
+  assert.match(x.d.querySelector('.key-where').textContent,/Paste it here and choose Save, then Connect/);
+  assert.equal(x.d.querySelector('[data-connect=github]'),null,'Connect waits for a key');
+  assert.equal(x.d.querySelector('[data-key-remove]'),null,'nothing to remove yet');
+  assert.doesNotMatch(x.d.body.textContent,/MCP server settings|Configure GITHUB_PAT_TOKEN/);
+});
+
+test('GitHub: Save sends the token once and clears it; the page then says Saved, never the token, and offers Remove',()=>{
+  const x=setup();openGithub(x);
+  x.input('[data-key-input]','github_pat_secret_value');
+  keyForm(x).dispatchEvent(new x.w.Event('submit',{cancelable:true}));
+  const saved=x.sent.filter(m=>m.type==='savePluginKey');
+  assert.deepEqual(saved.map(m=>({...m})),[{type:'savePluginKey',name:'github',server:'github',env:'GITHUB_PAT_TOKEN',key:'github_pat_secret_value'}]);
+  assert.equal(x.d.querySelector('[data-key-input]').value,'','cleared at once');
+  assert.match(x.d.querySelector('.key-form .save').textContent,/Saving/);
+  x.message({type:'pluginKeyResult',name:'github',server:'github',message:'Saved your GitHub personal access token in your system keychain.'});
+  x.message({type:'plugins',items:[{...github,keys:[{...githubKey,saved:true}]}]});
+  assert.equal(x.d.querySelector('.key-saved').textContent,'Saved');
+  assert.match(x.d.querySelector('[data-key-input]').placeholder,/Saved/);
+  assert.equal(x.d.querySelector('[data-key-input]').value,'');
+  assert.doesNotMatch(x.d.body.innerHTML,/github_pat_secret_value/,'the token is nowhere on the page');
+  assert.ok(x.d.querySelector('[data-connect=github]'),'Connect is offered once a token is saved');
+  x.click('[data-key-remove]');
+  assert.deepEqual({...x.sent.at(-1)},{type:'removePluginKey',name:'github',server:'github',env:'GITHUB_PAT_TOKEN'});
+  assert.match(x.d.querySelector('[data-key-remove]').textContent,/Removing/);
+});
+
+test('GitHub: a refused save and a failed connection are said on the page beside the field',()=>{
+  const x=setup();openGithub(x);
+  keyForm(x).dispatchEvent(new x.w.Event('submit',{cancelable:true}));
+  assert.equal(x.sent.filter(m=>m.type==='savePluginKey').length,0,'an empty field sends nothing');
+  assert.match(x.d.querySelector('.key-error').textContent,/Paste the key first/);
+  x.input('[data-key-input]','not a key');keyForm(x).dispatchEvent(new x.w.Event('submit',{cancelable:true}));
+  x.message({type:'pluginKeyResult',name:'github',server:'github',error:"That doesn't look like a key: it has spaces or line breaks in it."});
+  assert.match(x.d.querySelector('.key-error').textContent,/spaces or line breaks/);
+  const refused="GitHub didn't accept this personal access token (HTTP 401). Check that you copied all of it.";
+  x.message({type:'pluginKeyResult',name:'github',server:'github',message:'Saved.'});
+  x.message({type:'plugins',items:[{...github,keys:[{...githubKey,saved:true}],connection_error:refused}]});
+  const error=x.d.querySelector('.plugin-key .key-error');
+  assert.match(error.textContent,/didn't accept this personal access token \(HTTP 401\)/);
+  assert.ok(error.closest('.plugin-key').querySelector('[data-key-input]'),'the field is right there');
+  assert.equal(x.d.querySelectorAll('[role=alert]').length,1,'said once, in the panel');
+  x.click('[data-connect=github]');
+  assert.deepEqual({...x.sent.at(-1)},{type:'installPlugin',name:'github'},'Connect connects at once: no browser dialog');
+  assert.equal(x.d.querySelector('dialog'),null);
+  // Found in real VS Code: while the new Connect ran, the last attempt's error was still on the page as if it were
+  // the answer. Until this one finishes, the page says it is connecting.
+  assert.equal(x.d.querySelector('.plugin-key .key-error'),null,'no stale error while connecting');
+  assert.match(x.d.querySelector('.plugin-key .key-note').textContent,/Connecting to GitHub…/);
+  x.message({type:'pluginResult',name:'github',error:refused});
+  assert.match(x.d.querySelector('.plugin-key .key-error').textContent,/HTTP 401/,'then the answer');
+});
+
+test('GitHub: a token kept in the owner-only file says so, not "keychain"',()=>{
+  const x=setup();openGithub(x,{...github,keys:[{...githubKey,saved:true,stored:'file'}]});
+  assert.match(x.d.querySelector('.key-where').textContent,/saved in an owner-only file on this computer/);
+  assert.doesNotMatch(x.d.querySelector('.key-where').textContent,/keychain\./);
+  const y=setup();openGithub(y,{...github,keys:[{...githubKey,saved:true,stored:'keychain'}]});
+  assert.match(y.d.querySelector('.key-where').textContent,/saved in your system keychain/);
+});
+
+test('GitHub: a token from the environment is named as the fallback; a half-typed token survives a refresh',()=>{
+  const x=setup();openGithub(x,{...github,keys:[{...githubKey,from_environment:true}]});
+  assert.match(x.d.querySelector('.key-where').textContent,/GITHUB_PAT_TOKEN from the environment/);
+  assert.ok(x.d.querySelector('[data-connect=github]'),'the environment token can connect');
+  x.input('[data-key-input]','github_pat_half');
+  x.message({type:'plugins',items:[{...github,keys:[{...githubKey,from_environment:true}]}]});
+  assert.equal(x.d.querySelector('[data-key-input]').value,'github_pat_half');
+});
+
+test('GitHub: Sign in with GitHub, once DGC has an app for it, connects and shows the code to enter',()=>{
+  const x=setup();openGithub(x,{...github,keys:[{...githubKey,sign_in:'GitHub'}]});
+  assert.match(x.d.querySelector('.key-where').textContent,/Sign in with GitHub in your browser, or paste your own GitHub personal access token/);
+  x.click('[data-key-sign-in]');
+  assert.deepEqual({...x.sent.at(-1)},{type:'installPlugin',name:'github'});
+  x.message({type:'signin',server:'github',title:'GitHub',host:'github.com',id:'s1',code:'WDJB-MJHT'});
+  assert.match(x.d.querySelector('.banner').textContent,/Enter the code WDJB-MJHT on the page that opened to finish connecting GitHub/);
+  x.click('[data-copy-code]');
+  assert.deepEqual({...x.sent.at(-1)},{type:'copy',text:'WDJB-MJHT'});
+  x.message({type:'plugins',items:[{...github,connected:true,keys:[{...githubKey,sign_in:'GitHub'}]}]});
+  assert.equal(x.d.querySelector('.key-saved').textContent,'Signed in');
+  assert.equal(x.d.querySelector('[data-key-sign-in]'),null);
+  const plain=setup();openGithub(plain);
+  assert.equal(plain.d.querySelector('[data-key-sign-in]'),null,'no sign-in button without an app to sign in with');
+});

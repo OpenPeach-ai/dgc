@@ -475,6 +475,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private settingsInstalls = new Map<string, string>();
   private settingsPreviews = new Map<string, any>();
   private settingsPreviewRequests = new Map<string, string>();
+  /** A plugin key Save or Remove in flight: its request id, to the plugin and server it was for. */
+  private settingsKeyRequests = new Map<string, { name: string; server: string }>();
   private createdPluginFiles = new Set<string>();
   private settingsMcpOperation = 0;
   // ---- 0.40 images: refs this panel was shown, the stored path an `image` answer named for each,
@@ -3183,9 +3185,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
           const callbackUrl = typeof ev.payload._dgc_bridge_callback === "string"
             ? ev.payload._dgc_bridge_callback : "";
+          // A device sign-in (Sign in with GitHub): DGC's own client set this code, as it sets the callback above.
+          const deviceCode = typeof ev.payload._dgc_device_code === "string"
+            && /^[A-Za-z0-9-]{4,24}$/.test(ev.payload._dgc_device_code) ? ev.payload._dgc_device_code : "";
           this.backendNote(`[mcp sign-in prompt for ${String(ev.server || "plugin")}]`);
           this.mcpUrls.set(String(ev.id), { url: String(ev.payload.url || ""),
-            ...(callbackUrl ? { callbackUrl } : {}) });
+            ...(callbackUrl ? { callbackUrl } : {}), ...(deviceCode ? { deviceCode } : {}) });
           // Open straight away ONLY for the pinned local sign-in bridge. That callback is set by
           // the CLI (mcp.py, at the point it starts the bridge) and never by a server, so its
           // presence means the user clicked Connect a moment ago and is waiting for the browser.
@@ -3197,7 +3202,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           // TUI both still draw. 0.44.1 asked; returning here for every mode:"url" took the ask
           // away from the editor alone, and the same batch ships a marketplace that installs
           // third-party MCP servers.
-          if (callbackUrl) {
+          if (callbackUrl || deviceCode) {
             void this.confirmMcpBrowser(String(ev.id), String(ev.server || "this plugin"));
             return;
           }
@@ -3384,6 +3389,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.settingsEditor?.webview.postMessage({ type: "marketplaces", items: ev.items });
       return;
     }
+    // A plugin key saved or removed from its page: answered to that page alone, never with the key.
+    const keyRequest = ["plugin_operation", "command_rejected"].includes(ev.type)
+      ? this.settingsKeyRequests.get(String((ev as any).request_id || "")) : undefined;
+    if (keyRequest && (ev.type === "plugin_operation"
+        || ["set_plugin_key", "remove_plugin_key"].includes(String((ev as any).command || "")))) {
+      this.settingsKeyRequests.delete(String((ev as any).request_id || ""));
+      this.settingsEditor?.webview.postMessage({ type: "pluginKeyResult", ...keyRequest,
+        ...(ev.type === "plugin_operation" ? { message: String((ev as any).message || "") }
+          : { error: String((ev as any).message || "DGC couldn't save the key.") }) });
+      return;
+    }
     if (ev.type === "plugin_operation") {
       if (ev.action === "create_plugin" && ev.path) {
         const root = join(dgcHome(), "plugins", "authored");
@@ -3446,17 +3462,27 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     request.opening = true;
     let host = "";
     try { host = new URL(request.url).host; } catch { host = ""; }
-    const title = server.replace(/[-_]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()) || "This plugin";
+    // The plugin's own name where Settings knows it ("GitHub", not "Github").
+    const known = this.settingsCatalog.find(row => row?.name === server || row?.server_names?.includes?.(server));
+    const title = (typeof known?.display_name === "string" && known.display_name)
+      || server.replace(/[-_]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()) || "This plugin";
     const current = () => this.backend === be && this.mcpUrls.get(id) === request;
     this.pendingSignIn = request;
     this.pendingSignInServer = server;
     this.settingsEditor?.webview.postMessage({
-      type: "signin", title, host, server, id,
+      type: "signin", title, host, server, id, ...(request.deviceCode ? { code: request.deviceCode } : {}),
     });
     // Cursor draws its own "open the external website?" dialog from openExternal.
     let action = "cancel";
     try {
-      if (await openMcpBrowser(request, current)) action = "accept";
+      // A device sign-in shows its code first and copies it, as VS Code's own GitHub sign-in does: the page that
+      // opens asks for it.
+      const go = !request.deviceCode || await vscode.window.showInformationMessage(
+        `Sign in to ${title}: enter the code ${request.deviceCode}`,
+        { modal: true, detail: `DGC copies the code. Paste it on the ${host || "sign-in"} page that opens, then approve DGC.` },
+        "Copy code and open") === "Copy code and open";
+      if (go && request.deviceCode) await vscode.env.clipboard.writeText(request.deviceCode);
+      if (go && await openMcpBrowser(request, current)) action = "accept";
     } catch (error) {
       if (current()) {
         void vscode.window.showErrorMessage(
@@ -6193,6 +6219,30 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (!this.sendPluginCommand({ type: "install_plugin", request_id: requestId, name, accept_license: accept, ...(Array.isArray(msg.selectedServers) ? { selected_servers: msg.selectedServers } : {}) })) {
         this.settingsInstalls.delete(requestId);
         this.settingsEditor?.webview.postMessage({ type: "pluginResult", name, error: "DGC could not start installation. Try again." });
+      }
+    } else if (msg?.type === "savePluginKey" || msg?.type === "removePluginKey") {
+      // The key field on a plugin's page. The key goes to dgc serve, which keeps it in the system keychain; nothing
+      // here stores it, and the page only ever hears back whether one is saved.
+      const name = String(msg.name || ""), server = String(msg.server || ""), env = String(msg.env || "");
+      const reply = (error: string) => this.settingsEditor?.webview.postMessage({ type: "pluginKeyResult", name, server, error });
+      if (!PLUGIN_ID.test(name) || (server && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(server))
+          || (env && !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(env))) return;
+      if (this.lastReadyEvent && this.lastReadyEvent.capabilities?.plugin_keys !== true) {
+        reply("This DGC CLI can't keep a plugin's key yet. Update it, then save the key here.");
+        return;
+      }
+      const saving = msg.type === "savePluginKey";
+      const key = saving ? String(msg.key || "").trim() : "";
+      if (saving && !key) { reply("Paste the key first."); return; }
+      if (key.length > 16384) { reply("That key is too long. Copy the key itself."); return; }
+      const requestId = this.nextRequestId("plugin-key");
+      this.settingsKeyRequests.set(requestId, { name, server });
+      const command = saving
+        ? { type: "set_plugin_key" as const, request_id: requestId, name, key, ...(server ? { server } : {}), ...(env ? { env } : {}) }
+        : { type: "remove_plugin_key" as const, request_id: requestId, name, ...(server ? { server } : {}), ...(env ? { env } : {}) };
+      if (!this.sendPluginCommand(command)) {
+        this.settingsKeyRequests.delete(requestId);
+        reply("DGC couldn't reach its backend. Try again.");
       }
     } else if (msg?.type === "openSignIn") {
       const request = this.pendingSignIn;

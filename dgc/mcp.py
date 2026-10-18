@@ -468,6 +468,44 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(value)).strip("_") or "unnamed"
 
 
+def _saved_plugin_keys(name: str, spec: dict) -> dict:
+    """The key saved on a plugin's page for this server, if any (plugin_keys). Never raises: no key is an answer."""
+    try:
+        from .plugin_keys import runtime_env
+        return runtime_env(name, spec)
+    except Exception:  # noqa: BLE001 -- a keychain that can't be read leaves the environment fallback
+        return {}
+
+
+def _has_device_sign_in(name: str, spec: dict) -> bool:
+    """Whether this server has a device sign-in kept for its address (plugin_credentials, as mcp_remote keeps it)."""
+    try:
+        from . import plugin_credentials
+        saved = plugin_credentials.load(name) or {}
+    except Exception:  # noqa: BLE001 -- unreadable: no sign-in to use
+        return False
+    client = saved.get("client") if isinstance(saved.get("client"), dict) else {}
+    tokens = saved.get("tokens") if isinstance(saved.get("tokens"), dict) else {}
+    return (saved.get("url") == spec.get("url") and client.get("grant") == "device"
+            and isinstance(tokens.get("access_token"), str) and bool(tokens["access_token"]))
+
+
+def _missing_key_message(name: str, env_name: str) -> str:
+    try:
+        from .plugins import missing_key_message
+        return missing_key_message(name, [env_name])
+    except Exception:  # noqa: BLE001 -- the plain words without the plugin's label
+        return "Needs a key. Paste it on the plugin's page in Settings → Plugins and choose Save, then Connect."
+
+
+def _refused_key_message(name: str, spec: dict, error: str) -> str:
+    try:
+        from .plugins import refused_key_message
+        return refused_key_message(name, spec, error)
+    except Exception:  # noqa: BLE001
+        return error
+
+
 def _runtime_server_args(spec: dict) -> list[str]:
     """Materialize safe remote auth indirection without persisting a header value."""
     args = list(spec.get("args") or []) if isinstance(spec.get("args"), list) else []
@@ -702,7 +740,7 @@ class MCPServer:
             try:
                 proc = RemoteConnection(
                     self.name, self.args, self.env,
-                    sign_in=lambda url, redirect: self._browser_sign_in(url, generation),
+                    sign_in=lambda url, redirect, code="": self._browser_sign_in(url, generation, code=code),
                     cancelled=self._sign_in_cancelled)
             except (RemoteError, OSError, ValueError) as exc:
                 self.error = f"could not start: {exc}"
@@ -995,10 +1033,11 @@ class MCPServer:
         cancel = self._connection_cancel
         return bool(self._connecting and cancel is not None and cancel.is_set())
 
-    def _browser_sign_in(self, url: str, generation: int) -> bool:
+    def _browser_sign_in(self, url: str, generation: int, *, code: str = "") -> bool:
         """DGC's remote client needs the user to sign in: ask whoever can (the editor's card, the terminal).
 
-        True once they agreed and the browser opened; the client then waits for the service's redirect."""
+        True once they agreed and the browser opened; the client then waits for the service's redirect -- or, with a
+        ``code`` (a device sign-in, GitHub's), for the user to enter that code on the page it opened."""
         self._append_diagnostic("Remote MCP browser sign-in requested")
         if not self._connecting or self._generation != generation:
             # Mid-session (a sign-in that expired and couldn't refresh) nobody is waiting on a connection
@@ -1009,10 +1048,16 @@ class MCPServer:
             # This is a transient browser link, never catalog metadata or model context.
             params = sanitize_input_request("elicitation/create", {
                 "mode": "url", "url": url,
-                "message": "Sign in to this MCP server in your browser, then continue."})
-            # Generic server input sanitization strips this private marker. Only DGC's own client
-            # may ask the editor to forward its loopback callback.
-            params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
+                "message": (f"Enter the code {code} on the page that opens to sign in, then come back."
+                            if code else "Sign in to this MCP server in your browser, then continue.")})
+            # Generic server input sanitization strips these private markers. Only DGC's own client
+            # may ask the editor to forward its loopback callback, or show a code to enter.
+            if code:
+                if not re.fullmatch(r"[A-Za-z0-9-]{4,24}", code):
+                    raise MCPInputError("Remote MCP sign-in sent a code DGC can't show.")
+                params["_dgc_device_code"] = code
+            else:
+                params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
         except MCPInputError as exc:
             self._append_diagnostic(f"Remote MCP sign-in could not be completed ({exc})")
             self._connection_done.set()
@@ -1688,11 +1733,27 @@ class MCPManager:
             # launch can still resolve those references from its ambient environment, while the
             # editor reconnects with SecretStorage values in its typed setup frames.
             env_names = raw_spec.get("env_names")
+            # A key saved on the plugin's page (plugin_keys: the system keychain) fills its variable before the
+            # environment does, which stays the fallback for anyone who already sets it.
+            for env_name, value in _saved_plugin_keys(name, raw_spec).items():
+                configured_env.setdefault(env_name, value)
             if isinstance(env_names, list):
                 for env_name in env_names[:64]:
                     if isinstance(env_name, str) and env_name in os.environ:
                         configured_env.setdefault(env_name, os.environ[env_name])
-            args = _runtime_server_args(raw_spec)
+            auth_env = raw_spec.get("auth_env")
+            launch_spec = raw_spec
+            if (raw_spec.get("transport") == "remote" and isinstance(auth_env, str)
+                    and isinstance(env_names, list) and auth_env in env_names and auth_env not in configured_env):
+                if _has_device_sign_in(name, raw_spec):
+                    # No key, but the user signed in with the service instead (Sign in with GitHub): DGC's own
+                    # client sends that sign-in, and refreshes it, in place of a key header.
+                    launch_spec = {k: v for k, v in raw_spec.items() if k != "auth_env"}
+                else:
+                    # Its key is nowhere: say what to do, not "header refers to GITHUB_PAT_TOKEN, which isn't set".
+                    self.failures[name] = _missing_key_message(name, auth_env)
+                    continue
+            args = _runtime_server_args(launch_spec)
             server = MCPServer(name, cmd, args, configured_env, self.root,
                                str(raw_spec.get("log_level") or "warning"), self._client_capabilities)
             server.remote_bridge = raw_spec.get("transport") == "remote"
@@ -1716,7 +1777,8 @@ class MCPManager:
                 break
             if not started:
                 self.failures[name] = ("Needs sign-in. Connect it in Settings → Plugins."
-                                       if server._needs_sign_in else server.error or "connection failed")
+                                       if server._needs_sign_in else
+                                       _refused_key_message(name, launch_spec, server.error or "connection failed"))
         self._rebuild_routes()
 
     def _connect_in_background(self, servers: dict) -> None:
