@@ -38,6 +38,9 @@
 
 ### ChatDGC
 
+- **Thinking is collapsed by default**, while the model thinks and once it has answered, in new replies and in chats
+  you open again. Click "Thinking" (or press Enter on it) to read it; what you choose stays for that reply while it
+  streams and after.
 - **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
   slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
   still for a reader who asked for less motion.

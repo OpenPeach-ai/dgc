@@ -107,7 +107,7 @@ test("a new chat: the question and the box together, and a message goes out with
   } finally { await s.page.close(); }
 });
 
-test("a click collapses the thinking while it still thinks, even when a delta redraws the reply between press and release", async (t) => {
+test("a click opens the thinking while it still thinks, even when a delta redraws the reply between press and release", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -117,7 +117,7 @@ test("a click collapses the thinking while it still thinks, even when a delta re
     await s.send({ type: "delta", messageId: M(2), thinking: "First the beaches. " });
     await s.frame();
     const box = s.page.locator(".cd-assistant details.cd-thinking"), label = s.page.locator(".cd-thinking-label");
-    assert.equal(await box.getAttribute("open"), "", "open while it thinks");
+    assert.equal(await box.getAttribute("open"), null, "collapsed while it thinks: the founder's default");
     // A press, a streamed delta that redraws the reply, then the release: one click, as a reader makes it mid-stream.
     const at = await label.boundingBox();
     await s.page.mouse.move(at.x + 20, at.y + at.height / 2);
@@ -126,25 +126,33 @@ test("a click collapses the thinking while it still thinks, even when a delta re
     await s.frame();
     await s.page.mouse.up();
     await s.frame();
-    assert.equal(await box.getAttribute("open"), null, "collapsed by that click");
+    assert.equal(await box.getAttribute("open"), "", "opened by that click");
     for (const piece of ["Then the food. ", "Then the monsoon. "]) { await s.send({ type: "delta", messageId: M(2), thinking: piece }); await s.frame(); }
-    assert.equal(await box.getAttribute("open"), null, "and it stays collapsed while the thinking keeps coming");
+    assert.equal(await box.getAttribute("open"), "", "and it stays open while the thinking keeps coming");
     assert.equal(await s.page.locator(".cd-thought").textContent(), "First the beaches. Then the forts. Then the food. Then the monsoon. ",
                  "the words kept up all the same");
-    await label.focus();
-    await s.page.keyboard.press("Enter");
     await s.send({ type: "delta", messageId: M(2), text: "Day 1: the beaches." });
     await s.frame();
-    assert.equal(await box.getAttribute("open"), "", "opened again from the keyboard: the reader's choice, over its usual closing when the answer starts");
-    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Day 1: the beaches.", thinking: "First the beaches.", finish: "stop" } });
+    assert.equal(await box.getAttribute("open"), "", "the answer starting doesn't close what the reader opened");
+    await label.focus();
+    await s.page.keyboard.press("Enter");
+    await s.frame();
+    assert.equal(await box.getAttribute("open"), null, "closed again from the keyboard");
+    await s.send({ type: "delta", messageId: M(2), text: " Day 2: the forts." });
+    await s.frame();
+    assert.equal(await box.getAttribute("open"), null, "and the reader's choice holds as the reply streams");
+    await label.focus();
+    await s.page.keyboard.press("Enter");
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Day 1: the beaches. Day 2: the forts.", thinking: "First the beaches.", finish: "stop" } });
     await s.send({ type: "turn", state: "ended", replyId: M(2) });
     await s.frame();
     assert.match(await label.textContent(), /^Thought$/);
+    assert.equal(await box.getAttribute("open"), "", "opened while it streamed, it stays open once the reply is finished");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
 
-test("with no click, the thinking is open while it thinks and closes when the answer starts", async (t) => {
+test("with no click, the thinking is collapsed while it thinks, as the answer streams, once it's finished, and in a chat opened later", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -152,10 +160,22 @@ test("with no click, the thinking is open while it thinks and closes when the an
     await s.send({ type: "turn", state: "started", replyId: M(2) });
     await s.send({ type: "delta", messageId: M(2), thinking: "Hmm." });
     await s.frame();
-    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), "");
+    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), null, "collapsed while it thinks");
+    assert.equal(await shown(s.page, ".cd-thought"), false, "its words wait behind the label");
     await s.send({ type: "delta", messageId: M(2), text: "Yes." });
     await s.frame();
-    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), null);
+    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), null, "and as the answer streams");
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Yes.", thinking: "Hmm.", finish: "stop" } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    await s.frame();
+    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), null, "and once it's finished");
+    await s.send({ type: "opened", conversation: conversation({ id: `chat_${"b".repeat(32)}` }), earlier: 0, busy: false,
+                   messages: [{ id: M(3), role: "user", text: "Hi" }, { id: M(4), role: "assistant", text: "Hello.", thinking: "A greeting.", finish: "stop" }] });
+    await s.frame();
+    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), null, "a chat opened later shows its thinking collapsed");
+    await s.page.locator(".cd-thinking-label").click();
+    assert.equal(await s.page.locator("details.cd-thinking").getAttribute("open"), "", "a click opens it");
+    assert.equal(await s.page.locator(".cd-thought").textContent(), "A greeting.");
   } finally { await s.page.close(); }
 });
 
@@ -501,7 +521,7 @@ test("a reply streams in as Markdown; your words and its words never become mark
     await s.send({ type: "message", message: { id: M(1), role: "user", text: '<img src=x onerror="window.__owned=1"> hi' } });
     await s.send({ type: "delta", messageId: M(2), thinking: "The user greets me." });
     await s.frame();
-    assert.equal(await s.page.locator(".cd-assistant details.cd-thinking").getAttribute("open"), "", "its thinking shows while it thinks");
+    assert.equal(await s.page.locator(".cd-assistant details.cd-thinking").getAttribute("open"), null, "its thinking is there, collapsed");
     assert.match(await s.page.locator(".cd-thinking-label").textContent(), /Thinking…/);
     await s.send({ type: "delta", messageId: M(2), text: "**Paris** is the capital. <img src=x onerror=\"window.__owned=2\">\n\n```js\nconst x = 1;\n```\n\nSee [the docs](https://example.com/paris)." });
     await s.frame();

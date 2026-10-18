@@ -649,7 +649,8 @@
     document.body.append(panel);
     close.focus();
   }
-  // Open while it thinks, closed once it answers -- unless the reader chose, by a click: kept for that reply.
+  // Collapsed, while it thinks and once it has answered: a click opens it, and what the reader chose holds for that
+  // reply, as it streams and after.
   const thinkingChosen = new Map();
   function thinkingBlock(message, live) {
     const box = el("details", "cd-thinking");
@@ -658,7 +659,7 @@
     text.textContent = message.thinking || "";
     box.append(summary, text);
     box.dataset.id = message.id || "";
-    box.open = thinkingChosen.has(message.id) ? thinkingChosen.get(message.id) : live && !message.text;
+    box.open = thinkingChosen.get(message.id) === true;
     // It opens and closes on the press, not the click: a reply that streams redraws every delta, and Chromium drops a
     // click whose pressed element was moved in between. Enter and Space still come as a click (detail 0).
     const toggle = () => { box.open = !box.open; thinkingChosen.set(message.id, box.open); };
