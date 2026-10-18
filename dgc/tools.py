@@ -578,16 +578,20 @@ TROUPE_TOOL_SCHEMA = _fn(
                "description": "What to work through, one agent each: files, questions, places, options (up to 200)."},
      "template": {"type": "string", "enum": ["review", "research", "change", "compare"],
                   "description": "review: one explorer per item reports problems, then 3 verifiers each try to "
-                                 "disprove every problem and only those most agree on are kept. research: a "
+                                 "disprove every problem by reading the code and only those most agree on are kept "
+                                 "(a problem none of them could check is kept, marked unchecked). research: a "
                                  "researcher per question, a critic checks each answer. change: a worker per place "
-                                 "(each in its own checkout, merged back), a verifier checks each change. compare: "
+                                 "(each in its own checkout, merged back), a verifier reads each change. compare: "
                                  "an explorer works out each option, 3 judges pick the best."},
      "goal": {"type": "string", "description": "With a template: what to look for or do, e.g. \"security problems\"."},
      "stages": {"type": "array", "description": "Instead of a template: up to 4 stages, run in order.",
                 "items": {"type": "object", "properties": {
                     "name": {"type": "string"},
-                    "agent": {"type": "string", "description": "explorer, researcher, critic or verifier (read "
-                              "only), worker (writes, in its own checkout), or a named agent."},
+                    "agent": {"type": "string", "description": "What each kind can do. explorer, researcher, "
+                              "critic, verifier: read files and the web only, with NO shell, so they can't run "
+                              "commands, tests or database queries (give them what to read, or checks a reader can "
+                              "make). worker: a shell and writes, in an isolated checkout of its own, merged back. "
+                              "Or a named agent."},
                     "prompt": {"type": "string", "description": "What each agent does; {item} is where its item "
                                "goes ({items} with over: all)."},
                     "returns": {"type": "object", "description": _SKETCH},
@@ -596,7 +600,9 @@ TROUPE_TOOL_SCHEMA = _fn(
                     "votes": {"type": "integer", "description": "Independent agents per item, 1-5."},
                     "keep": {"type": "object", "description": "Keep only results whose field equals a value: "
                              "{\"field\": \"real\", \"equals\": true}; with votes, \"at_least\" of them must "
-                             "(default: most)."},
+                             "(default: most). A reading agent that can't check an item answers \"unsure\": true; "
+                             "that vote counts neither way, and an item no one could check is kept, marked "
+                             "unchecked."},
                     "split": {"type": "string", "description": "A list field in returns: each element becomes an "
                               "item of the next stage."}},
                     "required": ["name", "prompt"]}},

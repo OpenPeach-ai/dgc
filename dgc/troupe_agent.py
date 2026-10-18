@@ -22,13 +22,20 @@ from . import troupe
 # A troupe agent's role, ahead of its task. Not the `.dgc/agents` built-ins: those write files and hand off with a
 # FILES line, and a troupe agent reads and answers in JSON. The `task` roster has a verifier of its own (agents.py),
 # which may run checks; a troupe's verifier is matched here first and stays read only.
+# Each says exactly what the agent can do (troupe.ABILITIES): a verifier told only "read only" was asked to re-run
+# SQL, couldn't, and voted the finding not real (ERP session review, 2026-10-18).
 ROLE = {
-    "explorer": "You are a read-only explorer: search and read, never write or change anything. Cite path:line.",
-    "researcher": "You are a researcher: read and search the web, never write or change anything. Name your sources.",
-    "critic": "You are a critic: check the work given to you against its requirements and sources; read only, never "
-              "write or change anything.",
-    "verifier": "You are a verifier: try to prove the claim given to you wrong by reading what it names. Call it real "
-                "only if the evidence shows it. Read only: never write or change anything.",
+    "explorer": "You are a read-only explorer: search and read the project's files (and the web). You have no shell: "
+                "you can't run commands, tests or database queries. Never write or change anything. Cite path:line.",
+    "researcher": "You are a researcher: read files and search the web. You have no shell and never write or change "
+                  "anything. Name your sources.",
+    "critic": "You are a critic: check the work given to you against its requirements and sources, by reading files "
+              "and the web. You have no shell and never write or change anything.",
+    "verifier": "You are a verifier: try to prove the claim given to you wrong by reading what it names, in the "
+                "project's files and on the web. You have no shell: you can't run commands, tests or database "
+                "queries, so a claim about live data or a running service is one you can only check by reading. Call "
+                "it real only if the evidence shows it; when you can't check it with these tools, say you are unsure, "
+                "never that it is not real. Never write or change anything.",
     "worker": "You are a worker: make the bounded change given to you, keep the diff small, and run its tests when "
               "there are any.",
 }
@@ -223,7 +230,10 @@ def start(agent, args: dict, call_id) -> str:
     run.on_end = lambda finished: deliver(agent, finished, epoch)
     run.start()
     reused = f" {len(cached)} results from the earlier attempt are reused." if cached else ""
-    return (f"Troupe {run.id} started: {plan.title}. {shape}; {planned}, {pace}.{reused} It runs in the "
+    kinds = "; ".join(f"{stage.name} ({stage.agent}) {troupe.ABILITIES[stage.agent]}"
+                      for stage in plan.stages if stage.agent in troupe.ABILITIES)
+    kinds = f" What its agents can do: {kinds}." if kinds else ""
+    return (f"Troupe {run.id} started: {plan.title}. {shape}; {planned}, {pace}.{kinds}{reused} It runs in the "
             "background and this chat wakes with its results when it ends; until then, carry on or tell the user it "
             "is running. Don't start the same work again.")
 

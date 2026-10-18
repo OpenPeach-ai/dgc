@@ -254,6 +254,65 @@ class RunTests(unittest.TestCase):
         self.assertIn("then 3 per item of audit's findings", lines[0])
         self.assertIn(f"troupe {run.id} · ERP audit: 107 agents in all, now that each split is known", lines)
 
+    def test_a_checker_that_cannot_check_is_unsure_and_never_a_no(self):
+        """ERP session review (2026-10-18): verifiers with no shell were asked to re-run SQL, said "bash/docker was
+        refused", and voted "not real", so keep (real == true) dropped findings nobody had checked."""
+        plan = troupe.plan_from_args({"title": "ERP audit", "items": ["bridges", "mirrors", "e-way", "parity"], "stages": [
+            {"name": "audit", "agent": "worker", "prompt": "Audit {item}",
+             "returns": {"findings": [{"title": "string"}]}, "split": "findings"},
+            {"name": "verify", "agent": "verifier", "prompt": "Re-derive {item} with your own SQL", "votes": 3,
+             "returns": {"real": "boolean", "why": "string"}, "keep": {"field": "real", "equals": True}}]})
+        votes = {"frozen": ["unsure", "unsure", "unsure"],        # nobody could check: kept, marked unchecked
+                 "notes": ["yes", "unsure", "unsure"],            # the one that checked says real: kept
+                 "eway": ["no", "unsure", "unsure"],              # the one that checked says not real: dropped
+                 "parity": ["no", "no", "yes"]}                   # checked by all, most say no: dropped as before
+
+        def answer(stage, prompt):
+            if stage.name == "audit":
+                name = {"bridges": "frozen", "mirrors": "notes", "e-way": "eway", "parity": "parity"}[
+                    prompt.split("Audit ")[1].split()[0]]
+                return answer_json({"findings": [{"title": name}]})
+            self.assertIn('add "unsure": true', prompt)
+            title = json.loads(prompt.split("Re-derive ")[1].split(" with your own SQL")[0])["title"]
+            vote = votes[title][int(prompt.split("(number ")[1].split(")")[0]) - 1]
+            if vote == "unsure":
+                return answer_json({"real": False, "why": "no shell/DB in this verifier sandbox", "unsure": True})
+            return answer_json({"real": vote == "yes", "why": "checked"})
+        run = troupe.Run(plan, FakeRunner(answer), self.root)
+        run.run_here()
+        kept = {o["item"]["title"]: o for o in run.outputs}
+        self.assertEqual(set(kept), {"frozen", "notes"})
+        self.assertTrue(kept["frozen"]["unchecked"])
+        self.assertEqual((kept["frozen"]["agreed"], kept["frozen"]["unsure"]), (0, 3))
+        self.assertNotIn("unchecked", kept["notes"])
+        self.assertEqual((kept["notes"]["agreed"], kept["notes"]["unsure"]), (1, 2))
+        report = run.report()
+        self.assertIn("verify: 12 of 12 agents finished, 2 kept (1 of them unchecked)", report)
+        self.assertIn("1 of the kept results are UNCHECKED", report)
+        self.assertIn("UNCHECKED: none of 3 could check it", report)
+        self.assertIn("1 of 1 agreed, 2 could not check", report)
+
+    def test_one_checker_per_item_that_cannot_check_keeps_it_unchecked(self):
+        plan = troupe.plan_from_args({"title": "t", "items": ["a", "b"], "stages": [
+            {"name": "Check", "agent": "verifier", "prompt": "Is {item} right?", "returns": {"ok": "boolean"},
+             "keep": {"field": "ok", "equals": True}}]})
+        run = troupe.Run(plan, FakeRunner(lambda s, p: answer_json({"ok": False, "unsure": True}) if "a right" in p
+                                          else answer_json({"ok": False})), self.root)
+        run.run_here()
+        self.assertEqual([(o["item"], o.get("unchecked")) for o in run.outputs], [("a", True)])
+
+    def test_only_a_reading_stage_that_filters_is_offered_unsure(self):
+        stages = troupe.plan_from_args({"title": "t", "items": ["x"], "stages": [
+            {"name": "Fix", "agent": "worker", "prompt": "{item}", "returns": {"ok": "boolean"},
+             "keep": {"field": "ok", "equals": True}},
+            {"name": "Read", "agent": "explorer", "prompt": "{item}"},
+            {"name": "Check", "agent": "verifier", "prompt": "{item}", "returns": {"ok": "boolean"},
+             "keep": {"field": "ok", "equals": True}}]}).stages
+        self.assertEqual(['"unsure": true' in troupe.child_prompt(stage, item="x") for stage in stages],
+                         [False, False, True])
+        self.assertIn("no shell", troupe.ABILITIES["verifier"])
+        self.assertIn("a shell", troupe.ABILITIES["worker"])
+
     def test_compare_has_every_option_judged_together(self):
         plan = troupe.plan_from_args({"title": "Cache", "items": ["Redis", "SQLite", "in memory"], "template": "compare",
                                       "goal": "a cache"})

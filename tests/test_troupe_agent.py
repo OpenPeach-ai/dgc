@@ -137,6 +137,27 @@ def review_answers(prompt, workspace):
 
 
 class RunTests(AgentCase):
+    def test_the_model_is_told_exactly_what_each_kind_can_do(self):
+        """ERP session review (2026-10-18): the schema said only "read only", so the model told its verifiers to re-run
+        SQL and told the user they were "re-deriving each claim with their own SQL"."""
+        from dgc.tools import TROUPE_TOOL_SCHEMA
+        stage = TROUPE_TOOL_SCHEMA["function"]["parameters"]["properties"]["stages"]["items"]["properties"]
+        self.assertIn("NO shell", stage["agent"]["description"])
+        self.assertIn("can't run commands, tests or database queries", stage["agent"]["description"])
+        self.assertIn("worker: a shell and writes", stage["agent"]["description"])
+        self.assertIn('"unsure": true', stage["keep"]["description"])
+        self.assertIn("no shell", troupe_agent.ROLE["verifier"])
+        self.assertIn("say you are unsure, never that it is not real", troupe_agent.ROLE["verifier"])
+        agent = self.make_agent(ultra=True, ui=Recorder())
+        run, _ = fake_child(review_answers)
+        with patch.object(Agent, "_execute_prepared_subagent", run):
+            out = troupe_agent.start(agent, REVIEW, "c1")
+            agent._troupes[out.split()[1]].join(20)
+        self.assertIn("What its agents can do: Review (explorer) reads and searches the project's files and the web; "
+                      "no shell", out)
+        self.assertIn("Verify (verifier) reads files and the web; no shell (it can't run commands, tests or database "
+                      "queries)", out)
+
     def test_a_one_shot_run_returns_the_report_and_its_agents_only_read(self):
         agent = self.make_agent(ultra=True)
         run, calls = fake_child(review_answers)

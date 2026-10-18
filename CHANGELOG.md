@@ -460,6 +460,17 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   findings (verify); at most 400 in all", and the number it reports (`agents_planned`, the editor's "About N
   agents") becomes the real one as soon as the split's stage ends; the terminal says it once ("107 agents in all,
   now that each split is known").
+- **Troupe checkers say what they couldn't check, and that isn't a no.** The `troupe` tool said only "read only" about
+  explorer, researcher, critic and verifier, so a model told its verifiers to re-run SQL. They have no shell; they said
+  "bash/docker was refused" and voted "not real", and `keep` dropped findings nobody had checked. Now:
+  - The tool's description and each agent's role say exactly what each kind can do: the four reading kinds read files
+    and the web with no shell (no commands, tests or database queries); a worker has a shell and writes in its own
+    checkout. The start message says it per stage ("Verify (verifier) reads files and the web; no shell …").
+  - A reading stage with `keep` asks each agent, when it can't check something with its tools, to add
+    `"unsure": true` instead of guessing. Such a vote counts neither way: the votes that did check decide (most of
+    them, or `at_least` of them as far as there are any), and an item no one could check is kept with
+    `"unchecked": true`. The report counts them ("2 kept (1 of them unchecked)") and marks each one
+    ("UNCHECKED: none of 3 could check it", "1 of 1 agreed, 2 could not check").
 
 ### Windows: the editor runs DGC in a WSL distro of its own
 
