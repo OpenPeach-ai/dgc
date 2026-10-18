@@ -51,9 +51,9 @@ function screenHtml() {
   return cached;
 }
 
-async function openScreen({ width = 900, height = 700, theme = "dark-modern", state } = {}) {
+async function openScreen({ width = 900, height = 700, theme = "dark-modern", state, reducedMotion = false } = {}) {
   const { html, js, markdownJs } = screenHtml();
-  const page = await browser.newPage({ viewport: { width, height } });
+  const page = await browser.newPage({ viewport: { width, height }, reducedMotion: reducedMotion ? "reduce" : "no-preference" });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.setContent(html, { waitUntil: "load" });
@@ -1561,6 +1561,93 @@ test("the welcome: ChatDGC's mark and a line for the time of day, chosen once a 
     assert.equal(await s.page.getByText("What can I help with?").count(), 0);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+// The founder (2026-10-18): Work's tab opens on the three slashes, "DGC" and a "|" that move; ChatDGC's should too, with
+// its own mark, the bubble with the slashes inside it, and those slashes moving as Work's do. Both pages side by side.
+test("the header's wordmark moves as Work's does: the slashes in the bubble breathe in turn, the cursor blinks, in both themes; reduced motion stills them", async (t) => {
+  if (skipOrFail(t)) return;
+  async function openWork({ theme, reducedMotion }) {
+    const page = await browser.newPage({ viewport: { width: 900, height: 700 }, reducedMotion: reducedMotion ? "reduce" : "no-preference" });
+    await page.setContent(panelHtml().html, { waitUntil: "load" });
+    await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }` });
+    await page.evaluate((th) => document.body.classList.add(th.startsWith("light") ? "vscode-light" : "vscode-dark"), theme);
+    return page;
+  }
+  // A wordmark as the reader gets it: how each part moves, its size, colour and type, and where the parts sit.
+  const wordmark = (page, scope) => page.evaluate((scope) => {
+    const pm = document.querySelector(scope), cs = (n) => getComputedStyle(n), rect = (n) => n.getBoundingClientRect();
+    const motion = (n) => { const s = cs(n); return `${s.animationName} ${s.animationDuration} ${s.animationTimingFunction} ${s.animationIterationCount} ${s.animationDelay}`; };
+    const mark = pm.querySelector("svg.mk"), cur = pm.querySelector(".cur"), bubble = mark.querySelector(".mk-bubble");
+    const slashes = [...mark.querySelectorAll("path")].filter((n) => n !== bubble);
+    const range = document.createRange();
+    range.selectNode([...pm.childNodes].find((n) => n.nodeType === 3));
+    const word = range.getBoundingClientRect(), middle = (r) => r.top + r.height / 2;
+    return {
+      slashes: slashes.map(motion), cursor: motion(cur), bubble: bubble && motion(bubble),
+      words: { text: pm.textContent, font: `${cs(pm).fontWeight} ${cs(pm).fontSize} ${cs(pm).fontFamily}`, spacing: cs(pm).letterSpacing, colour: cs(pm).color },
+      colours: { slashes: [...new Set(slashes.map((n) => cs(n).fill))], cursor: cs(cur).backgroundColor, bubble: bubble && cs(bubble).stroke },
+      caret: { width: rect(cur).width, height: rect(cur).height, gap: rect(cur).left - word.right },
+      markGap: word.left - rect(mark).right, markSize: [rect(mark).width, rect(mark).height],
+      level: Math.max(Math.abs(middle(rect(mark)) - middle(word)), Math.abs(middle(rect(cur)) - middle(word))),
+      inset: rect(pm).left - rect(pm.parentElement).left,
+    };
+  }, scope);
+  const opacities = (page, scope) => page.evaluate(async (scope) => {
+    const slashes = [...document.querySelectorAll(`${scope} svg.mk path:not(.mk-bubble)`)], seen = slashes.map(() => new Set());
+    // One whole breath (2.1s) and a little more: a slash is at full strength for over half of one.
+    for (let i = 0; i < 24; i++) { slashes.forEach((n, k) => seen[k].add(Number(getComputedStyle(n).opacity).toFixed(2))); await new Promise((r) => setTimeout(r, 100)); }
+    return seen.map((s) => s.size);
+  }, scope);
+  const shots = process.env.DGC_SHOTS || "";
+  if (shots) mkdirSync(shots, { recursive: true });
+  for (const theme of ["dark-modern", "light-modern"]) {
+    const s = await openScreen({ theme }), work = await openWork({ theme });
+    try {
+      await s.send({ type: "opened", conversation: conversation({ title: "Trip to Goa" }), earlier: 0, busy: false,
+        messages: [{ id: M(1), role: "user", text: "Plan three days in Goa" }, { id: M(2), role: "assistant", text: "Day 1: the beaches.", finish: "stop" }] });
+      await s.frame();
+      const chat = await wordmark(s.page, ".cd-head .pm"), ours = await wordmark(work, "#phead .pm");
+      assert.deepEqual(ours.slashes, ["brand-slash-pulse 2.1s ease-in-out infinite 0s", "brand-slash-pulse 2.1s ease-in-out infinite 0.22s",
+                                      "brand-slash-pulse 2.1s ease-in-out infinite 0.44s"], "Work's slashes (the reference)");
+      assert.deepEqual(chat.slashes, ours.slashes, `${theme}: the bubble's slashes breathe in turn, as Work's do`);
+      assert.match(chat.bubble, /^none /, "the bubble holds still");
+      assert.match(ours.cursor, /^blink 1\.1s steps\(1(, end)?\) infinite 0s$/);
+      assert.equal(chat.cursor, ours.cursor, "the cursor blinks as Work's does");
+      assert.deepEqual(chat.words, { ...ours.words, text: "DGC" }, `${theme}: DGC, in Work's type and colour`);
+      assert.equal(ours.words.text, "DGC");
+      assert.deepEqual(chat.colours, { ...ours.colours, bubble: ours.colours.slashes[0] }, `${theme}: the bubble and its slashes in Work's mark colour`);
+      assert.deepEqual(chat.caret, ours.caret, "a caret of Work's size, as far from the word");
+      assert.equal(chat.markGap, ours.markGap, "as far from the word as Work's mark");
+      assert.ok(chat.level < 0.75 && ours.level < 0.75, `the mark, the word and the caret on one line (${chat.level}, ${ours.level})`);
+      assert.equal(chat.inset, ours.inset, "as far in from the header's edge");
+      assert.deepEqual(chat.markSize, [16, 16], "the bubble a little larger than Work's slashes, so the slashes inside read");
+      assert.deepEqual(ours.markSize, [14, 14]);
+      for (const sizes of await Promise.all([opacities(s.page, ".cd-head .pm"), opacities(work, "#phead .pm")])) {
+        assert.ok(sizes.every((n) => n > 2), `each slash really fades in and out (${sizes})`);
+      }
+      if (shots) {
+        await s.page.locator(".cd-head").screenshot({ path: join(shots, `chatdgc-header-${theme}.png`) });
+        await work.locator("#phead").screenshot({ path: join(shots, `work-header-${theme}.png`) });
+      }
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); await work.close(); }
+  }
+  // Reduced motion: Work's slashes and cursor stand still, and so do ChatDGC's.
+  const s = await openScreen({ reducedMotion: true }), work = await openWork({ theme: "dark-modern", reducedMotion: true });
+  try {
+    const chat = await wordmark(s.page, ".cd-head .pm"), ours = await wordmark(work, "#phead .pm");
+    for (const [name, mark] of [["Work", ours], ["ChatDGC", chat]]) {
+      assert.ok(mark.slashes.every((m) => m.startsWith("none ")), `${name}: the slashes are still (${mark.slashes})`);
+      assert.match(mark.cursor, /^none /, `${name}: the cursor is still`);
+    }
+    for (const sizes of await Promise.all([opacities(s.page, ".cd-head .pm"), opacities(work, "#phead .pm")])) {
+      assert.deepEqual(sizes, [1, 1, 1], "and each slash keeps one opacity");
+    }
+    assert.deepEqual(await s.page.evaluate(() => [...document.querySelectorAll(".cd-head .pm .mk-slashes path")].map((n) => getComputedStyle(n).opacity)),
+                     ["1", "1", "1"], "fully drawn, not caught mid-fade");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); await work.close(); }
 });
 
 test("what fills the window, in the meter's details: a bar a colour a part, each part's share, tools one by one", async (t) => {

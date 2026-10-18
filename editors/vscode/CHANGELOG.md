@@ -21,6 +21,9 @@
 
 ### ChatDGC
 
+- **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
+  slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
+  still for a reader who asked for less motion.
 - **Each prompt and reply says when it was sent or written**, in DGC's chat, ChatDGC and Pips: the time today,
   Yesterday or the weekday this week, then the date; the whole date on hover. A reopened chat shows its times too, and
   how long each finished turn worked.

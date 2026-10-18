@@ -204,12 +204,14 @@ function canvasTabPath(tab: vscode.Tab): string | undefined {
   return undefined;
 }
 
+// Its header opens on DGC's wordmark as Work's does (panel.ts, #phead .pm), with ChatDGC's own mark: the tab icon's
+// bubble and slashes, inline so the slashes can move as Work's do (main.css styles both).
 export function chatdgcDocument(asset: (name: string) => string, cspSource: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};">
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}"><link rel="stylesheet" href="${attr(asset("media/voicebar.css"))}">
 <title>ChatDGC</title></head><body class="cd-blank" data-katex="${attr(asset("dist/katex/katex.js"))}" data-katex-css="${attr(asset("dist/katex/katex.css"))}">
-<header class="cd-head"><button type="button" id="cd-crumb" class="cd-crumb" hidden></button><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
+<header class="cd-head"><span class="pm"><svg class="mk mk-chat" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-bubble" d="M5.5 2.5 H18.5 A4 4 0 0 1 22.5 6.5 V13.5 A4 4 0 0 1 18.5 17.5 H11 L6 21.5 V17.5 H5.5 A4 4 0 0 1 1.5 13.5 V6.5 A4 4 0 0 1 5.5 2.5 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><g class="mk-slashes" transform="translate(6.53 4.53) scale(0.4560)" fill="currentColor"><path d="M7.63 4.67 L3.44 6.76 L1 21.43 L5.19 19.33 Z"/><path d="M15.32 2.57 L11.13 4.67 L8.68 21.43 L12.87 19.33 Z"/><path d="M23 4.67 L18.81 6.76 L16.37 19.33 L20.56 17.24 Z"/></g></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" id="cd-crumb" class="cd-crumb" hidden></button><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
 <button type="button" id="cd-keys-open" class="cd-icon" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts"><span class="codicon codicon-keyboard" aria-hidden="true"></span></button>
 <button type="button" id="cd-menu" class="cd-icon" title="Rename, pin, archive, export or delete" aria-label="Chat options" hidden><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>
 <button type="button" id="cd-new" class="cd-icon" title="New chat" aria-label="New chat"><span class="codicon codicon-edit" aria-hidden="true"></span></button></header>

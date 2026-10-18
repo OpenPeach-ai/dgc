@@ -3092,7 +3092,7 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
   assert.equal(doc.getElementById("announcer").getAttribute("aria-live"), "polite");
   assert.equal(doc.getElementById("input").getAttribute("aria-label"), "Message DGC");
   assert.match(mainCss, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(mainCss, /#phead \.pm \.cur, \.tool \.dot\.run \{ animation: none; \}/);
+  assert.match(mainCss, /#phead \.pm \.cur, \.cd-head \.pm \.cur, \.tool \.dot\.run \{ animation: none; \}/);
   for (const id of ["btn-add", "btn-cmd", "btn-ctx", "btn-settings", "send"]) {
     assert.ok(doc.getElementById(id).getAttribute("aria-label"), `${id} needs an accessible name`);
   }
