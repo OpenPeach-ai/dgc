@@ -56,6 +56,9 @@
   "Paris [1]." reads "Paris.". They stay in code, in a reply with no sources, and where a number names none of its
   sources ("array[0]"). Copy, a deep research report (in the chat, its reader and its Copy) and chats you open again
   read the same way.
+- **No Search switch in the prompt box.** ChatDGC already looks things up whenever an answer depends on it, so the box's
+  Search (which only made it search first) is gone; Deep research and Study stay. Web search is on unless you turn it
+  off, in one place: **Settings → Web search → Search in ChatDGC**.
 - **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
   slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
   still for a reader who asked for less motion.

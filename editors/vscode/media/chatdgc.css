@@ -389,7 +389,7 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 
 /* Deep research. The toggle in the box; then the reply's card: the plan (to edit or start), the reading as it
    happens, or how it went; the report below it; and the report on its own, full screen. */
-/* Search, Deep research, Study: borderless, as main DGC's footer buttons are; on, they wear the accent. */
+/* Deep research and Study: borderless, as main DGC's footer buttons are; on, they wear the accent. */
 .cd-tool { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control); padding: 0 var(--sp-2);
   border: 1px solid transparent; border-radius: var(--r-md); background: transparent; color: var(--muted);
   font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; transition: background .12s, color .12s; }

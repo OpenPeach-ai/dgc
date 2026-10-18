@@ -42,13 +42,14 @@
   new MutationObserver(() => { if (!mathFrame) mathFrame = requestAnimationFrame(() => { mathFrame = 0; renderMath(log); }); })
     .observe(log, { childList: true, subtree: true });
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), notice = $("cd-notice");
-  // Web search is always there, as in ChatGPT: the model looks things up whenever an answer depends on it. The
-  // box's Search makes it search first, for the next message only; Settings -> Web search can turn it off.
-  const searchMode = () => (state.searchFirst ? "on" : "auto");
+  // Web search is always there, as in ChatGPT: the model looks things up whenever an answer depends on it, so the box
+  // has no switch for it (founder, 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
+  // search -> Search in ChatDGC turns it off for every chat.
+  const searchMode = () => "auto";
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", windows: [], breakdown: null,
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
-                  research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), searchFirst: false, planEditing: "", steerDraft: "", open: new Set(),
+                  research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
                   projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {}, draftEdit: {} };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
@@ -1650,8 +1651,7 @@
   function sendText(text) {
     if (!text.trim() || state.busy || !state.conversation || state.unavailable) return;
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode() });
-    state.lastSent = { text, research: false, pending: [], searchFirst: state.searchFirst, followup: true };
-    searchFirst(false);
+    state.lastSent = { text, research: false, pending: [], followup: true };
     state.busy = true;
     hideNotice(); controls();
   }
@@ -2061,12 +2061,11 @@
     if (state.research && state.pending.length) { showNotice("Deep research reads the web: send files without it, or turn it off.", "info"); return; }
     if (state.research && !text.trim()) return;
     const item = { text, research: !!state.research, model: modelPick.value || "", thinking: thinkingPick.value || "",
-                   search: searchMode(), study: !!state.study, pending: state.pending, searchFirst: state.searchFirst };
+                   search: searchMode(), study: !!state.study, pending: state.pending };
     // One step, so Cmd+Z right after sending brings the message back, chips and all.
     edit(() => { input.value = ""; state.pending = []; });
     grow(); saveDraft(); chips();
     if (state.research) researchMode(false);
-    searchFirst(false);
     // While it's answering (or summarizing), the message waits its turn, as Codex queues one: it goes when the
     // reply finishes. Voice mode never gets here busy -- it waits for the reply itself.
     if (busyNow()) { enqueue(item); controls(); return; }
@@ -2086,7 +2085,7 @@
                          ...(item.pending.length ? { attachments: item.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}),
                               ...(kind === "library" ? { ...(conversation_id ? { conversation_id } : { project_id }), attachment_id } : {}) })) } : {}) });
-    state.lastSent = { text: item.text, research: false, pending: item.pending, searchFirst: item.searchFirst };
+    state.lastSent = { text: item.text, research: false, pending: item.pending };
     state.busy = true;        // until the turn says otherwise: no second send in the meantime
     hideNotice();
     controls();
@@ -2189,7 +2188,6 @@
     state.research = !!on;
     researchToggle.setAttribute("aria-pressed", String(state.research));
     placeholder();
-    webToggle.hidden = state.research;                 // research always reads the web
   }
   const studyToggle = $("cd-study");
   /** Study mode: the chat's, on from the next message until it's turned off (the conversation says which). */
@@ -2204,13 +2202,6 @@
     input.placeholder = state.research ? "What should I research?" : state.study ? "What do you want to learn?"
       : project ? `New chat in ${project.name}` : "Ask anything";
   }
-  const webToggle = $("cd-websearch");
-  /** Search the web first, for the next message. */
-  function searchFirst(on) {
-    state.searchFirst = !!on;
-    webToggle.setAttribute("aria-pressed", String(state.searchFirst));
-  }
-  webToggle.addEventListener("click", () => { searchFirst(!state.searchFirst); input.focus(); });
   researchToggle.addEventListener("click", () => { researchMode(!state.research); input.focus(); });
   studyToggle.addEventListener("click", () => { studyMode(!state.study); input.focus(); });
   modelPick.addEventListener("change", () => { state.model = modelPick.value; });
@@ -2677,7 +2668,7 @@
         const picked = msg.canvasSelection && typeof msg.canvasSelection === "object" ? msg.canvasSelection : null;
         vscode.postMessage({ type: "send", text: msg.text, model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode(),
                              study: !!state.study, ...(picked ? { canvas_selection: picked } : {}) });
-        state.lastSent = { text: msg.text, research: false, pending: [], searchFirst: false };
+        state.lastSent = { text: msg.text, research: false, pending: [] };
         state.busy = true;
         hideNotice();
         controls();
@@ -2802,7 +2793,6 @@
           edit(() => { input.value = sent.text; state.pending = sent.pending; });
           grow(); saveDraft(); chips();
           researchMode(state.lastSent.research);
-          searchFirst(!!state.lastSent.searchFirst);
         }
         if (state.busy && !state.replyId) state.planAsked = false;
         if (state.busy && state.replyId) state.failed = true;  // its turn ends next: what's queued waits for you

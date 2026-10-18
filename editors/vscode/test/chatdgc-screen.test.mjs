@@ -397,7 +397,7 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
       await s.frame();
       const got = await s.page.evaluate(() => {
         const box = (sel) => { const n = document.querySelector(sel); if (!n || n.hidden || !n.offsetWidth) return null; const r = n.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
-        const parts = ["#cd-attach", "#cd-websearch", "#cd-research", "#cd-study", "#cd-temp-toggle", "#cd-context", "#cd-model-pill", "#cd-mic", "#cd-send"].map((sel) => [sel, box(sel)]).filter(([, b]) => b);
+        const parts = ["#cd-attach", "#cd-research", "#cd-study", "#cd-temp-toggle", "#cd-context", "#cd-model-pill", "#cd-mic", "#cd-send"].map((sel) => [sel, box(sel)]).filter(([, b]) => b);
         const tools = document.querySelector(".cd-tools").getBoundingClientRect();
         const words = [...document.querySelectorAll(".cd-tools .cd-tool-label")].filter((n) => n.offsetWidth).length;
         // A part squeezed narrower than what it holds spills over its neighbour while its box looks in place.
@@ -417,7 +417,7 @@ test("however narrow the editor, the prompt box keeps one row: the tools turn to
       assert.ok(["l", "r", "t", "b"].every((k) => Math.abs(voice[k] - at["#cd-send"][k]) <= 1), `${width}px: voice mode sat where Send is`);
       assert.equal(got.sideways, 0);
       assert.deepEqual(got.spills, [], `${width}px: nothing spills out of its place`);
-      if (width >= 1100) assert.ok(got.words >= 3, "wide: Search, Deep research and Study say their names");
+      if (width >= 1100) assert.ok(got.words >= 2, "wide: Deep research and Study say their names");
       if (width <= 460) assert.equal(got.words, 0, `${width}px: icons only`);
       assert.equal(await s.page.locator("#cd-research").getAttribute("aria-label"), "Deep research", "an icon still has its name");
       if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-box-${width}.png`) });
@@ -881,15 +881,14 @@ test("a reply that searches: what it looks for while it looks, its words with no
   const s = await openScreen();
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
-    // Web search is always there; Search makes it search first, for the next message only.
-    assert.equal(await s.page.locator("#cd-search").count(), 0, "no way to turn the web off from the box");
-    const first = s.page.locator("#cd-websearch");
-    await first.click();
-    assert.equal(await first.getAttribute("aria-pressed"), "true");
+    // Web search is always there, and the box has no switch for it (founder, 2026-10-18: "it anyway uses web, so
+    // let's not confuse users"): the model looks things up when an answer depends on it. Settings turns it off.
+    assert.equal(await s.page.locator("#cd-search, #cd-websearch, .cd-tools .codicon-globe").count(), 0, "no web switch in the box");
+    assert.deepEqual(await s.page.locator(".cd-tools .cd-tool").evaluateAll((tools) => tools.map((b) => b.getAttribute("aria-label"))),
+                     ["Deep research", "Study"], "Deep research and Study stay");
     await s.page.locator("#cd-input").fill("Weather in Paris?");
     await s.page.keyboard.press("Enter");
-    assert.equal((await s.posted("send"))[0].search, "on");
-    assert.equal(await first.getAttribute("aria-pressed"), "false", "one message: then it's the model's call again");
+    assert.equal((await s.posted("send"))[0].search, "auto", "the model's call, every message");
     await s.send({ type: "turn", state: "started", replyId: M(2) });
     await s.send({ type: "activity", messageId: M(2), kind: "searching", text: "paris weather" });
     await s.frame();
@@ -2243,8 +2242,8 @@ test("deep research: the toggle, a plan that counts down, editing it, the readin
     await s.send({ type: "opened", conversation: conversation({ title: "London" }), earlier: 0, busy: false, messages: [] });
     const toggle = s.page.locator("#cd-research");
     await toggle.click();
-    assert.deepEqual([await toggle.getAttribute("aria-pressed"), await s.page.locator("#cd-input").getAttribute("placeholder"),
-                      await s.page.locator("#cd-websearch").isHidden()], ["true", "What should I research?", true]);
+    assert.deepEqual([await toggle.getAttribute("aria-pressed"), await s.page.locator("#cd-input").getAttribute("placeholder")],
+                     ["true", "What should I research?"]);
     await s.page.locator("#cd-input").fill("Can I buy a London flat with savings in India?");
     await s.page.keyboard.press("Enter");
     const [asked] = await s.posted("research");

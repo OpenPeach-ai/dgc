@@ -471,6 +471,15 @@ test('Web search: ChatDGC searches on its own unless this switch turns it off, s
   assert.equal(x.sent.at(-1).values.chatdgc_web, false);
 });
 
+test('Web search: with nothing saved, ChatDGC searches the web; this switch is the one place to turn it off (the prompt box has none)', () => {
+  const x = setup();
+  const { chatdgc_web: _never, ...config } = x.config;
+  x.message({ type: 'event', event: { ...config, search_provider: 'duckduckgo', search_api_key_set: false, search_url: '' } });
+  x.click('[data-nav=web]');
+  assert.equal(x.d.querySelector('#chatdgc_web').getAttribute('aria-checked'), 'true', 'on by default');
+  assert.match(x.d.body.textContent, /Search in ChatDGC/);
+});
+
 test('ChatDGC: follow-ups under a reply, on unless this switch turns them off, saved with the page', () => {
   const x = setup();
   x.message({ type: 'event', event: { ...x.config, chatdgc_settable: true, chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_followups: true } });
