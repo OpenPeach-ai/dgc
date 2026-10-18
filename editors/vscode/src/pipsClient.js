@@ -8,6 +8,7 @@ import '../media/voicebar.js';  // window.DgcVoiceBar: the box while you dictate
 import '../media/voicebar.css';
 import '../media/readaloud.js'; // window.DgcReadAloud: a reply read aloud, as main DGC and ChatDGC play it
 import '../media/voicemode.js'; // window.DgcVoiceMode: a spoken conversation, as ChatDGC has it
+import '../media/texthistory.js'; // window.DgcTextHistory: undo and redo for the chat box, as main DGC and ChatDGC have them
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
@@ -72,10 +73,16 @@ reader?.onError((text,kind)=>{if(kind==='info')S.notice=text;else S.error=text;r
 const talkBar=window.DgcVoiceBar?window.DgcVoiceBar.create('pips-talk',root):null;
 const voiceMode=talkBar&&reader&&window.DgcVoiceMode?window.DgcVoiceMode.create({bar:talkBar,reader,
   post:m=>vscode.postMessage({...m,from:'pips'}),
-  deliver:text=>{micCaret=null;draft.chatText='';dictatedToPip(text,true);},
+  deliver:text=>chatEdit(()=>{micCaret=null;draft.chatText='';dictatedToPip(text,true);}),
   messages:()=>S.messages,
   show:()=>render(),
   notify:(text,kind)=>{if(kind==='info')S.notice=text;else S.error=text;render();}}):null;
+// Undo and redo for the chat box (media/texthistory.js). The page is redrawn whenever anything changes, and every redraw
+// is a new <textarea> with an empty history of its own: Cmd/Ctrl+Z in a Pip's box did nothing once a reply streamed in, or
+// once the first word swapped voice mode for Send. The history lives outside the element, and the box's own edits --
+// what was dictated, a message sent or given back, a choice added -- are steps of it.
+const chatHistory=window.DgcTextHistory?window.DgcTextHistory.create({box:()=>$('chatText'),changed:()=>{const box=$('chatText');if(!box)return;draft.chatText=box.value;if(S.selected)chatDrafts.set(S.selected,draft.chatText);rememberView();render();fitChatInput();}}):null;
+const chatEdit=change=>chatHistory?chatHistory.record(change):change();
 function micShow(next,action=''){S.mic=['starting','recording','writing'].includes(next)?next:'idle';voiceBar?.state(S.mic,action);}
 function micCancel(){micShow('idle');render();vscode.postMessage({type:'micCancel',from:'pips'});$('chatText')?.focus();}
 /** What was said, at the caret of the Pip's box, spaced from its neighbours; then sent, when Send stopped it. */
@@ -86,7 +93,7 @@ function dictatedToPip(text,send){
   const whole=draft.chatText||'',[start,end]=micCaret&&micCaret[1]<=whole.length?micCaret:[whole.length,whole.length];micCaret=null;
   const before=whole.slice(0,start),after=whole.slice(end);
   const piece=(before&&!/\s$/.test(before)?' ':'')+text+(after&&!/^\s/.test(after)?' ':'');
-  draft.chatText=(before+piece+after).slice(0,4000);render();
+  chatEdit(()=>{draft.chatText=(before+piece+after).slice(0,4000);render();});
   const again=$('chatText');if(again){again.focus();const at=Math.min(draft.chatText.length,start+piece.length);again.setSelectionRange(at,at);}
   fitChatInput();
   if(send)void sendChat();
@@ -492,9 +499,9 @@ async function sendChat(){
   const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,generation=selectionGeneration,epoch=S.epoch;let pending=chatRequests.get(id);if(!pending||pending.signature!==signature){pending={text,signature,options,images,files,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';
   // Your message is in the chat at once, as in DGC's own chat: the box clears now, not when the reply
   // is queued (a Pip's first step lists its workflow connectors' tools, which can take seconds).
-  S.sending={pip:id,text,key:pending.key,at:new Date().toISOString()};if(draft.chatText.trim()===text)draft.chatText='';render();
+  S.sending={pip:id,text,key:pending.key,at:new Date().toISOString()};chatEdit(()=>{if(draft.chatText.trim()===text)draft.chatText='';render();});
   try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');if(chatRequests.get(id)?.key===pending.key)chatRequests.delete(id);if(chatDrafts.get(id)?.trim()===text)chatDrafts.delete(id);if(pending.images?.length)chatImages.delete(id);if(pending.files?.length)chatFiles.delete(id);rememberView();if(token!==scope()||generation!==selectionGeneration)return;if(draft.chatText.trim()===text)draft.chatText='';await Promise.all([loadMessages(),refresh(false)]);}
-  catch(error){if(token===scope()&&generation===selectionGeneration){if(!draft.chatText.trim())draft.chatText=text;setError(error);}}
+  catch(error){if(token===scope()&&generation===selectionGeneration){chatEdit(()=>{if(!draft.chatText.trim())draft.chatText=text;setError(error);render();});}}
   finally{if(S.sending?.key===pending.key)S.sending=null;if(token===scope()&&generation===selectionGeneration){S.busy=false;render();$('chatText')?.focus();}}
 }
 function hydrateAdaptation(pip){const p=adaptationPolicy(pip.adaptation_policy);draft.adaptationMode=p.mode;draft.adaptationName=p.allowed_fields.includes('name');draft.adaptationSource=p.allowed_fields.includes('source_ref');S.adaptationDraftVersion=pip.current_version;}
@@ -2264,7 +2271,7 @@ async function loadSelected(chooseLatest=false) {
     const desired=S.runId||(chooseLatest?r.runs.find(run=>run.manifest?.run_kind!=='conversation')?.id:'');if(desired&&S.tab!=='chat')await loadRun(desired);if(S.tab==='chat')await loadMessages();
   }catch(error){if(token===scope()&&sequence===selectionSeq)setError(error);}
 }
-async function select(id) {if(id===S.selected&&!S.create){S.overview=false;S.tab='chat';rememberView();render();void loadMessages();return;}clearSelection();S.selected=id;S.create=false;S.overview=false;S.tab='chat';draft.chatText=chatDrafts.get(id)||'';S.error='';rememberView();render();await loadSelected(true);}
+async function select(id) {if(id===S.selected&&!S.create){S.overview=false;S.tab='chat';rememberView();render();void loadMessages();return;}clearSelection();S.selected=id;S.create=false;S.overview=false;S.tab='chat';draft.chatText=chatDrafts.get(id)||'';chatHistory?.reset();S.error='';rememberView();render();await loadSelected(true);}
 let refreshFlight=null;
 function refresh(includeContext=false) {
   if(!usable()||!S.workspace)return Promise.resolve();
@@ -2424,6 +2431,8 @@ function updateDraft(event) {
   if(key.startsWith('quick')){S.quickDirty=true;if(key==='quickKind'&&event.type==='change')render();}
   if((key==='scheduleType'||key==='handoffTarget'||key==='adaptationMode'||key==='sourceMode'||key==='outcomeSession'||key==='outcomeSourceKind')&&event.type==='change'){render();if(key==='handoffTarget'&&executionPip(S.jobs.find(p=>p.id===draft.handoffTarget)))void loadExecution();}
 }
+// The chat box's undo keys and typing, for its history. The box is redrawn, so the page listens, for the box.
+for(const type of ['keydown','beforeinput','input','compositionstart','compositionend'])document.addEventListener(type,event=>{if(chatHistory&&event.target?.id==='chatText')chatHistory[type](event);});
 document.addEventListener('input',updateDraft);
 document.addEventListener('paste',event=>{if(event.target?.id!=='chatText'||!canAttachImages())return;const files=[...(event.clipboardData?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
 document.addEventListener('dragover',event=>{if(canAttachImages()&&event.target?.closest?.('#chat-form')&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
@@ -2569,7 +2578,7 @@ document.addEventListener('click',event=>{
     if(target.dataset.chatAction==='copy'){vscode.postMessage({type:'copy',text:m.text});target.innerHTML=transcriptIcon('check')+'<span class="sr-only">Copied</span>';target.title='Copied';target.setAttribute('aria-label','Copied');const status=target.parentElement.querySelector('.copy-feedback');if(status)status.textContent='Copied';return;}
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id);if(!prompt||archived()||!usable())return;
     if(draft.chatText.trim()&&draft.chatText!==prompt.text){S.notice='You have an unsent message in the box. Send or copy it first, then edit this one.';render();return;}
-    draft.chatText=prompt.text;chatDrafts.set(S.selected,draft.chatText);rememberView();render();$('chatText')?.focus();
+    chatEdit(()=>{draft.chatText=prompt.text;chatDrafts.set(S.selected,draft.chatText);rememberView();render();});$('chatText')?.focus();
     if(target.dataset.chatAction==='retry')void sendChat();
     return;
   }
@@ -2605,7 +2614,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipNameCancel!==undefined){draft.pipPageName=S.pip?.name||'';draft.pipPageTitle=profile(S.pip?.profile).title;pageNameDirty=false;render();return;}
   if(target.dataset.openLink){vscode.postMessage({type:'openExternal',url:target.dataset.openLink});return;}
   if(target.dataset.openComputerFiles!==undefined){if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();return;}
-  if(target.dataset.setupChat!==undefined){S.tab='chat';draft.chatText='Change your instructions: ';chatDrafts.set(S.selected,draft.chatText);rememberView();render();void loadMessages();$('chatText')?.focus();return;}
+  if(target.dataset.setupChat!==undefined){S.tab='chat';chatEdit(()=>{draft.chatText='Change your instructions: ';chatDrafts.set(S.selected,draft.chatText);rememberView();render();});void loadMessages();$('chatText')?.focus();return;}
   if(target.dataset.copyPipId!==undefined){document.querySelectorAll('details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));vscode.postMessage({type:'copy',text:S.selected});S.notice='Copied its ID.';render();return;}
   if(target.dataset.pipsSettings){pipsSettings.view=target.dataset.pipsSettings;render();void loadPipsSettings();return;}
   if(target.dataset.computersUpdate!==undefined){void pipsSettingsCall('update_pip_computers',{},r=>r?.started?'Checking for updates. This can take a few minutes.':'Already checking for updates.');return;}
@@ -2668,8 +2677,8 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipChoice!==undefined){
     // A tap answers with that choice; with words or files already in the box it joins them instead.
     const choice=target.dataset.pipChoice;
-    if(draft.chatText.trim()||pendingImages().length||pendingFiles().length){draft.chatText=(draft.chatText.trim()?draft.chatText.trim()+' ':'')+choice;render();$('chatText')?.focus();}
-    else{draft.chatText=choice;void sendChat();}
+    if(draft.chatText.trim()||pendingImages().length||pendingFiles().length){chatEdit(()=>{draft.chatText=(draft.chatText.trim()?draft.chatText.trim()+' ':'')+choice;render();});$('chatText')?.focus();}
+    else chatEdit(()=>{draft.chatText=choice;void sendChat();});
     return;
   }
   if(target.dataset.needsOpen){if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();return;}
@@ -2974,7 +2983,7 @@ const stopMessages=options.onMessage(message=>{
   if(message.type==='pipsConnection'){
     if(message.generation !== undefined && message.generation === S.generation) return;
     S.generation=message.generation ?? null;
-    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';S.workspace=null;S.jobs=[];setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
+    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.jobs=[];setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
     render();if(usable())void initialize();
   }
 });

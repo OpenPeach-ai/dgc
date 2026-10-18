@@ -235,6 +235,21 @@
   own package and installs it from there (from the Marketplace instead, once it's there and not older), on the
   computer you're at even in a Remote SSH window. It starts at once, with no reload, and the box that asked says
   it's ready. If it can't install, it says why and where the file is, with **Install from VSIX…**.
+- **Cmd+Z and Ctrl+Z in the prompt box undo what you did, in the order you did it**, as in Codex's box. The box
+  keeps its own history now; the browser's did not keep up with it, and in VS Code it was what the keys reached:
+  - A paste, dictated words, a picked completion and a message put back are each one step. They were undone
+    together with everything typed before them; typing pauses for half a second end a step too.
+  - Undoing and redoing a picked skill or @file brings back what it stands for, not just the pill, and a pill
+    removed with Backspace comes back with Cmd+Z.
+  - Cmd+Shift+Z and Cmd+Y redo (Ctrl+Shift+Z and Ctrl+Y on Windows and Linux), and the keys no longer also reach
+    VS Code's own Undo, which ran the browser's history a second time.
+  - A paste in VS Code no longer turns the pills already in the box into nothing.
+  - Copying a selection with pills copies their words: `$skill`, `@file`, `/command` and a link's address
+    (Chromium's copy left them out). Pasted back into the box, they are pills again.
+  - Cmd+B and Cmd+I no longer make words bold or italic in a box that sends plain text.
+- **Undo works in ChatDGC's box and a Pip's box too.** Words dictated into ChatDGC's box, a sent message, a queued
+  message given back and a long paste folded into a chip can be undone; a Pip's box no longer forgets its undo
+  history each time the page redraws around it (whenever a reply streams in).
 - **Dictation over Remote SSH explains itself.** In Cursor or VS Code connected to another machine, the microphone
   said "Dictation records on the computer you're at" and nothing else. It now says DGC Voice must be installed in
   that editor on this computer while DGC runs on the remote host, and offers to install it.

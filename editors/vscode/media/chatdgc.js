@@ -781,7 +781,8 @@
   }
   function chips() {
     const box = $("cd-chips");
-    box.replaceChildren(...state.pending.map((item, i) => chip(item, () => { state.pending.splice(i, 1); chips(); controls(); input.focus(); })));
+    // Closed by hand is a decision, not an edit: undo does not bring it back.
+    box.replaceChildren(...state.pending.map((item, i) => chip(item, () => { history?.dismiss(item); state.pending.splice(i, 1); chips(); controls(); input.focus(); })));
     box.hidden = !state.pending.length;
   }
   // ---- images the chat keeps, shown as thumbnails (asked of the backend once each, then remembered)
@@ -1906,6 +1907,20 @@
     input.style.height = `${Math.min(input.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
   }
   input.addEventListener("input", () => { grow(); controls(); saveDraft(); });
+  // ---- undo and redo (media/texthistory.js): the box's own history, as the coding chat's box and Codex's have one.
+  // The textarea's would do for typing, but not for what this page does to the box itself -- a message sent or given
+  // back, words dictated, a long paste folded into a chip -- which it either never recorded or lost track of.
+  const history = window.DgcTextHistory ? window.DgcTextHistory.create({
+    box: () => input,
+    list: { get: () => state.pending, set: (items) => { state.pending = items; chips(); } },
+    changed: () => { grow(); controls(); saveDraft(); },
+  }) : null;
+  const edit = (change, kind) => (history ? history.record(change, kind) : change());
+  input.addEventListener("keydown", (e) => history?.keydown(e), true);
+  input.addEventListener("beforeinput", (e) => history?.beforeinput(e), true);
+  input.addEventListener("input", () => history?.input(), true);
+  input.addEventListener("compositionstart", () => history?.compositionstart());
+  input.addEventListener("compositionend", () => history?.compositionend());
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
     else if (e.key === "Escape" && (micState === "recording" || micState === "starting")) { e.preventDefault(); e.stopPropagation(); micCancel(); }
@@ -1966,7 +1981,7 @@
   var voiceMode = voiceTalk && reader && window.DgcVoiceMode ? window.DgcVoiceMode.create({
     bar: voiceTalk, reader,
     post: (m) => vscode.postMessage(m),
-    deliver: (text) => { input.value = ""; dictated(text); submit(true); },
+    deliver: (text) => edit(() => { input.value = ""; dictated(text); submit(true); }),
     messages: () => state.messages,
     show: (on) => {
       if (box.classList.contains("talking") === on) return;   // only when voice mode comes or goes
@@ -1987,7 +2002,7 @@
     const before = input.value.slice(0, start), after = input.value.slice(end);
     const piece = (before && !/\s$/.test(before) ? " " : "") + text + (after && !/^\s/.test(after) ? " " : "");
     input.focus();
-    input.setRangeText(piece, start, end, "end");
+    edit(() => input.setRangeText(piece, start, end, "end"));
     grow(); controls(); saveDraft();
     announce("Added what you said.");
   }
@@ -1998,8 +2013,9 @@
     if (state.research && !text.trim()) return;
     const item = { text, research: !!state.research, model: modelPick.value || "", thinking: thinkingPick.value || "",
                    search: searchMode(), study: !!state.study, pending: state.pending, searchFirst: state.searchFirst };
-    input.value = ""; grow(); saveDraft();
-    state.pending = []; chips();
+    // One step, so Cmd+Z right after sending brings the message back, chips and all.
+    edit(() => { input.value = ""; state.pending = []; });
+    grow(); saveDraft(); chips();
     if (state.research) researchMode(false);
     searchFirst(false);
     // While it's answering (or summarizing), the message waits its turn, as Codex queues one: it goes when the
@@ -2062,8 +2078,11 @@
   /** One queued message back in the box, below anything typed there. */
   function giveBack(item) {
     const typed = input.value.trim();
-    input.value = typed ? `${typed}\n\n${item.text}` : item.text;
-    state.pending = [...state.pending, ...item.pending]; chips();
+    edit(() => {
+      input.value = typed ? `${typed}\n\n${item.text}` : item.text;
+      state.pending = [...state.pending, ...item.pending];
+    });
+    chips();
     if (item.research && !typed) researchMode(true);
     grow(); saveDraft(); controls();
   }
@@ -2072,8 +2091,11 @@
     const list = queued().splice(0);
     if (!list.length) return;
     const typed = input.value.trim();
-    input.value = [...list.map((item) => item.text.trim()), ...(typed ? [typed] : [])].filter(Boolean).join("\n\n");
-    state.pending = [...list.flatMap((item) => item.pending), ...state.pending]; chips();
+    edit(() => {
+      input.value = [...list.map((item) => item.text.trim()), ...(typed ? [typed] : [])].filter(Boolean).join("\n\n");
+      state.pending = [...list.flatMap((item) => item.pending), ...state.pending];
+    });
+    chips();
     grow(); saveDraft(); saveQueue(); queueView(); controls();
     announce(list.length === 1 ? "The queued message is back in the box." : `The ${list.length} queued messages are back in the box.`);
   }
@@ -2207,14 +2229,14 @@
       e.preventDefault();
       for (const file of files.slice(0, 10 - state.pending.length)) {
         const data = await pastedImage(file);
-        if (data) state.pending.push({ kind: "image", name: file.name && file.name !== "image.png" ? file.name : "Pasted image", data,
-                                       size: Math.round(data.length * 0.75) });
+        if (data) edit(() => state.pending.push({ kind: "image", name: file.name && file.name !== "image.png" ? file.name : "Pasted image", data,
+                                                  size: Math.round(data.length * 0.75) }));
         else showNotice("That image couldn't be read.");
       }
       chips(); controls();
     } else if (words.length > PASTE_AS_FILE && state.pending.length < 10) {
       e.preventDefault();
-      state.pending.push({ kind: "text", name: "Pasted text", text: words });
+      edit(() => state.pending.push({ kind: "text", name: "Pasted text", text: words }));
       chips(); controls();
     }
   });
@@ -2729,8 +2751,9 @@
         // A send refused before it started (no model, a window too small for research): not running, and what
         // was typed comes back to the box rather than being lost.
         if (state.busy && !state.replyId && state.lastSent && !input.value.trim()) {
-          input.value = state.lastSent.text; grow(); saveDraft();
-          state.pending = state.lastSent.pending; chips();
+          const sent = state.lastSent;
+          edit(() => { input.value = sent.text; state.pending = sent.pending; });
+          grow(); saveDraft(); chips();
           researchMode(state.lastSent.research);
           searchFirst(!!state.lastSent.searchFirst);
         }
@@ -2834,7 +2857,8 @@
   // ---- a draft survives a reload, per chat
   function draftKey() { return `draft:${state.conversation?.id || "new"}`; }
   function saveDraft() { try { vscode.setState({ ...(vscode.getState() || {}), [draftKey()]: input.value.slice(0, 100000) }); } catch {} }
-  function restoreDraft() { const saved = (vscode.getState() || {})[draftKey()]; input.value = typeof saved === "string" ? saved : ""; grow(); }
+  // Another chat's draft starts another history: Cmd+Z in it must not bring back the chat that was left.
+  function restoreDraft() { const saved = (vscode.getState() || {})[draftKey()]; input.value = typeof saved === "string" ? saved : ""; history?.reset(); grow(); }
 
   // ---- keyboard shortcuts (ChatGPT's): Ctrl on Windows and Linux, Cmd on a Mac
   const MAC = /Mac/i.test(navigator.platform || navigator.userAgent || "");

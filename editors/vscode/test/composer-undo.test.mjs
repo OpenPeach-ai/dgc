@@ -5,11 +5,11 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 
-// Undo in the prompt box, in a real browser. A textarea keeps its own undo history, and that is what
-// Cmd+Z and Ctrl+Z act on. (VS Code's Edit → Undo menu item is routed to the active editor and does
-// not reach a webview view, so it is not claimed here.) The composer used to assign .value on every send and every
-// inserted completion, which wipes that history, so undo did nothing — unlike Claude's and Codex's
-// composers. jsdom has no editing commands, so only a real Chromium can prove this.
+// Undo in the prompt box, in a real browser. The box keeps its own history (main.js, "undo and redo"),
+// which is what Cmd+Z and Ctrl+Z act on; composer-history.test.mjs covers it key by key on both
+// platforms. The composer used to assign .value on every send and every inserted completion, which
+// wiped the browser's history, so undo did nothing — unlike Claude's and Codex's composers. jsdom has
+// no editing commands and no undo, so only a real Chromium can prove this.
 const here = dirname(fileURLToPath(import.meta.url));
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -190,10 +190,10 @@ test("undoing Show in text field folds the pasted text back into its chip", asyn
   await clearBox();
 });
 
-// A paste that folds into a chip is the one kind of paste Cmd+Z could not reach. Every other route
-// into the composer goes through insertText, so the browser records a step and the key works; the
-// chip branches call preventDefault and push onto `attachments`, changing no text, so there was
-// nothing in the undo stack to act on and the chip could only be dismissed by finding its button.
+// A paste that folds into a chip was the one kind of paste Cmd+Z could not reach: the chip branches
+// call preventDefault and push onto `attachments`, changing no text, so the browser's undo stack had
+// nothing to act on and the chip could only be dismissed by finding its button. The box's own history
+// holds the chip beside the text.
 const pastedChips = () => page.evaluate(() =>
   document.querySelectorAll("#attachments .pasted-chip").length);
 const pasteText = (text) => page.evaluate((t) => {

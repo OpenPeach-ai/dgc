@@ -35,8 +35,9 @@
   // so they cannot disagree with each other.
   const BLOCK = new Set(["DIV", "P", "LI", "TR", "SECTION", "ARTICLE", "BLOCKQUOTE", "PRE"]);
 
-  function walk(root, stopNode, stopOffset) {
-    // Returns [text, offsetAtStop]. A null stopNode just serializes the whole subtree.
+  function walk(root, stopNode, stopOffset, pillText = (pill) => pill.dataset.pill) {
+    // Returns [text, offsetAtStop]. A null stopNode just serializes the whole subtree. `pillText`
+    // is what a pill reads as: its wire text for the model, its typed token for the clipboard.
     let text = "";
     let found = stopNode == null ? 0 : -1;
     let endedByBr = false;   // a real <br> ended the last line, as opposed to a block boundary
@@ -68,7 +69,7 @@
         // first." against a box that was empty on screen.
         const filler = node.tagName === "BR" && node === node.parentNode.lastChild;
         if (!filler) {
-          text += node.tagName === "BR" ? "\n" : node.dataset.pill;
+          text += node.tagName === "BR" ? "\n" : pillText(node);
           endedByBr = node.tagName === "BR";
         }
         if (stopNode === node && found < 0) found = stopOffset > 0 ? text.length : before;
@@ -226,9 +227,6 @@
     sel.addRange(range);
   }
 
-  // One way to put text in at the caret, so every caller lands in the browser's undo history as
-  // an ordinary edit. execCommand is deprecated and is still the ONLY API that does that: a
-  // direct DOM mutation drops out of the stack, and Ctrl+Z then jumps over it to the edit before.
   // Set for as long as an IME session is open. There were no composition listeners at all before:
   // harmless for a textarea, which handles it internally, and not harmless here.
   let composing = false;
@@ -272,12 +270,17 @@
     return pill;
   }
 
+  // A null `start` puts the pill at the caret as it stands. Text offsets cannot say which side of
+  // a pill whose wire text is "" they mean, so a paste that rebuilds several pills in a row places
+  // each one where the last left the caret.
   function insertComposerPill(start, end, kind, label, wire = "") {
-    // Through execCommand so the insertion is ONE entry in the browser's own undo history --
-    // measured, not assumed: a spike confirmed insertHTML inserts an element as a single step,
-    // where a direct DOM mutation drops out of the stack and Ctrl+Z then jumps over the pill.
+    return recordComposerEdit(() => placeComposerPill(start, end, kind, label, wire));
+  }
+  function placeComposerPill(start, end, kind, label, wire) {
+    // Through execCommand still, because insertHTML is what puts the caret, the selection and the
+    // surrounding text right; the undo step itself is the composer's own (recordComposerEdit).
     input.focus({ preventScroll: true });
-    setComposerRange(start, end);
+    if (start != null) setComposerRange(start, end);
     const built = pillElement(kind, label, wire);
     // Tag it so the caret repair below can find exactly the node just inserted, rather than
     // guessing at "the last pill" -- there may already be others, in any order.
@@ -361,8 +364,10 @@
     }
     if (!victim) return;
     event.preventDefault();
-    releasePill(victim);
-    victim.remove();
+    // An edit like any other, so Cmd+Z brings the pill back with the skill or file it stood for.
+    // Removed by hand outside the history, the next Cmd+Z jumped past it and undid the pill's
+    // insertion instead: the picker token came back and the pill never did.
+    recordComposerEdit(() => { releasePill(victim); victim.remove(); });
     markComposerEmpty();
     onInput();
   }, true);
@@ -406,6 +411,9 @@
   }
 
   function insertComposerText(text) {
+    return recordComposerEdit(() => placeComposerText(text));
+  }
+  function placeComposerText(text) {
     input.focus();
     // What the composer must hold afterwards, computed BEFORE the insert so it can be checked.
     const [start, end] = composerSelection();
@@ -414,20 +422,64 @@
     // Guarded exactly as editComposer guards it: where execCommand does not exist, CALLING it
     // throws rather than returning falsy, and the text would be silently dropped instead of
     // falling through to the assignment below.
-    const inserted = typeof document.execCommand === "function"
-      && document.execCommand("insertText", false, text);
+    const native = typeof document.execCommand === "function";
+    const inserted = native && document.execCommand("insertText", false, text);
+    // Chromium will not run an editing command from inside another one, and VS Code hands this page
+    // every paste as one: its Paste runs execCommand("paste") here, so the paste handler is already
+    // inside an editing command and insertText returns false. Every paste in VS Code used to fall
+    // through to the rebuild below, which writes the box back as plain text -- every pill in it gone.
+    // Put the text in at the selection by hand first; the rebuild is only for a result that is still
+    // not what it must be.
+    if (native && !inserted) spliceComposer(text);
     // ...and then VERIFIED, because what `insertText` does with consecutive newlines is the host's
     // business, not ours. A paste of a numbered list with blank lines between the items came back
     // with the blank lines gone on one Chromium and intact on another, and a composer whose
     // contents depend on which editor is embedding it is not a composer. Where the native path is
-    // faithful it is kept, because it is the one that gives native undo; where it is not, the
-    // exact text is put in by hand. `composerText()` is the same serializer the wire uses, so this
-    // compares what the model would receive.
-    if (!inserted || composerText() !== want) {
+    // faithful it is kept, because it is the one that keeps the caret and the scroll where Chromium
+    // puts them; where it is not, the exact text is put in by hand. Neither costs the undo step,
+    // which the composer's own history records around this. `composerText()` is the same
+    // serializer the wire uses, so this compares what the model would receive.
+    if (composerText() !== want) {
       setComposerValue(want);
       setComposerRange(start + text.length);
     }
     markComposerEmpty();
+  }
+  // The DOM write insertText would have made, for where Chromium refuses to run it: the selection's
+  // contents out, the text in as text and <br>, the caret after it. Pills outside the selection are
+  // left exactly where they are.
+  function spliceComposer(text) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    const range = sel.getRangeAt(0);
+    if (!input.contains(range.startContainer) || !input.contains(range.endContainer)) return false;
+    range.deleteContents();
+    const frag = document.createDocumentFragment();
+    String(text).split("\n").forEach((line, i) => {
+      if (i) frag.appendChild(document.createElement("br"));
+      if (line) frag.appendChild(document.createTextNode(line));
+    });
+    const last = frag.lastChild;
+    if (!last) return true;
+    range.insertNode(frag);
+    // A <br> that ends its line is the line's filler and reads as nothing, so a text that ends in a
+    // newline needs a second one -- the rule setComposerValue writes by.
+    if (last.nodeName === "BR" && !last.nextSibling) last.after(document.createElement("br"));
+    range.setStartAfter(last);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  }
+  // The selection out of the box, by the editing command where Chromium runs it and by hand where it
+  // will not (inside a cut, which VS Code delivers as execCommand("cut")).
+  function deleteComposerSelection() {
+    if (typeof document.execCommand === "function") {
+      composerEditing = true;
+      try { if (document.execCommand("delete", false)) return; } finally { composerEditing = false; }
+    }
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && input.contains(sel.getRangeAt(0).commonAncestorContainer)) sel.getRangeAt(0).deleteContents();
   }
 
   /** The clipboard's text, from whichever flavour carries it.
@@ -483,7 +535,7 @@
   // composer, and a test asserting on it sees what the model would actually be sent.
   Object.defineProperty(input, "value", {
     get: () => composerText(),
-    set: (text) => { setComposerValue(text); },
+    set: (text) => { recordComposerEdit(() => setComposerValue(text)); },
     configurable: true,
   });
   // Writable, because a textarea's are: `input.selectionStart = 8; input.selectionEnd = 11` is the
@@ -504,6 +556,286 @@
   // Another method a <textarea> supplied. Callers use it to select the whole draft before
   // replacing or deleting it, and on a div it simply does not exist.
   input.select = () => setComposerRange(0, composerText().length);
+
+  // ---- undo and redo ------------------------------------------------------------------------
+  // The box keeps its own history, as Codex's composer does (a ProseMirror history, bound to
+  // Mod-z, Mod-Shift-z and Mod-y in the composer's own keymap), instead of leaning on the
+  // browser's. Chromium's undo stack was measured in this box and does not do what Cmd+Z means,
+  // however carefully each edit is routed through execCommand:
+  //
+  //   * every insertText joins the typing run still open before it, so a paste, a dictated phrase
+  //     or a picked completion was taken back together with the words typed ahead of it;
+  //   * a typing run never ends by itself: a paragraph written over a minute went in one press;
+  //   * what lives beside the text is not in it -- the selection a pill stands for, a paste folded
+  //     into a chip, the Goal choice -- so a redone pill no longer attached its skill or file, and
+  //     a pill removed with Backspace could not be brought back at all;
+  //   * every DOM write the panel makes (a restored draft, the fallback that keeps a paste's blank
+  //     lines) leaves the native steps pointing at nodes that are gone, and Cmd+Z does nothing.
+  //
+  // In VS Code the key does not reach the browser's undo in any case. The webview host cancels
+  // Cmd/Ctrl+Z, hands it to the workbench, and the workbench's Undo calls execCommand("undo") on
+  // this document. So the history answers every way in: the key itself, stopped here so the
+  // workbench does not undo a second time; execCommand("undo"/"redo"), which is the Edit menu;
+  // and beforeinput historyUndo/historyRedo, which is anything else.
+  //
+  // A step is a snapshot of the box: its nodes, pills and all, the selection, the selections and
+  // chips beside it, and the Goal choice. Typing and deleting group as ProseMirror groups them --
+  // a run of one kind at the caret, broken by a pause of HISTORY_GROUP_MS -- and everything the
+  // panel does itself is a step of its own.
+  const HISTORY_DEPTH = 100, HISTORY_GROUP_MS = 500;
+  const MAC = /Mac|iP(hone|[oa]d)/.test(navigator.platform || "");
+  const composerHistory = { done: [], undone: [], open: null, pending: null, depth: 0, before: null, restoring: false };
+  // Which selections the history may put back or take away. One added or removed BY an edit is
+  // the history's; one added from outside the box (the explorer, the Skills page) is not, and
+  // undoing some typing must not drop it. A chip closed by hand is a decision, never undone.
+  const historyManaged = new WeakSet(), historyDismissed = new WeakSet();
+  function dismissAttachment(item) { if (item && typeof item === "object") historyDismissed.add(item); }
+
+  function nodePath(node) {
+    const path = [];
+    for (; node && node !== input; node = node.parentNode) {
+      if (!node.parentNode) return null;
+      path.unshift(Array.prototype.indexOf.call(node.parentNode.childNodes, node));
+    }
+    return node === input ? path : null;
+  }
+  function nodeAtPath(path) {
+    let node = input;
+    for (const index of path || []) node = node ? node.childNodes[index] : null;
+    return node || null;
+  }
+  function captureComposer() {
+    // The caret as a DOM position, not a text offset: a skill pill reads as "", so the offsets on
+    // either side of it are the same number, and a caret restored by offset lands in FRONT of the
+    // pill it was after -- and the next word typed goes there too.
+    let caret = null;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      const r = sel.getRangeAt(0), start = nodePath(r.startContainer), end = nodePath(r.endContainer);
+      if (start && end) caret = { start, startOffset: r.startOffset, end, endOffset: r.endOffset };
+    }
+    return { nodes: [...input.childNodes].map((node) => node.cloneNode(true)), markup: input.innerHTML,
+      caret, at: composerSelection(), goal: goalDraftArmed,
+      atts: attachments.map((item) => ({ item, fromPill: item.fromPill === true })) };
+  }
+  function sameComposer(a, b) {
+    return a.markup === b.markup && a.goal === b.goal && a.atts.length === b.atts.length
+      && a.atts.every((entry, i) => entry.item === b.atts[i].item && entry.fromPill === b.atts[i].fromPill);
+  }
+  function restoreComposer(state) {
+    input.replaceChildren(...state.nodes.map((node) => node.cloneNode(true)));
+    const present = new Set(state.atts.map((entry) => entry.item));
+    for (let i = attachments.length - 1; i >= 0; i -= 1) {
+      const item = attachments[i];
+      if (!present.has(item) && (item.fromPill || historyManaged.has(item))) attachments.splice(i, 1);
+    }
+    state.atts.forEach((entry, index) => {
+      const { item } = entry;
+      if (!attachments.includes(item) && (entry.fromPill || historyManaged.has(item)) && !historyDismissed.has(item)) {
+        attachments.splice(Math.min(index, attachments.length), 0, item);
+      }
+      if (entry.fromPill) item.fromPill = true; else delete item.fromPill;
+    });
+    if (state.goal !== goalDraftArmed) setGoalDraftArmed(state.goal);
+    input.focus({ preventScroll: true });
+    const sel = window.getSelection(), c = state.caret;
+    const start = c && nodeAtPath(c.start), end = c && nodeAtPath(c.end);
+    const room = (node) => (node.nodeType === 3 ? node.data.length : node.childNodes.length);
+    try {
+      if (!sel || !start || !end) throw new Error("no caret");
+      const range = document.createRange();
+      range.setStart(start, Math.min(c.startOffset, room(start)));
+      range.setEnd(end, Math.min(c.endOffset, room(end)));
+      sel.removeAllRanges(); sel.addRange(range);
+    } catch { setComposerRange(state.at[0], state.at[1]); }
+  }
+  function pushComposerUndo(state) {
+    composerHistory.done.push(state);
+    if (composerHistory.done.length > HISTORY_DEPTH) composerHistory.done.shift();
+    composerHistory.undone.length = 0;
+  }
+  function resetComposerHistory() {
+    Object.assign(composerHistory, { open: null, pending: null });
+    composerHistory.done.length = 0; composerHistory.undone.length = 0;
+  }
+  // Whether an edit of this kind, made now, carries on the typing run before it.
+  function typingContinues(kind) {
+    const open = composerHistory.open;
+    if (!kind || !open || open.kind !== kind) return false;
+    if (composing) return true;
+    const [start, end] = composerSelection();
+    return start === end && start === open.end && Date.now() - open.time < HISTORY_GROUP_MS;
+  }
+  // Every change the panel makes to the box goes through here, and nested calls are one step: a
+  // picked @file is the token removed, the pill put in and the file attached, undone together.
+  // `kind` ("insert" or "delete") makes the edit part of a typing run instead -- Shift+Enter is
+  // typing; a paste, a completion or dictation is not.
+  function recordComposerEdit(edit, kind = "") {
+    const h = composerHistory;
+    if (h.restoring) return edit();
+    const outer = h.depth === 0;
+    if (outer) { h.before = typingContinues(kind) ? null : captureComposer(); h.open = null; h.pending = null; }
+    h.depth += 1;
+    try { return edit(); }
+    finally {
+      h.depth -= 1;
+      if (outer) {
+        const before = h.before;
+        h.before = null;
+        if (before) {
+          const had = new Set(before.atts.map((entry) => entry.item));
+          for (const item of attachments) if (!had.has(item)) historyManaged.add(item);
+          for (const item of had) if (!attachments.includes(item)) historyManaged.add(item);
+          // An edit that changed nothing is not a step: Cmd+Z would seem to do nothing.
+          if (!sameComposer(before, captureComposer())) pushComposerUndo(before);
+        }
+        h.open = kind ? { kind, end: composerSelection()[0], time: Date.now() } : null;
+      }
+    }
+  }
+  function moveComposerHistory(from, to) {
+    const h = composerHistory;
+    if (composing || h.depth || !from.length) return false;
+    h.open = null; h.pending = null;
+    to.push(captureComposer());
+    h.restoring = true;
+    try { restoreComposer(from.pop()); } finally { h.restoring = false; }
+    markComposerEmpty(); hidePop(); renderAtts(); renderPasteNotice();
+    renderComposerControls(); autosizeComposer(); persistDraft();
+    return true;
+  }
+  const undoComposer = () => moveComposerHistory(composerHistory.done, composerHistory.undone);
+  const redoComposer = () => moveComposerHistory(composerHistory.undone, composerHistory.done);
+
+  // Cmd+Z, Cmd+Shift+Z and Cmd+Y on a Mac; Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y elsewhere -- Codex's
+  // Mod-z, Mod-Shift-z and Mod-y. Read from the layout's letter, and from the physical key when the
+  // layout's letter is not Latin, so a Cyrillic or Greek keyboard still undoes.
+  function composerHistoryKey(event) {
+    if (event.altKey || event.isComposing || event.keyCode === 229) return "";
+    if (MAC ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return "";
+    const key = /^[a-z]$/i.test(event.key || "") ? event.key.toLowerCase()
+      : String(event.code || "").replace(/^Key/, "").toLowerCase();
+    if (key === "z") return event.shiftKey ? "redo" : "undo";
+    return key === "y" && !event.shiftKey ? "redo" : "";
+  }
+  input.addEventListener("keydown", (event) => {
+    const op = composerHistoryKey(event);
+    if (!op) return;
+    // Taken even when there is nothing to undo: let through, VS Code would run the browser's own
+    // undo on this page, over nodes that history has since replaced.
+    event.preventDefault();
+    event.stopPropagation();
+    if (op === "undo") undoComposer(); else redoComposer();
+  }, true);
+  // The Edit menu's Undo and Redo: the workbench sends them to the focused webview as
+  // execCommand on this document, which would otherwise run the browser's stack.
+  if (typeof document.execCommand === "function") {
+    const nativeExecCommand = document.execCommand;
+    document.execCommand = function (command, ...rest) {
+      const name = String(command || "").toLowerCase();
+      if ((name === "undo" || name === "redo") && input.contains(document.activeElement)) {
+        return name === "undo" ? undoComposer() : redoComposer();
+      }
+      return nativeExecCommand.call(this, command, ...rest);
+    };
+  }
+  input.addEventListener("beforeinput", (event) => {
+    const type = event.inputType || "";
+    if (type === "historyUndo" || type === "historyRedo") {
+      event.preventDefault();
+      if (type === "historyUndo") undoComposer(); else redoComposer();
+      return;
+    }
+    // Cmd+B and Cmd+I would bold and italicise in an editing host. The box is plain text: the
+    // serializer drops the markup anyway, so all it did was make words look different from what
+    // is sent.
+    if (/^format/.test(type)) { event.preventDefault(); return; }
+    const h = composerHistory;
+    if (h.depth || h.restoring) return;
+    // Captured now, while the DOM is still as it was; kept only if an input event follows, so a
+    // Backspace in an empty box does not leave a step that changes nothing.
+    const kind = /^insert(Text|CompositionText)$/.test(type) ? "insert"
+      : /^delete(Content|Word|SoftLine|HardLine)(Backward|Forward)$/.test(type) ? "delete" : "";
+    h.pending = typingContinues(kind) ? { kind } : { kind, state: captureComposer() };
+  }, true);
+  input.addEventListener("input", () => {
+    const h = composerHistory, pending = h.pending;
+    h.pending = null;
+    if (h.depth || h.restoring || !pending) return;
+    if (pending.state) pushComposerUndo(pending.state);
+    h.open = pending.kind ? { kind: pending.kind, end: composerSelection()[0], time: Date.now() } : null;
+  }, true);
+
+  // ---- copy, cut and paste back -------------------------------------------------------------
+  // A pill copied out of the box reads as the token that made it -- $skill, @file, /command -- or,
+  // for a link, as the URL itself; Chromium's own copy wrote the pill's label (a truncated host
+  // for a link) and its markup. Pasted back into the box, the same copy is pills again, with the
+  // skills and files they stand for: Codex's composer does the same through its own clipboard
+  // serializer. Nothing is trusted from the clipboard for that -- the pills come from this
+  // panel's memory of its last copy, and only when the clipboard still holds that exact text.
+  const PILL_MARK = "";
+  var composerCopy = null;
+  function pillToken(pill) {
+    const kind = pill.dataset.kind, name = pill.textContent;
+    if (kind === "link") return pill.dataset.pill || pill.title || name;
+    return (kind === "skill" ? "$" : kind === "file" ? "@" : "/") + name;
+  }
+  function copyComposerSelection(event) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed || !event.clipboardData) return false;
+    const range = sel.getRangeAt(0);
+    if (!input.contains(range.startContainer) || !input.contains(range.endContainer)) return false;
+    const holder = document.createElement("div");
+    holder.appendChild(range.cloneContents());
+    const text = walk(holder, null, 0, pillToken)[0];
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", text);
+    const pills = [];
+    const marked = walk(holder, null, 0, (pill) => { pills.push(pill); return PILL_MARK; })[0];
+    composerCopy = null;
+    if (pills.length && !text.includes(PILL_MARK)) {
+      const parts = [];
+      marked.split(PILL_MARK).forEach((piece, i) => {
+        if (i) {
+          const pill = pills[i - 1], kind = pill.dataset.kind, label = pill.title && kind === "link" ? pill.title : pill.textContent;
+          const att = kind === "file" ? attachments.find((a) => a.resource && a.label === pill.textContent) : null;
+          parts.push({ kind, label, wire: pill.dataset.pill || "", token: pillToken(pill),
+            resource: att ? { ...att.resource } : null });
+        }
+        if (piece) parts.push(piece);
+      });
+      composerCopy = { text, parts };
+    }
+    return true;
+  }
+  input.addEventListener("copy", copyComposerSelection);
+  input.addEventListener("cut", (event) => {
+    if (!copyComposerSelection(event)) return;
+    recordComposerEdit(() => { deleteComposerSelection(); reconcilePills(); });
+    markComposerEmpty();
+    onInput();
+  });
+  function pasteComposerCopy(parts) {
+    recordComposerEdit(() => {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.isCollapsed) deleteComposerSelection();
+      for (const part of parts) {
+        if (typeof part === "string") { insertComposerText(part); continue; }
+        const { kind, label, wire, token, resource } = part;
+        let ok = true;
+        if (kind === "skill" || kind === "template") ok = attachInvocation(kind, label);
+        else if (kind === "file") {
+          // One selection per @file pill, as the picker makes them: releasePill relies on it.
+          ok = !!resource && canAttach();
+          if (ok) attachments.push({ label, resource: { ...resource }, fromPill: true });
+        } else if (kind === "command") ok = !input.querySelector('[data-kind="command"]');   // one per prompt
+        if (ok) insertComposerPill(null, null, kind, label, wire);
+        else insertComposerText(token);
+      }
+      reconcilePills();
+    });
+    renderAtts(); onInput();
+  }
   // What the backend is sent. Identity while the composer is plain text; once a pill can sit in
   // the draft this is where its placeholder is turned back into the words the model should read.
   const wireText = (text) => text;
@@ -1653,19 +1985,11 @@
     const draft = cleanDraft(draftEntries.get(session))
       || { text: "", attachments: [], start: 0, end: 0, goal: false };
     restoringDraft = true;
-    // Another chat gets its own undo history. Assigning a new value does not reliably drop the old
-    // chat's steps: going from an empty composer to an empty chat changed nothing, and Ctrl+Z then
-    // brought back the prompt sent in the chat that was left. Chromium does drop every undo step of
-    // an element that leaves the document, so take the box out and put the same node straight back.
-    if (session !== prior && input.parentNode) {
-      const focused = document.activeElement === input, parent = input.parentNode, next = input.nextSibling;
-      input.remove(); parent.insertBefore(input, next);
-      if (focused) input.focus({ preventScroll: true });
-      shownPastes.length = 0;
-    }
     setComposerValue(draft.text); attachments.splice(0, attachments.length, ...draft.attachments);
     setGoalDraftArmed(draft.goal);
-    dropPastedChips();
+    // Another chat gets its own undo history: Ctrl+Z in a new chat must not bring back the prompt
+    // sent in the chat that was left, nor that chat's draft.
+    if (session !== prior) resetComposerHistory();
     setComposerRange(draft.start, draft.end);
     renderAtts(); autosizeComposer();
     hidePop(); restoringDraft = false; persistDraft();
@@ -1713,8 +2037,11 @@
       const button = el("button", "act", "Restore message to draft"); button.type = "button";
       button.onclick = () => {
         if (composerText() || attachments.length) { sysLine("Send or clear the current draft first."); return; }
-        setComposerValue(row.draft.text); attachments.push(...row.draft.attachments);
-        setGoalDraftArmed(row.draft.goal);
+        // One step, so Cmd+Z puts the box back as it was before the restore.
+        recordComposerEdit(() => {
+          setComposerValue(row.draft.text); attachments.push(...row.draft.attachments);
+          setGoalDraftArmed(row.draft.goal);
+        });
         unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== row.id);
         node.remove(); renderAtts(); onInput(); persistDraft();
       };
@@ -1744,8 +2071,11 @@
       if (composerText() || attachments.length) {
         sysLine("Send or clear the current draft before restoring this message."); return;
       }
-      setComposerValue(pending.text); attachments.push(...pending.attachments);
-      setGoalDraftArmed(pending.goal === true);
+      // A queued or refused prompt put back is one step of the box's history, like a paste.
+      recordComposerEdit(() => {
+        setComposerValue(pending.text); attachments.push(...pending.attachments);
+        setGoalDraftArmed(pending.goal === true);
+      });
       unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== id);
       renderAtts(); onInput(); persistDraft(); input.focus();
     };
@@ -3416,8 +3746,14 @@
     const text = String(prompt || "").trim();
     if (!text) return;
     const draft = composerText();
-    setComposerText(text); submit();
-    if (composerText() === "" && draft) { setComposerText(draft); onInput(); }
+    // Borrowing the box to send is not an edit of the draft, so it leaves no steps behind: the box
+    // reads the same before and after, and recordComposerEdit drops a step that changed nothing.
+    let restored = false;
+    recordComposerEdit(() => {
+      setComposerText(text); submit();
+      if (composerText() === "" && draft) { setComposerText(draft); restored = true; }
+    });
+    if (restored) onInput();
   }
   function discardTurn() {
     liveTurnHint = null;
@@ -5970,7 +6306,7 @@
   $("tasks-toggle").onclick = toggleTasks;
   /** Remove Goal from this draft without changing an already-running standing goal. */
   function clearGoalDraft() {
-    setGoalDraftArmed(false);
+    recordComposerEdit(() => setGoalDraftArmed(false));
     persistDraft();
     input.focus();
   }
@@ -6064,7 +6400,7 @@
     vscode.postMessage({ type: "startGoal", text: objective, requestId,
       skills: values("skill"), templates: values("template"), context: values("resource"),
       images: selected.filter(item => item.img).map(item => item.data) });
-    setGoalDraftArmed(false); clearComposer(); attachments.length = 0;
+    recordComposerEdit(() => { setGoalDraftArmed(false); clearComposer(); attachments.length = 0; });
     renderAtts(); persistDraft(); scroll();
   }
   function isSlashCommandText(text) {
@@ -6167,7 +6503,10 @@
       ...(references.length ? {pip_references: references.map(a => ({pip_id:a.pipReference.pip_id,expected_version:a.pipReference.job_version,expected_lifecycle_revision:a.pipReference.lifecycle_revision}))} : {}),
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       context: resources.length ? resources : undefined });
-    clearComposer(); attachments.length = 0; dropPastedChips(); renderAtts(); persistDraft(); setSending(true); scroll();
+    // One step with the text, so undo right after sending brings back the whole prompt -- the
+    // pills and the chips with the words.
+    recordComposerEdit(() => { clearComposer(); attachments.length = 0; });
+    renderAtts(); persistDraft(); setSending(true); scroll();
   }
   // An attached image is shown, not named: the same tile the sent prompt carries, so you can see
   // what you are about to send (and that it is the right screenshot) before you send it.
@@ -6218,7 +6557,7 @@
         const drop = el("button", "x", "\u00d7");
         drop.type = "button"; drop.title = "Remove this image";
         drop.setAttribute("aria-label", "Remove attached image");
-        drop.onclick = () => { forgetPastedChip(attachments[i]); attachments.splice(i, 1); renderAtts(); };
+        drop.onclick = () => { dismissAttachment(attachments[i]); attachments.splice(i, 1); renderAtts(); };
         atts.appendChild(imageAttachmentChip(a, drop));
         return;
       }
@@ -6230,7 +6569,7 @@
       // (No pill to take with it: pillShowing() suppresses a chip for as long as a pill stands for
       // the same selection, so a chip and its pill are never both on screen. Measured in Chromium
       // -- two skills picked, #attachments is empty.)
-      remove.onclick = () => { forgetPastedChip(attachments[i]); attachments.splice(i, 1); renderAtts(); };
+      remove.onclick = () => { dismissAttachment(attachments[i]); attachments.splice(i, 1); renderAtts(); };
       chip.appendChild(label);
       if (a.pasted) {
         // The paste is not hidden, only folded away. One click puts it back where it was typed.
@@ -6239,14 +6578,13 @@
         show.title = "Put this text back into the composer";
         show.onclick = () => {
           const at = composerSelection()[0] ?? composerText().length;
-          const before = composerText();
-          editComposer(at, at, a.pasted);
-          setComposerRange(at + a.pasted.length);
-          // The insert is in the textarea's undo history; the chip leaving is not. Remember both
-          // sides so Ctrl+Z folds the text back into its chip instead of deleting the paste.
-          shownPastes.push({ before, after: composerText(), item: a, index: i });
-          if (shownPastes.length > 8) shownPastes.shift();
-          attachments.splice(i, 1);
+          // The text going in and the chip going out are one step, so Ctrl+Z folds the text back
+          // into its chip instead of deleting the paste.
+          recordComposerEdit(() => {
+            editComposer(at, at, a.pasted);
+            setComposerRange(at + a.pasted.length);
+            attachments.splice(attachments.indexOf(a), 1);
+          });
           renderAtts();
           input.focus();
           autosizeComposer();
@@ -6323,7 +6661,10 @@
     autosizeComposer();
     scheduleDraftSave();
   }
-  function choosePop(i) {
+  // A pick is one step of the box's history, whatever it touches: the typed token out, the pill
+  // in, the skill or file attached. Undone, the token is back as it was typed.
+  function choosePop(i) { recordComposerEdit(() => pickPop(i)); }
+  function pickPop(i) {
     const it = popItems[i]; if (!it || it.disabled) return;
     if(it.pipPicker){clearPipPicker();pipPicker.active=true;replacePopToken("@");requestPromptPips("");return;}
     if(it.pipMore||it.pipRetry){requestPromptPips(pipPicker.query,!!it.pipMore);return;}
@@ -6391,6 +6732,9 @@
    *
    *  One command per prompt. Picking a second replaces the first rather than stacking. */
   function insertCommandPill(label, tokenStart, tokenEnd) {
+    recordComposerEdit(() => placeCommandPill(label, tokenStart, tokenEnd));
+  }
+  function placeCommandPill(label, tokenStart, tokenEnd) {
     const existing = [...input.querySelectorAll('[data-kind="command"]')];
     if (existing.length) {
       // Remove the old one first, and do it before measuring, so the offsets below are the ones
@@ -6415,9 +6759,13 @@
   }
 
   function armGoalDraft(tokenStart, tokenEnd) {
-    editComposer(tokenStart, tokenEnd, "");
-    setComposerRange(tokenStart);
-    setGoalDraftArmed(true);
+    // The token leaving and the Goal choice arriving are one step: undone, "/goal" is back as
+    // typed and the choice is gone with it.
+    recordComposerEdit(() => {
+      editComposer(tokenStart, tokenEnd, "");
+      setComposerRange(tokenStart);
+      setGoalDraftArmed(true);
+    });
     autosizeComposer();
     persistDraft();
   }
@@ -6474,16 +6822,17 @@
   });
   window.addEventListener("focus", autosizeComposer);
 
-  // ---- composer edits that Cmd/Ctrl+Z can take back ----
-  // A textarea keeps its own undo history, which is what makes Cmd+Z and Ctrl+Z work in Claude's
-  // and Codex's composers. (VS Code's Edit → Undo menu item does not reach it: the workbench sends
-  // that command to the active editor, and opening the menu takes focus out of this view.)
-  // Assigning .value wipes that history, so undo did nothing here after a send, a completion or an
-  // inserted command. Edits made through the browser's own editing command stay in the history
-  // instead: undo after sending brings the prompt back. Where that command is unavailable (a test
-  // DOM), the edit still happens, just without history.
+  // ---- composer edits ----
+  // Each one is a step in the composer's own history (recordComposerEdit, with the box's
+  // primitives): undo after sending brings the prompt back, and a completion or an inserted command
+  // is one Cmd+Z. Through the browser's editing command where it exists, because that is what keeps
+  // the caret, the scroll and IME state where Chromium expects them; set directly where it does
+  // not (a test DOM) or where it did not produce exactly this edit. Either way the step is the same.
   let composerEditing = false;
   function editComposer(start, end, text) {
+    return recordComposerEdit(() => applyComposerEdit(start, end, text));
+  }
+  function applyComposerEdit(start, end, text) {
     start = Math.max(0, Math.min(start, composerText().length));
     end = Math.max(start, Math.min(end, composerText().length));
     if (start === end && !text) return;
@@ -6493,8 +6842,11 @@
       try {
         input.focus({ preventScroll: true });
         setComposerRange(start, end);
-        const done = text ? document.execCommand("insertText", false, text)
+        let done = text ? document.execCommand("insertText", false, text)
           : document.execCommand("delete", false);
+        // Refused when this runs inside another editing command (a paste or drop VS Code started):
+        // the same edit by hand, rather than the rebuild below that drops every pill.
+        if (!done) done = spliceComposer(text);
         // onInput is suppressed while composerEditing is set, so nothing else re-reads the empty
         // state on this path: after a send the box sat empty with no placeholder on it.
         if (done && composerText() === expected) { markComposerEmpty(); return; }
@@ -6506,12 +6858,12 @@
     setComposerRange(start + text.length);
   }
   function setComposerText(text) { editComposer(0, composerText().length, String(text ?? "")); }
-  function clearComposer() {
+  function clearComposer() { recordComposerEdit(emptyComposer); }
+  function emptyComposer() {
     // A composer holding nothing but pills serializes to the empty string -- a skill pill's wire
     // text IS "" -- so the text-range edit below is a 0-to-0 no-op and the pills survive the send,
     // still sitting in the box under the message they were part of. Delete by DOM range instead of
-    // by text offsets, and keep it an execCommand so the undo history that brings a sent prompt
-    // back (composer-undo.test.mjs) survives.
+    // by text offsets.
     const cleared = () => composerText() === "" && !input.querySelector("[data-pill]");
     if (input.firstChild && typeof document.execCommand === "function") {
       composerEditing = true;
@@ -6535,86 +6887,11 @@
     autosizeComposer();
   }
 
-  // A paste that becomes a CHIP is invisible to Cmd+Z, and that is a gap rather than a choice.
-  // Every other way text enters the composer goes through `insertText`, so the browser records an
-  // undo step and the key just works. The two paste branches that fold into an attachment -- an
-  // image, and text past PASTED_TEXT_LIMIT -- call preventDefault and push onto `attachments`
-  // instead, changing no text at all. There is therefore NOTHING in the browser's undo stack to
-  // undo: Cmd+Z does not "fail", it has nothing to act on, so the chip sits there and the only way
-  // out is to find and click its remove button. Codex and Claude both take the paste back.
-  //
-  // So keep our own stack for exactly those chips and splice it into the browser's. What decides
-  // whether a chip is takeable is the TEXT the box held when it arrived, not a count of edits:
-  // Chromium groups a typing run into one undo step, so counting keystrokes and counting native
-  // undo steps drift apart immediately -- five characters typed, one step to undo them -- and a
-  // counter can never come back down to where it started. Comparing the text cannot drift. Type
-  // after pasting and the key undoes the typing first, a run at a time; when the box reads as it
-  // did at the paste, the next press takes the chip. That is a stack, which is what the key means
-  // everywhere else, and it is the same test `syncShownPaste` just above already relies on.
-  // var, for the reason composerSizedWidth is: selectDraftSession and the send path sit ABOVE this
-  // line and call into these, and a `let` would leave them in the temporal dead zone if either ever
-  // runs during evaluation rather than from a later message.
-  var pastedChips = [];
-  var undonePastedChips = [];
-  function recordPastedChip(item) {
-    pastedChips.push({ item, index: attachments.indexOf(item), before: composerText() });
-  }
-  function forgetPastedChip(item) {
-    for (let i = pastedChips.length - 1; i >= 0; i -= 1) {
-      if (pastedChips[i].item === item) pastedChips.splice(i, 1);
-    }
-  }
-  function dropPastedChips() { pastedChips.length = 0; undonePastedChips.length = 0; }
-  function undoPastedChip() {
-    const top = pastedChips[pastedChips.length - 1];
-    if (!top || composerText() !== top.before) return false;
-    const at = attachments.indexOf(top.item);
-    if (at < 0) { pastedChips.pop(); return undoPastedChip(); }   // already removed by hand
-    attachments.splice(at, 1);
-    pastedChips.pop();
-    undonePastedChips.push({ ...top, index: at });
-    renderAtts(); persistDraft(); autosizeComposer();
-    return true;
-  }
-  function redoPastedChip() {
-    const top = undonePastedChips[undonePastedChips.length - 1];
-    if (!top || composerText() !== top.before || attachments.includes(top.item)) return false;
-    attachments.splice(Math.min(top.index, attachments.length), 0, top.item);
-    undonePastedChips.pop();
-    pastedChips.push({ ...top });
-    renderAtts(); persistDraft(); autosizeComposer();
-    return true;
-  }
-  // Ctrl/Cmd+Z reaches us before the editing host acts on it, so returning without preventDefault
-  // leaves the native undo exactly as it was.
-  input.addEventListener("keydown", (event) => {
-    if ((event.key !== "z" && event.key !== "Z" && event.key !== "y" && event.key !== "Y")
-        || !(event.metaKey || event.ctrlKey) || event.altKey) return;
-    const redo = event.key === "y" || event.key === "Y" || event.shiftKey;
-    if (redo ? redoPastedChip() : undoPastedChip()) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  });
-
-  // "Show in text field" moved a pasted chip's text into the box. When undo or redo lands back on
-  // either side of that edit, put the chip back or take it away again to match.
-  const shownPastes = [];
-  function syncShownPaste(event) {
-    if (!shownPastes.length || (event.inputType !== "historyUndo" && event.inputType !== "historyRedo")) return;
-    for (const entry of [...shownPastes].reverse()) {
-      const attached = attachments.includes(entry.item);
-      if (event.inputType === "historyUndo" && !attached && composerText() === entry.before) {
-        attachments.splice(Math.min(entry.index, attachments.length), 0, entry.item);
-        renderAtts(); return;
-      }
-      if (event.inputType === "historyRedo" && attached && composerText() === entry.after) {
-        attachments.splice(attachments.indexOf(entry.item), 1);
-        renderAtts(); return;
-      }
-    }
-  }
-  input.addEventListener("input", syncShownPaste);
+  // A paste that folds into a chip -- an image, or text past PASTED_TEXT_LIMIT -- changes no text
+  // at all, so it was invisible to the browser's undo and needed a stack of its own, spliced into
+  // that one by comparing what the box read. It is an ordinary step of the composer's history now:
+  // the chip is in the snapshot beside the text, so typing after a paste is undone first, a run at
+  // a time, and the next press takes the chip.
   function onInput() {
     if (composerEditing) return;   // our own edit: its caller already does the follow-up work
     markComposerEmpty();
@@ -6693,7 +6970,8 @@
     // Shift+Enter used to be the textarea's own business. An editing host answers it by wrapping
     // the rest of the line in a <div>, which the serializer would have to unpick -- so insert the
     // break explicitly and keep the host a flat run of text and <br>.
-    else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); insertComposerText("\n"); }
+    // It is typing, so it joins the run it interrupts rather than being a step of its own.
+    else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); recordComposerEdit(() => insertComposerText("\n"), "insert"); }
     else if (e.key === "Escape" && (micState === "recording" || micState === "starting")) { e.preventDefault(); micCancel(); }
     else if (e.key === "Escape" && streaming) doStop();
   });
@@ -6808,7 +7086,7 @@
           }
           const image = { label: "Image", img: true, data: r.result, bytes: file.size };
           if (owner.session === draftSession) {
-            attachments.push(image); recordPastedChip(image); renderAtts();
+            recordComposerEdit(() => attachments.push(image)); renderAtts();
           } else {
             const draft = draftEntries.get(owner.session)
               || { text: "", attachments: [], start: 0, end: 0, updated: Date.now() };
@@ -6830,6 +7108,12 @@
     // characters it becomes an attachment instead, recoverable with one click. The threshold
     // matches Codex's.
     const pasted = clipboardText(e.clipboardData);
+    // A copy or cut out of this box that held pills is pills again here (copyComposerSelection).
+    if (composerCopy && pasted === composerCopy.text) {
+      e.preventDefault();
+      pasteComposerCopy(composerCopy.parts);
+      return;
+    }
     // No hook here. Every branch that puts text INTO the composer fires an input event, and
     // onInput already re-counts -- proved by removing this line and watching the tests stay green.
     // The one branch it would have covered, a paste large enough to fold into an attachment,
@@ -6839,8 +7123,7 @@
     if (pasted.length >= PASTED_TEXT_LIMIT && canAttach()) {
       e.preventDefault();
       const chip = { label: "Pasted text", pasted, chars: pasted.length };
-      attachments.push(chip);
-      recordPastedChip(chip);
+      recordComposerEdit(() => attachments.push(chip));
       renderAtts();
       sysLine(`Attached ${pasted.length.toLocaleString()} characters of pasted text.`);
       return;
@@ -7611,17 +7894,22 @@
       input.focus(); onInput();
     }
     else if (msg.type === "composer_skill") {
-      if (!attachInvocation("skill", String(msg.name || ""))) return;
-      if (msg.text) {
-        // `composerText() += x` is an assignment to a CALL, which parses fine and throws
-        // ReferenceError at runtime -- node --check passes it, V8 does not. It arrived mechanically
-        // when stage 2 renamed `input.value` to the reader everywhere, including on the left of an
-        // assignment. Appending has to go through the writer, and through the editing path so it
-        // is one entry in the undo history and cannot destroy a pill already in the box.
-        const at = composerText().length;
-        const gap = composerText() && !/\s$/.test(composerText()) ? " " : "";
-        editComposer(at, at, gap + String(msg.text));
-      }
+      // The skill and its text arrive as one step, and one Cmd+Z takes both away.
+      const added = recordComposerEdit(() => {
+        if (!attachInvocation("skill", String(msg.name || ""))) return false;
+        if (msg.text) {
+          // `composerText() += x` is an assignment to a CALL, which parses fine and throws
+          // ReferenceError at runtime -- node --check passes it, V8 does not. It arrived
+          // mechanically when stage 2 renamed `input.value` to the reader everywhere, including on
+          // the left of an assignment. Appending has to go through the writer, and through the
+          // editing path so it cannot destroy a pill already in the box.
+          const at = composerText().length;
+          const gap = composerText() && !/\s$/.test(composerText()) ? " " : "";
+          editComposer(at, at, gap + String(msg.text));
+        }
+        return true;
+      });
+      if (!added) return;
       input.focus(); onInput();
     }
     else if (msg.type === "turn_active") noteLiveTurn(msg);
