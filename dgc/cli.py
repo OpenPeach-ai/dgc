@@ -3140,6 +3140,13 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
         parser.error("-p - reads the prompt from stdin, which was empty")
     cli.ui.non_interactive = True
     cli.ui.permission_mode = str(getattr(cli.agent, "mode", "") or "")
+    # A pipe or a file gets the answer and nothing else, as `codex exec` does: thinking, tool steps and notices
+    # go to stderr, where a terminal still shows them. The model's reasoning used to land in
+    # `answer=$(dgc -p …)`. A terminal sees the run exactly as before. (A subscription engine prints its own.)
+    answer_only = not json_mode and not engine_key and not _stdout_is_terminal()
+    if answer_only:
+        cli.ui.console = cli.console = Console(file=sys.stderr, theme=render.markdown_theme(), highlight=False)
+        cli.ui._theme_pushed = False
     started = time.time()
     prior_messages = getattr(cli.agent, "messages", []) or []
     prior_count = len(prior_messages)
@@ -3167,7 +3174,7 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
             cli.ui.stop_working()   # -p never calls turn_complete(): a turn can end on a live spinner
         cli.ui.end_stream()
         if not json_mode:
-            print()
+            print(file=sys.stderr if answer_only else sys.stdout)
         _end_one_shot_children(cli.agent)
     current_messages = getattr(cli.agent, "messages", []) or []
     unchanged = len(current_messages) == prior_count and (not current_messages or current_messages[-1] is prior_tail)
@@ -3190,7 +3197,21 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
                        output=str(args.output) if args.output else None)
     elif args.print_session_id and session_id():
         print(f"session: {session_id()}", file=sys.stderr)
+    if answer_only and text:
+        try:
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            sys.stdout.flush()
+        except BrokenPipeError:             # `dgc -p … | head -1`: the reader has what it wanted
+            _silence_stdout()
+            return EXIT_READER_GONE
     return 0 if ok else 1
+
+
+def _stdout_is_terminal() -> bool:
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
 
 
 def run_export(argv: list[str]) -> int:
