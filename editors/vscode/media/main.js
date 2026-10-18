@@ -7669,7 +7669,8 @@
     const how = `Read it with pips_context (action "${read}", run_id "${r.run_id}")`;
     if (r.outcome === "failed") {
       return `${name} failed (run ${r.run_id}): ${String(r.reason || "it stopped with an error.")}\n`
-        + `${how}, find out what stopped it and help me fix that, so its next run works.`;
+        + `${how}, find out what stopped it and help me fix that, so its next run works. `
+        + `Ask me before you change any live data or services.`;
     }
     if (r.outcome === "checks_failed") {
       const which = Array.isArray(r.failed_checks) && r.failed_checks.length ? ` (${r.failed_checks.join("; ")})` : "";
