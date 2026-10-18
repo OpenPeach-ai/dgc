@@ -213,7 +213,7 @@ def start(agent, args: dict, call_id) -> str:
     runs[run.id] = run
     hub = getattr(agent, "monitors", None)
     epoch = getattr(hub, "epoch", None)
-    planned = plan.agents_planned()
+    planned = plan.estimate()
     shape = " → ".join(s.name for s in plan.stages)
     pace = "one at a time (a model on this machine)" if runner.width == 1 else f"up to {runner.width} at a time"
     if agent._non_interactive():
@@ -223,7 +223,7 @@ def start(agent, args: dict, call_id) -> str:
     run.on_end = lambda finished: deliver(agent, finished, epoch)
     run.start()
     reused = f" {len(cached)} results from the earlier attempt are reused." if cached else ""
-    return (f"Troupe {run.id} started: {plan.title}. {shape}; about {planned} agents, {pace}.{reused} It runs in the "
+    return (f"Troupe {run.id} started: {plan.title}. {shape}; {planned}, {pace}.{reused} It runs in the "
             "background and this chat wakes with its results when it ends; until then, carry on or tell the user it "
             "is running. Don't start the same work again.")
 
@@ -248,11 +248,18 @@ def describe_event(kind: str, fields: dict, seen: set, *, stop_hint: bool = True
     run_id, title = str(fields.get("run_id") or ""), str(fields.get("title") or "")
     stages = [s for s in fields.get("stages") or [] if isinstance(s, dict)]
     if kind == "started":
-        planned = int(fields.get("agents_planned") or 0)
+        planned = str(fields.get("estimate") or f"about {int(fields.get('agents_planned') or 0)} agents")
         shape = " → ".join(str(s.get("name")) for s in stages)
-        return f"troupe {run_id} · {title}: {shape}, about {planned} agents" + (
+        if " then " in planned and seen is not None:
+            seen.add((run_id, "split"))     # its size is known once every stage has started: said then
+        return f"troupe {run_id} · {title}: {shape}, {planned}" + (
             f" · /troupes stop {run_id}" if stop_hint else "")
     if kind == "progress":
+        estimate = str(fields.get("estimate") or "")
+        if (seen is not None and (run_id, "split") in seen and estimate and " then " not in estimate
+                and (run_id, "sized") not in seen):
+            seen.add((run_id, "sized"))
+            return f"troupe {run_id} · {title}: {estimate} in all, now that each split is known"
         for stage in stages:
             total = int(stage.get("total") or 0)
             if total and int(stage.get("done") or 0) + int(stage.get("failed") or 0) >= total:

@@ -455,6 +455,11 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   attempts: it had put split on the verify stage instead of the audit stage that returns the list. The refusal now
   names the stage's fields, says split goes on the stage that produces the list, and suggests the fix (`Did you mean
   "split": 'findings' on stages[0] ('audit')?`).
+- **A troupe's size counts its splits.** It said "about 32 agents" for 8 areas checked by 3 verifiers per finding,
+  then started 107 (33 findings) and ran for two hours. It now says "8 agents to start, then 3 per item of audit's
+  findings (verify); at most 400 in all", and the number it reports (`agents_planned`, the editor's "About N
+  agents") becomes the real one as soon as the split's stage ends; the terminal says it once ("107 agents in all,
+  now that each split is known").
 
 ### Windows: the editor runs DGC in a WSL distro of its own
 

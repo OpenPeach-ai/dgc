@@ -215,6 +215,45 @@ class RunTests(unittest.TestCase):
         self.assertEqual((kinds[0], kinds[-1]), ("started", "finished"))
         self.assertEqual(runner.events[-1][1]["state"], "done")
 
+    def test_the_size_counts_a_split_per_item_and_updates_when_it_is_known(self):
+        """ERP session review (2026-10-18): "about 32 agents" for 8 areas then 3 verifiers per finding; the audit found
+        33 findings, so the troupe started 107 agents and ran for two hours."""
+        plan = troupe.plan_from_args({"title": "ERP audit", "items": [f"area {n}" for n in range(8)], "stages": [
+            {"name": "audit", "agent": "worker", "prompt": "Audit {item}",
+             "returns": {"findings": [{"title": "string"}]}, "split": "findings"},
+            {"name": "verify", "agent": "verifier", "prompt": "Check {item}", "votes": 3,
+             "returns": {"real": "boolean", "why": "string"}, "keep": {"field": "real", "equals": True}}]})
+        self.assertEqual(plan.estimate(), "8 agents to start, then 3 per item of audit's findings (verify); "
+                                          "at most 400 in all")
+        self.assertEqual(troupe.plan_from_args({"title": "t", "items": ["a", "b"], "stages": [
+            {"name": "A", "prompt": "{item}", "votes": 2}]}).estimate(), "about 4 agents")
+        self.assertIn("then 3 for Judge", troupe.plan_from_args({"title": "t", "items": ["a"], "stages": [
+            {"name": "Find", "prompt": "{item}", "returns": {"found": ["string"]}, "split": "found"},
+            {"name": "Judge", "prompt": "{items}", "over": "all", "votes": 3}]}).estimate())
+
+        def answer(stage, prompt):
+            if stage.name == "audit":
+                count = 5 if "area 0" in prompt else 4          # 5 + 7 x 4 = 33 findings
+                return answer_json({"findings": [{"title": f"t{n}"} for n in range(count)]})
+            return answer_json({"real": True, "why": "it is"})
+        runner = FakeRunner(answer)
+        run = troupe.Run(plan, runner, self.root)
+        self.assertIn("then 3 per item", run.snapshot()["estimate"])
+        run.run_here()
+        self.assertEqual(len(runner.calls), 8 + 33 * 3)
+        started = [fields for kind, fields in runner.events if kind == "started"][0]
+        self.assertEqual(started["agents_planned"], 32, "before the audit ends, one per area is all that is known")
+        self.assertEqual(runner.events[-1][1]["agents_planned"], 107)
+        self.assertEqual(runner.events[-1][1]["estimate"], "107 agents")
+        from dgc.troupe_agent import describe_event
+        seen, lines = set(), []
+        for kind, fields in runner.events:
+            line = describe_event(kind, fields, seen, stop_hint=False)
+            if line:
+                lines.append(line)
+        self.assertIn("then 3 per item of audit's findings", lines[0])
+        self.assertIn(f"troupe {run.id} · ERP audit: 107 agents in all, now that each split is known", lines)
+
     def test_compare_has_every_option_judged_together(self):
         plan = troupe.plan_from_args({"title": "Cache", "items": ["Redis", "SQLite", "in memory"], "template": "compare",
                                       "goal": "a cache"})

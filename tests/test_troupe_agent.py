@@ -162,7 +162,8 @@ class RunTests(AgentCase):
         run, _ = fake_child(review_answers)
         with patch.object(Agent, "_execute_prepared_subagent", run):
             out = troupe_agent.start(agent, REVIEW, "c1")
-            self.assertRegex(out, r"^Troupe tr-[0-9a-f]{10} started: Review\. Review → Verify; about 8 agents, up to 8 at a time")
+            self.assertRegex(out, r"^Troupe tr-[0-9a-f]{10} started: Review\. Review → Verify; 2 agents to start, then 3 "
+                                  r"per item of Review's findings \(Verify\); at most 400 in all, up to 8 at a time")
             self.assertIn("this chat wakes with its results", out)
             run_id = out.split()[1]
             agent._troupes[run_id].join(20)
@@ -176,7 +177,11 @@ class RunTests(AgentCase):
         self.assertEqual(agent._detached_ledger()[1][run_id]["output"], notice["message"], "readable by id, as a task's")
         kinds = [kind for kind, _ in ui.events]
         self.assertEqual((kinds[0], kinds[-1]), ("started", "finished"))
-        self.assertTrue(all(ep.event_error({"type": f"troupe_{k}", "seq": 0, **f}) is None for k, f in ui.events),
+        # `dgc serve` sends the protocol's fields of a snapshot (an in-process snapshot also has its estimate in words).
+        from dgc.headless import _TROUPE_WIRE_FIELDS
+        self.assertEqual(set(_TROUPE_WIRE_FIELDS), set(ep.EVENT_FIELDS["troupe_started"]))
+        wire = [(k, {key: f[key] for key in _TROUPE_WIRE_FIELDS}) for k, f in ui.events]
+        self.assertTrue(all(ep.event_error({"type": f"troupe_{k}", "seq": 0, **f}) is None for k, f in wire),
                         "every event the editor gets is valid protocol")
 
     def test_a_replaced_chat_is_never_woken(self):

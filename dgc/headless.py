@@ -233,6 +233,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "ping", "editor_state",
 })
 _WAKE_YIELD_TIMEOUT = 10.0
+# A troupe's snapshot as the editor protocol declares it (troupe_started/progress/finished, troupes).
+_TROUPE_WIRE_FIELDS = ("run_id", "title", "state", "reason", "stages", "agents_planned", "reused", "journal")
 _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under this
 # A new_session whose request id starts with this retires the chat for good: the editor sends it when
 # the tab of a shared process's first chat closes (editors/vscode/src/backend.ts close()).
@@ -1579,8 +1581,7 @@ class HeadlessUI:
     def troupe_event(self, kind: str, fields: dict) -> None:
         """A troupe started, moved on, or ended (dgc/troupe.py): its card in the chat."""
         if kind in ("started", "progress", "finished") and isinstance(fields, dict):
-            self.em.emit(f"troupe_{kind}", **{key: fields[key] for key in (
-                "run_id", "title", "state", "reason", "stages", "agents_planned", "reused", "journal")})
+            self.em.emit(f"troupe_{kind}", **{key: fields[key] for key in _TROUPE_WIRE_FIELDS})
 
     def agent_step(self, agent_id, step, seq_in_agent=0) -> None:
         """One live step from a parallel child, for that child's own page."""
@@ -6550,7 +6551,10 @@ class Backend:
         """Every troupe this chat started, newest first: the card a reconnecting editor repaints."""
         runs = list((getattr(getattr(self, "agent", None), "_troupes", None) or {}).values())
         runs.sort(key=lambda run: run.started_at, reverse=True)
-        self.em.emit("troupes", runs=[run.snapshot() for run in runs[:20]], **_request_fields(request_id))
+        # The wire fields only: a snapshot also carries in-process extras (its estimate in words).
+        self.em.emit("troupes", runs=[{key: snap[key] for key in _TROUPE_WIRE_FIELDS}
+                                      for snap in (run.snapshot() for run in runs[:20])],
+                     **_request_fields(request_id))
 
     def _emit_agents(self, request_id: str | None = None) -> None:
         """The `agents` snapshot: every active record, then the most recent ended, exact counts."""

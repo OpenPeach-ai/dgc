@@ -236,6 +236,30 @@ class Plan:
             width = 1 if stage.over == "all" else width   # a split's count is unknown: counted as one each
         return count
 
+    def estimate(self) -> str:
+        """How many agents, in words: "about 16 agents", or with a split, "8 agents to start, then 3 per item of
+        audit's findings (verify)". The count after a split isn't known until its stage ends: a troupe said "about 32
+        agents" and started 107 (8 + 33 findings x 3; ERP session review, 2026-10-18)."""
+        count, width, tail = 0, len(self.items), []
+        unknown = ""             # what a stage's items are, while a split has made their number unknown
+        for stage in self.stages:
+            if not unknown and not tail:
+                count += (1 if stage.over == "all" else width) * stage.votes
+                width = 1 if stage.over == "all" else width
+            elif unknown and stage.over == "each":
+                tail.append(f"{stage.votes} per {unknown} ({stage.name})")
+            else:
+                # One agent (or its votes) sees them all, or the number is known again after one did.
+                tail.append(f"{stage.votes * (1 if stage.over == 'all' else width)} for {stage.name}")
+                if stage.over == "all":
+                    unknown, width = "", 1
+            if stage.split:
+                unknown = f"item of {stage.name}'s {stage.split}"
+        agents = f"{count} agent{'' if count == 1 else 's'}"
+        if not tail:
+            return f"about {agents}"
+        return f"{agents} to start, then " + ", then ".join(tail) + f"; at most {MAX_AGENTS} in all"
+
 
 TEMPLATES = ("review", "research", "change", "compare")
 
@@ -481,6 +505,7 @@ class Run:
         self.ended_at = 0.0
         self.reused = 0
         self.agents_started = 0
+        self.current = -1               # the stage working now (its earlier ones are complete)
         self._cached = dict(cached or {})
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -582,6 +607,7 @@ class Run:
     def _stage(self, index: int, stage: Stage, inputs: list) -> list:
         units = self._units(index, stage, inputs)
         record = self.stages[index]
+        self.current = index
         room = MAX_AGENTS - self.agents_started
         if len(units) > room:
             # A split can multiply the work past what was planned: the cap holds at run time too, and says so.
@@ -680,12 +706,38 @@ class Run:
 
     # -- what the frontend and the woken chat are told -----------------------------------------------
 
+    def agents_expected(self) -> int:
+        """How many agents this run starts, as far as is known now. A stage that has started counts its real number,
+        so the figure grows to the truth once a split's stage ends (8 + 33 x 3 = 107, where the plan alone said 32).
+        A stage not started yet counts what its items would be, one per item a split hasn't produced yet."""
+        with self._lock:
+            records = [dict(s) for s in self.stages]
+        count, width = 0, len(self.plan.items)
+        for index, stage in enumerate(self.plan.stages):
+            record = records[index]
+            count += record["total"] if record["total"] else (1 if stage.over == "all" else width) * stage.votes
+            if index < self.current:
+                width = record["kept"]          # complete: the next stage's items are exactly what it kept
+            else:
+                width = 1 if stage.over == "all" else width
+        return count
+
+    def estimate(self) -> str:
+        """The size in words: the plan's ("8 agents to start, then 3 per item of audit's findings (verify)") until every
+        stage has started, then the real number."""
+        with self._lock:
+            started = all(record["total"] for record in self.stages)
+        if not started:
+            return self.plan.estimate()
+        count = self.agents_expected()
+        return f"{count} agent{'' if count == 1 else 's'}"
+
     def snapshot(self) -> dict:
         with self._lock:
             stages = [dict(s) for s in self.stages]
         return {"run_id": self.id, "title": self.plan.title, "state": self.state, "reason": self.stop_reason,
-                "stages": stages, "agents_planned": self.plan.agents_planned(), "reused": self.reused,
-                "journal": str(self.dir)}
+                "stages": stages, "agents_planned": self.agents_expected(), "reused": self.reused,
+                "journal": str(self.dir), "estimate": self.estimate()}
 
     @staticmethod
     def _compact(output) -> str:
