@@ -1772,6 +1772,10 @@ class TUI:
                     serviced = self._service_goal_results() or serviced
                 except Exception:
                     pass
+                try:
+                    serviced = self._service_pip_reports() or serviced
+                except Exception:
+                    pass
                 if serviced or self._needs_pulse(tick):
                     app.invalidate()
 
@@ -2060,6 +2064,71 @@ class TUI:
         self.__dict__.setdefault("_goal_results", collections.deque()).append(
             ("edit", request_id, text, ok, error))
         self._invalidate()
+
+    # ---- Pip reports (dgc/pip_report_delivery.py) ----------------------------------------------
+    # A finished Pip run that reports to an open chat is one line in that chat's transcript, and is
+    # written into the saved session (so the editor shows its card there too). A thread reads the
+    # registry; the UI loop draws the line and writes the transcript only between turns, on the same
+    # thread that starts them. Never a turn, and nothing reaches the model.
+    def _start_pip_report_watch(self) -> None:
+        if self.config.get("pips_enabled", False) is not True or getattr(self, "_pip_report_stop", None):
+            return
+        stop = self._pip_report_stop = threading.Event()
+
+        def watch():
+            last_full, delay = 0.0, 0.5
+            while not stop.wait(delay):
+                delay = 5.0
+                force = time.monotonic() - last_full >= 60.0
+                if force:
+                    last_full = time.monotonic()
+                self._look_for_pip_reports(force=force)
+
+        threading.Thread(target=watch, name="dgc-pip-reports", daemon=True).start()
+
+    def _look_for_pip_reports(self, *, force: bool = False) -> int:
+        """Off the UI thread: queue each open chat's new reports for the UI loop to draw."""
+        from .pip_report_delivery import ChatReports
+        count = 0
+        for sess in list(getattr(self, "_sessions", None) or ()):
+            try:
+                state = sess.__dict__.setdefault("_pip_reports", ChatReports())
+                shown = state.look(sess.agent, sess.config, force=force)
+            except Exception:
+                continue
+            if shown:
+                with sess._monitor_inbox_lock:
+                    sess.__dict__.setdefault("_pip_report_inbox", []).extend(shown)
+                count += len(shown)
+                self._invalidate()
+        return count
+
+    def _service_pip_reports(self) -> bool:
+        """UI-loop tick: one line per report that arrived; written into the transcript between turns."""
+        from .pip_report_delivery import summary_line
+        changed = False
+        for sess in list(getattr(self, "_sessions", None) or ()):
+            state = sess.__dict__.get("_pip_reports")
+            if state is None:
+                continue
+            with sess._monitor_inbox_lock:
+                arrived = list(sess.__dict__.get("_pip_report_inbox") or ())
+                sess.__dict__["_pip_report_inbox"] = []
+            for report in arrived:
+                th = style_mod.theme()
+                sess.blocks.append(self._rich(f"[{th.accent}]{glyphs.DIAMOND}[/] {_esc(summary_line(report))} "
+                                              f"[{th.faint}]{glyphs.MIDDOT} /pips to open[/]"))
+                if sess._follow:
+                    sess._scroll_off = 0
+                changed = True
+            worker = sess._worker_thread
+            if (state.pending_write() and not sess._turn.is_set()
+                    and not (worker and worker.is_alive())):
+                try:
+                    state.flush(sess.agent)
+                except Exception:
+                    pass
+        return changed
 
     def _service_goal_results(self) -> bool:
         """UI loop: show live goal outcomes; a refused change puts its text back in the composer."""
@@ -9162,11 +9231,14 @@ class TUI:
         threading.Thread(target=sizer, daemon=True).start()
         self._start_peer_heartbeat()
         threading.Thread(target=self._load_pips_digest, name="dgc-pips-digest", daemon=True).start()
+        self._start_pip_report_watch()
         from . import termbg
         termbg.apply(self.config)          # dark canvas on a light terminal (idempotent; CLI may have done it)
         try:
             self.app.run()
         finally:
+            if getattr(self, "_pip_report_stop", None) is not None:
+                self._pip_report_stop.set()
             self._stop_peer_heartbeat()
             self._shutdown_fleet()
             termbg.reset()

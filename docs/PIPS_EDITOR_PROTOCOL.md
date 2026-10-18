@@ -36,6 +36,15 @@ capabilities object, so strict older clients still accept the handshake.
 - `pips_setup_notifications: 1` means the backend accepts `notify_pip_setup` (below).
 - `pip_references: 1` means the backend accepts `list_prompt_pips` and
   `pip_references` on `prompt`.
+- `pip_reports: 1` means a finished Pip run that reports to this chat can arrive as a
+  card in its transcript ([Reports reach the chat](PIPS.md#reports-reach-the-chat)). A
+  client that draws them sends `{"type": "watch_pip_reports"}`; until one does, the chat
+  is sent nothing and no report is taken. Then each arrives as
+  `{"type": "pip_report", "report": {...}}` (an open object: `run_id`, `pip_id`, `name`,
+  `pip_type`, `kind`, `outcome`, `finished_at`, `earlier`, and the findings, checks or
+  failure reason), and history replays it as `{"role": "pip_report", "report": {...}}`
+  after the turn it arrived in. `{"type": "pip_report_dismiss", "run_id": "run_…"}`
+  removes one; it is saved with the chat. A report never starts a turn.
 
 ## Commands and events
 

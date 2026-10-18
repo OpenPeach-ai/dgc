@@ -2581,3 +2581,41 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 @media (max-width: 300px) { .troupe-mini { display: none; } }
 @media (prefers-reduced-motion: reduce) { .troupe-mark .tm-part { animation: none !important; } .troupe-bar > span { transition: none; } }
 @media (forced-colors: active) { .troupe-bar { border: 1px solid CanvasText; } .troupe-bar > span { background: Highlight; } }
+
+/* A Pip report in the chat: a finished run of a Pip that reports here, drawn where it arrived (after
+   the turn that was running), never above the composer. Ask DGC to fix only fills the composer. A
+   clean run is one quiet line. Narrow panels wrap the row, never clip the actions. */
+.pip-report { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; margin: var(--sp-3) 0;
+  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
+  box-shadow: inset 3px 0 0 var(--accent-text); }
+.pip-report[data-outcome="failed"], .pip-report[data-outcome="checks_failed"] { box-shadow: inset 3px 0 0 var(--del-text); }
+.pip-report.quiet { align-items: center; margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-3);
+  border-color: transparent; background: transparent; box-shadow: none; }
+.pip-report-face, .pip-report-face .dgc-plush { display: block; flex: none; width: 28px; height: 28px; }
+.pip-report.quiet .pip-report-face, .pip-report.quiet .pip-report-face .dgc-plush { width: 18px; height: 18px; }
+.pip-report-main { flex: 1 1 auto; min-width: 0; }
+.pip-report.quiet .pip-report-main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); }
+.pip-report-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0;
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.pip-report-name { min-width: 0; overflow-wrap: anywhere; color: var(--text-strong); font-weight: var(--w-semi); }
+.pip-report-state { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.pip-report.quiet .pip-report-state { color: var(--muted); }
+.pip-report-when { margin-left: auto; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
+.pip-report.quiet .pip-report-when { margin-left: 0; }
+.pip-report-detail { margin: var(--sp-1) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--mono);
+  overflow-wrap: anywhere; }
+.pip-report-findings { display: grid; gap: 2px; margin: var(--sp-2) 0 0; padding: 0; list-style: none; }
+.pip-report-findings li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0;
+  font: var(--w-reg) var(--t-xs)/1.5 var(--sans); color: var(--text); }
+.pip-report-sev { flex: none; min-width: 4.5em; color: var(--muted); font-weight: var(--w-semi); text-transform: lowercase; }
+.pip-report-sev[data-severity="critical"], .pip-report-sev[data-severity="high"],
+.pip-report-sev[data-severity="failed"] { color: var(--del-text); }
+.pip-report-sev[data-severity="medium"] { color: var(--warn); }
+.pip-report-title { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
+.pip-report-where { flex: 0 1 auto; min-width: 0; color: var(--muted); font-family: var(--mono); overflow-wrap: anywhere; }
+.pip-report-more { margin: var(--sp-1) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.pip-report-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.pip-report.quiet .pip-report-actions { margin-top: 0; gap: var(--sp-1); }
+.pip-report.quiet .pip-report-actions button.act { min-height: 0; padding: 2px var(--sp-2); border-color: transparent;
+  background: transparent; color: var(--link); font-size: var(--t-xs); }
+.pip-report.quiet .pip-report-actions button.act:hover { border-color: var(--border-strong); }

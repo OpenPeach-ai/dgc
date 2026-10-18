@@ -347,6 +347,48 @@ dgc pips import brief.pip.json        # shows the job, asks, then creates it
 Patch Pips can't be shared yet, and a Pulse Pip is imported in the Pips view, where its
 commands are reviewed on the card.
 
+## Reports reach the chat
+
+What a Pip finds comes to the chat that should act on it, as an item, not a new turn.
+When a Pip's run finishes, a card appears in the transcript of every chat it reports to:
+
+- the chat it was **set up in**;
+- any chat it is **attached to** (ask DGC there: "attach ERP daily audit to this chat");
+- the chat that **ran it** with `run_pip_now`, for that run.
+
+A Pip that reports to no chat keeps reporting where it always has: its Pips page, Needs
+attention and the Pips strip on the Sessions home. Its **Runs** page says which it is, and how
+to attach it.
+
+The card shows the Pip's face and name, what happened and when: "finished · 5 findings (2 high,
+3 medium)", "finished · 1 of 2 checks failed", or "failed:" and the reason in plain words (the
+saved error below it), with the worst findings, file and line. It has three buttons:
+
+| Button | What it does |
+| --- | --- |
+| **Ask DGC to fix** | Puts a prompt about this report in the message box, after anything you already wrote. Nothing is sent: you edit it and send it. The prompt names the run, so DGC reads the whole report with `pips_context`, and it asks DGC to check before changing live data or services. |
+| **Open report** | Opens the Pips view at that run. |
+| **Dismiss** | Removes the card. The report stays in Pips. Saved with the chat. |
+
+**Which runs.** A finished source review (Scout, Lens, Rook, Lock), a Pulse's checks, and a
+failed run of either. They are said when something changes: the first report, new or different
+findings, a failure, or the all clear after one. A clean run after a clean one, the same findings
+again or the same failure again are not shown again. A clean run is one quiet line. A run you
+asked a chat to start is always shown there. Runs that finished while the chat was closed arrive
+when you open it, the newest per Pip, with how many earlier ones it folds. Runs more than a week
+old don't arrive. Chat replies, Quill drafts and Patch work stay in Pips.
+
+**Never a turn.** A card doesn't wake the chat, start a turn, interrupt one or reach the model:
+it is saved with the chat for you to see. If a turn is running when a report arrives, the card
+appears below it and the turn carries on. DGC acts on a report only when you send it a message
+that asks it to. That is why a chat never needs a monitor or a script that polls Pips: DGC's
+models are told so, and told that a report is not a request to change anything.
+
+**Once per chat.** Each chat gets each report once, open or closed, in the editor or the
+terminal. In the terminal (`dgc`) a report is one line in the open chat, such as
+`Pip 'ERP daily audit' finished: 5 findings (2 high, 3 medium) · /pips to open`, and the
+editor shows its card when you open that chat there.
+
 ## Rating results
 
 Under a finished result, report or Quill draft, **Was this result useful?** takes a thumbs

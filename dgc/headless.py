@@ -219,6 +219,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
     "get_config", "status", "get_history", "list_monitors", "stop_monitor", "list_mcp_context",
     "list_agents", "get_image", "list_troupes", "stop_troupe",
+    # Pip reports: a client asking for them, or dismissing a card, is not a user acting on the chat.
+    "watch_pip_reports", "pip_report_dismiss",
     # The Agent map's task list reads like the monitors list beside it, and its Stop is stop_monitor's.
     "list_background_shells", "stop_background_shell", "get_background_output",
     # A liveness ping is the editor breathing, not the user acting. Left out of this set, every
@@ -272,7 +274,7 @@ _BUSY_MUTATIONS = {
     # beside the turn -- Codex draws the same line.
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
-    "pips_enable", "pips_runtime", "list_prompt_pips",
+    "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
@@ -2140,6 +2142,11 @@ class Backend:
                           "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
+                          # A finished Pip run reaches the chats it reports to as a card in the
+                          # transcript (pip_report events, {role: "pip_report"} history markers),
+                          # once the client sends watch_pip_reports; pip_report_dismiss removes one.
+                          # Never a turn (dgc/pip_report_delivery.py).
+                          "pip_reports": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
@@ -2189,6 +2196,7 @@ class Backend:
         self._after_open()
         self._emit_config()
         self._publish_model_capabilities()
+        self._start_pip_report_watch()
 
     def _after_open(self) -> None:
         for warning in getattr(self.config, "credential_warnings", ()):
@@ -2228,6 +2236,7 @@ class Backend:
         # carries both native and delegated settings so editors render the route that will run.
         self._emit_config()
         self._publish_model_capabilities()
+        self._start_pip_report_watch()
 
     def _publish_model_capabilities(self, *, always: bool = False) -> None:
         """Learn what the selected model honours, off the command thread, and tell the editor.
@@ -2712,6 +2721,8 @@ class Backend:
                     else:
                         hub.policy.note_turn_end()
                 self._finish_steering(cancelled, failed)
+                # Pip reports that arrived while this turn ran go into the transcript now, after it.
+                self._flush_pip_reports()
                 try:
                     est = self.agent.estimate_tokens()
                 except Exception:
@@ -3659,6 +3670,7 @@ class Backend:
         cancel. The wait is bounded because the next backend is already starting and must not find
         this session held. Returns a short word for the log: idle, landed, or cancelled.
         """
+        self._stop_pip_report_watch()
         # A tab can close while the host and its other chats keep running. Pending
         # local controls belong to this tab; never apply them after it has gone.
         with self.__dict__.setdefault("_pips_command_lock", threading.Lock()):
@@ -3976,6 +3988,8 @@ class Backend:
             reannounce = getattr(getattr(self, "ui", None), "reannounce_open_requests", None)
             if callable(reannounce):
                 reannounce()
+        # A chat that was just opened (or reloaded) hears about the Pip reports it missed.
+        self._kick_pip_reports()
 
     def _history(self, live_turn: dict | None = None) -> list:
         """A replayable event log of the current conversation (for resuming in a UI).
@@ -4009,6 +4023,7 @@ class Backend:
         from .agent import _COMPACT_ACK, _COMPACT_PREFIX
         from .goals import RESUME_PROMPT
         from .workflows import display_prompt
+        from .pip_report_delivery import history_items as pip_report_items
 
         def close_turn() -> None:
             nonlocal turn
@@ -4039,6 +4054,7 @@ class Backend:
                           "reason": "paused" if pause else "completed" if finished else "cancelled",
                           "token_estimate": 0,
                           "final_message_id": turn["final"] if finished else None})
+            items.extend(turn.pop("pip_reports", ()))
             turn = None
 
         def open_turn(prompt: str, kind: str) -> None:
@@ -4065,8 +4081,24 @@ class Backend:
         if isinstance(live_turn, dict) and live_turn.get("anchor") is not None:
             anchor = live_turn["anchor"]
             live_after = next((i for i, m in enumerate(self.agent.messages) if m is anchor), -1)
+        # Pip reports that arrived after a message are drawn after the turn that message belongs to
+        # (once it has been read: a prompt opens its turn), never inside it -- live, a card that
+        # comes while a turn runs goes under that turn's block.
+        arrived: list = []
+
+        def place_reports() -> None:
+            if not arrived:
+                return
+            if turn is not None:
+                turn.setdefault("pip_reports", []).extend(arrived)
+            else:
+                items.extend(arrived)
+            arrived.clear()
+
         for index, m in enumerate(self.agent.messages):
             position = index
+            place_reports()
+            arrived.extend(pip_report_items(m))
             # Before any `continue`: images anchored at or before this message join the open turn.
             items.extend(self._history_before_message(index, turn))
             role = m.get("role")
@@ -4254,11 +4286,15 @@ class Backend:
             if (turn is not None and isinstance(pause, str) and 0 < len(pause) <= 256
                     and role in ("assistant", "tool")):
                 turn["goal_pause"] = pause
+        place_reports()
         live_start = None
+        live_reports: list = []
         if isinstance(live_turn, dict) and turn is not None and turn["at"] > live_after:
             live_start, live_id = items[turn["item"]], str(live_turn.get("id") or "") or turn["id"]
+            live_reports = turn.pop("pip_reports", [])
             turn = None                 # still running: its turn_end is the live one
         close_turn()
+        items.extend(live_reports)
         self._history_finish_reasoning(items)   # (may drop items: find the live turn again after)
         self._history_finish_images(items)
         items = self._history_restored_agent_cards(items)
@@ -4318,6 +4354,93 @@ class Backend:
         finally:
             if quiet:
                 self._suppress_wakes(False)
+
+    # ---- Pip reports in this chat (dgc/pip_report_delivery.py) ----------------------------------
+    # A finished Pip run reaches the chats it reports to as a card in the transcript. A thread looks
+    # every few seconds (a stat of the registry decides whether there is anything to read) and when
+    # the chat opens; it never starts a turn or tells the model anything.
+    _PIP_REPORT_POLL_S = 5.0
+    _PIP_REPORT_FULL_LOOK_S = 60.0
+
+    def _pip_report_state(self):
+        state = self.__dict__.get("_pip_reports")
+        if state is None:
+            from .pip_report_delivery import ChatReports
+            state = self.__dict__.setdefault("_pip_reports", ChatReports())
+        return state
+
+    def _start_pip_report_watch(self) -> None:
+        if self.__dict__.get("_pip_report_thread") is not None:
+            return
+        wake, stop = threading.Event(), threading.Event()
+        self._pip_report_wake, self._pip_report_stop = wake, stop
+
+        def watch():
+            force, last_full = True, 0.0
+            while not stop.is_set():
+                now = time.monotonic()
+                force = force or now - last_full >= self._PIP_REPORT_FULL_LOOK_S
+                if force:
+                    last_full = now
+                try:
+                    self._look_for_pip_reports(force=force)
+                except Exception:           # a report is never worth the chat
+                    pass
+                force = wake.wait(self._PIP_REPORT_POLL_S)
+                wake.clear()
+
+        thread = threading.Thread(target=watch, name="dgc-pip-reports", daemon=True)
+        self._pip_report_thread = thread
+        thread.start()
+
+    def _kick_pip_reports(self) -> None:
+        wake = self.__dict__.get("_pip_report_wake")
+        if wake is not None:
+            wake.set()
+
+    def _look_for_pip_reports(self, *, force: bool = False) -> int:
+        """Show this chat the reports it has not seen; write them in now if no turn is running."""
+        if (getattr(self, "_pips_closing", False) or getattr(self.agent, "stopping", False) is True
+                or not getattr(self, "_pip_reports_on", False)):
+            return 0                        # nobody here draws them: they wait for a client that does
+        state = self._pip_report_state()
+        session = getattr(self.agent, "session_file", None)
+        shown = state.look(self.agent, self.config, force=force)
+        if shown:
+            # Read outside the command lock; shown inside it, and only to the chat it was read for.
+            with self._dispatch_guard():
+                if getattr(self.agent, "session_file", None) != session:
+                    return 0                # another chat now: these wait for this one to reopen
+                for report in shown:
+                    self.em.emit("pip_report", report=report)
+        with self._turn_state_lock():
+            idle = not self._busy()
+        if idle and state.pending_write():
+            self._flush_pip_reports()
+        return len(shown)
+
+    def _flush_pip_reports(self) -> None:
+        """Write shown reports into the transcript and save it. Only where the transcript may change:
+        the turn worker between turns, or any thread while no turn runs (under the turn lock, so no
+        turn starts meanwhile, and the history lock, so no replay is being read from it)."""
+        state = self.__dict__.get("_pip_reports")
+        if state is None or not state.pending_write():
+            return
+        current = threading.current_thread()
+        with self._turn_state_lock(), getattr(self.em, "history_lock", nullcontext()):
+            worker = getattr(self, "_worker", None)
+            if self._busy() and worker is not current:
+                return                      # the turn's worker writes them when the turn ends
+            try:
+                state.flush(self.agent)
+            except Exception:
+                pass
+
+    def _stop_pip_report_watch(self) -> None:
+        stop = self.__dict__.get("_pip_report_stop")
+        if stop is not None:
+            stop.set()
+            self._kick_pip_reports()
 
     def _pip_starter(self, config, request):
         """Starter Pips: list them, or save one as a pending setup card owned by this chat.
@@ -5845,6 +5968,19 @@ class Backend:
                              **_request_fields(request_id))
         elif t == "get_history":
             self._emit_history(cmd["request_id"])
+        elif t == "watch_pip_reports":
+            # This client draws Pip reports: from now on this chat hears about them (see
+            # _look_for_pip_reports). Until a client says so none is sent, and none is taken.
+            self._pip_reports_on = True
+            self._kick_pip_reports()
+        elif t == "pip_report_dismiss":
+            # The card goes at once in the panel; here it is marked in the transcript, and saved now
+            # or, while a turn runs, when that turn ends.
+            self._pip_report_state().dismiss(self.agent, cmd.get("run_id"))
+            with self._turn_state_lock():
+                idle = not self._busy()
+            if idle:
+                self._flush_pip_reports()
         elif t == "clear_todos":
             # A list the model left behind, or a resumed session brought back, used to have no
             # exit short of a new chat: every later turn was reminded about it. Clear it through

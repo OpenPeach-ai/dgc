@@ -5,6 +5,11 @@
 Pips API 48: `mark_pip_news_seen {pip_ids, until}` (a mutation, local only) marks 1–50 Pips' news (failed runs, new
 findings) seen up to a digest's `until`, until they do something new; both SDKs know it and refuse it before API 48.
 
+The vendored protocol has the event `pip_report` (a finished Pip run that reports to the chat, `{report}`: an open
+object) and the commands `watch_pip_reports` (none is sent until a client asks) and `pip_report_dismiss {run_id}`, with
+`ready.capabilities.pip_reports`; the TypeScript SDK's known events include `pip_report`, so neither SDK drops it.
+History may carry `{role: "pip_report", report}` items.
+
 The editor's agent map added two events, `background_shells` and `background_output`, to the vendored protocol and
 the TypeScript SDK's known events, so neither SDK drops them; and the commands `list_background_shells`,
 `stop_background_shell` and `get_background_output` (with `ready.capabilities.background_tasks`). With

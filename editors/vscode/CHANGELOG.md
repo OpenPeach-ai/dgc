@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Pip reports in the chat
+
+- **A finished Pip run appears in the chat it reports to,** as a card in the transcript where it arrived (after
+  the turn that was running, which carries on), not as another row above the message box: the Pip's face and name,
+  what it found or why it failed, its worst findings with file and line, and **Ask DGC to fix** (puts a prompt
+  naming the run in the message box after your draft; nothing is sent), **Open report** (the Pips view at that run)
+  and **Dismiss** (saved with the chat). A clean run is one quiet line. It is saved with the chat, so a closed chat
+  shows it when you open it, and a reload draws the same card. A Pip's Runs page says where its reports go, or how
+  to attach it to a chat.
+
 ### Agent map
 
 - **The agents pill opens the agent map**, as in Claude Code, and so does `/agents`. The pill counts the agents

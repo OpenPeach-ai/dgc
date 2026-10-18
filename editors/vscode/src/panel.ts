@@ -4419,6 +4419,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "stopMonitor":
         void this.stopMonitor(String(msg.id || ""));
         break;
+      case "pipReportsWatch":
+        // The panel draws Pip reports (ready.capabilities.pip_reports): this chat's start arriving.
+        if (this.lastReadyEvent?.capabilities?.pip_reports === 1) { be.send({ type: "watch_pip_reports" }); }
+        break;
+      case "pipReportDismiss":
+        // A Pip report's card in this chat's transcript (ready.capabilities.pip_reports): the panel
+        // has already removed it; the backend saves that with the chat.
+        if (this.lastReadyEvent?.capabilities?.pip_reports === 1 && /^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) {
+          be.send({ type: "pip_report_dismiss", run_id: String(msg.run_id) });
+        }
+        break;
       case "stopTroupe":
         void this.stopTroupe(String(msg.run_id || ""));
         break;

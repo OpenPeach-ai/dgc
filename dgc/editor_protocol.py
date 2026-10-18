@@ -69,6 +69,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
                     "result": _O(False), "error": _O(False)},
     "pips_status": {"enabled": _B(), "api_version": _I(), "restart_required": _B(),
                     "message": _S(), "request_id": _S(False)},
+    # A finished Pip run that reports to this chat (capability pip_reports): a card in the
+    # transcript, never a turn. `report` is {run_id, pip_id, name, pip_type, kind (audit|checks),
+    # outcome (findings|clear|failed|checks_failed|checks_passed), finished_at, earlier, total?,
+    # counts?, findings? [{title, severity, path?, line?}], checks?, failed_checks?, reason?, detail?};
+    # an open object, so it can grow. History replays the same card as {role: "pip_report", report}.
+    "pip_report": {"report": _O()},
     # The screen's bytes for the viewer (base64), and the end of a stream with its reason.
     "pip_desktop_data": {"pip_id": _S(), "data": _S()},
     "pip_desktop_closed": {"pip_id": _S(), "reason": _S()},
@@ -575,6 +581,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # its per-command field allowlist and 16KiB limit are checked by the backend.
     "pips_control": {"request": _O()},
     "pips_enable": {"enabled": _B(), "request_id": _S(False)},
+    # A client that draws Pip reports asks for them (capability pip_reports): until it does, this chat
+    # is sent no pip_report and none is taken from the registry, so an older client misses nothing.
+    "watch_pip_reports": {"request_id": _S(False)},
+    # Dismiss a Pip report's card in this chat (capability pip_reports). Saved with the transcript.
+    "pip_report_dismiss": {"run_id": _S(), "request_id": _S(False)},
     "pips_runtime": {"action": _f("string", enum=("start", "resume")), "request_id": _S()},
     # A Pip computer's screen (capability pips_desktop): open a stream, send the viewer's bytes
     # (base64), close it. The editor never gets a socket or a path.

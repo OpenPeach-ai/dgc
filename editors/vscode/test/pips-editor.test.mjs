@@ -1568,3 +1568,11 @@ test("a Personal Pip's Job tab lists what it may do without asking, and Stop all
  assert.match(x.d.body.textContent,/This Pip will ask you again before: Send email with composio\./);
  assert.match(x.d.querySelector('[aria-label="Allowed without asking"]').textContent,/Nothing\. Every email, event or app action this Pip drafts waits for you\./);
 });
+test('the Runs page says which chats get its reports as a card, or how to attach one',async()=>{
+ const many=setup({jobs:[job('a',{report_chats:2})]});await many.drain();
+ assert.match(many.d.querySelector('.report-chats').textContent,/appear as a card in the 2 chats it reports to/);
+ const none=setup({jobs:[job('a',{report_chats:0})]});await none.drain();
+ assert.match(none.d.querySelector('.report-chats').textContent,/ask DGC in that chat: “attach Auditor a to this chat”/);
+ const older=setup();await older.drain();
+ assert.equal(older.d.querySelector('.report-chats'),null,'an older CLI sends no count, and the page says nothing');
+});

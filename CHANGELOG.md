@@ -650,6 +650,18 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   `get_pip_digest` everywhere (the side bar's home, the chat's Pips bar, desktop notifications, `dgc pips digest`),
   and a Pip comes back only with a run that ends later. The rest of the digest is not marked seen; waiting reviews are
   not news and stay. It never moves backwards. Pips registry schema 46 (`pip_news_seen`).
+- **Pip reports reach the chat.** A finished Pip run now appears in the chats it reports to (the chat it was set
+  up in, any chat it is attached to, and the chat that ran it) as a card in the transcript: the Pip, "finished · 5
+  findings (2 high, 3 medium)" or "failed:" and why in plain words, the worst findings with file and line, and
+  **Ask DGC to fix** / **Open report** / **Dismiss**. It never starts a turn and never reaches the model by itself:
+  Ask DGC to fix puts a prompt naming the run in the message box, and you send it. Said when something changes: a
+  clean run after a clean one, or the same findings or failure again, is not repeated. A chat that was closed gets
+  them when it opens, once. The terminal shows one line per report in the open chat. The tool descriptions now say
+  reports arrive by themselves, so a model has no reason to build a polling monitor, and that a report is not a
+  request to change anything. Editor protocol: the new event `pip_report {report}`, the history marker
+  `{role: "pip_report", report}`, the commands `watch_pip_reports` (a client that draws them asks; an older client is
+  sent none and none is taken) and `pip_report_dismiss {run_id}`, and `ready.capabilities.pip_reports: 1`;
+  `get_pip` gives `pip.report_chats`. See [docs/PIPS.md](docs/PIPS.md#reports-reach-the-chat).
 - **A Pip's run list works on Python 3.10** (Ubuntu 22.04's default). Listing runs read rows while a rollback ran,
   which Python 3.10's sqlite3 refuses: `dgc pip runs`, the Pips page and scheduled checks failed with "Cursor needed
   to be reset because of commit/rollback".

@@ -1333,6 +1333,7 @@
   // What the agent map may ask for: stopping one agent (`agent_control`; a foreground one only with
   // `agent_control_foreground`), and the background shells with their output (`background_tasks`).
   let agentControlLive = false, agentControlForeground = false, backgroundTasksLive = false;
+  let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
@@ -5444,6 +5445,9 @@
         agentControlLive = ev.capabilities?.agent_control === true;
         agentControlForeground = agentControlLive && ev.capabilities?.agent_control_foreground === true;
         backgroundTasksLive = Number(ev.capabilities?.background_tasks?.version) >= 1;
+        pipReportsLive = ev.capabilities?.pip_reports === 1;
+        // This panel draws Pip reports: ask for this chat's (none is sent, or taken, until it does).
+        if (pipReportsLive) vscode.postMessage({ type: "pipReportsWatch" });
         agentMapCapabilities();
         imageSpool = ev.capabilities?.image_spool === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
@@ -5948,6 +5952,11 @@
       case "todos":
         renderTodos(ev.todos);
         return;   // the transcript did not change: no follow scroll, no "New" on the pill
+      case "pip_report":
+        // A Pip that reports to this chat finished: a card in the transcript, never a turn. A turn
+        // running now carries on in its own block above it.
+        renderPipReport(ev.report);
+        break;
       case "monitor_event": {
         amNoteMonitorLines(ev);
         ensureTurn();
@@ -7551,7 +7560,7 @@
     // replaces their prompts and turns, and keeps the lines and the messages still in doubt.
     for (const box of [...log.querySelectorAll(":scope > .turn")]) unwrapTurn(box);
     for (const node of [...log.children]) {
-      if (node.matches(".msg, .resume-note, .compaction") && !pending.has(node)
+      if (node.matches(".msg, .resume-note, .compaction, .pip-report") && !pending.has(node)
           && !node.matches(".rejected, .unconfirmed")) node.remove();
     }
     let open = null;
@@ -7622,6 +7631,147 @@
     appendTurnContent(node);
     if (!replaying) fitPromptFolds(node);   // the turn's column, not the log's: decide again
   }
+  // ---- Pip reports in the chat ----
+  // A finished Pip run that reports to this chat arrives as a card in the transcript where it came
+  // (after the turn that was running), live as a `pip_report` event and on reopen as a
+  // {role: "pip_report"} marker -- one renderer for both, so a reload draws what was drawn live.
+  // Ask DGC to fix only fills the composer; the user edits and sends. Nothing here starts a turn.
+  const PIP_REPORT_TYPES = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"];
+  const PIP_REPORT_OUTCOMES = ["findings", "clear", "failed", "checks_failed", "checks_passed"];
+  const PIP_REPORT_SEVERITIES = ["critical", "high", "medium", "low"];
+  const pipReportPlural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  function validPipReport(r) {
+    return !!r && typeof r === "object" && /^run_[0-9a-f]{32}$/.test(String(r.run_id || ""))
+      && /^pip_[0-9a-f]{32}$/.test(String(r.pip_id || "")) && PIP_REPORT_TYPES.includes(r.pip_type)
+      && PIP_REPORT_OUTCOMES.includes(r.outcome) && typeof r.name === "string" && !!r.name.trim();
+  }
+  // "finished · 5 findings (2 high, 3 medium)", "failed: the project is too big…", in the user's words.
+  function pipReportState(r) {
+    const n = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : 0);
+    if (r.outcome === "failed") {
+      const reason = String(r.reason || "It stopped with an error.").slice(0, 300);
+      return `failed: ${reason.replace(/^(The|Its|It|A|This)\b/, (w) => w.toLowerCase())}`;
+    }
+    if (r.outcome === "clear") return "finished · nothing found";
+    if (r.outcome === "checks_passed") {
+      const total = n(r.checks?.total);
+      return total === 1 ? "finished · the check passed" : `finished · all ${total} checks passed`;
+    }
+    if (r.outcome === "checks_failed") return `finished · ${n(r.checks?.failed)} of ${pipReportPlural(n(r.checks?.total), "check")} failed`;
+    const counts = PIP_REPORT_SEVERITIES.filter((s) => n(r.counts?.[s])).map((s) => `${n(r.counts[s])} ${s}`);
+    return `finished · ${pipReportPlural(n(r.total), "finding")}${counts.length ? ` (${counts.join(", ")})` : ""}`;
+  }
+  // What "Ask DGC to fix" puts in the composer. It names the run so the model reads the whole report
+  // itself, and keeps live systems the user's call.
+  function pipReportPrompt(r) {
+    const name = `Pip “${r.name}”`;
+    const read = r.kind === "checks" ? "execution" : "report";
+    const how = `Read it with pips_context (action "${read}", run_id "${r.run_id}")`;
+    if (r.outcome === "failed") {
+      return `${name} failed (run ${r.run_id}): ${String(r.reason || "it stopped with an error.")}\n`
+        + `${how}, find out what stopped it and help me fix that, so its next run works.`;
+    }
+    if (r.outcome === "checks_failed") {
+      const which = Array.isArray(r.failed_checks) && r.failed_checks.length ? ` (${r.failed_checks.join("; ")})` : "";
+      return `${name} ran its checks and ${pipReportState(r).replace(/^finished · /, "")}${which} in run ${r.run_id}.\n`
+        + `${how}, find out why and fix it. Ask me before you change any live data or services.`;
+    }
+    return `${name} reported ${pipReportState(r).replace(/^finished · /, "")} in run ${r.run_id}.\n`
+      + `${how}, check each finding against the code, and fix the real ones here in the project. `
+      + `Ask me before you change any live data or services.`;
+  }
+  function askDgcToFix(r) {
+    const prompt = pipReportPrompt(r);
+    // Never replaces a draft: it goes after what is already there, and nothing is sent.
+    const draft = composerText();
+    if (input.querySelector(".composer-pill")) {      // a draft with pills keeps them: typed in at its end
+      input.focus(); setComposerRange(draft.length);
+      insertComposerText((draft.endsWith("\n") ? "\n" : "\n\n") + prompt);
+    } else setComposerText(draft.trim() ? draft.replace(/\s+$/, "") + "\n\n" + prompt : prompt);
+    onInput(); persistDraft();
+    setComposerRange(composerText().length);
+    input.focus();
+    speak("The prompt is in the message box. Edit it, then send it.");
+  }
+  function pipReportCard(r) {
+    const quiet = r.outcome === "clear" || r.outcome === "checks_passed";
+    const card = el("div", `pip-report${quiet ? " quiet" : ""}`);
+    card.dataset.run = r.run_id; card.dataset.outcome = r.outcome;
+    const state = pipReportState(r);
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", `Pip report from ${r.name}: ${state}`);
+    const face = el("span", "pip-report-face");
+    face.setAttribute("aria-hidden", "true");
+    const pose = r.outcome === "failed" || r.outcome === "checks_failed" ? "failure" : r.outcome === "findings" ? "waiting_approval" : "success";
+    try {
+      if (window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
+        { index: PIP_REPORT_TYPES.indexOf(r.pip_type), name: r.name }, pose, `pip-report-${r.run_id.slice(4, 16)}`, { paused: true });
+    } catch { face.replaceChildren(); }
+    const main = el("div", "pip-report-main");
+    const head = el("div", "pip-report-head");
+    head.append(el("span", "pip-report-name"), el("span", "pip-report-state"));
+    head.firstChild.textContent = r.name.slice(0, 120);
+    head.lastChild.textContent = state;
+    const time = window.DgcTime?.node(Date.parse(String(r.finished_at || "")), "pip-report-when");
+    if (time) head.append(time);
+    main.append(head);
+    if (r.outcome === "failed" && r.detail) {
+      const detail = el("p", "pip-report-detail"); detail.textContent = String(r.detail).slice(0, 600); main.append(detail);
+    }
+    const rows = r.outcome === "findings" ? (Array.isArray(r.findings) ? r.findings : []).slice(0, 3)
+      : r.outcome === "checks_failed" ? (Array.isArray(r.failed_checks) ? r.failed_checks : []).slice(0, 3).map((title) => ({ title, severity: "failed" })) : [];
+    if (rows.length) {
+      const list = el("ul", "pip-report-findings");
+      list.setAttribute("aria-label", r.outcome === "findings" ? "Top findings" : "Failed checks");
+      for (const f of rows) {
+        const li = el("li"), sev = el("span", "pip-report-sev"), title = el("span", "pip-report-title");
+        sev.dataset.severity = PIP_REPORT_SEVERITIES.includes(f.severity) ? f.severity : "failed";
+        sev.textContent = sev.dataset.severity;
+        title.textContent = String(f.title || "").slice(0, 200);
+        li.append(sev, title);
+        if (typeof f.path === "string" && f.path) {
+          const where = el("span", "pip-report-where");
+          where.textContent = f.path.slice(0, 300) + (Number.isSafeInteger(f.line) && f.line > 0 ? `:${f.line}` : "");
+          li.append(where);
+        }
+        list.append(li);
+      }
+      main.append(list);
+    }
+    const more = [];
+    const total = Number.isSafeInteger(r.total) ? r.total : 0;
+    if (r.outcome === "findings" && total > rows.length) more.push(`${total - rows.length} more in the report`);
+    if (Number.isSafeInteger(r.earlier) && r.earlier > 0) more.push(`${pipReportPlural(r.earlier, "earlier run")} not shown`);
+    if (more.length) { const p = el("p", "pip-report-more"); p.textContent = more.join(" · "); main.append(p); }
+    const actions = el("div", "pip-report-actions");
+    const button = (label, cls, title, fn) => {
+      const b = el("button", cls); b.type = "button"; b.textContent = label; b.title = title; b.onclick = fn; actions.append(b); return b;
+    };
+    if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", "Put a prompt about this report in the message box. Nothing is sent until you send it.", () => askDgcToFix(r));
+    button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, () => {
+      showPips(); pipsApp?.navigate?.({ pip: r.pip_id, section: "runs", run: r.run_id });
+    });
+    button("Dismiss", "act pip-report-dismiss", "Remove this card from the chat. The report stays in Pips.", () => {
+      const next = card.nextElementSibling;
+      card.remove();
+      if (pipReportsLive) vscode.postMessage({ type: "pipReportDismiss", run_id: r.run_id });
+      (next?.querySelector?.("button") || input).focus({ preventScroll: true });
+    });
+    main.append(actions);
+    card.append(face, main);
+    return card;
+  }
+  function renderPipReport(r) {
+    if (!validPipReport(r)) return;
+    // One card per run: a replay replaces the live card it repeats.
+    for (const old of [...log.querySelectorAll(".pip-report")]) if (old.dataset.run === r.run_id) old.remove();
+    const card = pipReportCard(r);
+    if (replaying) { card.classList.add("hist"); appendTarget.appendChild(card); return; }
+    const stick = atBottom();
+    log.appendChild(card);
+    speak(`Pip ${r.name} ${pipReportState(r)}`);
+    if (stick || following) scroll(); else noteNewContent();
+  }
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
     if (it.role === "time") {
@@ -7632,6 +7782,7 @@
       return;
     }
     if (it.role === "goal_edit") { sysLine(String(it.text || "")); return; }
+    if (it.role === "pip_report") { renderPipReport(it.report); return; }
     if (it.role === "steering") {
       ensureTurn();
       const node = el("div", "msg user"); node.appendChild(el("div", "role", "you · steering"));

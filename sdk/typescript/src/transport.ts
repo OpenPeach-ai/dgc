@@ -34,7 +34,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "monitor_ended", "monitor_event", "monitor_started", "monitors", "options_request",
   "options_resolved", "permission_decision", "permission_request", "permission_resolved",
   "permissions", "plan_proposal", "prompt_accepted", "queued", "ready", "recall",
-  "pip_desktop_closed", "pip_desktop_data", "pip_usage_report", "pips_result", "pips_status", "prompt_pips",
+  "pip_desktop_closed", "pip_desktop_data", "pip_report", "pip_usage_report", "pips_result", "pips_status", "prompt_pips",
   "request_expired", "retained_tasks", "rewound", "rule_added", "saved_plan", "session",
   "session_named", "sessions", "skill_catalog", "skill_detail", "skill_package", "status",
   "steering_update", "stream_end", "text_delta", "think_changed", "thinking_delta",

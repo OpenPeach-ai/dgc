@@ -1,0 +1,192 @@
+// Pip reports reach the chat: a finished run of a Pip that reports to this chat is a card IN THE
+// TRANSCRIPT where it arrived -- never another row above the composer, never a turn. Ask DGC to fix
+// only fills the composer (the user edits and sends); Open report opens the Pips view at that run;
+// Dismiss removes it and tells the backend, which saves it with the chat. Live (`pip_report`) and
+// replay ({role: "pip_report"} in history) go through one renderer, so a reload draws the same card.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { makeDom } from "./support/webview-dom.mjs";
+
+const RUN = "run_" + "a".repeat(32), PIP = "pip_" + "b".repeat(32);
+const REPORT = {
+  run_id: RUN, pip_id: PIP, name: "ERP daily audit", pip_type: "scout", kind: "audit", outcome: "findings",
+  finished_at: "2026-10-18T13:00:00.000Z", earlier: 1, total: 5,
+  counts: { critical: 0, high: 2, medium: 2, low: 1 },
+  findings: [
+    { title: "GST total skips cess", severity: "high", path: "app/gst.py", line: 88 },
+    { title: "Invoice push retries forever", severity: "high", path: "app/push.py", line: 40 },
+    { title: "Rounding drops paise", severity: "medium", path: "app/billing.py", line: 12 },
+  ],
+};
+const FAILED = {
+  run_id: "run_" + "c".repeat(32), pip_id: PIP, name: "GST watchdog", pip_type: "scout", kind: "audit",
+  outcome: "failed", finished_at: "2026-10-18T13:05:00.000Z", earlier: 0,
+  reason: "The project is too big for it to copy for review.",
+  detail: "Snapshot exceeds 10,000 entries, 4 MiB per file or 64 MiB total.",
+};
+const CLEAR = { run_id: "run_" + "d".repeat(32), pip_id: PIP, name: "Lock review", pip_type: "lock", kind: "audit",
+  outcome: "clear", finished_at: "2026-10-18T13:10:00.000Z", earlier: 0, total: 0, counts: {}, findings: [] };
+
+function panel() {
+  const s = makeDom();
+  s.event = (event) => s.send({ type: "event", event });
+  s.event({ type: "ready", capabilities: { pip_reports: 1 }, model: "m", mode: "default", think: "off" });
+  return s;
+}
+const cards = (s) => [...s.doc.querySelectorAll("#log .pip-report")];
+const composer = (s) => s.doc.getElementById("input").value;
+// A card without the class that only says "this came from the saved history".
+const shape = (card) => { const copy = card.cloneNode(true); copy.classList.remove("hist"); return copy.outerHTML; };
+
+test("a report is a card in the transcript: the Pip, what it found, the worst findings and its actions", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  const [card] = cards(s);
+  assert.ok(card, "a card in #log");
+  assert.equal(card.closest("#log"), s.doc.getElementById("log"));
+  assert.equal(s.doc.querySelector("#composer-rail .pip-report, #cbox .pip-report"), null, "never above the composer");
+  assert.equal(card.querySelector(".pip-report-name").textContent, "ERP daily audit");
+  assert.equal(card.querySelector(".pip-report-state").textContent, "finished · 5 findings (2 high, 2 medium, 1 low)");
+  assert.deepEqual([...card.querySelectorAll(".pip-report-findings li")].map((li) => li.textContent),
+    ["highGST total skips cessapp/gst.py:88", "highInvoice push retries foreverapp/push.py:40",
+     "mediumRounding drops paiseapp/billing.py:12"]);
+  assert.equal(card.querySelector(".pip-report-more").textContent, "2 more in the report · 1 earlier run not shown");
+  assert.deepEqual([...card.querySelectorAll(".pip-report-actions button")].map((b) => b.textContent),
+    ["Ask DGC to fix", "Open report", "Dismiss"]);
+  assert.match(card.getAttribute("aria-label"), /ERP daily audit: finished · 5 findings/);
+  assert.deepEqual(s.errors, []);
+});
+
+test("Ask DGC to fix puts a prompt naming the run in the composer and sends nothing", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  const before = s.posted.length;
+  cards(s)[0].querySelector(".pip-report-fix").click();
+  const text = composer(s);
+  assert.match(text, /^Pip “ERP daily audit” reported 5 findings \(2 high, 2 medium, 1 low\) in run run_a{32}\./);
+  assert.match(text, /pips_context \(action "report", run_id "run_a{32}"\)/);
+  assert.match(text, /Ask me before you change any live data or services\./);
+  assert.equal(s.posted.slice(before).some((m) => ["prompt", "send", "sendPrompt", "steer"].includes(m.type)), false,
+    "the user sends it; the card never does");
+  assert.equal(cards(s).length, 1, "the card stays");
+  assert.deepEqual(s.errors, []);
+});
+
+test("Ask DGC to fix never replaces a draft the user already wrote", () => {
+  const s = panel();
+  const input = s.doc.getElementById("input");
+  input.value = "Also look at the login page";
+  input.dispatchEvent(new s.dom.window.Event("input", { bubbles: true }));
+  s.event({ type: "pip_report", report: FAILED });
+  cards(s)[0].querySelector(".pip-report-fix").click();
+  const text = composer(s);
+  assert.ok(text.startsWith("Also look at the login page\n\n"), JSON.stringify(text));
+  assert.match(text, /Pip “GST watchdog” failed \(run run_c{32}\): The project is too big for it to copy for review\./);
+  assert.match(text, /pips_context \(action "report", run_id "run_c{32}"\)/);
+});
+
+test("a failed run says it failed, why, and what the saved error was", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: FAILED });
+  const [card] = cards(s);
+  assert.equal(card.dataset.outcome, "failed");
+  assert.equal(card.querySelector(".pip-report-state").textContent, "failed: the project is too big for it to copy for review.");
+  assert.equal(card.querySelector(".pip-report-detail").textContent, FAILED.detail);
+});
+
+test("a clean run is one quiet line with no fix to ask for", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: CLEAR });
+  const [card] = cards(s);
+  assert.ok(card.classList.contains("quiet"));
+  assert.equal(card.querySelector(".pip-report-state").textContent, "finished · nothing found");
+  assert.deepEqual([...card.querySelectorAll("button")].map((b) => b.textContent), ["Open report", "Dismiss"]);
+});
+
+test("Open report opens the Pips view at that run", () => {
+  const s = panel();
+  const navigated = [];
+  s.dom.window.DgcPips = { mount: () => ({ navigate: (value) => navigated.push(value), setVisible() {} }) };
+  s.event({ type: "pip_report", report: REPORT });
+  cards(s)[0].querySelector(".pip-report-open").click();
+  assert.equal(JSON.stringify(navigated), JSON.stringify([{ pip: PIP, section: "runs", run: RUN }]));
+  assert.equal(s.doc.getElementById("pips-host").hidden, false);
+});
+
+test("Dismiss removes the card and tells the backend; the saved chat no longer has it", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  cards(s)[0].querySelector(".pip-report-dismiss").click();
+  assert.equal(cards(s).length, 0);
+  assert.equal(JSON.stringify(s.posted.filter((m) => m.type === "pipReportDismiss")), JSON.stringify([{ type: "pipReportDismiss", run_id: RUN }]));
+  // The backend saves it dismissed, so a reopened chat's history leaves it out.
+  s.event({ type: "history", items: [{ type: "turn_start", turn_id: "h1", prompt: "Set up the audit" },
+    { type: "text_delta", text: "Done." }, { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", final_message_id: "h1:1" }] });
+  assert.equal(cards(s).length, 0);
+});
+
+test("Dismiss is not sent to a backend that cannot save it", () => {
+  const s = makeDom();
+  s.send({ type: "event", event: { type: "ready", capabilities: {}, model: "m" } });
+  s.send({ type: "event", event: { type: "pip_report", report: REPORT } });
+  s.doc.querySelector(".pip-report-dismiss").click();
+  assert.equal(s.posted.some((m) => m.type === "pipReportDismiss"), false);
+});
+
+test("a report that comes during a turn goes under it and the turn carries on, uninterrupted", () => {
+  const s = panel();
+  s.event({ type: "turn_start", turn_id: "t1", prompt: "Refactor the parser" });
+  s.event({ type: "text_delta", text: "Reading the parser. " });
+  s.event({ type: "pip_report", report: REPORT });
+  s.event({ type: "text_delta", text: "Done refactoring." });
+  s.event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  s.event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" });
+  const [card] = cards(s);
+  const block = s.doc.querySelector("#log .msg.dgc");
+  assert.equal(block.contains(card), false, "never inside the turn's block");
+  assert.match(block.textContent, /Reading the parser\. Done refactoring\./, "the answer is one piece, not cut by the card");
+  assert.ok(block.compareDocumentPosition(card) & s.dom.window.Node.DOCUMENT_POSITION_FOLLOWING, "after the turn");
+  assert.equal(s.posted.some((m) => m.type === "cancel" || m.type === "stop"), false);
+  assert.deepEqual(s.errors, []);
+});
+
+test("replay draws the card the live event drew, once, after the same turn", () => {
+  const turn = [{ type: "turn_start", turn_id: "h1", prompt: "Set up the audit" },
+    { type: "text_delta", text: "Done: it runs at 18:30." }, { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", final_message_id: "h1:1" }];
+  const live = panel();
+  live.event({ type: "history", items: turn });
+  live.event({ type: "pip_report", report: REPORT });
+  live.event({ type: "pip_report", report: FAILED });
+  const replay = panel();
+  replay.event({ type: "history", items: [...turn, { role: "pip_report", report: REPORT }, { role: "pip_report", report: FAILED }] });
+  assert.deepEqual(cards(replay).map(shape), cards(live).map(shape));
+  // The live chat gets the same history again (a reconnect): the saved cards replace the live ones.
+  live.event({ type: "history", items: [...turn, { role: "pip_report", report: REPORT }, { role: "pip_report", report: FAILED }] });
+  assert.equal(cards(live).length, 2, "one card per run");
+  assert.deepEqual(cards(live).map(shape), cards(replay).map(shape));
+  for (const s of [live, replay]) {
+    const block = s.doc.querySelector("#log .msg.dgc");
+    assert.ok(cards(s).every((card) => block.compareDocumentPosition(card) & s.dom.window.Node.DOCUMENT_POSITION_FOLLOWING));
+    assert.deepEqual(s.errors, []);
+  }
+});
+
+test("a malformed report draws nothing", () => {
+  const s = panel();
+  for (const report of [null, { ...REPORT, run_id: "run_x" }, { ...REPORT, outcome: "fixed" }, { ...REPORT, pip_type: "x" },
+    { ...REPORT, name: "" }]) s.event({ type: "pip_report", report });
+  s.event({ type: "history", items: [{ role: "pip_report", report: { ...REPORT, pip_id: "nope" } }] });
+  assert.equal(cards(s).length, 0);
+  assert.deepEqual(s.errors, []);
+});
+
+test("names and findings are text, never markup", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: { ...REPORT, name: '<img src=x onerror="bad()">',
+    findings: [{ title: "<b>bold</b>", severity: "high", path: "<i>p</i>", line: 1 }] } });
+  const [card] = cards(s);
+  assert.equal(card.querySelector("img, b, i"), null);
+  assert.equal(card.querySelector(".pip-report-title").textContent, "<b>bold</b>");
+});

@@ -4227,8 +4227,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                                              computer_plan=_new_computer(personal, request.get("computer")))}
             elif command == "get_pip":
                 from .pip_profile import get as profile
+                from .pip_report_delivery import report_chats
                 result = {"pip": store.get(pip_id)}
                 result["pip"]["profile"] = profile(registry.db, pip_id)
+                # How many chats its finished reports reach as a card (the Pip page says, or how to attach one).
+                result["pip"]["report_chats"] = report_chats(registry, pip_id)
             elif command == "propose_pip_update":
                 changes = request.get('changes')
                 if isinstance(changes,dict):

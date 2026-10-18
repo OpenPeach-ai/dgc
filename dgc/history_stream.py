@@ -96,6 +96,10 @@ class HistoryEmitter:
                 self._turn_id = str(fields.get("turn_id") or "") if type == "turn_start" else ""
             if type in DISPLAY_EVENTS:
                 self._remember({"type": type, **fields})
+            elif type == "pip_report":
+                # A Pip's report that arrived while this turn ran: a reload mid-turn draws it again,
+                # after the turn, where the transcript puts it once the turn has ended.
+                self._remember({"role": "pip_report", "report": fields.get("report")})
 
     def include_live(self, items, live):
         """Called under history_lock. Return the snapshot and whether its seq covers display."""
