@@ -289,6 +289,25 @@
 
 ### Chat
 
+- **What's running sits on one line above the prompt box.** A goal, a troupe, monitors, the checklist and this
+  chat's changes each took a full row there: five rows, 204px of a 460×820 side bar. With two or more showing, each
+  is now a chip on one line (36px): "◎ 1:12:00", "Troupe 5/8", "2 monitors", "Tasks 4/7", "6 files +214 −37". Click
+  a chip and its usual row opens just above the box, over the end of the chat, with every button it had: Stop,
+  Pause, Edit, Review, Clear, the troupe's stages and the checklist (already open). Esc, a click elsewhere, × or the
+  chip again closes it.
+  - **Anything that needs you turns its chip amber and says why:** a blocked task ("1 blocked"), monitor events
+    waiting for your next message ("3 waiting"), a blocked goal, a failed troupe, a Pips alert. A screen reader hears
+    it in the chip's label.
+  - **One kind alone keeps its full row**, as before.
+  - **From the keyboard** the chips are one Tab stop: ←/→, Home and End move along them, Enter or Space opens one,
+    and the focus goes into it and back to the chip when it closes.
+  - **A troupe's popover** also opens its journal (the plan, every agent's result, the report) and shows the troupe
+    in the agent map; the monitors' popover shows them there too.
+  - **A narrow panel** drops the words first, then the line counts, then a chip's number when it needs you (the
+    reason stays), and only then wraps onto a second line.
+  - The invisible-characters notice keeps its own row: it is about the message you're typing. "2 queued" and
+    **Workspace changes** move onto the chip line instead of taking rows of their own, and the Pips digest is a chip
+    too.
 - **What fills the window.** The context menu shows the session's window part by part, as ChatDGC's does: the
   messages and tool results, the system prompt, each tool (MCP tools by server), memory by file, skills and
   plugins, the room kept for summarizing, the free space, and the MCP tools held back until a search finds them.

@@ -49,12 +49,15 @@ for (const theme of ["dark-modern", "light-modern"]) {
           sendLabel: send.getAttribute("aria-label"), sendHit: send.contains(hit),
           sendInView: s.bottom <= innerHeight + 0.5 && s.top >= 0,
           log: rect("log").height, floor: Math.max(96, innerHeight * 0.2),
-          rail: getComputedStyle(document.getElementById("composer-rail")).display,
+          // Three kinds (the goal, the checklist, a monitor): one line of chips above the box (B2).
+          rail: getComputedStyle(document.getElementById("rail-chips")).display,
+          chips: [...document.querySelectorAll("#rail-chips .rail-chip")].map((chip) => chip.dataset.kind),
         };
       });
       assert.deepEqual(errors, []);
       assert.ok(g.docked, "the question is docked in the composer");
-      assert.notEqual(g.rail, "none", "the goal, tasks and monitors rail stays at 620 px");
+      assert.notEqual(g.rail, "none", "the goal, tasks and monitors chips stay at 620 px");
+      assert.deepEqual(g.chips, ["goal", "monitors", "tasks"]);
       assert.equal(g.pillHidden, false, "the agents pill shows");
       assert.equal(g.pillState, "running");
       // Two agents and the dev server's monitor: the narrow footer keeps the total running, and the
@@ -274,6 +277,10 @@ test("the goal rail leaves out an objective it has no room for, and brings it ba
   if (skipOrFail(t)) return;
   const { page, errors } = await openCrossLane(browser, { width: 460, height: 620, scenario: "footer" });
   try {
+    // The goal shares the line with the checklist and a monitor, so its row is in its chip's popover (B2), which is
+    // exactly as wide as the rail it came from.
+    await page.click('#rail-chips .rail-chip[data-kind="goal"]');
+    assert.equal(await page.evaluate(() => document.getElementById("rail-pop-body").contains(document.getElementById("goalbar"))), true);
     const facts = () => page.evaluate(() => {
       const text = document.getElementById("goal-text"), main = document.getElementById("goal-main");
       const rect = text.getBoundingClientRect();

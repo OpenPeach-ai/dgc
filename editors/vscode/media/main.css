@@ -40,6 +40,9 @@
   --ring:rgba(124,92,255,.30);
   --good:#5BCB8B; --good-soft:rgba(91,203,139,.1);
   --warn:#D1902B;
+  /* Something on the chip line needs you. Amber, and lifted for words: --need is 6.1:1 on the dark editor ground and
+     4.8:1 on the input one, --need-text 7.4:1 and 5.9:1. The light themes take darker steps (below). */
+  --need:#D1902B; --need-text:#E0A24E;
   /* Auto mode and error states share this olive. --err paints borders, fills and dots, where
      the exact colour is what matters. Text uses --err-text: the same hue lifted until it clears
      4.5:1 on every panel surface, because #768A00 reads 3.74:1 on --surface2 and the webview
@@ -402,6 +405,9 @@ body[data-agent-page] #to-latest { display: none; }
     drop-shadow(0 0 4px color-mix(in srgb, var(--mark) 70%, transparent));
 }
 body.vscode-light { --link:#6D49E8; }   /* on light: 5.3:1, and still the brand's hue */
+/* #D1902B is 2.7:1 on white. These clear 3:1 (the border and dot: 4.4 on white, 3.6 on the hover grey) and 4.5:1
+   (the words: 6.0 on white, 4.9 on the hover grey). */
+body.vscode-light, body.vscode-high-contrast-light { --need:#A86A12; --need-text:#8F5600; }
 /* Seti's own light pair, except the three it ships too pale to clear 3:1 on a light ground. */
 body.vscode-light {
   --fk-blue:#498ba7; --fk-yellow:#8d8d2d; --fk-orange:#cc6d2e; --fk-green:#6c9438;
@@ -1094,8 +1100,69 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-text-action { flex: none; min-height: 26px; padding: 0 var(--sp-1); border: 0; background: transparent;
   color: var(--muted); cursor: pointer; font: var(--w-reg) var(--t-sm)/1 var(--sans); }
 .rail-text-action:hover { color: var(--text-strong); }
-#workspace-changes { align-self: flex-end; min-height: 20px; font-size: var(--t-xs); }
+#workspace-changes { flex: none; margin-left: auto; min-height: 20px; font-size: var(--t-xs); }
 #workspace-changes .codicon { display: none; }
+
+/* The chip line (B2): one line above the box for everything the chat is running -- a chip per kind, "N queued", and
+   Workspace changes at its end. Two or more kinds fold into chips; a chip opens its kind's real row in a popover
+   over the end of the transcript, so the line is all the height they take (24px, 36px with the footer's padding
+   and gap). Under the composer's own menus (z-index 1 < #cbox's 2) except while its popover is open, when it
+   also has to sit over the "Latest" pill (3). */
+.rail-line { position: relative; z-index: 1; display: flex; align-items: flex-start; gap: var(--sp-1) var(--sp-2);
+  min-width: 0; margin: 0 var(--sp-3); }
+.rail-line.pop-open { z-index: 4; }
+.rail-chips { display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center; gap: var(--sp-1); min-width: 0; }
+.rail-line[data-fit="wrap"] .rail-chips { flex-wrap: wrap; }
+.rail-line.has-chips #workspace-changes { margin-top: 2px; }
+.rail-line.has-chips #queued { margin-top: 4px; }
+.rail-chip { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; max-width: 100%; height: 24px; min-width: 0;
+  padding: 0 7px; border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface);
+  color: var(--muted); cursor: pointer; overflow: hidden; white-space: nowrap;
+  font: var(--w-reg) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
+.rail-chip:hover, .rail-chip[aria-expanded="true"] { color: var(--text); border-color: var(--border-strong); background: var(--surface2); }
+.rail-chip > .codicon { flex: none; font-size: 13px; color: var(--faint); }
+.rail-chip[data-live] > .codicon { color: var(--accent-text); }
+.rail-chip .chip-num { color: var(--text); }
+.rail-chip .chip-mark { flex: none; width: 14px; height: 14px; }
+.rail-chip .chip-mark svg { display: block; width: 100%; height: 100%; }
+.rail-chip .chip-mini { flex: none; width: 28px; }
+.rail-chip:not([data-live]) .chip-mini > span { background: var(--faint); }
+.rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part { animation: troupe-tile 2.4s ease-in-out infinite; }
+.rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(2) { animation-delay: 0.6s; }
+.rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(3) { animation-delay: 1.2s; }
+.rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(4) { animation-delay: 1.8s; }
+/* Needs you: amber border, an amber dot and the reason. --need paints the border and the dot (3:1 or more on every
+   ground the chip sits on), --need-text the words (4.5:1). */
+.rail-chip[data-need] { border-color: var(--need); color: var(--text); }
+.rail-chip .chip-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--need); }
+.rail-chip .chip-need { color: var(--need-text); }
+.rail-line[data-fit]:not([data-fit="full"]) #workspace-changes .workspace-changes-label { display: none; }
+.rail-line[data-fit]:not([data-fit="full"]) #workspace-changes .codicon { display: inline-block; }
+.rail-line:is([data-fit="compact"], [data-fit="tight"], [data-fit="tighter"], [data-fit="wrap"]) .chip-word { display: none; }
+.rail-line:is([data-fit="tight"], [data-fit="tighter"], [data-fit="wrap"]) :is(.chip-extra, .chip-mini) { display: none; }
+/* The last step before wrapping: a chip that needs you gives its number's room to the reason ("☰ 1 blocked"). */
+.rail-line:is([data-fit="tighter"], [data-fit="wrap"]) .rail-chip:has(.chip-need) .chip-num { display: none; }
+/* In chips, the rail keeps only the invisible-characters notice: it is about the message being typed. */
+#composer-rail.as-chips > .rail-item:not(#pastebar) { display: none; }
+.rail-pop { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); display: flex; flex-direction: column;
+  min-width: 0; max-height: min(70vh, 560px); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
+  box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
+body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+.rail-pop:focus { outline: none; }
+.rail-pop:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+@keyframes rail-pop-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: no-preference) { .rail-pop:not([hidden]) { animation: rail-pop-in .14s ease-out; } }
+.rail-pop-head { display: flex; flex: none; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-1) 0 var(--sp-3); }
+.rail-pop-title { flex: 1; min-width: 0; color: var(--muted); font: var(--w-med) var(--t-xs)/1.45 var(--sans); }
+.rail-pop-body { display: flex; flex-direction: column; min-width: 0; }
+/* The real row, borrowed: the popover is its frame now. */
+.rail-pop-body > .rail-item { border: 0; border-radius: 0; background: transparent; }
+.rail-pop-links { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: var(--sp-1) var(--sp-3) var(--sp-2);
+  border-top: 1px solid var(--border); }
+.rail-pop-links .rail-pop-link { padding: 0; border: 0; background: transparent; color: var(--link); cursor: pointer;
+  font: var(--w-reg) var(--t-xs)/1.6 var(--sans); }
+.rail-pop-links .rail-pop-link:hover { text-decoration: underline; }
 .change-add { color: var(--good); font-variant-numeric: tabular-nums; }
 .change-del { color: var(--del-text); font-variant-numeric: tabular-nums; }
 #goalbar[data-status="active"] .goal-icon { color: var(--accent-text); }
@@ -1113,7 +1180,11 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   padding: 0; border: 1px solid transparent; border-radius: var(--r-full); background: transparent; color: var(--faint); cursor: pointer; }
 .rail-icon-button:hover { border-color: var(--border); background: var(--surface2); color: var(--text); }
 .rail-icon-button .codicon { font-size: var(--t-sm); }
-#queued { padding: 0 var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); }
+/* "2 queued": the messages waiting behind the running turn, on the chip line. They are in the transcript already
+   ("you · queued"), and the count has no controls of its own, so it is words on the line, not a chip. */
+#queued { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0 var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); }
+#queued:empty { display: none; }
 /* Inside the composer, above the text field: the attachments belong to the message being
    written, so they live in the same box as the words. */
 #attachments { display: flex; gap: var(--sp-1); flex-wrap: wrap; padding: var(--sp-2) var(--sp-3) 0; max-height: min(104px, 20vh); overflow-y: auto; overscroll-behavior: contain; }
@@ -1599,6 +1670,7 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
     --fk-violet:CanvasText; --fk-pink:CanvasText; --fk-red:CanvasText; --fk-neutral:CanvasText;
     --accent-hover:Highlight; --lav:LinkText;
     --accent-soft:transparent; --good:CanvasText; --good-soft:transparent; --warn:CanvasText;
+    --need:CanvasText; --need-text:CanvasText;
     --err:CanvasText; --err-text:CanvasText; --err-soft:transparent;
     --del:CanvasText; --del-text:CanvasText; --del-soft:transparent;
   }
@@ -2374,6 +2446,8 @@ body.ask-docked #tasks-panel { display: none; }
      transcript its height at 480px and pushed the card into overflow. */
   body.ask-docked #composer-rail:not(:has(#pastebar:not([hidden]))) { display: none; }
   body.ask-docked #composer-rail > :not(#pastebar), body.ask-docked #workspace-changes { display: none; }
+  body.ask-docked :is(#rail-chips, #rail-pop) { display: none; }
+  body.ask-docked #rail-line:not(:has(#queued:not(:empty))) { display: none; }
 }
 @media (max-height: 559px) {
   .ask-opt:not(.hot) .ask-desc { display: none; }
@@ -2580,6 +2654,14 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 #troupebar[data-state="stopped"] .troupe-mark, #troupebar[data-state="failed"] .troupe-mark { filter: grayscale(0.85); opacity: 0.75; }
 @media (max-width: 300px) { .troupe-mini { display: none; } }
 @media (prefers-reduced-motion: reduce) { .troupe-mark .tm-part { animation: none !important; } .troupe-bar > span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .rail-chip .chip-mark .tm-part { animation: none !important; } }
+/* No hue in forced colours: a chip that needs you says so with a heavier border, its dot and its words. */
+@media (forced-colors: active) {
+  .rail-chip { border-color: CanvasText; }
+  .rail-chip[data-need] { border-width: 2px; }
+  .rail-chip .chip-dot { forced-color-adjust: none; background: CanvasText; }
+  .rail-pop { border-color: CanvasText; }
+}
 @media (forced-colors: active) { .troupe-bar { border: 1px solid CanvasText; } .troupe-bar > span { background: Highlight; } }
 
 /* A Pip report in the chat: a finished run of a Pip that reports here, drawn where it arrived (after

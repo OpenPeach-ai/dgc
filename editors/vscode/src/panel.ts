@@ -4317,6 +4317,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "openFile":
         await this.openFile(msg.path, msg.line);
         break;
+      case "openTroupeJournal":
+        await this.openTroupeJournal(String(msg.runId || ""));
+        break;
       case "saveImage":
         await this.saveImage(String(msg.name || "image.png"), String(msg.data || ""));
         break;
@@ -4625,6 +4628,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       }
     }
+  }
+
+  /** A troupe's journal, from its popover's "Open the journal". The webview names only the run; the path is
+   *  this side's: ~/.dgc/troupes/<run id>, its report once the run has ended, else what it has written so far. */
+  private async openTroupeJournal(runId: string): Promise<void> {
+    if (!/^tr-[0-9a-f]{10}$/.test(runId)) { return; }
+    const root = join(dgcHome(), "troupes");
+    let base = "";
+    try { base = await realpath(root); } catch { /* no troupe has run on this computer */ }
+    for (const name of ["report.md", "results.jsonl", "plan.json"]) {
+      if (!base) { break; }
+      try {
+        const real = await realpath(join(root, runId, name));
+        if (!real.startsWith(base + sep) || !(await fs.promises.stat(real)).isFile()) { continue; }
+        await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(real));
+        return;
+      } catch { /* not written yet: the next one */ }
+    }
+    void vscode.window.showInformationMessage("This troupe's journal is not on this computer.");
   }
 
   private async openSafeExternal(raw: string): Promise<void> {
@@ -7175,9 +7197,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   </div>
 </div>
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
-<div id="queued" role="status" aria-live="polite"></div>
 <footer>
-  <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit"><span class="codicon codicon-diff" aria-hidden="true"></span><span class="workspace-changes-label">Workspace changes</span></button>
+  <div id="rail-line" class="rail-line">
+    <div id="rail-chips" class="rail-chips" role="toolbar" aria-label="Running in this chat" hidden></div>
+    <div id="queued" role="status" aria-live="polite"></div>
+    <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit"><span class="codicon codicon-diff" aria-hidden="true"></span><span class="workspace-changes-label">Workspace changes</span></button>
+    <div id="rail-pop" class="rail-pop" role="dialog" aria-modal="false" aria-labelledby="rail-pop-title" tabindex="-1" hidden>
+      <div class="rail-pop-head"><span id="rail-pop-title" class="rail-pop-title"></span><button type="button" id="rail-pop-close" class="rail-icon-button" title="Close" aria-label="Close"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>
+      <div id="rail-pop-body" class="rail-pop-body"></div>
+      <div id="rail-pop-links" class="rail-pop-links" hidden></div>
+    </div>
+  </div>
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="pipsbar" class="rail-item" aria-label="Pips digest" hidden>
       <div id="pips-digest-panel" class="pips-digest-panel" role="region" aria-label="What your Pips found" hidden></div>

@@ -60,7 +60,10 @@ for (const width of [300, 460]) {
             send: { top: sendRect.top, bottom: sendRect.bottom, height: sendRect.height, label: send.getAttribute("aria-label"),
               hit: hit === send || send.contains(hit) },
             footerVisible: getComputedStyle(document.getElementById("cfooter")).display !== "none",
-            rail: getComputedStyle(document.getElementById("composer-rail")).display,
+            // The goal, the checklist and a monitor are three kinds: one line of chips above the box (B2), and the
+            // rail itself is empty. Both step aside in a short panel.
+            rail: getComputedStyle(document.getElementById("rail-chips")).display,
+            rows: getComputedStyle(document.getElementById("composer-rail")).display,
             list: { scroll: list.scrollHeight, client: list.clientHeight, snap: getComputedStyle(list).scrollSnapType,
               align: getComputedStyle(list.querySelector(".ask-opt")).scrollSnapAlign },
             hiddenDescriptions: [...document.querySelectorAll(".ask-opt:not(.hot) .ask-desc")].every((node) => getComputedStyle(node).display === "none"),
@@ -73,7 +76,8 @@ for (const width of [300, 460]) {
         assert.equal(geometry.send.label, "Stop generation");
         assert.equal(geometry.send.hit, true, "Stop is the element under its own centre");
         assert.equal(geometry.footerVisible, true);
-        assert.equal(geometry.rail === "none", height < 600, `rail ${geometry.rail} at ${height}px`);
+        assert.equal(geometry.rail === "none", height < 600, `chip line ${geometry.rail} at ${height}px`);
+        assert.equal(geometry.rows, "none", "the rows are folded into their chips at every height");
         if (height < 560) assert.equal(geometry.hiddenDescriptions, true, "below 560px only the highlighted row keeps its description");
         assert.match(geometry.list.snap, /y/);
         assert.equal(geometry.list.align, "start");

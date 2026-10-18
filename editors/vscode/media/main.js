@@ -841,6 +841,10 @@
   const wireText = (text) => text;
   const goalBar = $("goalbar"), changesBar = $("changesbar"), tasksBar = $("tasksbar"), composerRail = $("composer-rail");
   const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar"), pipsBar = $("pipsbar"), troupeBar = $("troupebar");
+  // The kinds of work the rail can hold, in the order their chips stand on the chip line (B2). The
+  // invisible-characters notice is not one of them: it is about the message being typed.
+  const RAIL_KINDS = [["goal", goalBar], ["troupe", troupeBar], ["monitors", monitorsBar], ["tasks", tasksBar],
+    ["changes", changesBar], ["pips", pipsBar]].filter(([, bar]) => bar);
   const announcer = $("announcer");
   const queuedEl = $("queued");
   // Pips has its own durable conversations. Hiding the main chat preserves its
@@ -874,6 +878,7 @@
     cbox.classList.add("asking");
     if (textBox) textBox.hidden = true;            // hidden, not rebuilt: an unsent draft stays in it
     atts.hidden = true;
+    closeRailPop({ restore: false });              // the chip line steps aside for a docked card in a short panel
     document.body.classList.add("ask-docked");
     renderComposerControls();
     return true;
@@ -4330,19 +4335,21 @@
   // is. Clockwise, so a running troupe's tiles light up in turn around the square.
   const TROUPE_TILES = [[2, 2, ["#D2E7DD", "#BEE2D1", "#50E5CB", "#4261D9"]], [12.6, 2, ["#EBD8CE", "#E8C8B7", "#EB4A4A", "#DF3C83"]],
                         [12.6, 12.6, ["#EAE8CF", "#E6E4B9", "#EBAD4A", "#DF653C"]], [2, 12.6, ["#CED7EB", "#B7C7E8", "#5C4AEB", "#AB3CDF"]]];
-  const TROUPE_MARK = (() => {
-    const defs = ['<filter id="troupe-mark-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.1"/></filter>'];
+  // `id` prefixes its gradients' ids. A second copy (the troupe's chip) needs its own: url(#…) finds the first element
+  // with that id in the page, and the row's copy is not drawn while the row is folded into its chip.
+  function troupeMark(id = "troupe-mark") {
+    const defs = [`<filter id="${id}-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.1"/></filter>`];
     const tiles = TROUPE_TILES.map(([x, y, [base, ...hues]], i) => {
-      defs.push(`<clipPath id="troupe-mark-c${i}"><rect x="${x}" y="${y}" width="9.4" height="9.4" rx="2.6"/></clipPath>`);
+      defs.push(`<clipPath id="${id}-c${i}"><rect x="${x}" y="${y}" width="9.4" height="9.4" rx="2.6"/></clipPath>`);
       const orbs = [[2.2, 2, 6], [4.6, 4.8, 5], [7.6, 7.6, 5.4]].map(([dx, dy, r], j) => {
-        defs.push(`<radialGradient id="troupe-mark-g${i}${j}" cx="${x + dx}" cy="${y + dy}" r="${r}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${hues[j]}"/><stop offset="1" stop-color="${hues[j]}" stop-opacity="0"/></radialGradient>`);
-        return `<circle cx="${x + dx}" cy="${y + dy}" r="${r}" fill="url(#troupe-mark-g${i}${j})"/>`;
+        defs.push(`<radialGradient id="${id}-g${i}${j}" cx="${x + dx}" cy="${y + dy}" r="${r}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${hues[j]}"/><stop offset="1" stop-color="${hues[j]}" stop-opacity="0"/></radialGradient>`);
+        return `<circle cx="${x + dx}" cy="${y + dy}" r="${r}" fill="url(#${id}-g${i}${j})"/>`;
       }).join("");
-      return `<g class="tm-part" clip-path="url(#troupe-mark-c${i})"><rect x="${x}" y="${y}" width="9.4" height="9.4" fill="${base}"/><g filter="url(#troupe-mark-blur)">${orbs}</g></g>`;
+      return `<g class="tm-part" clip-path="url(#${id}-c${i})"><rect x="${x}" y="${y}" width="9.4" height="9.4" fill="${base}"/><g filter="url(#${id}-blur)">${orbs}</g></g>`;
     });
     return `<svg viewBox="0 0 24 24" focusable="false"><defs>${defs.join("")}</defs>${tiles.join("")}</svg>`;
-  })();
-  $("troupe-mark").innerHTML = TROUPE_MARK;
+  }
+  $("troupe-mark").innerHTML = troupeMark();
   function troupeStages(ev) { return Array.isArray(ev.stages) ? ev.stages.filter((s) => s && typeof s === "object") : []; }
   function troupeCounts(s) {
     const total = Math.max(0, Number(s.total) || 0), done = Math.max(0, Number(s.done) || 0), failed = Math.max(0, Number(s.failed) || 0);
@@ -4625,7 +4632,7 @@
   // began. A new chat, clear or resume empties it, so the end of a monitor from the chat that was
   // left (it can reach the webview after the new chat's acknowledgement) is not shown in this one.
   const eventCount = (value) => { const n = Math.max(0, Number(value) || 0); return `${n} event${n === 1 ? "" : "s"}`; };
-  let monitorItems = [], monitorsPaused = false, monitorsPending = 0;
+  let monitorItems = [], monitorsPaused = false, monitorsPending = 0, monitorsHeld = false;
   const knownMonitorIds = new Set();
   function renderMonitors(ev) {
     monitorItems = (Array.isArray(ev?.items) ? ev.items : [])
@@ -4645,6 +4652,7 @@
     const pending = monitorsPending;
     const wakeOff = lastConfig?.monitor_wake === false;
     const held = monitorsPaused || wakeOff || curMode === "plan";
+    monitorsHeld = held;
     const chips = $("monitor-chips");
     chips.innerHTML = "";
     live.forEach((item) => {
@@ -4837,14 +4845,19 @@
   };
   $("paste-keep").onclick = () => { pasteBar.hidden = true; syncComposerRail(); input.focus({ preventScroll: true }); };
 
+  // One kind of work showing keeps its full row above the box. Two or more fold into one line of chips
+  // (renderRailChips), and the rail itself then holds only the invisible-characters notice, if any.
   function syncComposerRail() {
-    composerRail.hidden = goalBar.hidden && changesBar.hidden && tasksBar.hidden && monitorsBar.hidden
-      && troupeBar.hidden && pasteBar.hidden && (!pipsBar || pipsBar.hidden);
+    const present = RAIL_KINDS.filter(([, bar]) => !bar.hidden).map(([kind]) => kind);
+    const asChips = present.length >= 2;
+    composerRail.classList.toggle("as-chips", asChips);
+    composerRail.hidden = pasteBar.hidden && (asChips || !present.length);
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
     composerRail.classList.toggle("has-troupes", !troupeBar.hidden);
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
+    renderRailChips(asChips ? present : []);
   }
   function setChatChanges(next) {
     const files = Array.isArray(next?.files) ? next.files.filter((item) => item
@@ -4927,6 +4940,7 @@
     const clock = $("goal-time"), before = clock.textContent;
     clock.textContent = formatDuration(currentGoalElapsed());
     if (clock.textContent.length !== before.length) fitGoalText();   // "9:59" -> "10:00" takes room
+    if (clock.textContent !== before) paintRailChip("goal");         // its chip keeps the same time
   }
   // The objective shares the rail with the status, the clock and four buttons. In a narrow sidebar the
   // room left for it is a letter or two ("S…"), which says nothing: below about four characters it is
@@ -5116,6 +5130,321 @@
   }
   const goalClockTimer = setInterval(paintGoalClock, 500);
   if (goalClockTimer && typeof goalClockTimer.unref === "function") goalClockTimer.unref();
+
+  // ---- the rail as one line of chips (B2) ----
+  // A goal, a troupe, monitors, the checklist and this chat's changes each took a full row above the box: 204px of a
+  // 460x820 side bar, a third of what the transcript had. With two or more kinds showing, each is one chip on a single
+  // line ("◎ 1:12:00", "Troupe 5/8", "2 monitors", "Tasks 4/7", "6 files +214 −37"), and a chip opens that kind's REAL
+  // row -- the same element, with every control it has -- in a popover just above the box, over the end of the
+  // transcript. One kind alone keeps its full row: there is room for it. A kind that needs you (a blocked task, monitor
+  // events waiting for your next message, a blocked goal, a failed troupe, a Pips alert) turns its chip amber and says
+  // why. The chips are one toolbar: a single Tab stop, the arrows move along it, Enter or Space opens a chip, focus goes
+  // into its popover and back to the chip when it closes (Esc, a click elsewhere, × or the chip again).
+  var railChipsReady = false;                    // `var`: the rail syncs while the panel is still starting up
+  const railLine = $("rail-line"), railChips = $("rail-chips"), railPop = $("rail-pop");
+  const railPopBody = $("rail-pop-body"), railPopLinks = $("rail-pop-links");
+  // Where each row lives in the rail, so a row a popover borrowed goes back to its own place.
+  const RAIL_ROW_ORDER = ["pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
+  const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
+    changes: "Changes in this chat", pips: "Pips" };
+  const RAIL_FITS = ["full", "compact", "tight", "tighter", "wrap"];
+  const railChipNodes = new Map();               // kind -> its chip, kept across repaints so a focused chip keeps focus
+  let railKinds = [], railStop = "", railOpen = null, railFit = { width: -1, shape: "" }, railLinksSig = "";
+  const railBar = (kind) => (RAIL_KINDS.find(([name]) => name === kind) || [])[1] || null;
+  const railCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  function railTroupeLead() {
+    const runs = [...troupeRuns.values()];
+    return runs.filter((ev) => String(ev.state || "running") === "running").at(-1) || runs.at(-1) || null;
+  }
+
+  // What a chip says: an icon, a word (the first thing a short line drops), the number, extras (dropped next) and,
+  // when the kind needs you, an amber dot with the reason (the words go last; the amber and the label never do).
+  function railChipSpec(kind) {
+    if (kind === "goal") {
+      const status = goalState.status, blocked = status === "blocked", paused = status === "paused";
+      const state = blocked ? "blocked" : paused ? "paused" : "pursuing";
+      return { icon: "target", word: paused ? "Paused" : "Goal", num: formatDuration(currentGoalElapsed()),
+        live: status === "active", need: blocked, needWord: blocked ? "blocked" : "",
+        label: `Goal, ${state}: ${String(goalState.text || "").replace(/\s+/g, " ").slice(0, 160)}`,
+        tip: `Goal · ${blocked ? "blocked: it needs your decision" : state}` };
+    }
+    if (kind === "troupe") {
+      const lead = railTroupeLead();
+      if (!lead) return null;
+      const runs = [...troupeRuns.values()], state = String(lead.state || "running"), sum = troupeSummary(lead);
+      let num = TROUPE_STATES[state] || state;
+      if (state === "running") {
+        const stages = troupeStages(lead);
+        const stage = stages.find((s) => { const c = troupeCounts(s); return !c.total || c.settled < c.total; }) || stages.at(-1);
+        const c = stage ? troupeCounts(stage) : { total: 0, settled: 0 };
+        num = c.total ? `${Math.min(c.settled, c.total)}/${c.total}` : "starting";
+      }
+      const failed = runs.filter((ev) => String(ev.state || "") === "failed").length, title = String(lead.title || "");
+      // A failed lead says so in its number ("Failed"); one that failed behind a running lead says it beside it.
+      return { icon: "troupe", word: runs.length > 1 ? `${runs.length} troupes` : "Troupe", num, live: state === "running",
+        share: sum.share, need: failed > 0, needWord: failed && state !== "failed" ? `${failed} failed` : "",
+        label: `Troupe${title ? ` ${title}` : ""}: ${sum.text}`, tip: `Troupe · ${title ? `${title} · ` : ""}${sum.text}` };
+    }
+    if (kind === "monitors") {
+      const live = monitorItems.filter((item) => item.state === "running" || item.state === "stopping").length;
+      const waiting = monitorsHeld ? monitorsPending : 0;
+      const paused = monitorsPaused || lastConfig?.monitor_wake === false;
+      const said = [live ? `${railCount(live, "monitor")} running` : "",
+        waiting ? `${eventCount(waiting)} waiting for your next message` : "", paused ? "wake-ups paused" : ""].filter(Boolean);
+      return { icon: "pulse", num: live ? String(live) : `${waiting} waiting`, after: live ? (live === 1 ? "monitor" : "monitors") : "",
+        live: live > 0 && !paused, need: waiting > 0, needWord: live && waiting ? `${waiting} waiting` : "",
+        label: `Monitors: ${said.join(", ")}`, tip: `Monitors · ${said.join(" · ")}` };
+    }
+    if (kind === "tasks") {
+      const statusOf = (t) => (Object.hasOwn(TODO_GLYPHS, t.status) ? t.status : "pending");
+      const rows = paintedTodos, done = rows.filter((t) => t.status === "done").length;
+      const blocked = rows.filter((t) => statusOf(t) === "blocked").length;
+      return { icon: "checklist", word: "Tasks", num: `${done}/${rows.length}`, live: rows.some((t) => statusOf(t) === "in_progress"),
+        need: blocked > 0, needWord: blocked ? `${blocked} blocked` : "",
+        label: $("tasks-main").getAttribute("aria-label") || `Tasks, ${done} of ${rows.length} done`,
+        tip: `Tasks · ${done} of ${rows.length} done${blocked ? ` · ${blocked} blocked: needs you` : ""}` };
+    }
+    if (kind === "changes") {
+      const { total, additions, deletions } = changeState;
+      const count = $("changes-count").textContent;
+      return { icon: "diff-multiple", num: total ? String(total) : "Changes", after: total ? (total === 1 ? "file" : "files") : "",
+        extra: total ? [[`+${additions}`, "change-add"], [`−${deletions}`, "change-del"]] : [["partial scan", ""]],
+        label: total ? `${count}, ${railCount(additions, "line")} added, ${railCount(deletions, "line")} removed` : count,
+        tip: total ? `${count} · +${additions} −${deletions}` : count };
+    }
+    if (kind === "pips") {
+      const alert = pipsBar.dataset.reason === "alert", headline = $("pips-digest-text").textContent;
+      return { icon: "bell", num: "Pips", need: alert, needWord: alert ? "alert" : "",
+        label: `Pips: ${headline}`, tip: `Pips · ${headline}` };
+    }
+    return null;
+  }
+  function railChipFace(spec) {
+    const icon = spec.icon === "troupe"
+      ? `<span class="chip-mark" aria-hidden="true">${troupeMark("rail-chip-troupe")}</span>`
+      : `<span class="codicon codicon-${spec.icon}" aria-hidden="true"></span>`;
+    const part = (cls, text) => (text ? `<span class="${cls}">${esc(text)}</span>` : "");
+    const mini = typeof spec.share === "number"
+      ? `<span class="chip-mini troupe-bar" aria-hidden="true"><span style="width:${spec.share}%"></span></span>` : "";
+    const extra = (spec.extra || []).map(([text, cls]) => part(`chip-extra ${cls}`.trim(), text)).join("");
+    const need = spec.need ? `<span class="chip-dot" aria-hidden="true"></span>${part("chip-need", spec.needWord)}` : "";
+    return icon + part("chip-word", spec.word) + part("chip-num", spec.num) + part("chip-word", spec.after) + mini + extra + need;
+  }
+  function railChip(kind) {
+    const chip = el("button", "rail-chip");
+    chip.type = "button";
+    chip.dataset.kind = kind;
+    chip.tabIndex = -1;
+    chip.setAttribute("aria-haspopup", "dialog");
+    chip.setAttribute("aria-expanded", "false");
+    chip.setAttribute("aria-controls", "rail-pop");
+    chip.addEventListener("click", () => { if (railOpen?.kind === kind) closeRailPop(); else openRailPop(kind); });
+    chip.addEventListener("focus", () => { if (railStop !== kind) { railStop = kind; railRove(); } });
+    return chip;
+  }
+  function paintRailChip(kind) {
+    if (!railChipsReady) return;
+    const chip = railChipNodes.get(kind), spec = chip ? railChipSpec(kind) : null;
+    if (!spec) return;
+    const sig = JSON.stringify(spec);
+    if (chip._sig === sig) return;
+    chip._sig = sig;
+    chip.innerHTML = railChipFace(spec);
+    chip.toggleAttribute("data-live", !!spec.live);
+    chip.toggleAttribute("data-need", !!spec.need);
+    chip.setAttribute("aria-label", spec.label + (spec.need ? `. Needs you${spec.needWord ? `: ${spec.needWord}` : ""}` : ""));
+    hoverTip.retitle(chip, spec.tip);
+    // Only a change of shape can change what fits: a ticking clock keeps its width.
+    const shape = sig.replace(/\d/g, "0");
+    if (chip._shape !== shape) { chip._shape = shape; fitRailChips(); }
+  }
+  function renderRailChips(present) {
+    if (!railChipsReady) return;
+    const focusWas = document.activeElement;
+    const hadFocus = railPop.contains(focusWas) || railChips.contains(focusWas);
+    railKinds = present;
+    railChips.hidden = !present.length;
+    railLine.classList.toggle("has-chips", present.length > 0);
+    // Its kind ended (a cleared checklist, a dismissed troupe), or it is the last one left and has its row back.
+    if (railOpen && !present.includes(railOpen.kind)) closeRailPop({ restore: false });
+    for (const [kind, chip] of railChipNodes) {
+      if (!present.includes(kind)) { chip.remove(); railChipNodes.delete(kind); }
+    }
+    present.forEach((kind, index) => {
+      let chip = railChipNodes.get(kind);
+      if (!chip) { chip = railChip(kind); railChipNodes.set(kind, chip); }
+      if (railChips.children[index] !== chip) railChips.insertBefore(chip, railChips.children[index] || null);
+      paintRailChip(kind);
+    });
+    railRove();
+    if (railOpen) paintRailPopLinks(railOpen.kind);
+    fitRailChips();
+    // Focus that was on the line or in its popover and has nowhere left to be goes to the line, else the prompt.
+    if (hadFocus && !railShown(document.activeElement)) {
+      const stop = railChips.querySelector('.rail-chip[tabindex="0"]');
+      if (stop && !railChips.hidden) focusQuietly(stop); else input.focus({ preventScroll: true });
+    }
+  }
+  // Whether the focus is somewhere a reader can see: not on the page itself, not in a hidden row, not in a row
+  // folded into its chip.
+  function railShown(node) {
+    return !!node && node !== document.body && node.isConnected && !node.closest("[hidden]")
+      && !(composerRail.classList.contains("as-chips") && composerRail.contains(node) && !pasteBar.contains(node));
+  }
+  // One Tab stop for the whole line: the chip last used, else the first.
+  function railRove() {
+    const chips = [...railChips.children];
+    const keep = chips.find((chip) => chip.dataset.kind === railStop) || chips[0];
+    for (const chip of chips) { const want = chip === keep ? 0 : -1; if (chip.tabIndex !== want) chip.tabIndex = want; }
+  }
+  // The line never scrolls sideways and never clips a chip: as room runs out it drops the words, then the extras
+  // (the diff counts and the troupe's bar), then the number of a chip that needs you (its reason, dot and amber
+  // stay), and only then wraps onto a second line.
+  function fitRailChips(force = false) {
+    if (!railChipsReady) return;
+    if (!railKinds.length) { delete railLine.dataset.fit; railFit = { width: -1, shape: "" }; return; }
+    const width = railLine.clientWidth;
+    const shape = railKinds.map((kind) => railChipNodes.get(kind)?._shape || "").join("|");
+    if (!force && width === railFit.width && shape === railFit.shape) return;
+    railFit = { width, shape };
+    for (const fit of RAIL_FITS) {
+      railLine.dataset.fit = fit;
+      if (fit === "wrap" || railChips.scrollWidth <= railChips.clientWidth + 1) break;
+    }
+  }
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => { fitRailChips(); sizeRailPop(); }).observe(railLine);
+  window.addEventListener("resize", () => sizeRailPop());
+  // The popover may use the height between the header and the chip line, and scrolls past that.
+  function sizeRailPop() {
+    if (!railOpen) return;
+    const room = Math.floor(railLine.getBoundingClientRect().top - ($("phead")?.getBoundingClientRect().bottom || 0) - 12);
+    railPop.style.maxHeight = room > 0 ? `${Math.max(160, room)}px` : "";
+  }
+  // Ways further than the row goes, under it: the troupe's journal, and the agent map that lists troupes and
+  // monitors under its background tasks.
+  function paintRailPopLinks(kind) {
+    const links = [];
+    if (kind === "troupe") {
+      const lead = railTroupeLead(), id = String(lead?.run_id || "");
+      if (/^tr-[0-9a-f]{10}$/.test(id)) {
+        links.push(["Open the journal", "Open this troupe's journal: its plan, every agent's result and the report",
+          () => vscode.postMessage({ type: "openTroupeJournal", runId: id })]);
+      }
+      // The map lists what runs now: an ended troupe is not on it.
+      if (id && String(lead.state || "running") === "running") {
+        links.push(["Show in the agent map", "Open the agent map at this troupe", () => railShowInMap(`troupe:${id}`)]);
+      }
+    }
+    if (kind === "monitors") {
+      const first = monitorItems.find((item) => item.state === "running" || item.state === "stopping");
+      if (first) links.push(["Show in the agent map", "Open the agent map at the monitors", () => railShowInMap(`monitor:${first.id}`)]);
+    }
+    const sig = links.map(([text, title]) => `${text}\n${title}`).join("\n") + (links.length ? kind + railTroupeLead()?.run_id : "");
+    if (sig === railLinksSig) return;
+    railLinksSig = sig;
+    railPopLinks.replaceChildren(...links.map(([text, title, run]) => {
+      const link = el("button", "link rail-pop-link");
+      link.type = "button"; link.textContent = text; link.title = title; link.onclick = run;
+      return link;
+    }));
+    railPopLinks.hidden = !links.length;
+  }
+  function railShowInMap(key) {
+    const chip = railOpen?.chip || null;
+    closeRailPop({ restore: false });
+    openAgentMap({ from: chip });
+    const row = amRowByKey(key);
+    if (row) amFocusRow(row, { quiet: false });
+  }
+  function openRailPop(kind) {
+    const chip = railChipNodes.get(kind), bar = railBar(kind);
+    if (!chip || !bar || bar.hidden) return;
+    if (railOpen) closeRailPop({ restore: false });
+    hoverTip.hide();
+    railOpen = { kind, bar, chip, unfolded: [] };
+    railPopBody.replaceChildren(bar);          // the row itself moves: its ids, controls and live updates come with it
+    // The stages and the checklist are what the chip summed up, so they come open; closing folds them again.
+    if (kind === "troupe" && !troupesOpen) { toggleTroupes(); railOpen.unfolded.push(() => { if (troupesOpen) toggleTroupes(); }); }
+    if (kind === "tasks" && !tasksOpen()) { toggleTasks(); railOpen.unfolded.push(() => { if (tasksOpen()) toggleTasks(); }); }
+    $("rail-pop-title").textContent = RAIL_POP_TITLES[kind] || "";
+    railLinksSig = "";
+    paintRailPopLinks(kind);
+    railPop.dataset.kind = kind;
+    railPop.hidden = false;
+    railLine.classList.add("pop-open");
+    sizeRailPop();
+    chip.setAttribute("aria-expanded", "true");
+    railStop = kind; railRove();
+    // Into the popover: the row's own main control (never a Stop), else the popover itself.
+    const main = [...bar.querySelectorAll(".rail-main")].find((node) => !node.disabled && !node.closest("[hidden]"));
+    focusQuietly(main || railPop, { preventScroll: true });
+  }
+  // `restore`: put the focus back on the chip if it was inside the popover (Esc, ×, the chip again). A click
+  // elsewhere, or Tab out of it, leaves the focus where it went.
+  function closeRailPop({ restore = true } = {}) {
+    if (!railChipsReady || !railOpen) return;
+    const { bar, chip, unfolded } = railOpen;
+    const active = document.activeElement, inside = railPop.contains(active);
+    railOpen = null;
+    unfolded.forEach((fold) => fold());
+    const next = RAIL_ROW_ORDER.slice(RAIL_ROW_ORDER.indexOf(bar.id) + 1).map((id) => $(id))
+      .find((node) => node && node.parentElement === composerRail);
+    composerRail.insertBefore(bar, next || null);
+    railPop.hidden = true;
+    railPop.style.maxHeight = "";
+    delete railPop.dataset.kind;
+    railPopLinks.replaceChildren(); railPopLinks.hidden = true; railLinksSig = "";
+    railLine.classList.remove("pop-open");
+    chip.setAttribute("aria-expanded", "false");
+    if (!inside) return;
+    if (restore && chip.isConnected && !railChips.hidden) { focusQuietly(chip); return; }
+    // Moving the row took the focus off it. Where the row is on screen again (the last kind left has its full row
+    // back), the focus goes back to the same control.
+    if (active?.isConnected && bar.contains(active) && railShown(active)) focusQuietly(active);
+  }
+  $("rail-pop-close").onclick = () => closeRailPop();
+  railPop.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !railOpen) return;
+    event.preventDefault(); event.stopPropagation();    // Esc in the composer is Stop: this one must not reach it
+    closeRailPop();
+  });
+  // A control that went away under the focus (Stop, once its troupe has stopped) leaves the focus on the page itself:
+  // Esc there still closes the popover, and the focus goes back to its chip.
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !railOpen || event.defaultPrevented) return;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    event.preventDefault();
+    const chip = railOpen.chip;
+    closeRailPop();
+    if (chip.isConnected && !railChips.hidden) focusQuietly(chip);
+  });
+  railChips.addEventListener("keydown", (event) => {
+    const chips = [...railChips.children], at = chips.indexOf(event.target);
+    if (at < 0) return;
+    if (event.key === "Escape") {
+      if (!railOpen) return;
+      event.preventDefault(); event.stopPropagation();
+      closeRailPop();
+      return;
+    }
+    const to = event.key === "ArrowRight" ? (at + 1) % chips.length : event.key === "ArrowLeft" ? (at - 1 + chips.length) % chips.length
+      : event.key === "Home" ? 0 : event.key === "End" ? chips.length - 1 : -1;
+    if (to < 0) return;
+    event.preventDefault();
+    railStop = chips[to].dataset.kind; railRove();
+    chips[to].focus();
+  });
+  // A dialog opened from the popover (the goal editor, the changes review) sits over it: working in it is not
+  // "elsewhere", and the popover is still there, with the focus coming back to it, when the dialog closes.
+  const railAway = (node) => node instanceof Element && !railPop.contains(node) && !railChips.contains(node)
+    && !node.closest(".modal-layer, .panel-overlay, #hover-tip");
+  document.addEventListener("pointerdown", (event) => { if (railOpen && railAway(event.target)) closeRailPop({ restore: false }); }, true);
+  railPop.addEventListener("focusout", (event) => {
+    // Focus that went nowhere (a repaint took the focused control away) leaves it open.
+    if (railOpen && event.relatedTarget && railAway(event.relatedTarget)) closeRailPop({ restore: false });
+  });
+  railChipsReady = true;
+  syncComposerRail();
 
   // ---- dedicated non-chat surfaces (skills, MCP, docs, permissions, memory, hooks) ----
   const SURFACE_META = {
@@ -11630,6 +11959,7 @@
     cbox.classList.add("asking");
     if (textBox) textBox.hidden = true;            // hidden, not rebuilt: the unsent draft stays in it
     atts.hidden = true;
+    closeRailPop({ restore: false });              // the chip line steps aside for a docked question in a short panel
     document.body.classList.add("ask-docked");
     setTimeout(() => { state.armed = true; }, ASK_KEY_GUARD_MS);
     renderAskCard(state);
