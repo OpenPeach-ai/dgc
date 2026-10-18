@@ -669,6 +669,10 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 - **A Pip's run list says why a run failed.** `dgc pips runs` (and `--json`, and `list_pip_runs`) showed `"error":
   null` for failed runs, so a model that wanted the reason opened the SQLite registry itself. Each failed row now has
   its error's code and message (the message up to 600 characters), as `dgc pips report` does.
+- **No more `&amp;` in a Pip's name.** Some providers send a tool call's text HTML-escaped (deepseek through Ollama
+  did), and two Pips were saved as "ERP daily audit — data &amp; Tally integrity". `pips_setup` (name, goal, reason)
+  and `pips_propose` (name, goal) now decode standard entities (`&amp;`, `&lt;`, `&#8212;`, …) when every `&` in
+  the text starts one; a goal that is about escaping, with a plain `&` in it too, is kept as written.
 - **A Pip's run list works on Python 3.10** (Ubuntu 22.04's default). Listing runs read rows while a rollback ran,
   which Python 3.10's sqlite3 refuses: `dgc pip runs`, the Pips page and scheduled checks failed with "Cursor needed
   to be reset because of commit/rollback".

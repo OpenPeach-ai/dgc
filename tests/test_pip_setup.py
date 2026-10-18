@@ -55,6 +55,37 @@ class PipSetupTests(unittest.TestCase):
         with patch.object(pip_setup_tool, 'WorkspaceRegistry', lambda: WorkspaceRegistry(self.registry.directory, clock=lambda: self.now)):
             return json.loads(pip_setup_tool.propose(request, context))
 
+    def test_a_providers_html_escaping_is_undone_in_name_goal_and_reason(self):
+        """ERP session review (2026-10-18): two Pips were saved as "ERP daily audit — data &amp; Tally integrity"."""
+        result = self.tool(self.request(name='ERP daily audit — data &amp; Tally integrity',
+                                        goal='Check bridges &amp; mirrors; flag rows where a &lt; b.',
+                                        reason='Owner asked for audits &amp; reviews.', run_now=False))
+        setup = result['setup']
+        self.assertEqual(setup['name'], 'ERP daily audit — data & Tally integrity')
+        self.assertEqual(setup['goal'], 'Check bridges & mirrors; flag rows where a < b.')
+        self.assertEqual(setup['reason'], 'Owner asked for audits & reviews.')
+        # The same call again is the same card: the retry key's content is the unescaped request.
+        again = self.tool(self.request(name='ERP daily audit — data &amp; Tally integrity',
+                                       goal='Check bridges &amp; mirrors; flag rows where a &lt; b.',
+                                       reason='Owner asked for audits &amp; reviews.', run_now=False))
+        self.assertEqual(again['setup']['id'], setup['id'])
+
+    def test_unescaping_is_only_for_standard_entities_and_never_for_text_about_escaping(self):
+        cases = {
+            'Data &amp; Tally': 'Data & Tally',
+            'caf&eacute; &#233; &#xE9;': 'café é é',
+            'Write & as &amp; in the XML export': 'Write & as &amp; in the XML export',  # a raw & too: unchanged
+            'R&D review': 'R&D review',
+            'Tom &amp Jerry': 'Tom &amp Jerry',              # no semicolon: not an entity here
+            '&nosuchentity; and &amp;': '&nosuchentity; and &amp;',  # an unknown name: left alone, all of it
+            'bell &#7; here': 'bell &#7; here',              # would decode to a control character
+            'no entities': 'no entities',
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(pip_setup.unescape_entities(text), expected)
+        self.assertIsNone(pip_setup.unescape_entities(None))
+
     def test_draft_is_only_one_immutable_card(self):
         before = self.state()
         draft = self.draft()

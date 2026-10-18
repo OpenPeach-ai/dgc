@@ -37,6 +37,9 @@ def _create(registry, setup, request, config):
 def propose(args, ctx) -> str:
     args = dict(args)
     create_now = args.pop('_dgc_create_now', None) is True   # set by the agent, never by the model
+    for key in ('name', 'goal', 'reason'):
+        if key in args:
+            args[key] = pip_setup.unescape_entities(args[key])   # a provider's &amp; for the model's &
     if ctx.config.get('pips_enabled', False) is not True:
         raise RegistryError('disabled', 'Pips are disabled in this session.')
     from .pip_access import require_unrestricted

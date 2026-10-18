@@ -53,6 +53,33 @@ def _fail(message, code='invalid_request'):
     raise RegistryError(code, message)
 
 
+_ENTITY = re.compile(r'&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});')
+
+
+def unescape_entities(text):
+    """A provider's HTML escaping, undone: "Data &amp; Tally integrity" as the "Data & Tally integrity" the model
+    meant (deepseek through Ollama sent the escaped form in its tool call, and two Pips were saved with a literal
+    &amp; in their names; ERP session review, 2026-10-18).
+
+    Only standard entities with their semicolon (named, decimal or hex), and only when every & in the text starts
+    one: a goal that is about escaping ("write & as &amp; in the XML export") keeps its words. Anything else, an
+    unknown name or an entity that would decode to a control character, leaves the text exactly as it was."""
+    if not isinstance(text, str) or '&' not in text:
+        return text
+    import html
+    found = list(_ENTITY.finditer(text))
+    if len(found) != text.count('&'):
+        return text
+    parts, last = [], 0
+    for match in found:
+        decoded = html.unescape(match.group(0))
+        if not decoded or decoded == match.group(0) or '\ufffd' in decoded or any(ord(c) < 32 and c not in '\n\t' or ord(c) == 127 for c in decoded):
+            return text
+        parts += [text[last:match.start()], decoded]
+        last = match.end()
+    return ''.join(parts) + text[last:]
+
+
 def _text(value, label, maximum, *, multiline=False):
     if (type(value) is not str or not value.strip() or len(value) > maximum
             or any(ord(c) < 32 and not (multiline and c in '\n\t')

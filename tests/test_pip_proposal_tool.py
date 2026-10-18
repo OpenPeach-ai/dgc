@@ -84,6 +84,17 @@ class PipProposalToolTests(unittest.TestCase):
                                             (receipt["proposal_id"],)).fetchone()
         self.assertEqual(tuple(approval), ("approved", "chat-permission:default"), "the record says how it was approved")
 
+    def test_a_providers_html_escaping_is_undone_in_a_name_or_goal(self):
+        """ERP session review (2026-10-18): deepseek through Ollama sent "&amp;" in its tool call, and the Pip's name
+        was saved with a literal &amp;."""
+        pip = self.create()
+        receipt = self.propose(self.request(pip, changes={"name": "GST watchdog &#8212; e-invoice &amp; e-way",
+                                                          "goal": "Check IRN &amp; e-way bill numbers."}))
+        self.assertEqual(receipt["status"], "accepted")
+        saved = self.store.get(pip["id"])
+        self.assertEqual(saved["name"], "GST watchdog — e-invoice & e-way")
+        self.assertEqual(saved["goal"], "Check IRN & e-way bill numbers.")
+
     def test_a_change_that_cannot_be_applied_now_stays_a_proposal(self):
         pip = self.create()
         with patch.object(pips.PipStore, "accept", side_effect=RegistryError("pending_review", "Resolve the earlier review first.")):

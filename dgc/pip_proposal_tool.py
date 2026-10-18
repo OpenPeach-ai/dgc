@@ -39,7 +39,9 @@ def _request(args):
     changes = args["changes"]
     if not isinstance(changes, dict) or not changes or set(changes) - set(_CHANGE_LIMITS):
         raise RegistryError("invalid_request", "Only name, goal and source_ref may be proposed; execution and permissions cannot change.")
-    changes = {key: _text(value, key, _CHANGE_LIMITS[key], multiline=key == "goal")
+    from .pip_setup import unescape_entities          # a provider's &amp; for the model's & (as pips_setup)
+    changes = {key: _text(unescape_entities(value) if key in ("name", "goal") else value, key, _CHANGE_LIMITS[key],
+                          multiline=key == "goal")
                for key, value in changes.items()}
     if "source_ref" in changes and (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", changes["source_ref"])
                                     or ".." in changes["source_ref"]):
