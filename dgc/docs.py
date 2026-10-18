@@ -687,11 +687,11 @@ A pasted connector token is kept in the editor's secret storage under DGC's own 
 and bound to the exact URL it was given for, never written to the config file. A URL carrying
 credentials, a query or a fragment is refused outright.
 
-## Asana and Docusign: your own app
+## Asana, Docusign and Zoom: your own app
 
-Asana's and Docusign's MCP servers admit only apps registered with them, and each needs a secret, which an
-open-source app can't ship. So you create an app for DGC in your own account, as both vendors document for Claude
-Code, Codex, Cursor and VS Code. **Settings → Plugins → Apps → Connect** shows each step:
+Asana's, Docusign's and Zoom's MCP servers admit only apps registered with them; Asana and Docusign also need a
+secret, which an open-source app can't ship. So you create an app for DGC in your own account, as the vendors document
+for coding tools. **Settings → Plugins → Apps → Connect** shows each step:
 
 - **Asana:** in **My apps**, create an app named DGC of type **MCP app**; under **OAuth** add the redirect URL DGC
   shows (`http://localhost:3334/oauth/callback`, with a Copy button); under **Manage distribution** choose your
@@ -700,6 +700,13 @@ Code, Codex, Cursor and VS Code. **Settings → Plugins → Apps → Connect** s
   add a **secret key**, and add the redirect URI DGC shows (`http://localhost:3335/oauth/callback`); then paste the
   **integration key** and **secret key**. A developer (demo) account works at once. A production account accepts the
   app only after Docusign's Go-Live review and your Docusign admin's approval for MCP.
+- **Zoom:** in the Zoom App Marketplace, build a **General app** named DGC, **User-managed**; under **App
+  Credentials** turn on **Use Public Client OAuth**; add the address DGC shows as the OAuth redirect URL and to the
+  OAuth allow list (`http://127.0.0.1:3336/oauth/callback`: Zoom asks for `127.0.0.1` here, not `localhost`); add the
+  scopes DGC lists (meetings, recordings, search and Docs); then paste the development **public client ID**. There is
+  no secret. DGC asks Zoom for no scopes of its own: the ones you added to the app decide what it can do. You need to
+  be the Zoom account's owner or an admin, or have the Zoom for developers role, and the app works for members of
+  your own Zoom account.
 
 The secret is kept in the editor's secret storage and handed to DGC in an owner-only file when it connects; the
 sign-in that follows is kept in your system keychain like any other. Reopening the setup keeps the saved secret if

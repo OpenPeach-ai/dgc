@@ -74,9 +74,9 @@ class ConnectorValidationTests(unittest.TestCase):
 
 
     def test_your_own_app_connectors_take_the_app_and_nothing_else(self):
-        # Asana and Docusign admit only apps registered with them: the saved server names its fixed callback port
+        # Asana, Docusign and Zoom admit only apps registered with them: the saved server names its fixed callback port
         # and the owner-only file holding the app (never the secret itself), on a published endpoint only.
-        for name, port in (('asana', '3334'), ('docusign', '3335')):
+        for name, port in (('asana', '3334'), ('docusign', '3335'), ('zoom', '3336')):
             with self.subTest(name=name):
                 good = spec(name)
                 self.assertEqual(connectors.validate(name, good)['args'][3], port)
@@ -93,6 +93,36 @@ class ConnectorValidationTests(unittest.TestCase):
             connectors.validate('docusign', spec('docusign', 'https://mcp.docusign.com.evil.example/mcp'))
         with self.assertRaisesRegex(plugins.PluginError, 'published endpoint'):
             connectors.validate('asana', spec('asana', 'https://mcp.asana.com/sse'))
+        for url in ('https://mcp.zoom.us/mcp/meeting/streamable', 'https://mcp-eu.zoom.us/mcp/zoom/streamable'):
+            with self.assertRaisesRegex(plugins.PluginError, 'published endpoint'):
+                connectors.validate('zoom', spec('zoom', url))
+
+    def test_own_apps_each_sign_in_on_their_own_port_and_only_a_public_client_has_no_secret(self):
+        from dgc import mcp_remote
+        own = {name: d['own_app'] for name, d in connectors.CATALOG.items() if d.get('own_app')}
+        self.assertEqual(sorted(own), ['asana', 'docusign', 'zoom'])
+        ports = [app['port'] for app in own.values()]
+        self.assertEqual(len(ports), len(set(ports)), 'one callback port per app: each is registered at its vendor')
+        self.assertNotIn(mcp_remote.CLIENT_METADATA_PORT, ports)
+        for name, app in own.items():
+            with self.subTest(name=name):
+                self.assertTrue(1024 <= app['port'] <= 65535)
+                self.assertIn(app.get('redirect_host', 'localhost'), ('localhost', '127.0.0.1'))
+                self.assertTrue(app['id_label'] and app['console'].startswith('https://') and app['steps'])
+                self.assertEqual('{scopes}' in ' '.join(app['steps']), bool(app.get('scopes')), 'listed where shown')
+        # Asana and Docusign keep requiring their secrets; Zoom's public client has none, so nothing names one.
+        self.assertEqual(own['asana']['secret_label'], 'Client secret')
+        self.assertEqual(own['docusign']['secret_label'], 'Secret key')
+        zoom = connectors.CATALOG['zoom']
+        self.assertEqual([k for k in zoom['own_app'] if 'secret' in k], [], 'no secret field for Zoom')
+        self.assertEqual((zoom['own_app']['port'], zoom['own_app']['redirect_host']), (3336, '127.0.0.1'))
+        self.assertEqual(zoom['url'], 'https://mcp.zoom.us/mcp/zoom/streamable', "Zoom's main MCP server")
+        self.assertTrue({'meeting:read:assets', 'cloud_recording:read:list_user_recordings', 'docs:read:export',
+                         'agentic_search:read:search'} <= set(zoom['own_app']['scopes']))
+        row = next(r for r in plugins.load_catalog()['plugins'] if r['name'] == 'zoom')
+        self.assertEqual((row['auth'], row['connector'], row['source_kind']), ('own-app', 'zoom', 'preset'))
+        self.assertEqual([k for k in row if 'secret' in k], [])
+        self.assertNotRegex(json.dumps([zoom, row]), r'\bAI\b', 'our own copy never says "AI"')
 
     def test_every_connector_is_offered_in_the_plugin_catalog(self):
         rows = {row['name']: row for row in plugins.load_catalog()['plugins']}

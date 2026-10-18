@@ -276,14 +276,34 @@ test('Docusign: the account choice picks the endpoint and says what production n
   assert.equal(x.sent.at(-1).url,'https://mcp-d.docusign.com/mcp');assert.equal(x.sent.at(-1).client_secret,'');
 });
 
+test('Zoom: a public client: no secret field, 127.0.0.1 on its own port, the scopes to add, and only the ID is sent',()=>{
+  const x=setup();x.message({type:'plugins',items:connectorRows});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');
+  x.click('[data-connector-setup=zoom]');
+  const dialogText=x.d.querySelector('dialog').textContent;
+  for(const step of [/General app/,/User-managed/,/Use Public Client OAuth/,/OAuth allow list/,/Add Scopes/,/development public client ID/])
+    assert.match(dialogText,step);
+  assert.equal(x.d.querySelector('#own-app-secret'),null,'Zoom\'s public client has no secret to ask for');
+  assert.match(x.d.querySelector('.own-app .note').textContent,/no secret/);
+  assert.equal(x.d.querySelector('#own-app-redirect').textContent,'http://127.0.0.1:3336/oauth/callback','Zoom asks for 127.0.0.1, not localhost');
+  assert.deepEqual([...x.d.querySelectorAll('#own-app-scopes code')].map(c=>c.textContent),connectorCatalog.zoom.own_app.scopes);
+  assert.equal(x.d.querySelector('dialog a[href="https://marketplace.zoom.us/user/build"]').textContent,'Open Created Apps in Zoom');
+  x.d.querySelector('[data-copy-redirect]').click();
+  assert.deepEqual({...x.sent.at(-1)},{type:'copy',text:'http://127.0.0.1:3336/oauth/callback'});
+  x.d.querySelector('#own-app-id').value=' zPublicClientId42 ';
+  x.d.querySelector('#connector-form').dispatchEvent(new x.w.Event('submit',{cancelable:true}));
+  assert.deepEqual({...x.sent.at(-1)},{type:'saveConnector',name:'zoom',url:'https://mcp.zoom.us/mcp/zoom/streamable',auth:'own-app',client_id:'zPublicClientId42'});
+});
+
 test('Apps offers named provider marks and routes each to its own setup',()=>{
  const x=setup();x.message({type:'plugins',items:[...connectorRows,{name:'composio',display_name:'Composio',apps:[],skills:[]}]});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');
  for(const row of connectorRows){
   const card=x.d.querySelector(`[aria-label="${row.display_name} connector"]`);assert.ok(card);assert.ok(card.querySelector('img.logo').src.startsWith('data:'));
   x.click(`[data-connector-setup=${row.name}]`);assert.ok(x.d.querySelector('.connection-art img[alt=DGC]'));assert.ok(x.d.querySelector(`.connection-art img[alt="${row.display_name}"]`));
   if(connectorCatalog[row.name].own_app){
-   // Your own app (Asana, Docusign): the guided steps and the app's ID and secret, never a URL or token field.
-   assert.ok(x.d.querySelector('.own-app-steps li'));assert.ok(x.d.querySelector('#own-app-id'));assert.ok(x.d.querySelector('#own-app-secret'));
+   // Your own app (Asana, Docusign, Zoom): the guided steps and the app's ID, its secret unless it is a public client
+   // (Zoom), never a URL or token field.
+   assert.ok(x.d.querySelector('.own-app-steps li'));assert.ok(x.d.querySelector('#own-app-id'));
+   assert.equal(!!x.d.querySelector('#own-app-secret'),!!connectorCatalog[row.name].own_app.secret_label,`${row.name}'s secret field`);
    assert.equal(x.d.querySelector('#connector-url'),null);assert.equal(x.d.querySelector('#connector-token-field'),null);x.click('#dialog-cancel');continue;
   }
   assert.equal(!!x.d.querySelector('#connector-url'),!connectorCatalog[row.name].url);

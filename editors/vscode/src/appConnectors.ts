@@ -1,7 +1,14 @@
 /** Provider-owned setup. Public descriptions are shared with the Python package. */
-/** Your own app at the vendor (Asana, Docusign): the steps to create it, and the callback port it is registered with. */
-export type OwnApp = { port: number; console: string; console_label: string; id_label: string; secret_label: string;
-  steps: string[] };
+/** Your own app at the vendor (Asana, Docusign, Zoom): the steps to create it, and the callback port it is registered
+ *  with. No secret_label: the vendor's public client, which has no secret (Zoom), so none is asked for or sent.
+ *  redirect_host: the loopback address the vendor accepts (Zoom says 127.0.0.1, not localhost). scopes: the
+ *  scopes a step ({scopes}) has the user add to the app; the sign-in then names none, so the app's own scopes decide. */
+export type OwnApp = { port: number; console: string; console_label: string; id_label: string; secret_label?: string;
+  redirect_host?: "localhost" | "127.0.0.1"; scopes?: string[]; steps: string[] };
+/** The redirect the user registers for their own app, which DGC listens on when it signs in. */
+export function ownAppRedirect(app: Pick<OwnApp, "port" | "redirect_host">): string {
+  return `http://${app.redirect_host === "127.0.0.1" ? "127.0.0.1" : "localhost"}:${app.port}/oauth/callback`;
+}
 export type AppConnector = { name: string; kind: string; url: string; auth: string[];
   manage: string; docs: string; terms: string; privacy: string; summary: string;
   setup: string; placeholder: string; license: string; cloud_execution: boolean;

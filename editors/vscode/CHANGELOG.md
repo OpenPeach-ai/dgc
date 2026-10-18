@@ -265,6 +265,9 @@
 - **Asana and Docusign** in Apps, with a guided setup for the app you create for DGC in your own account: the steps,
   the redirect URL to register with a Copy button, and fields for its ID and secret (kept in secret storage). For
   Docusign, choose a developer or a production account.
+- **Zoom** in Apps, with the same guided setup: build a General app, turn on Zoom's public client, register
+  `http://127.0.0.1:3336/oauth/callback` (with Copy), add the listed scopes, and paste the public client ID. Zoom's
+  public client has no secret, so the form has no secret field and nothing goes to secret storage.
 - **Cancel on "Finish connecting … in your browser" works.** Once the browser had opened, Cancel cleared the banner
   but never reached DGC: the editor's connection to DGC refused a second answer to the same sign-in. DGC went on
   waiting for the service for up to two minutes, and the next Connect was refused as "unavailable while a turn is

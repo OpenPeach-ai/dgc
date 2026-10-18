@@ -1,4 +1,4 @@
-import { APP_CONNECTORS, connectorUrl } from "./appConnectors";
+import { APP_CONNECTORS, connectorUrl, ownAppRedirect } from "./appConnectors";
 import { COMPOSIO_CATALOG } from "./composioConnections";
 import * as vscode from "vscode";
 import { createHash, randomBytes } from "crypto";
@@ -4655,7 +4655,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   // Your own OAuth app: DGC's remote client reads its client id and secret from an owner-only file (never from
   // argv, where other local users could see a secret) and listens for the sign-in on the fixed port the
-  // app registered: http://localhost:<port>/oauth/callback.
+  // app registered: http://localhost:<port>/oauth/callback (http://127.0.0.1:<port>/... for Zoom).
   // One file per server name AND content: a save the backend rejects never rewrites the file the
   // server already uses, and "Asana" and "asana" never share one on a case-blind disk.
   private oauthAppPrefix(name: string): string {
@@ -4665,9 +4665,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private oauthAppBody(item: ManagedMcpServer, secrets: ManagedMcpSecrets): string | undefined {
     if (item.transport !== "remote" || !validOauth(item.oauth)) return undefined;
+    // A guided own app (a connector) is the app its setup had you register: its loopback address (Zoom takes only
+    // 127.0.0.1), never a secret for a public client (Zoom), and, where you added the scopes to the app yourself, an
+    // empty scope: DGC asks for none and the app's own scopes decide.
+    const own = item.connector && item.name === item.connector ? APP_CONNECTORS[item.connector]?.own_app : undefined;
     return JSON.stringify({ client_id: item.oauth.clientId,
-      ...(secrets.oauthSecret ? { client_secret: secrets.oauthSecret } : {}),
-      redirect_uris: [`http://localhost:${item.oauth.port}/oauth/callback`] });
+      ...(secrets.oauthSecret && !(own && !own.secret_label) ? { client_secret: secrets.oauthSecret } : {}),
+      redirect_uris: [ownAppRedirect({ port: item.oauth.port, redirect_host: own?.redirect_host })],
+      ...(own?.scopes ? { scope: "" } : {}) });
   }
 
   private oauthAppFile(item: ManagedMcpServer, secrets: ManagedMcpSecrets): string | undefined {
@@ -6013,13 +6018,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const previous = this.managedMcpServers().find(s => s.name === id && s.target === target);
       if (auth === "token" && !token && !(previous && (await this.mcpSecrets(previous)).token))
         throw new Error("Enter the connection token from your provider");
-      // Your own app (Asana, Docusign): its ID and secret, and the callback port the setup told you to register.
+      // Your own app (Asana, Docusign, Zoom): its ID, its secret unless it is a public client (Zoom's has none), and
+      // the callback port the setup told you to register.
       const ownApp = auth === "own-app" && def.own_app ? def.own_app : undefined;
       const clientId = ownApp ? String(msg.client_id || "").trim() : "";
-      const clientSecret = ownApp ? String(msg.client_secret || "").trim() : "";
+      const clientSecret = ownApp?.secret_label ? String(msg.client_secret || "").trim() : "";
       const field = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);   // "client ID", "secret key"
       if (ownApp && !clientId) throw new Error(`Enter the ${field(ownApp.id_label)} from ${def.name}`);
-      if (ownApp && !clientSecret && !(previous?.oauth?.clientId === clientId && (await this.mcpSecrets(previous)).oauthSecret))
+      if (ownApp?.secret_label && !clientSecret
+          && !(previous?.oauth?.clientId === clientId && (await this.mcpSecrets(previous)).oauthSecret))
         throw new Error(`Enter the ${field(ownApp.secret_label)} from ${def.name}`);
       if (!this.settingsCatalog.some(row => row.name === id && row.installed)) {
         const answer = await vscode.window.showWarningMessage(

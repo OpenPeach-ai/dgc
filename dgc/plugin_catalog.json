@@ -1964,6 +1964,30 @@
     "apps": [],
     "mcps": []
    }
+  },
+  {
+   "name": "zoom",
+   "display_name": "Zoom",
+   "summary": "Search your Zoom meetings, recordings, summaries and Docs, through a Zoom app you create for DGC.",
+   "source_kind": "preset",
+   "connector": "zoom",
+   "license": "Zoom service terms",
+   "install": "accept",
+   "auth": "own-app",
+   "terms_url": "https://www.zoom.com/en/trust/terms/",
+   "license_url": "https://www.zoom.com/en/trust/terms/",
+   "privacy_url": "https://www.zoom.com/en/trust/privacy/privacy-statement/",
+   "upstream": "https://developers.zoom.us/docs/mcp/zoom/",
+   "developer": "Zoom",
+   "category": "Meetings",
+   "requirements": "A Zoom account in which you are the owner, an admin, or have the Zoom for developers role, and a Zoom app you create for DGC (DGC shows each step; no secret to copy). The app works for members of your own Zoom account.",
+   "verification": "Documented own-app setup implemented. DGC's sign-in link reaches Zoom's own sign-in, which checks the app ID it is given. Your own app's sign-in and a tool call verify access for your account (not tested).",
+   "cloud_execution": true,
+   "metadata": {
+    "long_summary": "Search your Zoom meetings, recordings, summaries and Docs, through a Zoom app you create for DGC. A Zoom account in which you are the owner, an admin, or have the Zoom for developers role, and a Zoom app you create for DGC (DGC shows each step; no secret to copy). The app works for members of your own Zoom account.",
+    "apps": [],
+    "mcps": []
+   }
   }
  ]
 }

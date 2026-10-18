@@ -41,6 +41,8 @@ class Vendor:
         self.delay = 0.0
         self.write_scope = False          # tools/call needs "write" (step-up)
         self.secret = ""                  # a confidential client: the token address wants this secret
+        self.registration = True          # dynamic registration offered (Zoom, Asana: no)
+        self.auth_methods = ["client_secret_basic", "none"]   # Zoom lists client_secret_basic only
         self.redirect = ""                # "same": /mcp answers 307 to /mcp/; "other": 307 to another host
         self.rbac = False                 # Docusign: a request without a token gets 403 and no challenge
         self.cimd = False                 # the authorization server takes client metadata documents
@@ -54,6 +56,7 @@ class Vendor:
         self.challenge = ""
         self.requests, self.grants, self.registrations, self.scopes, self.revoked = [], [], [], [], []
         self.token_auth, self.session_headers, self.protocol_headers, self.authorize_params = [], [], [], []
+        self.token_forms: list[dict] = []
         self.streams: list[queue.Queue] = []
         vendor = self
 
@@ -111,9 +114,10 @@ class Vendor:
                 if path == "/.well-known/oauth-authorization-server/as":
                     return self.reply({
                         "issuer": base + "/as", "authorization_endpoint": base + "/as/authorize",
-                        "token_endpoint": base + "/as/token", "registration_endpoint": base + "/as/register",
+                        "token_endpoint": base + "/as/token",
+                        **({"registration_endpoint": base + "/as/register"} if vendor.registration else {}),
                         "revocation_endpoint": base + "/as/revoke", "code_challenge_methods_supported": ["S256"],
-                        "token_endpoint_auth_methods_supported": ["client_secret_basic", "none"],
+                        "token_endpoint_auth_methods_supported": vendor.auth_methods,
                         **({"client_id_metadata_document_supported": True} if vendor.cimd else {}),
                         **({"authorization_response_iss_parameter_supported": True} if vendor.iss_supported else {})})
                 if path == "/as/authorize":
@@ -190,6 +194,7 @@ class Vendor:
                 if path == "/as/token":
                     form = {k: v[0] for k, v in parse_qs(data.decode()).items()}
                     vendor.token_auth.append((self.headers.get("Authorization"), form.get("client_id")))
+                    vendor.token_forms.append(form)
                     if vendor.secret:
                         basic = "Basic " + base64.b64encode(f"own-app:{vendor.secret}".encode()).decode()
                         if self.headers.get("Authorization") != basic:
@@ -590,6 +595,7 @@ class RemoteClientTests(unittest.TestCase):
         self.assertTrue(server.start(timeout=30), (server.error, server.diagnostics))
         self.assertEqual(self.vendor.registrations, [], "a registered app is never registered again")
         self.assertEqual(self.vendor.authorize_params[0]["redirect_uri"], f"http://localhost:{port}/oauth/callback")
+        self.assertEqual(self.vendor.authorize_params[0]["scope"], "read", "Asana's and Docusign's: the server's scopes")
         self.assertTrue(self.vendor.token_auth[0][0].startswith("Basic "), "the vendor asked for client_secret_basic")
         stored = self.keyring.items[plugin_credentials._account("fixture")]
         self.assertNotIn("own-app-secret", stored, "the secret stays where the editor keeps it")
@@ -599,6 +605,50 @@ class RemoteClientTests(unittest.TestCase):
         self.assertTrue(signed_out["revoked"], signed_out)
         self.assertEqual([item["token_type_hint"] for item in self.vendor.revoked], ["refresh_token", "access_token"])
         self.assertEqual(self.keyring.items, {})
+
+    def test_a_public_own_app_like_zooms_signs_in_with_pkce_alone_on_the_address_it_registered(self):
+        # Zoom: no registration, a token address that lists client_secret_basic only, and a public client ID with no
+        # secret. The editor writes the app as its setup had the user register it: 127.0.0.1 (Zoom's loopback rule
+        # says not localhost) and an empty scope (the scopes the user added to the app decide; DGC asks for none).
+        self.vendor.mode = "oauth"
+        self.vendor.registration = False
+        self.vendor.auth_methods = ["client_secret_basic"]
+        port = mcp_remote.free_port()
+        info = self.root / "zoom-app.json"
+        info.write_text(json.dumps({"client_id": "zoom-public-id", "scope": "",
+                                    "redirect_uris": [f"http://127.0.0.1:{port}/oauth/callback"]}))
+        info.chmod(0o600)
+        server = self.server(str(port), "--static-oauth-client-info", f"@{info}", auth=self.browser)
+        self.assertTrue(server.start(timeout=30), (server.error, server.diagnostics))
+        self.assertEqual(self.vendor.registrations, [])
+        query = self.vendor.authorize_params[0]
+        self.assertEqual(query["client_id"], "zoom-public-id")
+        self.assertEqual(query["redirect_uri"], f"http://127.0.0.1:{port}/oauth/callback", "the address it registered")
+        self.assertEqual(query["code_challenge_method"], "S256")
+        self.assertNotIn("scope", query, "no scope of DGC's own: the app's scopes decide")
+        self.assertEqual(query["resource"], self.vendor.base + "/mcp")
+        authorization, client_id = self.vendor.token_auth[0]
+        self.assertIsNone(authorization, "a public client sends no Authorization header (Zoom's PKCE exchange)")
+        form = self.vendor.token_forms[0]
+        self.assertEqual((client_id, form["redirect_uri"]), ("zoom-public-id", query["redirect_uri"]))
+        self.assertNotIn("client_secret", form)
+        self.assertTrue(form["code_verifier"], "PKCE: the verifier the vendor checked against the challenge")
+        self.assertEqual(self.vendor.grants, ["authorization_code"])
+        server.stop()
+
+    def test_a_registered_redirect_on_another_port_or_path_is_not_borrowed(self):
+        # Only a loopback redirect on the app's own port and DGC's callback path names the host; anything else keeps
+        # localhost, so a stray or hostile entry can't move where the browser returns.
+        self.vendor.mode = "oauth"
+        port = mcp_remote.free_port()
+        info = self.root / "app.json"
+        info.write_text(json.dumps({"client_id": "own-app", "redirect_uris": [
+            f"http://127.0.0.1:{port + 1}/oauth/callback", f"http://127.0.0.1:{port}/elsewhere",
+            f"http://evil.example:{port}/oauth/callback", "http://127.0.0.1:bad/oauth/callback"]}))
+        server = self.server(str(port), "--static-oauth-client-info", f"@{info}", auth=self.browser)
+        self.assertTrue(server.start(timeout=30), (server.error, server.diagnostics))
+        self.assertEqual(self.vendor.authorize_params[0]["redirect_uri"], f"http://localhost:{port}/oauth/callback")
+        server.stop()
 
     def test_two_windows_signing_in_at_once_open_one_browser(self):
         self.vendor.mode = "oauth"

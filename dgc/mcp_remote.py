@@ -14,7 +14,8 @@ then POSTs whose answers arrive on the stream), as mcp-remote's ``http-first`` d
 Sign-in (the MCP authorization spec): a 401 names the server's resource metadata (RFC 9728), which names its
 authorization server (RFC 8414 / OpenID discovery). DGC registers itself (RFC 7591) unless it was given a client,
 opens the sign-in through the same consent card the editor and terminal already show, receives the code on
-``http://localhost:<port>/oauth/callback``, and exchanges it with PKCE (S256) and the resource indicator (RFC 8707).
+``http://localhost:<port>/oauth/callback`` (or the loopback address a registered app names, such as Zoom's
+``127.0.0.1``), and exchanges it with PKCE (S256) and the resource indicator (RFC 8707).
 Tokens refresh before they expire and after a 401; a 403 ``insufficient_scope`` signs in again for the larger scope.
 """
 from __future__ import annotations
@@ -510,6 +511,19 @@ class RemoteAuth:
             client["client_secret"] = static["client_secret"]
         return client
 
+    def _registered_host(self, port: int) -> str:
+        """The loopback host of the redirect the user's own app was registered with on this port, else localhost.
+        Zoom matches only the numeric address (127.0.0.1) and says not to use localhost; most services take it."""
+        for uri in (self.options.static_client or {}).get("redirect_uris") or []:
+            try:
+                parts = urlsplit(uri) if isinstance(uri, str) else None
+                if parts and parts.scheme == "http" and parts.port == port and parts.path == "/oauth/callback" \
+                        and parts.hostname in ("localhost", "127.0.0.1", "::1"):
+                    return "[::1]" if parts.hostname == "::1" else parts.hostname
+            except ValueError:
+                continue
+        return "localhost"
+
     def _client(self, found: dict, redirect: str) -> dict:
         static = self._static()
         if static:
@@ -632,9 +646,16 @@ class RemoteAuth:
             if isinstance(methods, list) and methods and "S256" not in methods:
                 raise RemoteError("the service doesn't support PKCE with S256, which DGC requires")
             saved = self._load()
-            scope = (self.options.client_metadata.get("scope") or challenge.get("scope")
-                     or " ".join(s for s in (found["resource_metadata"].get("scopes_supported") or [])
-                                 if isinstance(s, str)))
+            # A registered app that names its scope (RFC 7591) asks for exactly that. An empty one means the scopes the
+            # user added to the app at the service decide, so the sign-in names none: Zoom's documented request names
+            # none, and its server lists far more scopes than the app the user created needs or has.
+            registered = (self.options.static_client or {}).get("scope")
+            if isinstance(registered, str):
+                scope = self.options.client_metadata.get("scope") or registered
+            else:
+                scope = (self.options.client_metadata.get("scope") or challenge.get("scope")
+                         or " ".join(s for s in (found["resource_metadata"].get("scopes_supported") or [])
+                                     if isinstance(s, str)))
             if step_up and challenge.get("scope"):
                 held = str((saved.get("tokens") or {}).get("scope") or scope or "").split()
                 scope = " ".join(dict.fromkeys([*held, *challenge["scope"].split()]))
@@ -654,8 +675,9 @@ class RemoteAuth:
                                       "on it; close what uses it and connect again") from None
                 port = free_port()
                 callback = _Callback(port, state)
-            # RFC 8252's loopback port exception is written for the IP literal, so a document client uses it.
-            redirect = f"http://{'127.0.0.1' if document else 'localhost'}:{port}/oauth/callback"
+            # RFC 8252's loopback port exception is written for the IP literal, so a document client uses it; a
+            # registered app uses the address it was registered with.
+            redirect = f"http://{'127.0.0.1' if document else self._registered_host(port)}:{port}/oauth/callback"
             try:
                 client = ({"client_id": CLIENT_METADATA_URL, "issuer": found["issuer"], "redirect_uris": [redirect],
                            "document": True} if document else self._client(found, redirect))

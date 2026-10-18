@@ -94,8 +94,9 @@ agents, hooks) are listed in the review and not imported.
 **Payments.** 1inch, Aave and Airwallex AgentOS can move real money (swaps, orders, payees and
 company cards). Treat every write as a real transaction; DGC asks before each one.
 
-Some services only let approved apps connect (Figma, Google Workspace, Microsoft 365, Zoom,
-Docusign, Asana, Vercel, Canva, Dropbox). They are not offered here yet; Composio reaches several
+Some services only let approved apps connect. Asana, Docusign and Zoom are offered with a guided
+setup for an app you create for DGC in your own account (Zoom's needs no secret). Figma, Google
+Workspace, Microsoft 365, Vercel, Canva and Dropbox are not offered here yet; Composio reaches several
 of them through its own approved apps.
 
 ## Requirements

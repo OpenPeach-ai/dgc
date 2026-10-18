@@ -2440,6 +2440,30 @@ test('own-app connector: the Asana app ID and port go into its server, the secre
   assert.equal(JSON.parse(fsm.readFileSync(h.commands.find(c=>c.type==='upsert_mcp_server').persisted.args[5].slice(1),'utf8')).client_secret,'fixture-secret');
  }finally{process.env.HOME=priorHome;}
 });
+test('own-app connector: Zoom\'s public client needs only its ID, and no secret reaches SecretStorage or the file',async()=>{
+ const home=mkdtempSync(join(scratch,'zoom-app-home-')),priorHome=process.env.HOME;process.env.HOME=home;
+ const fsm=await import('node:fs');
+ try{
+  const h=connectorHarness();
+  await h.provider.saveConnector({name:'zoom',auth:'own-app',url:'https://mcp.zoom.us/mcp/zoom/streamable',client_id:''});
+  assert.match(h.posted.findLast(m=>m.type==='connectorError').message,/public client ID from Zoom/);
+  notices.warningResponses.push('Accept and connect');
+  // No secret field exists for Zoom; even a stray one in the message is dropped, never stored or written.
+  await h.provider.saveConnector({name:'zoom',auth:'own-app',url:'https://mcp.zoom.us/mcp/zoom/streamable',client_id:'zPublicClientId42',client_secret:'stray-value'});
+  assert.equal(h.posted.filter(m=>m.type==='connectorError').length,1,'no secret is asked for');
+  const cmd=h.commands.find(c=>c.type==='upsert_mcp_server');
+  assert.equal(cmd.connector,'zoom');assert.equal(cmd.accept_license,'Zoom service terms');
+  assert.deepEqual(cmd.persisted.args.slice(0,5),['-y','mcp-remote','https://mcp.zoom.us/mcp/zoom/streamable','3336','--static-oauth-client-info']);
+  const file=cmd.persisted.args[5].slice(1);
+  assert.match(file,/mcp-oauth\/zoom-[0-9a-f]{8}-[0-9a-f]{16}\.json$/);
+  // As the setup had you register it: 127.0.0.1 (Zoom's loopback rule), no secret, and an empty scope (the scopes
+  // you added to the app decide; DGC asks for none of its own).
+  assert.deepEqual(JSON.parse(fsm.readFileSync(file,'utf8')),{client_id:'zPublicClientId42',redirect_uris:['http://127.0.0.1:3336/oauth/callback'],scope:''});
+  assert.equal(fsm.statSync(file).mode&0o777,0o600);
+  assert.equal(h.rawSecrets.has('dgc.mcp.zoom'),false,'nothing for Zoom in SecretStorage');
+  assert.doesNotMatch(JSON.stringify([cmd,h.catalog()]),/stray-value/);
+ }finally{process.env.HOME=priorHome;}
+});
 test('generic MCP save cannot forge connector license acceptance',async()=>{
  const h=connectorHarness();await h.provider.saveMcpServer({name:'zapier',transport:'remote',target:'https://mcp.zapier.com/api/v1/connect',token:'fixture-token',connector:'zapier',connectorLicense:'Zapier service terms'});
  assert.equal(h.commands[0].connector,undefined);assert.equal(h.catalog()[0].connector,undefined);

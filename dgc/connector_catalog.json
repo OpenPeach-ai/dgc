@@ -139,5 +139,47 @@
   "placeholder": "",
   "license": "Docusign service terms",
   "cloud_execution": true
+ },
+ "zoom": {
+  "name": "Zoom",
+  "kind": "Meetings",
+  "url": "https://mcp.zoom.us/mcp/zoom/streamable",
+  "auth": [
+   "own-app"
+  ],
+  "own_app": {
+   "port": 3336,
+   "redirect_host": "127.0.0.1",
+   "console": "https://marketplace.zoom.us/user/build",
+   "console_label": "Open Created Apps in Zoom",
+   "id_label": "Public client ID",
+   "scopes": [
+    "meeting:read:search",
+    "meeting:read:assets",
+    "cloud_recording:read:list_user_recordings",
+    "cloud_recording:read:content",
+    "agentic_search:read:search",
+    "agentic_search:read:ask",
+    "docs:read:export",
+    "docs:write:import"
+   ],
+   "steps": [
+    "In the Zoom App Marketplace, sign in and open Created Apps (the Developers link). Choose the plus sign next to Developer, then Build an app. Choose General app and create it.",
+    "On Basic Info, rename the app DGC and choose User-managed.",
+    "Under App Credentials, turn on Use Public Client OAuth. Zoom then shows a public client ID, which has no secret.",
+    "Under OAuth Information, add this address as the OAuth redirect URL and to the OAuth allow list: {redirect}",
+    "On Scopes, choose Add Scopes and add these: {scopes} A tool whose scope you leave out tells you which one it needs.",
+    "Copy the development public client ID into the field below."
+   ]
+  },
+  "manage": "https://marketplace.zoom.us/user/build",
+  "docs": "https://developers.zoom.us/docs/mcp/zoom/",
+  "terms": "https://www.zoom.com/en/trust/terms/",
+  "privacy": "https://www.zoom.com/en/trust/privacy/privacy-statement/",
+  "summary": "Search your Zoom meetings, recordings, summaries and Docs, through a Zoom app you create for DGC.",
+  "setup": "Zoom's MCP server admits only apps registered with Zoom, so you create one for DGC in your own Zoom account. Zoom's public client option needs no secret: you paste only the app's ID.",
+  "placeholder": "",
+  "license": "Zoom service terms",
+  "cloud_execution": true
  }
 }

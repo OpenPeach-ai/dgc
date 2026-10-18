@@ -589,6 +589,13 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   to register (with Copy), and the ID and secret it gives you. The secret stays in the editor's secret storage.
   Docusign works with a developer account at once; a production account needs Docusign's Go-Live review and your
   admin's MCP approval, which the setup says.
+- **Zoom**, the same way: Zoom's MCP server (`mcp.zoom.us/mcp/zoom/streamable`: meetings, summaries, recordings,
+  search and Docs) admits only apps registered with Zoom, so you build a General app for DGC in your own Zoom account
+  and paste its ID. Zoom's public client has no secret, so there is none to copy, store or send: DGC signs in with
+  PKCE alone. The app is registered on `http://127.0.0.1:3336/oauth/callback`, because Zoom asks for `127.0.0.1`
+  there, not `localhost`. DGC asks for no scopes of its own, so the ones you add to the app decide what it can do.
+  A registered app's own redirect address and scope (RFC 7591 client information) now steer DGC's sign-in; Asana
+  and Docusign are unchanged.
 - **The vendors' own plugins.** Settings → Plugins (and `dgc plugin list`) offers 41 more plugins
   published by the services themselves, each pinned to a reviewed commit of the vendor's package:
   Airtable, Coda, Craft, Read AI, Granola, Adobe App Builder, Mobbin, Refero, Mural, Intercom,

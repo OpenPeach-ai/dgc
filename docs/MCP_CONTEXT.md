@@ -87,8 +87,11 @@ callback port, `--header`, `--static-oauth-client-info`, `--static-oauth-client-
   where the service advertises `client_id_metadata_document_supported` and accepts public clients, and
   only once that document is published and says what DGC expects; else it registers itself as "DGC"
   (RFC 7591). With the document, the callback is `http://127.0.0.1:29167/oauth/callback` (any port where
-  29167 is busy, under RFC 8252's loopback exception). DGC sends the resource indicator (RFC 8707), asks
-  for the scope the challenge or metadata names, and checks the `iss` the service returns (RFC 9207). A
+  29167 is busy, under RFC 8252's loopback exception). Your own app signs in on the loopback address and
+  port it was registered with (`localhost`, or `127.0.0.1` for Zoom), with its secret if it has one
+  (Zoom's public client has none: PKCE alone). DGC sends the resource indicator (RFC 8707), asks for the
+  scope the challenge or metadata names (or your own app's registered scope; Zoom's is empty, so its
+  sign-in names none and the app's scopes decide), and checks the `iss` the service returns (RFC 9207). A
   service that answers a request without a token with `403` and no challenge (Docusign) is signed in to
   the same way as one that answers `401`. Tokens refresh before they expire and after a `401`. A `403 insufficient_scope` signs in
   again for the larger scope while you are connecting; in the middle of a conversation the call says
