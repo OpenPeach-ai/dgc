@@ -11,6 +11,12 @@ invalidate that cache on every turn, so it rides with the user's own message ins
 nothing was cacheable anyway. ``attach_turn_clock`` adds it and ``strip_turn_clock`` takes it
 back off for anything a human reads.
 
+The clock line carries the weekday and the date as well. The system prompt's date alone was not
+enough: after a twelve-day gap in one chat, the model wrote the last date it saw in the
+transcript into a Troupe title and a Pip's reason (ERP session review, 2026-10-18). The line
+costs no cache either way: it is part of the newest message, and every earlier turn keeps the
+line it was sent with, byte for byte.
+
 Nothing here raises, blocks on a network, or asks anyone: a machine with no timezone
 information still gets a truthful line ("UTC").
 
@@ -120,13 +126,19 @@ def environment_date(now: datetime | None = None) -> str:
     return f"{day} ({zone_label(now)})"
 
 
+# Spelled out here, not strftime("%A"): the weekday must be the same word whatever the locale.
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
 def turn_clock_line(now: datetime | None = None) -> str:
-    """``<dgc-now>Local time: 14:32 (Asia/Kolkata)</dgc-now>`` — one line, once per turn."""
+    """``<dgc-now>Local time: Sunday 2026-09-20 14:32 (Asia/Kolkata)</dgc-now>`` — one line, once per turn."""
     try:
-        minute = (now or datetime.now()).strftime("%H:%M")
+        moment = now or datetime.now()
+        stamp = f"{_WEEKDAYS[moment.weekday()]} {moment.strftime('%Y-%m-%d %H:%M')}"
     except Exception:
-        minute = datetime.now(timezone.utc).strftime("%H:%M")
-    return f"{CLOCK_OPEN}Local time: {minute} ({zone_name(now)}){CLOCK_CLOSE}"
+        moment = datetime.now(timezone.utc)
+        stamp = f"{_WEEKDAYS[moment.weekday()]} {moment.strftime('%Y-%m-%d %H:%M')}"
+    return f"{CLOCK_OPEN}Local time: {stamp} ({zone_name(now)}){CLOCK_CLOSE}"
 
 
 def strip_turn_clock(text):

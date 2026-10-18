@@ -1670,11 +1670,12 @@ because a model with no clock writes "what I completed tonight" in the middle of
   `TZ`, or the `/etc/localtime` link on Linux and macOS. A machine that records no name shows the
   offset alone (`UTC+05:30`), and one that records nothing shows `UTC`. Nothing is looked up
   online.
-- Every message you send carries the time of day, on its own line:
-  `Local time: 14:32 (Asia/Kolkata)`. It is on the message rather than in the session prompt so
-  that two questions a minute apart still send a byte-identical prompt, which is what lets a
-  provider charge cached-input rates for the second one. Resumed chats and `/export` show what you
-  typed, without it.
+- Every message you send carries the day and the time of day, on its own line:
+  `Local time: Sunday 2026-09-20 14:32 (Asia/Kolkata)`. It is on the message rather than in the
+  session prompt so that two questions a minute apart still send a byte-identical prompt, which is
+  what lets a provider charge cached-input rates for the second one. The date is on it too, so a
+  chat picked up days later doesn't reuse the last date it saw. Resumed chats and `/export` show
+  what you typed, without it.
 
 A day boundary reaches the model on your next message, so an overnight session does not keep
 calling it yesterday. A sub-agent is told the same two things. A turn DGC starts by itself on a

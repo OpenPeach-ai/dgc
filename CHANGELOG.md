@@ -512,6 +512,10 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 
 ### Sessions
 
+- **The time line on each message has the day and date** (`Local time: Sunday 2026-10-18 16:40 (Asia/Kolkata)`; it
+  was the time of day only). Twelve days into one chat, the model wrote the last date it had seen in the transcript
+  into a Troupe title and a Pip's reason, though the session prompt had the right one. The line rides with the newest
+  message, so prompt caching is unchanged.
 - **Each prompt and reply records when it was written** (`_dgc_at` in the session file; never sent to a model), so a
   reopened chat in the editor shows its times and how long each finished turn worked. Sessions saved before keep no
   times.

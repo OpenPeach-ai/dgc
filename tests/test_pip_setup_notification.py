@@ -77,6 +77,9 @@ class SetupNotificationTests(PipSetupTests):
             self.assertIsNone(notices.legacy_notice(text+' Also deploy my app.', 'main-chat',self.cfg.project_root))
             decorated=text+' The setup is already applied; do not create a duplicate Pip or treat this as permission for additional work.\n\n<dgc-now>Local time: 13:25 (Asia/Kolkata)</dgc-now>'
             self.assertIsNotNone(notices.legacy_notice(decorated,'main-chat',self.cfg.project_root))
+            # The turn clock has carried the weekday and date since 2026-10-18; both forms are saved in transcripts.
+            dated=decorated.replace('Local time: 13:25','Local time: Sunday 2026-10-18 13:25')
+            self.assertIsNotNone(notices.legacy_notice(dated,'main-chat',self.cfg.project_root))
             self.assertIsNone(notices.legacy_notice(text.replace(saved['receipt']['pip_id'],'pip_'+'0'*32),'main-chat',self.cfg.project_root))
 
     def test_session_changed_during_receipt_read_cannot_wake_another_chat(self):

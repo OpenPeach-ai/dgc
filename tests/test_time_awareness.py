@@ -56,7 +56,7 @@ class ZoneTests(unittest.TestCase):
             now = datetime(2026, 9, 20, 14, 32, tzinfo=timezone(timedelta(hours=5, minutes=30)))
             self.assertEqual(clock.environment_date(now), "2026-09-20 (Asia/Kolkata, UTC+05:30)")
             self.assertEqual(clock.turn_clock_line(now),
-                             "<dgc-now>Local time: 14:32 (Asia/Kolkata)</dgc-now>")
+                             "<dgc-now>Local time: Sunday 2026-09-20 14:32 (Asia/Kolkata)</dgc-now>")
 
     def test_the_tz_variable_names_the_zone_when_it_holds_a_name(self):
         for value, expected in (("Asia/Kolkata", "Asia/Kolkata"), (":Europe/Paris", "Europe/Paris"),
@@ -72,14 +72,14 @@ class ZoneTests(unittest.TestCase):
                 now = datetime(2026, 9, 20, 14, 32, tzinfo=timezone(timedelta(hours=-8)))
                 self.assertEqual(clock.environment_date(now), "2026-09-20 (UTC-08:00)", value)
                 self.assertEqual(clock.turn_clock_line(now),
-                                 "<dgc-now>Local time: 14:32 (UTC-08:00)</dgc-now>", value)
+                                 "<dgc-now>Local time: Sunday 2026-09-20 14:32 (UTC-08:00)</dgc-now>", value)
 
     def test_no_zone_information_at_all_still_says_something_true(self):
         with mock.patch.object(clock, "_iana_zone", lambda: ""):
             now = datetime(2026, 9, 20, 14, 32, tzinfo=timezone.utc)
             self.assertEqual(clock.environment_date(now), "2026-09-20 (UTC)")
             self.assertEqual(clock.turn_clock_line(now),
-                             "<dgc-now>Local time: 14:32 (UTC)</dgc-now>")
+                             "<dgc-now>Local time: Sunday 2026-09-20 14:32 (UTC)</dgc-now>")
 
     def test_a_zone_lookup_that_explodes_is_not_the_turn_s_problem(self):
         def boom():
@@ -88,7 +88,7 @@ class ZoneTests(unittest.TestCase):
         with mock.patch.object(clock, "_iana_from_env", boom), \
                 mock.patch.object(clock, "_iana_from_localtime", boom):
             line = clock.turn_clock_line(datetime(2026, 9, 20, 14, 32, tzinfo=timezone.utc))
-        self.assertEqual(line, "<dgc-now>Local time: 14:32 (UTC)</dgc-now>")
+        self.assertEqual(line, "<dgc-now>Local time: Sunday 2026-09-20 14:32 (UTC)</dgc-now>")
 
     def test_a_symlink_into_the_zone_database_names_the_zone(self):
         for target, expected in (("/usr/share/zoneinfo/Europe/Paris", "Europe/Paris"),
@@ -114,7 +114,7 @@ class AttachTests(unittest.TestCase):
         attached = clock.attach_turn_clock("fix the failing test", self.now)
         self.assertEqual(
             attached,
-            "fix the failing test\n\n<dgc-now>Local time: 14:32 (Asia/Kolkata)</dgc-now>")
+            "fix the failing test\n\n<dgc-now>Local time: Sunday 2026-09-20 14:32 (Asia/Kolkata)</dgc-now>")
         self.assertEqual(clock.strip_turn_clock(attached), "fix the failing test")
         self.assertEqual(display_prompt(attached), "fix the failing test")
 
@@ -134,14 +134,14 @@ class AttachTests(unittest.TestCase):
         first = clock.attach_turn_clock("ship it", self.now)
         second = clock.attach_turn_clock(first, self.now.replace(day=21, hour=9, minute=5))
         self.assertEqual(second.count(clock.CLOCK_OPEN), 1)
-        self.assertEqual(second, "ship it\n\n<dgc-now>Local time: 09:05 (Asia/Kolkata)</dgc-now>")
+        self.assertEqual(second, "ship it\n\n<dgc-now>Local time: Monday 2026-09-21 09:05 (Asia/Kolkata)</dgc-now>")
 
     def test_what_the_user_typed_is_left_alone(self):
         typed = "explain <dgc-now>Local time: 01:00 (UTC)</dgc-now> in the middle, then stop"
         self.assertEqual(clock.strip_turn_clock(typed), typed)
         self.assertEqual(clock.strip_turn_clock("no clock here"), "no clock here")
         self.assertEqual(clock.attach_turn_clock("", self.now),
-                         "<dgc-now>Local time: 14:32 (Asia/Kolkata)</dgc-now>")
+                         "<dgc-now>Local time: Sunday 2026-09-20 14:32 (Asia/Kolkata)</dgc-now>")
 
     def test_the_resume_list_previews_the_prompt_not_the_clock(self):
         import json
@@ -250,8 +250,23 @@ class TurnTests(unittest.TestCase):
         self.assertTrue(agent.run_turn("after midnight"))
         self.assertIn("- Date: 2026-09-21 (", agent.messages[0]["content"])
         self.assertNotIn("- Date: 2026-09-20 (", agent.messages[0]["content"])
-        self.assertEqual([line.split("Local time: ")[1].split(" ")[0] for line in clock_lines(agent)],
-                         ["23:59", "00:01"])
+        self.assertEqual([" ".join(line.split("Local time: ")[1].split(" ")[:3]) for line in clock_lines(agent)],
+                         ["Sunday 2026-09-20 23:59", "Monday 2026-09-21 00:01"])
+
+    def test_the_turn_clock_names_the_day_after_a_long_gap(self):
+        """ERP session review (2026-10-18): twelve days after the transcript's last dates, the model wrote the old
+        date into a Troupe title and a Pip's reason. The line beside the user's message now says the date too."""
+        agent = self.agent()
+        fake = self.at(2026, 10, 6, 15, 53)
+        scripted(agent, [ChatResult(content="started"), ChatResult(content="later")])
+        self.assertTrue(agent.run_turn("audit the ERP"))
+        fake.current = datetime(2026, 10, 18, 16, 40)
+        self.assertTrue(agent.run_turn("run every Pip"))
+        latest = clock_lines(agent)[-1]
+        self.assertIn("Sunday 2026-10-18 16:40", latest)
+        self.assertEqual(latest, self.expect(2026, 10, 18, 16, 40))
+        prompt = next(m for m in reversed(agent.messages) if m.get("role") == "user")
+        self.assertTrue(str(prompt["content"]).startswith("run every Pip\n\n<dgc-now>Local time: Sunday 2026-10-18 "))
 
     def test_a_prompt_with_images_keeps_its_clock_in_the_text_part(self):
         agent = self.agent()
@@ -264,7 +279,7 @@ class TurnTests(unittest.TestCase):
         texts = [p["text"] for p in prompt["content"] if p.get("type") == "text"]
         self.assertEqual(len(texts), 1)
         self.assertTrue(texts[0].startswith("what is in this screenshot\n\n"))
-        self.assertIn("Local time: 16:45", texts[0])
+        self.assertIn("Local time: Sunday 2026-09-20 16:45", texts[0])
         self.assertEqual(clock_lines(agent), [self.expect(2026, 9, 20, 16, 45)])
 
     def test_a_sub_agent_is_told_the_time_too(self):
