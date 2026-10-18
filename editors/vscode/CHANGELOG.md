@@ -342,6 +342,18 @@
 
 ### Pips
 
+- **Dismiss a Pip's news on the side bar's home.** A row that is news (failed runs, new findings) has a ✕ beside its
+  name, shown on hover or focus and always reached with Tab; it says what it dismisses ("Dismiss: GST watchdog — 1 run
+  failed"). The Pip's news is marked seen, here, in the chat's Pips bar and in the digest, and the Pip comes back only
+  when something new happens, such as another failed run. **Dismiss all** in the Pips heading does every news row at
+  once. A row that waits for your answer has no ✕: it needs the answer. With the last row gone, your Pips sit in the
+  quiet row of faces again. Needs the DGC CLI with this release (Pips API 48).
+- **The home shows the 3 Pips that most need you, however many you have:** what waits for your answer first, then
+  alerts, then failed runs, then new findings, then one line, "34 more need you · Show all", which opens the Pips view
+  at Needs attention, open in full, with your Pips listed under it. 100 Pips with 37 needing you took 1,600px of the
+  side bar and put Chat and Work two screens down; it is 204px now. A Pip with both failed runs and new findings says
+  both ("1 run failed · 2 new findings"). The home also read only your first 50 Pips: one past those that needed you
+  had no row.
 - **Pips settings stay readable in the side bar.** "How many Pips you can have" broke one letter per line; every
   settings row now keeps its words in a readable column, with the control underneath when the side bar is narrow.
 - **A reply's details open into view** at the bottom of a conversation, where they used to open out of sight.

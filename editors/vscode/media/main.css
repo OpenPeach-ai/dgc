@@ -268,10 +268,26 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pips-open { border:0; background:transparent; color:var(--link, var(--accent-text)); font:var(--w-med) var(--t-xs)/1 var(--sans);
   cursor:pointer; padding:var(--sp-1); border-radius:var(--r-sm); }
 #sessions-host .home-pips-open:hover { text-decoration:underline; }
+#sessions-host .home-pips-actions { display:inline-flex; align-items:center; gap:var(--sp-1); flex:none; }
+#sessions-host .home-pips-dismiss-all { border:0; background:transparent; color:var(--muted); font:var(--w-med) var(--t-xs)/1 var(--sans);
+  cursor:pointer; padding:var(--sp-1); border-radius:var(--r-sm); }
+#sessions-host .home-pips-dismiss-all:hover { color:var(--text); text-decoration:underline; }
 #sessions-host .home-pips-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
-#sessions-host .home-pip-row { width:100%; display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-1); border:0; border-radius:var(--r-sm);
+/* A row and, for news, its dismiss beside it (never over the name): the ✕ keeps its room and shows on
+   hover or focus; it is always in the tab order. */
+#sessions-host .home-pip-item { display:flex; align-items:center; gap:2px; min-width:0; border-radius:var(--r-sm); }
+#sessions-host .home-pip-item:hover { background:color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+#sessions-host .home-pip-row { flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-1); border:0; border-radius:var(--r-sm);
   background:transparent; color:inherit; text-align:left; cursor:pointer; }
-#sessions-host .home-pip-row:hover { background:color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+#sessions-host .home-pip-dismiss { flex:none; width:24px; height:24px; margin-right:2px; display:inline-flex; align-items:center; justify-content:center;
+  padding:0; border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted); cursor:pointer; opacity:0; }
+#sessions-host .home-pip-item:hover .home-pip-dismiss, #sessions-host .home-pip-item:focus-within .home-pip-dismiss { opacity:1; }
+#sessions-host .home-pip-dismiss:hover { color:var(--text); background:color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+@media (hover: none) { #sessions-host .home-pip-dismiss { opacity:1; } }
+#sessions-host .home-pips-more { align-self:flex-start; max-width:100%; border:0; background:transparent; color:var(--link, var(--accent-text));
+  font:var(--w-med) var(--t-xs)/1.3 var(--sans); text-align:left; cursor:pointer; padding:var(--sp-1); border-radius:var(--r-sm); }
+#sessions-host .home-pips-more:hover { text-decoration:underline; }
+#sessions-host .home-pips-error { margin:0; padding:0 var(--sp-1); color:var(--err-text); font:var(--w-reg) var(--t-xs)/1.3 var(--sans); }
 #sessions-host .home-pip-face { flex:none; display:inline-flex; }
 #sessions-host .home-pip-face-row { width:32px; height:32px; }
 #sessions-host .home-pip-face-small { width:22px; height:22px; }

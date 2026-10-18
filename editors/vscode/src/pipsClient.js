@@ -1563,6 +1563,12 @@ async function navigateAttention(value){
   if(!target)throw Error('Your Personal Pips are unavailable here. Refresh the dashboard.');
   S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;setupRows=[];setupError='';S.error='';rememberView();await refresh(true);
  }
+ // The Sessions home's "N more need you · Show all": this home at Needs attention, open in full, your Pips under it.
+ if(value.all===true){
+  if(S.pipSearch){S.pipSearch='';draft.pipSearch='';jobsExtra=[];S.jobsNext=null;}
+  clearSelection();S.selected='';S.create=false;S.overview=true;attentionExpanded=true;rememberView();await refresh(false);await loadAttention();render();
+  (document.querySelector('.attention')||document.querySelector('.simple-home'))?.scrollIntoView?.({block:'start'});return;
+ }
  if(typeof setup==='string'){
   clearSelection();S.selected='';S.create=false;S.overview=true;rememberView();render();await loadSetups();render();
   const box=document.querySelector('[data-details="setup-inbox"]');if(box){box.open=true;box.scrollIntoView?.({block:'start'});}return;

@@ -24,12 +24,19 @@ const page=(items,extra={})=>({as_of:new Date().toISOString(),total:items.length
 const link={id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:'Gmail',reason:'To read your new mail.',status:'requested',label:null,error:null,created_at:ago(9),updated_at:new Date().toISOString()};
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
-function setup({found=page([]),apiVersion=44,links=[link]}={}){
- const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
+function setup({found=page([]),apiVersion=44,links=[link],embedded=false}={}){
+ // embedded: the side bar's Pips view (main.js mounts it in a shadow root and navigates it from the Sessions home).
+ const dom=new JSDOM(embedded?'<!doctype html><html><body><div id="pips-host"></div></body></html>':viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.CSS={escape:s=>s};
  w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m),getState:()=>undefined,setState:()=>{}});
  w.eval(client);
+ let app=null,shadow=null;
+ if(embedded){
+  const listeners=new Set();shadow=w.document.getElementById('pips-host').attachShadow({mode:'open'});
+  app=w.DgcPips.mount({root:shadow,postMessage:m=>sent.push(m),onMessage:l=>{listeners.add(l);return()=>listeners.delete(l);},getState:()=>undefined,setState(){}});
+  w.addEventListener('message',e=>listeners.forEach(l=>l(e.data)));
+ }
  const message=data=>w.dispatchEvent(new w.MessageEvent('message',{data}));
  const answer=(m,result,ok=true)=>{answered.add(m.id);message({type:'pipsReply',id:m.id,ok,...(ok?{result}:{error:{message:result}})});};
  const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
@@ -46,9 +53,23 @@ function setup({found=page([]),apiVersion=44,links=[link]}={}){
   list_pip_attention:()=>found}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion,generation:1,connected:true,supported:true,enabled:true});
- const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
- return {w,d:w.document,sent,answer,requests,drain,click};
+ const d=shadow||w.document;
+ const click=s=>{const el=d.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
+ return {w,d,app,sent,answer,requests,drain,click};
 }
+
+// The Sessions home's "34 more need you · Show all" (founder, 2026-10-18): from a Pip's chat or a search,
+// the Pips home at Needs attention, open in full, with your Pips under it.
+test('Show all from the Sessions home opens the Pips home at Needs attention, all of it',async()=>{
+ const many=Array.from({length:9},(_,i)=>item('email','maildraft_'+String(i).repeat(32).slice(0,32).replace(/[^a-f0-9]/g,'0'),PIP,`Email ${i+1}`,{created_at:ago(i+1)}));
+ const x=setup({found:page(many),embedded:true});await x.drain();
+ x.click(`[data-job="${PIP}"]`);await x.drain();
+ assert.equal(x.d.querySelector('.attention'),null,'a Pip\'s chat is open');
+ const navigating=x.app.navigate({attention:true,all:true,workspace:PW});await x.drain();await navigating;
+ assert.ok(x.d.querySelector('.simple-home'),'the Pips home, your Pips listed');
+ assert.equal(x.d.querySelectorAll('.attention [data-attention]').length,9,'Needs attention open in full, not the first six');
+ assert.ok(x.d.querySelector('[data-attention-more="0"]'),'Show fewer is there to fold it');
+});
 
 test('the home lists what every Pip waits on, newest first, above Your Pips; each Pip row counts its own',async()=>{
  const found=page([item('app_link',LINK,PIP,'Connect Gmail?',{detail:'To read your new mail.',created_at:ago(1)}),item('email',DRAFT,MAX,'Send this email to sam@example.test?',{detail:'Lunch moved',created_at:ago(30)}),
