@@ -14,3 +14,5 @@ cap-*.mjs
 media/seti-codepoints.json
 SETTINGS_HANDOFF.md
 media/pips/computer-wallpaper.jpg
+# DGC Voice, carried inside DGC until it is on the Marketplace (esbuild.js packs it; src/voiceInstall.ts installs it).
+!dist/dgc-voice.vsix

@@ -1,11 +1,44 @@
 const esbuild = require("esbuild");
 const { execFileSync } = require("node:child_process");
-const { readFileSync, writeFileSync } = require("node:fs");
-const { resolve } = require("node:path");
+const { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { dirname, resolve } = require("node:path");
 
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
 const selfHosted = process.env.DGC_SELF_HOSTED === "true";
+
+// DGC Voice (editors/vscode-voice) isn't on the Marketplace or Open VSX yet, so DGC carries it: this file, which
+// .vscodeignore lets into DGC's own VSIX, is what "Install DGC Voice" installs (src/voiceInstall.ts).
+const VOICE_DIR = resolve(__dirname, "../vscode-voice");
+const VOICE_VSIX = resolve(__dirname, "dist/dgc-voice.vsix");
+/** One date for every file in it (2000-01-01 12:00 UTC), unless the build sets its own. */
+const VOICE_EPOCH = "946728000";
+
+/** Packs DGC Voice into `out` and returns its version. The same source gives the same bytes: one file date, sorted
+ *  files and UTC, so the registry and self-hosted packages, built one after the other, carry the same file. A
+ *  failure stops the build: a DGC without it would offer an install that can't happen. */
+function packVoice(out = VOICE_VSIX, source = VOICE_DIR) {
+  mkdirSync(dirname(out), { recursive: true });
+  rmSync(out, { force: true });
+  let version = "";
+  try {
+    version = JSON.parse(readFileSync(resolve(source, "package.json"), "utf8")).version;
+    const vsce = resolve(dirname(require.resolve("@vscode/vsce/package.json")), "vsce");
+    execFileSync(process.execPath, [vsce, "package", "--no-dependencies", "--out", out], {
+      cwd: source, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, SOURCE_DATE_EPOCH: process.env.SOURCE_DATE_EPOCH || VOICE_EPOCH, TZ: "UTC" },
+    });
+  } catch (error) {
+    rmSync(out, { force: true });
+    const said = String(error.stderr || error.stdout || error.message || error).trim();
+    throw new Error(`DGC Voice (editors/vscode-voice) couldn't be packed into dist/dgc-voice.vsix:\n${said}`);
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(String(version)) || !existsSync(out)) {
+    rmSync(out, { force: true });
+    throw new Error("DGC Voice (editors/vscode-voice) didn't pack into dist/dgc-voice.vsix");
+  }
+  return version;
+}
 
 function sourceCommit() {
   const requested = (process.env.DGC_SOURCE_COMMIT || "").trim();
@@ -46,6 +79,7 @@ async function main() {
   if (!coreMeetsMinimum) {
     throw new Error("package.json dgcCliVersion is newer than the reviewed CLI source version");
   }
+  const voiceVersion = packVoice();
   await esbuild.build({
     entryPoints: ["src/markdown.ts"], bundle: true, format: "iife",
     globalName: "DgcMarkdown", platform: "browser", target: "chrome108",
@@ -124,6 +158,8 @@ async function main() {
     // Keep the distribution marker for builds; update checks now cover every channel.
     define: {
       "process.env.DGC_SELF_HOSTED": JSON.stringify(selfHosted ? "true" : "false"),
+      // The DGC Voice in dist/dgc-voice.vsix: the gallery's is used instead only when it isn't older.
+      "process.env.DGC_VOICE_VERSION": JSON.stringify(voiceVersion),
     },
   });
   if (watch) {
@@ -141,7 +177,11 @@ async function main() {
   })}\n`, "utf8");
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
+
+module.exports = { packVoice, VOICE_DIR };

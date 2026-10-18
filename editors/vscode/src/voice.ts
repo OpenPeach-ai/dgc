@@ -6,8 +6,10 @@
 // (voice_transcribe), and the model the user chose in Settings -> Voice writes it down (voice_text).
 import * as vscode from "vscode";
 
-/** DGC Voice's id on the Marketplace and Open VSX, and its commands. */
+/** DGC Voice's id on the Marketplace and Open VSX, and its commands. DGC carries it too (src/voiceInstall.ts). */
 export const VOICE_EXTENSION = "vibedgc.dgc-voice";
+/** What the box that pressed the microphone says once DGC Voice, installed from the notification, answers. */
+export const VOICE_READY = "DGC Voice is installed. Press the microphone to dictate.";
 const START = "dgcVoice.start", STOP = "dgcVoice.stop", CANCEL = "dgcVoice.cancel", LEVEL = "dgcVoice.level";
 /** How often the waveform asks how loud it is (each answer carries every ~50 ms reading since the last). */
 export const LEVEL_POLL_MS = 100;
@@ -19,7 +21,9 @@ const TEXT_TIMEOUT_MS = 5 * 60_000;
 
 export type DictationResult =
   | { ok: true; text?: string }
-  | { ok: false; code: "no_model" | "no_recorder" | "old_cli" | "starting" | "busy" | "idle" | "record_failed" | "silent" | "failed"; error: string };
+  | { ok: false; code: "no_model" | "no_recorder" | "old_cli" | "starting" | "busy" | "idle" | "record_failed" | "silent" | "failed"; error: string;
+      /** no_recorder: true once DGC Voice, installed from the notification, answers. */
+      installed?: Promise<boolean> };
 
 export interface VoiceDeps {
   /** Sends a voice_* command on the side bar's `dgc serve`: "sent", "starting" while it comes up, "old_cli" without voice. */
@@ -28,7 +32,8 @@ export interface VoiceDeps {
   openSettings(section: string): void;
   /** vscode.commands.executeCommand, and the editor's notifications (tests replace them). */
   execute?: (command: string, ...args: unknown[]) => Thenable<any>;
-  offerInstall?: (message: string) => void;
+  /** The notification that offers DGC Voice: true once it's installed and answers (src/voiceInstall.ts). */
+  offerInstall?: (message: string) => PromiseLike<boolean> | void;
   /** Where the editor is: a remote name ("ssh-remote") when DGC runs on another computer, and the editor's name. */
   where?: () => { remote?: string; app?: string };
 }
@@ -112,12 +117,15 @@ export class VoiceClient {
     } catch {
       // The notification explains and carries the Install button; the chat only points to it, so the same words
       // don't appear twice. In a Remote window the microphone is on this computer while DGC runs on the host.
+      // DGC carries DGC Voice, so installing it needs no Marketplace (src/voiceInstall.ts).
       const { remote = "", app = "" } = this.deps.where?.() || {};
       const editor = app || "this editor";
-      this.deps.offerInstall?.(remote
-        ? `Dictation needs DGC Voice, a small extension that records your microphone on this computer while DGC runs on the remote host. It isn't installed in ${editor} on this computer yet. Install it, then press the microphone again.`
-        : `Dictation needs DGC Voice, a small extension that records your microphone. It isn't installed in ${editor} yet. Install it, then press the microphone again.`);
-      return { ok: false, code: "no_recorder", error: "Dictation needs DGC Voice. Install it from the notification, then press the microphone again." };
+      const offered = this.deps.offerInstall?.(remote
+        ? `Dictation needs DGC Voice, a small extension that records your microphone on this computer while DGC runs on the remote host. It comes with DGC, but it isn't installed in ${editor} on this computer yet.`
+        : `Dictation needs DGC Voice, a small extension that records your microphone. It comes with DGC, but it isn't installed in ${editor} yet.`);
+      const installed = offered && typeof (offered as PromiseLike<boolean>).then === "function" ? Promise.resolve(offered) : undefined;
+      return { ok: false, code: "no_recorder", error: "Dictation needs DGC Voice. Install it from the notification, then press the microphone again.",
+               ...(installed ? { installed } : {}) };
     }
     if (!started?.ok) return { ok: false, code: started?.code === "busy" ? "busy" : started?.code === "no_recorder" ? "no_recorder" : "record_failed", error: String(started?.error || "Recording didn't start.") };
     this.recording = true;
@@ -252,6 +260,11 @@ export class Dictation {
       this.owner = undefined;
       // No model yet: Settings -> Voice is open on the choice; the page says why, as information.
       owner.post({ type: "mic", state: "idle", error: started.error, kind: started.code === "no_model" ? "info" : "error" });
+      // DGC Voice installed from the notification: the box says it's ready, unless it's recording again by then.
+      if (started.code === "no_recorder") void started.installed?.then((ready) => {
+        if (ready !== true || this.owner === owner) return;
+        try { owner.post({ type: "mic", state: "idle", error: VOICE_READY, kind: "info" }); } catch { /* the box went away */ }
+      }, () => {});
       return;
     }
     owner.post({ type: "mic", state: "recording" });

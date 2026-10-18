@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -176,10 +177,27 @@ GENERATED_MEMBERS = {
     "[Content_Types].xml",
     "extension.vsixmanifest",
     "extension/dist/build.json",
+    "extension/dist/dgc-voice.vsix",
     "extension/dist/extension.js",
     "extension/dist/markdown.js",
     "extension/dist/mermaid.js",
 }
+# DGC Voice (editors/vscode-voice) rides inside the extension as a VSIX of its own until it is on the Marketplace and
+# Open VSX (esbuild.js packs it, src/voiceInstall.ts installs it). It is held to the same rules as the package around
+# it: an exact member list, every source file byte for byte, its identity, and the same credential scan.
+VOICE_MEMBER = "extension/dist/dgc-voice.vsix"
+VOICE_STATIC_MEMBERS = {
+    "extension/package.json": "package.json",
+    "extension/extension.js": "extension.js",
+    "extension/recording.js": "recording.js",
+    "extension/recorders/record-mac.js": "recorders/record-mac.js",
+    "extension/recorders/record-win.ps1": "recorders/record-win.ps1",
+    "extension/icon.png": "icon.png",
+    "extension/readme.md": "README.md",
+    "extension/LICENSE.txt": "LICENSE",
+}
+VOICE_MEMBERS = frozenset(VOICE_STATIC_MEMBERS) | {"[Content_Types].xml", "extension.vsixmanifest"}
+VOICE_SIZE_LIMIT = 1024 * 1024
 # Bundles built from third-party dependencies rather than from DGC's own source. They are still
 # allowlisted by name and still scanned for every real credential shape; what they are exempt from
 # is the low-signal `key = "value"` heuristic below, which exists to catch a hand-written secret
@@ -391,10 +409,65 @@ def _validate_content_types(raw: bytes) -> None:
         ".ttf": "font/ttf", ".txt": "text/plain", ".vsixmanifest": "text/xml",
         ".ico": "image/x-icon",
         ".woff": "font/woff",
+        ".vsix": "application/octet-stream",
     }
     if (actual != expected or len(actual) != len(default_nodes)
             or root.findall(f"{{{CONTENT_NS}}}Override")):
         raise ValidationError("[Content_Types].xml: unexpected content-type declarations")
+
+
+def validate_voice(raw: bytes, *, voice_root: Path, environment_values: list[bytes]) -> str:
+    """Validate the DGC Voice VSIX carried at VOICE_MEMBER against editors/vscode-voice; return its version."""
+    label = VOICE_MEMBER
+    if len(raw) > VOICE_SIZE_LIMIT:
+        raise ValidationError(f"{label}: oversized DGC Voice VSIX")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile as exc:
+        raise ValidationError(f"{label}: invalid DGC Voice VSIX ZIP") from exc
+    members: dict[str, bytes] = {}
+    with archive:
+        infos = archive.infolist()
+        names = [item.filename for item in infos]
+        if len(names) != len(set(names)):
+            raise ValidationError(f"{label}: duplicate ZIP members are forbidden")
+        if set(names) != VOICE_MEMBERS:
+            raise ValidationError(
+                f"{label}: DGC Voice member allowlist mismatch (added={sorted(set(names) - VOICE_MEMBERS)}, "
+                f"missing={sorted(VOICE_MEMBERS - set(names))})"
+            )
+        total = 0
+        for info in infos:
+            if not stat.S_ISREG(info.external_attr >> 16):
+                raise ValidationError(f"{label}: non-regular member {info.filename}")
+            if info.compress_type != zipfile.ZIP_DEFLATED or info.flag_bits & 0x1:
+                raise ValidationError(f"{label}: unexpected compression or encryption for {info.filename}")
+            total += info.file_size
+            if total > VOICE_SIZE_LIMIT:
+                raise ValidationError(f"{label}: oversized uncompressed DGC Voice VSIX")
+            members[info.filename] = archive.read(info)
+            _scan_credentials(f"{label}!{info.filename}", members[info.filename], environment_values)
+    for member, relative_source in VOICE_STATIC_MEMBERS.items():
+        source = voice_root / relative_source
+        if source.is_symlink() or not source.is_file() or members[member] != source.read_bytes():
+            raise ValidationError(f"{label}: {member} differs from reviewed source")
+    package = _read_json(members["extension/package.json"], f"{label}: package.json")
+    version = package.get("version")
+    if (package.get("name"), package.get("publisher"), package.get("extensionKind")) != ("dgc-voice", "vibedgc", ["ui"]) \
+            or not isinstance(version, str) or not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
+        raise ValidationError(f"{label}: package.json is not DGC Voice as a ui extension at a release version")
+    try:
+        manifest = ET.fromstring(members["extension.vsixmanifest"])
+    except ET.ParseError as exc:
+        raise ValidationError(f"{label}: extension.vsixmanifest: invalid XML") from exc
+    identity = manifest.find(f".//{{{VSIX_NS}}}Identity")
+    kinds = [node.get("Value") for node in manifest.findall(f".//{{{VSIX_NS}}}Property")
+             if node.get("Id") == "Microsoft.VisualStudio.Code.ExtensionKind"]
+    if identity is None or identity.attrib != {
+        "Language": "en-US", "Id": "dgc-voice", "Version": version, "Publisher": "vibedgc",
+    } or kinds != ["ui"]:
+        raise ValidationError(f"{label}: extension.vsixmanifest disagrees with DGC Voice's package.json")
+    return version
 
 
 def validate_artifact(
@@ -471,6 +544,8 @@ def validate_artifact(
         raise ValidationError(f"{path.name}: embedded build provenance disagrees")
     _validate_manifest(members["extension.vsixmanifest"], package, version)
     _validate_content_types(members["[Content_Types].xml"])
+    validate_voice(members[VOICE_MEMBER], voice_root=extension_root.parent / "vscode-voice",
+                   environment_values=environment_values)
     return members
 
 

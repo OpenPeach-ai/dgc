@@ -10,7 +10,8 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
-import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VOICE_EXTENSION, VoiceClient, type DictationOwner } from "./voice";
+import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
+import { offerVoiceInstall } from "./voiceInstall";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import { backendPath, dgcHome, editorPath, hiddenWslDistro, setUpWsl, wslRoute } from "./wslSetup";
 import {
@@ -708,13 +709,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       send: (cmd) => this.voiceSend(cmd),
       openSettings: (section) => this.openSettings(section),
       where: () => ({ remote: vscode.env.remoteName || "", app: vscode.env.appName || "" }),
-      offerInstall: (message) => {
-        void vscode.window.showInformationMessage(message, "Install DGC Voice").then((install) => {
-          if (!install) return;
-          void Promise.resolve(vscode.commands.executeCommand("workbench.extensions.installExtension", VOICE_EXTENSION)).catch(() =>
-            vscode.commands.executeCommand("workbench.extensions.search", `@id:${VOICE_EXTENSION}`));
-        });
-      },
+      // DGC carries DGC Voice (dist/dgc-voice.vsix), so Install works before it's on the Marketplace.
+      offerInstall: (message) => offerVoiceInstall(message, this.context.extensionPath),
     }));
   }
 

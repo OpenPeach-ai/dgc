@@ -230,6 +230,11 @@
 
 ### Fixed
 
+- **Install DGC Voice installs it.** DGC Voice isn't on the Marketplace or Open VSX yet, so the button opened the
+  Extensions view on a search for `@id:vibedgc.dgc-voice` that found nothing. DGC now carries DGC Voice inside its
+  own package and installs it from there (from the Marketplace instead, once it's there and not older), on the
+  computer you're at even in a Remote SSH window. It starts at once, with no reload, and the box that asked says
+  it's ready. If it can't install, it says why and where the file is, with **Install from VSIX…**.
 - **Dictation over Remote SSH explains itself.** In Cursor or VS Code connected to another machine, the microphone
   said "Dictation records on the computer you're at" and nothing else. It now says DGC Voice must be installed in
   that editor on this computer while DGC runs on the remote host, and offers to install it.

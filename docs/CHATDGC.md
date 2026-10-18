@@ -34,6 +34,8 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   - **Recording happens on the computer you're at,** through the small **DGC Voice** extension. It records the
     same way in a Remote SSH window, where DGC itself runs on the other machine. DGC Voice keeps nothing once it
     hands the recording over.
+  - **DGC Voice comes with DGC.** The first press without it offers **Install DGC Voice**, which installs it on
+    the computer you're at with no Marketplace needed and no reload; press the microphone again to talk.
   - **On a Mac,** macOS asks the first time whether your editor may use the microphone. If you said no, allow it
     in **System Settings → Privacy & Security → Microphone**.
 - **Read aloud.** The speaker under a reply reads it to you in the voice you chose in **Settings → Voice**. It

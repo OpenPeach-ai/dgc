@@ -23,13 +23,13 @@ await build({
     builder.onLoad({ filter: /^vscode$/, namespace: "test" }, () => ({ contents: "module.exports = globalThis.__DGC_TEST_VSCODE;", loader: "js" }));
   } }],
 });
-const { VoiceClient, Dictation, ReadAloud, PIECE_BYTES, VOICE_EXTENSION, LEVEL_POLL_MS } = createRequire(import.meta.url)(bundle);
+const { VoiceClient, Dictation, ReadAloud, PIECE_BYTES, VOICE_EXTENSION, VOICE_READY, LEVEL_POLL_MS } = createRequire(import.meta.url)(bundle);
 after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 
 const MODELS = (installed) => [{ id: "moonshine-base-en", role: "dictation", installed }, { id: "kitten-mini-en", role: "read_aloud", installed: false }];
 
 /** A `dgc serve` that answers voice_* as dgc/voice/service.py does. */
-function world({ installed = true, chosen = "moonshine-base-en", voice = "", voiceInstalled = false, hears = "book a table for two", recorder, sendAnswer = "sent", remote = "", app = "Cursor" } = {}) {
+function world({ installed = true, chosen = "moonshine-base-en", voice = "", voiceInstalled = false, hears = "book a table for two", recorder, sendAnswer = "sent", remote = "", app = "Cursor", offer } = {}) {
   const w = { sent: [], settings: [], offered: [], executed: [], uploads: new Map(), client: null };
   const answer = (ev) => setTimeout(() => w.client.onEvent(ev), 5);
   w.client = new VoiceClient({
@@ -51,7 +51,7 @@ function world({ installed = true, chosen = "moonshine-base-en", voice = "", voi
       return "sent";
     },
     openSettings: (section) => w.settings.push(section),
-    offerInstall: (message) => w.offered.push(message),
+    offerInstall: (message) => { w.offered.push(message); return offer?.(message); },
     where: () => ({ remote, app }),
     execute: async (command) => {
       w.executed.push(command);
@@ -110,6 +110,7 @@ test("no DGC Voice on this computer: it says so and offers to install it", async
   assert.match(result.error, /DGC Voice/);
   assert.equal(w.offered.length, 1);
   assert.match(w.offered[0], /isn't installed in Cursor yet/);
+  assert.match(w.offered[0], /It comes with DGC/, "DGC carries it: no Marketplace needed");
   // The chat points to the notification instead of repeating it.
   assert.notEqual(result.error, w.offered[0]);
   assert.match(result.error, /from the notification/);
@@ -190,6 +191,50 @@ test("one box records at a time; another is told so; the one recording hears its
   assert.deepEqual(pips.said.at(-1), { type: "mic", state: "recording" });
   await dictation.handle(pips, { type: "micStop" });
   assert.equal(pips.said.at(-1).mode, "insert", "Stop without a mode puts the words in the box");
+  dictation.dispose();
+});
+
+test("DGC Voice installed from the notification: the box that pressed says it's ready, and the next press records", async () => {
+  const NEEDS = { type: "mic", state: "idle", error: "Dictation needs DGC Voice. Install it from the notification, then press the microphone again.", kind: "error" };
+  let installed = false, finish;
+  const w = world({ recorder: (command) => {
+    if (!installed) throw new Error(`command '${command}' not found`);
+    return command === "dgcVoice.start" ? { ok: true } : { ok: true, pcm: speech(1).toString("base64") };
+  }, offer: () => new Promise((resolve) => { finish = resolve; }) });
+  const dictation = new Dictation(w.client);
+  const chat = box("chat");
+  await dictation.handle(chat, { type: "micStart" });
+  assert.deepEqual(chat.said, [NEEDS]);
+  assert.equal(w.offered.length, 1, "the notification offers to install it");
+  installed = true;
+  finish(true);                                   // installed, and dgcVoice.status answered
+  await until(() => chat.said.length === 2);
+  assert.deepEqual(chat.said[1], { type: "mic", state: "idle", error: VOICE_READY, kind: "info" });
+  assert.equal(VOICE_READY, "DGC Voice is installed. Press the microphone to dictate.");
+  await dictation.handle(chat, { type: "micStart" });
+  assert.deepEqual(chat.said.at(-1), { type: "mic", state: "recording" }, "no reload: the next press records");
+  await dictation.handle(chat, { type: "micStop" });
+  assert.equal(chat.said.at(-1).text, "book a table for two");
+
+  // Dismissed, or the install failed (its own notification said why): the box says nothing more.
+  const dismissed = world({ recorder: null, offer: async () => false }), page = box("page");
+  await new Dictation(dismissed.client).handle(page, { type: "micStart" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(page.said, [NEEDS]);
+
+  // Recording again by the time the install answers: the recording isn't interrupted.
+  let ready;
+  installed = false;
+  const again = world({ recorder: (command) => { if (!installed) throw new Error("not found"); return { ok: true }; },
+                        offer: () => new Promise((resolve) => { ready = resolve; }) });
+  const d3 = new Dictation(again.client), pips = box("pips");
+  await d3.handle(pips, { type: "micStart" });
+  installed = true;
+  await d3.handle(pips, { type: "micStart" });
+  ready(true);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(pips.said.slice(1), [{ type: "mic", state: "recording" }], "no idle note over a recording");
+  d3.dispose();
   dictation.dispose();
 });
 
