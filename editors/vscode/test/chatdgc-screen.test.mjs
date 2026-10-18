@@ -1621,8 +1621,19 @@ test("the header's wordmark moves as Work's does: the slashes in the bubble brea
       assert.equal(chat.markGap, ours.markGap, "as far from the word as Work's mark");
       assert.ok(chat.level < 0.75 && ours.level < 0.75, `the mark, the word and the caret on one line (${chat.level}, ${ours.level})`);
       assert.equal(chat.inset, ours.inset, "as far in from the header's edge");
-      assert.deepEqual(chat.markSize, [16, 16], "the bubble a little larger than Work's slashes, so the slashes inside read");
       assert.deepEqual(ours.markSize, [14, 14]);
+      assert.deepEqual(chat.markSize, ours.markSize, "the bubble at the size of Work's mark (the founder: the size and looks of Work's)");
+      // The whole header is Work's, not only the wordmark: its height, padding, no rule below, the title's type and colour,
+      // and the small faint buttons.
+      const header = (page, head, title, button) => page.evaluate(([head, title, button]) => {
+        const h = document.querySelector(head), t = document.querySelector(title), b = document.querySelector(button), cs = (n) => getComputedStyle(n);
+        return { height: h.getBoundingClientRect().height, minHeight: cs(h).minHeight, padding: cs(h).padding, rule: cs(h).borderBottomWidth,
+                 onItsPage: cs(h).backgroundColor === cs(document.body).backgroundColor, gap: cs(h).columnGap,
+                 title: `${cs(t).fontWeight} ${cs(t).fontSize}/${cs(t).lineHeight} ${cs(t).fontFamily} ${cs(t).color}`,
+                 button: { size: [b.getBoundingClientRect().width, b.getBoundingClientRect().height], colour: cs(b).color } };
+      }, [head, title, button]);
+      assert.deepEqual(await header(s.page, ".cd-head", "#cd-title", "#cd-new"), await header(work, "#phead", "#thread-title", "#chat-add"),
+                       `${theme}: ChatDGC's header measures as Work's`);
       for (const sizes of await Promise.all([opacities(s.page, ".cd-head .pm"), opacities(work, "#phead .pm")])) {
         assert.ok(sizes.every((n) => n > 2), `each slash really fades in and out (${sizes})`);
       }
