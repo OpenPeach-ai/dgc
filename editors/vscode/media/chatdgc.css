@@ -231,6 +231,13 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
   .cd-tool { width: var(--control); padding: 0; justify-content: center; }
   .cd-tool .cd-tool-label, .cd-toggle .cd-tool-label { display: none; }
   .cd-toggle > .codicon.cd-toggle-icon { display: inline-block; }
+  /* Without its word, Temporary is an icon button like its neighbours: the checkbox stays (focus, Space, the screen
+     reader's "checkbox, checked") but is drawn by the icon, lit when on. A bare native box read as a stray white square. */
+  .cd-toggle { position: relative; width: var(--control); height: var(--control); justify-content: center; border-radius: var(--r-sm); }
+  .cd-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .cd-toggle:hover { background: var(--surface2); color: var(--text); }
+  .cd-toggle:has(input:checked) { color: var(--accent); background: var(--surface2); }
+  .cd-toggle:has(input:focus-visible) { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 }
 /* Narrower still: the model keeps its arc and chevron (its name is the pill's tooltip and heads its menu)... */
 @container cd-box (max-width: 420px) {

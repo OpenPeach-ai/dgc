@@ -159,6 +159,36 @@ test("with no click, the thinking is open while it thinks and closes when the an
   } finally { await s.page.close(); }
 });
 
+// A narrow box drew Temporary as a bare native checkbox beside its icon: a stray white square in a dark theme
+// (seen in real VS Code, 2026-10-18). Without its word it is an icon button like its neighbours, lit when on.
+test("narrow, Temporary is an icon button: no bare checkbox, Space and a click still toggle it, and it lights when on", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 460, height: 700 });
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    const look = () => s.page.evaluate(() => {
+      const label = document.getElementById("cd-temp-toggle"), box = document.getElementById("cd-temporary");
+      const r = label.getBoundingClientRect(), icon = label.querySelector(".cd-toggle-icon"), cs = getComputedStyle;
+      return { boxShown: cs(box).opacity !== "0", checked: box.checked, size: [Math.round(r.width), Math.round(r.height)],
+               icon: cs(icon).display !== "none", colour: cs(label).color,
+               accent: cs(document.body).getPropertyValue("--accent").trim(), attach: Math.round(document.getElementById("cd-attach").getBoundingClientRect().height) };
+    });
+    const before = await look();
+    assert.equal(before.boxShown, false, "no bare checkbox drawn");
+    assert.equal(before.icon, true, "its icon stands for it");
+    assert.equal(before.size[1], before.attach, "as tall as its neighbours");
+    assert.equal(before.checked, false);
+    await s.page.locator("#cd-temp-toggle").click();
+    const on = await look();
+    assert.equal(on.checked, true, "a click turns it on");
+    assert.notEqual(on.colour, before.colour, "and it lights");
+    await s.page.locator("#cd-temporary").focus();
+    await s.page.keyboard.press("Space");
+    assert.equal((await look()).checked, false, "Space turns it off again");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("however narrow the editor, the prompt box keeps one row: the tools turn to icons, the meter, model, microphone and Send hold their places; recording, the voice bar takes the row", async (t) => {
   if (skipOrFail(t)) return;
   for (const [width, recording] of [1100, 640, 460, 340, 230].flatMap((w) => [[w, false], [w, true]])) {
