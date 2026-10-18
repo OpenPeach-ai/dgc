@@ -2320,11 +2320,21 @@ async function navigateFromHost(value) {
     if(!target)throw Error('The Personal workspace for this draft is unavailable.');
     S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;setupRows=[];setupError='';S.error='';rememberView();await refresh(true);
   }
-  if(!S.jobs.some(p=>p.id===value.pip)&&pipsPaged()){
-   // A Pip past the pages read so far (a notification, the Sessions home): read it, then open it.
-   try{const found=(await send('get_pip',{pip_id:value.pip})).pip;if(record(found)&&found.id===value.pip&&found.workspace_id===S.workspace.id&&!S.jobs.some(p=>p.id===found.id))S.jobs=[...S.jobs,found];}catch{/* refused below */}
+  if(!S.jobs.some(p=>p.id===value.pip)){
+   // A Pip opened from elsewhere (a chat's run line, a notification, the Sessions home) may be past the pages read
+   // so far, or another workspace's: a project's Pip while Personal shows (the founder, 2026-10-18, saw only Core and
+   // "not available in the selected workspace"). Read it, open its own workspace, then it. One that is gone says so
+   // (get_pip: "That Pip isn’t on this computer").
+   const found=(await send('get_pip',{pip_id:value.pip})).pip;
+   if(!record(found)||found.id!==value.pip||typeof found.workspace_id!=='string')throw Error('That Pip isn’t on this computer any more. It may have been deleted.');
+   if(found.workspace_id!==S.workspace.id){
+    let target=S.workspaces.find(w=>w.id===found.workspace_id);
+    if(!target){const listed=await send('list_workspaces');if(Array.isArray(listed?.workspaces))S.workspaces=listed.workspaces;target=S.workspaces.find(w=>w.id===found.workspace_id);}
+    if(!target)throw Error(`${typeof found.name==='string'&&found.name?found.name:'This Pip'} belongs to a project this Pips view can’t open.`);
+    S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;setupRows=[];setupError='';S.error='';rememberView();await refresh(true);
+   }
+   if(!S.jobs.some(p=>p.id===found.id))S.jobs=[...S.jobs,found];
   }
-  if(!S.jobs.some(p=>p.id===value.pip))throw new Error('This Pip is not available in the selected workspace. Refresh the dashboard.');
   S.error='';
   const selecting=select(value.pip),token=scope();await selecting;if(token!==scope()||S.selected!==value.pip||!usable())return;
   const allowed=['chat','job','runs','schedule','handoffs','revisions','context','notifications'];

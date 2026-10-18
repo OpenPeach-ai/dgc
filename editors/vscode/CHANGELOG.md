@@ -354,6 +354,10 @@
   side bar and put Chat and Work two screens down; it is 204px now. A Pip with both failed runs and new findings says
   both ("1 run failed · 2 new findings"). The home also read only your first 50 Pips: one past those that needed you
   had no row.
+- **A Pip opened from a chat opens, in its own project.** Clicking the name of a Pip the chat ran (its run line, or
+  the agent map) opened the Pips view on your Personal Pips, showed only Core and said "This Pip is not available in
+  the selected workspace. Refresh the dashboard." The Pips view now switches to the Pip's project and opens it at the
+  run; a Pip that was deleted says "That Pip isn’t on this computer. It may have been deleted."
 - **Pips settings stay readable in the side bar.** "How many Pips you can have" broke one letter per line; every
   settings row now keeps its words in a readable column, with the control underneath when the side bar is narrow.
 - **A reply's details open into view** at the bottom of a conversation, where they used to open out of sight.
