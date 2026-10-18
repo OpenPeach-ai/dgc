@@ -118,6 +118,70 @@ class DigestTests(unittest.TestCase):
             self.assertTrue(self.build()["due"], "a new run is never hidden by the cache")
             self.assertEqual(built.call_count, 3)
 
+    def fail_run(self, job=None):
+        run_id, _ = self.source_run(job=job)
+        self.store.finish(run_id, error={"code": "fixture_failure", "message": "The model could not be reached"})
+        return run_id
+
+    def test_dismissing_one_pips_news_hides_only_its_news_until_it_does_something_new(self):
+        """The Sessions home's dismiss (founder, 2026-10-18: "3 Pips ran and failed ... a dismiss option")."""
+        other = self.store.create(self.workspace["id"], "Second", "Inspect source evidence", "HEAD", "fixture")
+        self.fail_run()
+        self.complete([self.finding("Unchecked user id", severity="high")], job=other)
+        self.at("2026-10-01T10:05:00.000Z")
+        value = self.build()
+        self.assertEqual({p["name"]: (p["runs"]["failed"], p["new_total"]) for p in value["pips"]},
+                         {"Review": (1, 0), "Second": (0, 1)})
+        seen = digest.mark_news_seen(self.registry, [self.job["id"]], value["until"], "editor-user")
+        self.assertEqual(seen, {"seen": [{"pip_id": self.job["id"], "seen_until": value["until"]}]})
+        later = self.build()
+        self.assertEqual([p["name"] for p in later["pips"]], ["Second"], "only the dismissed Pip's news is gone")
+        self.assertEqual((later["failed_runs"], later["since"]), (0, value["since"]), "the digest itself is not marked seen")
+        self.assertNotIn("failed run", later["headline"])
+        # It stays dismissed for a new registry (a reload, the next poll), with no cached copy.
+        from dgc.workspace_registry import WorkspaceRegistry
+        digest._CACHE.clear()
+        with WorkspaceRegistry(self.registry.directory, clock=lambda: self.now) as reopened:
+            self.assertEqual([p["name"] for p in digest.build(reopened)["pips"]], ["Second"])
+        # Something new brings it back, counting only the new run.
+        self.at("2026-10-01T10:30:00.000Z")
+        self.fail_run()
+        back = {p["name"]: p for p in self.build()["pips"]}
+        self.assertEqual(back["Review"]["runs"], {"succeeded": 0, "failed": 1, "cancelled": 0})
+        self.assertEqual(back["Second"]["new_total"], 1)
+
+    def test_marking_news_seen_is_checked_whole_and_never_moves_backwards(self):
+        other = self.store.create(self.workspace["id"], "Second", "Inspect source evidence", "HEAD", "fixture")
+        self.fail_run()
+        until = self.build()["until"]
+        self.assertEqual(len(digest.mark_news_seen(self.registry, [self.job["id"], other["id"]], until, "local-console")["seen"]), 2)
+        earlier = digest.mark_news_seen(self.registry, [self.job["id"]], "2026-10-01T09:00:00.000Z", "editor-user")
+        self.assertEqual(earlier["seen"][0]["seen_until"], until, "an older digest never brings news back")
+        missing = "pip_" + "f" * 32
+        for pip_ids, stamp, actor, code in (
+                ([self.job["id"], missing], until, "editor-user", "not_found"),
+                ([], until, "editor-user", "invalid_digest"),
+                ([self.job["id"], self.job["id"]], until, "editor-user", "invalid_digest"),
+                ([f"pip_{i:032x}" for i in range(digest.MAX_NEWS_SEEN + 1)], until, "editor-user", "invalid_digest"),
+                (self.job["id"], until, "editor-user", "invalid_digest"),
+                ([self.job["id"]], "2026-10-01T10:00:01.000Z", "editor-user", "invalid_digest"),
+                ([self.job["id"]], "2026-10-01T10:00:00Z", "editor-user", "invalid_digest"),
+                ([self.job["id"]], until, "main-chat", "local_only")):
+            with self.subTest(pip_ids=pip_ids, stamp=stamp, actor=actor), self.assertRaises(RegistryError) as raised:
+                digest.mark_news_seen(self.registry, pip_ids, stamp, actor)
+            self.assertEqual(raised.exception.code, code)
+        rows = self.registry.db.execute("SELECT pip_id FROM pip_news_seen ORDER BY pip_id").fetchall()
+        self.assertEqual(sorted(r[0] for r in rows), sorted([self.job["id"], other["id"]]), "a refused request keeps nothing")
+
+    def test_dismissing_changes_the_cached_digest_at_once(self):
+        self.fail_run()
+        with patch.object(digest, "_build", wraps=digest._build) as built:
+            first = self.build()
+            self.assertEqual(self.build(), first)
+            digest.mark_news_seen(self.registry, [self.job["id"]], first["until"], "editor-user")
+            self.assertEqual(self.build()["pips"], [], "the next poll does not bring it back from the cache")
+            self.assertEqual(built.call_count, 2)
+
     def hold(self, created, expires="2026-10-02T10:00:00.000Z"):
         """A submit a Pip's computer is holding for the user, as the supervisor records it."""
         import secrets
@@ -258,6 +322,19 @@ class DigestMigrationTests(unittest.TestCase):
         with patch.object(workspace_registry, "SCHEMA_VERSION", 33), self.assertRaises(RegistryError):
             WorkspaceRegistry(self.registry.directory)
 
+    def test_schema45_gains_the_news_seen_table_and_an_older_reader_refuses_46(self):
+        from dgc import workspace_registry
+        from dgc.workspace_registry import WorkspaceRegistry
+        pip = self.store.create(self.workspace["id"], "Kept", "Review", "local-console")
+        self.registry.db.execute("DROP TABLE pip_news_seen")
+        self.registry.db.execute("PRAGMA user_version=45")
+        with WorkspaceRegistry(self.registry.directory) as upgraded:
+            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], 46)
+            self.assertEqual(upgraded.db.execute("SELECT count(*) FROM pip_news_seen").fetchone()[0], 0)
+            self.assertIsNotNone(upgraded.db.execute("SELECT 1 FROM pips WHERE id=?", (pip["id"],)).fetchone(), "its Pips kept")
+        with patch.object(workspace_registry, "SCHEMA_VERSION", 45), self.assertRaises(RegistryError):
+            WorkspaceRegistry(self.registry.directory)
+
 
 class DigestControlTests(unittest.TestCase):
     setUp = fixtures.LocalPipsTests.setUp
@@ -281,6 +358,17 @@ class DigestControlTests(unittest.TestCase):
         refused = self.control({"type": "get_pip_digest"}, actor="device_paired")
         self.assertEqual(refused["error"]["code"], "local_only")
         extra = self.control({"type": "get_pip_digest", "workspace_id": self.workspace["id"]})
+        self.assertEqual(extra["error"]["code"], "invalid_request")
+
+    def test_one_pips_news_is_marked_seen_by_a_local_control(self):
+        pip = self.store.create(self.workspace["id"], "Reviewer", "Review", "local-console")
+        until = self.control({"type": "get_pip_digest"})["result"]["digest"]["until"]
+        seen = self.control({"type": "mark_pip_news_seen", "pip_ids": [pip["id"]], "until": until})
+        self.assertTrue(seen["ok"], seen)
+        self.assertEqual(seen["result"], {"seen": [{"pip_id": pip["id"], "seen_until": until}]})
+        refused = self.control({"type": "mark_pip_news_seen", "pip_ids": [pip["id"]], "until": until}, actor="device_paired")
+        self.assertEqual(refused["error"]["code"], "local_only")
+        extra = self.control({"type": "mark_pip_news_seen", "pip_ids": [pip["id"]], "until": until, "pip_id": pip["id"]})
         self.assertEqual(extra["error"]["code"], "invalid_request")
 
 

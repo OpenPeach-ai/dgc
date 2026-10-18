@@ -11,6 +11,8 @@ activity log:
   because nothing had changed, and the earlier findings that went away after their file
   changed. It is due once a local day when there is something to say, or straight away when a
   finding reaches a Pip's alert level. Seeing it anywhere (editor, terminal, CLI) marks it seen.
+  One Pip's news can be marked seen on its own (the Sessions home's dismiss, Pips API 48): its
+  runs and findings until then leave the digest everywhere, and what it does next comes back.
 - Finding outcomes, per Pip: of everything it reported, what was accepted or dismissed, what went
   away after its file changed (likely fixed) and what went away without one. "Went away" is never
   called "fixed": a later run simply stopped reporting it.
@@ -35,6 +37,7 @@ MAX_PIPS = 20                          # Pips listed in one digest, most importa
 MAX_FINDINGS = 5                       # findings listed per Pip
 MAX_TITLE = 200
 MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+MAX_NEWS_SEEN = 50                     # Pips whose news one request marks seen
 
 SCHEMA = """
 CREATE TABLE pip_notify_settings (
@@ -49,6 +52,16 @@ CREATE TABLE pip_digest_state (
  id INTEGER PRIMARY KEY CHECK(id=1),
  seen_until TEXT NOT NULL,
  seen_day TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+"""
+# One Pip's news seen up to a digest's `until` (registry schema 46). `revision` moves on every change,
+# so the cached digest's fingerprint sees it.
+NEWS_SEEN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_news_seen (
+ pip_id TEXT PRIMARY KEY REFERENCES pips(id),
+ seen_until TEXT NOT NULL,
+ revision INTEGER NOT NULL CHECK(typeof(revision)='integer' AND revision>=1),
  updated_at TEXT NOT NULL
 );
 """
@@ -224,6 +237,7 @@ def _fingerprint(registry, now):
             registry.db.execute("SELECT max(finished_at), count(*) FROM pip_runs WHERE finished_at IS NOT NULL").fetchone()[:],
             registry.db.execute("SELECT max(id) FROM pip_checkpoints").fetchone()[0],
             registry.db.execute("SELECT max(seq) FROM workspace_events").fetchone()[0],
+            registry.db.execute("SELECT count(*), coalesce(sum(revision),0) FROM pip_news_seen").fetchone()[:],
             # Held submits that expire or are lost write no event.
             registry.db.execute("SELECT count(*) FROM pip_computer_actions WHERE status='pending'").fetchone()[0])
 
@@ -279,17 +293,21 @@ def _build(registry, config=None) -> dict:
                             "gone_after_change": 0, "alert": False, "latest_run_id": None}
         return pips[pip_id]
 
-    for row in registry.db.execute("""SELECT pip_id,status,count(*) AS n FROM pip_runs
-            WHERE finished_at>? AND finished_at<=? AND status IN ('succeeded','failed','cancelled')
-            GROUP BY pip_id,status""", (since_s, until_s)):
+    # A Pip whose news the user dismissed counts only what came after (pip_news_seen).
+    unseen = "LEFT JOIN pip_news_seen s ON s.pip_id=r.pip_id"
+    after = "(s.seen_until IS NULL OR r.finished_at>s.seen_until)"
+    for row in registry.db.execute(f"""SELECT r.pip_id,r.status,count(*) AS n FROM pip_runs r {unseen}
+            WHERE r.finished_at>? AND r.finished_at<=? AND {after} AND r.status IN ('succeeded','failed','cancelled')
+            GROUP BY r.pip_id,r.status""", (since_s, until_s)):
         item = entry(row["pip_id"])
         item["runs"][row["status"]] += row["n"]
-    for row in registry.db.execute("""SELECT id,pip_id FROM pip_runs WHERE finished_at>? AND finished_at<=?
-            AND status IN ('succeeded','failed','cancelled') ORDER BY finished_at""", (since_s, until_s)):
+    for row in registry.db.execute(f"""SELECT r.id,r.pip_id FROM pip_runs r {unseen} WHERE r.finished_at>? AND r.finished_at<=?
+            AND {after} AND r.status IN ('succeeded','failed','cancelled') ORDER BY r.finished_at""", (since_s, until_s)):
         entry(row["pip_id"])["latest_run_id"] = row["id"]
-    for row in registry.db.execute("""SELECT pip_id,payload FROM workspace_events
-            WHERE event_type IN ('pip_schedule_skipped','pip_event_trigger_skipped')
-            AND created_at>? AND created_at<=? AND pip_id IS NOT NULL LIMIT 5000""", (since_s, until_s)):
+    for row in registry.db.execute("""SELECT e.pip_id,e.payload FROM workspace_events e LEFT JOIN pip_news_seen s ON s.pip_id=e.pip_id
+            WHERE e.event_type IN ('pip_schedule_skipped','pip_event_trigger_skipped')
+            AND e.created_at>? AND e.created_at<=? AND (s.seen_until IS NULL OR e.created_at>s.seen_until)
+            AND e.pip_id IS NOT NULL LIMIT 5000""", (since_s, until_s)):
         try:
             reason = json.loads(row["payload"]).get("reason")
         except ValueError:
@@ -297,8 +315,8 @@ def _build(registry, config=None) -> dict:
         if reason == "source_unchanged":
             entry(row["pip_id"])["skipped_unchanged"] += 1
 
-    checkpoints = registry.db.execute("""SELECT c.id FROM pip_checkpoints c JOIN pip_runs r ON r.id=c.run_id
-            WHERE r.finished_at>? AND r.finished_at<=? ORDER BY c.id LIMIT ?""",
+    checkpoints = registry.db.execute(f"""SELECT c.id FROM pip_checkpoints c JOIN pip_runs r ON r.id=c.run_id {unseen}
+            WHERE r.finished_at>? AND r.finished_at<=? AND {after} ORDER BY c.id LIMIT ?""",
                                       (since_s, until_s, MAX_CHECKPOINTS + 1)).fetchall()
     truncated = len(checkpoints) > MAX_CHECKPOINTS
     baselines = {}
@@ -409,6 +427,38 @@ def mark_seen(registry, until, actor) -> dict:
             SET seen_until=excluded.seen_until,seen_day=excluded.seen_day,updated_at=excluded.updated_at""",
                             (until, day, stamp))
         return {"seen_until": until, "seen_day": day}
+
+
+def mark_news_seen(registry, pip_ids, until, actor) -> dict:
+    """Record that the user saw these Pips' news up to `until`, the time of the digest they saw (the
+    Sessions home's dismiss). Their runs and findings until then leave the digest, everywhere; a run
+    that ends later brings the Pip back. Waiting reviews are not news and stay. Never moves backwards."""
+    from .pip_schedules import _instant
+    from .pips import PipStore
+    if actor not in _LOCAL_ACTORS:
+        _fail("Digests are read on this computer.", "local_only")
+    if (not isinstance(pip_ids, list) or not 1 <= len(pip_ids) <= MAX_NEWS_SEEN
+            or any(not isinstance(p, str) for p in pip_ids) or len(set(pip_ids)) != len(pip_ids)):
+        _fail(f"Name 1 to {MAX_NEWS_SEEN} different Pips whose news you saw.")
+    now = _now(registry)
+    try:
+        instant = _instant(until)
+    except (RegistryError, ValueError, TypeError):
+        _fail("Mark news seen with the time its digest was built.")
+    if _stamp(instant) != until or instant > now:
+        _fail("Mark news seen with the time its digest was built.")
+    store = PipStore(registry)
+    with registry.transaction():
+        for pip_id in pip_ids:
+            store._job(pip_id)                        # not_found for an unknown Pip, before anything is kept
+        stamp = _stamp(now)
+        for pip_id in pip_ids:
+            registry.db.execute("""INSERT INTO pip_news_seen VALUES(?,?,1,?) ON CONFLICT(pip_id) DO UPDATE
+                SET seen_until=excluded.seen_until,revision=pip_news_seen.revision+1,updated_at=excluded.updated_at
+                WHERE excluded.seen_until>pip_news_seen.seen_until""", (pip_id, until, stamp))
+        seen = {row["pip_id"]: row["seen_until"] for row in registry.db.execute(
+            f"SELECT pip_id,seen_until FROM pip_news_seen WHERE pip_id IN ({','.join('?' * len(pip_ids))})", pip_ids)}
+    return {"seen": [{"pip_id": pip_id, "seen_until": seen[pip_id]} for pip_id in pip_ids]}
 
 
 # ---------------------------------------------------------------- outcomes ---

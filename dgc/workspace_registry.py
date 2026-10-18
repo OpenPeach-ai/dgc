@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 45
+SCHEMA_VERSION = 46
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -388,6 +388,10 @@ class WorkspaceRegistry:
             from .pip_routines import TROUPE_COLUMN
             if "troupe" not in {row[1] for row in self.db.execute("PRAGMA table_info(pip_routines)")}:
                 self.db.execute(TROUPE_COLUMN)
+        if version < 46:
+            # One Pip's news dismissed on the Sessions home, until it does something new (pip_digest.NEWS_SEEN_SCHEMA).
+            from .pip_digest import NEWS_SEEN_SCHEMA
+            _execute_schema(self.db, NEWS_SEEN_SCHEMA)
         # Schema33 admits explicit version3 bounded additional app-read grants.
         # Schema32 adds explicit guest and finite-series semantics to calendar drafts/actions.
         # Older readers must refuse the registry instead of rendering a partial review.

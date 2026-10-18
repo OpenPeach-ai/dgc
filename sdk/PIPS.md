@@ -161,6 +161,7 @@ job with `create_pip` and a reviewed update.
 | 45 | `set_plugin_permission`: what each plugin may do without asking (`always_ask`, `any_changes`, `important`, `never_ask`), for every Pip. A read at `important` runs without a card. |
 | 46 | `shared: true` on `list_pip_notes`, `add_pip_note` and `forget_pip_note`: a Pip's notes are kept in the one memory DGC keeps for you (ids `mem_…`). |
 | 47 | A Pip's `chat_options` are its own and apply to all its runs; runs have no step or time limit, reviewed specialist Patches included (specialist policy version 2); several Pips run at once |
+| 48 | `mark_pip_news_seen`: one Pip's news (failed runs, new findings) dismissed until it does something new |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -389,6 +390,7 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | --- | --- | --- |
 | `get_pip_digest` | R | none |
 | `mark_pip_digest_seen` | M | `until` (the digest's own `until`) |
+| `mark_pip_news_seen` | M | `pip_ids` (1–50), `until` (the digest's own `until`); API 48 |
 | `get_pip_notify_settings` | R | `pip_id` |
 | `set_pip_notify_settings` | M | `pip_id`, `min_severity`, `alert_severity` (or null), `expected_revision` |
 | `get_pip_outcomes` | R | `pip_id` |

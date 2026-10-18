@@ -67,6 +67,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "mark_pip_news_seen",
     "set_pip_chat_options",
     "set_plugin_permission",
     "allow_pip_plugin", "decline_pip_plugin", "set_pips_limit", "add_pip_note", "forget_pip_note", "set_pip_careful", "forget_pip_site",
@@ -217,6 +218,9 @@ MUTATION_COMMANDS |= API45_MUTATIONS
 # API 47: a Pip's context window and thinking are its own (its prompt box), for all its runs; local only.
 API47_MUTATIONS = frozenset({'set_pip_chat_options'})
 MUTATION_COMMANDS |= API47_MUTATIONS
+# API 48: a Pip's news (failed runs, new findings) dismissed until it does something new; local only.
+API48_MUTATIONS = frozenset({'mark_pip_news_seen'})
+MUTATION_COMMANDS |= API48_MUTATIONS
 COMMAND_FIELDS = {
     'list_pip_plugins': frozenset({'pip_id'}),
     'allow_pip_plugin': frozenset({'pip_id', 'grant_id'}),
@@ -282,6 +286,7 @@ COMMAND_FIELDS = {
     'set_pips_keep_running': frozenset({'enabled'}),
     'get_pip_digest': frozenset(),
     'mark_pip_digest_seen': frozenset({'until'}),
+    'mark_pip_news_seen': frozenset({'pip_ids', 'until'}),
     'get_pip_notify_settings': frozenset({'pip_id'}),
     'set_pip_notify_settings': frozenset({'pip_id', 'min_severity', 'alert_severity', 'expected_revision'}),
     'get_pip_outcomes': frozenset({'pip_id'}),
@@ -477,7 +482,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API47_MUTATIONS:
+        if command in API48_MUTATIONS:
+            minimum = 48
+        elif command in API47_MUTATIONS:
             minimum = 47
         elif command in API45_MUTATIONS:
             minimum = 45

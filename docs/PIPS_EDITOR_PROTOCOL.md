@@ -148,6 +148,12 @@ and shows the plan in the proposal review. The main chat's Pips bar polls
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md#schedules-and-event-triggers) for what a
 digest contains and when it is due.
 
+From API 48, `mark_pip_news_seen {pip_ids, until}` (local only, 1–50 Pips) marks those
+Pips' news seen up to the digest's own `until`: their runs, findings and skipped runs
+until then leave the digest, and a run that ends later brings a Pip back. It answers
+`{seen: [{pip_id, seen_until}]}` and never moves backwards. The side bar's home sends it
+for a row's ✕ and for **Dismiss all**; the extension refuses it before API 48.
+
 The computer controls (API 42) are local only (`editor-user`):
 `get_pip_computer {pip_id}` returns `{computer: {pip_id, granted, available, reason, pending,
 actions}}` with the newest five actions. `list_pip_computer_actions {pip_id, limit?}` returns

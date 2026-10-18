@@ -626,6 +626,11 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **One Pip's news can be dismissed (Pips API 48).** `mark_pip_news_seen {pip_ids, until}` (1–50 Pips, `until` the
+  digest's own `until`, local only) marks those Pips' failed runs and new findings seen up to then: they leave
+  `get_pip_digest` everywhere (the side bar's home, the chat's Pips bar, desktop notifications, `dgc pips digest`),
+  and a Pip comes back only with a run that ends later. The rest of the digest is not marked seen; waiting reviews are
+  not news and stay. It never moves backwards. Pips registry schema 46 (`pip_news_seen`).
 - **A Pip's run list works on Python 3.10** (Ubuntu 22.04's default). Listing runs read rows while a rollback ran,
   which Python 3.10's sqlite3 refuses: `dgc pip runs`, the Pips page and scheduled checks failed with "Cursor needed
   to be reset because of commit/rollback".

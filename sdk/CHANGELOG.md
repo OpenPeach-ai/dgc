@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+Pips API 48: `mark_pip_news_seen {pip_ids, until}` (a mutation, local only) marks 1–50 Pips' news (failed runs, new
+findings) seen up to a digest's `until`, until they do something new; both SDKs know it and refuse it before API 48.
+
 The editor's agent map added two events, `background_shells` and `background_output`, to the vendored protocol and
 the TypeScript SDK's known events, so neither SDK drops them; and the commands `list_background_shells`,
 `stop_background_shell` and `get_background_output` (with `ready.capabilities.background_tasks`). With
