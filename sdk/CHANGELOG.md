@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+The editor's agent map added two events, `background_shells` and `background_output`, to the vendored protocol and
+the TypeScript SDK's known events, so neither SDK drops them; and the commands `list_background_shells`,
+`stop_background_shell` and `get_background_output` (with `ready.capabilities.background_tasks`). With
+`ready.capabilities.agent_control_foreground`, `agent_control` close stops a foreground sub-agent without ending
+the turn.
+
 Pips have no daily token limit any more (backend 2026-10-14): `set_pip_daily_cap` accepts only `daily_tokens: null`
 (answered with the usage) and refuses a number; `get_pip_usage` keeps `daily_cap` (always null) and `capped_today`
 (always false).

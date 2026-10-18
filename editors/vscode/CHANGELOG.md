@@ -2,8 +2,35 @@
 
 ## Unreleased
 
+### Agent map
+
+- **The agents pill opens the agent map**, as in Claude Code, and so does `/agents`. The pill counts the agents
+  working now and stays after the turn once the chat has had one.
+  - **The map:** the chat as the root and every agent it started, in columns by depth (stacked in a narrow side bar):
+    its face (swirling while it works), what it was asked, and its time and tokens, ticking. Failed agents are red,
+    finished ones grey.
+  - **Background tasks below it:** commands running in the background, monitors, Troupes, Pip runs started from this
+    chat and artifact previews, each with Stop (or Open).
+  - **An agent's card:** state, type, model, background or foreground, who started it, time and tokens, what it is
+    doing or its result, its prompt, its tool calls, **Stop agent** and **Open transcript**: the agent's whole
+    conversation, live, in a large window.
+  - **Going back:** ←, Esc, or a click on the empty space around the window each go back one level: transcript, card,
+    map, closed.
+  - **Stop agent** stops one sub-agent without ending the turn (with a CLI that says it can); the main agent is told
+    and carries on. A command's card shows its output, updated every second.
+
 ### ChatDGC
 
+- **Each prompt and reply says when it was sent or written**, in DGC's chat, ChatDGC and Pips: the time today,
+  Yesterday or the weekday this week, then the date; the whole date on hover. A reopened chat shows its times too, and
+  how long each finished turn worked.
+- **Answered questions stay in the chat**, as Claude Code keeps them: "Questions · Answered · 2 questions", every
+  question with every option and its description, your picks marked (a filled circle for one choice, ticked boxes for
+  several, "Your words" for an answer you typed). It no longer folds away inside "Used 1 tool".
+- **A working agent's face swirls**, everywhere it is drawn, chips included; still once it ends, and still for a reader
+  who asked for less motion.
+- **An agent running in parallel says what each step worked on** ("Read README.md"), on its page and in the map,
+  where it read a bare "Read".
 - **Dictation, in every box.** DGC's chat, ChatDGC and Pips each have a microphone beside Send. While you speak, the
   box's bottom row becomes the voice bar, as Codex shows it:
   - **The bar:** ✕ Cancel, a live waveform with the time, ■ Stop and ↑ Send. Stop puts what you said in the box at
@@ -193,6 +220,9 @@
 
 ### Fixed
 
+- **Dictation over Remote SSH explains itself.** In Cursor or VS Code connected to another machine, the microphone
+  said "Dictation records on the computer you're at" and nothing else. It now says DGC Voice must be installed in
+  that editor on this computer while DGC runs on the remote host, and offers to install it.
 - **A link to a file with its line is a link.** `[README.md](README.md:1)` in a reply showed as raw text: a bare file
   name followed by a colon looked like a web address's scheme. The line comes off first now, so it opens README.md
   at line 1; `javascript:`, `command:` and the like are still refused, digits or not.
@@ -272,11 +302,16 @@
 
 ### Settings
 
+- **Settings and a Pip's Computer tab fit a narrow editor group** (about 230–270px): rows keep their words beside a
+  control that wraps underneath, the usage figures stack, and the Computer title no longer runs under its button.
 - **Token cap per turn** (Settings → General): what one turn may spend, sub-agents included; 0 means no cap. An older
   CLI shows it but can't save it.
 
 ### Pips
 
+- **Pips settings stay readable in the side bar.** "How many Pips you can have" broke one letter per line; every
+  settings row now keeps its words in a readable column, with the control underneath when the side bar is narrow.
+- **A reply's details open into view** at the bottom of a conversation, where they used to open out of sight.
 - **A Pip's context and thinking, in its message box, are the Pip's own:** "For this Pip: its replies and the work it
   does on its own", saved the moment you change them (with a DGC from before, still the next reply only). A run's
   details say **None** for the time, tool-call and step limits a run that keeps going doesn't have.

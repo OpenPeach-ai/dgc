@@ -6,6 +6,34 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+### Editor protocol: the agent map
+
+For the editor's agent map. Older clients are unaffected: everything new is a new event, a new command, or a key in
+`ready.capabilities`.
+
+- **`ready.capabilities.background_tasks: {"version": 1}`**: the backend sends `background_shells` (every background
+  command of this chat: id, redacted label, `running|exited|killed`, start and end, exit code, the sub-agent that
+  started it) once a client has asked with `list_background_shells`, and again whenever one starts or ends.
+  `stop_background_shell {id}` stops one, as `kill_shell` does. `get_background_output {id, max_bytes?}` answers
+  with `background_output`: the latest output of a background command or a monitor, redacted, at most `max_bytes`.
+- **`ready.capabilities.agent_control_foreground: true`**: `agent_control {action: "close", id}` also stops a
+  foreground sub-agent, without ending the turn. Its parent is told the user stopped it and carries on; its siblings
+  are untouched.
+
+### `dgc -p` in scripts
+
+- **A pipe or a file gets the answer and nothing else.** `answer=$(dgc -p …)`, `dgc -p … > out.txt` and
+  `dgc -p … | next-tool` used to receive the model's thinking ("· thinking (raw)…"), its tool steps and DGC's notices
+  along with the answer. When standard output isn't a terminal, those now go to standard error, which a terminal still
+  shows, and standard output holds only the final answer (the text `--output FILE` saves), as `codex exec` does. In a
+  terminal nothing changes. `--output-format json` is unchanged.
+- **The prompt stays off DGC's own command line.** `dgc -p "<prompt>"` restarts itself at once (same process, same
+  terminal and pipes) with a placeholder where the prompt was; the prompt crosses in a temporary file with no name on
+  disk, read and closed before anything else, so no command DGC runs inherits it. A model running
+  `pkill -f <a word of the prompt>` used to stop DGC itself mid-task (found running Terminal-Bench), and anyone on the
+  machine could read the prompt with `ps`. On Linux the process is also named `dgc`, so `pkill python` passes it by.
+  `-p -` (stdin) and Windows are unchanged.
+
 ### Security
 
 - **urllib3 2.8.0** (was 2.7.0) in the runtime lock: CVE-2026-97689 and CVE-2026-97688 (a malicious or broken server
@@ -35,6 +63,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ### ChatDGC
 
+- **Pictures of something else are dropped, not shown above a reply.** An image search sometimes answers with pictures
+  of something else entirely (asked for "Lisbon Portugal cityscape", DuckDuckGo returned four portraits from Kannada
+  news sites). A picture is kept only when a word of the search, without case or accents, is in its title, its page's
+  address or its own; no pictures beat wrong ones.
+- **Saving a file you asked for works on Python 3.10 and 3.11** (the spreadsheet writer used syntax only 3.12 allows).
 - **One memory, written everywhere.** Work sessions and Pips now add to the memory ChatDGC keeps, under the same
   rules: only what you typed (never a file, a page or a tool's output), facts not a task's details, at most three a
   turn.
@@ -464,6 +497,13 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 
 ### Models
 
+- **Ollama failing inside a reply, before anything was shown, is retried.** Ollama can answer 200 and then send
+  `{"error": "Internal Server Error"}` as the stream's first line. That ended the turn, where the same error before the
+  stream is retried; now it is retried too, from the same four tries. Once text, thinking or a tool call has been
+  shown, it still stops, since sending the request again would show it twice.
+- **An image the provider can't read no longer ends the turn.** A 400 such as "illegal base64 data at input byte 4" for
+  an attached image or a screenshot the model asked to see: the request goes again without the image, and the model
+  is told the provider couldn't read it. The model is still treated as able to read images.
 - **Ollama cloud replies stream.** Ollama's cloud labels its line-by-line stream `application/json`, and
   DGC read that body whole, so a `:cloud` model's reply reached the screen all at once when it ended, in
   Work, in Pips and in ChatDGC. Each part now arrives as the model writes it. A reply that really is one
@@ -471,6 +511,9 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 
 ### Sessions
 
+- **Each prompt and reply records when it was written** (`_dgc_at` in the session file; never sent to a model), so a
+  reopened chat in the editor shows its times and how long each finished turn worked. Sessions saved before keep no
+  times.
 - **The token cap per turn is in Settings → General.** `turn_token_budget` (tokens one turn may spend, sub-agents
   included; 0, the default, is no cap) could only be set in `config.json`. When it is reached, no new sub-agent
   starts and the turn wraps up, keeping its work. The `config` event carries it only to an editor that asks for it
@@ -575,6 +618,9 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   startup stops at once and says "Needs sign-in. Connect it in Settings → Plugins."
 ### Pips
 
+- **A Pip's run list works on Python 3.10** (Ubuntu 22.04's default). Listing runs read rows while a rollback ran,
+  which Python 3.10's sqlite3 refuses: `dgc pip runs`, the Pips page and scheduled checks failed with "Cursor needed
+  to be reset because of commit/rollback".
 - **A Pip run keeps going.** No step limit, no time limit and no 4,096-token answer cap: a run uses DGC's own output
   budget per response, in the Pip's own context window, compacts as a DGC chat does when it fills, and ends when its
   work is done, when you press Stop, or when it repeats itself without progress. A Patch with reviewed specialists
