@@ -696,6 +696,20 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 - **A Pip's run list says why a run failed.** `dgc pips runs` (and `--json`, and `list_pip_runs`) showed `"error":
   null` for failed runs, so a model that wanted the reason opened the SQLite registry itself. Each failed row now has
   its error's code and message (the message up to 600 characters), as `dgc pips report` does.
+- **One bad quote no longer throws away a Pip's report.** A finding whose excerpt didn't match its line failed the
+  whole run (`unverified_report`) and every verified finding with it. Now that finding is left out and named in the
+  report's limitations ("DGC left out 1 finding whose evidence it could not verify against the committed code: 5
+  'Title' (backend/app/admin_overview.py, line 287): its quoted code isn't at that line"), the same for a path outside
+  the snapshot or a file that isn't in it; the rejected excerpt is never repeated. Evidence stays exactly as strict:
+  only a finding whose excerpt is at its line is reported. The report keeps its format (at most 12 limitations of
+  500 characters). The audit instructions say so, and that anything with no source line (a data problem, a plan, a
+  count) belongs in the summary or limitations, never in an extra field.
+- **A report DGC can't read gets one repair with the exact reason.** Broken JSON or a field the format doesn't allow
+  (`severity_note`) gets one tool-free request that says what was wrong ("Finding 1 has invalid fields: unexpected
+  severity_note"). That request had at most 4,096 output tokens and 30 seconds, too little to rewrite a report of more
+  than 10 KB, which is the likely reason a broken report ("column 10898") stayed broken; it now gets room for the whole
+  draft (up to 16,384 tokens, within the context window) and the time to write it (up to 10 minutes). When the repair
+  fails too, the run's error says how ("the repair was cut off at its output limit").
 - **No more `&amp;` in a Pip's name.** Some providers send a tool call's text HTML-escaped (deepseek through Ollama
   did), and two Pips were saved as "ERP daily audit — data &amp; Tally integrity". `pips_setup` (name, goal, reason)
   and `pips_propose` (name, goal) now decode standard entities (`&amp;`, `&lt;`, `&#8212;`, …) when every `&` in

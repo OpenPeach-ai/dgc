@@ -256,7 +256,10 @@ AUDIT_SYSTEM_INSTRUCTIONS = (
     "Copy one or two complete source lines exactly, preserving leading spaces. "
     "Do not invent evidence. At most 16 findings and 12 limitations. An empty findings array is "
     "valid when no issue is substantiated; explain the inspection limits. Tests are NOT run. "
-    "Never claim test execution, verified correctness, or repository-wide coverage from a partial read."
+    "Never claim test execution, verified correctness, or repository-wide coverage from a partial read. "
+    "DGC checks every excerpt against the snapshot: a finding whose evidence isn't at its line is left out "
+    "of the report and named in limitations. Anything with no exact source line (a data problem, a count, "
+    "a plan or a list of fixes) goes in summary or limitations, never in a finding or an extra field."
 )
 
 
@@ -1859,7 +1862,7 @@ def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
     findings = report.get("findings")
     if not isinstance(findings, list) or len(findings) > 16 or not isinstance(limitations, list) or len(limitations) > 12:
         raise RegistryError("invalid_report", "The audit must contain at most 16 findings and 12 limitations.")
-    clean = []
+    clean, withheld = [], []
     for finding_index, finding in enumerate(findings, 1):
         expected_fields = {"title", "severity", "path", "line", "evidence"}
         if not isinstance(finding, dict):
@@ -1883,30 +1886,67 @@ def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
         if severity not in ("low", "medium", "high", "critical"):
             raise RegistryError("invalid_report", "The finding severity is invalid.")
         path = _text(finding["path"], "finding path", 1024)
-        pure = PurePosixPath(path)
-        if pure.is_absolute() or ".." in pure.parts or "\\" in path:
-            raise RegistryError("invalid_report", "Evidence must refer to a file inside the committed snapshot.")
         line = finding["line"]
         if type(line) is not int or not 1 <= line <= 1000000:
             raise RegistryError("invalid_report", "The evidence line must be a positive integer.")
         evidence = finding["evidence"]
         _text(evidence, "evidence", 1000)
-        from .workspace import read_regular_bytes, resolve_path
-        try:
-            target = resolve_path(path, snapshot)
-            data = read_regular_bytes(target, maximum=MAX_FILE_BYTES)[0].decode("utf-8", "replace")
-        except (OSError, ValueError) as exc:
-            raise RegistryError("invalid_report", "A finding references an unavailable source file.") from exc
-        lines = data.splitlines()
-        if line > len(lines) or not "\n".join(lines[line - 1:]).startswith(evidence):
-            raise RegistryError("unverified_report", f"Finding {finding_index} ({path[:160]!r}, line {line}): evidence does not match its stated source line. Copy source indentation exactly and omit read_file's line-number prefix.")
-        clean.append({"title": _text(finding["title"], "finding title", 200), "severity": severity,
+        title = _text(finding["title"], "finding title", 200)
+        # Evidence that does not check out costs that finding, never the report. One inexact quote used to fail the
+        # whole run with unverified_report, losing every verified finding beside it (ERP session review,
+        # 2026-10-18). The strictness stays: a finding is reported only with an excerpt found at its line; the
+        # others are named in limitations, with why.
+        pure = PurePosixPath(path)
+        problem = ""
+        if pure.is_absolute() or ".." in pure.parts or "\\" in path:
+            problem = "its path is outside the committed snapshot"
+        else:
+            from .workspace import read_regular_bytes, resolve_path
+            try:
+                target = resolve_path(path, snapshot)
+                data = read_regular_bytes(target, maximum=MAX_FILE_BYTES)[0].decode("utf-8", "replace")
+            except (OSError, ValueError):
+                problem = "that file isn't in the committed snapshot"
+            else:
+                lines = data.splitlines()
+                if line > len(lines):
+                    problem = f"the file has {len(lines)} lines"
+                elif not "\n".join(lines[line - 1:]).startswith(evidence):
+                    problem = "its quoted code isn't at that line"
+        if problem:
+            withheld.append((finding_index, title, path, line, problem))
+            continue
+        clean.append({"title": title, "severity": severity,
                       "path": path, "line": line, "evidence": evidence,
                       "verification": "source_excerpt_only"})
+    limitations = [_text(item, "limitation", 500) for item in limitations]
+    if withheld:
+        limitations = _with_withheld(limitations, withheld)
     return {"summary": summary, "findings": clean,
-            "limitations": [_text(item, "limitation", 500) for item in limitations],
+            "limitations": limitations,
             "verification": "Source excerpts checked against the pinned snapshot; findings are model assessments.",
             "tests_executed": False}
+
+
+def _with_withheld(limitations, withheld):
+    """The model's limitations plus one of DGC's: which findings were left out of the report and why. Still at most
+    12 items of 500 characters (the report's contract): with 12 already, the model's last two share one item."""
+    said = (f"DGC left out {len(withheld)} finding{'' if len(withheld) == 1 else 's'} whose evidence it could not "
+            "verify against the committed code:")
+    parts = []
+    for index, title, path, line, problem in withheld:
+        part = f" {index} '{title[:80]}' ({path[:120]}, line {line}): {problem};"
+        rest = len(withheld) - len(parts)
+        if len(said) + sum(map(len, parts)) + len(part) + 24 > 500:
+            parts.append(f" and {rest} more;")
+            break
+        parts.append(part)
+    note = (said + "".join(parts)).rstrip(";") + "."
+    kept = list(limitations)
+    if len(kept) >= 12:
+        joined = kept[10] + " " + kept[11]
+        kept = kept[:10] + [joined if len(joined) <= 500 else joined[:499] + "…"]
+    return [note[:500]] + kept
 
 
 class _WorkerUI:

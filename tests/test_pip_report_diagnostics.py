@@ -138,9 +138,10 @@ class PipReportDiagnosticTests(unittest.TestCase):
         self.assertEqual(failure.exception.code, "unverified_report")
         wrong = {"summary": "Reviewed", "findings": [{"title": "Concern", "severity": "low", "path": "source.py",
                   "line": 2, "evidence": "    return 99"}]}
-        with self.assertRaises(RegistryError) as failure:
-            self.parse(json.dumps(wrong))
-        self.assertEqual(failure.exception.code, "unverified_report")
+        # Unverified evidence costs its finding (named in limitations), never the report, and is never reported.
+        parsed = self.parse(json.dumps(wrong))
+        self.assertEqual(parsed["findings"], [])
+        self.assertIn("1 'Concern' (source.py, line 2): its quoted code isn't at that line", parsed["limitations"][0])
         with self.assertRaises(RegistryError):
             self.parse('{"summary":"Reviewed","findings":[],"unexpected":"value"}')
 

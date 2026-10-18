@@ -341,9 +341,10 @@ class LocalPipsTests(unittest.TestCase):
         result = pips.validate_report(json.dumps(report), self.root, read_calls=1)
         self.assertEqual(result["findings"][0]["verification"], "source_excerpt_only")
         self.assertFalse(result["tests_executed"])
-        report["findings"][0]["evidence"] = "not actually present"
-        with self.assertRaisesRegex(RegistryError, "does not match"):
-            pips.validate_report(json.dumps(report), self.root, read_calls=1)
+        report["findings"][0]["evidence"] = "return 'hello'"          # the indentation dropped: not the source
+        result = pips.validate_report(json.dumps(report), self.root, read_calls=1)
+        self.assertEqual(result["findings"], [], "an excerpt that isn't exact is never a verified finding")
+        self.assertIn("its quoted code isn't at that line", result["limitations"][0])
 
     def test_claim_of_success_without_source_read_refused(self):
         report = json.dumps({"summary": "All good", "findings": [], "limitations": []})
@@ -401,24 +402,40 @@ class LocalPipsTests(unittest.TestCase):
         self.assertIn("An empty findings array is valid", instructions)
         self.assertIn("Do not invent evidence", instructions)
 
-    def test_misquoted_or_misnumbered_evidence_has_actionable_private_diagnostic(self):
+    def test_misquoted_or_misnumbered_evidence_is_left_out_and_named_privately(self):
         self.commit()
         for line, evidence in ((1, "    return 'hello'"), (2, "return 'hello'"),
-                               (2, "2\t    return 'hello'"), (2, "PRIVATE_CANDIDATE_SECRET")):
+                               (2, "2\t    return 'hello'"), (2, "PRIVATE_CANDIDATE_SECRET"), (9, "return 'hello'")):
             report = {"summary": "Reviewed", "findings": [{"title": "Example", "severity": "low",
                       "path": "source.py", "line": line, "evidence": evidence}], "limitations": []}
-            with self.subTest(line=line, evidence=evidence), self.assertRaises(RegistryError) as raised:
-                pips.validate_report(json.dumps(report), self.root, read_calls=1)
-            self.assertEqual(raised.exception.code, "unverified_report")
-            self.assertIn(f"Finding 1 ('source.py', line {line})", str(raised.exception))
-            self.assertIn("omit read_file's line-number prefix", str(raised.exception))
-            self.assertNotIn("PRIVATE_CANDIDATE_SECRET", str(raised.exception))
+            with self.subTest(line=line, evidence=evidence):
+                result = pips.validate_report(json.dumps(report), self.root, read_calls=1)
+                self.assertEqual(result["findings"], [], "never reported as a verified finding")
+                self.assertIn(f"1 'Example' (source.py, line {line}): ", result["limitations"][0])
+                self.assertNotIn("PRIVATE_CANDIDATE_SECRET", json.dumps(result))
+        self.assertIn("the file has 2 lines", result["limitations"][0])
 
-    def test_unknown_and_external_evidence_refused(self):
-        report = {"summary": "Reviewed", "findings": [{"title": "Example", "severity": "low",
-                   "path": "../secret", "line": 1, "evidence": "secret"}], "limitations": []}
-        with self.assertRaisesRegex(RegistryError, "inside the committed"):
-            pips.validate_report(json.dumps(report), self.root, read_calls=1)
+    def test_unknown_and_external_evidence_is_left_out(self):
+        report = {"summary": "Reviewed", "findings": [
+            {"title": "Outside", "severity": "low", "path": "../secret", "line": 1, "evidence": "secret"},
+            {"title": "Missing", "severity": "low", "path": "nowhere.py", "line": 1, "evidence": "x"}], "limitations": []}
+        result = pips.validate_report(json.dumps(report), self.root, read_calls=1)
+        self.assertEqual(result["findings"], [])
+        self.assertIn("1 'Outside' (../secret, line 1): its path is outside the committed snapshot", result["limitations"][0])
+        self.assertIn("2 'Missing' (nowhere.py, line 1): that file isn't in the committed snapshot", result["limitations"][0])
+
+    def test_left_out_findings_keep_the_report_inside_its_contract(self):
+        from dgc.pip_checkpoints import encode_result
+        self.commit()
+        report = {"summary": "Reviewed", "findings": [{"title": "T" * 200, "severity": "low", "path": "p" * 300 + ".py",
+                  "line": n, "evidence": "x"} for n in range(1, 17)], "limitations": [f"limit {n} " + "l" * 300 for n in range(12)]}
+        result = pips.validate_report(json.dumps(report), self.root, read_calls=1)
+        self.assertEqual(len(result["limitations"]), 12)
+        self.assertTrue(all(len(item) <= 500 for item in result["limitations"]))
+        self.assertIn("and ", result["limitations"][0])
+        self.assertTrue(result["limitations"][0].startswith("DGC left out 16 findings"))
+        self.assertTrue(result["limitations"][-1].startswith("limit 10 "), "the model's last two share one item")
+        encode_result(result)            # a checkpoint accepts it as it is
 
     def test_native_policy_blocks_execution_in_every_mode(self):
         policy = pips._json(pips.native_policy())
