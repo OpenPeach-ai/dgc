@@ -158,6 +158,53 @@ class RunTests(AgentCase):
         self.assertIn("Verify (verifier) reads files and the web; no shell (it can't run commands, tests or database "
                       "queries)", out)
 
+    def test_while_it_runs_the_model_can_read_its_status_and_wait_for_it(self):
+        """ERP session review (2026-10-18): asked twice for a Troupe update, list_tasks was "not offered on this
+        request", so the model read ~/.dgc/troupes/<id>/results.jsonl with its own Python."""
+        agent = self.make_agent(ultra=True, ui=Recorder())
+        agent.on_detached_ended = lambda notice: None
+        self.assertFalse({"list_tasks", "wait_tasks"} & self.names(agent), "nothing to read yet")
+        release, verifying = threading.Event(), threading.Event()
+
+        def answers(prompt, workspace):
+            if "Review this for bugs" not in prompt:
+                number = int(prompt.split("(number ")[1].split(")")[0])
+                if number == 3:                       # the third vote waits until the test has looked
+                    verifying.set()
+                    release.wait(20)
+                    return '```json\n{"real": false, "why": "no shell here", "unsure": true}\n```'
+                return '```json\n{"real": true, "why": "seen"}\n```'
+            return review_answers(prompt, workspace)
+        run, _ = fake_child(answers)
+        with patch.object(Agent, "_execute_prepared_subagent", run), patch.object(troupe_agent, "width", lambda a: 1):
+            out = troupe_agent.start(agent, REVIEW, "c1")
+            run_id = out.split()[1]
+            self.assertTrue(verifying.wait(20))
+            names = self.names(agent)
+            self.assertIn("list_tasks", names, "offered on state: a troupe of this chat is running")
+            self.assertIn("wait_tasks", names)
+            self.assertFalse({"message_task", "close_task"} & names, "those act on sub-agents")
+            status = agent._list_tasks_result()
+            self.assertIn(f"- {run_id} · troupe · Review · running", status)
+            self.assertIn("Review: 2 of 2 agents done, 1 kept", status)
+            self.assertIn("Verify: 2 of 3 agents done (so far 2 said yes, 0 no)", status)
+            self.assertIn(f"{agent._troupes[run_id].dir}/results.jsonl has every finished agent's reply so far", status)
+            self.assertIn("5 agents", status, "the split's size is known once Verify started")
+            waited = {}
+            waiter = threading.Thread(target=lambda: waited.update(text=agent._wait_tasks_result(
+                {"ids": [run_id], "timeout_s": 30}, "c2")))
+            waiter.start()
+            time.sleep(0.3)
+            self.assertTrue(waiter.is_alive(), "it waits for the troupe instead of saying there is nothing to wait for")
+            release.set()
+            waiter.join(30)
+        self.assertIn(f"Troupe {run_id}: Review", waited.get("text", ""))
+        self.assertIn("Off by one", waited["text"])
+        status = agent._list_tasks_result()
+        self.assertIn(f"- {run_id} · troupe · Review · done", status)
+        self.assertIn("Verify: 3 of 3 agents done, 1 kept", status)
+        self.assertIn("report.md and results.json have the outcome", status)
+
     def test_a_one_shot_run_returns_the_report_and_its_agents_only_read(self):
         agent = self.make_agent(ultra=True)
         run, calls = fake_child(review_answers)

@@ -471,6 +471,13 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
     them, or `at_least` of them as far as there are any), and an item no one could check is kept with
     `"unchecked": true`. The report counts them ("2 kept (1 of them unchecked)") and marks each one
     ("UNCHECKED: none of 3 could check it", "1 of 1 agreed, 2 could not check").
+- **The model can read a running troupe's status.** Asked twice for an update, the model was told `list_tasks` was "not
+  offered on this request" and parsed the troupe's `results.jsonl` with its own Python. `list_tasks` and `wait_tasks`
+  are now offered whenever a troupe this chat started is running (state, never wording; `message_task` and
+  `close_task` still only for sub-agents). `list_tasks` lists the chat's troupes after its sub-agents: state, minutes,
+  size, each stage's agents done of total, what the votes say so far ("so far 12 said yes, 6 no, 2 could not
+  check"), what each finished stage kept, and where the results are. `wait_tasks` takes a troupe's id and returns its
+  report when it ends.
 
 ### Windows: the editor runs DGC in a WSL distro of its own
 

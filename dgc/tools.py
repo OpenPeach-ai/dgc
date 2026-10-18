@@ -639,7 +639,9 @@ TROUPE_TOOL_SCHEMA = _fn(
 SUPERVISION_TOOL_SCHEMAS = [
     _fn("list_tasks", "List the sub-agents of THIS conversation and what each is doing: id, state "
         "(queued, running, waiting on the user, finished, failed, stopped), how long it has run, "
-        "its tool count, and a finished one's one-line summary. Read-only and instant. Use it to "
+        "its tool count, and a finished one's one-line summary. Also its troupes: each stage's "
+        "agents done of total, what the votes say so far, what was kept, and where the results are. "
+        "Read-only and instant; use it for a troupe's progress instead of reading its journal. Use it to "
         "decide what to wait for: the ids it returns are the ids `wait_tasks` takes, and it marks "
         "which results are still unread.",
         {}, []),

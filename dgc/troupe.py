@@ -529,6 +529,7 @@ class Run:
         self.agents_started = 0
         self.current = -1               # the stage working now (its earlier ones are complete)
         self.unchecked: dict = {}       # stage index -> items it kept that no checker could check
+        self.tally: dict = {}           # stage index -> {"yes", "no", "unsure"}: the keep votes finished so far
         self._cached = dict(cached or {})
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -693,6 +694,11 @@ class Run:
                 record["failed"] += 1
             else:
                 record["done"] += 1
+                stage = self.plan.stages[unit.stage]
+                if stage.keep is not None and isinstance(unit.result, dict):
+                    # What the finished votes say so far, for the model's status (list_tasks) while the stage runs.
+                    tally = self.tally.setdefault(unit.stage, {"yes": 0, "no": 0, "unsure": 0})
+                    tally["unsure" if unsure(unit.result) else "yes" if stage.keep.holds(unit.result) else "no"] += 1
         self.runner.event("progress", self.snapshot())
 
     def _combine(self, stage: Stage, inputs: list, units: list[Unit], record: dict) -> list:
@@ -737,6 +743,39 @@ class Run:
         return out
 
     # -- what the frontend and the woken chat are told -----------------------------------------------
+
+    def status(self) -> str:
+        """This run for the model (list_tasks): where it is, stage by stage, what the votes say so far and where every
+        result is. A model asked for an update while a troupe ran found no tool for it and parsed results.jsonl with
+        its own Python (ERP session review, 2026-10-18)."""
+        with self._lock:
+            records = [dict(s) for s in self.stages]
+            tallies = {index: dict(t) for index, t in self.tally.items()}
+        minutes = int(((self.ended_at or time.time()) - self.started_at) // 60)
+        parts = []
+        for index, (stage, record) in enumerate(zip(self.plan.stages, records)):
+            if not record["total"]:
+                parts.append(f"{stage.name}: not started")
+                continue
+            line = f"{stage.name}: {record['done']} of {record['total']} agents done"
+            if record["failed"]:
+                line += f", {record['failed']} failed"
+            settled = record["done"] + record["failed"] >= record["total"]
+            tally = tallies.get(index)
+            if tally and not settled:
+                line += (f" (so far {tally['yes']} said yes, {tally['no']} no"
+                         + (f", {tally['unsure']} could not check" if tally["unsure"] else "") + ")")
+            if settled and index < self.current or settled and self.state != "running":
+                line += f", {record['kept']} kept" + (f" ({self.unchecked[index]} unchecked)"
+                                                      if self.unchecked.get(index) else "")
+            parts.append(line)
+        head = (f"- {self.id} · troupe · {self.plan.title} · {self.state}"
+                + (f" ({self.stop_reason})" if self.stop_reason else "")
+                + f" · {minutes} min · {self.estimate()}")
+        where = (f"  Results: {self.dir}/results.jsonl has every finished agent's reply so far"
+                 + ("; report.md and results.json have the outcome." if self.state != "running"
+                    else "; report.md and results.json come when it ends, and this chat wakes with the report."))
+        return "\n".join([head, "  " + " → ".join(parts), where])
 
     def agents_expected(self) -> int:
         """How many agents this run starts, as far as is known now. A stage that has started counts its real number,

@@ -3120,7 +3120,20 @@ class Agent(GoalLifecycle):
         from .permissions import session_policy
         if session_policy() is not None:
             return False
-        return bool(getattr(self, "_detached_jobs", None)) or self._detached_result_waiting()
+        return (bool(getattr(self, "_detached_jobs", None)) or self._detached_result_waiting()
+                or self._troupe_running())
+
+    def _troupe_running(self) -> bool:
+        """A troupe this chat started is still working: its status is something to read (list_tasks) and to wait for
+        (wait_tasks). State, never wording: asked twice for a Troupe update, the model was told list_tasks was "not
+        offered on this request" and parsed the journal with its own Python (ERP session review, 2026-10-18).
+        Registry-free and lock-free, like the gate it extends: a dict scan of this agent's own runs."""
+        runs = getattr(self, "_troupes", None)
+        if not runs:
+            return False
+        epoch = getattr(getattr(self, "monitors", None), "epoch", None)
+        return any(getattr(run, "state", "") == "running" and getattr(run, "epoch", None) in (None, epoch)
+                   for run in list(runs.values()))
 
     def _troupe_exposed(self) -> bool:
         """Is `troupe` offered (dgc/troupe.py)? Under Ultra, to the agent the user talks to, outside plan mode and
@@ -10383,14 +10396,19 @@ class Agent(GoalLifecycle):
         return {agent_id for agent_id in jobs if agent_id in known}
 
     def _list_tasks_result(self) -> str:
-        """`list_tasks`: this chat's sub-agents, rendered from the same snapshot the pill reads."""
+        """`list_tasks`: this chat's sub-agents, rendered from the same snapshot the pill reads, then its troupes."""
         from .subagents import model_view
+        from .troupe_agent import status_text
         registry = getattr(self, "subagents", None)
         snap = (registry.snapshot() if registry is not None
                 else {"items": [], "total": 0, "active": 0})
-        return model_view(snap, running_ids=self._live_detached_ids(),
-                          result_ids={row["id"] for row in
-                                      self._detached_results(unconsumed_only=True)})
+        agents = model_view(snap, running_ids=self._live_detached_ids(),
+                            result_ids={row["id"] for row in
+                                        self._detached_results(unconsumed_only=True)})
+        troupes = status_text(self)
+        if troupes and not (snap.get("items") or []):
+            return troupes                       # no sub-agents of its own: the troupes are the answer
+        return agents + ("\n\n" + troupes if troupes else "")
 
     def _wait_tasks_result(self, args: dict, call_id: str | None) -> str:
         """`wait_tasks`: block until a background child is final, then return its whole outcome.
@@ -10420,8 +10438,10 @@ class Agent(GoalLifecycle):
         budget = max(_WAIT_TASKS_MIN_S, min(_WAIT_TASKS_MAX_S, asked))
         note = "" if budget == asked else f" (timeout_s {asked} was clamped to {budget}.)"
 
+        from .troupe_agent import waiting_ids
+        troupe_ids = waiting_ids(self)
         if ids is not None:
-            known = set(getattr(self, "_detached_jobs", None) or {})
+            known = set(getattr(self, "_detached_jobs", None) or {}) | troupe_ids
             known |= {row["id"] for row in self._detached_results()}
             missing = [item for item in ids if item not in known]
             if len(missing) == len(ids):
@@ -10455,7 +10475,8 @@ class Agent(GoalLifecycle):
                 return ("Wait interrupted: the user sent a message while you were waiting. Read it "
                         "and deal with that first -- the sub-task keeps running and you can wait "
                         "again." + note)
-            live = self._live_detached_ids()
+            # A troupe this chat started is waited on like a background child: its end records a result here.
+            live = self._live_detached_ids() | waiting_ids(self)
             pending = sorted(live if ids is None else live.intersection(ids))
             if not pending:
                 return ("Nothing to wait for: no background sub-task of this conversation "

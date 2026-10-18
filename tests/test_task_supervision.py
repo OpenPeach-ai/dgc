@@ -70,10 +70,16 @@ class WhereTheSchemasLiveTest(unittest.TestCase):
 class WhoIsOfferedThePairTest(unittest.TestCase):
     """Three gates, and the request's wording is not one of them."""
 
-    def gate(self, *, depth=0, jobs=None, waiting=False) -> bool:
-        agent = SimpleNamespace(depth=depth, _detached_jobs=jobs or {},
+    @staticmethod
+    def agent(*, depth=0, jobs=None, waiting=False, troupes=None, epoch=None):
+        agent = SimpleNamespace(depth=depth, _detached_jobs=jobs or {}, _troupes=troupes or {},
+                                monitors=SimpleNamespace(epoch=epoch),
                                 _detached_result_waiting=lambda: waiting)
-        return Agent._supervision_exposed.__get__(agent)()
+        agent._troupe_running = Agent._troupe_running.__get__(agent)
+        return agent
+
+    def gate(self, **state) -> bool:
+        return Agent._supervision_exposed.__get__(self.agent(**state))()
 
     def test_nothing_running_and_nothing_unread_means_not_offered(self):
         self.assertFalse(self.gate())
@@ -83,6 +89,18 @@ class WhoIsOfferedThePairTest(unittest.TestCase):
 
     def test_so_does_a_result_nobody_has_read(self):
         self.assertTrue(self.gate(waiting=True))
+
+    def test_so_does_a_troupe_this_chat_started_that_is_still_running(self):
+        """ERP session review (2026-10-18): asked twice for a Troupe update, the model was told list_tasks was "not
+        offered on this request" and parsed the troupe's journal with its own Python."""
+        running = SimpleNamespace(state="running", epoch=4)
+        self.assertTrue(self.gate(troupes={"tr-0123456789": running}, epoch=4))
+        self.assertFalse(self.gate(troupes={"tr-0123456789": SimpleNamespace(state="done", epoch=4)}, epoch=4),
+                         "an ended troupe's report is an unread result, which the gate already covers")
+        self.assertFalse(self.gate(troupes={"tr-0123456789": running}, epoch=5), "a replaced chat's troupe")
+        self.assertFalse(self.gate(depth=1, troupes={"tr-0123456789": running}, epoch=4))
+        self.assertFalse(self.control_gate(troupes={"tr-0123456789": running}, epoch=4),
+                         "message_task and close_task act on sub-agents, not troupes")
 
     def test_a_child_is_never_offered_them(self):
         # `_run_subagent`'s detach gate is `depth == 0`, so a child's `background: true` runs
@@ -98,9 +116,8 @@ class WhoIsOfferedThePairTest(unittest.TestCase):
         # And with no host policy the same agent is offered them, so the patch is what decided it.
         self.assertTrue(self.gate(jobs={"sub-1": object()}, waiting=True))
 
-    def control_gate(self, *, depth=0, jobs=None, waiting=False) -> bool:
-        agent = SimpleNamespace(depth=depth, _detached_jobs=jobs or {},
-                                _detached_result_waiting=lambda: waiting)
+    def control_gate(self, **state) -> bool:
+        agent = self.agent(**state)
         # Bind the REAL supervision gate, so the conjunction is tested rather than restated.
         agent._supervision_exposed = Agent._supervision_exposed.__get__(agent)
         return Agent._control_exposed.__get__(agent)()

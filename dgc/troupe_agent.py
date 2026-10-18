@@ -173,6 +173,7 @@ def deliver(agent, run, epoch) -> None:
         agent._record_detached_result(run.id, description, outcome, epoch)
     except Exception:                            # noqa: BLE001
         pass
+    run.delivered = True                         # its report is readable by id now (wait_tasks)
     notify = getattr(agent, "on_detached_ended", None)
     if callable(notify):
         try:
@@ -220,6 +221,7 @@ def start(agent, args: dict, call_id) -> str:
     runs[run.id] = run
     hub = getattr(agent, "monitors", None)
     epoch = getattr(hub, "epoch", None)
+    run.epoch = epoch                            # whose run it is: a /new chat doesn't list or wait on it
     planned = plan.estimate()
     shape = " → ".join(s.name for s in plan.stages)
     pace = "one at a time (a model on this machine)" if runner.width == 1 else f"up to {runner.width} at a time"
@@ -250,6 +252,32 @@ def stop(agent, run_id: str = "") -> list[str]:
 
 def running(agent) -> list:
     return [run for run in getattr(agent, "_troupes", {}).values() if run.state == "running"]
+
+
+def this_chats(agent, *, running_only: bool = False) -> list:
+    """The troupes the chat now open started (newest first): a troupe a replaced chat started is not its business."""
+    hub = getattr(agent, "monitors", None)
+    epoch = getattr(hub, "epoch", None)
+    runs = [run for run in (getattr(agent, "_troupes", None) or {}).values()
+            if getattr(run, "epoch", None) in (None, epoch) and (run.state == "running" or not running_only)]
+    return sorted(runs, key=lambda run: run.started_at, reverse=True)
+
+
+def waiting_ids(agent) -> set:
+    """Troupes of this chat whose report isn't recorded yet: still working, or just ended and being delivered."""
+    return {run.id for run in this_chats(agent)
+            if run.state == "running" or (run.on_end is not None and not getattr(run, "delivered", False))}
+
+
+def status_text(agent) -> str:
+    """The `list_tasks` section for this chat's troupes, or "" when it has none."""
+    runs = this_chats(agent)[:10]
+    if not runs:
+        return ""
+    running_now = sum(1 for run in runs if run.state == "running")
+    head = (f"Troupes in this conversation: {len(runs)} ({running_now} running). A running troupe's id is one "
+            "wait_tasks takes; it wakes this chat with its report when it ends.")
+    return "\n".join([head, *(run.status() for run in runs)])
 
 
 def describe_event(kind: str, fields: dict, seen: set, *, stop_hint: bool = True) -> str:
