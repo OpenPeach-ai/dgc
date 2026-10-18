@@ -49,6 +49,34 @@ SITE = re.compile(r"(?i)^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[
 CITE = re.compile(r"\[(\d{1,3})\]")
 UNCITE = re.compile(r"[ \t]*\[(\d{1,3})\]")     # a citation and the space before it, to take out
 MARKER = re.compile(r"^(?:[-*•]|\d{1,2}[.)])\s+")      # a list marker the model or the user put before a step
+# A group of citation marks ("[1]", "[2][3]", "[2, 4]") with the space around it: what ChatDGC takes out of a reply's
+# words as it shows, copies and exports them (media/chatdgc.js does the same on screen). Its sources come at the end.
+CITE_MARKS = re.compile(r"([ \t ]*)(\[\d{1,3}(?:\s*,\s*\d{1,3})*\](?:[ \t ]*\[\d{1,3}(?:\s*,\s*\d{1,3})*\])*)([ \t ]*)")
+CODE_SPANS = re.compile(r"```[\s\S]*?(?:```|$)|`[^`\n]*`")
+CITE_GAP_PUNCT = re.compile(r"[.,;:!?)\]}”’\"'…%]")
+
+
+def uncited(text: str, sources) -> str:
+    """A reply's words without the marks that cite its sources, as the chat shows them: each group goes with the space
+    before it ("Paris [1]." -> "Paris."; "Paris [1] and" -> "Paris and"). A group goes when a number in it is one of
+    the reply's sources; brackets in a reply with no sources, or naming none ("array[0]"), are the reply's own and stay,
+    and so does anything in code. The reply as kept keeps them: they say which sources were cited."""
+    text = str(text or "")
+    known = {str(x.get("n")) for x in sources or [] if isinstance(x, dict)}
+    if not known:
+        return text
+    code = [m.span() for m in CODE_SPANS.finditer(text)]
+
+    def gap(m: re.Match) -> str:
+        at, end = m.span()
+        if not known.intersection(re.findall(r"\d{1,3}", m.group(2))) or any(at < b and end > a for a, b in code):
+            return m.group(0)
+        before, after = text[text.rfind("\n", 0, at) + 1:at], text[end:].split("\n", 1)[0]
+        if not before.strip() or not after.strip() or CITE_GAP_PUNCT.match(after):
+            return ""
+        joined = re.search(r"[A-Za-z0-9_]$", before) and re.match(r"[A-Za-z0-9_]", after)
+        return " " if (m.group(1) or m.group(3) or joined) else ""
+    return CITE_MARKS.sub(gap, text)
 # What a provider says when a model can't take tools (Ollama: "... does not support tools").
 NO_TOOLS = re.compile(r"(?i)(does not|doesn't) support tools|tools? (are|is) not supported|not support(ed)? (for )?tool")
 
@@ -507,9 +535,10 @@ class Research:
 
 
 def report_file(message: dict) -> str:
-    """A finished report as a Markdown file: the report, its sources, and what the citation check found."""
+    """A finished report as a Markdown file: the report (its words without their citation marks, as the chat shows
+    them), its sources, and what the citation check found."""
     state = message.get("research") or {}
-    lines = [message.get("text", "").rstrip(), ""]
+    lines = [uncited(message.get("text", ""), message.get("sources")).rstrip(), ""]
     if message.get("sources"):
         lines += ["## Sources", ""] + [f"{x['n']}. [{x['title']}]({x['url']})" for x in message["sources"]] + [""]
     check = state.get("check") or {}

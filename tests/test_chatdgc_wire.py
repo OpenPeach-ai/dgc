@@ -324,7 +324,7 @@ class ServiceTests(unittest.TestCase):
         target = Path(self.root).parent / "report.md"
         self.service.dispatch({"type": "chatdgc_export", "request_id": "e1", "conversation_id": chat, "path": str(target),
                                "format": "report", "message_id": planned["id"]})
-        self.assertTrue(target.read_text().startswith("# Paris\n\nSunny today [1]."))
+        self.assertTrue(target.read_text().startswith("# Paris\n\nSunny today.\n"), "its words as the chat shows them: no citation marks")
         self.assertIn("## Sources", target.read_text())
 
     def test_a_question_in_the_answer_on_the_wire(self):
@@ -453,10 +453,13 @@ class ServiceTests(unittest.TestCase):
         self.service.dispatch({"type": "chatdgc_export", "request_id": "x2", "conversation_id": chat,
                                "path": str(folder / "paris.md"), "format": "markdown"})
         self.assertIn("**Sources**\n\n1. [Forecast](https://weather.example/paris)", (folder / "paris.md").read_text())
+        self.assertIn("Sunny.", (folder / "paris.md").read_text(), "the words as the chat shows them: no citation marks")
+        self.assertNotIn("Sunny [1]", (folder / "paris.md").read_text())
         self.service.dispatch({"type": "chatdgc_export", "request_id": "x3", "conversation_id": chat,
                                "path": str(folder / "paris.json"), "format": "json"})
         whole = json.loads((folder / "paris.json").read_text())
         self.assertEqual(whole["format"], "chatdgc-chat")
+        self.assertIn("Sunny [1].", json.dumps(whole), "the whole chat as kept, marks and all")
         self.assertEqual(len(whole["chat"]["forks"]), 1, "every version")
         for bad in ("relative.md", str(folder), str(folder / "missing" / "x.md")):
             with self.subTest(bad=bad):

@@ -50,6 +50,12 @@
   Page Up and Down, Home and End move it). It follows the model's words while it's at its end; scroll it back and it
   stays where you put it while the reply goes on, and the chat stops pulling it away as the answer streams below. At
   its end, the wheel goes on to scroll the chat. The reply finishing keeps your place in it.
+- **Sources only at the end of a reply.** The source chips in the middle of a reply's words are gone, and so are their
+  hover cards; a reply that used the web ends with its sources ("Sources · 4" and their icons), which open beside the
+  chat as before. The "[1]" marks the model cites with are taken out of what you read, with the space before them, so
+  "Paris [1]." reads "Paris.". They stay in code, in a reply with no sources, and where a number names none of its
+  sources ("array[0]"). Copy, a deep research report (in the chat, its reader and its Copy) and chats you open again
+  read the same way.
 - **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
   slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
   still for a reader who asked for less motion.

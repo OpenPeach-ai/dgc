@@ -71,11 +71,10 @@
 
   // ---- messages
   const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
-  /** [n] in a reply that names one of its sources becomes a small mark that opens that page. Text nodes only,
-   *  outside code: a model's "[1]" in a code block is code. */
-  // ---- sources, as ChatGPT shows them: a pill with the site where a fact is cited, a card on hover, and a
-  // Sources button that opens them all. A favicon comes from Google's icon service, asked about the origin only,
-  // as Work's panel does; with dgc.linkFavicons off (or when one fails) it's a globe, and nothing is asked.
+  // ---- sources: only at the end of a reply, as the founder asked (2026-10-18): "mid-response source chips make it
+  // difficult to read the responses". The words read as prose; a reply that used the web ends with its sources
+  // (favicons and "Sources · N"), which open beside the chat. A favicon comes from Google's icon service, asked about
+  // the origin only, as Work's panel does; with dgc.linkFavicons off (or when one fails) it's a globe, and nothing is asked.
   let favicons = false;
   const siteOf = (url) => hostOf(url).replace(/^www\./, "");
   function faviconNode(url) {
@@ -88,33 +87,49 @@
     box.append(img);
     return box;
   }
-  /** [3][4] in a reply becomes one pill: the first source's site, and how many more. */
-  function cite(node, sources) {
-    if (!Array.isArray(sources) || !sources.length) return;
-    const byN = new Map(sources.map((x) => [String(x.n), x]));
+  // The model cites as it writes ("…in 1961 [2]."): the marks stay in the reply as kept, so its sources can say which
+  // were cited, but they are taken out of what's read, with the space before them, and out of what's copied. A group
+  // ("[1][3]", "[2, 4]") goes when any number in it is one of the reply's sources; a number in brackets in a reply
+  // with no sources, or one that names none ("array[0]"), is the reply's own and stays. Never inside code.
+  const CITE_MARKS = /([ \t ]*)(\[\d{1,3}(?:\s*,\s*\d{1,3})*\](?:[ \t ]*\[\d{1,3}(?:\s*,\s*\d{1,3})*\])*)([ \t ]*)/g;
+  const knownSources = (sources) => new Set((Array.isArray(sources) ? sources : []).map((x) => String(x?.n)));
+  const namesSource = (marks, known) => (marks.match(/\d{1,3}/g) || []).some((n) => known.has(n));
+  /** What takes a mark's place, from the words on either side of it in its paragraph: nothing at the start or the end,
+   *  or before punctuation ("Paris [1]." -> "Paris."); else one space where there was space ("Paris [1] and"). */
+  function citeGap(before, after, spaced) {
+    if (!before.trim() || !after.trim() || /^[.,;:!?)\]}”’"'…%]/.test(after)) return "";
+    return spaced || (/\w$/.test(before) && /^\w/.test(after)) ? " " : "";
+  }
+  /** The marks out of a rendered reply: text outside code, links and maths, judged within its paragraph. */
+  function uncite(node, sources) {
+    const known = knownSources(sources);
+    if (!known.size) return;
     const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, { acceptNode: (t) =>
-      t.parentElement?.closest("pre, code, .md-link") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+      t.parentElement?.closest("pre, code, .md-link, .md-math") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
     const texts = [];
-    for (let t = walker.nextNode(); t; t = walker.nextNode()) if (/\[\d{1,2}\]/.test(t.nodeValue)) texts.push(t);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) if (/\[\d/.test(t.nodeValue)) texts.push(t);
+    const range = document.createRange();
     for (const t of texts) {
-      const parts = t.nodeValue.split(/(\[\d{1,2}\](?:\s*\[\d{1,2}\])*)/);
-      const frag = document.createDocumentFragment();
-      for (const part of parts) {
-        const numbers = /^\[\d{1,2}\]/.test(part) ? [...new Set(part.match(/\d{1,2}/g))] : [];
-        const group = numbers.map((n) => byN.get(n)).filter(Boolean);
-        if (!group.length) { if (part) frag.append(part); continue; }
-        // A number the reply wasn't given stays as text after the pill: the model's mistake, not hidden.
-        const stray = numbers.filter((n) => !byN.has(n)).map((n) => `[${n}]`).join("");
-        const pill = el("button", "cd-cite");
-        pill.type = "button"; pill.dataset.url = group[0].url; pill.dataset.cites = group.map((x) => x.n).join(",");
-        pill.append(faviconNode(group[0].url), el("span", "cd-cite-site", siteOf(group[0].url)));
-        if (group.length > 1) pill.append(el("span", "cd-cite-more", `+${group.length - 1}`));
-        pill.setAttribute("aria-label", `Source${group.length > 1 ? "s" : ""}: ${group.map((x) => `${x.title} (${siteOf(x.url)})`).join("; ")}`);
-        frag.append(pill);
-        if (stray) frag.append(stray);
+      const block = t.parentElement.closest("p, li, td, th, h1, h2, h3, h4, h5, h6, blockquote, dt, dd") || node;
+      const found = [...t.nodeValue.matchAll(CITE_MARKS)].filter((m) => namesSource(m[2], known));
+      for (const m of found.reverse()) {           // from the last, so each one's place is still where it was found
+        range.setStart(block, 0); range.setEnd(t, m.index);
+        const before = range.toString();
+        range.setStart(t, m.index + m[0].length); range.setEnd(block, block.childNodes.length);
+        t.replaceData(m.index, m[0].length, citeGap(before, range.toString(), !!(m[1] || m[3])));
       }
-      t.replaceWith(frag);
     }
+  }
+  /** The same, for a reply's Markdown as written (a report's Copy): outside code fences and code spans, by the line. */
+  function uncitedText(text, sources) {
+    const words = String(text || ""), known = knownSources(sources);
+    if (!known.size) return words;
+    const code = [...words.matchAll(/```[\s\S]*?(?:```|$)|`[^`\n]*`/g)].map((m) => [m.index, m.index + m[0].length]);
+    return words.replace(CITE_MARKS, (all, pre, marks, post, at) => {
+      if (!namesSource(marks, known) || code.some(([from, to]) => at < to && at + all.length > from)) return all;
+      const before = words.slice(words.lastIndexOf("\n", at - 1) + 1, at), after = words.slice(at + all.length).split("\n")[0];
+      return citeGap(before, after, !!(pre || post));
+    });
   }
   /** One source as a card row: its favicon and site, its title (opens the page), and what the page says. */
   function sourceRow(source, tag = "li") {
@@ -127,53 +142,16 @@
     if (source.snippet) row.append(el("p", "cd-source-snippet", source.snippet));
     return row;
   }
-  // The card a pill shows on hover or focus; it stays while the pointer is on it, so its links can be used.
-  const citeCard = el("div", "cd-cite-card");
-  citeCard.hidden = true; citeCard.setAttribute("role", "dialog"); citeCard.setAttribute("aria-label", "Source");
-  document.body.append(citeCard);
-  let cardTimer = 0;
-  function showCard(pill) {
-    clearTimeout(cardTimer);
-    const message = state.messages.find((m) => m.id === pill.closest(".cd-msg")?.dataset.id) || readerMessage;
-    const byN = new Map((message?.sources || []).map((x) => [String(x.n), x]));
-    const group = String(pill.dataset.cites || "").split(",").map((n) => byN.get(n)).filter(Boolean);
-    if (!group.length) return;
-    const list = el("ul", "cd-card-list");
-    for (const source of group) list.append(sourceRow(source));
-    citeCard.replaceChildren(list);
-    citeCard.hidden = false;
-    const at = pill.getBoundingClientRect(), width = Math.min(340, window.innerWidth - 24);
-    citeCard.style.width = `${width}px`;
-    citeCard.style.left = `${Math.max(12, Math.min(at.left, window.innerWidth - width - 12))}px`;
-    // Above the pill, as ChatGPT's source preview opens: below it, a card held open by the pointer covered the
-    // Sources button and the reply's actions under a short answer (a live run couldn't reach them). Below only
-    // when there's no room above.
-    const height = citeCard.offsetHeight, above = at.top - height - 6;
-    citeCard.style.top = `${above >= 8 ? above : Math.min(at.bottom + 6, window.innerHeight - height - 8)}px`;
-  }
-  const hideCard = (soon = true) => { clearTimeout(cardTimer); cardTimer = setTimeout(() => { citeCard.hidden = true; }, soon ? 180 : 0); };
-  document.addEventListener("mouseover", (e) => {
-    const pill = e.target.closest?.(".cd-cite");
-    if (pill) showCard(pill);
-    else if (e.target.closest?.(".cd-cite-card")) clearTimeout(cardTimer);
-  });
-  document.addEventListener("mouseout", (e) => {
-    if (e.target.closest?.(".cd-cite, .cd-cite-card") && !e.relatedTarget?.closest?.(".cd-cite, .cd-cite-card")) hideCard();
-  });
-  document.addEventListener("focusin", (e) => { const pill = e.target.closest?.(".cd-cite"); if (pill) showCard(pill); });
-  document.addEventListener("focusout", (e) => { if (e.target.closest?.(".cd-cite") && !e.relatedTarget?.closest?.(".cd-cite-card")) hideCard(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !citeCard.hidden) { citeCard.hidden = true; } });
-  // Links in the card, the Sources panel and the reader: they live outside the conversation.
+  // Links in the Sources panel and the reader: they live outside the conversation.
   document.addEventListener("click", (e) => {
-    const open = e.target.closest?.(".cd-cite-card [data-url], .cd-panel [data-url], .cd-reader [data-url]");
+    const open = e.target.closest?.(".cd-panel [data-url], .cd-reader [data-url]");
     if (open) vscode.postMessage({ type: "openLink", target: open.dataset.url || "" });
   });
-  let readerMessage = null;
   function body(message, drafts) {
     const node = el("div", "text cd-body");
     const html = md(message.text);
     if (html === null) node.textContent = message.text || ""; else node.innerHTML = html;
-    cite(node, message.sources);
+    uncite(node, message.sources);
     if (drafts) { draftBlocks(node, message, drafts.live); chartBlocks(node, drafts.live); widgetBlocks(node, message, drafts.live); }
     return node;
   }
@@ -644,7 +622,6 @@
   /** The Sources panel, beside the conversation, as ChatGPT opens it. */
   function openSources(message) {
     $("cd-sources-panel")?.remove();
-    citeCard.hidden = true;
     const panel = el("aside", "cd-panel");
     panel.id = "cd-sources-panel";
     panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Sources");
@@ -694,7 +671,7 @@
   /** A reply as it reads: its rendered blocks without the screen's own buttons, links as links. */
   function readable(message) {
     const node = body(message, { live: true });
-    node.querySelectorAll(".copy, .code-language, .cd-draft-tools, .cd-cite, .cd-chart-tools, .cd-chart-legend, .cd-chart-tip").forEach((n) => n.remove());
+    node.querySelectorAll(".copy, .code-language, .cd-draft-tools, .cd-chart-tools, .cd-chart-legend, .cd-chart-tip").forEach((n) => n.remove());
     node.querySelectorAll(".cd-chart-table").forEach((t) => { t.hidden = false; });      // a chart pastes as its numbers
     node.querySelectorAll("button.md-link").forEach((b) => {
       const a = document.createElement("a");
@@ -1169,7 +1146,8 @@
       const actions = el("div", "cd-actions");
       const versions = versionsControl(message);
       if (versions) actions.append(versions);
-      actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: message.text || "" })));
+      // The report's Markdown as written, without the citation marks (its sources are listed at its end).
+      actions.append(action("copy", "Copy", () => vscode.postMessage({ type: "copy", text: uncitedText(message.text, message.sources) })));
       const branch = branchAction(message);
       if (branch) actions.append(branch);
       node.append(actions);
@@ -1202,7 +1180,6 @@
     });
     const side = el("aside", "cd-reader-sources");
     if ((message.sources || []).length) side.append(el("p", "cd-reader-label", "Sources"), sourcesList(message));
-    readerMessage = message;
     const page = el("div", "cd-reader-body");
     page.append(toc, article, side);
     shell.append(top, page);
@@ -2500,8 +2477,6 @@
   log.addEventListener("click", (e) => {
     const copy = e.target.closest?.(".copy[data-c]");
     if (copy) { vscode.postMessage({ type: "copy", text: decodeURIComponent(copy.dataset.c || "") }); return; }
-    const source = e.target.closest?.(".cd-cite[data-url]");
-    if (source) { vscode.postMessage({ type: "openLink", target: source.dataset.url || "" }); return; }
     const link = e.target.closest?.(".md-link[data-target]");
     if (link) { e.preventDefault(); vscode.postMessage({ type: "openLink", target: link.dataset.target || "" }); }
   });

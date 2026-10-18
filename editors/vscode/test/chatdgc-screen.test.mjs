@@ -876,7 +876,7 @@ test("the home: Chat and Work as tabs (a long list never hides the other), one s
   } finally { await page.close(); }
 });
 
-test("a reply that searches: what it looks for while it looks, citation marks, and its sources", async (t) => {
+test("a reply that searches: what it looks for while it looks, its words with no source chips, and its sources at the end", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -905,28 +905,17 @@ test("a reply that searches: what it looks for while it looks, citation marks, a
       text: "Sunny and 21°C [1], dry week [2][3][9].\n\n```\nlist[1]\n```" } });
     await s.send({ type: "turn", state: "ended", replyId: M(2) });
     await s.frame();
-    // A pill with the site where a fact is cited; [2][3] is one pill, "+1"; [9] was never given, so it stays text.
-    assert.deepEqual(await s.page.locator(".cd-cite").allTextContents(), ["weather.example", "meteo.example+1"]);
-    assert.match(await s.page.locator(".cd-body").first().textContent(), /\[9\]/);
+    // Sources only at the end (founder, 2026-10-18): no chip in the words, and the marks taken out cleanly. [2][3][9] is
+    // one group naming sources the reply has, so all of it goes; in code, [1] is code.
+    assert.equal(await s.page.locator(".cd-body button:not(.copy), .cd-body .cd-fav, [class*='cd-cite']").count(), 0, "nothing but words in the reply (and its code block's Copy)");
+    assert.equal(await s.page.locator(".cd-body p").first().textContent(), "Sunny and 21°C, dry week.");
     assert.equal(await s.page.locator("pre.code code").textContent(), "list[1]\n", "code is code");
-    assert.equal(await s.page.locator(".cd-cite").first().getAttribute("aria-label"), "Source: Paris forecast (weather.example)");
-    assert.equal(await s.page.locator(".cd-cite .cd-fav .codicon-globe").count(), 2, "favicons off: a globe, and nothing is asked");
-    await s.page.locator(".cd-cite").nth(1).hover();
-    const card = s.page.locator(".cd-cite-card");
-    await card.waitFor({ state: "visible" });
-    const [pillBox, cardBox] = [await s.page.locator(".cd-cite").nth(1).boundingBox(), await card.boundingBox()];
-    if (pillBox.y - 14 >= cardBox.height) assert.ok(cardBox.y + cardBox.height <= pillBox.y, "above the pill: the Sources button and actions under it stay in reach");
-    else assert.ok(cardBox.y >= pillBox.y + pillBox.height, "no room above: below it");
-    assert.deepEqual(await card.locator(".cd-source-open").allTextContents(), ["Météo", "BBC Weather: Paris"]);
-    assert.equal(await card.locator(".cd-source-snippet").textContent(), "A dry week ahead.");
-    await card.locator(".cd-source-open").nth(1).click();
-    await s.page.locator(".cd-cite").first().click();
-    assert.deepEqual((await s.posted("openLink")).map((m) => m.target), ["https://bbc.example/weather/paris", "https://www.weather.example/paris"]);
+    const button = s.page.locator(".cd-sources-button");
+    assert.equal(await button.locator(".cd-fav .codicon-globe").count(), 3, "favicons off: a globe, and nothing is asked");
     await s.send({ type: "favicons", on: true });
     await s.frame();
-    assert.match(await s.page.locator(".cd-cite .cd-fav img").first().getAttribute("src"),
+    assert.match(await button.locator(".cd-fav img").first().getAttribute("src"),
                  /^https:\/\/www\.google\.com\/s2\/favicons\?domain=https%3A%2F%2Fwww\.weather\.example&sz=32$/, "the origin only, never the page");
-    const button = s.page.locator(".cd-sources-button");
     assert.equal(await button.innerText(), "Sources · 4");
     assert.equal(await button.locator(".cd-fav").count(), 3, "the sites it cited first, three at most");
     await button.click();
@@ -945,29 +934,69 @@ test("a reply that searches: what it looks for while it looks, citation marks, a
   } finally { await s.page.close(); }
 });
 
-test("a source's card opens above its pill, so a short answer's Sources button stays in reach", async (t) => {
+// "In ChatDGC, the mid-response source chips — let's not have them there; only show sources at the end" (founder,
+// 2026-10-18). The marks the model cites with stay in the reply as kept (its Sources say which were cited) and are
+// taken out of what's read and copied, with the space before them; a reply's own brackets stay.
+test("sources only at the end: no chips in a reply, its citation marks out cleanly (spacing, punctuation), kept in code and where they name no source, and out of Copy", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
     const sources = [{ n: 1, title: "2026 Italian Grand Prix report", url: "https://www.formula1.com/en/latest/italy", snippet: "Antonelli won from Russell." },
-                     { n: 2, title: "F1 results", url: "https://www.espn.com/f1/results" }];
+                     { n: 2, title: "F1 results", url: "https://www.espn.com/f1/results" }, { n: 3, title: "Rates", url: "https://rbi.example/rates" }];
+    const text = "Kimi Antonelli won the Italian Grand Prix [1] [2].\n\n[1] At the start, and **bold**[2] next, then a list:\n\n"
+      + "- Rates rose 0.5% [3], then fell [1, 2]\n- In `arr[1]` code, array[0] stays and so does [7].\n\n| City | Temp |\n|---|---|\n| Paris [1] | 21°C [2] |\n\n"
+      + "Antonelli[1]won; Russell was second [2][9]!";
+    // A chat opened again: its replies come as kept, marks and all.
     await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
-      { id: M(1), role: "user", text: "Earlier question.\n".repeat(8) }, { id: M(2), role: "assistant", text: "Earlier answer.\n\n".repeat(6), finish: "stop" },
-      { id: M(3), role: "user", text: "Who won the most recent Grand Prix?" },
-      { id: M(4), role: "assistant", text: "Kimi Antonelli won the Italian Grand Prix [1] [2].", finish: "stop", sources, searches: ["latest grand prix winner"] }] });
+      { id: M(1), role: "user", text: "Who won the most recent Grand Prix?" },
+      { id: M(2), role: "assistant", text, finish: "stop", sources, searches: ["latest grand prix winner"] },
+      { id: M(3), role: "user", text: "And without the web?" },
+      { id: M(4), role: "assistant", text: "See note [1] below: no sources, so the brackets are the reply's own.", finish: "stop" }] });
     await s.frame();
-    const pill = s.page.locator(".cd-assistant").last().locator(".cd-cite");
-    await pill.hover();
-    const card = s.page.locator(".cd-cite-card");
-    await card.waitFor({ state: "visible" });
-    const [p, c] = [await pill.boundingBox(), await card.boundingBox()];
-    assert.ok(c.y + c.height <= p.y, "above the pill");
-    const button = s.page.locator(".cd-assistant").last().locator(".cd-sources-button");
-    const b = await button.boundingBox();
-    assert.equal(await s.page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest(".cd-sources-button") !== null,
-      [b.x + b.width / 2, b.y + b.height / 2]), true, "nothing covers the Sources button while the card is open");
+    const reply = s.page.locator(".cd-assistant").first();
+    assert.equal(await s.page.locator(".cd-body button:not(.copy), .cd-body .cd-fav, [class*='cd-cite']").count(), 0, "no chip, pill or card anywhere in the words");
+    assert.deepEqual(await reply.locator(".cd-body > p").allTextContents(),
+                     ["Kimi Antonelli won the Italian Grand Prix.", "At the start, and bold next, then a list:", "Antonelli won; Russell was second!"]);
+    assert.deepEqual(await reply.locator(".cd-body li").allTextContents(), ["Rates rose 0.5%, then fell", "In arr[1] code, array[0] stays and so does [7]."],
+                     "a group naming its sources goes; code, array[0] and a number naming none stay");
+    assert.deepEqual(await reply.locator(".cd-body td").allTextContents(), ["Paris", "21°C"]);
+    assert.equal(await reply.locator(".cd-body code").first().textContent(), "arr[1]");
+    assert.equal(await s.page.locator(".cd-assistant").last().locator(".cd-body p").textContent(), "See note [1] below: no sources, so the brackets are the reply's own.");
+    // Its sources, at the end, as they were.
+    const button = reply.locator(".cd-sources-button");
+    assert.equal(await button.innerText(), "Sources · 3");
     await button.click();
-    assert.equal(await s.page.locator("#cd-sources-panel").isVisible(), true);
+    assert.deepEqual(await s.page.locator("#cd-sources-panel .cd-sources-heading").allTextContents(), ["Cited · 3"], "the marks still say which were cited");
+    await s.page.keyboard.press("Escape");
+    // Copy: the words as they read.
+    await reply.locator('.cd-actions [aria-label="Copy"]').click();
+    const copied = (await s.posted("copy")).at(-1).text;
+    assert.doesNotMatch(copied.replace("arr[1]", "").replace("array[0]", "").replace("[7]", ""), /\[\d/, `no marks copied: ${copied}`);
+    assert.match(copied, /^Kimi Antonelli won the Italian Grand Prix\.\n\nAt the start, and bold next, then a list:\n\n- Rates rose 0\.5%, then fell\n/);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("a deep research report reads without its citation marks, on the chat, in its reader and in its Copy; its sources are at its end", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const plan = { title: "Rates", steps: ["Find the rate"], sites: [] };
+    const report = "# Rates\n\n## Today\n\nThe repo rate is 6.5% [1]. It held in October [1][2].\n\n```\nrate[1] = 6.5\n```";
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "The RBI rate", research: true },
+      { id: M(2), role: "assistant", text: report, finish: "stop", sources: [{ n: 1, title: "RBI", url: "https://rbi.example" }, { n: 2, title: "News", url: "https://news.example" }],
+        research: { status: "done", plan, round: 1, read: ["a"], notes: [{ n: 1, title: "RBI", url: "u", note: "x" }], activity: [], check: { checked: 2, supported: 2 } } }] });
+    await s.frame();
+    assert.deepEqual(await s.page.locator(".cd-assistant .cd-body p").allTextContents(), ["The repo rate is 6.5%. It held in October."]);
+    assert.equal(await s.page.locator(".cd-assistant .cd-sources-button").innerText(), "Sources · 2");
+    await s.page.locator(".cd-assistant").getByRole("button", { name: "Open report" }).click();
+    assert.deepEqual(await s.page.locator("#cd-reader .cd-reader-text p").allTextContents(), ["The repo rate is 6.5%. It held in October."]);
+    assert.equal(await s.page.locator("#cd-reader .cd-reader-sources .cd-source").count(), 2, "the reader's sources, at its side");
+    await s.page.keyboard.press("Escape");
+    await s.page.locator('.cd-assistant .cd-actions [aria-label="Copy"]').click();
+    assert.equal((await s.posted("copy")).at(-1).text, "# Rates\n\n## Today\n\nThe repo rate is 6.5%. It held in October.\n\n```\nrate[1] = 6.5\n```",
+                 "the report's Markdown, its code as written");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

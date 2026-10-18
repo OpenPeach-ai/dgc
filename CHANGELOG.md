@@ -64,6 +64,10 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 
 ### ChatDGC
 
+- **Exports read as the chat does: no citation marks.** A chat exported as Markdown, and a deep research report, leave
+  out the "[1]" marks the model cites with, with the space before them; each reply's sources are still listed after
+  it. The JSON export keeps the chat as stored, marks and all, and the saved reply keeps them so its sources can still
+  say which were cited.
 - **Pictures of something else are dropped, not shown above a reply.** An image search sometimes answers with pictures
   of something else entirely (asked for "Lisbon Portugal cityscape", DuckDuckGo returned four portraits from Kannada
   news sites). A picture is kept only when a word of the search, without case or accents, is in its title, its page's

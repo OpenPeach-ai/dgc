@@ -295,6 +295,29 @@ class ResearchTests(unittest.TestCase):
         self.assertTrue(exported.startswith("# Buying a London flat from India"))
         self.assertIn("## Sources\n\n1. [LRS](https://rbi.org.in/lrs)\n2. [SDLT](https://gov.uk/sdlt)", exported)
         self.assertIn("Citations checked: 4 of 5 cited claims hold up against their sources.", exported)
+        # Its words as the chat shows them: no citation marks (its sources are listed at its end); the reply keeps them.
+        self.assertIn("under the LRS.", exported)
+        self.assertNotRegex(exported, r"\[\d{1,3}\]")
+        kept = next(m for m in self.engine.open(chat["id"])["messages"] if m["id"] == reply["id"])
+        self.assertRegex(kept["text"], r"under the LRS \[1\]\.", "the reply as kept still says which sources it cited")
+
+    def test_citation_marks_come_out_with_their_spacing(self):
+        from dgc.chatdgc.research import uncited
+        sources = [{"n": 1}, {"n": 2}, {"n": 3}]
+        cases = {
+            "Paris is the capital [1].": "Paris is the capital.",
+            "Paris [1] [2], then Rome [3]!": "Paris, then Rome!",
+            "[1] At the start, and **bold**[2] next": "At the start, and **bold** next",
+            "- Rates rose 0.5% [3], then fell [1, 2]": "- Rates rose 0.5%, then fell",
+            "| Paris [1] | 21°C [2] |": "| Paris | 21°C |",
+            "Antonelli[1]won.": "Antonelli won.",
+            "A group [2][3][9] goes whole.": "A group goes whole.",
+            "array[0] and [7] name no source.": "array[0] and [7] name no source.",
+            "In `arr[1]` code [1].\n\n```\nrate[1] = 6.5\n```": "In `arr[1]` code.\n\n```\nrate[1] = 6.5\n```",
+        }
+        for before, after in cases.items():
+            self.assertEqual(uncited(before, sources), after, before)
+        self.assertEqual(uncited("See note [1].", []), "See note [1].", "no sources: the brackets are the reply's own")
 
     def test_a_plan_the_conversation_moved_on_from_isnt_run(self):
         chat, reply = self.planned()

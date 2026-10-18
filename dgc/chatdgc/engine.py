@@ -1058,7 +1058,8 @@ class ChatEngine:
                     lines += ["*Attached: " + ", ".join(names) + "*", ""]
             else:
                 lines += ["## ChatDGC" + (f" ({m['model']})" if m.get("model") else ""), ""]
-                lines += [with_questions(m, _exported) or "*(no reply)*", ""]
+                # Its words as the chat shows them, without the citation marks: its sources are listed below.
+                lines += [with_questions(m, _exported, lambda words, m=m: research.uncited(words, m.get("sources"))) or "*(no reply)*", ""]
                 made_names = [f.get("name", "file") for f in m.get("files") or [] if not f.get("removed")]
                 if made_names:
                     lines += ["*Made: " + ", ".join(made_names) + "*", ""]
@@ -2548,15 +2549,16 @@ def answered(question: dict, choice: str, choices: list | None = None) -> str:
     return f"{question.get('question', '')} {choice}." + (f" {prompt}" if prompt else "")
 
 
-def with_questions(message: dict, show: Callable[[dict], str]) -> str:
-    """A reply's words with each question it asked where it asked it, as ``show`` writes one."""
+def with_questions(message: dict, show: Callable[[dict], str], words: Callable[[str], str] = lambda part: part) -> str:
+    """A reply's words with each question it asked where it asked it, as ``show`` writes one (and ``words`` the words
+    between them)."""
     text = message.get("text") or ""
     out, done = [], 0
     for question in sorted(message.get("questions") or [], key=lambda q: int(q.get("at") or 0)):
         at = max(done, min(len(text), int(question.get("at") or 0)))
-        out += [text[done:at], show(question)]
+        out += [words(text[done:at]), show(question)]
         done = at
-    return "".join(out + [text[done:]])
+    return "".join(out + [words(text[done:])])
 
 
 def _asked(question: dict) -> str:
