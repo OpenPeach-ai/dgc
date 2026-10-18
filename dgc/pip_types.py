@@ -27,8 +27,14 @@ class PipType:
 
 
 _TYPES = (
-    PipType("core", "Core", "Main chat", "Coordinates the conversation and its specialist work.", False,
-            "Core is the main chat. It cannot be created as a background Pip.", 0, "Core", "", None),
+    # "Core" is two things to a user: DGC's main chat, and the Pip named Core on the Pips page. Both are one
+    # character, so the catalog says so (ERP session review, 2026-10-18: the user had to ask what the Core Pip was).
+    PipType("core", "Core", "Main chat",
+            "The character of DGC's main chat, which coordinates the conversation and its specialist work. Your "
+            "Primary Pip (the Personal Pip named Core on the Pips page) uses this character too.", False,
+            "Core is the main chat's character, and your Primary Pip uses it too: a Personal Pip for everyday tasks, "
+            "with no project files or shell. It can't be created as a project Pip; choose another character for "
+            "project work.", 0, "Core", "", None),
     PipType("scout", "Scout", "Repository exploration", "Reads the code to map out a project before a review. It doesn’t run commands.", True,
             None, 1, "Repository scout", "Explore the approved source structure and identify source-backed areas that deserve closer review.", "source_audit",
             "Your role is Scout: repository exploration. Orient the review using repository layout, entry points and component boundaries. "

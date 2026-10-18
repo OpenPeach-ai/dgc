@@ -673,6 +673,9 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   did), and two Pips were saved as "ERP daily audit — data &amp; Tally integrity". `pips_setup` (name, goal, reason)
   and `pips_propose` (name, goal) now decode standard entities (`&amp;`, `&lt;`, `&#8212;`, …) when every `&` in
   the text starts one; a goal that is about escaping, with a plain `&` in it too, is kept as written.
+- **`dgc pips types` says what Core is:** the main chat's character, which your Primary Pip (the Personal Pip named
+  Core) uses too, and why it can't be a project Pip. It said only that Core "cannot be created as a background Pip"
+  while the Pips page showed one named Core.
 - **A Pip's run list works on Python 3.10** (Ubuntu 22.04's default). Listing runs read rows while a rollback ran,
   which Python 3.10's sqlite3 refuses: `dgc pip runs`, the Pips page and scheduled checks failed with "Cursor needed
   to be reset because of commit/rollback".

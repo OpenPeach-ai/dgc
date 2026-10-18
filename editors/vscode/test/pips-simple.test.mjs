@@ -48,6 +48,8 @@ test('on API 43 the view opens on your Pips, and with none it introduces Core',a
  const x=setup();await x.drain();
  assert.ok(x.requests('list_pips').some(r=>r.request.workspace_id===PW),'your Personal Pips, not the project');
  const meet=x.d.querySelector('[aria-label="Meet Core"]');assert.ok(meet);assert.match(meet.textContent,/Core is your Primary Pip/);
+ // ERP session review (2026-10-18): "Core" is also the main chat; the user had to ask which one the Pip was.
+ assert.match(meet.textContent,/Core is also the character of DGC’s main chat: your Primary Pip uses it/);
  assert.equal(x.d.querySelector('.tabs'),null,'no tabs, no job form');
 });
 

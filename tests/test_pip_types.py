@@ -45,6 +45,17 @@ class PipTypeTests(unittest.TestCase):
         rows[0]["name"] = "Tampered"
         self.assertEqual(pip_types.catalog()[0]["name"], "Core")
 
+    def test_core_says_it_is_the_main_chat_and_the_primary_pip_uses_it(self):
+        # ERP session review (2026-10-18): `dgc pips types` said Core "cannot be created as a background Pip" while
+        # the Pips page showed a Pip named Core, and the user had to ask what it was.
+        core = pip_types.catalog()[0]
+        for text in (core["description"], core["unavailable_reason"]):
+            self.assertIn("main chat", text)
+            self.assertIn("Primary Pip", text)
+        from dgc.pip_cli import _format
+        listed = _format({"types": pip_types.catalog()})
+        self.assertIn("Core is the main chat's character, and your Primary Pip uses it too", listed)
+
     def test_each_available_type_is_persisted_and_invalid_types_fail_before_insert(self):
         for kind in ("scout", "lens", "rook", "lock", "patch", "pulse", "quill"):
             job = self.create(kind)

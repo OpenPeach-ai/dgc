@@ -375,6 +375,9 @@
   the agent map) opened the Pips view on your Personal Pips, showed only Core and said "This Pip is not available in
   the selected workspace. Refresh the dashboard." The Pips view now switches to the Pip's project and opens it at the
   run; a Pip that was deleted says "That Pip isn’t on this computer. It may have been deleted."
+- **Which Core is which.** "Meet Core" says Core is also the character of DGC's main chat and that your Primary Pip
+  uses it, and the Primary Pip's page and row say "Your Primary Pip, in the main chat's character" (they said
+  "Personal helper"). A user had to ask what the Pip named Core was.
 - **Pips settings stay readable in the side bar.** "How many Pips you can have" broke one letter per line; every
   settings row now keeps its words in a readable column, with the control underneath when the side bar is narrow.
 - **A reply's details open into view** at the bottom of a conversation, where they used to open out of sight.
