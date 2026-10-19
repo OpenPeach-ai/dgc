@@ -68,6 +68,17 @@
   The list's footer opens the Library on its Widgets tab. Esc closes the list, Tab and Enter work it, and a long chat
   opened on its latest messages still lists every widget (with a CLI that sends a chat's outline). The side bar's
   Library button now says it holds widgets too.
+- **The prompt rail**, as ChatGPT's table of contents: in a chat of five prompts or more, a short tick for each prompt
+  sits in the right margin, centred, and the one you're reading is bright.
+  - **Hover it** (or Tab to it) for a card of every prompt with its time under day headings (Today, Yesterday, the
+    weekday), the widget each reply made, and the one you're reading tinted. Click a prompt to go there: the view
+    eases to it (at once for a reader who asked for less motion) and outlines it for a moment.
+  - **Keys:** Alt+↑ and Alt+↓ go to the prompt before or after, from anywhere in the chat, the message box included;
+    in the card, ↑ ↓, Home, End and Enter, and Esc closes it.
+  - **Long chats:** the ticks close up to 4px apart, then show a window around where you are, faded at both ends;
+    they're shorter at side-bar width.
+  - **Chats opened on their latest messages** still list every prompt (with a CLI that sends a chat's outline), and
+    going to an early one loads the messages before it first. ChatGPT's rail broke in exactly that case.
 - **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
   slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
   still for a reader who asked for less motion.

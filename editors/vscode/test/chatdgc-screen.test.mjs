@@ -1639,7 +1639,7 @@ test("keyboard shortcuts, as ChatGPT has them, and the list of them", async (t) 
     await s.page.keyboard.press("Control+Slash");
     assert.equal(await s.page.locator("#cd-keys").evaluate((d) => d.open), true);
     assert.deepEqual(await s.page.locator("#cd-keys dd").allTextContents(), ["New chat", "Copy the last reply", "Copy the last code block",
-      "Focus the message box", "Stop the reply", "Show these shortcuts"]);
+      "Focus the message box", "Stop the reply", "The prompt before", "The next prompt", "Show these shortcuts"]);
     assert.match(await s.page.locator("#cd-keys dt").first().innerText(), /Ctrl\s+Shift\s+O/);
     await s.page.keyboard.press("Escape");
     assert.equal(await s.page.locator("#cd-keys").evaluate((d) => d.open), false);
@@ -3041,4 +3041,188 @@ test("widgets in a chat at side-bar width: the mark and the count, a list that f
     assert.equal((await button.innerText()).replace(/\s+/g, " "), "2");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+// The prompt rail (founder, 2026-10-18: "The rail looks good"), ChatGPT's table of contents with ours added: a tick
+// per prompt from five prompts, the one being read bright; a card on hover with every prompt, its time under day
+// headings and the widget its reply made; a click or Alt+Up/Down goes there. ChatGPT's broke when a chat loaded in
+// pieces; this one lists every prompt from the chat's outline and loads what a jump needs first.
+const railChat = (count, { widgetsAt = [0, 7] } = {}) => {
+  const P = (n) => `msg_${String(n).padStart(32, "0")}`;
+  const messages = [];
+  const start = Date.now() - count * 3 * 3600e3;
+  for (let i = 0; i < count; i++) {
+    const at = start + i * 3 * 3600e3;
+    messages.push({ id: P(2 * i), role: "user", text: `Prompt ${i}: ${"about the flat ".repeat(1 + (i % 3))}`.trim(), created_at: new Date(at).toISOString() });
+    messages.push({ id: P(2 * i + 1), role: "assistant", text: `Answer ${i}.\n\n${"A fixed rate stays the same for a set period. ".repeat(10)}`, finish: "stop",
+                    created_at: new Date(at + 60e3).toISOString(),
+                    widgets: widgetsAt.includes(i) ? [{ id: `wg_${String(i).padStart(16, "0")}`, title: i === 0 ? "EMI calculator" : `Widget ${i}`, html: "<p>w</p>" }] : [] });
+  }
+  return { P, messages };
+};
+const railState = (page) => page.evaluate(() => {
+  const ticks = [...document.querySelectorAll("#cd-rail .cd-tick")];
+  return { shown: !document.getElementById("cd-rail").hidden, ticks: ticks.length, now: ticks.findIndex((t) => t.classList.contains("now")) };
+});
+// The card opens over the rail, as ChatGPT's does: the pointer goes there (a locator's hover waits for the rail to be on
+// top, and the card it opened never lets it).
+const hoverRail = async (page) => { const b = await page.locator("#cd-rail").boundingBox(); await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); };
+const promptTop = (page, id) => page.evaluate((x) => {
+  const sc = document.getElementById("cd-scroll").getBoundingClientRect(), n = document.querySelector(`.cd-msg[data-id="${x}"]`);
+  return n ? (n.getBoundingClientRect().top - sc.top) / sc.height : null;
+}, id);
+
+test("the prompt rail: from five prompts, a tick each and the one being read bright; hover lists them with times, days and widgets; a click, Alt+Up/Down and the keys go there", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900, height: 700 });
+  try {
+    const { P, messages } = railChat(23);
+    await s.send({ type: "opened", conversation: conversation(), messages: messages.slice(0, 8), earlier: 0, busy: false });
+    assert.equal((await railState(s.page)).shown, false, "four prompts: no rail");
+    await s.send({ type: "message", message: messages[8] });
+    await s.frame();
+    assert.deepEqual(await railState(s.page).then((r) => [r.shown, r.ticks]), [true, 5], "the fifth prompt brings it");
+    await s.send({ type: "opened", conversation: conversation({ id: `chat_${"c".repeat(32)}` }), messages, earlier: 0, busy: false });
+    await s.frame();
+    const rail = s.page.locator("#cd-rail");
+    assert.equal((await railState(s.page)).ticks, 23);
+    // Where it sits: centred on the transcript, in its right margin, clear of the words.
+    const [r, scroll, bubble] = [await rail.boundingBox(), await s.page.locator("#cd-scroll").boundingBox(), await s.page.locator(".cd-bubble").first().boundingBox()];
+    assert.ok(Math.abs(r.y + r.height / 2 - (scroll.y + scroll.height / 2)) <= 2, "centred");
+    assert.ok(r.x > bubble.x + bubble.width && r.x + r.width <= scroll.x + scroll.width, "in the margin, right of the bubbles");
+    const tick = await s.page.locator(".cd-tick").first().boundingBox();
+    assert.deepEqual([tick.width, tick.height], [16, 2]);
+    // The one being read is bright.
+    await s.page.evaluate((id) => { const sc = document.getElementById("cd-scroll"), n = document.querySelector(`.cd-msg[data-id="${id}"]`);
+      sc.scrollTop += n.getBoundingClientRect().top - sc.getBoundingClientRect().top - 20; }, P(18));
+    await s.page.waitForTimeout(300);
+    assert.equal((await railState(s.page)).now, 9);
+    const colours = await s.page.evaluate(() => [...document.querySelectorAll(".cd-tick")].slice(8, 10).map((t) => getComputedStyle(t).opacity));
+    assert.deepEqual(colours, ["0.55", "1"]);
+    // Hover: every prompt, with its time, under day headings; the widget a reply made; the one being read marked.
+    await hoverRail(s.page);
+    const card = s.page.locator("#cd-rail-card");
+    await card.waitFor({ state: "visible" });
+    assert.equal(await rail.getAttribute("aria-expanded"), "true");
+    assert.match(await card.locator(".cd-rail-head").innerText(), /^23 prompts/);
+    assert.equal(await card.locator(".cd-rail-row").count(), 23);
+    assert.ok((await card.locator(".cd-rail-day").count()) >= 2, "day headings");
+    assert.deepEqual(await card.locator(".cd-rail-widget").allInnerTexts(), ["EMI calculator", "Widget 7"]);
+    const now = card.locator(".cd-rail-row.now");
+    assert.equal(await now.getAttribute("data-i"), "9");
+    assert.equal(await now.getAttribute("aria-current"), "true");
+    assert.match(await card.locator(".cd-rail-row").nth(9).locator(".cd-rail-time").innerText(), /^\d{1,2}:\d{2}/);
+    const c = await card.boundingBox();
+    assert.ok(c.x + c.width <= 900 && c.y >= scroll.y && c.y + c.height <= scroll.y + scroll.height, "inside the transcript");
+    // A click: the card closes, the view eases to that prompt, near the top, outlined for a moment.
+    await card.locator(".cd-rail-row").nth(2).click();
+    assert.equal(await card.isHidden(), true);
+    await s.page.waitForTimeout(450);
+    const top = await promptTop(s.page, P(4));
+    assert.ok(top >= 0 && top < 0.12, `prompt 2 near the top (${top})`);
+    assert.equal(await s.page.locator(`.cd-msg[data-id="${P(4)}"] .cd-bubble`).evaluate((n) => n.classList.contains("cd-flash")), true);
+    assert.equal((await railState(s.page)).now, 2, "and its tick is the bright one");
+    // Alt+Down and Alt+Up, from the message box.
+    await s.page.locator("#cd-input").focus();
+    await s.page.keyboard.press("Alt+ArrowDown");
+    await s.page.waitForTimeout(450);
+    assert.equal((await railState(s.page)).now, 3);
+    assert.ok((await promptTop(s.page, P(6))) < 0.12);
+    await s.page.keyboard.press("Alt+ArrowUp");
+    await s.page.waitForTimeout(450);
+    assert.equal((await railState(s.page)).now, 2);
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "", "nothing typed into the box");
+    // The keys: Tab reaches it, Down goes into the list, Enter goes there, Esc closes it.
+    await rail.focus();
+    await s.page.keyboard.press("ArrowDown");
+    assert.equal(await s.page.evaluate(() => document.activeElement?.dataset.i), "2", "into the list, at the one being read");
+    await s.page.keyboard.press("ArrowDown");
+    await s.page.keyboard.press("ArrowDown");
+    await s.page.keyboard.press("Enter");
+    await s.page.waitForTimeout(450);
+    assert.equal((await railState(s.page)).now, 4);
+    await rail.focus();
+    await s.page.keyboard.press("ArrowDown");
+    await s.page.keyboard.press("Escape");
+    assert.equal(await card.isHidden(), true);
+    assert.equal(await s.page.evaluate(() => document.activeElement?.id), "cd-rail");
+    assert.match(await rail.getAttribute("aria-label"), /^Prompts in this chat: 23\./);
+    assert.match(await s.page.locator("#cd-keys-list").textContent(), /Alt ↑The prompt beforeAlt ↓The next prompt/, "in the shortcuts list");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("the prompt rail on a long chat opened on its latest pages: every prompt listed from its outline, and a jump to an early one loads the pages before it first", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900, height: 700 });
+  try {
+    const { P, messages } = railChat(25);
+    await s.send({ type: "opened", conversation: conversation(), messages: messages.slice(40), earlier: 40, busy: false });
+    await s.frame();
+    assert.deepEqual(await railState(s.page).then((r) => [r.shown, r.ticks]), [true, 5], "what's on screen, until the outline comes");
+    await hoverRail(s.page);
+    assert.match(await s.page.locator("#cd-rail-card .cd-rail-more").innerText(), /Earlier messages aren't listed yet/);
+    await s.page.mouse.move(100, 100);
+    await s.page.waitForTimeout(250);
+    const outline = [];
+    for (let i = 0; i < 25; i++) {
+      const w = messages[2 * i + 1].widgets;
+      outline.push({ id: P(2 * i), text: messages[2 * i].text, created_at: messages[2 * i].created_at,
+                     ...(w.length ? { widgets: w.map(({ html, ...x }) => ({ ...x, message_id: P(2 * i + 1) })) } : {}) });
+    }
+    await s.send({ type: "outline", conversation: ID, prompts: outline });
+    await s.frame();
+    assert.equal((await railState(s.page)).ticks, 25, "every prompt");
+    assert.equal((await railState(s.page)).now, 24);
+    await hoverRail(s.page);
+    const card = s.page.locator("#cd-rail-card");
+    assert.equal(await card.locator(".cd-rail-row").count(), 25);
+    assert.equal(await card.locator(".cd-rail-more").count(), 0);
+    assert.deepEqual(await card.locator(".cd-rail-widget").allInnerTexts(), ["EMI calculator", "Widget 7"], "the widgets of replies not on screen too");
+    await card.locator(".cd-rail-row").nth(3).click();
+    assert.deepEqual((await s.posted("earlier")).map((m) => m.before), [P(40)], "the page before what's shown");
+    await s.send({ type: "earlier", messages: messages.slice(20, 40), earlier: 20 });
+    assert.deepEqual((await s.posted("earlier")).map((m) => m.before), [P(40), P(20)], "not there yet: the next");
+    await s.send({ type: "earlier", messages: messages.slice(0, 20), earlier: 0 });
+    await s.page.waitForTimeout(450);
+    const top = await promptTop(s.page, P(6));
+    assert.ok(top !== null && top >= 0 && top < 0.12, `there, near the top (${top})`);
+    assert.equal(await s.page.locator(`.cd-msg[data-id="${P(6)}"] .cd-bubble`).evaluate((n) => n.classList.contains("cd-flash")), true);
+    assert.equal((await railState(s.page)).now, 3);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("the prompt rail for a very long chat closes its ticks up and shows a window around where you are; shorter ticks at side-bar width; still for less motion", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const [width, motion] of [[900, false], [460, true]]) {
+    const s = await openScreen({ width, height: 700, reducedMotion: motion });
+    try {
+      const { P, messages } = railChat(80);
+      await s.send({ type: "opened", conversation: conversation(), messages, earlier: 0, busy: false });
+      await s.frame();
+      const look = await s.page.evaluate(() => {
+        const ticks = document.querySelector(".cd-rail-ticks"), all = [...ticks.children], sc = document.getElementById("cd-scroll");
+        return { windowed: ticks.classList.contains("windowed"), height: ticks.getBoundingClientRect().height, half: sc.clientHeight / 2,
+                 pitch: all[1].getBoundingClientRect().top - all[0].getBoundingClientRect().top, width: all[0].getBoundingClientRect().width,
+                 nowShown: (() => { const n = ticks.querySelector(".now").getBoundingClientRect(), b = ticks.getBoundingClientRect(); return n.top >= b.top && n.bottom <= b.bottom; })() };
+      });
+      assert.equal(look.windowed, true, `${width}px: a window, faded at both ends`);
+      assert.ok(look.height <= look.half + 1, "no taller than half the transcript");
+      assert.equal(look.pitch, 4, "4px apart at the closest");
+      assert.equal(look.width, width === 900 ? 16 : 10, "shorter at side-bar width");
+      assert.equal(look.nowShown, true, "the bright one in the window");
+      if (motion) {
+        // Less motion: a jump is instant.
+        await s.page.locator("#cd-input").focus();
+        for (let i = 0; i < 5; i++) await s.page.keyboard.press("Alt+ArrowUp");
+        const top = await promptTop(s.page, P(148));
+        assert.ok(top >= 0 && top < 0.12, `five prompts up, there at once, without easing (${top})`);
+        await s.frame();
+        assert.equal((await railState(s.page)).now, 74);
+      }
+      assert.equal(await s.page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth), 0);
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  }
 });
