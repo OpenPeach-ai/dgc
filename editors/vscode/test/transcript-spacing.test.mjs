@@ -821,17 +821,19 @@ test("the page does not jump after the fonts change at the same width", async (t
 // size observer, thousands of px tall, while still claiming the width they had been pinned at.
 // Back at that same width nothing re-measured them: 12,000px of phantom transcript and a
 // 10,800px jump on the first scroll up.
+// Enough turns to walk back in five 250px steps at 988px, now that a progress line carries no empty row.
+const CHAT_TURNS = 7;
 for (const width of WIDTHS) {
   test(`blocks on screen when the panel collapsed are measured again when it comes back at the same width (${width}px)`, async (t) => {
     if (skipOrFail(t)) return;
     const panel = await openPanel(width);
-    const build = async (p) => { await p.events(answeredTurn("t0")); await longChat(p, 5); };
+    const build = async (p) => { await p.events(answeredTurn("t0")); await longChat(p, CHAT_TURNS); };
     try {
       await panel.events(answeredTurn("t0"));
       await panel.settle(); await wait(panel, 300);
       await panel.page.setViewportSize({ width: 1, height: 900 });
       await wait(panel, 300);
-      await longChat(panel, 5);
+      await longChat(panel, CHAT_TURNS);
       await wait(panel, 300);
       await panel.page.setViewportSize({ width, height: 900 });
       await panel.settle(); await wait(panel, 600);
