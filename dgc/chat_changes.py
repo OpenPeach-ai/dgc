@@ -601,7 +601,11 @@ class ChatChanges:
             for index, pair in enumerate(segments):
                 if pair["after"]["kind"] == "missing" and pair["before"]["kind"] != "missing":
                     later = segments[index + 1]["before"] if index + 1 < len(segments) else now.get(name)
-                    if later is not None and _same(later, pair["before"]):
+                    # Content, not mode: the journals this repairs recorded 0o644 for files a 002 umask
+                    # keeps at 0o664 (a real ERP repo's 497 phantoms all differed only there), and a
+                    # mode change is never a deletion.
+                    if later is not None and later["kind"] == pair["before"]["kind"] \
+                            and later["hash"] == pair["before"]["hash"]:
                         dropped += 1
                         continue
                 if kept and _same(kept[-1]["after"], pair["before"]):

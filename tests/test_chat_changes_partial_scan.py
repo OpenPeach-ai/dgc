@@ -371,6 +371,20 @@ class OldJournalsAreRepairedTest(unittest.TestCase):
         self.assertFalse(changes.report()["complete"],
                          "the old runs may still have missed changes, so the journal stays partial")
 
+    def test_a_002_umask_doesnt_keep_the_phantoms(self) -> None:
+        # The founder's real journal (192.168.1.111, 19 Oct): all 497 phantoms matched the files on disk byte for
+        # byte, but the old scan recorded 0o644 and Ubuntu's 002 umask keeps them at 0o664 (0o775 for a script), so
+        # the repair compared the mode too and dropped none.
+        for name in ("kept/real.txt", "phantom/one.txt", "phantom/twice.txt", "edited/then_phantom.txt",
+                     "phantom/then_edit.txt"):
+            (self.root / name).chmod(0o664)
+        changes = ChatChanges.from_state(self.root, copy.deepcopy(self.value))
+        changes.repair()
+        rows = {row["path"]: row for row in changes.report()["files"]}
+        self.assertNotIn("phantom/one.txt", rows)
+        self.assertNotIn("phantom/twice.txt", rows)
+        self.assertEqual(sum(row["deleted"] for row in rows.values()), 1, "only the file really gone")
+
     def test_loading_a_session_repairs_its_journal(self) -> None:
         from dgc.agent import Agent
         from dgc.config import Config, DEFAULTS
