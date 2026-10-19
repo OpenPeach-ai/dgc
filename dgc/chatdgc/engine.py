@@ -642,11 +642,11 @@ class ChatEngine:
 
     # -- a turn
 
-    def _search(self, query: str) -> list[dict]:
+    def _search(self, query: str, n: int = 6) -> list[dict]:
         """The one web search set in Settings, read fresh (Work and Pips use the same)."""
         from .. import search
         provider, key, url = search.shared_settings(self.config)
-        return search.results(query, provider, api_key=key, url=url, n=6)
+        return search.results(query, provider, api_key=key, url=url, n=n)
 
     def _image_search(self, query: str) -> list[dict]:
         """The same search, for pictures."""
@@ -823,8 +823,10 @@ class ChatEngine:
             if cancel is not None and cancel.is_set():
                 raise ChatEngineError("Stopped before the plan was made.") from exc
             raise ChatEngineError(_failure_text(exc)) from exc
-        state = {"status": "planned", "question": text, "plan": plan, "thinking": thinking_level}
-        reply = {"id": reply_id, "role": "assistant", "text": research.plan_text(plan), "created_at": now(),
+        depth = research.depth_of(self.config.get("chatdgc_research_depth"))
+        state = {"status": "planned", "question": text, "plan": plan, "thinking": thinking_level, "depth": depth,
+                 "budget": dict(research.DEPTHS[depth])}
+        reply = {"id": reply_id, "role": "assistant", "text": research.plan_text(plan, depth), "created_at": now(),
                  "model": name or chat.get("model") or "", "finish": "stop", "research": state}
         chat["messages"].append(reply)
         self._save(chat)
@@ -851,6 +853,11 @@ class ChatEngine:
                 state["plan"] = research.clean_plan(plan)
             except research.ResearchError as exc:
                 raise ChatEngineError(str(exc)) from exc
+            if isinstance(plan, dict) and plan.get("depth"):
+                state["depth"] = research.depth_of(plan.get("depth"))
+        if state.get("status") == "planned" or not isinstance(state.get("budget"), dict):
+            state["depth"] = research.depth_of(state.get("depth") or self.config.get("chatdgc_research_depth"))
+            state["budget"] = dict(research.DEPTHS[state["depth"]])
         if write and not state.get("notes"):
             raise ChatEngineError("There's nothing found yet to write from.")
         model = chat.get("model") or None
@@ -869,13 +876,20 @@ class ChatEngine:
         def said(snapshot):
             if on_research is not None:
                 on_research(message_id, snapshot)
-        run = research.Research(self, state, client_for=lambda: self.client(model), room=room, search=self._searcher,
+        # Research reads more results a search than a reply does (the default search; a stand-in is used as it is).
+        searcher = (lambda query: self._search(query, n=research.RESULTS_PER_QUERY)) \
+            if self._searcher == self._search else self._searcher
+        run = research.Research(self, state, client_for=lambda: self.client(model), room=room, search=searcher,
                                 fetch=self._fetcher, said=said, save=lambda _: self._save(chat), cancel=cancel,
                                 tools=name not in self._toolless)
         with self._lock:
             self._researching[(chat["id"], message_id)] = run
         try:
             if not write:
+                if run.spent():                   # Keep researching, after the budget ran out: a little more
+                    run.more()
+                    budget = state["budget"]
+                    run.log("info", f"Carrying on: up to {budget['pages']} pages and {budget['minutes']} minutes in all.")
                 run.gather()
             if run.stopped():
                 raise research.ResearchError("Stopped.")
@@ -883,7 +897,10 @@ class ChatEngine:
             if run.stopped():
                 raise research.ResearchError("Stopped.")
             cited = {int(n) for n in research.CITE.findall(report)}
+            run.how()
             state.update(status="done", finished_at=now())
+            for kept_for_more in ("pool", "seen"):     # what more rounds would read; a finished report has no more
+                state.pop(kept_for_more, None)
             message.update(text=report[:MAX_TEXT], finish="stop",
                            sources=[{"n": n["n"], "title": n["title"], "url": n["url"],
                                      "snippet": research.note_line(n["note"])}
@@ -904,6 +921,7 @@ class ChatEngine:
         finally:
             with self._lock:
                 self._researching.pop((chat["id"], message_id), None)
+            run.tally()
             self._save(chat)
             said(run.snapshot())
         return message
