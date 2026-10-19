@@ -67,6 +67,14 @@ class PipProposalToolTests(unittest.TestCase):
         agent.session_file = sessions.new_path(self.root)
         return agent, approvals
 
+    def test_the_tool_says_where_a_model_change_goes(self):
+        # On a real project the model told the founder a Pip's model "isn't changeable through my tools" (2026-10-19):
+        # it is, through a pips_setup card for that Pip, where the user picks the model.
+        from dgc import tools
+        text = next(t["function"]["description"] for t in tools.TOOL_SCHEMAS if t["function"]["name"] == "pips_propose")
+        self.assertIn("MODEL", text)
+        self.assertIn("pips_setup with its pip_id", text)
+
     def test_an_allowed_change_is_applied_and_starts_no_work(self):
         # The tool call's permission (auto mode, an allow rule or the user's Allow) is the approval.
         pip = self.create()

@@ -283,7 +283,9 @@ TOOL_SCHEMAS = [
         ["target_root", "name", "goal", "pip_type", "work_kind", "schedule", "run_now", "reason", "request_key"]),
     _fn("pips_propose", "Change an EXISTING Pip in this chat's workspace. Calling it asks the user like any tool call "
         "(auto mode allows it); once allowed, the change is applied. Only name, goal, source_ref and source_exclude can "
-        "change; it cannot run work, schedule work or change permissions. Read pips_context definition first. "
+        "change; it cannot run work, schedule work or change permissions. To change an existing Pip's MODEL, schedule or "
+        "permissions, use pips_setup with its pip_id, expected_version and expected_lifecycle_revision: the user picks "
+        "the model on that card and approves it (or changes it on the Pip's page). Read pips_context definition first. "
         "source_exclude is the complete list of folders or .gitignore-style patterns its source copy leaves out "
         "(for example uploads/ or docs/screenshots/), which also moves it to the current safe_source_v2 rules; use it "
         "when a run failed because the source is too big, naming folders from that message. "
