@@ -415,7 +415,7 @@
      "sign_in": {
       "kind": "device",
       "provider": "GitHub",
-      "client_id": "",
+      "client_id": "Ov23li4FkrCcivrU2Ec2",
       "client_id_setting": "github_sign_in_client_id"
      }
     }

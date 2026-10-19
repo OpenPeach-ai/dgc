@@ -10,6 +10,7 @@ flow end to end. Keys and sign-ins go to a stand-in keychain in a temporary DGC 
 from __future__ import annotations
 
 import io
+import copy
 import json
 import os
 import tempfile
@@ -162,6 +163,8 @@ class Config:
 class Fixture(unittest.TestCase):
     """GitHub's plugin installed in a temporary DGC home, a stand-in keychain, and no GITHUB_PAT_TOKEN."""
 
+    with_dgc_app = False
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="dgc-plugin-keys-")
         self.addCleanup(temporary.cleanup)
@@ -185,6 +188,19 @@ class Fixture(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         os.environ.pop("GITHUB_PAT_TOKEN", None)
+        if not self.with_dgc_app:
+            # These tests are about keys: the catalog as it was before DGC registered its GitHub app (19 Oct 2026),
+            # so a missing key isn't answered by a sign-in. GitHubSignInTests set an app themselves.
+            catalog = json.loads(Path(plugins.CATALOG_PATH).read_text())
+            for entry in catalog.get("plugins", []):
+                for key in (entry.get("keys") or {}).values():
+                    if isinstance(key.get("sign_in"), dict):
+                        key["sign_in"]["client_id"] = ""
+            without_app = self.root / "plugin_catalog.json"
+            without_app.write_text(json.dumps(catalog))
+            started = patch.object(plugins, "CATALOG_PATH", without_app)
+            started.start()
+            self.addCleanup(started.stop)
         self.github = GitHub()
         self.addCleanup(self.github.close)
         self.config = Config()
@@ -201,7 +217,7 @@ class Fixture(unittest.TestCase):
             {"name": "github", "license": "MIT", "interface": {"displayName": "GitHub"}}))
         (package / ".mcp.json").write_text(json.dumps({"mcpServers": {"github": {
             "type": "http", "url": url or self.github.base + "/mcp/", "bearer_token_env_var": "GITHUB_PAT_TOKEN"}}}))
-        entry = {**next(e for e in plugins.load_catalog()["plugins"] if e["name"] == "github"),
+        entry = {**copy.deepcopy(next(e for e in plugins.load_catalog()["plugins"] if e["name"] == "github")),
                  "source_kind": "link", "source_path": str(package)}
         return plugins._install_tree(entry, package, accept_license="")
 
@@ -462,6 +478,15 @@ class GitHubSignInTests(Fixture):
         self.shown = params
         self.github.approved.set()
         return {"action": "accept"}
+
+    def test_dgc_ships_its_registered_github_app(self):
+        # OpenPeach registered the "DGC" OAuth App with device flow on 19 Oct 2026; its client id is public.
+        catalog = json.loads((Path(plugins.__file__).parent / "plugin_catalog.json").read_text())
+        entry = next(e for e in catalog["plugins"] if e["name"] == "github")
+        sign_in = entry["keys"]["GITHUB_PAT_TOKEN"]["sign_in"]
+        self.assertEqual(sign_in["client_id"], "Ov23li4FkrCcivrU2Ec2")
+        self.assertEqual(sign_in["kind"], "device")
+        self.assertNotIn("client_secret", json.dumps(entry), "an open-source app ships no secret")
 
     def test_without_a_client_id_there_is_no_sign_in_and_the_key_field_is_the_way(self):
         self.assertIsNone(plugins.sign_in_client("github", plugins.record_servers(self.record)["github"], self.config))
