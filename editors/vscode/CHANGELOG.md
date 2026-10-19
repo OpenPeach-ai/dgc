@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Even gaps around progress lines.** Each line the model writes between steps kept an empty row under it for its hover Copy button, so every tool line had 44px above it and 8px below. The Copy button now sits at the end of the line itself, and a line sits just above the work it introduces.
 - **One line per stretch of work.** Everything the model does between two of its sentences is one line now, such as "Ran 6 commands · thought 13s ›", folded once it is done. Thinking no longer splits that line: a model that thinks before every command drew "Thought for 2s · raw" and "Ran 1 command" six times over (twelve rows); it is one line, and opened it lists the six steps. Each thought sits on the step it led to as a small "thought 2s" mark that opens the same thought text as before. A thought just before a sentence, with no step around it, stays its own row; one that ends a stretch is the line's last row and counts on the line. A hidden ("withheld") thought is a mark with nothing to open. A sentence, a summarized note, a delegation and an approval still stand on their own, and an approval is never folded away.
 - **The step running now, under the line.** While a stretch works, one row under its line says what it is doing: "Running npm test 2.1s" with a spinner, "Thinking… 3s" between steps, or the last step done until the next one starts. It changes in place, steps aside when the line is opened (the steps show themselves) and goes when the stretch ends. A chat reopened mid-stretch draws it again.
 

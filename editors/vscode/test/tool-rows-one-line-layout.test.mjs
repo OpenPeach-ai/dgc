@@ -217,3 +217,68 @@ test("an approval inside a working stretch is on screen, below the line and its 
     await page.close();
   }
 });
+
+// Progress lines between stretches (the Work prompt asks for them now). Each line's copy button used to
+// sit on an empty row of its own under the line, keeping the paragraph's bottom margin too: 44px above
+// every tool line and 8px below it, so the transcript read as uneven gaps. The button now sits at the
+// end of the line's last row, in room the line keeps for it, and a line sits nearer the work it
+// introduces than the work before it.
+function progressTurn(lines) {
+  const frames = [{ type: "turn_start", turn_id: "t1", prompt: "go", kind: "prompt" }];
+  lines.forEach((text, i) => frames.push(
+    { type: "text_delta", text }, { type: "stream_end", message_id: `t1:${i + 1}`, phase: "commentary" },
+    { type: "tool_call", call_id: `c${i + 1}`, name: "bash", args: { command: "pytest -q" }, summary: "pytest -q" },
+    { type: "tool_result", call_id: `c${i + 1}`, name: "bash", output: "ok", is_error: false }));
+  frames.push({ type: "text_delta", text: "All five are done." }, { type: "stream_end", message_id: "t1:9", phase: "answer" },
+    { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 1, final_message_id: "t1:9" });
+  return frames;
+}
+const PROGRESS = ["Baseline is green (11 tests). Starting change 1.",
+  "Change 1 is verified. Now adding Cart.remove(sku) and running the whole suite again, then moving the low-stock threshold into catalog.py.",
+  "Change 2 is verified."];
+
+for (const width of [300, 900]) {
+  test(`progress lines at ${width}px: no empty row under a line, nearer the work it introduces, its copy beside the words`, async (t) => {
+    if (skipOrFail(t)) return;
+    const page = await open({ width, events: progressTurn(PROGRESS) });
+    try {
+      const facts = await page.evaluate(() => {
+        const turn = [...document.querySelectorAll("#log .msg.dgc")].at(-1);
+        return [...turn.querySelectorAll(":scope > .text.commentary")].map((line) => {
+          const box = line.getBoundingClientRect(), words = line.querySelector(":scope > p").getBoundingClientRect();
+          const work = line.nextElementSibling, before = line.previousElementSibling;
+          return { extra: box.bottom - words.bottom, below: work.getBoundingClientRect().top - box.bottom,
+            above: before?.matches(".tool-group") ? box.top - before.getBoundingClientRect().bottom : null };
+        });
+      });
+      assert.equal(facts.length, 3);
+      for (const [i, line] of facts.entries()) {
+        assert.ok(line.extra <= 0.5, `line ${i + 1} has no empty row under its words (${line.extra}px)`);
+        assert.ok(line.below <= 10, `line ${i + 1} sits ${line.below}px above its tool line`);
+        if (line.above !== null) {
+          assert.ok(line.above >= line.below && line.above <= 16, `line ${i + 1}: ${line.above}px above, ${line.below}px below`);
+        }
+      }
+      // The copy button: revealed on hover, inside the line's box, clear of every word (the long line wraps at 300px).
+      const line = page.locator(".msg.dgc .text.commentary").nth(1);
+      await line.hover();
+      await page.waitForTimeout(200);
+      const copy = await line.evaluate((node) => {
+        const button = node.querySelector(".commentary-actions button").getBoundingClientRect();
+        const range = document.createRange(); range.selectNodeContents(node.querySelector(":scope > p"));
+        const rects = [...range.getClientRects()];
+        const box = node.getBoundingClientRect();
+        return { opacity: Number(getComputedStyle(node.querySelector(".commentary-actions")).opacity),
+          inside: button.right <= box.right + 0.5 && button.bottom <= box.bottom + 0.5 && button.top >= box.top - 0.5,
+          clear: rects.every((r) => r.right <= button.left + 0.5 || r.bottom <= button.top + 0.5),
+          rows: new Set(rects.map((r) => Math.round(r.top))).size };
+      });
+      assert.ok(copy.opacity > 0.5, `hover shows the copy (${copy.opacity})`);
+      assert.ok(copy.inside, "the copy sits inside the line's box");
+      assert.ok(copy.clear, "and over none of its words");
+      if (width === 300) assert.ok(copy.rows >= 2, "the long line wraps at 300px");
+    } finally {
+      await page.close();
+    }
+  });
+}

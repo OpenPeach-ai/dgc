@@ -772,8 +772,15 @@ body.vscode-light, body.vscode-high-contrast-light {
 .ract .codicon { font-size: var(--t-sm); }
 
 /* Copy one mid-turn line. Faded rather than absent, so Tab still reaches it and focus reveals
-   it for anyone not using a mouse. */
-.commentary-actions { display: flex; margin-top: var(--sp-1); opacity: 0; transition: opacity .12s; }
+   it for anyone not using a mouse. It sits at the end of the line's last row, in room the line
+   keeps for it, not on a row of its own: in flow it added an empty row (and kept the paragraph's
+   bottom margin) under every progress line, so the gap above each tool line was 44px and the gap
+   below it 8px. */
+.text.commentary { position: relative; padding-right: calc(var(--control-sm) + var(--sp-1)); }
+.text.commentary > :has(+ .commentary-actions:last-child) { margin-bottom: 0; }
+/* A progress line introduces the work under it: a little more room above it than below. */
+.msg.dgc > :is(.tool-group, .tg-live) + .text.commentary { margin-top: var(--sp-1); }
+.commentary-actions { position: absolute; right: 0; bottom: 0; display: flex; opacity: 0; transition: opacity .12s; }
 .text.commentary:hover .commentary-actions, .commentary-actions:focus-within { opacity: .62; }
 .text.commentary:hover .commentary-actions:hover { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .commentary-actions { transition: none; } }
