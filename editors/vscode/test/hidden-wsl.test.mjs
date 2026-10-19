@@ -135,6 +135,11 @@ test("events: the distro's paths the editor opens or shows become Windows paths,
   assert.equal(history.items[0].path, "\\\\wsl.localhost\\DGC\\home\\dgc\\.dgc\\sessions\\s.images\\1.png", "replayed events too");
   assert.equal(history.items[1].text, "/mnt/c/proj/a.py", "free text is never rewritten");
   assert.equal(b.toEditor({ type: "troupe_finished", journal: "/home/dgc/.dgc/troupes/tr-1" }).journal, "\\\\wsl.localhost\\DGC\\home\\dgc\\.dgc\\troupes\\tr-1");
+  const photo = b.toEditor({ type: "pips_result", command: "get_pip_message_image", request_id: "r", ok: true,
+    result: { path: "/home/dgc/.dgc/pips/chat_images/pip_a/f.jpg", mime: "image/jpeg", bytes: 9 } });
+  assert.equal(photo.result.path, "\\\\wsl.localhost\\DGC\\home\\dgc\\.dgc\\pips\\chat_images\\pip_a\\f.jpg", "a Pip chat's kept photo");
+  const file = { type: "pips_result", command: "read_pip_computer_file", request_id: "r", ok: true, result: { path: "/home/pip/notes.txt" } };
+  assert.deepEqual(b.toEditor(structuredClone(file)), file, "a path inside a Pip's computer stays its own");
   const tool = { type: "tool_call", name: "read_file", args: { path: "/mnt/c/proj/a.py" }, summary: "a.py" };
   assert.deepEqual(b.toEditor(structuredClone(tool)), tool, "tool arguments are the model's: shown as it wrote them");
 });

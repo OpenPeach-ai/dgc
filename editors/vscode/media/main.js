@@ -1326,6 +1326,12 @@
   // sent rather than what a JSON line can carry. `imageSpool` is set from ready.capabilities.
   const SPOOL_IMAGE_TOTAL_BYTES = 32 * 1024 * 1024;
   let imageSpool = false;
+  // An iPhone photo (HEIC/HEIF): Chromium can't show one, but a backend with capabilities.heic_images takes it
+  // through the spool and sends the model a JPEG (photos.heic_to_jpeg).
+  let heicImages = false;
+  const HEIC_IMAGE_TYPES = new Set(["image/heic", "image/heif"]);
+  const heicFile = (file) => HEIC_IMAGE_TYPES.has(String(file.type || "").toLowerCase())
+    || (!file.type && /\.hei[cf]$/i.test(String(file.name || "")));
   const imageFileCeiling = () => (imageSpool ? Infinity : MAX_IMAGE_FILES);
   const imageByteCeiling = () => (imageSpool ? SPOOL_IMAGE_TOTAL_BYTES : MAX_IMAGE_TOTAL_BYTES);
   const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
@@ -2917,6 +2923,15 @@
       const chip = el("span", "prompt-att chip pip-reference-chip");
       chip.textContent = pipReferenceLabel(item.pipReference);
       chip.title = `${item.pipReference.pip_id} · ${item.pipReference.status} · lifecycle ${item.pipReference.lifecycle_revision} · Reference only`;
+      return chip;
+    }
+    if (item.img && item.heic) {
+      // Chromium can't draw an iPhone photo: the chip names it, and the model is sent it as a JPEG.
+      const chip = el("span", "prompt-att chip");
+      chip.appendChild(el("span", "codicon codicon-file-media"));
+      chip.lastChild.setAttribute("aria-hidden", "true");
+      chip.appendChild(el("span", "chip-label", esc(item.label || "iPhone photo")));
+      chip.title = "An iPhone photo, sent as a JPEG";
       return chip;
     }
     if (item.img) {
@@ -6029,6 +6044,7 @@
         if (pipReportsLive) vscode.postMessage({ type: "pipReportsWatch" });
         agentMapCapabilities();
         imageSpool = ev.capabilities?.image_spool === true;
+        heicImages = imageSpool && ev.capabilities?.heic_images === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
         pipsOffered = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
           && Number(ev.capabilities?.pips_api_version) >= 41;
@@ -7116,8 +7132,8 @@
     const name = kind ? kind.toUpperCase() : "Image";
     const size = imageSize(a.bytes);
     caption.textContent = name;
-    chip.title = [name, size].filter(Boolean).join(" · ");
-    if (a.data) {
+    chip.title = [a.heic ? "iPhone photo, sent as a JPEG" : name, size].filter(Boolean).join(" · ");
+    if (a.data && !a.heic) {
       const img = el("img"); img.alt = ""; img.decoding = "async"; img.src = a.data;
       img.addEventListener("load", () => {
         // The caption stays short enough to read; the full details are the chip's hover label.
@@ -7652,10 +7668,15 @@
     const items = (e.clipboardData && e.clipboardData.items) || [];
     let sawImage = false;
     for (const it of items) {
-      if (it.type && it.type.indexOf("image/") === 0) {
-        const file = it.getAsFile(); if (!file) continue;
+      const pastedFile = it.kind === "file" && !(it.type && it.type.indexOf("image/") === 0) ? it.getAsFile() : null;
+      if ((it.type && it.type.indexOf("image/") === 0) || (pastedFile && heicFile(pastedFile))) {
+        const file = pastedFile || it.getAsFile(); if (!file) continue;
         if (!canAttach()) continue;
-        if (!SUPPORTED_IMAGE_TYPES.has(String(file.type || "").toLowerCase())) {
+        const heic = heicFile(file);
+        if (heic && !heicImages) {
+          sysLine("Update DGC to send iPhone photos (HEIC), or send the photo as a JPEG.", true); continue;
+        }
+        if (!heic && !SUPPORTED_IMAGE_TYPES.has(String(file.type || "").toLowerCase())) {
           sysLine(`Unsupported pasted image type: ${file.type || "unknown"}.`, true); continue;
         }
         const current = attachments.filter((a) => a.img);
@@ -7679,10 +7700,14 @@
         };
         r.onload = () => {
           release();
-          if (typeof r.result !== "string" || !r.result.startsWith("data:image/")) {
+          if (typeof r.result !== "string" || !r.result.startsWith(heic ? "data:" : "data:image/")) {
             sysLine("The pasted image could not be encoded safely.", true); return;
           }
-          const image = { label: "Image", img: true, data: r.result, bytes: file.size };
+          // An iPhone photo is labelled for what it is; DGC turns it into a JPEG for the model.
+          const image = heic
+            ? { label: "iPhone photo", img: true, heic: true, bytes: file.size,
+                data: r.result.replace(/^data:[^;,]*(;[^,]*)?;base64,/, `data:${String(file.type || "").toLowerCase() === "image/heif" ? "image/heif" : "image/heic"};base64,`) }
+            : { label: "Image", img: true, data: r.result, bytes: file.size };
           if (owner.session === draftSession) {
             recordComposerEdit(() => attachments.push(image)); renderAtts();
           } else {

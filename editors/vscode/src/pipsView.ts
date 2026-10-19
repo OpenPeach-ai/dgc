@@ -6,6 +6,22 @@ import { homedir } from 'os';
 const commands = new Set(['list_pip_run_posts','check_pip_source','get_pip_run_source','mark_pip_news_seen','set_pip_chat_options','set_plugin_permission','list_pip_sites','set_pip_careful','forget_pip_site','list_pip_notes','add_pip_note','forget_pip_note','list_pip_attention','get_pips_limit','set_pips_limit','list_pip_reply_stats','get_pip_chat_context','list_pip_plugins','allow_pip_plugin','decline_pip_plugin','list_pip_plugin_uses','list_pip_routines','add_pip_routine','update_pip_routine','delete_pip_routine','decide_pip_routine','set_pip_profile','list_pip_shared','get_pip_computers','update_pip_computers','reset_pip_computer','list_pip_apps','finish_pip_computer_check','list_pip_app_links','start_pip_app_link','check_pip_app_link','decline_pip_app_link','disconnect_pip_app_link','get_pip_computer_desktop','list_pip_computer_files','read_pip_computer_file','add_pip_computer_file','remove_pip_computer_file','run_pip_computer_command','list_pip_computer_terminal','get_pip_message_image','introduce_pip','always_allow_pip_computer_action','get_pip_computer','list_pip_computer_actions','decide_pip_computer_action','get_pip_computer_frame','list_pip_computer_frames','stop_pip_computer','open_pip_computer','use_pip_computer_view','always_allow_pip_app_action','list_pip_action_grants','revoke_pip_action_grant','set_pip_feedback','list_pip_feedback','export_pip','get_pip_usage','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context']);
 /** Images sent with a Pip message, as data URIs: 2 MiB of image, base64, plus headers. */
 const MAX_IMAGE_URI_CHARS = 2_800_000;
+/** Pips API 52: photos and files go the Work chat's way. The host writes them into the backend's spool
+ *  (ready.capabilities.image_spool_dir) and sends their names, so the 4 MiB command frame no longer caps
+ *  them: 8 MiB a photo and 32 MiB of photos a message (no four-photo cap; 64 is the request's own bound),
+ *  and the Work chat's document limits for files (16 MiB a document, 1 MiB a text or code file, 32 MiB). */
+const MiB = 1024 * 1024;
+const SPOOL_PHOTO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/heic': 'heic', 'image/heif': 'heif' };
+const MAX_SPOOLED_PHOTOS = 64, MAX_PHOTO_BYTES = 8 * MiB, MAX_PHOTOS_BYTES = 32 * MiB;
+const MAX_SPOOLED_FILES = 16, MAX_DOCUMENT_BYTES = 16 * MiB, MAX_TEXT_FILE_BYTES = MiB, MAX_FILES_BYTES = 32 * MiB;
+const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.docx', '.xlsx', '.pptx', '.odt', '.ods', '.odp', '.rtf']);
+const PHOTO_LIMITS = 'Send photos of up to 8 MB each, 32 MB in all.';
+const FILE_LIMITS = 'Send up to 16 files: documents up to 16 MB, text and code up to 1 MB, 32 MB in all.';
+const DATA_URI = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})$/i;
+const decodedBytes = (b64: string) => Math.floor(b64.length * 3 / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
+/** A Pip chat's kept photo: <state>/chat_images/<pip_id>/<sha256>.<ext>, as the backend names it. */
+const KEPT_PHOTO = /^[0-9a-f]{64}\.(png|jpg|gif|webp|bmp)$/;
+const KEPT_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 const attr = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function pipsDocument(scriptUri = '', styleUri = '', cspSource = ''): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div><script src="${attr(scriptUri)}"></script></body></html>`;
@@ -27,9 +43,11 @@ export class PipsEditor implements vscode.Disposable {
   private computers = new Map<string, { panel: vscode.WebviewPanel; pip: ComputerPip }>();
   /** The CLI streams a Pip computer's full screen (ready.capabilities.pips_desktop). */
   private desktopStream = false;
-  private pending = new Map<string, { client: string; command: string; at: number; surface?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number } }>();
+  private pending = new Map<string, { client: string; command: string; at: number; surface?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number }; keptImage?: { pip: string; message: string; index: number; generation: number }; spooled?: string[] }>();
   private generation = 0;
   private apiVersion = 0;
+  /** The backend's image spool (ready.capabilities.image_spool_dir), where a Pip message's photos and files go from API 52. */
+  private spoolDir = '';
   private backendIdentity?: object;
   private backgroundSetup = false;
   private state: { connected: boolean; supported: boolean; enabled: boolean } = { connected: false, supported: false, enabled: false };
@@ -111,6 +129,7 @@ export class PipsEditor implements vscode.Disposable {
     this.backgroundSetup = capabilities?.pips_setup_notifications === 1;
     this.apiVersion = Number.isSafeInteger(capabilities?.pips_api_version) ? capabilities.pips_api_version : 0;
     this.desktopStream = capabilities?.pips_desktop === 1;
+    this.spoolDir = capabilities?.image_spool === true && typeof capabilities?.image_spool_dir === 'string' ? capabilities.image_spool_dir : '';
     this.generation++;
     this.pending.clear();
     this.state = { connected: true, supported: capabilities?.pips_supported === true && capabilities?.pips_api_version >= 9, enabled: capabilities?.pips_enabled === true };
@@ -157,6 +176,13 @@ export class PipsEditor implements vscode.Disposable {
     }
     if (owner.exportFile && event.type === 'pips_result' && event.ok === true) {
       void this.openExport(owner.client, owner.exportFile.generation, event.result);
+      return true;
+    }
+    if (owner.spooled && !(event.type === 'pips_result' && event.ok === true)) void this.unspool(owner.spooled);
+    if (owner.keptImage && event.type === 'pips_result' && event.ok === true) {
+      void this.keptImage(event.result, owner.keptImage).then(
+        image => this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { pip_id: owner.keptImage!.pip, message_id: owner.keptImage!.message, index: owner.keptImage!.index, image } }, owner.surface),
+        error => this.post({ type: 'pipsReply', id: owner.client, ok: false, error: { message: error instanceof Error ? error.message : 'That photo could not be read.' } }, owner.surface));
       return true;
     }
     if (owner.command === 'start_pip_app_link' && event.type === 'pips_result' && event.ok === true) {
@@ -239,6 +265,139 @@ export class PipsEditor implements vscode.Disposable {
       this.post({type:'pipsReply', id:client, ok:false, error:{message:error instanceof Error ? error.message : 'Could not open the saved document.'}});
     }
   }
+  /** A kept photo the backend named (get_pip_message_image as_file, API 52), read here as a data URI: a photo
+   *  of 8 MiB is more than any protocol frame carries. Only a regular file where the backend keeps a Pip
+   *  chat's photos, named by its digest, of the size and type it said. */
+  private async keptImage(result: any, want: { pip: string; message: string; index: number; generation: number }): Promise<string> {
+    const fs = await import('node:fs/promises');
+    const nodePath = await import('node:path');
+    const gone = () => new Error('That photo is no longer available.');
+    if (want.generation !== this.generation || !this.state.connected) throw new Error('The DGC connection changed. Refresh and try again.');
+    const path = result?.path, bytes = result?.bytes;
+    if (result?.message_id !== want.message || result?.index !== want.index || typeof path !== 'string' || !nodePath.isAbsolute(path)
+      || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > MAX_PHOTO_BYTES) throw gone();
+    const info = await fs.lstat(path).catch(() => undefined);
+    if (!info || !info.isFile() || info.isSymbolicLink() || info.size !== bytes) throw gone();
+    const real = await fs.realpath(path);
+    const name = nodePath.basename(real), kind = KEPT_PHOTO.exec(name)?.[1];
+    if (!kind || KEPT_MIME[kind] !== result.mime || nodePath.basename(nodePath.dirname(real)) !== want.pip
+      || nodePath.basename(nodePath.dirname(nodePath.dirname(real))) !== 'chat_images') throw gone();
+    const raw = await fs.readFile(real);
+    const magic = kind === 'png' ? raw.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      : kind === 'jpg' ? raw[0] === 0xff && raw[1] === 0xd8 && raw[2] === 0xff
+      : kind === 'gif' ? ['GIF87a', 'GIF89a'].includes(raw.subarray(0, 6).toString('latin1'))
+      : kind === 'webp' ? raw.subarray(0, 4).toString('latin1') === 'RIFF' && raw.subarray(8, 12).toString('latin1') === 'WEBP'
+      : raw.subarray(0, 2).toString('latin1') === 'BM';
+    if (!magic || raw.byteLength !== bytes) throw gone();
+    return `data:${result.mime};base64,${raw.toString('base64')}`;
+  }
+  /** The spool files of a send that never reached the backend, or that it refused before reading. */
+  private async unspool(names: string[]): Promise<void> {
+    if (!this.spoolDir) return;
+    const fs = await import('node:fs/promises');
+    const nodePath = await import('node:path');
+    await Promise.all(names.map(name => fs.unlink(nodePath.join(this.spoolDir, name)).catch(() => undefined)));
+  }
+  /** What is wrong with a message's photos and files for the spool (API 52), or '' when they fit. */
+  private spoolProblem(images: unknown, files: unknown): string {
+    if (images !== undefined) {
+      if (!Array.isArray(images) || images.length < 1 || images.length > MAX_SPOOLED_PHOTOS) return `Send up to ${MAX_SPOOLED_PHOTOS} photos with one message.`;
+      let total = 0;
+      for (const image of images) {
+        const match = typeof image === 'string' ? DATA_URI.exec(image) : null;
+        if (!match || !SPOOL_PHOTO_TYPES[match[1].toLowerCase()]) return 'Send photos as PNG, JPEG, GIF, WebP, BMP or iPhone (HEIC) images.';
+        const size = decodedBytes(match[2]);
+        if (size < 1 || size > MAX_PHOTO_BYTES || (total += size) > MAX_PHOTOS_BYTES) return PHOTO_LIMITS;
+      }
+    }
+    if (files !== undefined) {
+      if (!Array.isArray(files) || files.length < 1 || files.length > MAX_SPOOLED_FILES) return FILE_LIMITS;
+      let total = 0;
+      for (const f of files as any[]) {
+        if (!f || typeof f !== 'object' || Object.keys(f).sort().join() !== 'data,name' || typeof f.name !== 'string' || !f.name.trim()
+          || f.name.length > 255 || /[\/\\"\u0000-\u001f]/.test(f.name)) return 'Name each file plainly: no folders, quotes or control characters.';
+        const match = typeof f.data === 'string' ? DATA_URI.exec(f.data) : null;
+        const dot = f.name.lastIndexOf('.'), ext = dot > 0 ? f.name.slice(dot).toLowerCase() : '';
+        const size = match ? decodedBytes(match[2]) : 0;
+        if (!match || size < 1 || size > (DOCUMENT_EXTENSIONS.has(ext) ? MAX_DOCUMENT_BYTES : MAX_TEXT_FILE_BYTES) || (total += size) > MAX_FILES_BYTES) return FILE_LIMITS;
+      }
+    }
+    return '';
+  }
+  /** Send a Pip message whose photos and files go through the spool (API 52): each written, readable only by
+   *  you, under a fresh name in the backend's own spool, then sent by name. A spool the host can't write falls
+   *  back to the inline path when the message fits it (four images, 2 MB, no iPhone photos). */
+  private async sendSpooled(client: string, surface: string, request: any, requestId: string): Promise<void> {
+    const fail = (text: string) => this.post({ type: 'pipsReply', id: client, ok: false, error: { message: text } }, surface);
+    const generation = this.generation, written: string[] = [];
+    const spooledImages: { name: string; media_type: string }[] = [], spooledFiles: { name: string; spool: string }[] = [];
+    try {
+      const fs = await import('node:fs/promises');
+      const nodePath = await import('node:path');
+      await fs.mkdir(this.spoolDir, { recursive: true, mode: 0o700 });
+      const put = async (b64: string, ext: string) => {
+        const name = `${randomBytes(16).toString('hex')}.${ext}`;
+        await fs.writeFile(nodePath.join(this.spoolDir, name), Buffer.from(b64, 'base64'), { mode: 0o600, flag: 'wx' });
+        written.push(name);
+        return name;
+      };
+      for (const image of request.images || []) {
+        const [, mime, b64] = DATA_URI.exec(image)!;
+        spooledImages.push({ name: await put(b64, SPOOL_PHOTO_TYPES[mime.toLowerCase()]), media_type: mime.toLowerCase() });
+      }
+      for (const f of request.files || []) spooledFiles.push({ name: f.name, spool: await put(DATA_URI.exec(f.data)![2], 'bin') });
+    } catch {
+      await this.unspool(written);
+      const images: string[] = request.images || [], files: any[] = request.files || [];
+      const inline = images.length <= 4 && files.length <= 4 && images.every(i => !/^data:image\/hei[cf];/i.test(i))
+        && images.reduce((n, i) => n + i.length, 0) + files.reduce((n, f) => n + f.data.length, 0) <= MAX_IMAGE_URI_CHARS;
+      if (!inline) { fail('DGC couldn’t hand your photos to the Pip; try sending again.'); return; }
+      this.pending.set(requestId, { client, command: request.type, at: Date.now(), surface });
+      if (!this.send({ type: 'pips_control', request: { ...request, request_id: requestId } }, this.backendIdentity)) { this.pending.delete(requestId); fail('DGC couldn’t send that. Refresh to see whether it worked before trying again.'); }
+      return;
+    }
+    if (generation !== this.generation || !this.state.connected) { await this.unspool(written); fail('The DGC connection changed. Send it again.'); return; }
+    const { images: _images, files: _files, ...rest } = request;
+    const nested = { ...rest, ...(spooledImages.length ? { spooled_images: spooledImages } : {}), ...(spooledFiles.length ? { spooled_files: spooledFiles } : {}), request_id: requestId };
+    this.pending.set(requestId, { client, command: request.type, at: Date.now(), surface, spooled: written });
+    if (!this.send({ type: 'pips_control', request: nested }, this.backendIdentity)) {
+      this.pending.delete(requestId); await this.unspool(written);
+      fail('DGC couldn’t send that. Refresh to see whether it worked before trying again.');
+    }
+  }
+  /** Open a photo from a Pip's chat, the original, in an editor tab (one click on its thumbnail). */
+  private async openPhoto(message: any): Promise<void> {
+    const unavailable = () => void vscode.window.showInformationMessage('That photo is no longer available.');
+    const pip = message?.pip_id, id = message?.message_id, index = message?.index;
+    if (this.apiVersion < 43 || !this.state.connected || typeof pip !== 'string' || !/^pip_[A-Za-z0-9]{1,64}$/.test(pip)
+      || typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id) || !Number.isSafeInteger(index) || index < 0 || index > 63) { unavailable(); return; }
+    const generation = this.generation;
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        const requestId = 'pips-photo-' + randomBytes(12).toString('hex');
+        const timer = setTimeout(() => { this.hostReads.delete(requestId); reject(new Error('No reply from DGC.')); }, 20000);
+        this.hostReads.set(requestId, (event) => {
+          clearTimeout(timer); this.hostReads.delete(requestId);
+          if (event.type === 'pips_result' && event.ok === true && event.command === 'get_pip_message_image') resolve(event.result); else reject(new Error('DGC could not read the photo.'));
+        });
+        if (!this.send({ type: 'pips_control', request: { type: 'get_pip_message_image', pip_id: pip, message_id: id, index, ...(this.apiVersion >= 52 ? { as_file: true } : {}), request_id: requestId } }, this.backendIdentity)) {
+          clearTimeout(timer); this.hostReads.delete(requestId); reject(new Error('DGC is not connected.'));
+        }
+      });
+      const uri = this.apiVersion >= 52 ? await this.keptImage(result, { pip, message: id, index, generation }) : result?.image;
+      const match = typeof uri === 'string' ? /^data:image\/(png|jpeg|gif|webp|bmp);base64,([A-Za-z0-9+/=]+)$/.exec(uri) : null;
+      if (!match) { unavailable(); return; }
+      const fs = await import('node:fs/promises');
+      const os = await import('node:os');
+      const nodePath = await import('node:path');
+      // A copy under a name a person can read ("Photo 1.jpg"), not the digest the chat keeps it by.
+      const folder = nodePath.join(os.tmpdir(), 'dgc-pip-photos', id);
+      await fs.mkdir(folder, { recursive: true, mode: 0o700 });
+      const target = nodePath.join(folder, `Photo ${index + 1}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`);
+      await fs.writeFile(target, Buffer.from(match[2], 'base64'), { mode: 0o600 });
+      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target), { preview: true });
+    } catch { unavailable(); }
+  }
   receive(message: any, surface = 'main'): void {
     const computer = surface.startsWith('computer:') ? this.computers.get(surface.slice(9)) : undefined;
     if (surface !== 'main' && !computer) return;
@@ -251,6 +410,7 @@ export class PipsEditor implements vscode.Disposable {
     if (MIC_MESSAGES.includes(message?.type) && !computer) { if (this.dictation) void this.dictation().handle(this.mic, message); return; }
     if (SPEAK_MESSAGES.includes(message?.type) && !computer) { if (this.readAloud) void this.readAloud().handle(this.mic, message); return; }
     if (message?.type === 'pipComputerSave' && computer) { void this.saveComputerFile(surface, message); return; }
+    if (message?.type === 'pipsOpenPhoto' && !computer) { void this.openPhoto(message); return; }
     if (message?.type === 'pipsPluginLogos' && !computer) {
       // The logos of the plugins a Pip's replies used ("Used [logo] Aave"), by id; "" for one with none.
       const ids = Array.isArray(message.plugins) ? message.plugins.filter((id: unknown) => typeof id === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(id)).slice(0, 16) : [];
@@ -375,6 +535,30 @@ export class PipsEditor implements vscode.Disposable {
       // bounded on their own (2 MB of data); every other field keeps the budget.
       const fileData = request.type === 'add_pip_computer_file' && Object.prototype.hasOwnProperty.call(request, 'data') ? request.data : undefined;
       if (fileData !== undefined && (typeof fileData !== 'string' || !fileData.startsWith('data:') || !fileData.slice(0, 200).includes(';base64,') || !/^[\x00-\x7f]*$/.test(fileData) || fileData.length > MAX_IMAGE_URI_CHARS)) { fail('Add a file of 2 MB or less. Nothing was sent.'); return; }
+      // The spool's names come from this host alone (API 52); a view never names files in it, nor asks for a kept path.
+      if (request.type === 'send_pip_message' && ['spooled_images', 'spooled_files'].some(key => Object.prototype.hasOwnProperty.call(request, key))) {
+        fail(this.apiVersion < 52 ? 'Update DGC to send bigger photos and files to a Pip.' : 'Add photos and files with the message box.'); return;
+      }
+      if (request.type === 'get_pip_message_image' && Object.prototype.hasOwnProperty.call(request, 'as_file')) {
+        fail(this.apiVersion < 52 ? 'Update DGC to open a Pip chat’s photos.' : 'Choose a photo in the chat.'); return;
+      }
+      if (request.type === 'get_pip_message_image' && this.apiVersion >= 52 && typeof request.pip_id === 'string' && typeof request.message_id === 'string'
+        && Number.isSafeInteger(request.index)) {
+        // A photo can be 8 MiB, which no frame carries as a data URI: the host reads the kept file itself.
+        this.pending.set(requestId, { client: message.id, command: request.type, at: Date.now(), surface,
+          keptImage: { pip: request.pip_id, message: request.message_id, index: request.index, generation: this.generation } });
+        if (!this.send({ type: 'pips_control', request: { ...nested, as_file: true } }, this.backendIdentity)) { this.pending.delete(requestId); fail('DGC couldn’t read that photo.'); }
+        return;
+      }
+      if (request.type === 'send_pip_message' && this.apiVersion >= 52 && this.spoolDir
+        && ['images', 'files'].some(key => Object.prototype.hasOwnProperty.call(request, key))) {
+        const problem = this.spoolProblem(request.images, request.files);
+        if (problem) { fail(problem); return; }
+        const { images: _images, files: _files, ...small } = nested;
+        if (Buffer.byteLength(JSON.stringify(small), 'utf8') > maxBytes) { fail(`This request exceeds the ${maxBytes / 1024} KiB limit. Nothing was sent.`); return; }
+        void this.sendSpooled(message.id, surface, request, requestId);
+        return;
+      }
       const images = request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'images') ? request.images : undefined;
       if (images !== undefined && (!Array.isArray(images) || images.length < 1 || images.length > 4 || images.some((i: unknown) => typeof i !== 'string' || !i.startsWith('data:image/') || !/^[\x00-\x7f]*$/.test(i))
         || images.reduce((n: number, i: string) => n + i.length, 0) > MAX_IMAGE_URI_CHARS)) { fail('Send up to 4 images, 2 MB in all. Nothing was sent.'); return; }

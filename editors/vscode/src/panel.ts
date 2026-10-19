@@ -3702,8 +3702,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       for (const value of list) {
         const match = /^data:(image\/[a-z+.-]+);base64,([A-Za-z0-9+/]*={0,2})$/i.exec(String(value ?? ""));
         if (!match) { return undefined; }        // not ours to reinterpret; let the backend judge it
+        // An iPhone photo (HEIC/HEIF) goes too: a backend with capabilities.heic_images sends the model a JPEG.
         const ext = ({ "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
-                       "image/webp": "webp", "image/bmp": "bmp" } as Record<string, string>)[match[1].toLowerCase()];
+                       "image/webp": "webp", "image/bmp": "bmp",
+                       ...(caps?.heic_images === true ? { "image/heic": "heic", "image/heif": "heif" } : {}) } as Record<string, string>)[match[1].toLowerCase()];
         if (!ext) { return undefined; }
         const name = `${crypto.randomUUID()}.${ext}`;
         await fs.writeFile(nodePath.join(dir, name), Buffer.from(match[2], "base64"), { mode: 0o600 });
@@ -4021,6 +4023,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsReconnect":
       case "pipsRequest":
       case "pipsOpenComputer":
+      case "pipsOpenPhoto":
       case "pipsPluginLogos":
         if (msg.documentId !== this.pipsDocumentId) return;
         this.ensurePipsBridge().receive(msg);

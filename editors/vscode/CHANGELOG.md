@@ -17,6 +17,19 @@
 - **Ask DGC to fix sends, once.** On a Pip report card it sends DGC one message naming the run (queued behind a turn that is running) and becomes "Asked DGC", also after the chat is reopened. Before, it only filled the box, and a second click pasted the prompt again. A draft in the box is left alone.
 - **The chip line's colours are the rows' colours again.** Blocked tasks and a blocked goal show their icon and "N blocked" in the olive error colour, waiting monitors and a Pips alert in amber, with no dot and no outline. Error text in light themes is a darker olive, readable on white.
 
+### Phone photos in a Pip's chat (needs DGC with Pips API 52)
+
+- **Send a Pip real photos.** A photo can be up to 8 MB and a message up to 32 MB of photos, with no four-photo
+  cap; files can be up to 16 (a document up to 16 MB, a text or code file up to 1 MB, 32 MB in all). The extension
+  hands them to DGC through its spool, as the Work chat does, so a phone photo of a bill goes as it is. With an
+  older DGC the old limit stays (4 images and 4 files, 2 MB in all).
+- **iPhone photos (HEIC) just work**, in a Pip's chat and the Work chat: add or paste one and DGC turns it into a
+  JPEG. Its chip shows its name until it is sent, since VS Code can't draw HEIC. A computer that can't convert one
+  says what to install in one sentence, and nothing is sent.
+- **The chat keeps your original.** Every photo a message brought shows as a thumbnail (drawn small, so a chat of
+  phone photos stays light), and clicking one opens the original at full size in an editor tab ("Photo 1.jpg").
+  The model is sent a large photo at 2,500 pixels, which keeps small print readable.
+
 ### A Pip's runs in its own chat (needs DGC with Pips API 51)
 
 - **Each run is a message from the Pip in its chat**, where you can ask about it: its face and name, "Today's

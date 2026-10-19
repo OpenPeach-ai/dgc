@@ -304,7 +304,7 @@ function chatControlsMarkup(canSend,busy){
  // An empty box offers voice mode where Send is, as ChatGPT does; a word typed, and it's Send again.
  const offerVoice=!!voiceMode&&!busy&&canSend&&!draft.chatText.trim()&&!(canAttachImages()&&(pendingImages().length||pendingFiles().length));
  const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${composerIcon('stop')}</button>`:`<button type="submit" class="chat-send${canSend&&(draft.chatText.trim()||canAttachImages()&&(pendingImages().length||pendingFiles().length))?' ready':''}" aria-label="Send message" title="Send message"${canSend?'':' disabled'}>${composerIcon('up')}</button>`;
- return `${modelMenu}${contextMenu}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button><button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(shownModel)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
+ return `${modelMenu}${contextMenu}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button><button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(shownModel)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
 // What the prompt box's choices are for: since API 47 they are this Pip's own (its replies and the work it does on
@@ -477,38 +477,72 @@ async function loadChatStream(){
     if(ended)void loadMessages();       // the reply is saved: show it now, not at the next 4 s refresh
     else if(S.stream?.runId===runId&&S.tab==='chat'&&S.visible&&!document.hidden)streamTimer=window.setTimeout(()=>{void loadChatStream();},400);}}
 }
-// Images in a Pip's chat (API 43): up to four, 2 MB in all, the types the main chat takes. They are
-// added with the image button, pasted or dropped, shown as previews, and sent with the message.
-const PIP_IMAGE_TYPES=['image/png','image/jpeg','image/gif','image/webp','image/bmp'],PIP_MAX_IMAGES=4,PIP_MAX_IMAGE_BYTES=2*1024*1024;
+// Images in a Pip's chat (API 43): added with the image button, pasted or dropped, shown as previews, and
+// sent with the message. Inline (API 43–51) they ride inside the request: up to four, 2 MB in all with any
+// files. From API 52 the host hands them to DGC the Work chat's way (its spool), so a photo can be 8 MB and
+// a message 32 MB of photos, with no four-photo cap; an iPhone photo (HEIC) goes too, and DGC turns it into a
+// JPEG (Chromium can't show one, so its chip names it until it is sent).
+const PIP_IMAGE_TYPES=['image/png','image/jpeg','image/gif','image/webp','image/bmp'],PIP_HEIC_TYPES=['image/heic','image/heif'],PIP_MAX_IMAGES=4,PIP_MAX_IMAGE_BYTES=2*1024*1024;
+const MB=1024*1024,PIP_SPOOL_IMAGES=64,PIP_PHOTO_BYTES=8*MB,PIP_PHOTOS_BYTES=32*MB,PIP_SPOOL_FILES=16,PIP_DOCUMENT_BYTES=16*MB,PIP_TEXT_FILE_BYTES=MB,PIP_FILES_BYTES=32*MB;
+const PIP_DOCUMENT_EXTENSIONS=['.pdf','.docx','.xlsx','.pptx','.odt','.ods','.odp','.rtf'];
 const chatImages=new Map(),messageImageCache=new Map(),messageImageFlight=new Set();
 // Plugin logos for "Used [logo] Aave", by plugin id: the host reads each once (a data: URI; "" for none).
 const pluginLogoCache=new Map(),pluginLogoAsked=new Set();
 // Files go with a message too, as in the main chat: text and code, PDF, Word, Excel, PowerPoint,
-// OpenDocument, RTF, CSV and TSV. Up to 4, and 2 MB in all with any images.
+// OpenDocument, RTF, CSV and TSV. Inline, up to 4 and 2 MB in all with any images; from API 52, the Work
+// chat's limits: up to 16, a document up to 16 MB, a text or code file up to 1 MB, 32 MB in all.
 const PIP_FILE_EXTENSIONS=['.pdf','.docx','.xlsx','.pptx','.odt','.ods','.odp','.rtf','.csv','.tsv','.txt','.md','.markdown','.rst','.log','.json','.jsonl','.yaml','.yml','.toml','.ini','.cfg','.conf','.xml','.html','.htm','.css','.js','.mjs','.cjs','.ts','.tsx','.jsx','.py','.rb','.go','.rs','.java','.kt','.swift','.c','.h','.cpp','.hpp','.cs','.php','.sh','.sql','.r','.ipynb','.srt','.vtt','.tex','.bib','.svg','.ics','.vcf','.eml'],PIP_MAX_FILES=4;
 const chatFiles=new Map();
 function pendingFiles(){return chatFiles.get(S.selected)||[];}
 function fileExtension(name){const i=name.lastIndexOf('.');return i>0?name.slice(i).toLowerCase():'';}
 function fileSize(n){return n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(n<10240?1:0)} KB`:`${(n/1048576).toFixed(1)} MB`;}
 function canAttachImages(){return S.apiVersion>=43&&!remoteHost&&personalPip();}
+function spoolsPhotos(){return S.apiVersion>=52;}
 function pendingImages(){return chatImages.get(S.selected)||[];}
+function heicFile(f){return PIP_HEIC_TYPES.includes(String(f.type||'').toLowerCase())||!f.type&&['.heic','.heif'].includes(fileExtension(f.name||''));}
 function imageStripMarkup(){
  const images=pendingImages(),files=pendingFiles();if(!images.length&&!files.length)return '';
- return `<div class="chat-images" aria-label="Images and files to send">${images.map((image,i)=>`<span class="chat-image-chip"><img src="${esc(image.data)}" alt="Image ${i+1} to send"><button type="button" data-remove-image="${i}" aria-label="Remove image ${i+1}" title="Remove">×</button></span>`).join('')}${files.map((file,i)=>`<span class="chat-file-chip" title="${esc(file.name)}"><span class="chat-file-ext" aria-hidden="true">${esc((fileExtension(file.name).slice(1)||'txt').slice(0,4))}</span><span class="chat-file-name">${esc(file.name)}</span><span class="chat-file-size">${esc(fileSize(file.bytes))}</span><button type="button" data-remove-file="${i}" aria-label="Remove ${esc(file.name)}" title="Remove">×</button></span>`).join('')}</div>`;
+ // An iPhone photo can't be drawn here (Chromium has no HEIC); its chip says what it is, and DGC sends it as a JPEG.
+ return `<div class="chat-images" aria-label="Images and files to send">${images.map((image,i)=>image.heic?`<span class="chat-file-chip chat-heic-chip" title="${esc(image.name)}: an iPhone photo, sent as a JPEG"><span class="chat-file-ext" aria-hidden="true">heic</span><span class="chat-file-name">${esc(image.name)}</span><span class="chat-file-size">${esc(fileSize(image.bytes))}</span><button type="button" data-remove-image="${i}" aria-label="Remove ${esc(image.name)}" title="Remove">×</button></span>`:`<span class="chat-image-chip"><img src="${esc(image.data)}" alt="Image ${i+1} to send"><button type="button" data-remove-image="${i}" aria-label="Remove image ${i+1}" title="Remove">×</button></span>`).join('')}${files.map((file,i)=>`<span class="chat-file-chip" title="${esc(file.name)}"><span class="chat-file-ext" aria-hidden="true">${esc((fileExtension(file.name).slice(1)||'txt').slice(0,4))}</span><span class="chat-file-name">${esc(file.name)}</span><span class="chat-file-size">${esc(fileSize(file.bytes))}</span><button type="button" data-remove-file="${i}" aria-label="Remove ${esc(file.name)}" title="Remove">×</button></span>`).join('')}</div>`;
 }
 function addImageFiles(files){
  if(!canAttachImages()||!S.selected)return;
- const pip=S.selected,all=[...files],list=all.filter(f=>PIP_IMAGE_TYPES.includes(f.type)),docs=all.filter(f=>!PIP_IMAGE_TYPES.includes(f.type));
+ const pip=S.selected,all=[...files],spool=spoolsPhotos();
+ const heics=all.filter(heicFile),list=all.filter(f=>PIP_IMAGE_TYPES.includes(f.type)||spool&&heicFile(f)),docs=all.filter(f=>!PIP_IMAGE_TYPES.includes(f.type)&&!heicFile(f));
+ if(heics.length&&!spool)setError('Update DGC to send iPhone photos.');
  const usable=docs.filter(f=>PIP_FILE_EXTENSIONS.includes(fileExtension(f.name))&&f.name.length<=255&&!/[\/\\"\u0000-\u001f]/.test(f.name));
  if(usable.length<docs.length)setError('Add images, text or code files, or PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV or TSV files.');
  if(!list.length&&!usable.length)return;
- const images=pendingImages(),filesNow=pendingFiles(),used=images.reduce((n,i)=>n+i.bytes,0)+filesNow.reduce((n,f)=>n+f.bytes,0);
- const takeImages=list.slice(0,Math.max(0,PIP_MAX_IMAGES-images.length)),takeFiles=usable.slice(0,Math.max(0,PIP_MAX_FILES-filesNow.length));
- const bytes=used+takeImages.reduce((n,f)=>n+f.size,0)+takeFiles.reduce((n,f)=>n+f.size,0);
- if(takeImages.length<list.length||takeFiles.length<usable.length)setError(`Send up to ${PIP_MAX_IMAGES} images and ${PIP_MAX_FILES} files with one message.`);
- if(bytes>PIP_MAX_IMAGE_BYTES){setError('Send up to 2 MB of images and files with one message.');return;}
- for(const file of takeImages){const reader=new FileReader();reader.onload=()=>{if(typeof reader.result!=='string'||!reader.result.startsWith('data:image/'))return;const next=[...(chatImages.get(pip)||[]),{data:reader.result,bytes:file.size}].slice(0,PIP_MAX_IMAGES);chatImages.set(pip,next);if(S.selected===pip)render();};reader.readAsDataURL(file);}
- for(const file of takeFiles){if(!file.size){setError(`${file.name} is empty.`);continue;}const reader=new FileReader();reader.onload=()=>{if(typeof reader.result!=='string'||!reader.result.startsWith('data:'))return;const data=reader.result.replace(/^data:[^;,]*(;[^,]*)?;base64,/,'data:application/octet-stream;base64,');const next=[...(chatFiles.get(pip)||[]),{name:file.name,data,bytes:file.size}].slice(0,PIP_MAX_FILES);chatFiles.set(pip,next);if(S.selected===pip)render();};reader.readAsDataURL(file);}
+ const images=pendingImages(),filesNow=pendingFiles();
+ const takeImages=list.slice(0,Math.max(0,(spool?PIP_SPOOL_IMAGES:PIP_MAX_IMAGES)-images.length)),takeFiles=usable.slice(0,Math.max(0,(spool?PIP_SPOOL_FILES:PIP_MAX_FILES)-filesNow.length));
+ if(spool){
+  // The Work chat's limits, one plain sentence each.
+  if(takeImages.length<list.length){setError(`Send up to ${PIP_SPOOL_IMAGES} photos with one message.`);return;}
+  if(takeFiles.length<usable.length){setError(`Send up to ${PIP_SPOOL_FILES} files with one message.`);return;}
+  const big=takeImages.find(f=>f.size>PIP_PHOTO_BYTES);if(big){setError(`${big.name||'That photo'} is over 8 MB; send a smaller photo.`);return;}
+  if(images.reduce((n,i)=>n+i.bytes,0)+takeImages.reduce((n,f)=>n+f.size,0)>PIP_PHOTOS_BYTES){setError('Send up to 32 MB of photos with one message.');return;}
+  const over=takeFiles.find(f=>f.size>(PIP_DOCUMENT_EXTENSIONS.includes(fileExtension(f.name))?PIP_DOCUMENT_BYTES:PIP_TEXT_FILE_BYTES));
+  if(over){setError(PIP_DOCUMENT_EXTENSIONS.includes(fileExtension(over.name))?`${over.name} is over 16 MB; send a document of 16 MB or less.`:`${over.name} is over 1 MB; send a text or code file of 1 MB or less.`);return;}
+  if(filesNow.reduce((n,f)=>n+f.bytes,0)+takeFiles.reduce((n,f)=>n+f.size,0)>PIP_FILES_BYTES){setError('Send up to 32 MB of files with one message.');return;}
+ }else{
+  const used=images.reduce((n,i)=>n+i.bytes,0)+filesNow.reduce((n,f)=>n+f.bytes,0),bytes=used+takeImages.reduce((n,f)=>n+f.size,0)+takeFiles.reduce((n,f)=>n+f.size,0);
+  if(takeImages.length<list.length||takeFiles.length<usable.length)setError(`Send up to ${PIP_MAX_IMAGES} images and ${PIP_MAX_FILES} files with one message.`);
+  if(bytes>PIP_MAX_IMAGE_BYTES){setError('Send up to 2 MB of images and files with one message.');return;}
+ }
+ const cap=spool?PIP_SPOOL_IMAGES:PIP_MAX_IMAGES,fileCap=spool?PIP_SPOOL_FILES:PIP_MAX_FILES;
+ // Each is read in the background; they join the message in the order you picked them, not the order they finish.
+ const read=file=>new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(typeof reader.result==='string'?reader.result:'');reader.onerror=()=>resolve('');reader.readAsDataURL(file);});
+ void Promise.all(takeImages.map(read)).then(results=>{
+  const added=takeImages.map((file,i)=>{const heic=heicFile(file),result=results[i];if(!result.startsWith(heic?'data:':'data:image/'))return null;
+   const data=heic?result.replace(/^data:[^;,]*(;[^,]*)?;base64,/,`data:${String(file.type||'').toLowerCase()==='image/heif'?'image/heif':'image/heic'};base64,`):result;
+   return {data,bytes:file.size,...(heic?{heic:true,name:file.name||'iPhone photo'}:{})};}).filter(Boolean);
+  if(!added.length)return;chatImages.set(pip,[...(chatImages.get(pip)||[]),...added].slice(0,cap));if(S.selected===pip)render();
+ });
+ const readable=takeFiles.filter(file=>{if(!file.size)setError(`${file.name} is empty.`);return !!file.size;});
+ void Promise.all(readable.map(read)).then(results=>{
+  const added=readable.map((file,i)=>results[i].startsWith('data:')?{name:file.name,data:results[i].replace(/^data:[^;,]*(;[^,]*)?;base64,/,'data:application/octet-stream;base64,'),bytes:file.size}:null).filter(Boolean);
+  if(!added.length)return;chatFiles.set(pip,[...(chatFiles.get(pip)||[]),...added].slice(0,fileCap));if(S.selected===pip)render();
+ });
 }
 function messageImageSrc(messageId,index){return messageImageCache.get(`${messageId}:${index}`)||'';}
 function pluginLogoSrc(plugin){return pluginLogoCache.get(plugin)||'';}
@@ -527,17 +561,33 @@ function takePluginLogos(logos){
   for(const mark of document.querySelectorAll(`[data-plugin-mark="${id}"]`)){const img=document.createElement('img');img.alt='';img.src=src;mark.replaceChildren(img);}
  }
 }
+// A thumbnail of a big photo is drawn from the original once and kept small (a 12 MP photo is 48 MB once
+// decoded); clicking it opens the original. A small image, or one this webview can't redraw, is kept as it is.
+function thumbnail(uri){
+ return new Promise(resolve=>{
+  if(uri.length<600000||typeof Image!=='function'){resolve(uri);return;}
+  const img=new Image();
+  img.onload=()=>{try{const scale=Math.min(1,480/Math.max(img.naturalWidth,img.naturalHeight)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));const g=canvas.getContext('2d');if(!g){resolve(uri);return;}g.imageSmoothingQuality='high';g.drawImage(img,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',0.86));}catch{resolve(uri);}};
+  img.onerror=()=>resolve(uri);img.src=uri;
+ });
+}
 // Thumbnails of images already sent load one at a time, when their message is on screen.
 function hydrateMessageImages(){
  for(const node of document.querySelectorAll('img[data-message-image]')){
   const key=node.dataset.messageImage;if(messageImageCache.has(key)){if(!node.getAttribute('src'))node.src=messageImageCache.get(key);continue;}
   if(messageImageFlight.has(key)||S.apiVersion<43)continue;
   const [messageId,index]=key.split(':'),pip=S.selected;messageImageFlight.add(key);
-  send('get_pip_message_image',{pip_id:pip,message_id:messageId,index:Number(index)}).then(result=>{
+  send('get_pip_message_image',{pip_id:pip,message_id:messageId,index:Number(index)}).then(async result=>{
    if(!record(result)||result.message_id!==messageId||typeof result.image!=='string'||!/^data:image\/(png|jpeg|gif|webp|bmp);base64,/.test(result.image))return;
-   messageImageCache.set(key,result.image);for(const img of document.querySelectorAll(`img[data-message-image="${key}"]`))img.src=result.image;
+   const small=await thumbnail(result.image);
+   messageImageCache.set(key,small);for(const img of document.querySelectorAll(`img[data-message-image="${key}"]`))img.src=small;
   }).catch(()=>{}).finally(()=>messageImageFlight.delete(key));
  }
+}
+function openMessageImage(key){
+ const [messageId,index]=String(key||'').split(':');
+ if(!S.selected||!messageId||!/^\d+$/.test(index||''))return;
+ vscode.postMessage({type:'pipsOpenPhoto',pip_id:S.selected,message_id:messageId,index:Number(index)});
 }
 async function sendChat(){
   // Enter while the Pip is answering said nothing before; the draft stays in the box either way.
@@ -2697,6 +2747,8 @@ document.addEventListener('click',event=>{
   const link=event.target.closest?.('.md-link');
   if(link){event.preventDefault();const target=window.DgcMarkdown?.linkTarget?.(link.dataset.target+(link.dataset.line?`:${link.dataset.line}`:''));if(target?.kind==='external')vscode.postMessage({type:'openExternal',url:target.target});else if(target?.kind==='file')vscode.postMessage({type:'openFile',path:target.target,line:target.line});return;}
   const copy=event.target.closest?.('button.copy[data-c]');if(copy){event.preventDefault();try{vscode.postMessage({type:'copy',text:decodeURIComponent(copy.dataset.c)});copy.classList.add('done');copy.title='Copied';copy.setAttribute('aria-label','Copied');copy.innerHTML=transcriptIcon('check');}catch{/* malformed generated data is not copied */}return;}
+  const photo=event.target.closest?.('img[data-message-image]');
+  if(photo&&S.apiVersion>=43&&!remoteHost){openMessageImage(photo.dataset.messageImage);return;}
   const target=event.target.closest('button');if(!target||target.disabled)return;
   if(target.id==='chat-attach'){$('chat-attach-input')?.click();return;}
   if(target.dataset.removeFile!==undefined){const i=Number(target.dataset.removeFile),files=[...pendingFiles()];if(Number.isInteger(i)&&i>=0&&i<files.length){files.splice(i,1);files.length?chatFiles.set(S.selected,files):chatFiles.delete(S.selected);render();$('chatText')?.focus();}return;}
