@@ -522,7 +522,7 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 - **A verifier for ordinary sub-agents too.** `task`'s roster gains `verifier` beside explorer, researcher, critic and
   worker: it tries to prove a claim or a change wrong, reads and runs the tests or commands that would show it (in
   its own checkout, which has your uncommitted edits), edits nothing, and starts its answer with CONFIRMED, REFUTED
-  or UNSURE. A troupe's verifier is unchanged: read only, answering in JSON. A `~/.dgc/agents/verifier.md` of your own
+  or UNSURE. A troupe's verifier answers in JSON, with its own read-only box (below). A `~/.dgc/agents/verifier.md` of your own
   still replaces it.
 - **A misplaced `split` says where it goes.** "stages[1].split must name a list field in returns" cost a model two
   attempts: it had put split on the verify stage instead of the audit stage that returns the list. The refusal now
@@ -536,14 +536,34 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 - **Troupe checkers say what they couldn't check, and that isn't a no.** The `troupe` tool said only "read only" about
   explorer, researcher, critic and verifier, so a model told its verifiers to re-run SQL. They have no shell; they said
   "bash/docker was refused" and voted "not real", and `keep` dropped findings nobody had checked. Now:
-  - The tool's description and each agent's role say exactly what each kind can do: the four reading kinds read files
-    and the web with no shell (no commands, tests or database queries); a worker has a shell and writes in its own
-    checkout. The start message says it per stage ("Verify (verifier) reads files and the web; no shell …").
+  - The tool's description and each agent's role say exactly what each kind can do: explorer, researcher and critic
+    read files and the web with no shell (no commands, tests or database queries); a verifier has its read-only box
+    (below) where this computer can run one; a worker has a shell and writes in its own checkout. The start message
+    says it per stage.
   - A reading stage with `keep` asks each agent, when it can't check something with its tools, to add
     `"unsure": true` instead of guessing. Such a vote counts neither way: the votes that did check decide (most of
     them, or `at_least` of them as far as there are any), and an item no one could check is kept with
     `"unchecked": true`. The report counts them ("2 kept (1 of them unchecked)") and marks each one
     ("UNCHECKED: none of 3 could check it", "1 of 1 agreed, 2 could not check").
+- **Troupe verifiers get a read-only shell in a sealed box, and a project can give them a read-only database
+  account** (the founder's decision). A `verifier` now has bash, every command run in DGC's bubblewrap box: the
+  project read only (at `/mnt` and its own path), a private `/tmp` the one writable place, credential files hidden
+  as from a Pip snapshot (`.env*`, keys, `.git`, `.ssh`, cloud configs; dependency and build folders stay so tests
+  run), homes and `/run` (Docker's socket, D-Bus) empty, no capabilities, and no network. Its bash needs no approval
+  (it is the box), yet your own deny and ask rules for Bash still come first. A refused write says it was the box
+  working, not a fault.
+  - **`dgc readonly-db set|show|clear|guide`**: one `postgresql://` address per project for a role you made read
+    only (`guide` prints the SQL; DGC never creates or changes a role). It is kept as a plugin's sign-in is (system
+    keychain, or an owner-only file), read from the terminal or a pipe and never from the command line, and must be
+    a database on this computer. A verifier's box reaches it through one forwarded port and nothing else, as
+    `$DGC_READONLY_DATABASE_URL`; a worker gets the same variable as the connection to prefer for reads. Its
+    password is redacted from the agents' tool output and replies.
+  - Where the box can't run (stock Ubuntu 23.10+ AppArmor, no bubblewrap, macOS), a verifier has no shell and is
+    told why, and to answer unsure rather than "not real". The `troupe` tool's description says exactly what each
+    kind can do on this computer and in this project (box or not, database or not).
+  - Live, on this machine: through a throwaway Postgres in Docker and the read-only role from `guide`, a verifier's
+    box ran `select count(*)` (3 rows), was refused an UPDATE ("cannot execute UPDATE in a read-only transaction"),
+    and could reach neither the machine's other Postgres on port 5432 nor the internet.
 - **The model can read a running troupe's status.** Asked twice for an update, the model was told `list_tasks` was "not
   offered on this request" and parsed the troupe's `results.jsonl` with its own Python. `list_tasks` and `wait_tasks`
   are now offered whenever a troupe this chat started is running (state, never wording; `message_task` and

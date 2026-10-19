@@ -3301,6 +3301,10 @@ class Agent(GoalLifecycle):
                 tool = {**tool, "function": function}
             if name == "task" and one_shot:
                 tool = _one_shot_task_schema(tool)
+            if name == "troupe":
+                # What each kind can do, on this computer and in this project (a checker's box, its database).
+                from .troupe_agent import with_abilities
+                tool = with_abilities(tool, self.config.project_root)
             if name == "troupe" and one_shot:
                 # `dgc -p` has no later turn to wake: the troupe runs to its end inside the call.
                 function = dict(tool["function"])
@@ -9374,7 +9378,10 @@ class Agent(GoalLifecycle):
                                    cancel: threading.Event | None = None,
                                    handle: dict | None = None,
                                    tools: frozenset | None = None,
-                                   unattended: bool = False) -> tuple[str, str, str]:
+                                   unattended: bool = False,
+                                   checker_box: dict | None = None,
+                                   tool_env: dict | None = None,
+                                   secrets=()) -> tuple[str, str, str]:
         """Run one child in an already-selected checkout.
 
         `tools` narrows what the child is offered (a troupe's read-only agents); `unattended` makes it refuse steps
@@ -9409,6 +9416,21 @@ class Agent(GoalLifecycle):
                 return "", "", start_error
             # The sub-agent's own window, as context_size is the main one's: it sizes each request
             # (Ollama's num_ctx) and every budget the child measures, compaction included.
+            if checker_box is not None:
+                # A Troupe checker (dgc/checker_box.py): every shell command in its read-only box, and that boxed
+                # shell needs no approval nobody is there to give. The user's own deny and ask rules for Bash still
+                # come first (deny, then ask, then allow), and the rules are this child's own copy.
+                child_config.data.update(sandbox=True, sandbox_read_only=True, sandbox_network=False,
+                                         _checker_box=checker_box)
+                shared = getattr(child_config, "session_permissions", None) or {}
+                child_config.session_permissions = {
+                    action: [*(shared.get(action, []) or []), *(["Bash"] if action == "allow" else [])]
+                    for action in ("allow", "ask", "deny")}
+            if tool_env:
+                child_config._tool_env_extra = dict(tool_env)
+            if secrets:
+                child_config._session_secret_values = tuple(
+                    [*getattr(self.config, "_session_secret_values", ()), *secrets])[-256:]
             window = self._subagent_window(adef)
             if window:
                 child_config.data["context_size"] = window

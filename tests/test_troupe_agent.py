@@ -118,9 +118,10 @@ def fake_child(answers):
     calls = []
 
     def run(self, description, prompt, agent_name, workspace, sub_ui, call_id=None, *, cancel=None, handle=None,
-            tools=None, unattended=False):
+            tools=None, unattended=False, checker_box=None, tool_env=None, secrets=()):
         calls.append({"description": description, "prompt": prompt, "workspace": workspace, "tools": tools,
-                      "unattended": unattended, "agent_name": agent_name})
+                      "unattended": unattended, "agent_name": agent_name, "checker_box": checker_box,
+                      "tool_env": tool_env, "secrets": tuple(secrets)})
         return "", answers(prompt, workspace), ""
     return run, calls
 
@@ -155,8 +156,9 @@ class RunTests(AgentCase):
             agent._troupes[out.split()[1]].join(20)
         self.assertIn("What its agents can do: Review (explorer) reads and searches the project's files and the web; "
                       "no shell", out)
-        self.assertIn("Verify (verifier) reads files and the web; no shell (it can't run commands, tests or database "
-                      "queries)", out)
+        # A verifier's own line depends on this computer and project (its read-only box, its database):
+        # tests/test_troupe_checker_box.py covers each case.
+        self.assertIn("Verify (verifier) " + troupe_agent.abilities(agent.config.project_root)["verifier"], out)
 
     def test_while_it_runs_the_model_can_read_its_status_and_wait_for_it(self):
         """ERP session review (2026-10-18): asked twice for a Troupe update, list_tasks was "not offered on this
@@ -215,9 +217,14 @@ class RunTests(AgentCase):
         self.assertIn("Verify: 3 of 3 agents finished, 1 kept", out)
         self.assertIn("Off by one", out)
         self.assertEqual(len(calls), 5)
+        from dgc import checker_box
+        boxed = not checker_box.unavailable_reason()
         for call in calls:
             self.assertIsNone(call["workspace"], "read-only agents need no checkout")
-            self.assertEqual(call["tools"], troupe.READ_TOOLS)
+            verifier = call["prompt"].startswith("You are a verifier")
+            # A verifier's shell is its read-only box (tests/test_troupe_checker_box.py), where this computer has one.
+            self.assertEqual(call["tools"], troupe.READ_TOOLS | ({"bash"} if verifier and boxed else set()))
+            self.assertEqual(call["checker_box"] is not None, verifier and boxed)
             self.assertTrue(call["unattended"])
         self.assertTrue(calls[0]["prompt"].startswith("You are a read-only explorer"))
         self.assertTrue(calls[-1]["prompt"].startswith("You are a verifier"))

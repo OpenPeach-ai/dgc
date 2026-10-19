@@ -329,6 +329,13 @@ def process_env(config=None, *, agent: bool = True) -> dict[str, str]:
     env.update({"HOME": "/tmp/dgc-home", "TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp"})
     if agent or os.environ.get(AGENT_SHELL) == "1":
         env[AGENT_SHELL] = "1"
+    # Names a Troupe gives one child's shell (its read-only database), never the user's or another agent's: a
+    # worker's (_tool_env_extra) or a checker's, inside its box (_checker_box, dgc/checker_box.py).
+    box = config.get("_checker_box") if config is not None else None
+    for extra in (getattr(config, "_tool_env_extra", None) if config is not None else None,
+                  box.get("env") if isinstance(box, dict) else None):
+        if isinstance(extra, dict):
+            env.update({str(k): str(v) for k, v in extra.items() if not _is_provider_key_env(k)})
     return env
 
 
@@ -403,6 +410,11 @@ def _mask_with_workspace_link(argv: list[str], masked: Path, root: Path) -> None
 
 def wrap(command: str, project_root, config=None) -> list[str] | None:
     """Build a confined argv, or return ``None`` when no supported sandbox exists."""
+    box = config.get("_checker_box") if config is not None else None
+    if isinstance(box, dict):
+        # A Troupe checker's child (dgc/checker_box.py): read only, credentials hidden, no network but its database.
+        from .checker_box import wrap as checker_wrap
+        return checker_wrap(command, project_root, box)
     backend = _backend()
     if backend is None:
         return None

@@ -40,6 +40,69 @@ ROLE = {
               "there are any.",
 }
 
+# A verifier's role when it has its read-only shell (dgc/checker_box.py; the founder, 2026-10-18).
+VERIFIER_SHELL = (
+    "You are a verifier: try to prove the claim given to you wrong. You have a read-only shell (bash) in a sealed "
+    "box: the project is at /mnt and read only, the only place you can write is a private /tmp, credential files "
+    "(.env, keys) are hidden, and there is no network{database}. Run the commands, tests and queries that would show "
+    "the claim is wrong, and read the project's files and the web. Call it real only if the evidence shows it; when "
+    "you can't check it, say you are unsure, never that it is not real. Never try to write or change anything.")
+VERIFIER_DATABASE = (
+    " except this project's database, through a read-only account: it is in $DGC_READONLY_DATABASE_URL (for example "
+    "psql \"$DGC_READONLY_DATABASE_URL\" -c 'select ...'), and it can't change data")
+VERIFIER_NO_DATABASE = (
+    ". No read-only database account is set for this project, so you can't query its live data: for a claim that "
+    "needs one, answer unsure")
+WORKER_DATABASE = (
+    " A read-only account for this project's database is in $DGC_READONLY_DATABASE_URL: use it for every query that "
+    "only reads, never an admin or owner account.")
+
+
+def verifier_role(*, shell: bool, database: bool, note: str = "") -> str:
+    """A verifier's role as things are for this run: with its boxed shell (and the database) or without one, and why."""
+    if not shell:
+        return ROLE["verifier"].replace("You have no shell:", "You have no shell" + (f" ({note})" if note else "") + ":")
+    said = VERIFIER_SHELL.format(database=VERIFIER_DATABASE if database else VERIFIER_NO_DATABASE)
+    return said + (f" ({note}.)" if note else "")
+
+
+def abilities(project_root) -> dict:
+    """What each kind can do in this project on this computer, in the words the troupe tool's schema and the start
+    message use: the verifier's box depends on bubblewrap here, and its database on `dgc readonly-db`."""
+    from . import checker_box, readonly_database
+    found = dict(troupe.ABILITIES)
+    database = readonly_database.configured(project_root)
+    reason = checker_box.unavailable_reason()
+    if reason:
+        found["verifier"] = ("reads files and the web; no shell on this computer (" + reason.split(":")[0]
+                             + "), so it answers unsure for what it would have to run")
+    else:
+        found["verifier"] = ("a read-only shell in a sealed box (the project read only, writes only to a private /tmp, "
+                             "credential files hidden, no network" + (
+                                 " but this project's database through a read-only account, "
+                                 "$DGC_READONLY_DATABASE_URL)" if database else
+                                 "; no read-only database account is set for this project, so no queries: "
+                                 "`dgc readonly-db` sets one)") + ", plus files and the web")
+    if database:
+        found["worker"] += "; this project's read-only database account is in $DGC_READONLY_DATABASE_URL, for reads"
+    return found
+
+
+def with_abilities(tool: dict, project_root) -> dict:
+    """The troupe tool's schema with each kind's abilities as they are here (a copy; the module's schema is kept)."""
+    import copy
+    try:
+        found = abilities(project_root)
+    except Exception:                            # noqa: BLE001 - a description, never the tool's availability
+        return tool
+    tool = copy.deepcopy(tool)
+    properties = tool["function"]["parameters"]["properties"]
+    agent = properties["stages"]["items"]["properties"]["agent"]
+    agent["description"] = ("What each kind can do here. explorer: " + found["explorer"] + ". researcher: "
+                            + found["researcher"] + ". critic: " + found["critic"] + ". verifier: " + found["verifier"]
+                            + ". worker: " + found["worker"] + ". Or a named agent.")
+    return tool
+
 
 def width(agent) -> int:
     """How many troupe agents run at once: one on a model served on this machine, else what `task` may run."""
@@ -57,6 +120,7 @@ class TroupeRunner(troupe.Runner):
     def __init__(self, agent):
         from .agent import _SubUI
         self.agent = agent
+        self._database = ...                     # this project's read-only database, read once per run (keychain)
         self.width = width(agent)
         self.keeper = agent.checkpoints          # the chat this work belongs to, as it is now
         # Made on the turn's thread: its events reach the terminal session (or chat) that started it, whatever
@@ -81,31 +145,63 @@ class TroupeRunner(troupe.Runner):
         reads_only = bool(allowed) and allowed <= troupe.READ_TOOLS
         return stage.agent, (allowed if reads_only else None), not reads_only
 
+    def database(self):
+        """This project's read-only database (dgc/readonly_database.py), or None; read once per run."""
+        if self._database is ...:
+            from .readonly_database import load
+            try:
+                self._database = load(self.agent.config.project_root)
+            except Exception:                    # noqa: BLE001 - none this run: checkers are told so
+                self._database = None
+        return self._database
+
     def run(self, stage, prompt, label, cancel, check):
         from .agent import _SubUI
         agent = self.agent
         name, tools, writes = self._kind(stage)
         role = ROLE.get(stage.agent, "")
+        box, relay, tool_env, secrets = None, None, None, ()
+        if stage.agent == "verifier":
+            # The founder (2026-10-18): checkers get a sandboxed read-only shell and a read-only database account.
+            from . import checker_box
+            box, relay, note = checker_box.prepare(agent.config.project_root, self.database())
+            if box is not None:
+                tools = troupe.READ_TOOLS | {"bash"}
+                secrets = tuple(box.get("secrets") or ())
+            role = verifier_role(shell=box is not None, database=relay is not None, note=note)
+        elif writes and self.database() is not None:
+            from .readonly_database import ENV, url_for
+            url = url_for(self.database())
+            tool_env, secrets = {ENV: url}, tuple(value for value in (self.database().get("password"),) if value)
+            role += WORKER_DATABASE
         task_prompt = (role + "\n\n" + prompt) if role else prompt
         sub_ui = _SubUI(agent.ui, f"troupe · {label}", buffered=True, cancel=cancel)
         workspace = None
-        if writes:
-            workspace, refusal = self._checkout(label, cancel)
-            if refusal:
-                return "", refusal
-        handle: dict = {}
-        failure, text, start_error = agent._execute_prepared_subagent(
-            f"troupe · {label}", task_prompt, name, workspace, sub_ui, None, cancel=cancel, handle=handle,
-            tools=tools, unattended=True)
-        problem = "" if (failure or start_error) else check(text)
-        child = handle.get("agent")
-        if problem and child is not None and not cancel.is_set():
-            # Once, the same agent with everything it already read: just the JSON, this time.
-            try:
-                if child.run_turn(troupe.fix_prompt(problem, stage)) is not False:
-                    text = sub_ui.result()
-            except Exception:                    # noqa: BLE001 -- the unit fails on its own below
-                pass
+        try:
+            if writes:
+                workspace, refusal = self._checkout(label, cancel)
+                if refusal:
+                    return "", refusal
+            handle: dict = {}
+            failure, text, start_error = agent._execute_prepared_subagent(
+                f"troupe · {label}", task_prompt, name, workspace, sub_ui, None, cancel=cancel, handle=handle,
+                tools=tools, unattended=True, checker_box=box, tool_env=tool_env, secrets=secrets)
+            problem = "" if (failure or start_error) else check(text)
+            child = handle.get("agent")
+            if problem and child is not None and not cancel.is_set():
+                # Once, the same agent with everything it already read: just the JSON, this time.
+                try:
+                    if child.run_turn(troupe.fix_prompt(problem, stage)) is not False:
+                        text = sub_ui.result()
+                except Exception:                    # noqa: BLE001 -- the unit fails on its own below
+                    pass
+        finally:
+            if relay is not None:
+                relay.close()
+        if secrets:
+            # The journal and the woken chat get the reply: never the account's password.
+            from .redaction import redact_text
+            text = redact_text(text, [value for value in secrets if value])
         if workspace is None:
             return text, failure or start_error
         return self._merge(label, workspace, failure, text, start_error, cancel)
@@ -229,12 +325,15 @@ def start(agent, args: dict, call_id) -> str:
         # `dgc -p` ends with this turn and nothing would wake it: run here and answer with the results.
         run.run_here()
         return run.report()
+    # Before the run starts: what each kind can do here may probe the box once (dgc/checker_box.py), and a Stop the
+    # moment this returns must find the run still at its first agents.
+    found = abilities(agent.config.project_root)
+    kinds = "; ".join(f"{stage.name} ({stage.agent}) {found[stage.agent]}"
+                      for stage in plan.stages if stage.agent in found)
+    kinds = f" What its agents can do: {kinds}." if kinds else ""
     run.on_end = lambda finished: deliver(agent, finished, epoch)
     run.start()
     reused = f" {len(cached)} results from the earlier attempt are reused." if cached else ""
-    kinds = "; ".join(f"{stage.name} ({stage.agent}) {troupe.ABILITIES[stage.agent]}"
-                      for stage in plan.stages if stage.agent in troupe.ABILITIES)
-    kinds = f" What its agents can do: {kinds}." if kinds else ""
     return (f"Troupe {run.id} started: {plan.title}. {shape}; {planned}, {pace}.{kinds}{reused} It runs in the "
             "background and this chat wakes with its results when it ends; until then, carry on or tell the user it "
             "is running. Don't start the same work again.")

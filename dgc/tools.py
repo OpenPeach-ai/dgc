@@ -2047,7 +2047,8 @@ def bash(args: dict, ctx) -> str:
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace", start_new_session=True,
                     env=(sandbox.process_env(ctx.config, agent=not _USER_TYPED.get()) if sandbox_requested
-                         else sandbox.tool_env(agent=not _USER_TYPED.get())))
+                         else sandbox.tool_env(getattr(ctx.config, "_tool_env_extra", None),
+                                               agent=not _USER_TYPED.get())))
     observer = None
     receipt = getattr(ctx, 'configured_verifier_receipt', None)
     if receipt is not None:
@@ -2184,7 +2185,7 @@ def bash(args: dict, ctx) -> str:
                                    is_verify=verify)
     return _explain_sandbox_denial(
         f"exit code: {proc.returncode}\n{out.strip() or '(no output)'}",
-        proc.returncode, sandbox_requested)
+        proc.returncode, sandbox_requested, checker=isinstance(ctx.config.get("_checker_box"), dict))
 
 
 # `Operation not permitted` from inside the sandbox reads like a broken machine, and a model that
@@ -2200,13 +2201,19 @@ _SANDBOX_DENIALS = (
 _NOT_A_DENIAL = frozenset({2, 126, 127})
 
 
-def _explain_sandbox_denial(rendered: str, returncode: int, sandboxed: bool) -> str:
+def _explain_sandbox_denial(rendered: str, returncode: int, sandboxed: bool, *, checker: bool = False) -> str:
     """Say when a failure was the sandbox refusing, not the command being wrong."""
     if not sandboxed or returncode == 0 or returncode in _NOT_A_DENIAL:
         return rendered
     lowered = rendered.lower()
     if not any(term in lowered for term in _SANDBOX_DENIALS):
         return rendered
+    if checker:
+        # A Troupe checker's box (dgc/checker_box.py) refuses every write by design: not a fault, not the user's.
+        return rendered + (
+            "\n\n[dgc] That was your read-only box working: only /tmp is writable, credential files are hidden and"
+            " there is no network (except the project's read-only database, when one is set). Check the claim"
+            " another way, or answer unsure.")
     return rendered + (
         "\n\n[dgc] The sandbox refused this, so it is a policy result rather than a fault on this"
         " machine: the command reached a path outside the project, and DGC denies those while"
@@ -2271,7 +2278,8 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
                         encoding="utf-8", errors="replace",
                         cwd=str(ctx.project_root), start_new_session=True,
                         env=(sandbox.process_env(ctx.config, agent=not _USER_TYPED.get()) if sandbox_requested
-                         else sandbox.tool_env(agent=not _USER_TYPED.get())))
+                         else sandbox.tool_env(getattr(ctx.config, "_tool_env_extra", None),
+                                               agent=not _USER_TYPED.get())))
         if argv:
             proc = subprocess.Popen(argv, **popen_kw)
         else:

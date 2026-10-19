@@ -1386,8 +1386,23 @@ agent sees every item at once).
 
 ## What its agents may do
 
-- **explorer, researcher, critic, verifier** read only (files, search, the web). They run beside your
-  files, so a hundred of them cost no checkouts.
+- **explorer, researcher, critic** read only (files, search, the web), with no shell. They run beside
+  your files, so a hundred of them cost no checkouts.
+- **verifier** reads the same and also has a **read-only shell in a sealed box** (Linux, bubblewrap),
+  to run the commands, tests and queries that would prove a finding wrong. In the box the project is
+  read only (at `/mnt`), the only writable place is a private `/tmp`, credential files a Pip snapshot
+  leaves out (`.env*`, keys, `.git`, `.ssh`, ...) are hidden, your home, `/run` and their sockets
+  (Docker's included) are empty, and there is no network, except the project's read-only database
+  when one is set. Where the box can't run (stock Ubuntu 23.10+ AppArmor: `dgc pips execution
+  --fix`), a verifier has no shell and is told so. A verifier that can't check something answers
+  unsure, which counts neither way; what nobody could check is kept and marked unchecked.
+- **A read-only database account**, for checks on live data: make a read-only role yourself
+  (`dgc readonly-db guide` prints the Postgres SQL; DGC never creates or changes a role), then
+  `dgc readonly-db set` in the project and paste its `postgresql://` address (it is kept as a
+  plugin's sign-in is, the system keychain or an owner-only file, and never goes on a command line).
+  It must be on this computer: a verifier's box reaches it through one forwarded port and nothing
+  else, as `$DGC_READONLY_DATABASE_URL`. A worker gets the same variable, to prefer for reads.
+  `dgc readonly-db show` and `clear` too. Without one, a verifier's box has no database at all.
 - **worker** writes, always in an isolated checkout of its own, and its changes are merged back
   exactly as a sub-task's are. A named agent from `.dgc/agents` that may write is treated the same.
 - They never ask you anything: a step that would ask is refused (in auto mode, everything their kind
