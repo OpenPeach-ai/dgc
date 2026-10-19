@@ -447,7 +447,7 @@ saved error below it), with the worst findings, file and line. It has three butt
 
 | Button | What it does |
 | --- | --- |
-| **Ask DGC to fix** | Puts a prompt about this report in the message box, after anything you already wrote. Nothing is sent: you edit it and send it. The prompt names the run, so DGC reads the whole report with `pips_context`, and it asks DGC to check before changing live data or services. |
+| **Ask DGC to fix** | Sends a prompt about this report, once, and leaves the message box alone. If a turn is running, it waits in the queue (**Steer now** moves it into the turn). The button then reads "Asked DGC", also after a reload. The prompt names the run, so DGC reads the whole report with `pips_context`, and it asks DGC to check before changing live data or services. |
 | **Open report** | Opens the Pips view at that run. |
 | **Dismiss** | Removes the card. The report stays in Pips. Saved with the chat. |
 
