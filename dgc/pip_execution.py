@@ -670,7 +670,9 @@ def fix_machine(*, run=None, ask=None, out=None) -> int:
     if str(answer).strip().lower() not in ("y", "yes"):
         out("Nothing was changed.")
         return 1
-    run = run or (lambda argv: subprocess.run(argv, check=False).returncode)
+    # The user's own terminal, on purpose: sudo asks for their password there. Only reached in a terminal (above);
+    # a chat and the model's shell are refused before this (pip_cli).
+    run = run or (lambda argv: subprocess.run(argv, check=False, stdin=sys.stdin).returncode)
     for step in fix["steps"]:
         out("$ " + " ".join(step))
         code = run(list(step))
