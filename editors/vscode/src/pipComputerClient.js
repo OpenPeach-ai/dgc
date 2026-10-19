@@ -5,7 +5,7 @@ import {carefulWords} from './pipCareful.js';
 import './pipComputer.css';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
-import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop} from './pipsModel.js';
+import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer} from './pipsModel.js';
 
 const vscode=acquireVsCodeApi();
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
@@ -20,11 +20,45 @@ const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],compu
  // press Escape or leave the bar.
  address:null,
  // The full screen, like Grok's bots: the CLI can stream it (screenCapable) and this machine has it (desktop.available).
- screenCapable:false,desktop:null,screen:{state:'off',reason:''}};
+ screenCapable:false,desktop:null,screen:{state:'off',reason:''},
+ // Where the Pip last acted by position (Pips API 53): you see its cursor there while it works.
+ pointer:null,pointerSeq:-1,pointerAt:0,pointerPulse:false,screenWatching:false};
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
 const $=id=>document.getElementById(id);
 const send=(type,fields={})=>broker.request({type,...fields});
-let frameTimer=null,frameBusy=false,statusTimer=null,terminalTimer=null,desktopTimer=null,setupTimer=null,cleanupFace=null;
+let frameTimer=null,frameBusy=false,statusTimer=null,terminalTimer=null,desktopTimer=null,setupTimer=null,cleanupFace=null,pointerTimer=null,pointerBusy=false;
+// The Pip's cursor: an arrow with its name, like a person's cursor in a shared document.
+const CURSOR=`<svg width="22" height="26" viewBox="0 0 22 26" aria-hidden="true" focusable="false"><path d="M2 2 L2 21 L7 16.5 L10.5 24 L13.5 22.6 L10 15.2 L17 15.2 Z" fill="#fff" stroke="#1d1d22" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+function cursorMarkup(){return `<span class="pc-cursor" id="pc-cursor" hidden aria-hidden="true">${CURSOR}<span class="pc-cursor-name">${esc(S.pip?.name||'Pip')}</span></span>`;}
+function notePointer(value){
+ const p=value==null?null:pipComputerPointer(value);
+ if(p&&p.seq!==S.pointerSeq){S.pointerSeq=p.seq;S.pointerAt=Date.now();S.pointerPulse=true;}
+ S.pointer=p;
+}
+// On the page's screenshot (the browser window), or on the full screen (the browser is a window on its desktop).
+function placeCursor(){
+ const c=$('pc-cursor'),p=S.pointer;if(!c)return;
+ const show=!!p&&(using()||S.screenWatching||Date.now()-S.pointerAt<8000);
+ let x=null,y=null;
+ if(show&&screenMode()){
+  const live=$('pc-live'),canvas=$('pc-vnc')?.querySelector('canvas');
+  if(live&&canvas&&p.screen_x!==undefined){const a=live.getBoundingClientRect(),b=canvas.getBoundingClientRect(),fw=canvas.width||p.screen_width,fh=canvas.height||p.screen_height;
+   if(b.width&&b.height&&fw&&fh){x=b.left-a.left+p.screen_x/fw*b.width;y=b.top-a.top+p.screen_y/fh*b.height;}}
+ }else if(show&&S.view?.ok){
+  const img=$('pc-screen');
+  if(img){const a=img.parentElement.getBoundingClientRect(),b=img.getBoundingClientRect();
+   if(b.width&&b.height&&S.view.width&&S.view.height){x=b.left-a.left+p.x/S.view.width*b.width;y=b.top-a.top+p.y/S.view.height*b.height;}}
+ }
+ if(x===null){c.hidden=true;return;}
+ c.hidden=false;c.style.left=`${Math.round(x)}px`;c.style.top=`${Math.round(y)}px`;c.dataset.kind=p.kind;
+ if(S.pointerPulse){S.pointerPulse=false;c.classList.remove('pulse');void c.offsetWidth;c.classList.add('pulse');}
+}
+async function pollPointer(){
+ if(pointerBusy||!S.pip||!screenMode()||S.apiVersion<53)return;pointerBusy=true;
+ try{const v=(await send('use_pip_computer_view',{pip_id:S.pip.id,op:'pointer'})).view;if(record(v)&&v.ok===true){notePointer(v.pointer);S.screenWatching=v.watching===true;}}
+ catch{}
+ finally{pointerBusy=false;placeCursor();}
+}
 
 function plushFace(state){
  const plush=window.PipConcepts?.plush,index=TYPES.indexOf(S.pip?.pip_type);
@@ -58,11 +92,11 @@ function waitingMarkup(){
  return `<section class="pc-waiting" aria-label="Waiting for you">${waiting.map(a=>{const words=carefulWords(a.summary,S.pip?.name||'The Pip');return words
    // Careful mode: a new site, or something it read from your apps; no Always allow for these.
    ?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span>${a.summary.kind==='text'&&typeof a.summary.text==='string'?`<pre class="pc-held-text">${esc(a.summary.text)}</pre>`:''}</div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
-   :`<article class="pc-hold"><div><strong>Send a form to ${esc(a.summary.host)}</strong><span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button><button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
+   :`<article class="pc-hold"><div><strong>Send a form to ${esc(a.summary.host)}</strong><span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${a.summary.payment===true?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
 }
 function browserMarkup(){
  const v=S.view;
- return `<section class="pc-pane pc-browser" aria-label="Browser"><form id="pc-go" class="pc-bar"><button type="button" id="pc-back" class="pc-quiet" aria-label="Back">←</button><input id="pc-url" aria-label="Address" placeholder="Search or type a web address" autocomplete="off" value="${esc(S.address??(v?.ok?v.url:''))}"><button type="submit">Go</button></form><div class="pc-screen" tabindex="0" aria-label="The Pip's browser. Click to click there; type to type into the page.">${v?.ok?`<img id="pc-screen" alt="" src="${v.image}" data-width="${v.width}" data-height="${v.height}">`:`<p class="pc-muted">${esc(S.viewError||'Opening the browser…')}</p>`}</div><p class="pc-muted pc-hint">${using()?'The Pip is using its browser. You can watch; it is yours again when it stops.':'You are driving. What you submit here is sent; the Pip\'s own submits wait for you.'}</p></section>`;
+ return `<section class="pc-pane pc-browser" aria-label="Browser"><form id="pc-go" class="pc-bar"><button type="button" id="pc-back" class="pc-quiet" aria-label="Back">←</button><input id="pc-url" aria-label="Address" placeholder="Search or type a web address" autocomplete="off" value="${esc(S.address??(v?.ok?v.url:''))}"><button type="submit">Go</button></form><div class="pc-screen" tabindex="0" aria-label="The Pip's browser. Click to click there; type to type into the page.">${v?.ok?`<img id="pc-screen" alt="" src="${v.image}" data-width="${v.width}" data-height="${v.height}">${cursorMarkup()}`:`<p class="pc-muted">${esc(S.viewError||'Opening the browser…')}</p>`}</div><p class="pc-muted pc-hint">${using()?'The Pip is using its browser. You can watch; it is yours again when it stops.':'You are driving. What you submit here is sent; the Pip\'s own submits wait for you.'}</p></section>`;
 }
 function filesMarkup(){
  const f=S.files,crumbs=['Files',...(f.path?f.path.split('/'):[])];
@@ -109,11 +143,12 @@ function overlayMarkup(){
 }
 function renderScreen(){
  const app=document.getElementById('app');
- if(!$('pc-live'))app.innerHTML=`<div id="pc-top"></div><div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div></div>`;
+ if(!$('pc-live'))app.innerHTML=`<div id="pc-top"></div><div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div>${cursorMarkup()}</div>`;
  cleanupFace?.();
  $('pc-top').innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${waitingMarkup()}`;
  $('pc-overlay').innerHTML=overlayMarkup();
  cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-top'));
+ placeCursor();
 }
 // The first time a computer opens, DGC downloads its desktop and Google Chrome itself (no password,
 // nothing installed on the system) and the tab shows how far it has got; the screen opens when done.
@@ -141,6 +176,8 @@ function render(){
  cleanupFace=window.PipConcepts?.plush?.mount?.(app);
  if(focus&&$(focus)){$(focus).focus();if(caret!=null&&$(focus).setSelectionRange)try{$(focus).setSelectionRange(caret,caret);}catch{}}
  const log=$('pc-log');if(log)log.scrollTop=log.scrollHeight;
+ const img=$('pc-screen');if(img)img.addEventListener('load',placeCursor,{once:true});
+ placeCursor();
 }
 
 async function loadComputer(){
@@ -168,7 +205,7 @@ async function frame(op='frame',fields={},opening=false){
  try{
   if(opening)await send('open_pip_computer',{pip_id:S.pip.id});
   const reply=pipComputerView((await send('use_pip_computer_view',{pip_id:S.pip.id,op,...fields})).view);
-  if(reply.ok){S.view=reply;S.viewError='';}else{S.viewError=reply.error;}
+  if(reply.ok){S.view=reply;S.viewError='';notePointer(reply.pointer);}else{S.viewError=reply.error;}
  }catch(error){S.viewError=errorText(error);}
  finally{
   frameBusy=false;
@@ -212,10 +249,14 @@ function screenPoint(event){
  return {x:Math.round((event.clientX-box.left)/box.width*Number(img.dataset.width)),y:Math.round((event.clientY-box.top)/box.height*Number(img.dataset.height))};
 }
 function schedule(){
- clearInterval(frameTimer);clearInterval(statusTimer);clearInterval(terminalTimer);clearInterval(desktopTimer);
+ clearInterval(frameTimer);clearInterval(statusTimer);clearInterval(terminalTimer);clearInterval(desktopTimer);clearInterval(pointerTimer);
  if(document.hidden||!S.computer?.granted)return;
  statusTimer=setInterval(()=>void loadComputer(),5000);
- if(screenMode()){desktopTimer=setInterval(()=>void loadDesktop(),3000);return;}   // the screen streams itself
+ if(screenMode()){
+  desktopTimer=setInterval(()=>void loadDesktop(),3000);                // the screen streams itself
+  if(S.apiVersion>=53)pointerTimer=setInterval(()=>void pollPointer(),700);   // and its cursor is asked for
+  return;
+ }
  // The browser's window refreshes its screen; without it, a slow check notices the Pip starting.
  frameTimer=setInterval(()=>void frame(),S.app==='browser'?800:4000);
  if(S.app==='terminal')terminalTimer=setInterval(()=>void loadTerminal(),2500);

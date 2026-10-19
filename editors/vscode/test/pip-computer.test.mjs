@@ -102,11 +102,18 @@ test('a held submit is reviewed with its screenshot; Send once sends that exact 
  assert.equal(x.d.querySelector('[role=dialog]'),null);assert.match(x.d.body.textContent,/Approved. It is sent within a few seconds, exactly as shown/);
 });
 
-test('Always allow sends this submit and lets the Pip make the same one on that site without asking',async()=>{
+test('a payment held in its browser asks every time: Send once and Reject, never Always allow',async()=>{
+ // Founder, 2026-10-19: "Payments are never Always-allow", however the Pip clicked (a ref, or by position).
  const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[action({frame:null,summary:{...action().summary,payment:true}})]})});await x.openJob();
  x.click(`[data-computer-action="${actionId}"]`);await flush();
- const dialog=x.d.querySelector('[role=dialog]');
- assert.match(dialog.textContent,/This sends payment card details\./,'a payment is said plainly, then decided like anything else');
+ assert.match(x.d.querySelector('[role=dialog]').textContent,/This sends payment card details\./,'a payment is said plainly');
+ assert.ok(x.d.querySelector('#review-confirm'),'Send once');
+ assert.equal(x.d.querySelector('#review-always'),null,'no Always allow for a payment');
+});
+
+test('Always allow sends this submit and lets the Pip make the same one on that site without asking',async()=>{
+ const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[action({frame:null})]})});await x.openJob();
+ x.click(`[data-computer-action="${actionId}"]`);await flush();
  assert.ok(x.d.querySelector('#review-always'),'Always allow sits beside Send once');
  x.click('#review-always');x.click('#review-always');
  const asked=x.requests('always_allow_pip_computer_action');

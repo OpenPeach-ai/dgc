@@ -125,6 +125,14 @@ test('what the Pip would submit waits at the top with Send once, Always allow an
  assert.match(x.d.body.textContent,/Approved/);
 });
 
+test('a payment waits with Send once and Reject, never Always allow',async()=>{
+ const x=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,payment:true}}]})});await x.drain();
+ assert.ok(x.d.querySelector(`[data-send="${actionId}"]`));assert.ok(x.d.querySelector(`[data-reject="${actionId}"]`));
+ assert.equal(x.d.querySelector(`[data-always="${actionId}"]`),null,'a payment asks every time');
+ const plain=setup({status:computer({pending:1,actions:[hold]})});await plain.drain();
+ assert.ok(plain.d.querySelector(`[data-always="${actionId}"]`),'any other submit can be always allowed');
+});
+
 test('careful mode: a new site waits as "Let Shopper visit…" with Allow this site and Not now, never Always allow',async()=>{
  const site={...hold,summary:{kind:'site',site:'shop.example',shown:'shop.example',method:'GET',host:'shop.example',path:'/',page:'https://shop.example/',fields:[],more_fields:0,body_bytes:0}};
  const x=setup({status:computer({pending:1,actions:[site]})});await x.drain();

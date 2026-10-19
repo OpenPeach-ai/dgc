@@ -514,3 +514,12 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 button.link.last-run{display:inline;min-height:0;padding:0;border:0;border-radius:3px;font:inherit;color:inherit;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent);text-underline-offset:2px;cursor:pointer}
 button.link.last-run:hover{background:transparent;color:var(--pip-ink);text-decoration-color:currentColor}
 button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscode-focusBorder));outline-offset:2px}
+/* A run's timeline (Pips API 53): the Pip's cursor where a step acted by position, and a drag's path. */
+.computer-timeline-frame{position:relative;width:fit-content;max-width:100%;margin:10px auto}
+.computer-timeline-frame .computer-timeline-shot{margin:0}
+.computer-timeline-cursor{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.computer-timeline-cursor[hidden]{display:none}
+.computer-timeline-cursor .ct-ring{fill:none;stroke:#7c5cff;opacity:.85}
+.computer-timeline-cursor .ct-path{stroke:#7c5cff;opacity:.85}
+.computer-timeline-cursor .ct-from{fill:#7c5cff;opacity:.85}
+.computer-timeline-cursor .ct-arrow{fill:#fff;stroke:#1d1d22;stroke-width:1.5;stroke-linejoin:round;vector-effect:non-scaling-stroke}

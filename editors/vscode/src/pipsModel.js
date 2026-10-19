@@ -1242,10 +1242,33 @@ export function pipComputerView(value){
   throw Error('The browser view reply is invalid.');
  return value;
 }
+// Where a Pip acted by position (Pips API 53): its kind and point, in the page's pixels; a drag also says where it
+// started, and on its desktop the point on the screen. Anything else is not drawn.
+const POINT_KINDS=['click_at','double_click_at','right_click_at','drag','scroll_at','hover_at'];
+const coordinate=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0&&v<=100000;
+export function pipComputerPointer(value){
+ if(!record(value)||!POINT_KINDS.includes(value.kind)||!coordinate(value.x)||!coordinate(value.y))return null;
+ const out={kind:value.kind,x:value.x,y:value.y,seq:Number.isSafeInteger(value.seq)?value.seq:0};
+ if(coordinate(value.from_x)&&coordinate(value.from_y))Object.assign(out,{from_x:value.from_x,from_y:value.from_y});
+ if(coordinate(value.screen_x)&&coordinate(value.screen_y)&&coordinate(value.screen_width)&&coordinate(value.screen_height)&&value.screen_width>0&&value.screen_height>0)
+  Object.assign(out,{screen_x:value.screen_x,screen_y:value.screen_y,screen_width:value.screen_width,screen_height:value.screen_height});
+ return out;
+}
 export function pipComputerFrames(value,run){
+ const rowKeys=f=>Object.keys(f).filter(k=>k!=='pointer').sort().join();
  if(!record(value)||Object.keys(value).sort().join()!=='frames,run_id'||value.run_id!==run||!Array.isArray(value.frames)||value.frames.length>200
-   ||!value.frames.every(f=>record(f)&&Object.keys(f).sort().join()==='at,frame,label,url'&&/^\d{4}\.jpg$/.test(f.frame)&&['label','url','at'].every(k=>typeof f[k]==='string'&&f[k].length<=500)))
+   ||!value.frames.every(f=>record(f)&&rowKeys(f)==='at,frame,label,url'&&/^\d{4}\.jpg$/.test(f.frame)&&['label','url','at'].every(k=>typeof f[k]==='string'&&f[k].length<=500)
+     &&(f.pointer===undefined||pipComputerPointer(f.pointer)!==null)))
   throw Error('This run\'s screenshots are invalid.');
+ return value;
+}
+// How a Personal Pip sees (Pips API 53, get_pip_eyes / set_pip_eyes): its model, whether that model can see, and when
+// it can't, the user's choice (ask, a model that sees looks for it, or not now) and the model that would look.
+export function pipEyes(value,pip){
+ if(!record(value)||Object.keys(value).sort().join()!=='choice,model,pip_id,sees,vision_model'||value.pip_id!==pip
+   ||typeof value.model!=='string'||!value.model||value.model.length>256||![true,false,null].includes(value.sees)
+   ||!['ask','relay','off'].includes(value.choice)||!(value.vision_model===null||typeof value.vision_model==='string'&&value.vision_model&&value.vision_model.length<=256))
+  throw Error('How this Pip sees didn\'t load. Refresh to try again.');
  return value;
 }
 export function pipComputerFrame(value,run,frame){

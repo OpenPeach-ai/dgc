@@ -19,9 +19,10 @@ import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForSe
 import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {carefulPage,carefulMarkup,carefulWords} from './pipCareful.js';
+import {eyesMarkup,eyesNotice} from './pipEyes.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles} from './pipsModel.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles,pipComputerPointer,pipEyes} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -934,7 +935,7 @@ async function openComputerAction(id){
  }
  openReview({title:'Send this once?',description:`${S.pip?.name||'The Pip'} wants to send a form to ${s.host}. Nothing has been sent.`,
   body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
-  confirm:'Send once',always:true,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
+  confirm:'Send once',always:s.payment!==true,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
 }
 async function decideComputerAction(review,approve){
  if(S.busy||!usable())return;const token=scope();S.busy=true;renderReview();
@@ -974,6 +975,17 @@ async function computerView(op,fields,opening=false){
  }catch(error){const status=$('computer-status');if(status)status.textContent=errorText(error);}
  finally{computerViewBusy=false;}
 }
+// Where a step acted by position, drawn over its screenshot: the Pip's cursor, and for a drag the path it took.
+function timelineCursor(img,value){
+ const svg=$('computer-timeline-cursor'),p=value?pipComputerPointer(value):null;if(!svg)return;
+ const w=img.naturalWidth,h=img.naturalHeight;
+ if(!p||!w||!h){svg.setAttribute('hidden','');svg.innerHTML='';return;}
+ svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.setAttribute('preserveAspectRatio','none');svg.removeAttribute('hidden');
+ // The same size on screen however small the screenshot is drawn: k is the image's pixels per screen pixel.
+ const k=Math.max(1,w/Math.max(1,img.clientWidth||w)),r=n=>Math.round(n*k*10)/10;
+ const path=p.kind==='drag'&&p.from_x!==undefined?`<line class="ct-path" x1="${p.from_x}" y1="${p.from_y}" x2="${p.x}" y2="${p.y}" stroke-width="${r(3)}" stroke-dasharray="${r(8)} ${r(6)}"/><circle class="ct-from" cx="${p.from_x}" cy="${p.from_y}" r="${r(5)}"/>`:'';
+ svg.innerHTML=`${path}<circle class="ct-ring" cx="${p.x}" cy="${p.y}" r="${r(13)}" stroke-width="${r(3)}"/><path class="ct-arrow" transform="translate(${p.x} ${p.y}) scale(${r(1)})" d="M0 0 L0 20 L5 15 L9 24 L12 22.5 L8 14 L15 14 Z"/>`;
+}
 // A run's timeline: the screenshots its computer kept, one at a time.
 let computerTimeline=null;
 function computerUsedMarkup(run){
@@ -983,10 +995,11 @@ function computerUsedMarkup(run){
 async function openComputerTimeline(){
  const run=S.run;if(!run||!usable())return;const token=scope();computerTimeline=null;
  openReview({computerTimeline:true,readOnly:true,title:'What it saw',description:'Screenshots from this run, oldest first. What they show came from websites.',
-  body:`<p id="computer-timeline-status" class="muted" role="status">Loading…</p><img id="computer-timeline-img" class="computer-shot computer-timeline-shot" alt=""><p id="computer-timeline-label" class="muted"></p><div class="actions">${button('computer-prev','Previous',true)}${button('computer-next','Next',true)}</div>`,
+  body:`<p id="computer-timeline-status" class="muted" role="status">Loading…</p><div class="computer-timeline-frame"><img id="computer-timeline-img" class="computer-shot computer-timeline-shot" alt=""><svg id="computer-timeline-cursor" class="computer-timeline-cursor" aria-hidden="true" hidden></svg></div><p id="computer-timeline-label" class="muted"></p><div class="actions">${button('computer-prev','Previous',true)}${button('computer-next','Next',true)}</div>`,
   request:{type:'list_pip_computer_frames'}});
  try{
-  const v=pipComputerFrames(await send('list_pip_computer_frames',{run_id:run.id}),run.id);
+  // API 53: each step that acted by position says where, and the screenshot shows its cursor there.
+  const v=pipComputerFrames(await send('list_pip_computer_frames',{run_id:run.id,...(S.apiVersion>=53?{pointers:true}:{})}),run.id);
   if(token!==scope()||!S.review?.computerTimeline)return;
   computerTimeline={run:run.id,frames:v.frames,index:0};
   if(!v.frames.length){$('computer-timeline-status').textContent='No screenshots were kept for this run.';return;}
@@ -997,7 +1010,7 @@ async function showTimelineFrame(i){
  const t=computerTimeline,f=t?.frames[i];if(!f||!S.review?.computerTimeline)return;t.index=i;
  $('computer-timeline-status').textContent=`${i+1} of ${t.frames.length}`;$('computer-timeline-label').textContent=f.url?`${f.label} · ${f.url}`:f.label;
  $('computer-prev').disabled=i===0;$('computer-next').disabled=i===t.frames.length-1;
- try{const v=pipComputerFrame(await send('get_pip_computer_frame',{run_id:t.run,frame:f.frame}),t.run,f.frame);if(computerTimeline===t&&t.index===i&&S.review?.computerTimeline){const img=$('computer-timeline-img');img.src=v.image;img.alt=`Screenshot ${i+1}: ${f.label}`;}}
+ try{const v=pipComputerFrame(await send('get_pip_computer_frame',{run_id:t.run,frame:f.frame}),t.run,f.frame);if(computerTimeline===t&&t.index===i&&S.review?.computerTimeline){const img=$('computer-timeline-img');img.onload=()=>timelineCursor(img,f.pointer);img.src=v.image;img.alt=`Screenshot ${i+1}: ${f.label}`;timelineCursor(img,f.pointer);}}
  catch(error){if(computerTimeline===t)$('computer-timeline-status').textContent=errorText(error);}
 }
 // API 43: a Personal Pip uses your DGC skills that fit everyday work; you turn them on or off in DGC.
@@ -1142,7 +1155,7 @@ function runReportMarkup() {
   if(!S.runId) return `<p class="muted">${personalPip()?'Choose a result to see it.':'Choose a run to see its report.'}</p>`;
   if(!run || run.id!==S.runId) return '<p role="status">Loading run…</p>';
   if(run.manifest?.run_kind==='personal_task')return `<section class="section" aria-label="Personal result"><div class="section-head"><h2>${esc(personalStatusLabel(run.status))}</h2>${active(run.status)?button('cancel-run','Stop…',S.busy||!usable(),'danger'):''}</div><p class="muted">Saved with ${esc(S.pip?.name||'this Pip')}. Nothing was sent or changed without your OK.</p>${run.status==='failed'?errorMarkup(errorText(run.error)):''}${run.status==='succeeded'&&typeof run.result?.text==='string'?`<div class="message-body text final personal-result-text" tabindex="0">${renderPipMarkdown(run.result.text)}</div>${run.manifest.handoff?`<p class="muted">Another Pip shared this with it. <button type="button" data-handoff="${esc(run.manifest.handoff.handoff_id)}">See what was shared</button></p>`:''}<div class="actions">${button('copy-personal-result','Copy result',S.busy)}${!remoteHost?button('open-personal-result','Open',S.busy)+button('save-personal-result','Save as file…',S.busy)+(S.apiVersion>=31&&!archived()?button('prepare-message','Prepare email…',S.busy):'')+(S.apiVersion>=34&&!archived()?button('prepare-calendar','Prepare calendar event…',S.busy):'')+(S.apiVersion>=36&&!archived()?button('prepare-connector','Use an app…',S.busy):'')+(S.apiVersion>=30&&!archived()?button('handoff-personal','Share with another Pip…',S.busy):''):''}</div>`:''}${run.status==='succeeded'?computerUsedMarkup(run):''}${activityMarkup()}</section>`;
-  if(run.manifest?.run_kind==='conversation')return `<section class="section" aria-label="Conversation run"><h2>Conversation reply</h2><p class="muted">${esc(personalStatusLabel(run.status))}. One of its chat replies.</p>${run.status==='failed'?errorMarkup(errorText(run.error)):''}<button type="button" data-tab="chat">Back to chat</button>${executionMarkup(run)}${memoryPinMarkup(run)}</section>`;
+  if(run.manifest?.run_kind==='conversation')return `<section class="section" aria-label="Conversation run"><h2>Conversation reply</h2><p class="muted">${esc(personalStatusLabel(run.status))}. One of its chat replies.</p>${run.status==='failed'?errorMarkup(errorText(run.error)):''}${run.status==='succeeded'?computerUsedMarkup(run):''}<button type="button" data-tab="chat">Back to chat</button>${executionMarkup(run)}${memoryPinMarkup(run)}</section>`;
   if(Object.hasOwn(run.manifest||{},'pulse_verification')||run.manifest?.run_kind==='test'&&!run.manifest?.handoff)return pulseReportMarkup(run);
   if(['patch','test'].includes(run.manifest?.run_kind))return executionReportMarkup(run);
   if(run.manifest?.run_kind==='draft')return draftReportMarkup(run);
@@ -1692,6 +1705,21 @@ function computerRowMarkup(p,off){
   ?`<strong>Its own computer</strong><small>A browser, a Terminal and files, separate from yours. It starts when ${esc(p.name)} needs it.</small></span>${button('remove-computer','Remove…',off,'quiet')}`
   :`<strong>Computer</strong><small>Give ${esc(p.name)} its own computer, so it can look things up and fill in forms for you.</small></span>${button('give-computer','Give it a computer…',off,'quiet')}`}</div></section>`;
 }
+// How it sees (Pips API 53): whether its model can, and when it can't, your choice; on a Personal Pip's page.
+const eyesState={pip:'',value:null,error:'',busy:false,seq:0};
+async function loadEyes(){
+ if(remoteHost||S.apiVersion<53||!personalPip()||!usable())return;
+ const token=scope(),pip=S.selected,sequence=++eyesState.seq;
+ try{const value=pipEyes((await send('get_pip_eyes',{pip_id:pip})).eyes,pip);if(token!==scope()||sequence!==eyesState.seq||S.selected!==pip)return;
+  eyesState.pip=pip;eyesState.value=value;eyesState.error='';render();}
+ catch(error){if(token===scope()&&sequence===eyesState.seq){eyesState.error=errorText(error);render();}}
+}
+async function setEyes(choice){
+ if(eyesState.busy||!usable()||!personalPip())return;const token=scope(),pip=S.selected;eyesState.busy=true;eyesState.error='';render();
+ try{const value=pipEyes((await send('set_pip_eyes',{pip_id:pip,choice})).eyes,pip);if(token!==scope()||S.selected!==pip)return;eyesState.pip=pip;eyesState.value=value;S.notice=eyesNotice(choice,value);}
+ catch(error){if(token===scope())eyesState.error=errorText(error);}
+ finally{eyesState.busy=false;if(token===scope())render();}
+}
 // Careful mode (#9): its switch and the sites it may visit, on the page of a Pip with a computer.
 const carefulState={pip:'',value:null,error:'',busy:false,seq:0};let sitesAll=false;
 async function loadCareful(){
@@ -2042,7 +2070,7 @@ function routinesSectionMarkup(){
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
  S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;lookDirty=false;routineEditing='';routineError='';
- void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();noteConfirmAll=false;sitesAll=false;
+ void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();noteConfirmAll=false;sitesAll=false;
 }
 function putProfile(pipId,value){
  const p=profile(value);if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
@@ -2087,7 +2115,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+computerRowMarkup(p,off)+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -2617,7 +2645,7 @@ document.addEventListener('input',updateDraft);
 document.addEventListener('paste',event=>{if(event.target?.id!=='chatText'||!canAttachImages())return;const files=[...(event.clipboardData?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
 document.addEventListener('dragover',event=>{if(canAttachImages()&&event.target?.closest?.('#chat-form')&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
 document.addEventListener('drop',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='computer-go'){event.preventDefault();const url=$('computer-url').value.trim();if(url)void computerView('go',{url:/^https?:\/\//i.test(url)?url:'https://'+url});return;}
   if(event.target.id==='computer-type'){event.preventDefault();const input=$('computer-text'),text=input.value;if(text){input.value='';void computerView('type',{text});}return;}
@@ -2810,6 +2838,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.computerReset){void pipsSettingsCall('reset_pip_computer',{pip_id:target.dataset.computerReset},r=>r?.reset?'Its computer is fresh: signed out, no history. Its Files are still there.':'Resetting its computer: it is fresh the next time it opens. Its Files stay.');return;}
   if(target.dataset.appRemove){void pipsSettingsCall('disconnect_pip_app_link',{pip_id:target.dataset.appRemovePip,link_id:target.dataset.appRemove},'Removed. That Pip no longer uses the account.');return;}
   if(target.dataset.attention){const item=S.attention?.items.find(i=>i.id===target.dataset.attention);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
+  if(target.dataset.eyesSwitch){const model=target.dataset.eyesSwitch,choice={mode:'model',model};void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${model}, which can see.`).then(ok=>{if(ok)void loadEyes();});return;}
   if(target.dataset.siteForget){void carefulCall('forget_pip_site',{site:target.dataset.siteForget},`Removed. It asks before it opens ${target.dataset.siteForget} again.`);return;}
   if(target.dataset.sitesAll){sitesAll=true;render();return;}
   if(target.dataset.noteForget){const n=(S.notes||[]).find(x=>x.id===target.dataset.noteForget);void noteCall('forget_pip_note',{note_id:target.dataset.noteForget},()=>n?`Forgotten: ${n.text}`:'Forgotten.');return;}
