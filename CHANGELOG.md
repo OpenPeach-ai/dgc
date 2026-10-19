@@ -64,6 +64,10 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 
 ### ChatDGC
 
+- **A chat's outline, whatever is on screen.** `chatdgc_outline` (offered as `ready.capabilities.chatdgc.outline`)
+  answers with every prompt of a chat, oldest first: its first words (or what it attached), when it was sent, and the
+  widgets the replies to it made (deleted ones marked). A long chat opens on its latest pages, so the editor's Widgets
+  list and prompt rail read the rest from here. It is a new command and a new event; no existing event changed.
 - **Exports read as the chat does: no citation marks.** A chat exported as Markdown, and a deep research report, leave
   out the "[1]" marks the model cites with, with the space before them; each reply's sources are still listed after
   it. The JSON export keeps the chat as stored, marks and all, and the saved reply keeps them so its sources can still

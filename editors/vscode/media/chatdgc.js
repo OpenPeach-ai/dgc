@@ -50,7 +50,7 @@
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
-                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {}, draftEdit: {} };
+                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {}, draftEdit: {}, outline: null };
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -1803,6 +1803,227 @@
   document.addEventListener("click", (e) => {
     if (!e.target.closest?.("#cd-context, #cd-context-pop")) { $("cd-context-pop").hidden = true; $("cd-context").setAttribute("aria-expanded", "false"); }
   });
+  // ---- the chat's outline: every prompt, when it was sent, and the widgets the replies to it made. What's on screen
+  // says it for the pages loaded; for a long chat opened on its latest pages, the backend's outline (chatdgc_outline,
+  // asked once the chat opens) says it for the rest. The Widgets list and the prompt rail both read it.
+  const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const promptWords = (m) => String(m.text || "").replace(/\s+/g, " ").trim()
+    || (Array.isArray(m.attachments) ? m.attachments.map((a) => a?.name || "attachment").join(", ") : "");
+  const WIDGET_ID = /^wg_[a-f0-9]{16}$/;
+  const removedWidgets = new Set();          // deleted from this chat's list (said by the host), its reply maybe not on screen
+  function storedWidgets(m) {
+    return (Array.isArray(m.widgets) ? m.widgets : []).filter((w) => w && WIDGET_ID.test(String(w.id || "")))
+      .map((w) => ({ id: w.id, message_id: m.id, title: String(w.title || "Interactive").slice(0, 80), created_at: w.created_at || m.created_at || "",
+                     removed: w.removed === true || removedWidgets.has(w.id), html: typeof w.html === "string" ? w.html : "" }));
+  }
+  /** A message from before what's on screen: older than the first one shown, or one the outline places earlier. */
+  function earlierThanShown(message) {
+    const first = Date.parse(state.messages[0]?.created_at || ""), at = Date.parse(message.created_at || "");
+    if (Number.isFinite(first) && Number.isFinite(at)) return at < first;
+    return (state.outline?.prompts || []).some((p) => (p?.widgets || []).some((w) => w?.message_id === message.id));
+  }
+  function outlineNow() {
+    const loaded = new Set(state.messages.map((m) => m.id));
+    const prompts = [];
+    const told = state.earlier > 0 && state.outline?.conversation === state.conversation?.id ? state.outline.prompts : [];
+    for (const p of told) {
+      if (!p || typeof p.id !== "string" || loaded.has(p.id)) break;      // the rest are on screen: read from there
+      prompts.push({ id: p.id, text: String(p.text || ""), created_at: String(p.created_at || ""), loaded: false,
+                     widgets: (Array.isArray(p.widgets) ? p.widgets : []).filter((w) => w && WIDGET_ID.test(String(w.id || "")) && !loaded.has(w.message_id))
+                       .map((w) => ({ id: w.id, message_id: String(w.message_id || ""), title: String(w.title || "Interactive").slice(0, 80),
+                                      created_at: String(w.created_at || ""), removed: w.removed === true || removedWidgets.has(w.id), html: "" })) });
+    }
+    let current = prompts[prompts.length - 1] || null;
+    for (const m of state.messages) {
+      if (m.role === "user") {
+        current = { id: m.id, text: promptWords(m).slice(0, 160), created_at: m.created_at || "", loaded: true, widgets: [] };
+        prompts.push(current);
+      } else if (current) current.widgets.push(...storedWidgets(m));
+    }
+    return prompts;
+  }
+  /** Every widget the chat's replies made, in the order they were made, with the prompt that asked. */
+  const chatWidgets = () => outlineNow().flatMap((p) => p.widgets.map((w) => ({ ...w, prompt: p.text })));
+
+  // ---- going to a message: scrolled to (eased, unless the reader asked for less motion) and outlined for a moment.
+  // One not on screen yet is reached first: the pages before what's shown are asked for until it's among them.
+  let seeking = null;
+  function reach(messageId, then) {
+    if (state.messages.some((m) => m.id === messageId)) { then(); return; }
+    if (!(state.earlier > 0) || !state.messages.length) { showNotice("That part of the chat isn't there any more.", "info"); return; }
+    seeking = { id: messageId, then };
+    announce("Loading earlier messages…");
+    $("cd-earlier").disabled = true;
+    vscode.postMessage({ type: "earlier", before: state.messages[0].id });
+  }
+  function sought() {
+    if (!seeking) return;
+    const s = seeking;
+    if (state.messages.some((m) => m.id === s.id)) { seeking = null; s.then(); }
+    else if (state.earlier > 0) { $("cd-earlier").disabled = true; vscode.postMessage({ type: "earlier", before: state.messages[0].id }); }
+    else { seeking = null; showNotice("That part of the chat isn't there any more.", "info"); }
+  }
+  let gliding = 0;
+  /** The view moved so `node` sits `at` of the way down it (a little above the middle). */
+  function glide(node, at = 0.3) {
+    cancelAnimationFrame(gliding);
+    const box = scroller.getBoundingClientRect(), r = node.getBoundingClientRect();
+    const from = scroller.scrollTop;
+    const to = Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, from + r.top - box.top - box.height * at));
+    pinned = false;                         // the reader is going somewhere: the reply going on doesn't pull them back
+    if (reduceMotion() || Math.abs(to - from) < 2) { scroller.scrollTop = to; return; }
+    const t0 = performance.now(), ms = 320;
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / ms);
+      scroller.scrollTop = from + (to - from) * (1 - (1 - t) ** 3);
+      if (t < 1) gliding = requestAnimationFrame(step);
+    };
+    gliding = requestAnimationFrame(step);
+  }
+  function flash(node) {
+    node.classList.remove("cd-flash");
+    void node.offsetWidth;                  // so it plays again on a node that just played it
+    node.classList.add("cd-flash");
+    setTimeout(() => node.classList.remove("cd-flash"), 1600);
+  }
+
+  // ---- widgets in this chat (option C1, the founder's pick): a "Widgets N" button in the header while the chat has
+  // any, opening a list of them: each one's name, when it was made and the prompt that asked, with Open, Show it in the
+  // chat (its earlier pages loaded first when it isn't on screen) and Delete (asked in the row, then the Library's
+  // delete: its card stays, marked deleted). Every chat's widgets are in the Library, a click away.
+  const widgetsButton = $("cd-widgets");
+  let widgetsPanel = null, widgetConfirm = "";
+  const widgetDeleting = new Set();
+  function widgetsChrome() {
+    const all = chatWidgets(), live = all.filter((w) => !w.removed).length;
+    widgetsButton.hidden = !state.conversation || (!live && !widgetsPanel);
+    $("cd-widgets-count").textContent = String(live);
+    const name = `Widgets in this chat: ${live}`;
+    if (widgetsButton.getAttribute("aria-label") !== name) widgetsButton.setAttribute("aria-label", name);
+    if (widgetsPanel) fillWidgets(all);
+  }
+  function widgetRow(w) {
+    const row = el("li", "cd-wrow");
+    row.dataset.widget = w.id;
+    if (w.removed) row.dataset.removed = "";
+    const badge = el("span", "cd-wbadge");
+    badge.append(icon("play-circle"));
+    const words = el("span", "cd-wwords");
+    const when = window.DgcTime?.label(Date.parse(w.created_at)) || "";
+    const meta = w.removed ? "Deleted" : [when, w.prompt ? `from “${w.prompt}”` : ""].filter(Boolean).join(" · ");
+    words.append(el("span", "cd-wname", w.title), el("span", "cd-wmeta", meta));
+    if (w.prompt) words.title = `${w.title}\n${when ? `${when} · ` : ""}from “${w.prompt}”`;
+    row.append(badge, words);
+    if (w.removed) return row;
+    const acts = el("span", "cd-wacts");
+    const button = (cls, label, text, glyph, onClick) => {
+      const b = el("button", cls, text);
+      b.type = "button"; b.dataset.w = `${w.id}:${cls.split(" ")[1] || cls}`;
+      b.setAttribute("aria-label", label); b.title = label;
+      if (glyph) b.append(icon(glyph));
+      b.addEventListener("click", onClick);
+      return b;
+    };
+    if (widgetDeleting.has(w.id)) acts.append(el("span", "cd-wconfirm", "Deleting…"));
+    else if (widgetConfirm === w.id) {
+      const sure = el("span", "cd-wconfirm", "Delete it?");
+      acts.append(sure,
+        button("cd-wbtn cd-wdanger", `Delete ${w.title}`, "Delete", "", () => {
+          widgetConfirm = ""; widgetDeleting.add(w.id);
+          vscode.postMessage({ type: "widgetRemove", id: w.id });
+          widgetsChrome(); widgetsPanel?.focus();
+          announce(`Deleting ${w.title}.`);
+        }),
+        button("cd-wbtn cd-wcancel", "Keep it", "Cancel", "", () => { widgetConfirm = ""; widgetsChrome(); focusW(`${w.id}:cd-wdel`); }));
+    } else {
+      acts.append(button("cd-wbtn cd-wopen", `Open ${w.title} beside the chat`, "Open", "", () => openWidget(w)),
+                  button("cd-wicon cd-wgo", `Show ${w.title} in the chat`, undefined, "arrow-right", () => showWidgetInChat(w)));
+      if (!state.conversation?.temporary) {
+        acts.append(button("cd-wicon cd-wdel", `Delete ${w.title}`, undefined, "trash", () => {
+          widgetConfirm = w.id; widgetsChrome(); focusW(`${w.id}:cd-wdanger`);
+        }));
+      }
+    }
+    row.append(acts);
+    return row;
+  }
+  const focusW = (key) => widgetsPanel?.querySelector(`[data-w="${CSS.escape(key)}"]`)?.focus();
+  function fillWidgets(all = chatWidgets()) {
+    const had = document.activeElement?.dataset?.w;
+    const live = all.filter((w) => !w.removed).length;
+    const head = el("div", "cd-whead");
+    const title = el("h2", "cd-wtitle", "Widgets in this chat");
+    title.id = "cd-widgets-title";
+    head.append(title, el("span", "cd-wcount", all.length ? `${live}, in the order they were made` : ""));
+    const list = el("ul", "cd-wlist");
+    list.setAttribute("aria-labelledby", title.id);
+    list.append(...all.map(widgetRow));
+    if (!all.length) list.append(el("li", "cd-wempty", "No widgets in this chat."));
+    const parts = [head, list];
+    if (!state.conversation?.temporary) {
+      const foot = el("div", "cd-wfoot");
+      const library = el("button", "cd-wlink", "Open the Library");
+      library.type = "button"; library.dataset.w = "library";
+      library.addEventListener("click", () => { closeWidgets(false); vscode.postMessage({ type: "openLibrary", view: "widgets" }); });
+      foot.append(el("span", "", "Every chat's widgets are in the Library."), library);
+      parts.push(foot);
+    }
+    widgetsPanel.replaceChildren(...parts);
+    if (had) focusW(had);
+    placeWidgets();
+  }
+  function placeWidgets() {
+    if (!widgetsPanel) return;
+    const b = widgetsButton.getBoundingClientRect(), width = Math.min(400, window.innerWidth - 24);
+    widgetsPanel.style.width = `${width}px`;
+    widgetsPanel.style.top = `${Math.round(b.bottom + 6)}px`;
+    widgetsPanel.style.left = `${Math.round(Math.max(12, Math.min(window.innerWidth - width - 12, b.right - width)))}px`;
+  }
+  function openWidgets() {
+    if (widgetsPanel) return;
+    widgetsPanel = el("div", "cd-wpanel");
+    widgetsPanel.id = "cd-widgets-panel";
+    widgetsPanel.setAttribute("role", "dialog");
+    widgetsPanel.tabIndex = -1;
+    widgetsPanel.setAttribute("aria-labelledby", "cd-widgets-title");
+    widgetsPanel.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation();
+      if (widgetConfirm) { const id = widgetConfirm; widgetConfirm = ""; widgetsChrome(); focusW(`${id}:cd-wdel`); }
+      else closeWidgets(true);
+    });
+    document.body.append(widgetsPanel);
+    widgetsButton.setAttribute("aria-expanded", "true");
+    fillWidgets();
+    (widgetsPanel.querySelector(".cd-wopen") || widgetsPanel.querySelector("button"))?.focus();
+  }
+  function closeWidgets(focusButton) {
+    if (!widgetsPanel) return;
+    widgetsPanel.remove(); widgetsPanel = null; widgetConfirm = "";
+    widgetsButton.setAttribute("aria-expanded", "false");
+    widgetsChrome();
+    if (focusButton && !widgetsButton.hidden) widgetsButton.focus();
+  }
+  widgetsButton.addEventListener("click", () => (widgetsPanel ? closeWidgets(false) : openWidgets()));
+  document.addEventListener("click", (e) => {
+    if (widgetsPanel && !e.composedPath().some((n) => n === widgetsPanel || n === widgetsButton)) closeWidgets(false);
+  });
+  window.addEventListener("resize", placeWidgets);
+  function openWidget(w) {
+    // Its page from its card when its reply is on screen; else the host asks the backend for it, as the Library does.
+    vscode.postMessage({ type: "widgetOpen", id: w.id, title: w.title, ...(w.html ? { html: w.html } : {}) });
+  }
+  function showWidgetInChat(w) {
+    closeWidgets(false);
+    reach(w.message_id, () => {
+      const card = log.querySelector(`.cd-msg[data-id="${CSS.escape(w.message_id)}"] .cd-widget[data-ref="${CSS.escape(`${w.message_id}:${w.id}`)}"]`);
+      if (!card) { showNotice("That widget's card isn't in this version of the chat.", "info"); return; }
+      glide(card);
+      flash(card.querySelector(".cd-widget-card") || card);
+      card.querySelector(".cd-widget-open")?.focus({ preventScroll: true });
+    });
+  }
+
   function render() {
     const nodes = state.messages.map(messageNode);
     const upto = state.conversation?.summary?.upto;
@@ -1843,6 +2064,7 @@
     $("cd-title").textContent = page ? projectOf(state.conversation).name : state.conversation?.title || "New chat";
     crumb();
     controls();
+    widgetsChrome();
     follow();
   }
   /** One message changed (a streamed part): redraw it alone, at most once a frame. */
@@ -1868,6 +2090,7 @@
       redraw.clear();
       document.body.classList.remove("cd-blank");
       $("cd-empty").hidden = true;
+      widgetsChrome();
       follow();
     });
   }
@@ -2508,7 +2731,10 @@
         // keep: the same chat shown again (a new version, or another one chosen): what you're typing and the
         // model and thinking you picked stay, and so does where you were reading.
         const keep = msg.keep === true && state.conversation?.id === msg.conversation?.id;
-        if (state.conversation?.id !== msg.conversation?.id) state.picks = {};
+        if (state.conversation?.id !== msg.conversation?.id) { state.picks = {}; removedWidgets.clear(); closeWidgets(false); }
+        // A long chat opens on its latest pages: the rest of its prompts and widgets come as its outline.
+        state.outline = null; seeking = null;
+        if (Number(msg.earlier) > 0 && msg.conversation?.id) vscode.postMessage({ type: "outline" });
         state.conversation = msg.conversation || null;
         state.messages = Array.isArray(msg.messages) ? msg.messages : [];
         state.earlier = Number(msg.earlier) || 0;
@@ -2548,6 +2774,7 @@
         render();
         scroller.scrollTop = top + (scroller.scrollHeight - height);   // stay on what you were reading
         pinned = keep;
+        sought();                                     // a jump to something earlier: there yet, or the next page
         return;
       }
       case "turn":
@@ -2592,6 +2819,12 @@
           if (images.get(item?.id)?.error) images.delete(item.id);
         }
         const at = state.messages.findIndex((m) => m.id === message.id);
+        if (at < 0 && state.earlier > 0 && message.role === "assistant" && earlierThanShown(message)) {
+          // A reply on a page not on screen, sent again (a widget of it deleted): not the newest message.
+          for (const w of storedWidgets(message)) if (w.removed) removedWidgets.add(w.id);
+          widgetsChrome();
+          return;
+        }
         if (at >= 0) state.messages[at] = message; else state.messages.push(message);
         // A draft edit is saved once the reply comes back with it.
         const saved = Object.keys(state.draftEdit).filter((k) => k.startsWith(`${message.id}\u0000`) && state.draftEdit[k].saving);
@@ -2635,6 +2868,20 @@
         update(message.id);
         return;
       }
+      case "outline":
+        // Every prompt of the chat on screen, and the widgets its replies made (an older one's is dropped).
+        if (msg.conversation && msg.conversation === state.conversation?.id && Array.isArray(msg.prompts)) {
+          state.outline = { conversation: msg.conversation, prompts: msg.prompts.slice(0, 5000) };
+          widgetsChrome();
+        }
+        return;
+      case "widgetRemoved":
+        if (WIDGET_ID.test(String(msg.id || ""))) {
+          removedWidgets.add(msg.id); widgetDeleting.delete(msg.id);
+          widgetsChrome();
+          announce("Widget deleted.");
+        }
+        return;
       case "widgetShown": {
         const w = msg.widget;
         if (!w || typeof w.html !== "string" || !/^wg_[a-f0-9]{16}$/.test(String(w.id || ""))) return;
@@ -2771,6 +3018,8 @@
         return;
       }
       case "error": {
+        if (widgetDeleting.size) { widgetDeleting.clear(); widgetsChrome(); }     // a delete refused: its row comes back
+        if (seeking) { seeking = null; $("cd-earlier").disabled = false; }
         const summarizing = state.compacting;      // Compact now failed: what you queued meanwhile comes back
         if (state.compacting) { state.compacting = false; render(); }
         if (Object.keys(state.cardBusy).length) {        // a card's choice that was refused: its buttons come back

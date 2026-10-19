@@ -925,6 +925,9 @@ COMMAND_FIELDS.update({
                              "conversation_id": _S(False), "project_id": _S(False), "attachment_id": _S(),
                              "path": _S(False), "target_project": _S(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "before": _S()},
+    # Every prompt of a chat as shown, however much of it the screen has paged in: the prompt rail and the chat's
+    # Widgets list read it (offered as ready.capabilities.chatdgc.outline). Answered by `chatdgc_outline`.
+    "chatdgc_outline": {"request_id": _S(), "conversation_id": _S()},
     "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
                      # Spoken in voice mode: the reply will be read aloud, so it is asked to sound like speech.
                      "voice": _B(False),
@@ -1031,6 +1034,9 @@ EVENT_FIELDS.update({
     "chatdgc_library_file": {"request_id": _S(), "op": _S(), "path": _S(False), "bytes": _I(False)},
     "chatdgc_project": {"request_id": _S(), "project": _f("object", "null"), "deleted": _A(False)},
     "chatdgc_earlier": {"request_id": _S(), "conversation_id": _S(), "messages": _A(), "earlier": _I()},
+    # The answer to chatdgc_outline: `prompts`, oldest first, each {id, text (its first words, or what it attached),
+    # created_at, widgets?: [{id, message_id, title, created_at, removed?}]}, the widgets the replies to it made.
+    "chatdgc_outline": {"request_id": _S(), "conversation_id": _S(), "prompts": _A()},
     "chatdgc_turn": {"conversation_id": _S(), "state": _f("string", enum=("started", "ended")),
                      "reply_id": _S(), "request_id": _S(False)},
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},

@@ -1336,6 +1336,11 @@ test("the Library's widgets: a tab of their own once the backend keeps them, eac
     assert.equal(await page.locator("#lib-views").isHidden(), true, "not before the backend says it keeps them");
     await send({ type: "widgetsOffered", on: true });
     assert.deepEqual(await page.locator(".lib-view").allTextContents(), ["Files", "Widgets"]);
+    // Opened from a chat's Widgets list ("Open the Library"): on its Widgets tab.
+    await send({ type: "view", view: "widgets" });
+    assert.equal(await page.locator(".lib-view", { hasText: "Widgets" }).getAttribute("aria-selected"), "true");
+    assert.deepEqual((await posted("widgets")).at(-1), { type: "widgets", query: "", offset: 0 });
+    await page.locator(".lib-view", { hasText: "Files" }).click();
     await page.locator(".lib-view", { hasText: "Widgets" }).click();
     assert.deepEqual((await posted("widgets")).at(-1), { type: "widgets", query: "", offset: 0 });
     assert.equal(await page.evaluate(() => window.__state?.view), "widgets", "remembered");
@@ -2903,6 +2908,137 @@ test("files a reply made: a card with what each is, Open and Save a copy…, liv
     await s.frame();
     assert.equal(await s.page.locator(`.cd-file[aria-label="Budget.xlsx, Excel workbook"]`).count(), 1);
     assert.equal(await s.page.locator(`.cd-file[aria-label^="x.docx"]`).count(), 0, "only a file DGC named");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+// Widgets in a chat, option C1 (founder, 2026-10-18): "Widgets N" in the header while the chat has any, a list of them
+// with when each was made and the prompt that asked, Open, Show it in the chat, Delete asked in the row, and the
+// Library a click away. A long chat opens on its latest pages: the rest come from its outline, and Show it in the chat
+// loads the pages before what's shown until the widget's card is there.
+test("widgets in a chat: Widgets N in the header, each with its prompt, Open, shown in the chat (earlier pages loaded first), deleted after asking, the Library a click away", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900, height: 700 });
+  try {
+    const P = (n) => `msg_${String(n).padStart(32, "0")}`, WG = (n) => `wg_${String(n).padStart(16, "0")}`;
+    const at = (n) => new Date(Date.UTC(2026, 9, 10, 9, n)).toISOString();
+    const say = ["Make me an EMI calculator", "Something else", "Make a tool to compare loans", "Build a focus timer", "Thanks"];
+    const msgs = [];
+    say.forEach((text, i) => {
+      msgs.push({ id: P(2 * i), role: "user", text, created_at: at(4 * i) });
+      const made = { 0: [{ id: WG(1), title: "EMI calculator", html: "<title>EMI calculator</title><p>emi</p>", created_at: at(4 * i + 1) }],
+                     1: [{ id: WG(3), title: "Old one", removed: true, created_at: at(4 * i + 1) }],
+                     2: [{ id: WG(5), title: "Loan comparison", html: "<p>loans</p>", created_at: at(4 * i + 1) }],
+                     3: [{ id: WG(7), title: "Focus timer", html: "<p>timer</p>", created_at: at(4 * i + 1) }] }[i] || [];
+      msgs.push({ id: P(2 * i + 1), role: "assistant", text: `Reply ${i}.\n\n${"Words. ".repeat(120)}`, widgets: made, finish: "stop", created_at: at(4 * i + 1) });
+    });
+    // A chat with none: no button.
+    await s.send({ type: "opened", conversation: conversation(), messages: msgs.slice(2, 4).map((m) => ({ ...m, widgets: [] })), earlier: 0, busy: false });
+    assert.equal(await shown(s.page, "#cd-widgets"), false, "no widgets, no button");
+    assert.equal((await s.posted("outline")).length, 0, "the whole chat on screen: no outline asked");
+    // A long chat opened on its latest pages (prompts 3 and 4): the rest of its widgets come from its outline.
+    await s.send({ type: "opened", conversation: conversation({ id: `chat_${"b".repeat(32)}`, title: "Flat" }), messages: msgs.slice(6), earlier: 6, busy: false });
+    assert.equal((await s.posted("outline")).length, 1, "asked for, once");
+    const outline = say.map((text, i) => ({ id: P(2 * i), text, created_at: at(4 * i),
+      ...(msgs[2 * i + 1].widgets.length ? { widgets: msgs[2 * i + 1].widgets.map(({ html, ...w }) => ({ ...w, message_id: P(2 * i + 1) })) } : {}) }));
+    await s.send({ type: "outline", conversation: `chat_${"b".repeat(32)}`, prompts: outline });
+    await s.frame();
+    const button = s.page.locator("#cd-widgets");
+    assert.equal(await shown(s.page, "#cd-widgets"), true);
+    assert.equal((await button.innerText()).replace(/\s+/g, " "), "Widgets 3", "the three not deleted, though one's reply is on screen");
+    assert.equal(await button.getAttribute("aria-label"), "Widgets in this chat: 3");
+    const head = await s.page.evaluate(() => [...document.querySelector(".cd-head").children].filter((n) => n.checkVisibility()).map((n) => n.id || n.className));
+    assert.ok(head.indexOf("cd-widgets") < head.indexOf("cd-keys-open"), `among the header's buttons, first (${head})`);
+    await button.click();
+    const panel = s.page.locator("#cd-widgets-panel");
+    assert.equal(await panel.getAttribute("role"), "dialog");
+    assert.equal(await button.getAttribute("aria-expanded"), "true");
+    assert.equal(await panel.locator(".cd-wtitle").textContent(), "Widgets in this chat");
+    assert.equal(await panel.locator(".cd-wcount").textContent(), "3, in the order they were made");
+    assert.deepEqual(await panel.locator(".cd-wname").allTextContents(), ["EMI calculator", "Old one", "Loan comparison", "Focus timer"]);
+    const metas = await panel.locator(".cd-wmeta").allTextContents();
+    assert.match(metas[0], /· from “Make me an EMI calculator”$/);
+    assert.equal(metas[1], "Deleted");
+    assert.match(metas[3], /from “Build a focus timer”$/);
+    assert.equal(await panel.locator('.cd-wrow[data-removed] button').count(), 0, "nothing to do with a deleted one");
+    assert.equal(await s.page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Open EMI calculator beside the chat", "the keys start on the first Open");
+    // The keys: Esc closes it and gives the button back its focus; Enter opens it again.
+    await s.page.keyboard.press("Escape");
+    assert.equal(await panel.count(), 0);
+    assert.equal(await s.page.evaluate(() => document.activeElement?.id), "cd-widgets");
+    await s.page.keyboard.press("Enter");
+    assert.equal(await panel.count(), 1);
+    // Open: from its card's page when its reply is on screen; by id, for the host to fetch, when it isn't.
+    await panel.locator('.cd-wrow[data-widget="' + WG(7) + '"] .cd-wopen').click();
+    await panel.locator('.cd-wrow[data-widget="' + WG(1) + '"] .cd-wopen').click();
+    assert.deepEqual((await s.posted("widgetOpen")).map((m) => [m.id, m.title, m.html || ""]),
+                     [[WG(7), "Focus timer", "<p>timer</p>"], [WG(1), "EMI calculator", ""]]);
+    // Delete, asked in the row; Esc says no. Its reply isn't on screen: the reply sent again stays off the bottom.
+    const row5 = panel.locator('.cd-wrow[data-widget="' + WG(5) + '"]');
+    await row5.locator(".cd-wdel").click();
+    assert.equal(await row5.locator(".cd-wconfirm").textContent(), "Delete it?");
+    assert.equal(await s.page.evaluate(() => document.activeElement?.textContent), "Delete", "the row's Delete has the keys");
+    await s.page.keyboard.press("Escape");
+    assert.equal(await row5.locator(".cd-wconfirm").count(), 0, "Esc: kept");
+    assert.equal(await panel.count(), 1, "and the list stays open");
+    await row5.locator(".cd-wdel").click();
+    await row5.locator(".cd-wdanger").click();
+    assert.deepEqual(await s.posted("widgetRemove"), [{ type: "widgetRemove", id: WG(5) }]);
+    assert.equal(await row5.locator(".cd-wconfirm").textContent(), "Deleting…");
+    await s.send({ type: "message", message: { ...msgs[5], widgets: [{ id: WG(5), title: "Loan comparison", removed: true, created_at: at(9) }] } });
+    await s.send({ type: "widgetRemoved", id: WG(5) });
+    await s.frame();
+    assert.equal(await row5.locator(".cd-wmeta").textContent(), "Deleted");
+    assert.equal((await button.innerText()).replace(/\s+/g, " "), "Widgets 2");
+    assert.equal(await s.page.evaluate(() => [...document.querySelectorAll("#cd-log .cd-msg")].at(-1).dataset.id), P(9), "an earlier reply, not a new one at the end");
+    // Show it in the chat: the pages before what's shown, asked for one after another, until its card is there.
+    await panel.locator('.cd-wrow[data-widget="' + WG(1) + '"] .cd-wgo').click();
+    assert.equal(await panel.count(), 0, "the list closes");
+    let asked = await s.posted("earlier");
+    assert.deepEqual(asked.map((m) => m.before), [P(6)]);
+    await s.send({ type: "earlier", messages: msgs.slice(2, 6).map((m) => (m.id === P(5) ? { ...m, widgets: [{ id: WG(5), title: "Loan comparison", removed: true }] } : m)), earlier: 2 });
+    asked = await s.posted("earlier");
+    assert.deepEqual(asked.map((m) => m.before), [P(6), P(2)], "not there yet: the page before");
+    await s.send({ type: "earlier", messages: msgs.slice(0, 2), earlier: 0 });
+    await s.page.waitForTimeout(450);
+    const card = s.page.locator(`.cd-widget[data-ref="${P(1)}:${WG(1)}"]`);
+    const [c, view] = [await card.boundingBox(), await s.page.locator("#cd-scroll").boundingBox()];
+    assert.ok(c.y >= view.y && c.y + c.height <= view.y + view.height, `its card in view (${c.y} in ${view.y}-${view.y + view.height})`);
+    assert.equal(await card.locator(".cd-widget-card").evaluate((n) => n.classList.contains("cd-flash")), true, "and outlined for a moment");
+    assert.equal(await s.page.locator(`.cd-widget[data-ref="${P(5)}:${WG(5)}"] .cd-widget-note`).textContent(), "Deleted from your Library");
+    // The Library, on its Widgets tab.
+    await button.click();
+    await s.page.locator(".cd-wlink").click();
+    assert.deepEqual(await s.posted("openLibrary"), [{ type: "openLibrary", view: "widgets" }]);
+    assert.equal(await panel.count(), 0);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("widgets in a chat at side-bar width: the mark and the count, a list that fits, and a widget made while it is open", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 460, height: 700 });
+  try {
+    const W1 = { id: `wg_${"1".repeat(16)}`, title: "A calculator with a rather long name that has to give way", html: "<p>x</p>", created_at: "2026-10-10T09:00:00Z" };
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Make me a calculator for something with a long description that runs on", created_at: "2026-10-10T08:59:00Z" },
+      { id: M(2), role: "assistant", text: "Here.", widgets: [W1], finish: "stop", created_at: "2026-10-10T09:00:00Z" }] });
+    const button = s.page.locator("#cd-widgets");
+    assert.equal((await button.innerText()).replace(/\s+/g, " "), "1", "narrow: the mark and the count");
+    assert.equal(await button.getAttribute("aria-label"), "Widgets in this chat: 1", "its name says it all the same");
+    await button.click();
+    const box = await s.page.locator("#cd-widgets-panel").boundingBox();
+    assert.ok(box.x >= 11 && box.x + box.width <= 460 - 11, `inside the editor (${box.x}, ${box.width})`);
+    const row = await s.page.evaluate(() => { const r = document.querySelector(".cd-wrow"); return { over: r.scrollWidth - r.clientWidth, acts: r.querySelector(".cd-wacts").getBoundingClientRect().right, right: r.getBoundingClientRect().right }; });
+    assert.ok(row.over <= 0 && row.acts <= row.right + 1, "the name gives way; Open, Show and Delete stay in reach");
+    assert.equal(await s.page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth), 0);
+    // A new widget while the list is open: there at once.
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await s.send({ type: "message", message: { id: M(3), role: "user", text: "And a timer", created_at: "2026-10-10T09:05:00Z" } });
+    await s.send({ type: "widgetShown", messageId: M(4), widget: { id: `wg_${"2".repeat(16)}`, title: "Timer", html: "<p>t</p>", created_at: "2026-10-10T09:06:00Z" } });
+    await s.frame();
+    assert.deepEqual(await s.page.locator("#cd-widgets-panel .cd-wname").allTextContents(), [W1.title, "Timer"]);
+    assert.equal((await button.innerText()).replace(/\s+/g, " "), "2");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

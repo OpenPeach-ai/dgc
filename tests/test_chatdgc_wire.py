@@ -616,6 +616,55 @@ class ServiceTests(unittest.TestCase):
         for frame in self.wire.frames:
             self.assertLess(len(json.dumps(frame).encode()), 4 * 1024 * 1024, frame["type"])
 
+    def test_the_outline_lists_every_prompt_and_the_widgets_its_replies_made_whatever_is_paged_in(self):
+        chat = self.engine.store.create()
+        big = "x" * (900 * 1024)
+        wid = lambda n: f"wg_{n:016x}"
+        messages = []
+        for i in range(8):
+            if i % 2 == 0:
+                messages.append({"id": f"msg_{i:032x}", "role": "user", "text": f"Prompt {i}:\n  make   me something " + big,
+                                 "created_at": f"2026-10-1{i // 2}T09:00:00.000Z"})
+            else:
+                widgets = [{"id": wid(i), "title": f"Widget {i}", "html": "<p>hi</p>", "created_at": f"2026-10-1{i // 2}T09:01:00.000Z"}]
+                if i == 3:
+                    widgets.append({"id": wid(33), "title": "Deleted one", "removed": True, "created_at": "2026-10-11T09:02:00.000Z"})
+                messages.append({"id": f"msg_{i:032x}", "role": "assistant", "text": f"Reply {i}", "widgets": widgets if i < 7 else [],
+                                 "created_at": f"2026-10-1{i // 2}T09:01:00.000Z"})
+        messages.append({"id": "msg_" + "9" * 32, "role": "user", "text": "", "attachments": [{"name": "plan.pdf"}, {"name": "a.png"}],
+                         "created_at": "2026-10-14T09:00:00.000Z"})
+        chat["messages"] = messages
+        self.engine.store.save(chat)
+        self.service.dispatch({"type": "chatdgc_open", "request_id": "o", "conversation_id": chat["id"]})
+        self.assertGreater(self.wire.of("chatdgc_opened")[-1]["earlier"], 0, "only its latest pages are on screen")
+        self.service.dispatch({"type": "chatdgc_outline", "request_id": "ol", "conversation_id": chat["id"]})
+        got = self.wire.of("chatdgc_outline")[-1]
+        self.assertEqual((got["request_id"], got["conversation_id"]), ("ol", chat["id"]))
+        prompts = got["prompts"]
+        self.assertEqual([p["id"] for p in prompts], [f"msg_{i:032x}" for i in (0, 2, 4, 6)] + ["msg_" + "9" * 32], "every prompt, oldest first")
+        self.assertEqual(prompts[0]["text"], ("Prompt 0: make me something " + big)[:service_module.OUTLINE_CHARS], "its first words, spaces tidied")
+        self.assertEqual(prompts[0]["created_at"], "2026-10-10T09:00:00.000Z")
+        self.assertEqual(prompts[-1]["text"], "plan.pdf, a.png", "a prompt of attachments alone says what it attached")
+        self.assertEqual(prompts[1]["widgets"], [
+            {"id": wid(3), "message_id": f"msg_{3:032x}", "title": "Widget 3", "created_at": "2026-10-11T09:01:00.000Z"},
+            {"id": wid(33), "message_id": f"msg_{3:032x}", "title": "Deleted one", "created_at": "2026-10-11T09:02:00.000Z", "removed": True}])
+        self.assertNotIn("widgets", prompts[3], "a reply that made none")
+        self.assertNotIn("html", json.dumps(got), "no widget's page: an outline is small")
+        self.assertLess(len(json.dumps(got).encode()), 64 * 1024)
+        self.service.dispatch({"type": "chatdgc_outline", "request_id": "no", "conversation_id": "chat_" + "f" * 32})
+        self.assertEqual(self.wire.of("chatdgc_error")[-1]["request_id"], "no")
+
+    def test_an_outline_stays_inside_one_frame(self):
+        many = []
+        for i in range(service_module.OUTLINE_PROMPTS + 50):
+            many.append({"id": f"msg_{2 * i:032x}", "role": "user", "text": "w" * 5000, "created_at": "2026-10-10T00:00:00.000Z"})
+            many.append({"id": f"msg_{2 * i + 1:032x}", "role": "assistant", "text": "ok",
+                         "widgets": [{"id": f"wg_{i:016x}", "title": "t" * 500}]})
+        listed = service_module.outline(many)
+        self.assertEqual(len(listed), service_module.OUTLINE_PROMPTS, "the latest prompts")
+        self.assertEqual(listed[-1]["id"], many[-2]["id"])
+        self.assertLess(len(json.dumps({"type": "chatdgc_outline", "prompts": listed}).encode()), 4 * 1024 * 1024)
+
     def test_a_message_too_large_for_one_frame_is_cut_for_showing(self):
         huge = {"id": "msg_" + "a" * 32, "role": "assistant", "text": "😀" * 1_000_000, "thinking": "t" * 1000}
         shown = fit(huge)
@@ -685,7 +734,7 @@ class HostTests(unittest.TestCase):
     def test_ready_offers_it(self):
         self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1, "widget_library": 1,
                           "windows": ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"], "context_breakdown": 1,
-                          "voice_replies": 1, "question_forms": 1})
+                          "voice_replies": 1, "question_forms": 1, "outline": 1})
 
     def test_no_frame_carries_a_sessions_chat_id_even_with_several_sessions(self):
         self.host.dispatch({"type": "open_chat", "request_id": "oc", "cwd": str(self.tmp / "b")})

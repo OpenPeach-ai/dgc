@@ -10,6 +10,10 @@ object) and the commands `watch_pip_reports` (none is sent until a client asks) 
 `ready.capabilities.pip_reports`; the TypeScript SDK's known events include `pip_report`, so neither SDK drops it.
 History may carry `{role: "pip_report", report}` items.
 
+ChatDGC's outline: the command `chatdgc_outline` (offered as `ready.capabilities.chatdgc.outline`) and its answer, the
+event `chatdgc_outline` (every prompt of a chat, oldest first, with the widgets its replies made), are in the vendored
+protocol and the TypeScript SDK's known events, so neither SDK drops it.
+
 The editor's agent map added two events, `background_shells` and `background_output`, to the vendored protocol and
 the TypeScript SDK's known events, so neither SDK drops them; and the commands `list_background_shells`,
 `stop_background_shell` and `get_background_output` (with `ready.capabilities.background_tasks`). With

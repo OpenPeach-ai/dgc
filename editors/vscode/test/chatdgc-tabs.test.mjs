@@ -1323,3 +1323,61 @@ test("a tab asks for the logos of the plugins its replies used, and gets them fr
   await new Promise((r) => setImmediate(r));
   assert.deepEqual(panel.last("pluginLogos").logos, { aave: "" }, "a host with no logos: the page keeps its plug");
 });
+
+test("a chat's Widgets list: its outline from a backend that offers one, a widget opened by id, deleted for that chat, and the Library on its Widgets tab", async () => {
+  chat.open(ID(8)); chat.open(ID(9));
+  const [panel, other] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(8), title: "Flat" }, { earlier: 12 });
+  other.say({ type: "ready" }); opened(other, { id: ID(9), title: "Other" });
+  // An older CLI: no outline asked; the page makes do with what it has.
+  host.offers = { version: 1, widget_library: 1 };
+  panel.say({ type: "outline" });
+  assert.equal(last("chatdgc_outline"), undefined, "not offered: not asked");
+  host.offers = { version: 1, widget_library: 1, outline: 1 };
+  panel.say({ type: "outline" });
+  const ask = last("chatdgc_outline");
+  assert.deepEqual({ ...ask, request_id: "" }, { type: "chatdgc_outline", conversation_id: ID(8), request_id: "" });
+  const prompts = [{ id: MSG(1), text: "Make me an EMI calculator", created_at: "2026-10-11T10:00:00Z",
+                     widgets: [{ id: `wg_${"1".repeat(16)}`, message_id: MSG(2), title: "EMI calculator", created_at: "2026-10-11T10:01:00Z" }] }];
+  chat.onEvent({ type: "chatdgc_outline", request_id: ask.request_id, conversation_id: ID(8), prompts });
+  assert.deepEqual(panel.last("outline"), { type: "outline", conversation: ID(8), prompts });
+  assert.equal(other.last("outline"), undefined, "only the tab that asked");
+  // Open, named by id from the list (its reply isn't on screen): its page asked for, as the Library asks.
+  const WG = `wg_${"1".repeat(16)}`;
+  panel.say({ type: "widgetOpen", id: WG, title: "EMI calculator" });
+  const get = last("chatdgc_widgets");
+  assert.deepEqual([get.op, get.conversation_id, get.widget_id], ["get", ID(8), WG]);
+  chat.onEvent({ type: "chatdgc_widgets", request_id: get.request_id, op: "get", conversation_id: ID(8), widget_id: WG,
+                 widget: { id: WG, title: "EMI calculator", html: "<b>EMI</b>", at: 0, message_id: MSG(2) } });
+  const tab = world.panels.at(-1);
+  assert.deepEqual([tab.viewType, tab.title], [CHATDGC_WIDGET, "EMI calculator"]);
+  panel.say({ type: "widgetOpen", id: WG, title: "EMI calculator" });
+  assert.equal(tab.revealed, 1, "open already: shown, not asked for again");
+  // Delete, asked in the list's own row first: the Library's delete, for this chat, with no second question.
+  panel.say({ type: "widgetRemove", id: "wg_../../x" });
+  assert.equal(last("chatdgc_widgets").op, "get", "an id it can't name: nothing");
+  panel.say({ type: "widgetRemove", id: WG });
+  const remove = last("chatdgc_widgets");
+  assert.deepEqual([remove.op, remove.conversation_id, remove.widget_id], ["remove", ID(8), WG]);
+  assert.deepEqual(world.warnings, [], "the page asked already: no modal");
+  chat.onEvent({ type: "chatdgc_widgets", request_id: remove.request_id, op: "remove", conversation_id: ID(8), widget_id: WG });
+  assert.equal(tab.disposedCount, 1, "its tab closes");
+  assert.deepEqual(panel.last("widgetRemoved"), { type: "widgetRemoved", id: WG });
+  assert.equal(other.last("widgetRemoved"), undefined, "another chat's tab hears nothing");
+  // The Library, on its Widgets tab: said once its page is ready, and again when it's open already.
+  panel.say({ type: "openLibrary", view: "widgets" });
+  const library = world.panels.at(-1);
+  assert.equal(library.viewType, CHATDGC_LIBRARY);
+  assert.equal(library.last("view"), undefined, "not before its page can hear it");
+  library.say({ type: "ready" });
+  assert.deepEqual(library.webview.posted.filter((m) => ["widgetsOffered", "view"].includes(m.type)),
+                   [{ type: "widgetsOffered", on: true }, { type: "view", view: "widgets" }]);
+  panel.say({ type: "openLibrary", view: "widgets" });
+  assert.equal(library.revealed, 1);
+  assert.equal(library.webview.posted.filter((m) => m.type === "view").length, 2, "open already: shown on its Widgets tab");
+  // A backend that keeps no widgets: no delete, and the Library opens as it always has.
+  host.offers = { version: 1 };
+  const before = sent.length;
+  panel.say({ type: "widgetRemove", id: WG });
+  assert.equal(sent.length, before);
+});

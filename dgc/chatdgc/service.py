@@ -24,6 +24,8 @@ WIDGET_REPORT_SECONDS = 6.0        # how long a reply waits to hear what its wid
 WIDGET_REPORT_CHARS = 4_000
 
 PAGE_BYTES = 3 * 1024 * 1024          # one frame's messages, encoded
+OUTLINE_PROMPTS = 4000                # the latest prompts an outline lists: well inside one frame
+OUTLINE_CHARS = 160                   # of each prompt's words
 PREVIEW_BYTES = 2_500_000             # an image shown in the chat: its data: URI must fit one frame
 FLUSH_S = 0.05
 FLUSH_CHARS = 16_000
@@ -77,6 +79,28 @@ def page(messages: list[dict], before: str | None = None) -> tuple[list[dict], i
         used += size
         start -= 1
     return out, start
+
+
+def outline(messages: list[dict]) -> list[dict]:
+    """Every prompt of the conversation as shown, oldest first: its first words (or what it attached), when it was
+    sent, and the widgets the replies to it made. What the prompt rail and a chat's Widgets list show, whichever of
+    its pages the screen holds."""
+    prompts: list[dict] = []
+    for m in messages:
+        if not isinstance(m, dict) or not m.get("id"):
+            continue
+        if m.get("role") == "user":
+            words = " ".join(str(m.get("text") or "").split())
+            if not words:
+                words = ", ".join(str(a.get("name") or "attachment") for a in m.get("attachments") or [] if isinstance(a, dict))
+            prompts.append({"id": m["id"], "text": words[:OUTLINE_CHARS], "created_at": str(m.get("created_at") or "")})
+        elif prompts:
+            made = [{"id": str(w["id"]), "message_id": m["id"], "title": str(w.get("title") or "Interactive")[:80],
+                     "created_at": str(w.get("created_at") or m.get("created_at") or ""), **({"removed": True} if w.get("removed") else {})}
+                    for w in m.get("widgets") or [] if isinstance(w, dict) and w.get("id")]
+            if made:
+                prompts[-1].setdefault("widgets", []).extend(made)
+    return prompts[-OUTLINE_PROMPTS:]
 
 
 class _Stream:
@@ -147,7 +171,7 @@ class ChatService:
         conversation_id = cmd.get("conversation_id")
         try:
             {"chatdgc_list": self._list, "chatdgc_open": self._open, "chatdgc_earlier": self._earlier,
-             "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
+             "chatdgc_outline": self._outline, "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
              "chatdgc_update": self._update, "chatdgc_file": self._file, "chatdgc_edit": self._edit,
              "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version, "chatdgc_answer": self._answer,
              "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
@@ -581,6 +605,10 @@ class ChatService:
         messages = self._marked(chat, messages)
         self.emit("chatdgc_earlier", request_id=cmd["request_id"], conversation_id=chat["id"], messages=messages,
                   earlier=earlier)
+
+    def _outline(self, cmd: dict) -> None:
+        chat = self.engine.open(cmd["conversation_id"])
+        self.emit("chatdgc_outline", request_id=cmd["request_id"], conversation_id=chat["id"], prompts=outline(chat["messages"]))
 
     def _file(self, cmd: dict) -> None:
         fields = {"request_id": cmd["request_id"], "conversation_id": cmd["conversation_id"],

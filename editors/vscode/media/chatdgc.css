@@ -19,6 +19,57 @@ body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760p
 .cd-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--control); height: var(--control);
   padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .cd-icon:hover { background: var(--surface2); color: var(--text); }
+/* The header's "Widgets N" (main.css draws it as Work's Pips button): there while the chat has widgets, lit while its
+   list is open; in a narrow editor, the mark and the count. */
+.cd-head .cd-head-btn[hidden] { display: none; }
+.cd-head .cd-head-btn .codicon { font-size: 14px; margin-right: 1px; }
+.cd-head .cd-head-btn[aria-expanded="true"] { background: var(--surface2); color: var(--text); }
+.cd-head-btn-count { font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .cd-head-btn-label { display: none; } }
+
+/* Widgets in this chat: a panel under the button. Each row: the widget's mark, its name, when it was made and the prompt
+   that asked; Open (lit on the row under the pointer), Show it in the chat, Delete (asked in the row). */
+.cd-wpanel { position: fixed; z-index: 50; max-height: min(70vh, 520px); display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: 0 14px 40px -10px rgba(0, 0, 0, .75); }
+body.vscode-light .cd-wpanel { box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .25); }
+.cd-wpanel:focus { outline: none; }
+.cd-whead { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border); }
+.cd-wtitle { margin: 0; color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.3 var(--sans); }
+.cd-wcount, .cd-wempty { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.3 var(--sans); }
+.cd-wempty { padding: var(--sp-2); }
+.cd-wlist { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0; padding: 4px; list-style: none; }
+.cd-wrow { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--r-md); }
+.cd-wrow:hover, .cd-wrow:focus-within { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.cd-wbadge { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: #fff; font-size: 14px;
+  background: color-mix(in srgb, var(--accent) 45%, #0f766e); }
+.cd-wrow[data-removed] .cd-wbadge { opacity: .4; }
+.cd-wwords { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cd-wname, .cd-wmeta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-wname { color: var(--text); font: var(--w-med) var(--t-sm)/1.35 var(--sans); }
+.cd-wmeta { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-wrow[data-removed] .cd-wname { color: var(--faint); text-decoration: line-through; }
+.cd-wacts { flex: none; display: flex; align-items: center; gap: 2px; }
+.cd-wbtn { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: transparent; color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; white-space: nowrap; }
+.cd-wbtn:hover { background: var(--surface2); }
+.cd-wrow:hover .cd-wopen, .cd-wopen:focus-visible { border-color: var(--accent-fill); background: var(--accent-fill); color: #fff; }
+.cd-wicon { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted); cursor: pointer; }
+.cd-wicon:hover { background: var(--surface2); color: var(--text); }
+.cd-wdel:hover { color: var(--del-text); }
+.cd-wbtn:focus-visible, .cd-wicon:focus-visible, .cd-wlink:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.cd-wconfirm { margin-right: 4px; color: var(--text); font: var(--w-reg) var(--t-xs)/1.3 var(--sans); white-space: nowrap; }
+.cd-wdanger { border-color: var(--del); color: var(--del-text); }
+.cd-wfoot { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px var(--sp-2);
+  padding: 8px 12px; border-top: 1px solid var(--border); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-wlink { padding: 0; border: 0; background: none; color: var(--link); font: inherit; cursor: pointer; }
+.cd-wlink:hover { text-decoration: underline; }
+/* A card gone to (a widget's from the list, a prompt's from the rail): outlined for a moment. */
+.cd-flash { animation: cd-flash 1.4s ease-out 1; }
+@keyframes cd-flash { 0%, 35% { outline: 2px solid var(--accent); outline-offset: 2px; } 100% { outline: 2px solid transparent; outline-offset: 6px; } }
+@media (prefers-reduced-motion: reduce) { .cd-flash { animation: none; outline: 2px solid var(--accent); outline-offset: 2px; } }
+@media (forced-colors: active) { .cd-wpanel { border-color: CanvasText; } .cd-wbadge { forced-color-adjust: none; } }
 
 .cd-column { width: 100%; max-width: var(--cd-col); margin: 0 auto; padding: 0 var(--sp-4); }
 .cd-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-block: var(--sp-5); }

@@ -215,6 +215,9 @@
       state.offered = msg.on === true;
       if (!state.offered && state.view === "widgets") show("files");        // as if Files were chosen
       else { if (state.offered && !was && state.view === "widgets") ask(); render(); }
+    } else if (msg.type === "view") {
+      // Opened from a chat's Widgets list: the Widgets tab (the host says so only to a backend that keeps them).
+      if (msg.view === "widgets" && state.offered) show("widgets");
     } else if (msg.type === "refresh") {
       ask();                                        // the list stays on screen until the new one comes
     } else if (msg.type === "image") {

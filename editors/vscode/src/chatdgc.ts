@@ -212,6 +212,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}"><link rel="stylesheet" href="${attr(asset("media/voicebar.css"))}">
 <title>ChatDGC</title></head><body class="cd-blank" data-katex="${attr(asset("dist/katex/katex.js"))}" data-katex-css="${attr(asset("dist/katex/katex.css"))}">
 <header class="cd-head"><span class="pm"><svg class="mk mk-chat" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-bubble" d="M5.5 2.5 H18.5 A4 4 0 0 1 22.5 6.5 V13.5 A4 4 0 0 1 18.5 17.5 H11 L6 21.5 V17.5 H5.5 A4 4 0 0 1 1.5 13.5 V6.5 A4 4 0 0 1 5.5 2.5 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><g class="mk-slashes" transform="translate(6.53 4.53) scale(0.4560)" fill="currentColor"><path d="M7.63 4.67 L3.44 6.76 L1 21.43 L5.19 19.33 Z"/><path d="M15.32 2.57 L11.13 4.67 L8.68 21.43 L12.87 19.33 Z"/><path d="M23 4.67 L18.81 6.76 L16.37 19.33 L20.56 17.24 Z"/></g></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" id="cd-crumb" class="cd-crumb" hidden></button><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
+<button type="button" id="cd-widgets" class="cd-head-btn" title="This chat's widgets" aria-label="Widgets in this chat" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-play-circle" aria-hidden="true"></span><span class="cd-head-btn-label">Widgets</span><span id="cd-widgets-count" class="cd-head-btn-count"></span></button>
 <button type="button" id="cd-keys-open" class="cd-icon" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts"><span class="codicon codicon-keyboard" aria-hidden="true"></span></button>
 <button type="button" id="cd-menu" class="cd-icon" title="Rename, pin, archive, export or delete" aria-label="Chat options" hidden><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>
 <button type="button" id="cd-new" class="cd-icon" title="New chat" aria-label="New chat"><span class="codicon codicon-edit" aria-hidden="true"></span></button></header>
@@ -314,11 +315,18 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   private library?: vscode.WebviewPanel;
+  private libraryView = "";
 
-  /** The Library, in a tab of its own (one at a time). */
-  openLibrary(): void {
+  /** The Library, in a tab of its own (one at a time); `view` "widgets" opens it on its Widgets tab. */
+  openLibrary(view = ""): void {
     // Shown again, it asks again: a file attached or made since is there (it keeps its filters).
-    if (this.library) { this.library.reveal(); void this.library.webview.postMessage({ type: "refresh" }); return; }
+    if (this.library) {
+      this.library.reveal();
+      if (view) void this.library.webview.postMessage({ type: "view", view });
+      void this.library.webview.postMessage({ type: "refresh" });
+      return;
+    }
+    this.libraryView = view;                 // said once the page is ready to hear it
     const panel = vscode.window.createWebviewPanel(CHATDGC_LIBRARY, "Library", vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] });
     panel.iconPath = this.chatdgcIcon();
@@ -595,6 +603,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       }
       case "ready":
         void panel.webview.postMessage({ type: "widgetsOffered", on: this.widgetLibrary() });
+        if (this.libraryView) { void panel.webview.postMessage({ type: "view", view: this.libraryView }); this.libraryView = ""; }
         // falls through: the files are asked for as a list is
       case "list": {
         const kind = LIBRARY_KINDS.has(String(message.kind)) ? String(message.kind) : "";
@@ -956,6 +965,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.widgetPanels.get(id)?.dispose();
           this.keepWidgetState(id, null);
           void asker.libraryPanel?.webview.postMessage({ type: "changed" });
+          // Every tab on that chat hears it: its Widgets list marks it deleted, whether or not its reply is on screen.
+          for (const tab of showing(chat)) this.post(tab, { type: "widgetRemoved", id });
+          if (asker.tab) void this.library?.webview.postMessage({ type: "changed" });       // an open Library shows it gone too
         }
         return;
       }
@@ -996,6 +1008,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       }
       case "chatdgc_earlier":
         if (asker?.tab) { this.requests.delete(requestId); this.post(asker.tab, { type: "earlier", messages: ev.messages, earlier: ev.earlier }); }
+        return;
+      case "chatdgc_outline":
+        if (asker?.tab) {
+          this.requests.delete(requestId);
+          this.post(asker.tab, { type: "outline", conversation, prompts: Array.isArray(ev.prompts) ? ev.prompts : [] });
+        }
         return;
       case "chatdgc_turn":
         if (ev.state === "ended" && requestId) this.requests.delete(requestId);
@@ -1352,8 +1370,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "widgetOpen": {
         // Open (again): the widget's own tab, beside the chat.
         const html = typeof message.html === "string" ? message.html : "";
-        if (!html || html.length > 200_000) return;
         const id = /^wg_[a-f0-9]{16}$/.test(String(message.id || "")) ? String(message.id) : "";
+        if (!html && id && conversation && this.widgetLibrary()) {
+          // Named from the chat's Widgets list, its reply not on screen: its tab if open, else its page asked for.
+          const open = this.widgetPanels.get(id);
+          if (open) open.reveal(undefined, false);
+          else this.ask({ tab, kind: "widgetGet" }, { type: "chatdgc_widgets", op: "get", conversation_id: conversation, widget_id: id });
+          return;
+        }
+        if (!html || html.length > 200_000) return;
         this.showWidget(id, html, String(message.title || ""), true, conversation || "");
         return;
       }
@@ -1514,6 +1539,23 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "earlier":
         if (!conversation || !MESSAGE_ID.test(String(message.before || ""))) return;
         this.ask({ tab, kind: "earlier" }, { type: "chatdgc_earlier", conversation_id: conversation, before: message.before });
+        return;
+      case "outline":
+        // Every prompt of the chat and the widgets its replies made, for the rail and the Widgets list, when only its
+        // latest pages are on screen (ready.capabilities.chatdgc.outline). An older CLI: the page makes do with what it has.
+        if (conversation && Number(this.host?.chatdgcOffers?.()?.outline) >= 1) {
+          this.ask({ tab, kind: "outline" }, { type: "chatdgc_outline", conversation_id: conversation });
+        }
+        return;
+      case "widgetRemove": {
+        // Deleted from the chat's Widgets list, after its own "Delete it?": the Library's delete, for this chat.
+        const id = String(message.id || "");
+        if (!conversation || !WIDGET_ID.test(id) || !this.widgetLibrary()) return;
+        this.ask({ tab, kind: "widgetRemove" }, { type: "chatdgc_widgets", op: "remove", conversation_id: conversation, widget_id: id });
+        return;
+      }
+      case "openLibrary":
+        this.openLibrary(message.view === "widgets" && this.widgetLibrary() ? "widgets" : "");
         return;
       case "models":
         void this.models(tab);

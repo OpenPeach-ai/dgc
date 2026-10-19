@@ -59,6 +59,15 @@
 - **No Search switch in the prompt box.** ChatDGC already looks things up whenever an answer depends on it, so the box's
   Search (which only made it search first) is gone; Deep research and Study stay. Web search is on unless you turn it
   off, in one place: **Settings → Web search → Search in ChatDGC**.
+- **Widgets in a chat, from its header.** While a chat has widgets, its header shows **Widgets N** (the mark and the
+  count in a narrow editor), styled as Work's header buttons. It opens "Widgets in this chat": each widget's name,
+  when it was made and the prompt that asked for it, with:
+  - **Open**, beside the chat (its page fetched when its reply isn't on screen);
+  - **→**, which scrolls to its card and outlines it, loading the chat's earlier messages first when needed;
+  - **Delete**, asked in the row ("Delete it?"), then deleted as the Library does: its card stays, marked deleted.
+  The list's footer opens the Library on its Widgets tab. Esc closes the list, Tab and Enter work it, and a long chat
+  opened on its latest messages still lists every widget (with a CLI that sends a chat's outline). The side bar's
+  Library button now says it holds widgets too.
 - **A chat's header opens on DGC's wordmark**, as a Work session's does: ChatDGC's mark (the chat bubble with the three
   slashes inside it), "DGC" and the blinking cursor. The slashes in the bubble breathe in turn as Work's do, and stand
   still for a reader who asked for less motion.

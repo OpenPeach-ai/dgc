@@ -144,10 +144,11 @@ body {
 #phead .thread-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
 #phead .pd { flex: 0 1 25%; min-width: 0; border: 0; padding: var(--sp-1) 0; background: transparent; text-align: right; font: var(--w-reg) var(--t-xs)/1 var(--sans); color: var(--faint); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #phead .pd:hover { color: var(--muted); }
-/* Pips has its own editor tab; its labelled entry stays outside settings and menus. */
-#phead .pips-nav { flex: none; display: inline-flex; align-items: center; gap: 3px; min-height: var(--control-sm); padding: 3px 7px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); }
-#phead .pips-nav:hover { background: var(--surface2); color: var(--text); }
-#phead .pips-nav:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+/* Pips has its own editor tab; its labelled entry stays outside settings and menus. ChatDGC's header buttons with
+   words (Widgets N) are the same button, so each rule names both. */
+#phead .pips-nav, .cd-head .cd-head-btn { flex: none; display: inline-flex; align-items: center; gap: 3px; min-height: var(--control-sm); padding: 3px 7px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); }
+#phead .pips-nav:hover, .cd-head .cd-head-btn:hover { background: var(--surface2); color: var(--text); }
+#phead .pips-nav:focus-visible, .cd-head .cd-head-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 #phead .pips-nav-core { flex: none; width: 18px; height: 18px; margin: -3px -3px -3px 0; }
 #phead .pips-nav-core:empty { display: none; }
 #phead .pips-back { display:inline-flex; align-items:center; gap:4px; border:0; background:transparent; color:var(--muted); padding:4px 6px 4px 0; font-size:var(--t-sm); cursor:pointer; }
