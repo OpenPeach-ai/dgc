@@ -975,9 +975,11 @@
     return parts.join(" · ");
   }
   const DEPTHS = { quick: ["Quick", 15, 5], standard: ["Standard", 40, 15], thorough: ["Thorough", 80, 30] };
-  const depthWords = (depth) => {
+  /** A depth in words, with the budget the research has for it (a bigger window reads more), else a 32k window's. */
+  const depthWords = (depth, budget) => {
     const [name, pages, minutes] = DEPTHS[depth] || DEPTHS.standard;
-    return `${name}: reads up to ${pages} pages, in up to ${minutes} minutes`;
+    const b = budget && Number(budget.pages) > 0 ? budget : { pages, minutes };
+    return `${name}: reads up to ${b.pages} pages, in up to ${b.minutes} minutes`;
   };
   /** The plan; while it runs, a tick on each step the sources already cover. */
   function planList(plan, covered = []) {
@@ -1042,7 +1044,7 @@
     const was = DEPTHS[message.research.depth] ? message.research.depth : "standard";
     const depth = el("select", "cd-plan-input");
     for (const value of Object.keys(DEPTHS)) {
-      const option = el("option", "", depthWords(value)); option.value = value; depth.append(option);
+      const option = el("option", "", depthWords(value, message.research.depths?.[value])); option.value = value; depth.append(option);
     }
     depth.value = was;
     title.dataset.keep = `plan-title-${message.id}`; steps.dataset.keep = `plan-steps-${message.id}`; sites.dataset.keep = `plan-sites-${message.id}`;
@@ -1102,7 +1104,7 @@
       if (state.planEditing === message.id) card.append(planEditor(message));
       else {
         card.append(planList(r.plan || {}));
-        if (r.depth) card.append(el("p", "cd-plan-sites cd-plan-depth", `${depthWords(r.depth)}.`));
+        if (r.depth) card.append(el("p", "cd-plan-sites cd-plan-depth", `${depthWords(r.depth, r.budget)}.`));
         if (last && !state.busy) {
           const row = el("div", "cd-research-actions");
           const deadline = state.countdowns[message.id];
@@ -1169,8 +1171,9 @@
     // The report: as it streams, then checked.
     if (["writing", "checking", "done"].includes(status) && message.text) {
       node.append(body(message));
-      // How it was researched: rounds, searches, sources found and read, minutes, the citation check.
-      if (status === "done" && r.how) node.append(el("p", "cd-research-how", r.how));
+      // How it was researched: rounds, searches, sources found and read, minutes, the citation check. When the check
+      // corrected or removed claims, the line opens on each of them: what it said, what it says now, and why.
+      if (status === "done" && r.how) node.append(howLine(r, message.id));
       if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
     }
     if (status === "done" && !live) {
@@ -1184,6 +1187,30 @@
       node.append(actions);
     }
     return node;
+  }
+  function howLine(r, id) {
+    const check = r.check || {}, fixed = check.corrected || [], gone = check.removed || [], judged = check.judgement || [];
+    if (!fixed.length && !gone.length && !judged.length) return el("p", "cd-research-how", r.how);
+    const box = kept(`how-line-${id}`, "cd-research-how", r.how);
+    if (fixed.length) {
+      box.append(el("p", "cd-research-note", "Corrected to what the sources say:"));
+      const list = el("ul", "cd-research-corrected");
+      for (const item of fixed) list.append(el("li", "", `${item.claim} → ${item.now}${item.why ? ` (${item.why})` : ""}`));
+      box.append(list);
+    }
+    if (gone.length) {
+      box.append(el("p", "cd-research-note", "Removed: no source backed them."));
+      const list = el("ul", "cd-research-removed");
+      for (const item of gone) list.append(el("li", "", item.why && item.why !== "No source backed it." ? `${item.claim} (${item.why})` : item.claim));
+      box.append(list);
+    }
+    if (judged.length) {
+      box.append(el("p", "cd-research-note", "Kept as the report's own reasoning, without a citation:"));
+      const list = el("ul", "cd-research-judgement");
+      for (const item of judged) list.append(el("li", "", item.claim));
+      box.append(list);
+    }
+    return box;
   }
   /** The report on its own, as ChatGPT's full-screen view has it: contents, the report, and its sources. */
   function openReader(message) {

@@ -2445,6 +2445,58 @@ test("deep research: how deep it goes, its budget as it reads, the steps it has 
   } finally { await s.page.close(); }
 });
 
+test("deep research on a model with a big window: the plan and How deep say the budget it really has", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const plan = { title: "Coding models", steps: ["What shipped", "Benchmarks", "Hardware"], sites: [] };
+    const depths = { quick: { rounds: 3, pages: 15, minutes: 5 }, standard: { rounds: 10, pages: 80, minutes: 25 },
+                     thorough: { rounds: 16, pages: 160, minutes: 50 } };
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Open-weight coding models for local use", research: true },
+      { id: M(2), role: "assistant", text: "plan", finish: "stop",
+        research: { status: "planned", plan, depth: "standard", budget: depths.standard, depths } }] });
+    const card = s.page.locator(".cd-research");
+    assert.equal(await card.locator(".cd-plan-depth").textContent(), "Standard: reads up to 80 pages, in up to 25 minutes.");
+    await card.getByRole("button", { name: "Edit" }).click();
+    const howDeep = card.locator(".cd-plan-field").nth(3).locator("select");
+    assert.equal(await howDeep.inputValue(), "standard");
+    assert.deepEqual(await howDeep.locator("option").allTextContents(),
+                     ["Quick: reads up to 15 pages, in up to 5 minutes", "Standard: reads up to 80 pages, in up to 25 minutes",
+                      "Thorough: reads up to 160 pages, in up to 50 minutes"]);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("deep research: the line on how it was researched opens on each claim the check corrected or removed", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const plan = { title: "Home loans", steps: ["Rates"], sites: [] };
+    const how = "How this was researched: 5 rounds of searching and reading, 30 searches, 120 sources found, 40 pages read in full, "
+      + "38 of them used, 3 minutes. Citations checked: 70 of 74 cited claims hold up against their sources; 1 corrected, 1 removed: no source backed it.";
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Home loans", research: true },
+      { id: M(2), role: "assistant", text: "# Home loans\n\nICICI's rate starts at 8.75% [4].", finish: "stop",
+        sources: [{ n: 4, title: "ICICI", url: "https://icici.example" }],
+        research: { status: "done", plan, round: 5, opened: 40, how, notes: [], activity: [],
+                    check: { claims: 74, checked: 74, supported: 70, first: 68, page: 2,
+                             corrected: [{ claim: "ICICI's rate starts at 8.50%.", now: "ICICI's rate starts at 8.75%.", why: "The source gives 8.75%, not 8.50%" }],
+                             removed: [{ claim: "SBI is the largest lender in Pune.", cites: [1], why: "No source backed it." }],
+                             judgement: [{ claim: "Ask for the spread in writing.", why: "The report's own advice." }] } } }] });
+    const line = s.page.locator("details.cd-research-how");
+    assert.equal(await line.locator("summary").textContent(), how, "one line, as before");
+    assert.equal(await line.locator(".cd-research-corrected li").isVisible(), false, "the detail is a click away");
+    await line.locator("summary").click();
+    assert.deepEqual(await line.locator(".cd-research-corrected li").allTextContents(),
+                     ["ICICI's rate starts at 8.50%. → ICICI's rate starts at 8.75%. (The source gives 8.75%, not 8.50%)"]);
+    assert.deepEqual(await line.locator(".cd-research-removed li").allTextContents(), ["SBI is the largest lender in Pune."]);
+    assert.deepEqual(await line.locator(".cd-research-judgement li").allTextContents(), ["Ask for the spread in writing."]);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-research-how-corrected.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("a send refused before it starts gives back what was typed, and never leaves the box stuck", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
