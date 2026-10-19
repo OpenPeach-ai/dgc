@@ -38,6 +38,7 @@ draft beside the main chat. It pairs with DGC CLI 0.48.0, which advertises Pips 
 | `read(command, params)` | Run one read control, after checking the backend's Pips capabilities. |
 | `mutate(command, params, *, approved=False)` | Run one mutation. Refused unless the host passes `approved=True` (TypeScript: `{ approved: true }`) for that call; retries need it again. |
 | `list(workspace_id)`, `get(pip_id)`, `runs(pip_id)`, `get_run(run_id)` | Shortcuts for common reads (`getRun` in TypeScript). |
+| `run_posts(pip_id, *, before_id=None, limit=None)` | What the Pip's runs posted in its own chat, oldest first, paged by `before_id` (`runPosts` in TypeScript). Needs Pips API 51. |
 | `PipReadCommand`, `PipMutationCommand` | The closed sets of read and mutation command names `read` and `mutate` accept. |
 
 Pips controls need a client opened with `inherit_user_state=True` (TypeScript:
