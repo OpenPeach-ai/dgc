@@ -216,6 +216,22 @@ or `{ok: false, error, ready?}` while it opens or after it closes. `propose_pip_
 accepts `changes.computer_plan` from API 42; the extension refuses to send it, or any of these
 commands, to an older backend.
 
+**Eyes and a cursor** (API 53). A `frame` reply also carries `pointer` once the Pip has acted by
+position: `{kind, x, y, from_x?, from_y?, at, seq}` (`kind` one of `click_at`, `double_click_at`,
+`right_click_at`, `drag`, `scroll_at`, `hover_at`; `x`, `y` in the page's CSS pixels, the frame's
+`width` × `height`), plus `screen_x`, `screen_y`, `screen_width` and `screen_height` when the browser
+is a window on the computer's desktop. `use_pip_computer_view {pip_id, op: "pointer"}` returns
+`{view: {ok: true, watching, pointer}}` with no frame (`pointer` may be null). `list_pip_computer_frames`
+takes `pointers: true`; each row of a step by position then also has `pointer {kind, x, y, from_x?,
+from_y?}` in that screenshot's pixels, and without it the rows are exactly `{frame, label, url, at}`.
+`get_pip_eyes {pip_id}` and `set_pip_eyes {pip_id, choice: "ask" | "relay" | "off"}` return `{eyes:
+{pip_id, model, sees, choice, vision_model}}` (`sees` true, false or null). The extension sends none of
+these, nor `pointers` or op `pointer`, to an older backend. It draws the Pip's cursor (an arrow and its
+name) over the frame, or over the full screen from the `screen_*` fields while it asks op `pointer`
+every 700 ms; "What it saw…" draws each row's pointer, and a drag's path, over its screenshot; and a
+Personal Pip's page shows **Seeing** with the choice. A text-only Pip's card in its chat is an
+ordinary reply with `choices`; a tap sends the choice's words, and the backend recognises them.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

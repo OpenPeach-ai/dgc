@@ -979,7 +979,9 @@ only to global addresses, and connects to the address it checked. WebSockets are
 Every request from every page and popup is paused in the browser (CDP `Fetch`, Request stage).
 GET, HEAD and OPTIONS continue. The rest are held, at most eight at a time; more fail. A held
 request whose body carries a Luhn-valid card number (also when form-encoded) is held like any
-other, and its summary adds `payment: true` so the review can say so.
+other, and its summary adds `payment: true` so the review can say so. From API 53 a payment asks
+every time: `always_allow_pip_computer_action` refuses it (`asks_every_time`), and no
+`computer_submit` grant approves one.
 
 A held request becomes a `pip_computer_actions` row: `pending` for 24 hours, with a summary
 (method, host, path, page, up to 24 fields with secret-named values masked), the digest of that
@@ -1004,6 +1006,86 @@ requests the user submits in it are released at once, because the user made them
 run the view only watches. All nine computer commands are for the local user only. Screenshots
 are JPEG, at most 90 KiB each and 200 per run, under the run's `artifacts/computer`. A live
 view frame is taken at JPEG quality 55, and again at 30 if it is over 700 KiB (a busy page).
+
+**Eyes and a cursor** (API 53, `pip_eyes`). The `computer` tool also has `look`, `click_at`,
+`double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at` and `upload`, and `type` with no
+`ref` types into what has focus (a key event per character, so a canvas editor's text box sees it).
+Only a run whose model sees is offered the position operations: the worker asks its own client
+(`vision.has_vision`: Ollama's `/api/show` must list `vision`, cached by `LLMClient`), or the run
+has a vision relay (below). `look` returns the browser's visible page as a JPEG of at most 1280 × 800
+(`BoxedBrowser.screenshot_for_model`), which the worker gives the model as an image after the step,
+labelled with its size and the run's point scale; the result text gives the size, the address and the
+title, marked untrusted. Only the run's last two screens stay in its context. `click_at {x, y}`,
+`double_click_at`, `right_click_at`, `hover_at {x, y}`, `drag {x, y, to_x, to_y}` (press, twelve
+mouse moves, release; an HTML drag the page starts is caught with `Input.setInterceptDrags` and
+finished with drag events at the same points) and `scroll_at {x, y, dy}` act in the latest
+screenshot's space, converted to the page's CSS pixels; a point off the screen is refused. Each sets
+the write window (`acted_at`) as a ref click does, so a submit it causes is held the same way; each
+names what was under the point (role and name, never a field's value), records a timeline frame with
+`pointer {kind, x, y, from_x?, from_y?}` (CSS pixels), and answers with a new screenshot on which a
+red ring marks the mouse (drawn by DGC, said in the text). `upload {path, ref | x,y}` reads the path
+as a regular file in the Pip's Files (no links followed, at most 64 MB), copies exactly those bytes
+into `home/.dgc-uploads/TOKEN/NAME` (beside Files, where the Terminal box never reaches, so nothing can
+swap it for a link to the browser's profile in between), and gives that copy to the page: a `ref` to an `<input type=file>` through `DOM.setFileInputFiles`, or a button (ref or
+point) whose file chooser DGC answers itself (`Page.setInterceptFileChooserDialog`,
+`Page.fileChooserOpened`). Choosing sends nothing; the page's upload is held like any write. A
+chat's photos are copied into `Files/From chat` as `photo-SHA12.EXT` for a Pip with a computer.
+
+*What the model never sees.* Before each screenshot, DGC's own isolated world (`Page.createIsolatedWorld`,
+so page scripts neither see nor change what it uses) finds every `input`, `textarea` and `select`
+that is a password (type), has an `autocomplete` token `cc-*`, `current-password`, `new-password` or
+`one-time-code`, is named, labelled or placeholdered like a password, card number, expiry, CVC/CVV,
+one-time code, PIN, IBAN or SSN, or holds 13-19 digits; and every frame whose address, name or title
+is a payment provider's (Stripe, Braintree, Adyen, PayPal...). Each frame of the tab is asked the same
+way in its own isolated world, and each frame from another site through its own target session; their
+fields are placed by the box of the frame that holds them, and a frame DGC can't ask or place is
+covered whole. The screenshot is then redrawn in an `OffscreenCanvas` in that world, fitted to 1280 ×
+800, the boxes filled black (3 px wider each side), and re-encoded; if that fails, no screenshot is
+sent. Timeline frames, the live view and approval cards are unchanged.
+
+*Points.* Most models name a point in the image's pixels; Qwen3's vision models (qwen3-vl, qwen3.5,
+qwen3.6, qwen3.8) answer on a 0-1000 scale across the image, even when asked for pixels.
+`pip_eyes.convention_for` gives each model its own scale and the tool description says it plainly;
+`pip_eyes.to_pixels` converts, and an answer that can only be the other scale (in pixels, a point past
+the image's edge with both numbers within 1000; on 0-1000, a number over 1000 inside the image)
+switches the run to it. Measured on a 23-target page (buttons, links, checkboxes, 16-32 px icons and
+shapes on a canvas), one click each, hit = inside the target, through this path:
+
+| Model | Scale | Hits | Median seconds a click |
+| --- | --- | --- | --- |
+| deepseek-v4.1-flash:cloud | pixels | 21/23 | 0.8 |
+| qwen3.8:27b-q4km | 0-1000 | 23/23 (0/23 read as pixels) | 8.7 |
+| qwen3-vl:8b | 0-1000 | 11/23 (1/23 read as pixels) | 109 (it thinks before every answer) |
+
+*A model that reads text only.* At a Personal Pip's run start the supervisor pins `computer_eyes`:
+the user's choice for this Pip (`ask`, `relay` or `off`, registry metadata `pip_eyes:PIP_ID`), the
+model's scale, and, when the Pip's model can't see, the model that would see for it
+(`pip_eyes.pick`: from the connection's catalog, the same kind first (`:cloud` with `:cloud`), then
+the configured sub-agent model, then models Ollama has loaded, then smaller ones; it must list
+`vision`, `tools` and `completion`; at most 32 checked, cached an hour). In `relay` the worker's
+vision route is that model on the Pip's own connection: `look` sends it the screenshot and the Pip's
+`question` (`vision.look`, one request, no tools) and it answers in words with points in its own
+scale, which the tool then reads; photos sent in the chat are described the same way. In `ask`, a
+conversation run whose model calls `look` ends its turn there, and a message with photos is not sent
+to the model at all; the reply is one line, `**MODEL can't see images.**`, with three choices (an
+options card, `choices`): "Use VISION to see, keep MODEL for the rest", "Switch this Pip to VISION",
+"Not now" (shortened to fit 80 characters). The reply's `eyes` records the card
+(`pip_eyes_asked:PIP_ID`). When the user's next message is exactly one of those choices and the card
+is still the Pip's latest reply, `send_pip_message` applies it before queueing the run: `relay` and
+`off` are saved, and a switch proposes and accepts the Pip's `model_choice` (checked against the
+catalog), so that run already uses the model that sees. That run is told the answer (`decided`) and
+gets the earlier message's photos again. In `off`, `look` says the user chose that it works without
+seeing. A task run has no card: it says in its result that its model can't see images.
+
+`get_pip_eyes {pip_id}` and `set_pip_eyes {pip_id, choice}` (API 53, local only, Personal Pips)
+return `{eyes: {pip_id, model, sees, choice, vision_model}}`; `sees` is null when the connection
+doesn't say. `list_pip_computer_frames` takes `pointers: true` (API 53), and then a row from a step
+by position also has `pointer {kind, x, y, from_x?, from_y?}`; without it the rows are exactly as
+before. `use_pip_computer_view` takes op `pointer` (API 53): `{view: {ok, watching, pointer}}`
+without a frame, so a full screen that streams itself can draw the cursor, and a `frame` reply
+carries `pointer` too. `pointer` is `{kind, x, y, from_x?, from_y?, at, seq}` in the page's CSS pixels,
+plus `screen_x`, `screen_y`, `screen_width` and `screen_height` when the browser is a window on the
+computer's desktop (its window position and toolbar height, read in an isolated world).
 
 **The full screen** (API 43, capability `pips_desktop`). When the machine has the desktop programs
 (TigerVNC's `Xtigervnc`, `openbox`, `tint2`, `pcmanfm`, `xterm`; `pip_screen.availability()`), a
@@ -1415,4 +1497,5 @@ Clients check it before using a newer control.
 | 49 | Additive, nothing to gate on: `list_pip_runs` rows carry a failed run's `error`; `get_pip_execution` has `local_http_checks` and, when DGC knows the one-time fix, `fix` (`dgc pips execution --fix`); a Pulse setup card's `runner_notice` says when it can't run on this computer |
 | 50 | The `safe_source_v2` source rules (files DGC can't copy are left out and listed, `.dgcignore`, the project's ignore files for current files, a Pip's Excluded folders in `source_policy.exclude`, 256 MiB); `check_pip_source` and `get_pip_run_source`; new reviewer and Quill Pips start on `safe_source_v2` |
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
+| 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
 | 52 | Photos and files in a Pip's chat through the backend's spool: `send_pip_message` takes `spooled_images` (8 MiB a photo, 32 MiB in all, up to 64; HEIC kept as JPEG) and `spooled_files` (a document 16 MiB, text 1 MiB, 32 MiB in all, up to 16), local only; `get_pip_message_image` takes `as_file` and answers with the kept file's `path`. A large photo goes to the model at 2,500 pixels |

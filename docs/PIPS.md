@@ -855,14 +855,49 @@ without.
   once, because you did it. While a run is using the computer, the view only watches.
 - **Fenced in.** The browser reaches only public web addresses on ports 80 and 443. Your home
   network, this computer's own services and cloud metadata addresses are refused. A request
-  that carries a payment card number waits for you like any other change, and its review says
-  it sends payment card details. A Pip with
+  that carries a payment card number waits for you every time: its review says it sends payment
+  card details, it never offers **Always allow**, and no Always allow you gave for that site sends
+  one. A Pip with
   a computer can't also have app reads, so private data from your accounts never sits in a
   browser that could send it on.
 - **Stop it any time.** **Stop computer**, or `dgc pips computer stop PIP`, closes the browser at
   once and cancels anything waiting, unsent. A computer with nothing waiting closes itself after 15 minutes idle.
   **Remove computer…** takes it away; the Pip's saved sign-ins stay in its folder (see
   [Privacy](#privacy-and-where-state-lives)) until you delete it.
+
+**Eyes and a cursor.** A Pip whose model can see (its capabilities say so: deepseek-v4.1-flash:cloud, Qwen3.8, Qwen3-VL and
+others) uses its browser two ways, and picks: by the page's text (it reads the page and clicks
+things by name), and by eyes and a cursor. It **looks** at its screen (a picture of the browser,
+about 1280 × 800) and clicks, double-clicks, right-clicks, hovers, drags and scrolls where it points.
+That is what a drawing canvas or a drag-and-drop editor needs, such as a T-shirt designer. Every step
+by position comes back with a new picture of the screen, with a red ring where the mouse now is, so
+it sees what happened.
+
+- **It never sees a password or a card.** Before a picture goes to its model, DGC blacks out every
+  password, card number, expiry, security-code and one-time-code field: on the page, in its frames,
+  and the whole of any frame a payment provider puts on it. If one can't be blacked out, the picture
+  isn't sent. Your own view of its screen, and the approval card, show the page as it is.
+- **What it sends still waits for you.** A click by position holds a submit exactly as any other
+  click: anything that would send, buy, pay, post or book waits for your **Allow**, careful mode still
+  asks before a new site, and a payment asks every time.
+- **You see its cursor.** In its computer tab an arrow with its name shows where it last acted,
+  while it works. **What it saw…** shows each step with its cursor, and a drag with its path.
+- **Uploads.** It can put a file from its Files into a website's file field or upload button. The
+  photos and files you send in its chat are in its Files, under **From chat**. Choosing a file sends
+  nothing; when the page uploads it, that waits for your **Allow** like any submit.
+
+A Pip whose model reads text only (glm-5.3:cloud or deepseek-v4-pro:cloud, for example) still uses
+the page's text. When it needs to see (a canvas, a picture, or photos you sent it), it says so in one
+line, **glm-5.3:cloud can't see images.**, with three choices:
+
+- **Use deepseek-v4.1-flash:cloud to see, keep glm-5.3:cloud for the rest**: a model that can see
+  looks at the screen or the photos for it and answers in words, naming the points it can click.
+- **Switch this Pip to deepseek-v4.1-flash:cloud**: the Pip's model changes, and it sees for itself.
+- **Not now**: it works from the page's text and says what it couldn't do.
+
+DGC picks the model that sees from the ones you already have, the same kind first (a `:cloud` model
+for a `:cloud` Pip); it also has to use tools, so switching to it works. It asks once. Change the
+answer on its page under **Seeing**, which also offers **Switch to …**.
 
 **Its screen in an editor tab.** The computer button in a Pip's chat (or **Open its computer**
 in Settings) opens "NAME · Computer" as an editor tab.
@@ -902,7 +937,8 @@ on any computer, then **I've done it**, and the Pip looks again and carries on. 
 cookies, so a site usually trusts it for a while afterwards.
 
 - **Browser**: the live screen. Click, type, scroll and go to an address; anything the Pip would
-  submit shows at the top with **Send once**, **Always allow** and **Reject**.
+  submit shows at the top with **Send once**, **Always allow** and **Reject** (a payment has no
+  **Always allow**). While the Pip works, its cursor shows where it last acted.
 - **Files**: the computer's own folder, never yours. Downloads from its browser land in
   **Downloads**. Open a file to see it, **Save to…** to copy it where you choose, **Add files…**
   (or drop them) to give the Pip something to work on, and **Remove**. It holds 1 GB.

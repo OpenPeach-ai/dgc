@@ -165,6 +165,7 @@ job with `create_pip` and a reviewed update.
 | 50 | The `safe_source_v2` source rules in `changes.source_policy` (with an optional `exclude` list); `check_pip_source {pip_id, source_policy?}` and `get_pip_run_source {run_id}`, local only |
 | 51 | `list_pip_run_posts {pip_id, before_id?, limit?}`: what a Pip's runs posted in its own chat (`pips.run_posts()` / `pips.runPosts()`) |
 | 52 | `send_pip_message`'s `spooled_images` [{name, media_type}] and `spooled_files` [{name, spool}]: photos and files through the image spool (`pips.spool(data, suffix=)` writes one and returns its name); `get_pip_message_image`'s `as_file` |
+| 53 | `get_pip_eyes` (R) and `set_pip_eyes` (M, `choice` ask, relay or off): how a Personal Pip whose model reads text only sees; `list_pip_computer_frames`' `pointers`; `use_pip_computer_view`'s op `pointer`. A payment held in a Pip's browser is refused Always allow |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -434,12 +435,14 @@ settings are display preferences outside the reviewed job; changing them grants 
 | `get_pip_computer` | R | `pip_id` |
 | `list_pip_computer_actions` | R | `pip_id`, `limit?` (1–50) |
 | `get_pip_computer_frame` | R | `run_id`, `frame` (`0001.jpg` style) |
-| `list_pip_computer_frames` | R | `run_id` |
+| `list_pip_computer_frames` | R | `run_id`, `pointers?` (API 53: each step by position also has `pointer {kind, x, y, from_x?, from_y?}`) |
+| `get_pip_eyes` | R | `pip_id`; how a Personal Pip sees: `{eyes: {pip_id, model, sees, choice, vision_model}}` (API 53) |
+| `set_pip_eyes` | M | `pip_id`, `choice` (`ask`: it asks in its chat when it needs to see; `relay`: a model that sees looks for it; `off`); returns `{eyes}` (API 53) |
 | `decide_pip_computer_action` | M | `action_id`, `expected_digest`, `approve` (bool) |
 | `always_allow_pip_computer_action` | M | `action_id`, `expected_digest`; sends it and lets its Pip send the same submit (method, site, path) without asking |
 | `stop_pip_computer` | M | `pip_id` |
 | `open_pip_computer` | M | `pip_id` |
-| `use_pip_computer_view` | M | `pip_id`, `op` (`frame`, `click`, `type`, `key`, `scroll`, `go`, `back`), `x?`, `y?`, `text?`, `key?`, `dy?`, `url?` |
+| `use_pip_computer_view` | M | `pip_id`, `op` (`frame`, `click`, `type`, `key`, `scroll`, `go`, `back`; `pointer` from API 53: where the Pip last acted by position, no frame), `x?`, `y?`, `text?`, `key?`, `dy?`, `url?` |
 | `list_pip_computer_files` | R | `pip_id`, `path?`; the computer's own Files folder (API 43) |
 | `read_pip_computer_file` | R | `pip_id`, `path`; `text` (first 64 KiB), or `data` up to 2 MB (API 43) |
 | `list_pip_computer_terminal` | R | `pip_id`; the last 200 commands and the one running (API 43) |
