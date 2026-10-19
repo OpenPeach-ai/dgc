@@ -112,8 +112,8 @@ const defaultZone=OLD_ZONES[browserZone]||browserZone;
 S.sourceDirty=false;S.sourceDraftVersion=null;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;S.executionCapability=null;S.executionLoading=false;S.executionError='';S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';S.types=[];S.createStep='type';S.createType='';S.overview=true;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.models=[];S.defaultModel='';S.modelsError='';S.modelsLoading=false;S.modelDirty=false;S.stream=null;
 const creationDrafts=new Map(),avatarIds=new Map(),chatDrafts=new Map(),chatRequests=new Map();let avatarSequence=0,avatarObserver=null,characterCleanup=null,messageSeq=0,streamSeq=0,streamLoading=false,selectionGeneration=0;
 let savedView=options.getState?.(),restoreView=true,navigationPending=!!options.navigation;
-// Ask DGC to fix, once per run: kept with the view, as the Work chat keeps the prompt in its transcript.
 let postsSeq=0;
+// Ask DGC to fix, once per run: kept with the view, as the Work chat keeps the prompt in its transcript.
 const askedRuns=new Set(Array.isArray(savedView?.asked)?savedView.asked.filter(r=>typeof r==='string'&&/^run_[0-9a-f]{32}$/.test(r)).slice(-100):[]);
 S.sidebarPinned=savedView?.sidebar_pinned===true;
 function rememberView(){savedView={workspace_id:S.workspace?.id,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),asked:[...askedRuns].slice(-100)};options.setState?.(savedView);}
@@ -1129,7 +1129,7 @@ function pulseReportMarkup(run){
 function reportChatsNote(){
   const n=S.pip?.report_chats;
   if(!Number.isSafeInteger(n)||n<0)return '';
-  return `<p class="muted report-chats">${n?`Its finished reports also appear as a card in ${n===1?'the chat it reports to':`the ${n} chats it reports to`}: the chat it was set up in, and any chat it is attached to. Nothing changes until you ask there.`:`Its reports stay here. To have them appear in a chat as a card you can act on, ask DGC in that chat: “attach ${esc(S.pip.name)} to this chat”.`}</p>`;
+  return `<p class="muted report-chats">${n?`Its finished reports also appear as a card in ${n===1?'the chat it reports to':`the ${n} chats it reports to`}: the chat it was set up in, and any chat it is attached to. Nothing changes until you ask there.`:`${postsShown()?'Its reports post in its own chat and stay here.':'Its reports stay here.'} To have them appear in a chat as a card you can act on, ask DGC in that chat: “attach ${esc(S.pip.name)} to this chat”.`}</p>`;
 }
 // Runs became History (API 51): every run, newest first, each row saying what it found; the chat has the posts.
 function historyName(old){return postsShown()?'History':old;}
