@@ -2394,6 +2394,57 @@ test("deep research: a new plan you don't touch starts by itself when the count 
   } finally { await s.page.close(); }
 });
 
+test("deep research: how deep it goes, its budget as it reads, the steps it has covered, and how it was researched", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const plan = { title: "Home loans in Pune", steps: ["Rates in 2026", "Processing fees", "Prepayment rules"], sites: [] };
+    const planned = { status: "planned", plan, depth: "standard", budget: { rounds: 6, pages: 40, minutes: 15, least: 20 } };
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Home loans for a ₹70 lakh flat in Pune", research: true },
+      { id: M(2), role: "assistant", text: "plan", finish: "stop", research: planned }] });
+    const card = s.page.locator(".cd-research");
+    assert.equal(await card.locator(".cd-plan-depth").textContent(), "Standard: reads up to 40 pages, in up to 15 minutes.");
+    await card.getByRole("button", { name: "Edit" }).click();
+    const depth = card.locator(".cd-plan-field").nth(3).locator("select");
+    assert.equal(await depth.inputValue(), "standard");
+    assert.deepEqual(await depth.locator("option").allTextContents(), ["Quick: reads up to 15 pages, in up to 5 minutes",
+      "Standard: reads up to 40 pages, in up to 15 minutes", "Thorough: reads up to 80 pages, in up to 30 minutes"]);
+    await depth.selectOption("thorough");
+    await card.getByRole("button", { name: "Start research" }).click();
+    const [started] = await s.posted("researchStart");
+    assert.equal(started.plan.depth, "thorough", "a depth you change goes with the plan");
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    await s.send({ type: "research", messageId: M(2), research: { ...planned, status: "running", depth: "thorough",
+      budget: { rounds: 10, pages: 80, minutes: 30, least: 40 }, round: 3, reads: 25, opened: 23, found: 96, covered: [1, 3],
+      notes: [{ n: 1, title: "SBI", url: "https://sbi.co.in" }],
+      activity: [{ kind: "gap", text: "Prepayment rules for fixed-rate loans" }, { kind: "pick", text: "Chose 9 of 31 results to read" }] } });
+    await s.frame();
+    assert.equal(await card.locator(".cd-research-stats").textContent(), "round 3 of 10 · 23 of 80 pages read · 96 sources found");
+    assert.deepEqual(await card.locator(".cd-research-log li").allTextContents(),
+                     ["Still missing: Prepayment rules for fixed-rate loans", "Chose 9 of 31 results to read"]);
+    await card.getByText(/^Research plan · 3 steps · 2 covered so far$/).click();
+    assert.deepEqual(await card.locator(".cd-plan-steps li").evaluateAll((items) => items.map((li) => li.classList.contains("cd-step-covered"))),
+                     [true, false, true]);
+    const how = "How this was researched: 6 rounds of searching and reading, 31 searches, 112 sources found, 38 pages read (35 in full), "
+      + "29 of them used, 13 minutes. Citations checked: 52 of 55 cited claims hold up against their sources.";
+    await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "# Home loans\n\nRates start at 7.5% [1].", finish: "stop",
+      sources: [{ n: 1, title: "SBI", url: "https://sbi.co.in" }],
+      research: { status: "done", plan, depth: "thorough", budget: { rounds: 10, pages: 80, minutes: 30 }, round: 6, opened: 38, found: 112,
+                  seconds: 785, started_at: "2026-10-10T10:00:00Z", finished_at: "2026-10-10T11:00:00Z", how,
+                  notes: [{ n: 1, title: "SBI", url: "u", note: "x" }], check: { claims: 55, checked: 55, supported: 52 }, activity: [] } } });
+    await s.send({ type: "turn", state: "ended", replyId: M(2) });
+    assert.equal(await card.locator(".cd-research-stats").textContent(), "38 pages read · 112 sources found · 13:05 · citations: 52 of 55 hold up",
+                 "the time it spent, not the hour on the clock");
+    assert.equal(await s.page.locator(".cd-research-how").textContent(), how);
+    const order = await s.page.locator(".cd-assistant").evaluate((node) => [".cd-body", ".cd-research-how", ".cd-sources-button"]
+      .map((sel) => [...node.querySelectorAll("*")].indexOf(node.querySelector(sel))));
+    assert.ok(order[0] < order[1] && order[1] < order[2], `the report, how it was researched, then its sources: ${order}`);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-research-how.png") });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("a send refused before it starts gives back what was typed, and never leaves the box stuck", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

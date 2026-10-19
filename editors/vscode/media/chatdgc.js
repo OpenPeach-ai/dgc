@@ -955,31 +955,48 @@
   }
   function elapsed(r) {
     const from = Date.parse(r.started_at || ""), to = r.finished_at ? Date.parse(r.finished_at) : Date.now();
-    if (!from || !(to >= from)) return "";
-    const seconds = Math.round((to - from) / 1000);
+    // Once it's over, the time it spent (a run stopped and carried on later doesn't count the pause).
+    const spent = !RESEARCHING.includes(r.status) && Number(r.seconds) > 0 ? Math.round(Number(r.seconds)) : null;
+    if (spent === null && (!from || !(to >= from))) return "";
+    const seconds = spent ?? Math.round((to - from) / 1000);
     return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   }
-  function researchStats(r) {
-    const reads = Number(r.reads ?? (r.read || []).length) || 0, notes = (r.notes || []).length;
+  /** How far it is: the round and pages read out of its budget (when it has one), sources noted and found, the time. */
+  function researchStats(r, { round = true } = {}) {
+    const b = r.budget || {};
+    const reads = Number(r.opened ?? r.reads ?? (r.read || []).length) || 0, notes = (r.notes || []).length;
     const parts = [];
-    if (r.round) parts.push(`round ${r.round}`);
-    parts.push(`${reads} page${reads === 1 ? "" : "s"} read`, `${notes} noted`);
+    if (r.round && round) parts.push(b.rounds ? `round ${r.round} of ${b.rounds}` : `round ${r.round}`);
+    parts.push(b.pages && RESEARCHING.includes(r.status) ? `${reads} of ${b.pages} pages read` : `${reads} page${reads === 1 ? "" : "s"} read`);
+    if (!b.pages) parts.push(`${notes} noted`);                 // research from before budgets said it this way
+    if (r.found) parts.push(`${r.found} sources found`);
     const time = elapsed(r);
     if (time) parts.push(time);
     return parts.join(" · ");
   }
-  function planList(plan) {
+  const DEPTHS = { quick: ["Quick", 15, 5], standard: ["Standard", 40, 15], thorough: ["Thorough", 80, 30] };
+  const depthWords = (depth) => {
+    const [name, pages, minutes] = DEPTHS[depth] || DEPTHS.standard;
+    return `${name}: reads up to ${pages} pages, in up to ${minutes} minutes`;
+  };
+  /** The plan; while it runs, a tick on each step the sources already cover. */
+  function planList(plan, covered = []) {
     const box = el("div", "cd-plan");
     if (plan.title) box.append(el("h3", "cd-plan-title", plan.title));
     const list = el("ol", "cd-plan-steps");
-    for (const step of plan.steps || []) list.append(el("li", "", step));
+    (plan.steps || []).forEach((step, i) => {
+      const item = el("li", "", step);
+      if (covered.includes(i + 1)) { item.classList.add("cd-step-covered"); item.title = "Covered by what it has read"; item.append(icon("check")); }
+      list.append(item);
+    });
     box.append(list);
     if ((plan.sites || []).length) box.append(el("p", "cd-plan-sites", `Only these sites: ${plan.sites.join(", ")}`));
     return box;
   }
   const ACTIVITY = { search: ["search", "Searching"], read: ["globe", "Reading"], note: ["note", "Noted"], skip: ["circle-slash", "Skipped"],
                      round: ["sync", ""], write: ["edit", ""], check: ["checklist", ""], checked: ["pass", ""], steer: ["comment", "You added"],
-                     info: ["info", ""], error: ["warning", ""], wait: ["watch", ""] };
+                     info: ["info", ""], error: ["warning", ""], wait: ["watch", ""], gap: ["question", "Still missing"],
+                     conflict: ["git-compare", "To check"], pick: ["filter", ""] };
   function activityList(lines) {
     const list = el("ol", "cd-research-log");
     for (const line of lines) {
@@ -1022,17 +1039,25 @@
     const title = el("input", "cd-plan-input"); title.value = plan.title || ""; title.maxLength = 200;
     const steps = el("textarea", "cd-plan-input"); steps.value = (plan.steps || []).join("\n"); steps.rows = Math.max(4, (plan.steps || []).length + 1);
     const sites = el("input", "cd-plan-input"); sites.value = (plan.sites || []).join(", "); sites.placeholder = "Any site (or, for example: rbi.org.in, gov.uk)";
+    const was = DEPTHS[message.research.depth] ? message.research.depth : "standard";
+    const depth = el("select", "cd-plan-input");
+    for (const value of Object.keys(DEPTHS)) {
+      const option = el("option", "", depthWords(value)); option.value = value; depth.append(option);
+    }
+    depth.value = was;
     title.dataset.keep = `plan-title-${message.id}`; steps.dataset.keep = `plan-steps-${message.id}`; sites.dataset.keep = `plan-sites-${message.id}`;
+    depth.dataset.keep = `plan-depth-${message.id}`;
     const row = el("div", "cd-edit-actions");
     const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button";
     const go = el("button", "cd-continue", "Start research"); go.type = "submit";
     row.append(cancel, go);
-    form.append(field("Title", title), field("Steps, one a line", steps), field("Only these sites", sites), row);
+    form.append(field("Title", title), field("Steps, one a line", steps), field("Only these sites", sites), field("How deep", depth), row);
     cancel.addEventListener("click", () => { state.planEditing = ""; update(message.id); });
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const edited = { title: title.value.trim(), steps: steps.value.split("\n").map((x) => x.trim()).filter(Boolean),
-                       sites: sites.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean) };
+                       sites: sites.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean),
+                       ...(depth.value !== was ? { depth: depth.value } : {}) };
       if (!edited.steps.length) { steps.focus(); return; }
       startResearch(message, { plan: edited });
     });
@@ -1077,6 +1102,7 @@
       if (state.planEditing === message.id) card.append(planEditor(message));
       else {
         card.append(planList(r.plan || {}));
+        if (r.depth) card.append(el("p", "cd-plan-sites cd-plan-depth", `${depthWords(r.depth)}.`));
         if (last && !state.busy) {
           const row = el("div", "cd-research-actions");
           const deadline = state.countdowns[message.id];
@@ -1091,8 +1117,10 @@
       }
     } else if (live && RESEARCHING.includes(status)) {
       head(status === "writing" ? "Writing the report…" : status === "checking" ? "Checking the citations…" : "Researching…", researchStats(r));
-      const plan = kept(`plan-${message.id}`, "cd-research-more", `Research plan · ${(r.plan?.steps || []).length} steps`);
-      plan.append(planList(r.plan || {}));
+      const steps = (r.plan?.steps || []).length, covered = (r.covered || []).filter((n) => n >= 1 && n <= steps);
+      const plan = kept(`plan-${message.id}`, "cd-research-more",
+                        `Research plan · ${steps} steps${r.covered ? ` · ${covered.length} covered so far` : ""}`);
+      plan.append(planList(r.plan || {}, covered));
       card.append(plan);
       const lines = r.activity || [];
       card.append(activityList(lines.slice(-8)));
@@ -1100,7 +1128,7 @@
       if (status === "running") card.append(steerForm(message));
     } else if (status === "done") {
       const check = r.check || {};
-      head("Deep research", [researchStats(r).replace(/^round \d+ · /, ""),
+      head("Deep research", [researchStats(r, { round: false }),
                              check.checked ? `citations: ${check.supported} of ${check.checked} hold up` : ""].filter(Boolean).join(" · "));
       const row = el("div", "cd-research-actions");
       const open = el("button", "cd-continue", ""); open.type = "button";
@@ -1141,6 +1169,8 @@
     // The report: as it streams, then checked.
     if (["writing", "checking", "done"].includes(status) && message.text) {
       node.append(body(message));
+      // How it was researched: rounds, searches, sources found and read, minutes, the citation check.
+      if (status === "done" && r.how) node.append(el("p", "cd-research-how", r.how));
       if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
     }
     if (status === "done" && !live) {
