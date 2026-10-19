@@ -12,6 +12,33 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 - **A Pip report is never lost to its summary.** A summary over 4,000 characters is cut at its last sentence that fits and marked, and a missing one is written from the findings, each with a note in the report's limitations. Before, "report summary must be text between 1 and 4000 characters" failed the whole run, and even the one format repair never ran (three failed runs in a row on a real project).
 
+### Pips: phone photos and bigger files in a Pip's chat (Pips API 52)
+
+- **A Pip's chat takes what the Work chat takes.** Photos and files no longer ride inside the request, where the
+  4 MiB command frame capped them at four images and 2 MB in all (one phone photo of a medical bill could be over
+  that). `send_pip_message` now also takes `spooled_images` and `spooled_files`, files the editor put in the
+  backend's image spool, as the Work chat's prompt does: 8 MB a photo and 32 MB of photos a message with no
+  four-photo cap (64 at most), and up to 16 files (a document 16 MB, a text or code file 1 MB, 32 MB in all).
+  Only this computer's own editor and SDKs can name spool files, every name is a bare file name, and what a send
+  brought is removed from the spool whether it succeeds or not. Inline `images` and `files` still work for an
+  older editor. `get_pip_message_image` takes `as_file` and answers with where the photo is kept, so the editor
+  can show an 8 MB original no frame carries.
+- **iPhone photos (HEIC/HEIF) become JPEG automatically**, in a Pip's chat and the Work chat (pasted, dragged in, or
+  `@IMG_1234.HEIC` in the terminal). DGC uses what the computer has: `sips` on macOS; on Linux Pillow with
+  pillow-heif, libvips, ImageMagick, libheif's `heif-convert`, or the GNOME image loader Ubuntu's desktop ships
+  with (`ready.capabilities.heic_images`). With none, the message is not sent and says in one sentence to install
+  `libheif-examples` or send the photo as a JPEG.
+- **Large photos go to the model at 2,500 pixels.** A photo over 2,500 pixels on its long side is sent to the model
+  as a quality-90 JPEG at 2,500 pixels (a PNG stays a PNG), turned upright and lightly sharpened, so small print stays
+  readable and the request stays a size every provider takes. Measured on five phone photos of a bill in one message
+  (`deepseek-v4.1-flash:cloud`, 24 runs): a 6.5-point claim reference read right 24/24 from the sharpened copy, and
+  as little as 14/24 from a plain shrink. Nothing is upscaled; the chat keeps the original. With no converter,
+  the model gets the original, as before.
+- **Dragged-in images in the Work chat** are bounded like pasted ones: 8 MB each and 32 MB in all, instead of
+  2 MB in total, since DGC reads the file itself.
+- The registry schema stays 46: a registry made before this release has its chat images and files tables
+  rebuilt with the new bounds, rows kept, the first time a message needs them.
+
 ### Pips: a Pip's runs in its own chat (Pips API 51)
 
 - **Each run posts its result in the Pip's own chat**, as Grok Bots and OpenAI Dots post a scheduled run: a

@@ -38,7 +38,7 @@ export type PipReadParams = {
   get_pip_computer: { pip_id: string };
   list_pip_computer_actions: { pip_id: string; limit?: number };
   get_pip_computer_frame: { run_id: string; frame: string };
-  get_pip_message_image: { pip_id: string; message_id: string; index: number };
+  get_pip_message_image: { pip_id: string; message_id: string; index: number; as_file?: boolean };
   list_pip_computer_frames: { run_id: string };
   list_pip_action_grants: { pip_id: string };
   list_pip_feedback: { pip_id: string };
@@ -183,7 +183,8 @@ export type PipMutationParams = {
   review_pip_execution: { expected_revision: number; reason: string; run_id: string; status: string };
   review_pip_finding: { expected_revision: number; finding_index: number; reason: string; run_id: string; status: string };
   run_pip: { idempotency_key: string; pip_id: string; expected_version?: number; expected_lifecycle_revision?: number; expected_plan_digest?: string };
-  send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[] };
+  send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[];
+    spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[] };
   introduce_pip: { pip_id: string };
   stop_pips: { [key: string]: never };
 };
@@ -337,9 +338,12 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
     "idempotency_key",
     "images",
     "pip_id",
+    "spooled_files",
+    "spooled_images",
     "text"
   ],
   "get_pip_message_image": [
+    "as_file",
     "index",
     "message_id",
     "pip_id"
@@ -583,6 +587,32 @@ for (const command of API50_READS) READS.add(command);
 // API 51: a finished run posts its result in its Pip's own chat; list_pip_run_posts reads them, a page at a time.
 const API51_READS = new Set(["list_pip_run_posts"]);
 for (const command of API51_READS) READS.add(command);
+// API 52: photos and files handed over through the backend's spool (ready.capabilities.image_spool_dir), as the
+// Work chat's prompt does: send_pip_message's spooled_images [{name, media_type}] and spooled_files [{name, spool}];
+// get_pip_message_image's as_file answers with the kept file's path. Fields, not commands.
+const API52_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  send_pip_message: ["spooled_images", "spooled_files"], get_pip_message_image: ["as_file"] };
+const SPOOLED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/heic", "image/heif"]);
+const spoolName = (value: unknown): boolean => typeof value === "string" && value.length >= 1 && value.length <= 255
+  && value !== "." && value !== ".." && !/[\/\\\u0000-\u001f\u007f]/.test(value);
+function checkApi52Fields(values: Record<string, unknown>): void {
+  if (Object.hasOwn(values, "spooled_images")) {
+    const images = values.spooled_images;
+    if (!Array.isArray(images) || images.length < 1 || images.length > 64 || !images.every((i: any) => i && typeof i === "object"
+      && !Array.isArray(i) && Object.keys(i).sort().join() === "media_type,name" && spoolName(i.name) && SPOOLED_IMAGE_TYPES.has(i.media_type))) {
+      throw new DGCConfigError("spooled_images must be 1 to 64 {name, media_type} entries naming files in the image spool");
+    }
+  }
+  if (Object.hasOwn(values, "spooled_files")) {
+    const files = values.spooled_files;
+    if (!Array.isArray(files) || files.length < 1 || files.length > 16 || !files.every((f: any) => f && typeof f === "object"
+      && !Array.isArray(f) && Object.keys(f).sort().join() === "name,spool" && typeof f.name === "string" && f.name.trim() !== ""
+      && f.name.length <= 255 && !/[\/\\"\u0000-\u001f]/.test(f.name) && spoolName(f.spool))) {
+      throw new DGCConfigError("spooled_files must be 1 to 16 {name, spool} entries naming files in the image spool");
+    }
+  }
+  if (Object.hasOwn(values, "as_file") && typeof values.as_file !== "boolean") throw new DGCConfigError("as_file must be true or false");
+}
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -731,6 +761,12 @@ export class Pips {
       && (this.caps.pips_api_version as number) < 16) {
       throw new DGCUnsupportedError("Reviewed lifecycle revisions require a runtime advertising Pips API 16 or newer");
     }
+    if ((API52_FIELDS[command] || []).some((key) => Object.hasOwn(values, key))) {
+      if ((this.caps.pips_api_version as number) < 52) {
+        throw new DGCUnsupportedError("Photos and files through the spool, and as_file, require a runtime advertising Pips API 52 or newer");
+      }
+      checkApi52Fields(values);
+    }
     if (Object.keys(values).some((key) => !COMMAND_FIELDS[command].includes(key))) throw new DGCConfigError("Unknown or reserved Pip parameter");
     if (["list_pip_notes", "add_pip_note", "forget_pip_note"].includes(command) && Object.hasOwn(values, "shared")
       && (this.caps.pips_api_version as number) < 46)
@@ -837,5 +873,24 @@ export class Pips {
     return this.read("list_pip_run_posts", { pip_id: pipId,
       ...(options.beforeId !== undefined ? { before_id: options.beforeId } : {}),
       ...(options.limit !== undefined ? { limit: options.limit } : {}) });
+  }
+  /** Hand a photo or file to the runtime through its spool (Pips API 52); resolves to the name to send in
+   *  send_pip_message's spooled_images ({name, media_type}) or spooled_files ({name: your file's name, spool}).
+   *  The runtime reads it and removes it. */
+  async spool(data: Uint8Array, options: { suffix?: string } = {}): Promise<string> {
+    const folder = this.caps.image_spool === true && typeof this.caps.image_spool_dir === "string" ? this.caps.image_spool_dir : "";
+    if (!folder) throw new DGCUnsupportedError("This runtime has no image spool to hand files over through");
+    if (!Number.isSafeInteger(this.caps.pips_api_version) || (this.caps.pips_api_version as number) < 52) {
+      throw new DGCUnsupportedError("Photos and files through the spool require a runtime advertising Pips API 52 or newer");
+    }
+    if (!(data instanceof Uint8Array) || data.byteLength === 0) throw new DGCConfigError("spool takes the file's bytes");
+    const suffix = options.suffix ?? "";
+    if (!/^(\.[A-Za-z0-9]{1,10})?$/.test(suffix)) throw new DGCConfigError("suffix is empty or one extension, such as .jpg");
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const name = randomUUID().replace(/-/g, "") + suffix;
+    await mkdir(folder, { recursive: true, mode: 0o700 });
+    await writeFile(join(folder, name), data, { mode: 0o600, flag: "wx" });
+    return name;
   }
 }

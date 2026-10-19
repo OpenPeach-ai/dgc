@@ -13,6 +13,14 @@ command `restart_monitor {key}` restarts one a resume left stopped. A resume sen
 Likewise `task_interrupted` (`kind` shell|agent|troupe, `state` stopped|started|resumed|failed, `actions`) with
 `ready.capabilities.task_interrupted`, and the command `rerun_task {key, how?}` (`how` again|resume).
 
+Pips API 52: `send_pip_message` takes `spooled_images` [{name, media_type}] and `spooled_files` [{name, spool}],
+photos and files handed over through the runtime's image spool (8 MB a photo and 32 MB of photos, up to 64; up to 16
+files, a document 16 MB, a text file 1 MB; `image/heic` and `image/heif` are kept as JPEG), and
+`get_pip_message_image` takes `as_file` (the kept file's `path` instead of a data URI). Both SDKs know the fields,
+check their shape and refuse them before API 52; `pips.spool(data, suffix=)` (`await pips.spool(bytes, { suffix })`
+in TypeScript) writes a file into `ready.capabilities.image_spool_dir` and returns the name to send. No editor event
+changed.
+
 Pips API 51: `list_pip_run_posts {pip_id, before_id?, limit?}` (a read) returns what a Pip's runs posted in its own
 chat, oldest first (`pips.run_posts()` in Python, `pips.runPosts()` in TypeScript); both SDKs refuse it before API 51.
 No editor event changed.

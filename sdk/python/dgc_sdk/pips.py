@@ -229,6 +229,12 @@ READ_COMMANDS |= API50_READS
 # API 51: a finished run posts its result in its Pip's own chat; list_pip_run_posts reads them, a page at a time.
 API51_READS = frozenset({'list_pip_run_posts'})
 READ_COMMANDS |= API51_READS
+# API 52: photos and files handed over through the backend's spool (ready.capabilities.image_spool_dir), as the
+# Work chat's prompt does: send_pip_message's spooled_images [{name, media_type}] and spooled_files [{name, spool}];
+# get_pip_message_image's as_file answers with the kept file's path. Fields, not commands.
+API52_FIELDS = {'send_pip_message': frozenset({'spooled_images', 'spooled_files'}),
+                'get_pip_message_image': frozenset({'as_file'})}
+SPOOLED_IMAGE_TYPES = frozenset({'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/heic', 'image/heif'})
 COMMAND_FIELDS = {
     'list_pip_run_posts': frozenset({'pip_id', 'before_id', 'limit'}),
     'check_pip_source': frozenset({'pip_id', 'source_policy'}),
@@ -396,8 +402,8 @@ COMMAND_FIELDS = {
     'review_pip_execution': frozenset(['expected_revision', 'reason', 'run_id', 'status']),
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
-    'send_pip_message': frozenset(['chat_options', 'files', 'idempotency_key', 'images', 'pip_id', 'text']),
-    'get_pip_message_image': frozenset(['index', 'message_id', 'pip_id']),
+    'send_pip_message': frozenset(['chat_options', 'files', 'idempotency_key', 'images', 'pip_id', 'spooled_files', 'spooled_images', 'text']),
+    'get_pip_message_image': frozenset(['as_file', 'index', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),
 }
@@ -455,6 +461,30 @@ def _detach(params: Mapping[str, Any]) -> dict[str, Any]:
         raise DGCConfigError("Pip parameters must be a plain object")
     visit(params)
     return json.loads(json.dumps(params, ensure_ascii=False, allow_nan=False))
+
+
+def _spool_name(value: Any) -> bool:
+    return (type(value) is str and 1 <= len(value) <= 255 and value not in ('.', '..')
+            and not any(c in value for c in '/\\') and value.isprintable())
+
+
+def _check_api52_fields(values: Mapping[str, Any]) -> None:
+    """The API 52 fields' shapes, before anything is sent (the runtime checks them again)."""
+    images = values.get('spooled_images')
+    if 'spooled_images' in values and (
+            type(images) is not list or not 1 <= len(images) <= 64
+            or any(type(i) is not dict or set(i) != {'name', 'media_type'} or not _spool_name(i['name'])
+                   or i['media_type'] not in SPOOLED_IMAGE_TYPES for i in images)):
+        raise DGCConfigError('spooled_images must be 1 to 64 {name, media_type} entries naming files in the image spool')
+    files = values.get('spooled_files')
+    if 'spooled_files' in values and (
+            type(files) is not list or not 1 <= len(files) <= 16
+            or any(type(f) is not dict or set(f) != {'name', 'spool'} or type(f['name']) is not str
+                   or not f['name'].strip() or len(f['name']) > 255 or any(c in f['name'] for c in '/\\"')
+                   or any(ord(c) < 32 for c in f['name']) or not _spool_name(f['spool']) for f in files)):
+        raise DGCConfigError('spooled_files must be 1 to 16 {name, spool} entries naming files in the image spool')
+    if 'as_file' in values and type(values['as_file']) is not bool:
+        raise DGCConfigError('as_file must be true or false')
 
 
 class Pips:
@@ -583,6 +613,10 @@ class Pips:
                 raise DGCConfigError('data must be one data URI of 2 MB or less')
             params = {key: value for key, value in params.items() if key != 'data'}
         values = _detach(params)
+        if API52_FIELDS.get(command, frozenset()) & set(values):
+            if version < 52:
+                raise DGCUnsupportedError('Photos and files through the spool, and as_file, require a runtime advertising Pips API 52 or newer')
+            _check_api52_fields(values)
         if (command in ('propose_pip_calendar_action','prepare_pip_calendar_draft')
                 and isinstance(values.get('event'),dict)
                 and {'attendees','repeat','send_invitations'}.intersection(values['event']) and version < 38):
@@ -691,6 +725,32 @@ class Pips:
             params["limit"] = limit
         return self.read("list_pip_run_posts", params)
 
+    def spool(self, data: bytes, *, suffix: str = "") -> str:
+        """Hand a photo or file to the runtime through its spool (Pips API 52); returns the name to send.
+
+        The bytes go into ``ready.capabilities.image_spool_dir`` under a fresh name, readable only by you.
+        Send that name in ``send_pip_message``'s ``spooled_images`` ({name, media_type}) or
+        ``spooled_files`` ({name: your file's name, spool: this name}); the runtime reads and removes it.
+        """
+        import os
+        import re
+        caps = self._session._ready.get("capabilities", {})
+        folder = caps.get("image_spool_dir") if isinstance(caps, dict) and caps.get("image_spool") is True else None
+        if not isinstance(folder, str) or not folder:
+            raise DGCUnsupportedError("This runtime has no image spool to hand files over through")
+        if type(caps.get("pips_api_version")) is not int or caps["pips_api_version"] < 52:
+            raise DGCUnsupportedError("Photos and files through the spool require a runtime advertising Pips API 52 or newer")
+        if not isinstance(data, (bytes, bytearray)) or not data:
+            raise DGCConfigError("spool takes the file's bytes")
+        if not isinstance(suffix, str) or not re.fullmatch(r"(\.[A-Za-z0-9]{1,10})?", suffix):
+            raise DGCConfigError("suffix is empty or one extension, such as .jpg")
+        name = uuid.uuid4().hex + suffix
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        fd = os.open(os.path.join(folder, name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(bytes(data))
+        return name
+
 
 class AsyncPips:
     """Async parity; control waits run on a worker thread like AsyncSession."""
@@ -718,3 +778,6 @@ class AsyncPips:
 
     async def run_posts(self, pip_id: str, *, before_id: str | None = None, limit: int | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self._sync.run_posts, pip_id, before_id=before_id, limit=limit)
+
+    async def spool(self, data: bytes, *, suffix: str = "") -> str:
+        return await asyncio.to_thread(self._sync.spool, data, suffix=suffix)

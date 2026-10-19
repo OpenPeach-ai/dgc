@@ -183,8 +183,11 @@ def bounded_file_uri(value) -> str:
 def bulk_fields(command):
     """The fields of a Pips command that may carry a file's worth of data, each with its bound."""
     if command == "send_pip_message":
-        from .pip_chat import bounded_file_uris, bounded_image_uris
-        return (("images", bounded_image_uris), ("files", bounded_file_uris))
+        # API 52: the names of the files the editor spooled are small, but up to 64 photos and 16 files
+        # are more items than a Pips request's 256; bounded on their own, they carry no data.
+        from .pip_chat import bounded_file_uris, bounded_image_uris, bounded_spooled_files, bounded_spooled_images
+        return (("images", bounded_image_uris), ("files", bounded_file_uris),
+                ("spooled_images", bounded_spooled_images), ("spooled_files", bounded_spooled_files))
     if command == "add_pip_computer_file":
         return (("data", bounded_file_uri),)
     return ()
@@ -197,7 +200,9 @@ def bound_bulk(command, request: dict) -> tuple[dict, dict]:
     """
     bulk = {field: bound(request[field]) for field, bound in bulk_fields(command) if field in request}
     size = 0
-    for value in bulk.values():
+    for field, value in bulk.items():
+        if field.startswith("spooled_"):
+            continue                       # names of files in the spool: no data rides with them
         size += len(value) if isinstance(value, str) else sum(len(i if isinstance(i, str) else i["data"]) for i in value)
     if size > MAX_FILE_URI_CHARS:
         raise RegistryError("invalid_request", "Send at most 2 MB of images and files with one message.")
@@ -223,11 +228,13 @@ def add_file(root: Path, folder, name, data_uri) -> dict:
     return _write_new(root, parts, name, raw)
 
 
-def add_raw_file(root: Path, folder: str, name: str, raw: bytes) -> dict:
-    """A file DGC puts in the computer (one you sent in the chat), in a folder it makes if needed."""
+def add_raw_file(root: Path, folder: str, name: str, raw: bytes, *, maximum: int = MAX_FILE_BYTES) -> dict:
+    """A file DGC puts in the computer (one you sent in the chat), in a folder it makes if needed.
+
+    A file sent in the chat may be bigger than one added through the editor (16 MiB, pip_chat)."""
     parts = _parts(folder)
     named = _parts(name) if isinstance(name, str) and "/" not in name else []
-    if len(named) != 1 or len(raw) > MAX_FILE_BYTES:
+    if len(named) != 1 or len(raw) > maximum:
         raise RegistryError("invalid_request", "That file cannot be added.")
     fd = _open_dir(root, [])
     try:

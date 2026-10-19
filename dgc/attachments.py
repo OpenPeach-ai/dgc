@@ -60,6 +60,12 @@ _IMAGE_TYPES = {
     ".webp": "image/webp",
     ".bmp": "image/bmp",
 }
+# iPhone photos: taken as attachments and handed over as JPEG (photos.heic_to_jpeg), because neither
+# a model nor the editor's Chromium reads HEIC. Never a model-bound type in their own right.
+_HEIC_TYPES = {
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+}
 _MENTION_RE = re.compile(
     r'''(?<![\w@])@(?:"([^"\r\n]{1,4096})"|'([^'\r\n]{1,4096})'|([\w./\\~:+-]{1,4096}))''')
 _BOUNDARY_RE = re.compile(r"(?i)<\s*/?\s*(?:dgc_attachment|content)\s*>")
@@ -105,7 +111,20 @@ def _image_matches(data: bytes, mime: str) -> bool:
         return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
     if mime == "image/bmp":
         return data.startswith(b"BM")
+    if mime in _HEIC_TYPES.values():
+        from .photos import is_heif
+        return is_heif(data)
     return False
+
+
+def _model_image(raw: bytes, mime: str) -> tuple[bytes, str]:
+    """An image as a model may be sent it: an iPhone photo (HEIC) becomes a JPEG, anything else stays.
+
+    Raises photos.PhotoError (a ValueError) with one plain sentence when it can't be converted here."""
+    if mime in _HEIC_TYPES.values():
+        from .photos import heic_to_jpeg
+        return heic_to_jpeg(raw), "image/jpeg"
+    return raw, mime
 
 
 def validate_image_data_uris(values, *, maximum_files: int = MAX_IMAGE_FILES,
@@ -184,7 +203,7 @@ def read_spooled_images(entries, root: Path | str, *,
     if len(entries) > maximum_entries:
         raise ValueError(f"spooled images exceed the {maximum_entries}-entry limit")
     base = Path(root)
-    allowed = set(_IMAGE_TYPES.values())
+    allowed = set(_IMAGE_TYPES.values()) | set(_HEIC_TYPES.values())
     total = 0
     out: list[str] = []
     consumed: list[Path] = []
@@ -216,11 +235,13 @@ def read_spooled_images(entries, root: Path | str, *,
             consumed.append(path)
             if len(raw) > maximum_file_bytes:
                 raise ValueError(f"spooled image {index + 1} exceeds its byte limit")
+            if not _image_matches(raw, mime):
+                raise ValueError(f"spooled image {index + 1} media type does not match its data")
+            # An iPhone photo is sent on as a JPEG; what counts toward the total is what is sent.
+            raw, mime = _model_image(raw, mime)
             total += len(raw)
             if total > maximum_total_bytes:
                 raise ValueError("spooled images exceed the aggregate byte limit")
-            if not _image_matches(raw, mime):
-                raise ValueError(f"spooled image {index + 1} media type does not match its data")
             out.append(f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}")
         return tuple(out)
     finally:
@@ -385,7 +406,7 @@ def expand_attachments(prompt: str, project_root: Path | str, *, sanitizer=None,
         seen.add(key)
 
         suffix = path.suffix.lower()
-        mime = _IMAGE_TYPES.get(suffix)
+        mime = _IMAGE_TYPES.get(suffix) or _HEIC_TYPES.get(suffix)
         is_document = not mime and suffix in DOCUMENT_SUFFIXES
         if is_document:
             remaining = MAX_DOCUMENT_TOTAL_BYTES - document_bytes
@@ -438,6 +459,14 @@ def expand_attachments(prompt: str, project_root: Path | str, *, sanitizer=None,
             if not _image_matches(raw, mime):
                 notices.append(
                     f"attachment skipped ({label}): extension does not match image data")
+                continue
+            try:
+                raw, mime = _model_image(raw, mime)
+            except ValueError as exc:
+                notices.append(f"attachment skipped ({label}): {exc}")
+                continue
+            if image_bytes + len(raw) > MAX_IMAGE_TOTAL_BYTES:
+                notices.append(f"attachment skipped ({label}): total image limit reached")
                 continue
             encoded = base64.b64encode(raw).decode("ascii")
             images.append(f"data:{mime};base64,{encoded}")
@@ -527,15 +556,18 @@ def expand_attachments(prompt: str, project_root: Path | str, *, sanitizer=None,
 
 
 def editor_image_mentions(context, project_root: Path | str, images=(), *,
-                          maximum_files: int = MAX_IMAGE_FILES,
-                          maximum_total_bytes: int = MAX_EDITOR_IMAGE_TOTAL_BYTES) -> AttachmentExpansion:
+                          maximum_files: int = MAX_SPOOLED_IMAGE_ENTRIES,
+                          maximum_total_bytes: int = MAX_SPOOLED_IMAGE_TOTAL_BYTES,
+                          maximum_file_bytes: int = MAX_SPOOLED_IMAGE_FILE_BYTES) -> AttachmentExpansion:
     """The pixels of the image files an editor attached as ``file_mention`` resources.
 
     An @-mention, a drag from the explorer and Add File to Chat all send a typed path. That is all a
     text file needs, because the model can read it; a model cannot see an image through its path,
-    so, like the terminal's ``@file.png``, the image itself is attached. The editor's own bounds
-    apply (the count and the total bytes, images already on the prompt included), a symlinked or
-    non-regular path is refused the same way, and every image that is not attached says why.
+    so, like the terminal's ``@file.png``, the image itself is attached. The backend reads the file
+    itself, so no protocol frame bounds it: the bounds are the spooled images' (8 MiB a photo, 32 MiB
+    in all, images already on the prompt included), an iPhone photo (HEIC) is attached as a JPEG, a
+    symlinked or non-regular path is refused the same way, and every image that is not attached says
+    why.
     """
     if not isinstance(context, list):
         return AttachmentExpansion("")
@@ -555,7 +587,7 @@ def editor_image_mentions(context, project_root: Path | str, images=(), *,
         raw_path = item.get("path")
         if not isinstance(raw_path, str):
             continue
-        mime = _IMAGE_TYPES.get(Path(raw_path).suffix.lower())
+        mime = _IMAGE_TYPES.get(Path(raw_path).suffix.lower()) or _HEIC_TYPES.get(Path(raw_path).suffix.lower())
         if not mime:
             continue
         shown = item.get("relative_path") if isinstance(item.get("relative_path"), str) else raw_path
@@ -576,7 +608,7 @@ def editor_image_mentions(context, project_root: Path | str, images=(), *,
         try:
             if remaining <= 0:
                 raise OSError("exceeds")
-            captured = read_regular_bytes(path, maximum=remaining)
+            captured = read_regular_bytes(path, maximum=min(remaining, maximum_file_bytes))
             assert captured is not None
             raw = captured[0]
         except FileNotFoundError:
@@ -589,7 +621,10 @@ def editor_image_mentions(context, project_root: Path | str, images=(), *,
             notices.append(f"attachment skipped ({label}): linked or non-regular paths are not allowed")
             continue
         except OSError as exc:
-            if "exceed" in str(exc).lower() or "beyond" in str(exc).lower():
+            if ("exceed" in str(exc).lower() or "beyond" in str(exc).lower()) and remaining > maximum_file_bytes:
+                notices.append(f"attachment skipped ({label}): an image is limited to "
+                               f"{maximum_file_bytes // 1_048_576} MiB")
+            elif "exceed" in str(exc).lower() or "beyond" in str(exc).lower():
                 notices.append(f"attachment skipped ({label}): the editor's images are limited to "
                                f"{limit_mib} MiB in total")
             else:
@@ -597,6 +632,15 @@ def editor_image_mentions(context, project_root: Path | str, images=(), *,
             continue
         if not _image_matches(raw, mime):
             notices.append(f"attachment skipped ({label}): extension does not match image data")
+            continue
+        try:
+            raw, mime = _model_image(raw, mime)
+        except ValueError as exc:
+            notices.append(f"attachment skipped ({label}): {exc}")
+            continue
+        if total + len(raw) > maximum_total_bytes:
+            notices.append(f"attachment skipped ({label}): the editor's images are limited to "
+                           f"{limit_mib} MiB in total")
             continue
         found.append(f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}")
         total += len(raw)

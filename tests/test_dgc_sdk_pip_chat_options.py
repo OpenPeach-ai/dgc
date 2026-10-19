@@ -26,7 +26,7 @@ class PipChatOptionsSDKTests(unittest.TestCase):
     def test_send_fields_match_runtime_and_options_are_optional_only_at_outer_level(self):
         from dgc.pips import _COMMAND_ARGS
         self.assertEqual(COMMAND_FIELDS['send_pip_message'], _COMMAND_ARGS['send_pip_message'])
-        self.assertEqual(COMMAND_FIELDS['send_pip_message'], {'pip_id', 'text', 'idempotency_key', 'chat_options', 'images', 'files'})
+        self.assertEqual(COMMAND_FIELDS['send_pip_message'], {'pip_id', 'text', 'idempotency_key', 'chat_options', 'images', 'files', 'spooled_images', 'spooled_files'})
         self.assertNotIn('chat_options', COMMAND_FIELDS['list_pip_messages'])
 
     def test_option_presence_requires_api24_but_absent_message_keeps_api8_gate(self):

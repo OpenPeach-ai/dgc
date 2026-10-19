@@ -28,7 +28,8 @@ else:
     for _var in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
         os.environ[_var] = _HOME.name
 
-from dgc.attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, editor_image_mentions  # noqa: E402
+from dgc.attachments import (MAX_EDITOR_IMAGE_TOTAL_BYTES, MAX_SPOOLED_IMAGE_FILE_BYTES,  # noqa: E402
+                             MAX_SPOOLED_IMAGE_TOTAL_BYTES, editor_image_mentions)
 from dgc.config import Config                                                    # noqa: E402
 
 # A 1x1 PNG.
@@ -55,20 +56,30 @@ class EditorImageMentionTests(unittest.TestCase):
 
     def test_an_image_that_cannot_be_attached_says_why_instead_of_going_silent(self):
         big = self.root / "big.png"
-        big.write_bytes(PNG + b"\0" * MAX_EDITOR_IMAGE_TOTAL_BYTES)
+        big.write_bytes(PNG + b"\0" * MAX_SPOOLED_IMAGE_FILE_BYTES)
         result = editor_image_mentions([self.mention("big.png"), self.mention("fake.png"),
                                         self.mention("gone.png")], self.root)
         self.assertEqual(result.images, ())
         self.assertEqual(result.notices, (
-            "attachment skipped (big.png): the editor's images are limited to 2 MiB in total",
+            "attachment skipped (big.png): an image is limited to 8 MiB",
             "attachment skipped (fake.png): extension does not match image data",
             "attachment skipped (gone.png): file not found"))
 
+    def test_a_photo_over_the_old_2_mib_is_attached_now(self):
+        # The backend reads a mentioned file itself, so no protocol frame bounds it: the spooled
+        # images' limits apply (8 MiB a photo, 32 MiB in all), not the inline 2 MiB.
+        photo = self.root / "photo.png"
+        photo.write_bytes(PNG + b"\0" * (MAX_EDITOR_IMAGE_TOTAL_BYTES + 1))
+        result = editor_image_mentions([self.mention("photo.png")], self.root)
+        self.assertEqual(len(result.images), 1)
+        self.assertEqual(result.notices, ("attached 1 image",))
+
     def test_pasted_images_count_toward_the_same_limits(self):
-        pasted = ["data:image/png;base64," + base64.b64encode(PNG).decode()] * 4
+        pasted = ["data:image/png;base64," + base64.b64encode(PNG + b"\0" * (MAX_SPOOLED_IMAGE_FILE_BYTES - len(PNG))).decode()] * 4
         result = editor_image_mentions([self.mention("shot.png")], self.root, pasted)
         self.assertEqual(result.images, ())
-        self.assertEqual(result.notices, ("attachment skipped (shot.png): image count limit reached",))
+        self.assertEqual(result.notices, ("attachment skipped (shot.png): the editor's images are limited to "
+                                          f"{MAX_SPOOLED_IMAGE_TOTAL_BYTES // 1048576} MiB in total",))
 
     def backend(self, engine=""):
         from dgc.headless import Backend, PendingRequests

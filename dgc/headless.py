@@ -247,7 +247,10 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 50: the safe_source_v2 source rules (source_policy.exclude), check_pip_source and get_pip_run_source.
 # API 51: a finished run posts its result in its Pip's own chat; list_pip_run_posts reads them, and get_pip says
 # the chat Ask DGC to fix goes to (report_session).
-PIPS_API_VERSION = 51
+# API 52: send_pip_message takes `spooled_images` and `spooled_files` (files the editor put in the image spool,
+# as the Work chat's prompt does): 8 MiB a photo and 32 MiB of photos a message, documents up to 16 MiB, an iPhone
+# photo (HEIC) kept as a JPEG; get_pip_message_image takes `as_file` and answers with the kept file's path.
+PIPS_API_VERSION = 52
 
 
 def _pips_platform_supported() -> bool:
@@ -2176,6 +2179,9 @@ class Backend:
                           # field on `ready` is fatal to a client that has not opted in -- the SDK
                           # refuses the whole event with "ready has an undeclared field".
                           "image_spool": True, "image_spool_dir": str(self._image_spool()),
+                          # A spooled `image/heic` or `image/heif` (an iPhone photo) is taken and sent on as
+                          # a JPEG (photos.heic_to_jpeg), or refused with one sentence saying what to install.
+                          "heic_images": True,
                           # context_breakdown is understood: what fills the window, part by part.
                           "context_breakdown": 1,
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
@@ -5253,8 +5259,11 @@ class Backend:
                     # config (the unit harness does exactly that), an AttributeError.
                     images = tuple(images) + read_spooled_images(spooled, self._image_spool())
             except ValueError as exc:
+                from .photos import PhotoError
+                # A photo DGC could not prepare says what to do in its own sentence.
                 self.em.emit("command_rejected", command=t, reason="invalid_images",
-                             message=f"prompt images rejected: {exc}", **_request_fields(request_id))
+                             message=str(exc) if isinstance(exc, PhotoError) else f"prompt images rejected: {exc}",
+                             **_request_fields(request_id))
                 return
             if images and self.config.get("subscription_engine", ""):
                 self.em.emit("command_rejected", command=t, reason="unsupported_images",

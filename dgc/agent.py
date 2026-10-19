@@ -6739,6 +6739,12 @@ class Agent(GoalLifecycle):
         else:
             images = self._pending_images
             self._pending_images = None
+            if images:
+                # A very large photo goes to the model at 2,500 pixels on its long side, as a
+                # high-quality JPEG: small print stays readable and the request stays a size every
+                # provider takes. The chat that sent it keeps the original (photos.for_model).
+                from .photos import for_model_all
+                images = for_model_all(images)
             # The time of day, attached to the prompt itself — once per turn, for this agent and
             # for every sub-agent, and never in the system prompt, whose cached prefix must not
             # change between two turns a minute apart. A resumed transcript carries the clock of

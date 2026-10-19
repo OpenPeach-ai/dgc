@@ -44,22 +44,31 @@ CREATE TABLE IF NOT EXISTS pip_chat_messages (
 );
 CREATE INDEX IF NOT EXISTS pip_chat_history ON pip_chat_messages(pip_id,seq);
 """
-# Images in a Pip chat (Pips API 43): up to four per message, 2 MiB together (the editor's frame
-# limit), checked like the main chat's. Kept content-addressed under the Pips state directory,
-# never in a run manifest; the worker reads and re-checks them by digest.
-MAX_CHAT_IMAGES = 4
-MAX_CHAT_IMAGE_BYTES = 2 * 1024 * 1024
+# Images in a Pip chat. Sent inline (Pips API 43: data URIs inside the request, as an older editor or
+# SDK sends them) they keep the 4 MiB command frame's share: up to four, 2 MiB together. Handed over
+# through the backend's spool (API 52: `spooled_images`, as the Work chat's prompt does) they are
+# bounded like the Work chat's (attachments.MAX_SPOOLED_IMAGE_*): 8 MiB a photo, 32 MiB a message,
+# and up to 64, which is only the request's list bound. An iPhone photo (HEIC) is kept as the JPEG it
+# becomes (photos.heic_to_jpeg). Each is checked like the main chat's and kept content-addressed
+# under the Pips state directory, never in a run manifest; the worker reads and re-checks them by
+# digest, and the model is sent a very large one at 2,500 pixels (photos.for_model).
+MAX_INLINE_IMAGES = 4
+MAX_INLINE_BYTES = 2 * 1024 * 1024
+MAX_CHAT_IMAGES = 64
+MAX_CHAT_IMAGE_BYTES = 8 * 1024 * 1024            # one image
+MAX_CHAT_IMAGES_BYTES = 32 * 1024 * 1024          # one message's images
 IMAGE_ONLY_TEXT = "(sent an image)"
 # Images in transit, as data URIs: 2 MiB of image is at most 2,796,204 base64 characters, plus headers.
 MAX_CHAT_IMAGE_URI_CHARS = 2_800_000
 _IMAGE_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/bmp": "bmp"}
-IMAGES_SCHEMA = """
+_SPOOL_IMAGE_TYPES = frozenset(_IMAGE_EXT) | {"image/heic", "image/heif"}
+IMAGES_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS pip_chat_images (
  message_id TEXT NOT NULL REFERENCES pip_chat_messages(id),
- idx INTEGER NOT NULL CHECK(typeof(idx)='integer' AND idx BETWEEN 0 AND 3),
+ idx INTEGER NOT NULL CHECK(typeof(idx)='integer' AND idx BETWEEN 0 AND {MAX_CHAT_IMAGES - 1}),
  sha256 TEXT NOT NULL CHECK(length(sha256)=64),
  mime TEXT NOT NULL,
- bytes INTEGER NOT NULL CHECK(typeof(bytes)='integer' AND bytes BETWEEN 1 AND 2097152),
+ bytes INTEGER NOT NULL CHECK(typeof(bytes)='integer' AND bytes BETWEEN 1 AND {MAX_CHAT_IMAGE_BYTES}),
  PRIMARY KEY(message_id, idx)
 );
 """
@@ -73,25 +82,49 @@ def image_directory(directory, pip_id) -> Path:
 
 # Files in a chat (schema 37): text and code as they are, and the documents the main chat reads
 # (PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV, TSV). The worker reads them the main
-# chat's way (attachments.expand_attachments), so the same limits and secret redaction apply.
-MAX_CHAT_FILES = 4
-MAX_CHAT_FILE_BYTES = 2 * 1024 * 1024          # all of one message's files
+# chat's way (attachments.expand_attachments), so the same limits and secret redaction apply: a
+# document up to 16 MiB, a text or code file (CSV and TSV among them) up to 1 MiB, 32 MiB in all and
+# up to 16 (the mentions one prompt reads). Inline (API 43) they share the images' 2 MiB and four.
+MAX_INLINE_FILES = 4
+MAX_CHAT_FILES = 16                                # attachments.MAX_ATTACHMENT_MENTIONS
+MAX_CHAT_DOCUMENT_BYTES = 16 * 1024 * 1024         # attachments.MAX_DOCUMENT_FILE_BYTES
+MAX_CHAT_TEXT_FILE_BYTES = 1024 * 1024             # attachments.MAX_TEXT_FILE_BYTES
+MAX_CHAT_FILE_BYTES = 32 * 1024 * 1024             # all of one message's files (MAX_DOCUMENT_TOTAL_BYTES)
 FILE_ONLY_TEXT = "(sent a file)"
 TEXT_FILE_EXTENSIONS = frozenset({
     ".txt", ".md", ".markdown", ".rst", ".log", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini",
     ".cfg", ".conf", ".xml", ".html", ".htm", ".css", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py",
     ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".h", ".cpp", ".hpp", ".cs", ".php", ".sh",
     ".sql", ".r", ".ipynb", ".srt", ".vtt", ".tex", ".bib", ".svg", ".ics", ".vcf", ".eml"})
-FILES_SCHEMA = """
+FILES_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS pip_chat_files (
  message_id TEXT NOT NULL REFERENCES pip_chat_messages(id),
- idx INTEGER NOT NULL CHECK(typeof(idx)='integer' AND idx BETWEEN 0 AND 3),
+ idx INTEGER NOT NULL CHECK(typeof(idx)='integer' AND idx BETWEEN 0 AND {MAX_CHAT_FILES - 1}),
  name TEXT NOT NULL CHECK(length(CAST(name AS BLOB)) BETWEEN 1 AND 255),
  sha256 TEXT NOT NULL CHECK(length(sha256)=64),
- bytes INTEGER NOT NULL CHECK(typeof(bytes)='integer' AND bytes BETWEEN 1 AND 2097152),
+ bytes INTEGER NOT NULL CHECK(typeof(bytes)='integer' AND bytes BETWEEN 1 AND {MAX_CHAT_DOCUMENT_BYTES}),
  PRIMARY KEY(message_id, idx)
 );
 """
+
+
+def widen_tables(db) -> None:
+    """Hold API 52's images and files in a registry made before it, once.
+
+    The tables were created with the inline limits in their CHECKs (four of each, 2 MiB). The first
+    message that brings images or files rebuilds them with the new bounds, rows kept, inside that
+    message's transaction. The registry schema stays 46: an older DGC still opens it and reads them.
+    """
+    from .workspace_registry import _execute_schema
+    for table, schema in (("pip_chat_images", IMAGES_SCHEMA), ("pip_chat_files", FILES_SCHEMA)):
+        row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+        if row is None or "AND 2097152)" not in row[0]:
+            continue
+        db.execute(f"DROP TABLE IF EXISTS {table}_widened")
+        _execute_schema(db, schema.replace(f"CREATE TABLE IF NOT EXISTS {table} (", f"CREATE TABLE {table}_widened ("))
+        db.execute(f"INSERT INTO {table}_widened SELECT * FROM {table}")
+        db.execute(f"DROP TABLE {table}")
+        db.execute(f"ALTER TABLE {table}_widened RENAME TO {table}")
 
 
 # Options a Pip offers under its reply, like Grok's A/B cards ("Yes, connect Gmail" / "Not yet"); the
@@ -149,25 +182,52 @@ def _file_fits(name: str, raw: bytes) -> None:
         starts = {".pdf": (b"%PDF-",), ".rtf": (b"{\\rtf",)}.get(ext, (b"PK\x03\x04",))
         if not raw.startswith(starts) or sniff(name, raw) != ext:
             raise RegistryError("invalid_files", f"{name} is not the kind of file its name says.")
+        if len(raw) > MAX_CHAT_DOCUMENT_BYTES:
+            raise RegistryError("invalid_files", f"{name} is over 16 MB; send a document of 16 MB or less.")
         return
     if ext in TEXT_FILE_EXTENSIONS or ext in (".csv", ".tsv", ""):
         if b"\0" in raw[:8192]:
             raise RegistryError("invalid_files", f"{name} is not a text file.")
+        # The Pip reads a text file the main chat's way, which takes 1 MiB of one (MAX_TEXT_FILE_BYTES).
+        if len(raw) > MAX_CHAT_TEXT_FILE_BYTES:
+            raise RegistryError("invalid_files", f"{name} is over 1 MB; send a text or code file of 1 MB or less.")
         return
     raise RegistryError("invalid_files", f"{name}: send text, code, PDF, Word, Excel, PowerPoint, "
                                          "OpenDocument, RTF, CSV or TSV files.")
 
 
+def _spool_name(value) -> bool:
+    """A file the editor put in the backend's spool: a bare name, nothing that could reach elsewhere."""
+    return (isinstance(value, str) and 1 <= len(value) <= 255 and value == os.path.basename(value)
+            and value not in (".", "..") and not os.path.isabs(value) and "\\" not in value
+            and value.isprintable())
+
+
 def bounded_file_uris(value):
-    """A send's files before they are decoded: 1 to 4 {name, data} with data URIs, 2 MB in all."""
-    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_FILES
+    """A send's inline files before they are decoded: 1 to 4 {name, data} with data URIs, 2 MB in all."""
+    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_INLINE_FILES
             or any(not isinstance(i, dict) or set(i) != {"name", "data"} or not isinstance(i["data"], str)
                    or not i["data"].startswith("data:") or ";base64," not in i["data"][:200] or not i["data"].isascii()
                    for i in value)
             or sum(len(i["data"]) for i in value) > MAX_CHAT_IMAGE_URI_CHARS):
-        raise RegistryError("invalid_files", f"Send up to {MAX_CHAT_FILES} files, {MAX_CHAT_FILE_BYTES // 1048576} MB in all.")
+        raise RegistryError("invalid_files", f"Send up to {MAX_INLINE_FILES} files, {MAX_INLINE_BYTES // 1048576} MB in all.")
     for item in value:
         file_name(item["name"])
+    return [dict(i) for i in value]
+
+
+def bounded_spooled_files(value):
+    """API 52: 1 to 16 {name, spool}, each your file's own name and the file the editor put in the spool."""
+    try:
+        if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_FILES
+                or any(not isinstance(i, dict) or set(i) != {"name", "spool"} or not _spool_name(i["spool"]) for i in value)
+                or len({i["spool"] for i in value}) != len(value)):
+            raise RegistryError("invalid_files", f"Send up to {MAX_CHAT_FILES} files, {MAX_CHAT_FILE_BYTES // 1048576} MB in all.")
+        for item in value:
+            file_name(item["name"])
+    except RegistryError:
+        _drop_spooled(value if isinstance(value, list) else None, "spool")     # refused: none of them stay
+        raise
     return [dict(i) for i in value]
 
 
@@ -176,7 +236,7 @@ def validate_files(value):
     if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_FILES
             or any(not isinstance(i, dict) or set(i) != {"name", "sha256", "bytes"} or not isinstance(i["sha256"], str)
                    or not re.fullmatch(r"[0-9a-f]{64}", i["sha256"]) or type(i["bytes"]) is not int
-                   or not 1 <= i["bytes"] <= MAX_CHAT_FILE_BYTES for i in value)
+                   or not 1 <= i["bytes"] <= MAX_CHAT_DOCUMENT_BYTES for i in value)
             or sum(i["bytes"] for i in value) > MAX_CHAT_FILE_BYTES):
         raise RegistryError("invalid_files", f"Send up to {MAX_CHAT_FILES} files, {MAX_CHAT_FILE_BYTES // 1048576} MB in all.")
     for item in value:
@@ -184,21 +244,75 @@ def validate_files(value):
     return [dict(i) for i in value]
 
 
-def store_files(directory, pip_id, values):
-    """Check files the editor sent and keep each once, by its digest, readable only by you."""
-    values = bounded_file_uris(values)
-    decoded = []
-    for item in values:
+def _take_spooled(spool: str, maximum: int, refusal) -> bytes:
+    """One file from the backend's spool, read (no further than ``maximum``) and then removed."""
+    from .attachments import spool_root
+    from .workspace import WorkspaceBoundaryError, read_regular_bytes
+    path = spool_root("") / spool
+    try:
+        captured = read_regular_bytes(path, maximum=maximum)
+        if captured is None:
+            raise FileNotFoundError(spool)
+        return captured[0]
+    except FileNotFoundError as exc:
+        raise refusal("is no longer there; send it again.") from exc
+    except WorkspaceBoundaryError as exc:
+        raise refusal("is not a regular file.") from exc
+    except OSError as exc:
+        raise refusal("is over 16 MB; send a document of 16 MB or less.") from exc
+    finally:
+        # The spool is a hand-over, not a store: what was read, or refused, does not stay.
         try:
-            raw = base64.b64decode(item["data"].split(";base64,", 1)[1], validate=True)
-        except ValueError as exc:
-            raise RegistryError("invalid_files", f"{item['name']} could not be read.") from exc
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _drop_spooled(entries, key) -> None:
+    """The spool files of a send that was refused before they were read."""
+    from .attachments import spool_root
+    for item in entries or ():
+        name = item.get(key) if isinstance(item, dict) else None
+        if _spool_name(name):
+            try:
+                (spool_root("") / name).unlink()
+            except OSError:
+                pass
+
+
+def store_files(directory, pip_id, values=None, spooled=None):
+    """Check the files a message brings and keep each once, by its digest, readable only by you.
+
+    ``values`` are inline data URIs (API 43: four, 2 MB in all); ``spooled`` names files the editor put
+    in the backend's spool (API 52: a document up to 16 MB, a text file up to 1 MB, 32 MB in all)."""
+    decoded, inline_only = [], spooled is None
+    try:
+        if values is not None:
+            for item in bounded_file_uris(values):
+                try:
+                    raw = base64.b64decode(item["data"].split(";base64,", 1)[1], validate=True)
+                except ValueError as exc:
+                    raise RegistryError("invalid_files", f"{item['name']} could not be read.") from exc
+                decoded.append((file_name(item["name"]), raw))
+        if spooled is not None:
+            for item in bounded_spooled_files(spooled):
+                name = file_name(item["name"])
+
+                def refusal(why, name=name):
+                    return RegistryError("invalid_files", f"{name} {why}")
+                decoded.append((name, _take_spooled(item["spool"], MAX_CHAT_DOCUMENT_BYTES, refusal)))
+    finally:
+        # The spool is a hand-over: whatever happened, none of this send's files stay in it.
+        _drop_spooled(spooled if isinstance(spooled, list) else None, "spool")
+    if len(decoded) > MAX_CHAT_FILES:
+        raise RegistryError("invalid_files", f"Send up to {MAX_CHAT_FILES} files with one message.")
+    for name, raw in decoded:
         if not raw:
-            raise RegistryError("invalid_files", f"{item['name']} is empty.")
-        _file_fits(file_name(item["name"]), raw)
-        decoded.append((file_name(item["name"]), raw))
-    if sum(len(raw) for _, raw in decoded) > MAX_CHAT_FILE_BYTES:
-        raise RegistryError("invalid_files", f"Send up to {MAX_CHAT_FILE_BYTES // 1048576} MB of files in all.")
+            raise RegistryError("invalid_files", f"{name} is empty.")
+        _file_fits(name, raw)
+    budget = MAX_INLINE_BYTES if inline_only else MAX_CHAT_FILE_BYTES
+    if sum(len(raw) for _, raw in decoded) > budget:
+        raise RegistryError("invalid_files", f"Send up to {budget // 1048576} MB of files in all.")
     folder = file_directory(directory, pip_id)
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     kept = []
@@ -247,15 +361,27 @@ def message_files(db, message_id):
 
 
 def bounded_image_uris(value):
-    """A send's images before they are decoded: 1 to 4 image data URIs, 2 MB in all.
+    """A send's inline images before they are decoded: 1 to 4 image data URIs, 2 MB in all.
 
     They travel outside the small budget every other Pips request field keeps; this bound is theirs.
     """
-    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_IMAGES
+    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_INLINE_IMAGES
             or any(not isinstance(i, str) or not i.startswith("data:image/") or not i.isascii() for i in value)
             or sum(len(i) for i in value) > MAX_CHAT_IMAGE_URI_CHARS):
-        raise RegistryError("invalid_images", f"Send up to {MAX_CHAT_IMAGES} images, {MAX_CHAT_IMAGE_BYTES // 1048576} MB in all.")
+        raise RegistryError("invalid_images", f"Send up to {MAX_INLINE_IMAGES} images, {MAX_INLINE_BYTES // 1048576} MB in all.")
     return list(value)
+
+
+def bounded_spooled_images(value):
+    """API 52: 1 to 64 {name, media_type}, each a file the editor put in the backend's spool."""
+    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_IMAGES
+            or any(not isinstance(i, dict) or set(i) != {"name", "media_type"} or not _spool_name(i["name"])
+                   or i["media_type"] not in _SPOOL_IMAGE_TYPES for i in value)
+            or len({i["name"] for i in value}) != len(value)):
+        _drop_spooled(value if isinstance(value, list) else None, "name")      # refused: none of them stay
+        raise RegistryError("invalid_images", f"Send up to {MAX_CHAT_IMAGES} photos, "
+                                              f"{MAX_CHAT_IMAGES_BYTES // 1048576} MB in all.")
+    return [dict(i) for i in value]
 
 
 def validate_images(value):
@@ -264,19 +390,37 @@ def validate_images(value):
             or any(not isinstance(i, dict) or set(i) != {"sha256", "mime", "bytes"} or not isinstance(i["sha256"], str)
                    or not re.fullmatch(r"[0-9a-f]{64}", i["sha256"]) or i["mime"] not in _IMAGE_EXT
                    or type(i["bytes"]) is not int or not 1 <= i["bytes"] <= MAX_CHAT_IMAGE_BYTES for i in value)
-            or sum(i["bytes"] for i in value) > MAX_CHAT_IMAGE_BYTES):
-        raise RegistryError("invalid_images", f"Send up to {MAX_CHAT_IMAGES} images, {MAX_CHAT_IMAGE_BYTES // 1048576} MB in all.")
+            or sum(i["bytes"] for i in value) > MAX_CHAT_IMAGES_BYTES):
+        raise RegistryError("invalid_images", f"Send up to {MAX_CHAT_IMAGES} photos, "
+                                              f"{MAX_CHAT_IMAGES_BYTES // 1048576} MB in all.")
     return [dict(i) for i in value]
 
 
-def store_images(directory, pip_id, values):
-    """Check images the editor sent (data URIs) and keep each once, by its digest."""
-    from .attachments import validate_image_data_uris
+def store_images(directory, pip_id, values=None, spooled=None):
+    """Check the images a message brings and keep each once, by its digest.
+
+    ``values`` are inline data URIs (API 43: four, 2 MB in all); ``spooled`` names files the editor
+    put in the backend's spool (API 52: 8 MB a photo, 32 MB in all). An iPhone photo is kept as the
+    JPEG it becomes, and refused with one sentence when this computer can't convert it."""
+    from .attachments import read_spooled_images, spool_root, validate_image_data_uris
+    from .photos import PhotoError
+    uris = []
     try:
-        uris = validate_image_data_uris(values, maximum_files=MAX_CHAT_IMAGES, maximum_file_bytes=MAX_CHAT_IMAGE_BYTES,
-                                        maximum_total_bytes=MAX_CHAT_IMAGE_BYTES)
+        if values is not None:
+            uris += validate_image_data_uris(values, maximum_files=MAX_INLINE_IMAGES, maximum_file_bytes=MAX_INLINE_BYTES,
+                                             maximum_total_bytes=MAX_INLINE_BYTES)
+        if spooled is not None:
+            uris += read_spooled_images(bounded_spooled_images(spooled), spool_root(""), maximum_entries=MAX_CHAT_IMAGES,
+                                        maximum_file_bytes=MAX_CHAT_IMAGE_BYTES, maximum_total_bytes=MAX_CHAT_IMAGES_BYTES)
+    except PhotoError as exc:
+        raise RegistryError("invalid_images", str(exc)) from exc
     except ValueError as exc:
+        if isinstance(exc, RegistryError):
+            raise
         raise RegistryError("invalid_images", f"These images cannot be sent: {exc}.") from exc
+    finally:
+        # The spool is a hand-over: whatever happened, none of this send's images stay in it.
+        _drop_spooled(spooled if isinstance(spooled, list) else None, "name")
     if not uris:
         return None
     folder = image_directory(directory, pip_id)
@@ -329,13 +473,23 @@ def message_images(db, message_id):
     return [{"index": r[0], "mime": r[2], "bytes": r[3]} for r in rows]
 
 
-def get_image(store, pip_id, message_id, index):
+def get_image(store, pip_id, message_id, index, as_file=False):
+    """One image of a message in this Pip's chat: the data URI, or (API 52, ``as_file``) where it is kept.
+
+    A photo can be 8 MiB, which no protocol frame carries as a data URI: an editor on the same computer
+    asks for the kept file instead and reads it itself. Either way it is checked against its digest."""
+    if type(as_file) is not bool:
+        raise RegistryError("invalid_request", "as_file is true or false.")
     row = store.db.execute("SELECT i.sha256,i.mime,i.bytes FROM pip_chat_images i JOIN pip_chat_messages m ON m.id=i.message_id "
                            "WHERE m.pip_id=? AND m.id=? AND i.idx=?", (pip_id, message_id, index)).fetchone()
     if row is None:
         raise RegistryError("not_found", "That image is not in this Pip's chat.")
     item = {"sha256": row[0], "mime": row[1], "bytes": row[2]}
     [path] = image_paths(store.registry.directory, pip_id, [item])
+    if as_file:
+        read_image(path, item)
+        return {"pip_id": pip_id, "message_id": message_id, "index": index, "path": str(path),
+                "mime": item["mime"], "bytes": item["bytes"]}
     return {"pip_id": pip_id, "message_id": message_id, "index": index, "image": read_image(path, item)}
 
 
@@ -750,6 +904,8 @@ def insert_user(store, pip, req, run_id, model, now):
     store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at,request_key,request_digest) "
                      "VALUES(?,?,?,?,?,?,?,?,?,?)", (message_id, pip["id"], pip["workspace_id"], run_id,
                      "user", req["text"], model, now, req["request_key"], req["digest"]))
+    if req.get("images") or req.get("files"):
+        widen_tables(store.db)
     for index, item in enumerate(req.get("images") or []):
         store.db.execute("INSERT INTO pip_chat_images VALUES(?,?,?,?,?)", (message_id, index, item["sha256"], item["mime"], item["bytes"]))
     for index, item in enumerate(req.get("files") or []):
@@ -905,17 +1061,27 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             "history_context_omitted_count": omitted, "continuity": continuity}
 
 
-def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, files=None, _intro=False):
-    if not _intro and isinstance(key, str) and key.startswith(DGC_KEYS):
-        raise RegistryError("invalid_request", "That message key is reserved for messages DGC writes.")
-    if images is not None:
-        store._job(pip_id)
-        images = store_images(store.registry.directory, pip_id, images)
-    if files is not None:
-        job = store._job(pip_id)
-        files = store_files(store.registry.directory, pip_id, files)
-        if job.get("computer_plan") is not None:
-            _copy_to_computer(store.registry.directory, pip_id, files)
+def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, files=None,
+         spooled_images=None, spooled_files=None, _intro=False):
+    """Queue a reply to a message, with what it brings: images and files inline (API 43) or handed
+    over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``)."""
+    try:
+        if not _intro and isinstance(key, str) and key.startswith(DGC_KEYS):
+            raise RegistryError("invalid_request", "That message key is reserved for messages DGC writes.")
+        if images is not None or spooled_images is not None:
+            store._job(pip_id)
+            given, spooled_images = spooled_images, None
+            images = store_images(store.registry.directory, pip_id, images, given)
+        if files is not None or spooled_files is not None:
+            job = store._job(pip_id)
+            given, spooled_files = spooled_files, None
+            files = store_files(store.registry.directory, pip_id, files, given)
+            if job.get("computer_plan") is not None:
+                _copy_to_computer(store.registry.directory, pip_id, files)
+    finally:
+        # A send refused before its spooled files were read leaves none of them behind.
+        _drop_spooled(spooled_images if isinstance(spooled_images, list) else None, "name")
+        _drop_spooled(spooled_files if isinstance(spooled_files, list) else None, "spool")
     req = request(text, key, chat_options, images=images, files=files)
     run = prior(store, pip_id, req, actor)
     if run is None:
@@ -940,7 +1106,7 @@ def _copy_to_computer(directory, pip_id, files) -> None:
     folder = files_root(computer_root(directory, pip_id))
     for item, path in zip(files, file_paths(directory, pip_id, files)):
         try:
-            add_raw_file(folder, "From chat", item["name"], read_file(path, item))
+            add_raw_file(folder, "From chat", item["name"], read_file(path, item), maximum=MAX_CHAT_DOCUMENT_BYTES)
         except RegistryError:
             pass                       # a full computer still gets the message; the Pip reads the file in chat
 

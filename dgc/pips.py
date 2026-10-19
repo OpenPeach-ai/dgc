@@ -175,8 +175,8 @@ _COMMAND_ARGS = {
     "list_workspaces": set(), "list_pips": {"workspace_id", "limit", "offset", "query", "order"}, "list_pip_types": set(),
     "list_pip_models": set(),
     "list_pip_messages": {"pip_id", "before_id", "limit"},
-    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files"}, "introduce_pip": {"pip_id"},
-    "get_pip_message_image": {"pip_id", "message_id", "index"},
+    "send_pip_message": {"pip_id", "text", "idempotency_key", "chat_options", "images", "files", "spooled_images", "spooled_files"}, "introduce_pip": {"pip_id"},
+    "get_pip_message_image": {"pip_id", "message_id", "index", "as_file"},
     "create_pip": {"workspace_id", "name", "goal", "source_ref", "pip_type", "model_choice", "computer"}, "get_pip": {"pip_id"},
     "propose_pip_update": {"pip_id", "expected_version", "changes", "reason"},
     "accept_pip_update": {"pip_id", "proposal_id", "expected_version"},
@@ -4045,6 +4045,10 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 raise RegistryError('local_only','Review external app actions on this computer.')
             if redact_value(request, secret_values(config)) != request:
                 raise RegistryError('secret_detected','Remove configured credentials from the exact message review.')
+        if command == 'send_pip_message' and ('spooled_images' in request or 'spooled_files' in request) \
+                and actor not in ('editor-user', 'local-console'):
+            # The spool is this computer's hand-over directory: only its own editor and SDKs name files in it.
+            raise RegistryError('local_only', 'Send photos and files from this computer.')
         path_authoring = request.get('changes') if command == 'propose_pip_update' else None
         if isinstance(path_authoring,dict):
             _path_secret_guard(path_authoring,config)
@@ -4559,7 +4563,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 from .pip_chat import get_image
                 if type(request.get("index")) is not int:
                     raise RegistryError("invalid_request", "Choose one image of the message.")
-                result = get_image(store, pip_id, request.get("message_id"), request["index"])
+                result = get_image(store, pip_id, request.get("message_id"), request["index"],
+                                   as_file=request.get("as_file", False))
             elif command == "introduce_pip":
                 # A new Personal Pip's first message: once per Pip, and only the local user asks.
                 from .pip_chat import introduce
@@ -4571,7 +4576,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     validate(request['chat_options'])
                 result = send(store, pip_id, request.get("text"), request.get("idempotency_key"), actor, config,
                               chat_options=request.get('chat_options'), images=request.get('images'),
-                              files=request.get('files'))
+                              files=request.get('files'), spooled_images=request.get('spooled_images'),
+                              spooled_files=request.get('spooled_files'))
             elif command == "list_pips":
                 # A page at a time (100 at most, the reply's size), oldest first unless `order` says
                 # "recent"; `query` keeps those whose name or title contains it. `total` is how many

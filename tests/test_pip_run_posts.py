@@ -192,7 +192,7 @@ class ReadingThemTests(PostScene):
         self.assertFalse(posts._has_table(self.registry.db))
 
     def test_the_api_says_posts_are_here(self):
-        self.assertEqual(PIPS_API_VERSION, 51)
+        self.assertGreaterEqual(PIPS_API_VERSION, 51)
         self.assertIn("list_pip_run_posts", pips.CONTROL_COMMANDS)
 
     def test_get_pip_names_the_chat_ask_dgc_to_fix_goes_to(self):
