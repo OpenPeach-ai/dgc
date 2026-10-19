@@ -139,9 +139,12 @@ for (const theme of ["dark-modern", "light-modern", "hc"]) {
           selection.selectAllChildren(bubble);
           const copied = selection.toString();
           selection.removeAllRanges();
+          const text = bubble.querySelector(":scope > .prompt-text").getBoundingClientRect();
           return { inside: r.left >= b.left - 0.5 && r.right <= b.right + 0.5 && r.top >= b.top - 0.5 && r.bottom <= b.bottom + 0.5,
-            hit: hit === toggle, height: r.height, overflow: log.scrollWidth - log.clientWidth, copied };
+            hit: hit === toggle, height: r.height, overflow: log.scrollWidth - log.clientWidth, copied,
+            clear: r.top >= text.bottom - 0.5 };
         });
+        assert.ok(geometry.clear, "the pill sits under the three lines, never on the text (the founder, 19 Oct)");
         assert.ok(geometry.inside, "the pill sits inside its bubble");
         assert.ok(geometry.hit, "and nothing covers it");
         assert.ok(geometry.height >= 24, `a 24px target at least (${geometry.height}px)`);

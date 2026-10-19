@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **"Show more" on a long prompt no longer sits on its text.** It has a strip of its own under the first three lines; over the faded last line, the words ran into it.
+
 - **A Pip's status opens its latest run.** "Report ready", "Last run failed" and the like under a Pip's name read like a link and did nothing; they open that run on the Runs tab now, scrolled to its report.
 
 - **Ask DGC to fix sends, once.** On a Pip report card it sends DGC one message naming the run (queued behind a turn that is running) and becomes "Asked DGC", also after the chat is reopened. Before, it only filled the box, and a second click pasted the prompt again. A draft in the box is left alone.

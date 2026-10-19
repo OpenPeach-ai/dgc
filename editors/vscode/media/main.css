@@ -1812,7 +1812,10 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
 .prompt-fold::before { content: attr(data-label); }
 .prompt-fold .codicon { font-size: var(--t-sm); color: var(--muted); }
 .prompt-fold:hover { border-color: var(--accent); }
-.user .bubble[data-fold="folded"] > .prompt-fold { position: absolute; right: var(--sp-2); bottom: var(--sp-2); z-index: 1; opacity: 0; transition: opacity .12s; }
+/* The pill gets a strip of its own under the three lines, so it never sits on the text: over the faded last line it
+   read as text running into it (the founder, 19 Oct). */
+.user .bubble[data-fold="folded"] { padding-bottom: calc(var(--sp-2) + 26px); }
+.user .bubble[data-fold="folded"] > .prompt-fold { position: absolute; right: var(--sp-2); bottom: var(--sp-1); z-index: 1; opacity: 0; transition: opacity .12s; }
 .user .bubble[data-fold="folded"]:hover > .prompt-fold,
 .user .bubble[data-fold="folded"]:has(:focus-visible) > .prompt-fold { opacity: 1; }
 .user .bubble[data-fold="open"] > .prompt-fold { position: sticky; bottom: calc(var(--control) + var(--sp-3)); z-index: 1;
