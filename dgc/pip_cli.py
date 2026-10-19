@@ -1246,7 +1246,7 @@ def _format(value):
         source = source_projection(manifest)
         lines = [f'{run["id"]} · {run["status"]}', f'Pip: {run["pip_id"]}',
                  f'Job version: {manifest["job_version"]} · model: {manifest["model"]}',
-                 source['label'] + ': ' + source['identity']]
+                 source['label'] + (': ' + source['identity'] if source['identity'] else '')]   # a Personal Pip has no project source
         if source['source_snapshot'] is not None:
             receipt = source['source_snapshot']
             lines.append(f"Captured {receipt['files']} files / {receipt['bytes']} bytes with {receipt['exclusions']} exclusions"

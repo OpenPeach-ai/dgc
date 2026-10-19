@@ -544,3 +544,17 @@ class PipCliWebReadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PersonalRunFormatTests(unittest.TestCase):
+    """`dgc pips run` / `dgc pips report` on a Personal Pip's run crashed after queuing it (TypeError: a Personal
+    Pip has no project source, so its source identity is None). Found by the home-Pips run, 2026-10-19."""
+
+    def test_a_personal_run_prints_without_a_source_identity(self):
+        from dgc import pip_cli
+        manifest = {"job_version": 1, "model": "deepseek-v4.1-flash:cloud", "source_revision": None,
+                    "source_policy": {"mode": "personal"}}
+        text = pip_cli._format({"run": {"id": "run_" + "a" * 32, "status": "queued", "pip_id": "pip_" + "b" * 32,
+                                        "manifest": manifest}})
+        self.assertIn("Personal · no project access", text)
+        self.assertNotIn("None", text)
