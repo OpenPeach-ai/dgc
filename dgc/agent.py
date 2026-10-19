@@ -1235,7 +1235,7 @@ def summariser_role(message: dict) -> str:
     role = message.get("role", "?") if isinstance(message, dict) else "?"
     if role == "user":
         content = message.get("content")
-        if notice_kind(message) == "stream_recovery":
+        if notice_kind(message) in ("stream_recovery", "monitor_restart"):
             return "dgc-note"
         if notice_kind(message):
             return "monitor-output (untrusted)"
@@ -2042,6 +2042,10 @@ class Agent(GoalLifecycle):
         self._sync_vision()
         self.monitors = MonitorHub(self.ctx.tool_owner, config, config.project_root)
         self.ctx.monitors = self.monitors
+        # A top-level chat writes its monitors down beside its session, so reopening it brings back
+        # the ones DGC's stopping ended (dgc/monitor_restart.py). Set by load_session, taken once.
+        self.monitors.journal = self._monitor_journal_target
+        self._monitor_restart_due = False
         self.subagents = SubagentRegistry()      # this chat's task sub-agents (children share it)
         self._monitor_turn = False               # a turn DGC started on a monitor event is running
         # ---- 0.40 shared plain state (declared once here; each lane gives its fields meaning) ----
@@ -3901,6 +3905,7 @@ class Agent(GoalLifecycle):
         self._last_turn_mcp_tools = set()
         self._last_turn_mcp_query = ""
         self._stale_monitor_note = ""
+        self._monitor_restart_due = False
         # A persistent Python "code action" interpreter belongs to the session being torn down; its
         # in-memory namespace must not leak into the new session, so kill it here (lazily restarted).
         shutdown_python_kernels(getattr(self.ctx, "tool_owner", None))
@@ -5564,6 +5569,9 @@ class Agent(GoalLifecycle):
         if self.image_views:                      # images: the branch keeps what its chat viewed
             image_views.copy_store(previous[0], self.session_file)
         if self._persist():
+            # The conversation goes on as the branch, and so do its running monitors.
+            self.monitors.rebind_journal((previous[0], self.session_root),
+                                         (self.session_file, self.session_root))
             return True
         if self.image_views:
             image_views.remove_store(self.session_file)
@@ -5717,7 +5725,9 @@ class Agent(GoalLifecycle):
                     # command output, and never a constraint the handoff should carry forward.
                     lines.append("dgc-note: (the stream was cut; DGC asked the model to continue)")
                     continue
-                if notice_kind(m):
+                if notice_kind(m) == "monitor_restart":
+                    role = "dgc-note"
+                elif notice_kind(m):
                     role = "monitor-output (untrusted)"
                 content = self._safe_text(str(m.get("content", "")))[:2000]
                 calls = ""
@@ -5829,6 +5839,15 @@ class Agent(GoalLifecycle):
                        and any(isinstance(c, dict) and (c.get("function") or {}).get("name") == "monitor"
                                for c in (m.get("tool_calls") or []))
                        for m in loaded) else "")
+            # The frontend that delivers monitor events brings back the ones DGC's stopping ended,
+            # once, after it has shown the history (restart_monitors); their notes replace this line.
+            self._monitor_restart_due = True
+            try:
+                from . import monitor_restart
+                if monitor_restart.has_due(path, self.session_root):
+                    self._stale_monitor_note = ""
+            except Exception:
+                pass
             # Resume is a live model/UI boundary even when the optional extra persistence pass is
             # disabled. Never replay a legacy raw credential into memory or a provider request.
             from .redaction import redact_checkpoint_state
@@ -5918,6 +5937,55 @@ class Agent(GoalLifecycle):
         """The one line to show after reopening a session that had monitors, once."""
         note, self._stale_monitor_note = getattr(self, "_stale_monitor_note", ""), ""
         return note
+
+    # ---- monitors that come back with their chat (dgc/monitor_restart.py) ------------------------
+    def _monitor_journal_target(self):
+        """(session file, session root) where this chat's monitors are written down, or None."""
+        if self.depth != 0 or not self.session_file:
+            return None
+        return (Path(self.session_file), self.session_root)
+
+    def _monitor_permission(self, name: str, args: dict) -> tuple[str, str]:
+        """The decision this call would get now, from the rules and mode in force (no card)."""
+        with self._mode_lock:
+            rules = {action: [*(self.config.permissions.get(action, []) or []),
+                              *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
+                     for action in ("allow", "ask", "deny")}
+            engine = PermissionEngine(self.mode, rules, self.config.project_root)
+        return engine.decide(name, args)
+
+    def restart_monitors(self) -> list:
+        """After reopening a session: start again, once, each monitor DGC's stopping ended.
+
+        Only a frontend that delivers monitor events calls this, after it has shown the history.
+        Returns the outcomes (dgc.monitor_restart.Outcome), already noted for the model."""
+        if not getattr(self, "_monitor_restart_due", False):
+            return []
+        self._monitor_restart_due = False
+        if not self._monitor_delivery() or getattr(self, "stopping", False):
+            return []
+        from . import monitor_restart
+        try:
+            return monitor_restart.restart_all(self)
+        except Exception as exc:          # never let a journal stop a session from opening
+            self.ui.info(self._safe_text(f"monitors were not restarted: {type(exc).__name__}"))
+            return []
+
+    def restart_monitor(self, key: str):
+        """The user pressed Restart on a monitor that did not come back on its own. Their press is
+        the approval; a deny still wins. None when this chat has no such stopped monitor."""
+        if not self._monitor_delivery():
+            return None
+        from . import monitor_restart
+        return monitor_restart.restart_one(self, key)
+
+    def _monitor_restart_noted(self, outcomes: list) -> None:
+        """Tell the model at its next turn what the user was just shown, and save it with the chat."""
+        from . import monitor_restart
+        self._stale_monitor_note = ""
+        self.messages.append(self._safe_value(monitor_restart.notice_message(outcomes)))
+        if not self._persist():
+            self.ui.error(self._last_persist_error or "could not save the monitor restart note")
 
     def subscription_session_id(self, engine: str, mode: str, model: str, effort: str) -> str:
         """Return this conversation's exact matching vendor thread, never an ambient latest one."""
@@ -8562,6 +8630,7 @@ class Agent(GoalLifecycle):
             from .tools import signed_in_page
             policy_args = {**args, "_page": signed_in_page(self.ctx)}
         decision, reason = perms.decide(name, policy_args)
+        asked_user = decision == ASK            # a monitor's restart keeps the approval it was given
         if decision == DENY:
             self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)
             return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
@@ -8631,6 +8700,10 @@ class Agent(GoalLifecycle):
             exec_args.pop("_dgc_create_now", None)
             if not (decision == ALLOW and reason == SETUP_CARD):
                 exec_args["_dgc_create_now"] = True
+        if name == "monitor":
+            # Internal: how this start was allowed, written to the restart journal with it.
+            exec_args["_dgc_permission"] = {"mode": self.mode,
+                                            "allowed_by": "approval" if asked_user else "policy"}
         if name == "bash" and args.get("background") and self._monitor_delivery():
             # Internal: this frontend delivers the exit notice. On wherever it can be delivered,
             # whether or not this request offered the `monitor` tool itself.
@@ -9280,7 +9353,8 @@ class Agent(GoalLifecycle):
                 self.checkpoints.commit_rewind()
                 if self.monitors.has_running() or self.monitors.pending_count():
                     self.ui.info("monitors stopped by rewind")
-                self.monitors.new_epoch("shutdown")
+                # A rewind took back the turn that started them: a reopen must not bring them back.
+                self.monitors.new_epoch("shutdown", journal_end="rewound")
                 self.subagents.prune_to(self.messages)   # agents whose task call was rewound away go
                 if conversation is not None and self.session_file:
                     # Rewinding restores the very messages a later compaction archived; keeping

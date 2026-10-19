@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Monitors restarted when a session is reopened (backend `ready.capabilities.monitor_restart`): the event
+`monitor_restart` (`key`, `id`, `state` restarted|stopped|expired|failed, `message`, `stopped_at`, `at`, `restart`,
+`by_user`) is part of the vendored protocol and the TypeScript SDK's known events, so neither SDK drops it, and the
+command `restart_monitor {key}` restarts one a resume left stopped. A resume sends these after its other events.
+
 Pips API 48: `mark_pip_news_seen {pip_ids, until}` (a mutation, local only) marks 1–50 Pips' news (failed runs, new
 findings) seen up to a digest's `until`, until they do something new; both SDKs know it and refuse it before API 48.
 

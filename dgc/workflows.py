@@ -153,7 +153,9 @@ def notice_kind(message) -> str:
         # bare text, and only the whole exact sentence counts (see stream_recovery_notice).
         return "stream_recovery" if message.get("content") == STREAM_RECOVERY_TEXT else ""
     kind = notice.get("kind")
-    return kind if kind in ("monitor", "stream_recovery") else ""
+    # monitor_restart: what happened to a chat's monitors when it was opened again after DGC
+    # stopped (dgc/monitor_restart.py) -- DGC's own words, for the model's next turn.
+    return kind if kind in ("monitor", "stream_recovery", "monitor_restart") else ""
 
 
 # What DGC asks a model whose stream was cut before its terminal event. Written as a user message

@@ -1298,6 +1298,11 @@ class TUI:
             for kind, payload in items:
                 th = th or style_mod.theme()
                 if kind == "started":
+                    restarted = getattr(sess, "_restarted_monitor_ids", None)
+                    if restarted and str(payload.get("id", "")) in restarted:
+                        restarted.discard(str(payload.get("id", "")))   # its restart line says it
+                        changed = True
+                        continue
                     sess.blocks.append(self._rich(
                         f"[{th.faint}]◉ monitor {_esc(payload.get('id', ''))} started · "
                         f"{_esc(payload.get('description', ''))}[/]"))
@@ -1505,6 +1510,24 @@ class TUI:
             else:
                 self._flash(f"no running monitor {parts[1]}")
             self._invalidate()
+            return
+        if action == "restart" and len(parts) == 2:
+            # A monitor that did not come back on its own when this chat was reopened.
+            from . import monitor_restart
+            target = self.agent._monitor_journal_target()
+            records = monitor_restart.read(*target) if target else []
+            record = next((r for r in reversed(records) if parts[1] in (r.get("id"), r.get("key"))), None)
+            sess = self.active
+            if sess is not None and (sess._turn.is_set() or (sess._worker_thread is not None
+                                                               and sess._worker_thread.is_alive())):
+                self._flash("DGC is working; restart it when the turn ends")
+                return
+            outcome = self.agent.restart_monitor(record["key"]) if record else None
+            if outcome is None:
+                self._flash(f"no stopped monitor {parts[1]} to restart")
+                return
+            self._show_monitor_restarts([outcome])
+            self._scroll_off = 0
             return
         if action == "wake" and len(parts) == 2 and parts[1].lower() in ("on", "off"):
             on = parts[1].lower() == "on"
@@ -7281,6 +7304,9 @@ class TUI:
                                    "tag": wake_tag(row.get("items"))})
                 else:
                     blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
+            elif who == "monitor_restart":
+                # What happened to the chat's monitors when it was opened again after DGC stopped.
+                blocks.append(self._rich(f"[{th.faint}]◉ {_esc(body[:600])}[/]"))
             elif who == "retry":
                 # A stream-cut continuation DGC wrote: a closed reconnect block, never a user band.
                 blocks.append({"kind": "retry", "retry_id": f"history:{len(blocks)}", "exp": False,
@@ -7383,6 +7409,11 @@ class TUI:
                                  "state": "unfinished"})
                     pending_retries.append(rows[-1])
                     continue
+                if notice_kind(m) == "monitor_restart":
+                    from .monitor_restart import history_items
+                    rows.extend({"who": "monitor_restart", "body": item["message"], "tools": ""}
+                                for item in history_items(m))
+                    continue
                 if notice_kind(m):
                     notice = m.get("_dgc_notice") or {}
                     rows.append({"who": "monitor", "body": str(notice.get("label") or "monitor events"),
@@ -7478,7 +7509,24 @@ class TUI:
         note = getattr(self.agent, "take_stale_monitor_note", lambda: "")()
         if note:
             self.blocks.append(self._rich(f"[{th.faint}]◉ {_esc(note)}[/]"))
+        self._show_monitor_restarts(getattr(self.agent, "restart_monitors", lambda: [])())
         self._scroll_off = 0               # resumed conversation: show the newest end, not the top
+
+    def _show_monitor_restarts(self, outcomes) -> None:
+        """One line per monitor a reopen (or /monitors restart) brought back, or could not."""
+        if not outcomes:
+            return
+        th = style_mod.theme()
+        sess = self.active
+        for outcome in outcomes or ():
+            if outcome.state == "restarted" and sess is not None:
+                ids = sess.__dict__.setdefault("_restarted_monitor_ids", set())
+                ids.add(outcome.id)
+            hint = f" · /monitors restart {outcome.id}" if outcome.restart else ""
+            color = th.faint if outcome.state in ("restarted", "expired") else th.warn
+            self.blocks.append(self._rich(f"[{color}]◉ {_esc(outcome.message)}{_esc(hint)}[/]"))
+        if outcomes:
+            self._invalidate()
 
     def _resume_flow(self) -> None:
         from . import sessions

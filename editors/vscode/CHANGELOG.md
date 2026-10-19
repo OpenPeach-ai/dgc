@@ -14,6 +14,16 @@
   even when VS Code is closed. Turn this off in the Pips view, under Controls (Keep Pips running)…". A setup card
   with a schedule says so before you accept it.
 
+### Monitors after a reload
+
+- **A reload no longer loses the chat's monitors.** When the chat comes back after a window reload or a lost
+  connection, each monitor that was running starts again with the same command, folder and sandbox, and the chat
+  says what was missed: "Monitor "ERP sync" restarted after DGC reopened this chat; nothing was watched between 10:02
+  and 10:05." It is on the monitors row and in the agent map with Stop, as before.
+- One the chat's permissions no longer allow (plan mode, or an approval it did not need before) reads "stopped when
+  DGC restarted" with **Restart**; your press is the approval. The same lines come back when the chat is reopened
+  later, without the button. Needs a CLI with `monitor_restart`.
+
 ### Pip reports in the chat
 
 - **A finished Pip run appears in the chat it reports to,** as a card in the transcript where it arrived (after

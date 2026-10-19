@@ -1090,6 +1090,10 @@ button.act:hover { border-color: var(--accent); }
 .sys-marked > .ic { margin-top: 1px; color: var(--muted); }
 .sys.err.sys-marked > .ic { color: var(--err-text); }
 .sys.model-switch { color: var(--muted); }
+/* A monitor the reopened chat brought back, or could not: the one that waits on you reads like it. */
+.sys.monitor-restart { align-items: center; }
+.sys.monitor-restart[data-state="stopped"] { color: var(--muted); }
+.monitor-restart > button.monitor-restart-again { flex: none; margin-left: auto; min-height: 24px; }
 
 /* composer */
 footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direction: column; gap: var(--sp-1);

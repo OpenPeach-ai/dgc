@@ -291,7 +291,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
-    "get_memory", "add_memory", "list_monitors", "stop_monitor", "list_agents", "list_troupes", "stop_troupe",
+    "get_memory", "add_memory", "list_monitors", "stop_monitor", "restart_monitor", "list_agents", "list_troupes", "stop_troupe",
     "list_background_shells", "stop_background_shell", "get_background_output",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
@@ -2122,6 +2122,9 @@ class Backend:
                           # the registry's face slots; only then do agent frames carry face_slot.
                           "agent_faces": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True, "pip_usage_report": True,
+                          # A reopened chat starts again the monitors DGC's stopping ended and says
+                          # so with `monitor_restart`; `restart_monitor {key}` is that note's Restart.
+                          "monitor_restart": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           # This CLI accepts `agent_control`: the user may steer or stop ONE
                           # background sub-agent instead of ending the whole turn. Gated because
@@ -2807,6 +2810,10 @@ class Backend:
         try:
             turn_id = getattr(self.ui, "turn_id", "")
             if kind == "started":
+                held = getattr(self, "_monitor_started_held", None)
+                if held is not None and held[0] == threading.get_ident():
+                    held[1].append(payload)     # a restart: sent after its monitor_restart note
+                    return
                 self.em.emit("monitor_started", id=payload["id"], description=payload["description"],
                              command=payload["command"], persistent=bool(payload["persistent"]),
                              timeout_ms=int(payload["timeout_ms"]),
@@ -2836,6 +2843,28 @@ class Backend:
                 self._maybe_wake()
         except Exception:
             pass                               # a monitor callback must never break a reader thread
+
+    def _bring_back_monitors(self, restart, request_id: str | None = None) -> list:
+        """Run a monitor restart (the reopen's, or the user's Restart) and say what happened.
+
+        Each monitor's note goes first, then its monitor_started, so the panel draws one line for a
+        restarted monitor rather than a note and a "started" line under it."""
+        held = (threading.get_ident(), [])
+        self._monitor_started_held = held
+        try:
+            outcomes = restart()
+        finally:
+            self._monitor_started_held = None
+        outcomes = [outcome for outcome in (outcomes if isinstance(outcomes, list) else [outcomes])
+                    if outcome is not None]
+        for outcome in outcomes:
+            self.em.emit("monitor_restart", **outcome.event(), **_request_fields(request_id))
+            for payload in held[1]:
+                if payload.get("id") == outcome.id and outcome.state == "restarted":
+                    self._on_monitor("started", payload)
+        if outcomes:
+            self._schedule_monitors_snapshot()
+        return outcomes
 
     def _emit_monitor_events(self, notification, delivery: str, turn_id: str = "") -> None:
         for batch in notification.batches:
@@ -4110,6 +4139,13 @@ class Backend:
             role = m.get("role")
             content = m.get("content")
             if role == "system":
+                continue
+            # What happened to the chat's monitors when it was opened again: markers between turns,
+            # drawn as the live monitor_restart lines were (without their Restart).
+            if notice_kind(m) == "monitor_restart":
+                from .monitor_restart import history_items
+                close_turn()
+                items.extend(history_items(m))
                 continue
             # First, before any content test: a notice's text is command output and may contain
             # anything, including the markers below. It is a monitor turn or an event in a turn.
@@ -5969,6 +6005,9 @@ class Backend:
                 # resume -- sent first, the whole history landed in the app's first stream().
                 self._emit_mode_if_changed(mode_before)
                 self._forget_ended_shells()
+                # Last: the chat is on screen, in the mode it reopened in. Monitors DGC's stopping
+                # ended start again (once) and each says so.
+                self._bring_back_monitors(self.agent.restart_monitors)
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
@@ -6162,6 +6201,19 @@ class Backend:
             self._emit_troupes(request_id)
         elif t == "agent_control":
             self._agent_control(cmd)
+        elif t == "restart_monitor":
+            # The Restart on a monitor that did not come back on its own when the chat reopened.
+            # Idle only: its note joins the transcript, which a running turn is writing.
+            if self._busy():
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="DGC is working; press Restart again when the turn ends",
+                             **_request_fields(request_id))
+                return
+            key = str(cmd.get("key") or "")[:32]
+            if not self._bring_back_monitors(lambda: self.agent.restart_monitor(key), request_id):
+                self.em.emit("command_rejected", command=t, reason="unknown_monitor",
+                             message="that monitor is no longer waiting to be restarted",
+                             **_request_fields(request_id))
         elif t == "stop_monitor":
             # Never blocks the command loop: the group is signalled here and reaped by its reader,
             # which reports monitor_ended when it is gone.

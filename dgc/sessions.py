@@ -28,6 +28,7 @@ WORKSPACE_SCHEMA_VERSION = 1
 _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
 RECALL_SCHEMA_VERSION = 1
 _RECALL_SUFFIX = ".recall"
+_MONITORS_SUFFIX = ".monitors"              # dgc/monitor_restart.py: the monitors a reopen restarts
 _IMAGES_SUFFIX = ".images"                  # images: <session>.images/, the viewed-image store
 _MAX_SAVED_IMAGES = 512
 _DEFAULT_RECALL_BYTES = 512 * 1024          # config `recall_max_bytes`
@@ -68,7 +69,7 @@ def _session_family(path: Path) -> Path:
         return path.with_suffix(".json")
     if path.name.endswith(".plan.md"):
         return path.with_name(path.name[:-len(".plan.md")] + ".json")
-    if path.suffix in (".metrics", ".workspace", _RECALL_SUFFIX):
+    if path.suffix in (".metrics", ".workspace", _RECALL_SUFFIX, _MONITORS_SUFFIX):
         return path.with_suffix(".json")
     return path
 
@@ -1102,7 +1103,8 @@ def delete(path, project_root, *, expected_revision: int | None = None,
                     exists, revision, expected_revision, expected_exists):
                 return False
             sidecars = (plan_path(p, project_root), metrics_path(p, project_root),
-                        workspace_path(p, project_root), recall_path(p, project_root))
+                        workspace_path(p, project_root), recall_path(p, project_root),
+                        p.with_suffix(_MONITORS_SUFFIX))
             for member in (p, *sidecars):
                 _reclaim_stale_temporary(member)
             p.unlink()

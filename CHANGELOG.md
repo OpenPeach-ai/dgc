@@ -56,6 +56,25 @@ or 64 MiB total", because one file over 4 MiB or more than 64 MiB of committed c
 - **Faster current-file copies.** Capturing your current files no longer flushes every file to disk (each copy is
   checked by its digest before and after the run): 2,048 small files took 6.3 s and now take 0.5 s.
 
+### Monitors come back when their chat does
+
+- **A monitor DGC's stopping ended starts again when the chat is opened again.** A window reload, a lost
+  connection or a killed backend stopped every monitor, and reopening the chat left them gone. Now DGC writes each
+  monitor down beside its session (`<session>.monitors`), and when that session is opened again — `dgc serve`
+  resuming it for the editor, or `dgc --resume` and `/resume` in the terminal — it starts each one that was still
+  running when DGC stopped, once, with the same command, folder, sandbox and permissions, within the time it had left
+  (counted from its first start; `persistent` has no limit). The chat shows one line, "Monitor "ERP sync" restarted
+  after DGC reopened this chat; nothing was watched between 10:02 and 10:05", and the model reads the same at its next
+  turn. Nothing watches while DGC is closed.
+- Not restarted: a monitor stopped by you or the model, one that timed out or exited, one a rewind took back, one whose
+  time ran out while DGC was closed (the line says so), one whose command carried a credential, and one another DGC
+  still runs. One the permissions in force now forbid (plan mode, a deny rule, a hook) or that would now need an
+  approval it did not need is shown as stopped, with Restart; in the terminal `/monitors restart ID`. A failed start
+  is reported once and not retried. See [docs/MONITORS.md](docs/MONITORS.md).
+- **Editor protocol:** `ready.capabilities.monitor_restart`; a new event `monitor_restart` (one per monitor after a
+  resume's other events, and the answer to the new command `restart_monitor {key}`); history replays it as
+  `{role: "monitor_restart"}`. No existing event changed.
+
 ### Editor protocol: the agent map
 
 For the editor's agent map. Older clients are unaffected: everything new is a new event, a new command, or a key in

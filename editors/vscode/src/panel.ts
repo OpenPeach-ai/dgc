@@ -1745,6 +1745,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** The Restart on a monitor the reopened chat did not bring back on its own. The answer (a monitor_restart
+   *  line, or command_rejected) reaches the webview as an ordinary event. A CLI without monitor_restart never sent
+   *  the note the button is on, so it is never asked. */
+  private restartMonitor(key: string): void {
+    const recordKey = String(key || "");
+    if (!/^[0-9a-f]{12}$/.test(recordKey) || (this.lastReadyEvent?.capabilities as any)?.monitor_restart !== true) { return; }
+    this.backend?.send({ type: "restart_monitor", key: recordKey, request_id: this.nextRequestId("monitor-restart") });
+  }
+
   /** Stop one troupe. The backend stops its agents; the `troupes` answer and the troupe_finished that follows update
    *  its row. A CLI without troupes never sent one, so it is never asked. */
   private async stopTroupe(id: string): Promise<void> {
@@ -4418,6 +4427,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "stopArtifact":
         void this.stopArtifact(String(msg.id || ""));
+        break;
+      case "restartMonitor":
+        this.restartMonitor(String(msg.key || ""));
         break;
       case "stopMonitor":
         void this.stopMonitor(String(msg.id || ""));

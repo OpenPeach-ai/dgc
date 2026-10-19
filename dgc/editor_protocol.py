@@ -456,6 +456,17 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # persistent, timeout_ms, started_at (epoch s), end_reason?, exit_code?}
     "monitors": {"items": _A(), "wake_paused": _B(), "pending_events": _I(),
                  "request_id": _S(False)},
+    # ready.capabilities.monitor_restart: a reopened chat (resume_session) starts again, once, each
+    # monitor that was running when DGC stopped, and sends one of these per monitor after the
+    # resume's other events: `restarted` (its monitor_started follows), `stopped` (the permissions
+    # in force now do not allow it: `restart` offers restart_monitor {key}), `expired` (its time
+    # ran out while DGC was closed) or `failed`. `message` is the line to show; `stopped_at` is
+    # when it stopped watching (epoch s). Also the answer to restart_monitor (`by_user`, request_id).
+    # History replays it as {role: "monitor_restart", key, id, state, description, message, at}.
+    "monitor_restart": {"key": _S(), "id": _S(), "description": _S(), "command": _S(),
+                        "state": _f("string", enum=("restarted", "stopped", "expired", "failed")),
+                        "message": _S(), "stopped_at": _f("null", "integer"), "at": _I(),
+                        "restart": _B(), "by_user": _B(False), "request_id": _S(False)},
     # ---- background tasks (the Agent map; ready.capabilities.background_tasks = {version: 1}) ----
     # Every background shell (`bash` with background: true) of this chat, the whole list each time:
     # items {id "bg<n>", command (the redacted label, never the raw command), state running|exited|
@@ -782,6 +793,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # running monitor. Wake settings travel in set_config (monitor_wake and three bounded integers).
     "list_monitors": {"request_id": _S(False)},
     "stop_monitor": {"id": _S(), "request_id": _S(False)},
+    # capabilities.monitor_restart: the Restart on a monitor_restart note with `restart`. Answered
+    # with monitor_restart, or command_rejected (turn_in_progress, unknown_monitor).
+    "restart_monitor": {"key": _S(), "request_id": _S(False)},
     # Background tasks (capabilities.background_tasks): read and stop only, allowed while a turn runs.
     # list_ and stop_background_shell answer with `background_shells`; an id this chat does not have
     # is command_rejected (reason unknown_task). get_background_output answers with exactly one

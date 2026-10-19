@@ -4696,6 +4696,27 @@
     monitorsBar.hidden = !live.length && !(held && pending);
     syncComposerRail();
   }
+  // A chat opened again after DGC stopped brings back the monitors that were running (dgc/monitor_restart.py):
+  // one line each, saying what was not watched in between, or why it was not started. Live and replayed alike;
+  // only the live line offers Restart (a replayed one belongs to an earlier opening of the chat).
+  const restartedMonitorIds = new Set();
+  const MONITOR_RESTART_ICONS = { restarted: "refresh-cw", stopped: "circle-slash", expired: "history", failed: "triangle-alert" };
+  function monitorRestartLine(ev, live) {
+    const state = String(ev?.state || "");
+    if (!MONITOR_RESTART_ICONS[state]) return;
+    const line = el("div", "sys sys-marked monitor-restart" + (live ? "" : " hist") + (state === "failed" ? " err" : ""));
+    line.dataset.state = state;
+    line.innerHTML = icon(MONITOR_RESTART_ICONS[state]) + `<span>${esc(String(ev.message || "").slice(0, 600))}</span>`;
+    if (live && ev.restart === true && ev.key) {
+      const again = el("button", "act monitor-restart-again", "Restart");
+      again.type = "button";
+      again.title = "Start this monitor again with the same command, folder and sandbox";
+      again.onclick = () => { again.disabled = true; vscode.postMessage({ type: "restartMonitor", key: String(ev.key) }); };
+      line.appendChild(again);
+    }
+    if (live && state === "restarted" && ev.id) restartedMonitorIds.add(String(ev.id));
+    if (live) appendConversationContent(line); else appendTarget.appendChild(line);
+  }
   function renderMonitorsList() {
     if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }
     const c = decisionCard(`<div class="q">${icon("activity")} Background monitors</div><div class="monitor-list"></div>`, "Background monitors");
@@ -6301,7 +6322,12 @@
       }
       case "monitor_started":
         knownMonitorIds.add(String(ev.id || ""));
+        // A monitor the reopened chat brought back already has its line (monitor_restart, just before).
+        if (restartedMonitorIds.delete(String(ev.id || ""))) break;
         sysLine(`Monitor ${ev.id} started · ${String(ev.description || "")}`);
+        break;
+      case "monitor_restart":
+        monitorRestartLine(ev, true);
         break;
       case "monitor_ended":
         if (!knownMonitorIds.has(String(ev.id || ""))) break;   // a monitor of a chat that was left
@@ -8172,6 +8198,7 @@
       return;
     }
     if (it.role === "notice") { appendTarget.appendChild(el("div", "sys hist", esc(it.text))); return; }
+    if (it.role === "monitor_restart") { monitorRestartLine(it, false); return; }
     if (it.role === "resume") { onEvent({ type: "turn_start", prompt: String(it.text || ""), kind: "resume" }); return; }
     if (it.role === "user") { onEvent({ type: "turn_start", prompt: String(it.text || ""), kind: "prompt" }); return; }
     if (it.role === "assistant" && it.text) {

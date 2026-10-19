@@ -6,10 +6,13 @@ frontends that can start a turn on their own (the TUI and the editor). stderr is
 ``bash_output`` and never becomes an event.
 
 Ownership and lifetime
-    One ``MonitorHub`` per Agent. Monitors never survive a restart, /new, /clear, resuming another
-    session, or a rewind. A DGC that dies by signal (SIGKILL, OOM) cannot run its own cleanup, so a
-    small watchdog process holds a pipe from this process and kills every registered process group
-    when that pipe reaches EOF.
+    One ``MonitorHub`` per Agent. A monitor stops with its conversation (/new, /clear, resuming
+    another session, a rewind) and with DGC, and nothing watches while DGC is closed. A DGC that
+    dies by signal (SIGKILL, OOM) cannot run its own cleanup, so a small watchdog process holds a
+    pipe from this process and kills every registered process group when that pipe reaches EOF.
+    A top-level agent's hub writes each monitor to its session's journal (dgc.monitor_restart), so
+    a monitor that DGC's stopping ended -- not one that was stopped, timed out or exited -- is
+    started again, once, when that session is opened again.
 
 Lock-ordering contract
     The hub lock and a monitor's lock are leaves: the hub never calls its listener (or anything else
@@ -98,8 +101,27 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 _CLOSE_TAG = re.compile(r"</(\s*)monitor-events", re.IGNORECASE)
 
 _ids = itertools.count(1)
+_id_lock = threading.Lock()
+_ids_floor = 0                       # a restarted monitor kept its id: new ones are numbered past it
 _hubs: "weakref.WeakSet[MonitorHub]" = weakref.WeakSet()
 _hubs_lock = threading.Lock()
+
+
+def _take_id(prefer: str = "") -> str:
+    """The next monitor id, or ``prefer`` (a restarted monitor's old id) when no hub uses it."""
+    global _ids_floor
+    with _id_lock:
+        match = re.fullmatch(r"mon(\d{1,9})", str(prefer or ""))
+        if match:
+            with _hubs_lock:
+                hubs = list(_hubs)
+            if not any(hub.get(prefer) is not None for hub in hubs):
+                _ids_floor = max(_ids_floor, int(match.group(1)))
+                return prefer
+        while True:
+            number = next(_ids)
+            if number > _ids_floor:
+                return f"mon{number}"
 
 
 def plural(count: int, word: str) -> str:
@@ -462,6 +484,11 @@ for sig in (signal.SIGTERM, signal.SIGKILL):
 _watchdog = _Watchdog()
 
 
+def _beat_interval() -> float:
+    from .monitor_restart import HEARTBEAT_S
+    return HEARTBEAT_S
+
+
 def _killpg(pgid: int, sig: int) -> bool:
     try:
         os.killpg(pgid, sig)
@@ -508,11 +535,22 @@ class Monitor:
         self._batch: Batch | None = None
         self._batch_deadline = 0.0
         self._err_partial = b""
+        # Its record in the session's restart journal (dgc.monitor_restart): where, which, which run.
+        self.journal = None
+        self.journal_key = ""
+        self.journal_run = ""
+        self.journal_done = False
+        self._beat_at = time.monotonic()
         self.thread = threading.Thread(target=self._run, daemon=True, name=f"dgc-monitor-{mid}")
 
     # ---- control ------------------------------------------------------------------------------
-    def request_stop(self, reason: str) -> bool:
-        """Signal the process group now; the reader escalates, reaps and reports the end."""
+    def request_stop(self, reason: str, *, journal_end: str = "") -> bool:
+        """Signal the process group now; the reader escalates, reaps and reports the end.
+
+        The journal hears why at once, before the process is gone: a window that reloads a moment
+        after Stop must not leave a monitor the user stopped looking like one DGC's exit ended.
+        ``journal_end`` names how a "shutdown" ended it (a rewind is not DGC stopping).
+        """
         with self.lock:
             if self.state != "running":
                 return False
@@ -521,6 +559,9 @@ class Monitor:
             first = not self._kill_sent_at
             if first:
                 self._kill_sent_at = time.monotonic()
+        if first:
+            from .monitor_restart import RESTARTABLE, STOP_ENDS
+            self.hub._journal_ended(self, STOP_ENDS.get(reason) or journal_end or RESTARTABLE)
         if first and self.pgid:
             _killpg(self.pgid, signal.SIGTERM)
         elif first:
@@ -664,6 +705,9 @@ class Monitor:
                     self._close_batch()
                 if deadline is not None and now >= deadline and not self._kill_sent_at:
                     self.request_stop("timeout")
+                if self.journal is not None and now - self._beat_at >= _beat_interval():
+                    self._beat_at = now
+                    self.hub._journal_beat()
                 if self._kill_sent_at:
                     waited = now - self._kill_sent_at
                     if waited >= 1.0 and self.pgid:
@@ -808,6 +852,10 @@ class MonitorHub:
         self._epoch_lock = threading.Lock()     # taken before _lock, never the other way round
         self._monitors: dict[str, Monitor] = {}
         self._pending: deque = deque()
+        # Where this hub's monitors are written down for a restart: a callable returning the
+        # session (file, root) of the conversation now, or None. Set by a top-level Agent only.
+        self.journal = None
+        self._beating = threading.Lock()
         with _hubs_lock:
             _hubs.add(self)
 
@@ -823,13 +871,21 @@ class MonitorHub:
 
     # ---- starting -------------------------------------------------------------------------------
     def start(self, args: dict, ctx) -> str:
+        return self.start_monitor(args, ctx)[0]
+
+    def start_monitor(self, args: dict, ctx, *, restart: dict | None = None):
+        """Start one monitor: (the tool's result text, the Monitor or None when it did not start).
+
+        ``restart`` is a journal record (dgc.monitor_restart) being brought back: its folder, its
+        id when free, and at least the sandbox it ran in; ``args`` then carries the time it has left.
+        """
         from .redaction import redact_text, secret_values
         from .tools import MAX_BASH_COMMAND_CHARS, _safe_command_label
         command = args.get("command")
         if not isinstance(command, str) or not command.strip():
-            return "error: monitor command is empty"
+            return "error: monitor command is empty", None
         if len(command) > MAX_BASH_COMMAND_CHARS:
-            return f"error: monitor command exceeds {MAX_BASH_COMMAND_CHARS} characters"
+            return f"error: monitor command exceeds {MAX_BASH_COMMAND_CHARS} characters", None
         description = " ".join(str(args.get("description") or "").split())
         description = redact_text(description, secret_values(self.config))[:MAX_DESCRIPTION_CHARS]
         label = _safe_command_label(command, ctx)
@@ -845,21 +901,25 @@ class MonitorHub:
             running = [m for m in self._monitors.values() if m.state == "running"]
         if len(running) >= MAX_MONITORS_PER_OWNER:
             return (f"error: {MAX_MONITORS_PER_OWNER} monitors are already running "
-                    f"({', '.join(m.id for m in running)}); stop one with monitor_stop first")
+                    f"({', '.join(m.id for m in running)}); stop one with monitor_stop first"), None
         if process_running_count() >= MAX_MONITORS_PROCESS:
-            return f"error: DGC already runs {MAX_MONITORS_PROCESS} monitors; stop one first"
+            return f"error: DGC already runs {MAX_MONITORS_PROCESS} monitors; stop one first", None
         from . import sandbox
         from .scheduler import acquire_cancellable, workspace_mutation_lock
         root = getattr(ctx, "project_root", None) or self.project_root
         config = getattr(ctx, "config", None) or self.config
-        sandbox_requested = sandbox.requested(config)
+        if restart is not None and not os.path.isdir(str(root)):
+            return f"error: its folder {root} is no longer there", None
+        # A restart runs in at least the sandbox it ran in, and in one the settings ask for now.
+        sandbox_requested = sandbox.requested(config) or bool(restart and restart.get("sandboxed"))
         argv = sandbox.wrap(command, root, config) if sandbox_requested else None
         if sandbox_requested and argv is None:
-            return "error: sandbox policy cannot safely confine this workspace; monitor was not started"
+            return ("error: sandbox policy cannot safely confine this workspace; monitor was not "
+                    "started"), None
         lease = workspace_mutation_lock(root)
         if not acquire_cancellable(lease, getattr(ctx, "cancelled", None)):
             return (f"error: {lease.last_error}" if lease.last_error else
-                    "error: monitor was cancelled while waiting for the workspace write lease")
+                    "error: monitor was cancelled while waiting for the workspace write lease"), None
         try:
             proc = subprocess.Popen(
                 argv or ["/bin/bash", "-o", "pipefail", "-c", command],
@@ -868,34 +928,99 @@ class MonitorHub:
                 start_new_session=True,
                 env=sandbox.process_env(config) if sandbox_requested else sandbox.tool_env())
         except OSError as exc:
-            return f"error: could not start the monitor: {exc}"
+            return f"error: could not start the monitor: {exc}", None
         finally:
             # Released as soon as the process exists: see the module docstring.
             lease.release()
-        mid = f"mon{next(_ids)}"
+        mid = _take_id(str(restart.get("id") or "") if restart is not None else "")
         monitor = Monitor(self, mid, description, label, persistent, timeout_ms, proc,
                           bool(argv))
         if monitor.pgid:
             _watchdog.add(monitor.pgid)
+        target = self._journal_target()
         with self._lock:
             stale = monitor.epoch != self.epoch
             if not stale:
                 self._monitors[mid] = monitor
+                monitor.journal = target
+        if target is not None and not stale:
+            from . import monitor_restart
+            permission = args.get("_dgc_permission")
+            monitor_restart.record_started(target, monitor, {
+                "command": command, "description": description, "label": label, "cwd": str(root),
+                "persistent": persistent, "timeout_ms": timeout_ms, "sandboxed": bool(argv),
+                "permission": permission if isinstance(permission, dict) else {}}, restart=restart)
         monitor.thread.start()                  # the reader reaps it either way
         if stale:
             monitor.request_stop("shutdown")
-            return "error: the conversation was replaced while the monitor started; it was stopped"
+            return ("error: the conversation was replaced while the monitor started; it was "
+                    "stopped"), None
         self._notify("started", {"id": mid, "description": description, "command": label,
                                  "persistent": persistent, "timeout_ms": timeout_ms,
                                  "sandboxed": bool(argv)})
         lifetime = ("runs until monitor_stop or the session ends" if persistent
                     else f"stops after {timeout_ms // 1000}s")
+        comes_back = (" If DGC stops while it runs (a window reload, a lost connection), DGC starts "
+                      "it again when this chat is opened again, within its time limit, and tells "
+                      "you what it missed." if target is not None else "")
         return (f'started monitor {mid} ("{description}"): {label}\n'
                 f"It {lifetime}. Events arrive as <monitor-events> notifications. Read retained "
                 f'output and stderr with bash_output(id="{mid}"); stop it with '
                 f'monitor_stop(id="{mid}"). Monitors end when this conversation is replaced or '
-                "closed (/clear, resuming another session, a rewind) or when DGC exits — they do "
-                "not survive a restart. Do not use a monitor to change files.")
+                "closed (/clear, resuming another session, a rewind) or when DGC exits; nothing "
+                f"watches while DGC is closed.{comes_back} Do not use a monitor to change "
+                "files."), monitor
+
+    # ---- the restart journal --------------------------------------------------------------------
+    def _journal_target(self):
+        source = self.journal
+        if not callable(source):
+            return None
+        try:
+            return source()
+        except Exception:
+            return None
+
+    def _journal_ended(self, monitor: Monitor, end: str) -> None:
+        """Write how a monitor's run ended, once, before anything else can be written about it."""
+        with monitor.lock:
+            if monitor.journal is None or monitor.journal_done:
+                return
+            monitor.journal_done = True
+            target = monitor.journal
+        from . import monitor_restart
+        monitor_restart.record_ended(target, monitor, end)
+
+    def _journal_beat(self) -> None:
+        """The heartbeat, off the reader thread: a slow disk must never hold back output."""
+        if not self._beating.acquire(blocking=False):
+            return
+
+        def beat():
+            try:
+                from . import monitor_restart
+                groups: dict = {}
+                for monitor in self.running():
+                    if monitor.journal is not None and not monitor.journal_done:
+                        groups.setdefault(monitor.journal, []).append(monitor)
+                for target, monitors in groups.items():
+                    monitor_restart.record_alive(target, monitors)
+            except Exception:
+                pass
+            finally:
+                self._beating.release()
+        threading.Thread(target=beat, daemon=True, name="dgc-monitor-journal").start()
+
+    def rebind_journal(self, old_target, new_target) -> None:
+        """A branch continues this conversation under a new session: so do its running monitors."""
+        if not old_target or not new_target or old_target == new_target:
+            return
+        moving = [m for m in self.running() if m.journal == old_target and not m.journal_done]
+        from . import monitor_restart
+        monitor_restart.move_running(old_target, new_target, moving)
+        for monitor in moving:
+            with monitor.lock:
+                monitor.journal = new_target
 
     # ---- events ---------------------------------------------------------------------------------
     def _queue_batch(self, monitor: Monitor, batch: Batch) -> None:
@@ -969,6 +1094,8 @@ class MonitorHub:
             monitor.exit_code = proc.returncode
             monitor.ended_at = time.time()
             events = monitor.events_total
+        if reason == "exited":
+            self._journal_ended(monitor, "exited")   # a stop already wrote its own reason
         elapsed = int(time.monotonic() - monitor.started_mono)
         if reason == "timeout":
             message = f"ended: timed out after {elapsed}s"
@@ -1168,11 +1295,15 @@ class MonitorHub:
                 stopped.append(monitor.id)
         return stopped
 
-    def shutdown(self, reason: str = "shutdown", *, wait: float = 0.0) -> None:
-        """End every monitor with no delivery and forget pending events."""
+    def shutdown(self, reason: str = "shutdown", *, wait: float = 0.0,
+                 journal_end: str = "dgc_stopped") -> None:
+        """End every monitor with no delivery and forget pending events.
+
+        ``journal_end`` is how their journal records end: "dgc_stopped" (the default: DGC or the
+        chat stopped, so a reopen starts them again) or "rewound" (never)."""
         monitors = self.running()
         for monitor in monitors:
-            monitor.request_stop(reason)
+            monitor.request_stop(reason, journal_end=journal_end)
         self.discard_pending()
         if wait > 0:
             deadline = time.monotonic() + wait
@@ -1180,11 +1311,11 @@ class MonitorHub:
                 monitor.thread.join(max(0.0, deadline - time.monotonic()))
         self.discard_pending()
 
-    def new_epoch(self, reason: str = "shutdown") -> None:
+    def new_epoch(self, reason: str = "shutdown", *, journal_end: str = "dgc_stopped") -> None:
         """The conversation was replaced: stop monitors, drop their events and stale exit notices."""
         with self._epoch_lock, self._lock:
             self.epoch += 1
-        self.shutdown(reason)
+        self.shutdown(reason, journal_end=journal_end)
         with self._lock:
             # Their ids and output belong to the old conversation too: bash_output in the new one
             # cannot read them. The reader threads still finish and reap on their own.
