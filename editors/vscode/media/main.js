@@ -7935,6 +7935,7 @@
       }
       face.innerHTML = plush.markup({ index: 0, name: "Core" }, "idle", "pips-nav-core", { includeStyles: false });
       plush.mount(face);
+      plush.mount(log);   // the Pips' faces in the chat (report cards) breathe, blink and look at the pointer too
     } catch { face.replaceChildren(); }
   })();
   $("btn-pips-back").onclick = () => closePips();
@@ -8160,7 +8161,8 @@
     const pose = r.outcome === "failed" || r.outcome === "checks_failed" ? "failure" : r.outcome === "findings" ? "waiting_approval" : "success";
     try {
       if (window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
-        { index: PIP_REPORT_TYPES.indexOf(r.pip_type), name: r.name }, pose, `pip-report-${r.run_id.slice(4, 16)}`, { paused: true });
+        { index: PIP_REPORT_TYPES.indexOf(r.pip_type), name: r.name }, pose, `pip-report-${r.run_id.slice(4, 16)}`,
+        { includeStyles: !document.getElementById("plush-styles") && !document.getElementById("pips-plush-styles") });   // alive like the Pips button's Core (the founder, 19 Oct)
     } catch { face.replaceChildren(); }
     const main = el("div", "pip-report-main");
     const head = el("div", "pip-report-head");
