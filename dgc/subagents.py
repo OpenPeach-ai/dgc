@@ -583,7 +583,7 @@ class SubagentRegistry:
                     fields["log"] = kept
             if state in ACTIVE:
                 fields["duration_ms"] = _int(item.get("elapsed_ms"))
-                fields["message"] = "the backend stopped before this agent reported"
+                fields["message"] = "stopped by a restart: DGC stopped before this agent reported"
             records.append(fields)
             seen.add(identity)
         if value["items"] and not records:
@@ -639,6 +639,12 @@ class SubagentRegistry:
                                       for state in ENDED}
 
     # ---- reads -------------------------------------------------------------------------------
+    def log_of(self, id: str) -> list:
+        """A copy of one record's bounded step log (tool calls and results), [] when there is none."""
+        with self._lock:
+            record = self._records.get(str(id or ""))
+            return [dict(entry) for entry in (getattr(record, "log", None) or [])] if record else []
+
     def description(self, id: str) -> str:
         """What this chat's agent `id` was asked to do; "" for an id it has no record of."""
         with self._lock:

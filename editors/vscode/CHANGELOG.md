@@ -29,6 +29,10 @@
 - One the chat's permissions no longer allow (plan mode, or an approval it did not need before) reads "stopped when
   DGC restarted" with **Restart**; your press is the approval. The same lines come back when the chat is reopened
   later, without the button. Needs a CLI with `monitor_restart`.
+- **Commands, sub-agents and Troupes after a restart.** A background command or sub-agent that was running reads
+  "stopped by a restart" in the chat, with **Run again** (and **Resume** for a sub-agent); nothing runs again until you
+  press it. The agent map lists such a command with Run again on its card, apart from what is running. A Troupe picks
+  up where it stopped, once. Needs a CLI with `task_interrupted`.
 
 ### Pip reports in the chat
 

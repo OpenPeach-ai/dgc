@@ -1262,8 +1262,8 @@ class TUI:
         self._invalidate()
 
     def _service_awaited_restart(self, sess) -> bool:
-        """A reopen found monitors whose previous DGC was still exiting: bring them back once that
-        process has gone and this session is idle (checked twice a second, not every frame)."""
+        """A reopen found work whose previous DGC was still exiting: bring it back once that process
+        has gone and this session is idle (checked twice a second, not every frame)."""
         agent = getattr(sess, "agent", None)
         if agent is None or not getattr(agent, "_monitor_restart_awaited", None):
             return False
@@ -7321,8 +7321,8 @@ class TUI:
                                    "tag": wake_tag(row.get("items"))})
                 else:
                     blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
-            elif who == "monitor_restart":
-                # What happened to the chat's monitors when it was opened again after DGC stopped.
+            elif who in ("monitor_restart", "task_interrupted"):
+                # What happened to the chat's background work when it was opened again after DGC stopped.
                 blocks.append(self._rich(f"[{th.faint}]◉ {_esc(body[:600])}[/]"))
             elif who == "retry":
                 # A stream-cut continuation DGC wrote: a closed reconnect block, never a user band.
@@ -7428,7 +7428,7 @@ class TUI:
                     continue
                 if notice_kind(m) == "monitor_restart":
                     from .monitor_restart import history_items
-                    rows.extend({"who": "monitor_restart", "body": item["message"], "tools": ""}
+                    rows.extend({"who": item["role"], "body": item["message"], "tools": ""}
                                 for item in history_items(m))
                     continue
                 if notice_kind(m):
@@ -7530,13 +7530,18 @@ class TUI:
         self._scroll_off = 0               # resumed conversation: show the newest end, not the top
 
     def _show_monitor_restarts(self, outcomes, sess=None) -> None:
-        """One line per monitor a reopen (or /monitors restart) brought back, or could not."""
+        """One line per monitor a reopen (or /monitors restart) brought back, or could not, and per
+        background command, sub-agent or troupe the restart stopped (never run again on their own)."""
         if not outcomes:
             return
         th = style_mod.theme()
         sess = sess or self.active
         blocks = sess.blocks if sess is not None else self.blocks
         for outcome in outcomes or ():
+            if getattr(outcome, "kind", "monitor") != "monitor":
+                color = th.faint if outcome.state in ("started", "resumed") else th.warn
+                blocks.append(self._rich(f"[{color}]◉ {_esc(outcome.message)}[/]"))
+                continue
             if outcome.state == "restarted" and sess is not None:
                 ids = sess.__dict__.setdefault("_restarted_monitor_ids", set())
                 ids.add(outcome.id)

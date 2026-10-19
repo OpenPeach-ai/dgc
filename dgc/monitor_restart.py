@@ -76,9 +76,9 @@ _write_lock = threading.Lock()       # one journal read-modify-write at a time i
 
 
 # ---- the journal -------------------------------------------------------------------------------
-def journal_path(session_file, session_root) -> Path:
+def journal_path(session_file, session_root, suffix: str = SUFFIX) -> Path:
     from . import sessions
-    return sessions.resolve_path(session_root, session_file).with_suffix(SUFFIX)
+    return sessions.resolve_path(session_root, session_file).with_suffix(suffix)
 
 
 def _clean(record) -> dict | None:
@@ -100,11 +100,12 @@ def _clean(record) -> dict | None:
     return record
 
 
-def read(session_file, session_root) -> list:
+def read(session_file, session_root, *, suffix: str = SUFFIX, clean=None) -> list:
     """The journal's records, oldest first. [] when there is none or it cannot be read."""
     from . import sessions
+    clean = clean or _clean
     try:
-        path = journal_path(session_file, session_root)
+        path = journal_path(session_file, session_root, suffix)
         with sessions._lock_for(path):
             if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_JOURNAL_BYTES:
                 return []
@@ -113,40 +114,46 @@ def read(session_file, session_root) -> list:
         return []
     if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
         return []
-    return [r for r in (_clean(item) for item in list(data.get("records") or [])[:MAX_RECORDS * 2]) if r]
+    return [r for r in (clean(item) for item in list(data.get("records") or [])[:MAX_RECORDS * 4]) if r]
 
 
-def _prune(records: list) -> list:
-    """At most MAX_RECORDS: the running ones always stay; then the restartable ones, newest first."""
-    if len(records) <= MAX_RECORDS:
+LIVE_ENDS = (RESTARTABLE, "failed", "reported")
+
+
+def _prune(records: list, limit: int = MAX_RECORDS) -> list:
+    """At most ``limit``: the running ones always stay; then the restartable ones, newest first."""
+    if len(records) <= limit:
         return records
     def rank(record):
-        live = record.get("state") == "running" or record.get("end") in (RESTARTABLE, "failed")
-        return (1 if live else 0, float(record.get("ended_at") or record.get("run_started_at") or 0))
-    keep = sorted(records, key=rank, reverse=True)[:MAX_RECORDS]
+        live = record.get("state") == "running" or record.get("end") in LIVE_ENDS
+        return (1 if live else 0, float(record.get("ended_at") or record.get("run_started_at")
+                                        or record.get("started_at") or 0))
+    keep = sorted(records, key=rank, reverse=True)[:limit]
     return [record for record in records if record in keep]
 
 
-def update(session_file, session_root, mutate) -> bool:
+def update(session_file, session_root, mutate, *, suffix: str = SUFFIX, clean=None,
+           limit: int = MAX_RECORDS) -> bool:
     """Read the journal, let ``mutate(records)`` change the list in place, write it back.
 
     Best effort, never raises: a journal that cannot be written costs the restart, not the monitor.
     """
     from . import sessions
+    clean = clean or _clean
     try:
-        path = journal_path(session_file, session_root)
+        path = journal_path(session_file, session_root, suffix)
         with _write_lock, sessions._lock_for(path):
             records = []
             if path.is_file() and not path.is_symlink() and path.stat().st_size <= MAX_JOURNAL_BYTES:
                 try:
                     data = json.loads(path.read_text(encoding="utf-8"))
                     if isinstance(data, dict) and data.get("schema_version") == SCHEMA_VERSION:
-                        records = [r for r in (_clean(item) for item in data.get("records") or []) if r]
+                        records = [r for r in (clean(item) for item in data.get("records") or []) if r]
                 except (OSError, ValueError, TypeError):
                     records = []
             before = json.dumps(records, sort_keys=True, default=str)
             mutate(records)
-            records[:] = _prune(records)
+            records[:] = _prune(records, limit)
             if json.dumps(records, sort_keys=True, default=str) == before:
                 return True
             if not records:
@@ -349,9 +356,16 @@ class Outcome:
     at: float
     restart: bool = False       # a Restart is offered
     by_user: bool = False
+    kind: str = "monitor"       # monitor | shell | agent | troupe
+    actions: tuple = ()         # for the others: run_again, resume
 
     def event(self) -> dict:
-        """The fields of a `monitor_restart` event."""
+        """The fields of a `monitor_restart` event, or of a `task_interrupted` one."""
+        if self.kind != "monitor":
+            return {"key": self.key, "kind": self.kind, "id": self.id, "description": self.description,
+                    "command": self.command, "state": self.state, "message": self.message,
+                    "stopped_at": int(self.stopped_at) if self.stopped_at else None,
+                    "at": int(self.at), "actions": list(self.actions), "by_user": bool(self.by_user)}
         return {"key": self.key, "id": self.id, "description": self.description,
                 "command": self.command, "state": self.state, "message": self.message,
                 "stopped_at": int(self.stopped_at) if self.stopped_at else None,
@@ -359,7 +373,7 @@ class Outcome:
 
     def item(self) -> dict:
         return {"key": self.key, "id": self.id, "description": self.description,
-                "state": self.state, "message": self.message,
+                "state": self.state, "message": self.message, "kind": self.kind,
                 "stopped_at": int(self.stopped_at) if self.stopped_at else None,
                 "at": int(self.at), "by_user": bool(self.by_user)}
 
@@ -372,15 +386,17 @@ def notice_message(outcomes: list) -> dict:
     """The transcript message that tells the model, at its next turn, what happened -- the same
     facts the user was shown. Tagged so every projection shows it as a note, never as a prompt."""
     by_user = all(outcome.by_user for outcome in outcomes)
-    head = ("DGC note, not a message from the user: the user pressed Restart on a monitor that "
-            "stopped when DGC stopped." if by_user else
-            "DGC note, not a message from the user: DGC stopped while this chat had background "
-            "monitors running (a window reload, a lost connection, or DGC closing), and the chat "
-            "was opened again. Nothing watched while DGC was stopped: lines printed in that gap "
-            "were not seen.")
+    monitors = any(outcome.kind == "monitor" for outcome in outcomes)
+    head = ("DGC note, not a message from the user: the user acted on work that stopped when DGC "
+            "stopped." if by_user else
+            "DGC note, not a message from the user: DGC stopped while this chat had work running in "
+            "the background (a window reload, a lost connection, a restart, or DGC closing), and the "
+            "chat was opened again."
+            + (" Nothing watched while DGC was stopped: lines printed in that gap were not seen."
+               if monitors else ""))
     body = "\n".join(f"- {outcome.note}" for outcome in outcomes)
     label = (outcomes[0].message if len(outcomes) == 1
-             else f"{len(outcomes)} monitors after DGC reopened this chat")
+             else f"{len(outcomes)} background tasks after DGC reopened this chat")
     return {"role": "user", "content": f"{NOTICE_OPEN}\n{head}\n{body}\n{NOTICE_CLOSE}",
             "_dgc_notice": {"kind": "monitor_restart", "label": label[:200],
                             "items": [outcome.item() for outcome in outcomes]}}
@@ -390,8 +406,20 @@ def history_items(message: dict) -> list:
     """A saved restart note as the editor replays it: one marker per monitor, no Restart."""
     notice = message.get("_dgc_notice") if isinstance(message, dict) else None
     items = []
-    for row in list((notice or {}).get("items") or [])[:MAX_RECORDS]:
-        if not isinstance(row, dict) or row.get("state") not in ("restarted", "stopped", "expired", "failed"):
+    for row in list((notice or {}).get("items") or [])[:MAX_RECORDS * 4]:
+        if not isinstance(row, dict):
+            continue
+        if row.get("kind") in ("shell", "agent", "troupe"):
+            if row.get("state") not in ("stopped", "started", "resumed", "failed"):
+                continue
+            items.append({"role": "task_interrupted", "kind": row["kind"],
+                          "key": str(row.get("key") or "")[:16], "id": str(row.get("id") or "")[:64],
+                          "state": row["state"], "description": str(row.get("description") or "")[:200],
+                          "message": str(row.get("message") or "")[:600],
+                          "at": int(row.get("at") or 0) if isinstance(row.get("at"), int) else 0,
+                          "actions": []})
+            continue
+        if row.get("state") not in ("restarted", "stopped", "expired", "failed"):
             continue
         items.append({"role": "monitor_restart", "key": str(row.get("key") or "")[:16],
                       "id": str(row.get("id") or "")[:16], "state": row["state"],
@@ -531,15 +559,19 @@ def _bring_back(agent, target, record: dict, *, by_user: bool) -> Outcome:
 
 
 def restart_all(agent) -> list:
-    """Once per reopen: bring back every monitor of this session that DGC's stopping ended. One whose
-    process is still exiting is left to ``restart_awaited`` (the frontend asks until it is gone)."""
+    """Once per reopen: bring back every monitor of this session that DGC's stopping ended, and say
+    what happened to its other background work (dgc.stopped_work). Work whose process is still
+    exiting is left to ``restart_awaited`` (the frontend asks again until it is gone)."""
     target = agent._monitor_journal_target()
     if target is None:
         return []
+    from . import stopped_work
     me = owner()
     records = read(*target)
     outcomes = [_bring_back(agent, target, record, by_user=False) for record in records if due(record, me)]
+    outcomes += stopped_work.after_reopen(agent)
     waiting = {record["key"] for record in records if awaited(record, me)}
+    waiting |= stopped_work.awaited_keys(agent)
     agent._monitor_restart_awaited = (waiting, time.monotonic() + WAIT_FOR_OWNER_S) if waiting else None
     if outcomes:
         agent._monitor_restart_noted(outcomes)
@@ -547,16 +579,18 @@ def restart_all(agent) -> list:
 
 
 def awaiting(agent) -> str:
-    """"ready" when a monitor the reopen waited on can be brought back now, "wait" while its process
-    is still there, "" when there is nothing (left) to wait for."""
+    """"ready" when work the reopen waited on can be brought back now, "wait" while its process is
+    still there, "" when there is nothing (left) to wait for."""
     waiting = getattr(agent, "_monitor_restart_awaited", None)
     if not waiting:
         return ""
     keys, deadline = waiting
     target = agent._monitor_journal_target()
+    from . import stopped_work
     me = owner()
     records = [r for r in read(*target) if r.get("key") in keys] if target else []
-    if any(due(r, me) for r in records):
+    records += [r for r in stopped_work.read(target) if r.get("key") in keys]
+    if any(due(r, me) or stopped_work._due(r, me) for r in records):
         return "ready"
     if time.monotonic() >= deadline or not any(awaited(r, me) for r in records):
         agent._monitor_restart_awaited = None    # it kept running: that DGC still has the session
@@ -565,16 +599,19 @@ def awaiting(agent) -> str:
 
 
 def restart_awaited(agent) -> list:
-    """The waited-on monitors whose process has now ended: as a reopen would have brought them back."""
+    """The waited-on work whose process has now ended: as a reopen would have brought it back."""
     waiting = getattr(agent, "_monitor_restart_awaited", None)
     target = agent._monitor_journal_target()
     if not waiting or target is None:
         return []
     keys, deadline = waiting
+    from . import stopped_work
     me = owner()
-    records = [r for r in read(*target) if r.get("key") in keys]
-    outcomes = [_bring_back(agent, target, record, by_user=False) for record in records if due(record, me)]
+    outcomes = [_bring_back(agent, target, record, by_user=False)
+                for record in read(*target) if record.get("key") in keys and due(record, me)]
+    outcomes += stopped_work.after_reopen(agent, keys=keys)
     left = {r["key"] for r in read(*target) if r.get("key") in keys and awaited(r, me)}
+    left |= stopped_work.awaited_keys(agent) & keys
     agent._monitor_restart_awaited = (left, deadline) if left and time.monotonic() < deadline else None
     if outcomes:
         agent._monitor_restart_noted(outcomes)

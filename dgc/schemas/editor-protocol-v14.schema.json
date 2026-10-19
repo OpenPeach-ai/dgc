@@ -4493,6 +4493,97 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "task_interrupted"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "shell",
+                "agent",
+                "troupe"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "stopped",
+                "started",
+                "resumed",
+                "failed"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "stopped_at": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              ]
+            },
+            "at": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "actions": {
+              "type": "array"
+            },
+            "by_user": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "key",
+            "kind",
+            "id",
+            "description",
+            "command",
+            "state",
+            "message",
+            "stopped_at",
+            "at",
+            "actions"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "background_shells"
             },
             "seq": {
@@ -9508,6 +9599,37 @@
             },
             "key": {
               "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "rerun_task"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "key": {
+              "type": "string"
+            },
+            "how": {
+              "type": "string",
+              "enum": [
+                "again",
+                "resume"
+              ]
             },
             "request_id": {
               "type": "string"

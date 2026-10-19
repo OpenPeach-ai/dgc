@@ -79,6 +79,13 @@ or 64 MiB total", because one file over 4 MiB or more than 64 MiB of committed c
 - **Keyed on the DGC that ran it having ended.** A monitor another DGC process still runs (a window that kept the
   session, a chat switched away in the same process) is never restarted by another opening; a reopen that finds the
   previous DGC still exiting waits up to 30 seconds for it.
+- **The rest of the background work a restart stopped.** Background commands and sub-agents that were running are
+  shown as stopped by a restart, never run again on their own: Run again (the same command in the same folder, the
+  same task from scratch) and, for a sub-agent, Resume (a new one told what the stopped one had done and where its
+  unmerged work was kept). Troupes resume once from their journal, unfinished agents only, or are offered as Resume
+  when the permissions now would not start them. The model is told which stopped. Written in `<session>.tasks`.
+  Protocol: `ready.capabilities.task_interrupted`, event `task_interrupted` (history `{role: "task_interrupted"}`),
+  command `rerun_task {key, how}`; `background_shells` may list a stopped command as `{state: "stopped", rerun}`.
 
 ### Editor protocol: the agent map
 

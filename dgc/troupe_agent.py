@@ -331,7 +331,13 @@ def start(agent, args: dict, call_id) -> str:
     kinds = "; ".join(f"{stage.name} ({stage.agent}) {found[stage.agent]}"
                       for stage in plan.stages if stage.agent in found)
     kinds = f" What its agents can do: {kinds}." if kinds else ""
-    run.on_end = lambda finished: deliver(agent, finished, epoch)
+    from . import stopped_work                   # its session knows it ran: a reopen resumes it once
+    stopped_work.troupe_started(agent, run)
+
+    def ended(finished):
+        stopped_work.troupe_ended(agent, finished)
+        deliver(agent, finished, epoch)
+    run.on_end = ended
     run.start()
     reused = f" {len(cached)} results from the earlier attempt are reused." if cached else ""
     return (f"Troupe {run.id} started: {plan.title}. {shape}; {planned}, {pace}.{kinds}{reused} It runs in the "

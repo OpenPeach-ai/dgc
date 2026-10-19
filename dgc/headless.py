@@ -291,7 +291,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
-    "get_memory", "add_memory", "list_monitors", "stop_monitor", "restart_monitor", "list_agents", "list_troupes", "stop_troupe",
+    "get_memory", "add_memory", "list_monitors", "stop_monitor", "restart_monitor", "rerun_task", "list_agents", "list_troupes", "stop_troupe",
     "list_background_shells", "stop_background_shell", "get_background_output",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
@@ -2128,6 +2128,9 @@ class Backend:
                           # A reopened chat starts again the monitors DGC's stopping ended and says
                           # so with `monitor_restart`; `restart_monitor {key}` is that note's Restart.
                           "monitor_restart": True,
+                          # ...and says which background commands, sub-agents and troupes the restart
+                          # stopped (`task_interrupted`); `rerun_task {key, how}` is Run again / Resume.
+                          "task_interrupted": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           # This CLI accepts `agent_control`: the user may steer or stop ONE
                           # background sub-agent instead of ending the whole turn. Gated because
@@ -2902,17 +2905,24 @@ class Backend:
         outcomes = [outcome for outcome in (outcomes if isinstance(outcomes, list) else [outcomes])
                     if outcome is not None]
         for outcome in outcomes:
+            if outcome.kind != "monitor":
+                self.em.emit("task_interrupted", **outcome.event(), **_request_fields(request_id))
+                continue
             self.em.emit("monitor_restart", **outcome.event(), **_request_fields(request_id))
             for payload in held[1]:
                 if payload.get("id") == outcome.id and outcome.state == "restarted":
                     self._on_monitor("started", payload)
         if outcomes:
             self._schedule_monitors_snapshot()
+        if any(outcome.kind == "shell" for outcome in outcomes):
+            self._on_background_shell()          # the agent map lists a stopped command, or its new run
+        if any(outcome.kind == "agent" for outcome in outcomes):
+            self._emit_agents()
         return outcomes
 
     def _await_previous_owner(self) -> None:
-        """A reopen found monitors whose previous DGC was still exiting (the window reloaded a moment
-        before): bring them back once that process has gone and this chat is idle. Never while a turn
+        """A reopen found work whose previous DGC was still exiting (the window reloaded a moment
+        before): bring it back once that process has gone and this chat is idle. Never while a turn
         writes the transcript; gives up when the process keeps running (it still has the session)."""
         if not self.agent.monitor_restart_awaiting():
             return
@@ -2991,10 +3001,20 @@ class Backend:
         """`background_shells.items`: this chat's shells, oldest first, minus those that had ended
         before the chat was last reset. Labels were redacted when the shell started; again here,
         for a secret the user added since."""
-        from . import tools
+        from . import stopped_work, tools
         since = getattr(self, "_background_since", 0.0)
         items = [item for item in tools.background_shells(self._chat_tool_owners())
                  if item["ended_at"] is None or item["ended_at"] >= since]
+        # Commands a restart stopped (dgc/stopped_work.py), as "stopped", with the key Run again takes.
+        # Their own ids belonged to the process that ended: "was-bg3" can never be a live shell's.
+        try:
+            for record in stopped_work.stopped_shells(self.agent):
+                items.insert(0, {"id": f"was-{record['id']}"[:64], "command": str(record.get("label") or ""),
+                                 "state": "stopped", "started_at": round(float(record["started_at"]), 3),
+                                 "ended_at": round(float(record.get("ended_at") or record["started_at"]), 3),
+                                 "exit_code": None, "agent_id": None, "rerun": record["key"]})
+        except Exception:
+            pass
         # Bounded like every list on the wire. The oldest ended shells go first: never drop a running
         # one to make room for one that has ended.
         drop = len(items) - _MAX_BACKGROUND_SHELLS_LISTED
@@ -6334,6 +6354,20 @@ class Backend:
             if not self._bring_back_monitors(lambda: self.agent.restart_monitor(key), request_id):
                 self.em.emit("command_rejected", command=t, reason="unknown_monitor",
                              message="that monitor is no longer waiting to be restarted",
+                             **_request_fields(request_id))
+        elif t == "rerun_task":
+            # Run again / Resume on a command, sub-agent or troupe a restart stopped. Idle only, as
+            # restart_monitor: its note joins the transcript, which a running turn is writing.
+            if self._busy():
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="DGC is working; press it again when the turn ends",
+                             **_request_fields(request_id))
+                return
+            key = str(cmd.get("key") or "")[:32]
+            how = "resume" if cmd.get("how") == "resume" else "again"
+            if not self._bring_back_monitors(lambda: self.agent.rerun_task(key, how), request_id):
+                self.em.emit("command_rejected", command=t, reason="unknown_task",
+                             message="that work is no longer waiting to be run again",
                              **_request_fields(request_id))
         elif t == "stop_monitor":
             # Never blocks the command loop: the group is signalled here and reaped by its reader,

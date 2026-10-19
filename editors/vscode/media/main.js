@@ -4746,7 +4746,7 @@
   const restartedMonitorIds = new Set();
   // A live note and its replayed marker are one line. The restore's history snapshot can land before or after the live
   // note (the note is saved with the chat first), so whichever comes second gives way: a replay skips a marker whose
-  // live line is on screen, and a live line takes the place of its replayed marker (the live one has the button).
+  // live line is on screen, and a live line takes the place of its replayed marker (the live one has the buttons).
   const restartNoteId = (ev) => `${String(ev?.key || "")}:${String(ev?.state || "")}:${Number(ev?.at) || 0}`;
   function placeRestartNote(line, ev, live) {
     line.dataset.note = restartNoteId(ev);
@@ -4757,8 +4757,8 @@
       return;
     }
     twins.filter((n) => n.classList.contains("hist")).forEach((n) => n.remove());
-    // Running again: the earlier line's Restart has done its job.
-    if (String(ev?.state || "") === "restarted" && ev?.key) {
+    // Running again: the earlier line's Restart / Run again / Resume has done its job.
+    if (["restarted", "started", "resumed"].includes(String(ev?.state || "")) && ev?.key) {
       for (const earlier of log.querySelectorAll(".monitor-restart:not(.hist)")) {
         if (earlier.dataset.note.startsWith(`${String(ev.key)}:`)) earlier.querySelectorAll("button").forEach((b) => b.remove());
       }
@@ -4780,6 +4780,31 @@
       line.appendChild(again);
     }
     if (live && state === "restarted" && ev.id) restartedMonitorIds.add(String(ev.id));
+    placeRestartNote(line, ev, live);
+  }
+  // A background command, sub-agent or troupe the restart stopped (dgc/stopped_work.py). Never run again on its own:
+  // the live line offers Resume / Run again; a replayed one is the record of it.
+  const TASK_INTERRUPTED_ICONS = { stopped: "circle-slash", started: "play", resumed: "refresh-cw", failed: "triangle-alert" };
+  const TASK_ACTIONS = { resume: ["Resume", "Start a new one that picks up from what the stopped one had done"],
+    run_again: ["Run again", "The same command in the same folder, or the same task from scratch"] };
+  function taskInterruptedLine(ev, live) {
+    const state = String(ev?.state || "");
+    if (!TASK_INTERRUPTED_ICONS[state]) return;
+    const line = el("div", "sys sys-marked monitor-restart task-interrupted" + (live ? "" : " hist") + (state === "failed" ? " err" : ""));
+    line.dataset.state = state;
+    line.dataset.kind = String(ev.kind || "");
+    line.innerHTML = icon(TASK_INTERRUPTED_ICONS[state]) + `<span>${esc(String(ev.message || "").slice(0, 600))}</span>`;
+    const actions = live && ev.key && Array.isArray(ev.actions) ? ev.actions.filter((a) => TASK_ACTIONS[a]) : [];
+    for (const action of actions) {
+      const [label, title] = TASK_ACTIONS[action];
+      const button = el("button", "act monitor-restart-again", label);
+      button.type = "button"; button.title = title;
+      button.onclick = () => {
+        line.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+        vscode.postMessage({ type: "rerunTask", key: String(ev.key), how: action === "resume" ? "resume" : "again" });
+      };
+      line.appendChild(button);
+    }
     placeRestartNote(line, ev, live);
   }
   function renderMonitorsList() {
@@ -6394,6 +6419,9 @@
         break;
       case "monitor_restart":
         monitorRestartLine(ev, true);
+        break;
+      case "task_interrupted":
+        taskInterruptedLine(ev, true);
         break;
       case "monitor_ended":
         if (!knownMonitorIds.has(String(ev.id || ""))) break;   // a monitor of a chat that was left
@@ -8372,6 +8400,7 @@
     }
     if (it.role === "notice") { appendTarget.appendChild(el("div", "sys hist", esc(it.text))); return; }
     if (it.role === "monitor_restart") { monitorRestartLine(it, false); return; }
+    if (it.role === "task_interrupted") { taskInterruptedLine(it, false); return; }
     if (it.role === "resume") { onEvent({ type: "turn_start", prompt: String(it.text || ""), kind: "resume" }); return; }
     if (it.role === "user") { onEvent({ type: "turn_start", prompt: String(it.text || ""), kind: "prompt" }); return; }
     if (it.role === "assistant" && it.text) {
@@ -10167,10 +10196,12 @@
     const id = String(item.id), key = `shell:${id}`;
     const running = item.state === "running";
     const ms = amTaskMs(key, Number(item.started_at) * 1000, running, Number(item.ended_at) * 1000);
-    const word = running ? "Running" : item.state === "killed" ? "Stopped"
+    const restarted = item.state === "stopped";       // a restart stopped it (dgc/stopped_work.py); Run again on its card
+    const word = running ? "Running" : restarted ? "Stopped by a restart" : item.state === "killed" ? "Stopped"
       : `Exited${Number.isInteger(item.exit_code) ? ` · code ${item.exit_code}` : ""}`;
     return { key, kind: "shell", id, running, name: String(item.command || id), word, label: "shell", ms,
-      stoppable: running, output: true, item, meta: ["shell", amDuration(ms)].filter(Boolean) };
+      stoppable: running, output: !restarted, item, rerun: restarted ? String(item.rerun || "") : "",
+      meta: ["shell", restarted ? "stopped by a restart" : amDuration(ms)].filter(Boolean) };
   }
   function amTroupeTask(ev) {
     const id = String(ev.run_id), state = String(ev.state || "running"), running = state === "running";
@@ -10200,6 +10231,9 @@
   // The ones running now: the map's "N background tasks" list, its root card and the pill all count
   // this, so no two of them can disagree.
   function amRunningTasks() { return amAllTasks().filter((task) => task.running); }
+  // The map's list: what runs now, and a command a restart stopped until it is run again (its card has Run again).
+  // Only the running ones are counted as running, by the pill, the root card and the list's title alike.
+  function amListedTasks() { return amAllTasks().filter((task) => task.running || task.rerun); }
   function amTaskEntry(task) {
     let entry = amTaskRows.get(task.key);
     if (entry) return entry;
@@ -10306,8 +10340,10 @@
     more.hidden = agentTotalExtra <= 0;
     agentsSetText(more, agentTotalExtra > 0
       ? `${agentPlural(agentTotalExtra, "more agent")} not listed${agentActiveExtra > 0 ? `, ${agentActiveExtra} of them working` : ""}.` : "");
-    // Only what runs now: a task that ends drops out of the list (its card, if open, keeps it).
-    const tasks = amRunningTasks();
+    // Only what runs now: a task that ends drops out of the list (its card, if open, keeps it). A command a
+    // restart stopped stays, with Run again, until it is run again.
+    const tasks = amListedTasks();
+    const stoppedByRestart = tasks.filter((task) => !task.running).length;
     const keys = new Set(tasks.map((task) => task.key));
     for (const key of [...amTaskRows.keys()]) if (!keys.has(key)) amTaskRows.delete(key);
     for (const key of [...taskStopping.keys()]) if (!keys.has(key)) taskStopping.delete(key);
@@ -10317,7 +10353,9 @@
       return entry.item;
     }));
     $("agent-map-tasks").hidden = !tasks.length;
-    agentsSetText($("agent-map-tasks-title"), `${agentPlural(tasks.length, "background task")} · click a task for details`);
+    const running = tasks.length - stoppedByRestart;
+    agentsSetText($("agent-map-tasks-title"), [running ? agentPlural(running, "background task") : "",
+      stoppedByRestart ? `${stoppedByRestart} stopped by a restart` : "", "click a task for details"].filter(Boolean).join(" · "));
     // One tab stop in the tree and one in the tasks; the arrow keys move within each.
     amRove($("agent-map-tree"), focusedKey);
     amRove($("agent-map-task-list"), focusedKey);
@@ -10757,6 +10795,10 @@
       if (task.kind === "preview") n.open = amButton(actions, "Open in browser", () => amOpenTask(amTaskFor(amCard.key)));
       if (task.kind === "pip") n.open = amButton(actions, "Open in Pips", () => amOpenTask(amTaskFor(amCard.key)));
       if (task.kind !== "pip") n.stop = amButton(actions, "Stop", () => amStopTask(amTaskFor(amCard.key)));
+      if (task.rerun) n.rerun = amButton(actions, "Run again", () => {
+        n.rerun.disabled = true;
+        vscode.postMessage({ type: "rerunTask", key: task.rerun, how: "again" });
+      });
       n.stopNote = actions.appendChild(el("p", "am-note am-failure"));
       // Its output in a large window, as an agent's card opens its transcript.
       if (task.output) n.full = amButton(actions, "Open output", () => amOpenTranscript({ kind: "output", key: task.key }, n.full), "act am-wide");

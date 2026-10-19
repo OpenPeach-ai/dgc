@@ -1754,6 +1754,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.backend?.send({ type: "restart_monitor", key: recordKey, request_id: this.nextRequestId("monitor-restart") });
   }
 
+  /** Run again / Resume on a command, sub-agent or troupe a restart stopped (task_interrupted). The answer reaches the
+   *  webview as an ordinary event. Only a CLI with task_interrupted sent the line the button is on. */
+  private rerunTask(key: string, how: "again" | "resume"): void {
+    const recordKey = String(key || "");
+    if (!/^[0-9a-f]{12}$/.test(recordKey) || (this.lastReadyEvent?.capabilities as any)?.task_interrupted !== true) { return; }
+    this.backend?.send({ type: "rerun_task", key: recordKey, how, request_id: this.nextRequestId("rerun-task") });
+  }
+
   /** Stop one troupe. The backend stops its agents; the `troupes` answer and the troupe_finished that follows update
    *  its row. A CLI without troupes never sent one, so it is never asked. */
   private async stopTroupe(id: string): Promise<void> {
@@ -4441,6 +4449,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "restartMonitor":
         this.restartMonitor(String(msg.key || ""));
+        break;
+      case "rerunTask":
+        this.rerunTask(String(msg.key || ""), msg.how === "resume" ? "resume" : "again");
         break;
       case "stopMonitor":
         void this.stopMonitor(String(msg.id || ""));

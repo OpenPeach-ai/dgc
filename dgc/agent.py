@@ -2046,7 +2046,7 @@ class Agent(GoalLifecycle):
         # the ones DGC's stopping ended (dgc/monitor_restart.py). Set by load_session, taken once.
         self.monitors.journal = self._monitor_journal_target
         self._monitor_restart_due = False
-        self._monitor_restart_awaited = None     # monitors whose previous DGC was still exiting at reopen
+        self._monitor_restart_awaited = None     # work whose previous DGC was still exiting at reopen
         self.subagents = SubagentRegistry()      # this chat's task sub-agents (children share it)
         self._monitor_turn = False               # a turn DGC started on a monitor event is running
         # ---- 0.40 shared plain state (declared once here; each lane gives its fields meaning) ----
@@ -5982,13 +5982,13 @@ class Agent(GoalLifecycle):
         return monitor_restart.restart_one(self, key)
 
     def restart_awaited_monitors(self) -> list:
-        """Monitors a reopen waited on because their previous DGC was still exiting, now that it has."""
+        """Work a reopen waited on because its previous DGC was still exiting, now that it has."""
         from . import monitor_restart
         try:
             return monitor_restart.restart_awaited(self)
         except Exception as exc:
             self._monitor_restart_awaited = None
-            self.ui.info(self._safe_text(f"monitors were not restarted: {type(exc).__name__}"))
+            self.ui.info(self._safe_text(f"background work was not restarted: {type(exc).__name__}"))
             return []
 
     def monitor_restart_awaiting(self) -> str:
@@ -6001,6 +6001,14 @@ class Agent(GoalLifecycle):
         except Exception:
             self._monitor_restart_awaited = None
             return ""
+
+    def rerun_task(self, key: str, how: str = "again"):
+        """The user's Run again or Resume on a command, sub-agent or troupe a restart stopped. Their
+        press is the approval; a deny still wins. None when this chat has no such stopped work."""
+        if not self._monitor_delivery():
+            return None
+        from . import stopped_work
+        return stopped_work.run_again(self, key, how)
 
     def _monitor_restart_noted(self, outcomes: list) -> None:
         """Tell the model at its next turn what the user was just shown, and save it with the chat."""
@@ -9676,6 +9684,9 @@ class Agent(GoalLifecycle):
                     if files:
                         note = (note + "\nFILES: " + ", ".join(files)).strip()
                 registry.end(agent_id, state, self._safe_text(note), tool_calls=tool_calls, tokens=tokens)
+                if self.depth == 0:
+                    from . import stopped_work
+                    stopped_work.agent_ended(self, agent_id, state)
 
     def _remove_task_workspace(self, workspace, *, cancel: threading.Event | None = None,
                                may_remove: bool = True) -> tuple[bool, str]:
@@ -9958,6 +9969,10 @@ class Agent(GoalLifecycle):
                            isolated=workspace is not None, parallel=False, queued=False,
                            turn_hint=getattr(self.ui, "turn_id", ""),
                            background=detach)
+        if self.depth == 0:
+            from . import stopped_work            # a restart says which sub-agents it stopped
+            stopped_work.agent_started(self, sub_ui.agent_id, description, prompt, agent_name,
+                                       background=detach, call_id=call_id, workspace=workspace)
         if not detach:
             try:
                 execution = self._execute_prepared_subagent(
@@ -10344,7 +10359,10 @@ class Agent(GoalLifecycle):
                 return len(troupe_agent.stop(self, agent_id)) if agent_id in getattr(self, "_troupes", {}) else 0
             job["cancel"].set()
             return 1
-        from . import troupe_agent
+        from . import stopped_work, troupe_agent
+        # Every one of them: the chat or DGC is going away, not the user stopping one. Written down
+        # first, so a reopen knows they did not end by request (dgc/stopped_work.py).
+        stopped_work.chat_stopping(self)
         n = len(troupe_agent.stop(self))
         for job in list(jobs.values()):
             job["cancel"].set()

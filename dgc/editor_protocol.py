@@ -467,6 +467,19 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
                         "state": _f("string", enum=("restarted", "stopped", "expired", "failed")),
                         "message": _S(), "stopped_at": _f("null", "integer"), "at": _I(),
                         "restart": _B(), "by_user": _B(False), "request_id": _S(False)},
+    # ready.capabilities.task_interrupted: after the resume's monitor_restart lines, one per background
+    # command (`shell`), sub-agent (`agent`) or troupe the restart stopped. A command or sub-agent is
+    # `stopped` and never run again on its own: `actions` offers run_again (and resume, for a
+    # sub-agent) through rerun_task {key, how}. A troupe is `resumed` from its journal, or `stopped`
+    # with resume when the permissions in force now would not start it. Also the answer to rerun_task
+    # (`started`, `resumed`, `stopped` when a deny wins, `failed`). History replays it as
+    # {role: "task_interrupted", kind, key, id, state, description, message, at}. The agent map's
+    # background_shells then lists a stopped command as {id: "was-<id>", state: "stopped", rerun: key}.
+    "task_interrupted": {"key": _S(), "kind": _f("string", enum=("shell", "agent", "troupe")),
+                         "id": _S(), "description": _S(), "command": _S(),
+                         "state": _f("string", enum=("stopped", "started", "resumed", "failed")),
+                         "message": _S(), "stopped_at": _f("null", "integer"), "at": _I(),
+                         "actions": _A(), "by_user": _B(False), "request_id": _S(False)},
     # ---- background tasks (the Agent map; ready.capabilities.background_tasks = {version: 1}) ----
     # Every background shell (`bash` with background: true) of this chat, the whole list each time:
     # items {id "bg<n>", command (the redacted label, never the raw command), state running|exited|
@@ -806,6 +819,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # capabilities.monitor_restart: the Restart on a monitor_restart note with `restart`. Answered
     # with monitor_restart, or command_rejected (turn_in_progress, unknown_monitor).
     "restart_monitor": {"key": _S(), "request_id": _S(False)},
+    # capabilities.task_interrupted: Run again (`how` again, the default) or Resume on a
+    # task_interrupted line. Answered with task_interrupted, or command_rejected (turn_in_progress,
+    # unknown_task).
+    "rerun_task": {"key": _S(), "how": _f("string", required=False, enum=("again", "resume")),
+                   "request_id": _S(False)},
     # Background tasks (capabilities.background_tasks): read and stop only, allowed while a turn runs.
     # list_ and stop_background_shell answer with `background_shells`; an id this chat does not have
     # is command_rejected (reason unknown_task). get_background_output answers with exactly one

@@ -49,3 +49,22 @@ What comes back, and what does not:
 
 DGC writes each monitor down in a small file beside the session (`<session>.monitors`, at most eight
 records, private to you), and removes it with the session.
+
+## Other background work a restart stopped
+
+The same opening of the chat says what happened to the rest of the work that was running in the background:
+
+- **Background commands** (a dev server, a long build started with `background: true`) are shown as "stopped by a
+  restart" with **Run again**: the same command in the same folder. They are never run again on their own, because a
+  command may not be safe to repeat. The agent map lists them too, with Run again on their card, until you run them
+  again.
+- **Sub-agents** that had not reported are shown as stopped by a restart, here and in the agent map, with **Resume**
+  (a new sub-agent with the same task and what the stopped one had done: its steps, and its unmerged work when DGC
+  kept it as a retained task) and **Run again** (the same task from scratch). Never run again on their own.
+- **Troupes** pick up where they stopped, once, when the chat is opened again: every agent that had finished keeps
+  its result, and only the unfinished ones run again. When the permissions in force now would not start it (plan
+  mode, or an approval auto mode had given), it is shown stopped with **Resume** instead.
+
+Your press is the approval; a deny rule or plan mode still wins. The model is told which ones stopped, and what was
+run again. These are written beside the session in `<session>.tasks`, under the same rules: only work whose DGC has
+ended, never work another live DGC still runs.

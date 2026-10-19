@@ -2300,6 +2300,11 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
              "on_change": getattr(ctx, "on_background", None)}
     with _BG_LOCK:
         _BG[bid] = entry
+    try:                                    # a chat's commands are written down: a restart says which stopped
+        from . import stopped_work
+        stopped_work.shell_started(entry, bid, command, ctx, sandboxed=bool(argv))
+    except Exception:
+        pass
 
     def reader():
         redactor = StreamingRedactor(lambda: secret_values(getattr(ctx, "config", None)))
@@ -2342,6 +2347,12 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
             proc.wait()
         finally:
             entry["finished"] = time.time()
+        try:
+            from . import stopped_work
+            stopped_work.shell_ended(entry, "dgc_stopped" if entry.get("shutdown") else
+                                     "killed" if entry.get("killed") else "exited")
+        except Exception:
+            pass
         # Tell the model once when the task ends on its own -- never after bash_kill or shutdown,
         # and never into a conversation that replaced the one that started it (the hub's epoch).
         if hub is not None and not entry.get("killed"):
@@ -2606,6 +2617,14 @@ def _shutdown_background(owner: str | None = None) -> None:
         # IDs: the kernel may have reused one for an unrelated process by interpreter shutdown.
         if entry.get("finished") is None:
             entry["killed"] = True
+            # Not the user's or the model's kill: the chat or DGC is going away. Said before the process
+            # goes, so a restart knows this command did not end by request (dgc/stopped_work.py).
+            entry["shutdown"] = True
+            try:
+                from . import stopped_work
+                stopped_work.shell_ended(entry, "dgc_stopped")
+            except Exception:
+                pass
             _terminate_background(entry["proc"], sweep_exited_group=True)
             _join_background_reader(entry)
 
