@@ -12,6 +12,18 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 - **A Pip report is never lost to its summary.** A summary over 4,000 characters is cut at its last sentence that fits and marked, and a missing one is written from the findings, each with a note in the report's limitations. Before, "report summary must be text between 1 and 4000 characters" failed the whole run, and even the one format repair never ran (three failed runs in a row on a real project).
 
+### Pips: a Pip's runs in its own chat (Pips API 51)
+
+- **Each run posts its result in the Pip's own chat**, as Grok Bots and OpenAI Dots post a scheduled run: a
+  review's findings (how many, the worst severity, the top three with file and line), Pulse checks, a Quill draft,
+  a Personal Pip's scheduled result, and a failure of any of them in plain words, with when it runs next. It is
+  written when the run finishes, by the runner, so it is there once per run even if no editor was open. It says
+  what the Work chat's report card says (one builder makes both).
+- **Not a turn, not your words.** A post never starts a reply. The Pip's next reply reads its five latest posts as
+  reference data, marked as written by DGC, beside its last report.
+- `list_pip_run_posts {pip_id, before_id?, limit?}` reads them; `get_pip` has `report_session`, the chat Ask DGC to
+  fix goes to. The registry schema stays 46 (the posts' table is made on first use).
+
 ### Pips: scheduled Pips run with VS Code closed
 
 - **Keep Pips running turns itself on** the first time a Pip gets a schedule, a commit trigger or a routine

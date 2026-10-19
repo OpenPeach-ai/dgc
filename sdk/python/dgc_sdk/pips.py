@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_pip_run_posts",
     "check_pip_source", "get_pip_run_source",
     "list_pip_plugins", "list_pip_plugin_uses", "list_pip_attention", "list_pip_notes", "list_pip_sites", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit",
     "list_pip_routines", "list_pip_shared", "get_pip_computers", "list_pip_apps",
@@ -225,7 +226,11 @@ MUTATION_COMMANDS |= API48_MUTATIONS
 # API 50: whether a Pip's source fits a run, and what one run's copy left out (safe_source_v2); local only.
 API50_READS = frozenset({'check_pip_source', 'get_pip_run_source'})
 READ_COMMANDS |= API50_READS
+# API 51: a finished run posts its result in its Pip's own chat; list_pip_run_posts reads them, a page at a time.
+API51_READS = frozenset({'list_pip_run_posts'})
+READ_COMMANDS |= API51_READS
 COMMAND_FIELDS = {
+    'list_pip_run_posts': frozenset({'pip_id', 'before_id', 'limit'}),
     'check_pip_source': frozenset({'pip_id', 'source_policy'}),
     'get_pip_run_source': frozenset({'run_id'}),
     'list_pip_plugins': frozenset({'pip_id'}),
@@ -488,7 +493,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API50_READS:
+        if command in API51_READS:
+            minimum = 51
+        elif command in API50_READS:
             minimum = 50
         elif command in API48_MUTATIONS:
             minimum = 48
@@ -675,6 +682,15 @@ class Pips:
         """Read a run; this does not enqueue work."""
         return self.read("get_pip_run", {"run_id": run_id})
 
+    def run_posts(self, pip_id: str, *, before_id: str | None = None, limit: int | None = None) -> dict[str, Any]:
+        """What this Pip's runs posted in its own chat, oldest first (Pips API 51)."""
+        params: dict[str, Any] = {"pip_id": pip_id}
+        if before_id is not None:
+            params["before_id"] = before_id
+        if limit is not None:
+            params["limit"] = limit
+        return self.read("list_pip_run_posts", params)
+
 
 class AsyncPips:
     """Async parity; control waits run on a worker thread like AsyncSession."""
@@ -699,3 +715,6 @@ class AsyncPips:
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         return await self.read("get_pip_run", {"run_id": run_id})
+
+    async def run_posts(self, pip_id: str, *, before_id: str | None = None, limit: int | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.run_posts, pip_id, before_id=before_id, limit=limit)

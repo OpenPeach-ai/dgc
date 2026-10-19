@@ -26,6 +26,7 @@ export type PipReadParams = {
   get_pip_chat_context: { pip_id: string; context_size?: number };
   check_pip_source: { pip_id: string; source_policy?: Record<string, unknown> };
   get_pip_run_source: { run_id: string };
+  list_pip_run_posts: { pip_id: string; before_id?: string; limit?: number };
   get_pips_limit: Record<string, never>;
   list_pip_reply_stats: { pip_id: string; run_ids: string[] };
   list_pip_routines: { pip_id: string };
@@ -211,6 +212,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   set_pip_chat_options: ["pip_id", "chat_options"],
   check_pip_source: ["pip_id", "source_policy"],
   get_pip_run_source: ["run_id"],
+  list_pip_run_posts: ["pip_id", "before_id", "limit"],
   list_pip_reply_stats: ["pip_id", "run_ids"],
   get_pips_limit: [],
   set_pips_limit: ["max_pips"],
@@ -578,6 +580,9 @@ for (const command of API48_MUTATIONS) MUTATIONS.add(command);
 // API 50: whether a Pip's source fits a run, and what one run's copy left out (safe_source_v2); local only.
 const API50_READS = new Set(["check_pip_source", "get_pip_run_source"]);
 for (const command of API50_READS) READS.add(command);
+// API 51: a finished run posts its result in its Pip's own chat; list_pip_run_posts reads them, a page at a time.
+const API51_READS = new Set(["list_pip_run_posts"]);
+for (const command of API51_READS) READS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -666,7 +671,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -827,4 +832,10 @@ export class Pips {
   runs(pipId: string): Promise<PipResult> { return this.read("list_pip_runs", { pip_id: pipId }); }
   /** Read a run; never enqueue work. */
   getRun(runId: string): Promise<PipResult> { return this.read("get_pip_run", { run_id: runId }); }
+  /** What this Pip's runs posted in its own chat, oldest first (Pips API 51). */
+  runPosts(pipId: string, options: { beforeId?: string; limit?: number } = {}): Promise<PipResult> {
+    return this.read("list_pip_run_posts", { pip_id: pipId,
+      ...(options.beforeId !== undefined ? { before_id: options.beforeId } : {}),
+      ...(options.limit !== undefined ? { limit: options.limit } : {}) });
+  }
 }

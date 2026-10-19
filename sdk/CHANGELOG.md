@@ -13,6 +13,10 @@ command `restart_monitor {key}` restarts one a resume left stopped. A resume sen
 Likewise `task_interrupted` (`kind` shell|agent|troupe, `state` stopped|started|resumed|failed, `actions`) with
 `ready.capabilities.task_interrupted`, and the command `rerun_task {key, how?}` (`how` again|resume).
 
+Pips API 51: `list_pip_run_posts {pip_id, before_id?, limit?}` (a read) returns what a Pip's runs posted in its own
+chat, oldest first (`pips.run_posts()` in Python, `pips.runPosts()` in TypeScript); both SDKs refuse it before API 51.
+No editor event changed.
+
 Pips API 48: `mark_pip_news_seen {pip_ids, until}` (a mutation, local only) marks 1–50 Pips' news (failed runs, new
 findings) seen up to a digest's `until`, until they do something new; both SDKs know it and refuse it before API 48.
 

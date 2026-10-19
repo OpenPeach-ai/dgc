@@ -277,5 +277,24 @@ class ReplyPromptTests(unittest.TestCase):
         self.assertIn("Current user message:\nIs the greeting one new?", prompt)
 
 
+class SDKGateTests(unittest.TestCase):
+    """Both SDKs know list_pip_run_posts and refuse it before Pips API 51, without a request."""
+
+    def test_python_sdk_refuses_it_before_api_51_and_sends_its_fields(self):
+        from tests.test_dgc_sdk_pips import CAPS, Wire, session      # puts sdk/python on the path first
+        from dgc_sdk import DGCUnsupportedError
+        from dgc_sdk.pips import COMMAND_FIELDS
+        self.assertEqual(COMMAND_FIELDS["list_pip_run_posts"], pips._COMMAND_ARGS["list_pip_run_posts"])
+        wire = Wire()
+        old = session(wire, caps={**CAPS, "pips_api_version": 50})
+        with self.assertRaisesRegex(DGCUnsupportedError, "API 51"):
+            old.pips.run_posts("pip_rook")
+        self.assertFalse(wire.calls)
+        current = session(wire, caps={**CAPS, "pips_api_version": 51})
+        answer = current.pips.run_posts("pip_rook", before_id="run_" + "1" * 32, limit=10)
+        self.assertEqual(answer["request"]["type"], "list_pip_run_posts")
+        self.assertEqual((answer["request"]["before_id"], answer["request"]["limit"]), ("run_" + "1" * 32, 10))
+
+
 if __name__ == "__main__":
     unittest.main()

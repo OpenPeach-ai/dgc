@@ -394,6 +394,40 @@ dgc pips import brief.pip.json        # shows the job, asks, then creates it
 Patch Pips can't be shared yet, and a Pulse Pip is imported in the Pips view, where its
 commands are reviewed on the card.
 
+## A Pip's runs in its own chat
+
+Each run a Pip finishes is posted in its own chat, as a short message from the Pip, the way
+Grok Bots and OpenAI Dots post a scheduled run in the bot's conversation. Reply to it there:
+"is the e-way one the same as last week?" The full list is the Pip's **History** tab (it was
+Runs; for a Personal Pip, Results).
+
+| Run | What its chat shows |
+| --- | --- |
+| A review with findings (Scout, Lens, Rook, Lock) | "Today's audit found 5 things, 2 of them high", the top three with severity, title and file:line, how many more are in the report, **Open full report** and **Ask DGC to fix** |
+| Pulse checks that failed | "Today's checks: 2 of 5 failed", the failed checks, the same two buttons |
+| A failed run | "Today's audit didn't finish." What stopped it in plain words, "Nothing in your project was changed", and when it runs next; **See what happened**, **Run again now** when it can, **Ask DGC to fix** |
+| A clean run | One quiet line between the messages: "✓ 12:58 PM · Audit: nothing found · Open" |
+| A Quill draft | "Today's draft is ready:" and its title |
+| A Personal Pip's scheduled task (Core and the others) | Its result, in its own words (the first 1,200 characters), and **Open full result** |
+
+**Open full report** opens that run under History, at its report. **Ask DGC to fix** sends
+the prompt the Work chat's report card sends, naming the run, to the chat the Pip reports to
+(the newest one it was set up in or attached to), in that chat's tab; a Pip that reports to no
+chat starts a new one. It is sent once: the button then reads "Asked DGC". The status under the
+Pip's name says what its last run found ("Today's audit: 5 findings") and goes to its post.
+
+**Once, even with the editor closed.** The post is written when the run finishes, by the
+runner, so a run that ends overnight is in the chat in the morning. Chat replies, Patch work
+and cancelled runs post nothing.
+
+**Not a message from you.** A post never starts a reply and is never sent to the Pip's model as
+something you said. When you next write to the Pip, its model reads its five latest posts as
+reference data, with the full report a tool call away.
+
+**Long chats.** Each run is one post. Runs nobody replied to that are more than a day old fold
+into one line, "12 earlier runs · 3 with findings", which opens in place; the newest of them and
+any run you replied to stay as they are.
+
 ## Reports reach the chat
 
 What a Pip finds comes to the chat that should act on it, as an item, not a new turn.
@@ -404,8 +438,8 @@ When a Pip's run finishes, a card appears in the transcript of every chat it rep
 - the chat that **ran it** with `run_pip_now`, for that run.
 
 A Pip that reports to no chat keeps reporting where it always has: its Pips page, Needs
-attention and the Pips strip on the Sessions home. Its **Runs** page says which it is, and how
-to attach it.
+attention and the Pips strip on the Sessions home, and its own chat. Its **History** page says
+which it is, and how to attach it.
 
 The card shows the Pip's face and name, what happened and when: "finished · 5 findings (2 high,
 3 medium)", "finished · 1 of 2 checks failed", or "failed:" and the reason in plain words (the

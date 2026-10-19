@@ -578,6 +578,39 @@ local only) or by a message sent with them, and applied to every run of that Pip
 has no step or time limit (`max_turns` 0, `turn_budget_s` 0; the manifest's `limits` are 0,
 meaning none), except a Patch with reviewed specialists, whose bounds stay as reviewed.
 
+**Runs in the Pip's own chat (API 51).** When an `audit`, a Pulse plan's `test`, a `draft` or a
+`personal_task` run succeeds or fails, `PipStore.finish` (and `recover`, for a run the runner lost)
+writes one row in `pip_run_posts`, keyed by the run, in the same transaction: once per run, whether
+or not an editor is open. The table is created on first use, so the registry schema stays 46.
+Conversation replies, Patch work, a handoff's test run and cancelled runs post nothing. A post is
+the Work chat card's report (`pip_report_delivery` builds both) plus:
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `audit`, `checks`, `draft` or `result` (a Personal Pip's task) |
+| `outcome` | `findings`, `clear`, `failed`, `checks_failed`, `checks_passed`, `draft` or `result` |
+| `trigger` | `schedule`, `event`, `you`, `chat` (the main chat ran it) or `handoff` |
+| `total`, `counts`, `findings` | A review's findings: how many, by severity, the top three (`title`, `severity`, `path`, `line`) |
+| `checks`, `failed_checks` | Pulse: `{passed, failed, total}` and up to three failed checks |
+| `reason`, `detail` | A failure in plain words, and the saved message |
+| `next_run_at` | A failed run of an active, scheduled Pip: when it runs next |
+| `title`, `summary` | A Quill draft |
+| `preview`, `truncated` | A Personal Pip's result: its first 1,200 characters, cut at a paragraph |
+| `text` | The post in one plain line, as the terminal says it |
+| `posted_at` | When the run finished |
+
+`list_pip_run_posts {pip_id, before_id?, limit?}` (a read, `limit` 1 to 50, default 20) returns
+`{pip_id, workspace_id, posts, next_before_id}`, oldest first, the newest page first; `before_id`
+is a post's `run_id`. The editor draws each post where it falls among the chat's messages, and
+History (the Runs tab) says what each run found from the same posts.
+
+A post is not a chat message: it is not in `pip_chat_messages`, never queues a reply and never
+pairs with a user message. A conversation run's context carries the five newest posts as
+`run_posts` (each without the Pip's id and name, a Personal result's preview cut to 400
+characters), and the worker puts them in the reference data beside `last_report`, with a note
+that DGC wrote them, not the user. `get_pip` returns `report_session`: the newest chat the Pip
+reports to (attached, or set up there), where the editor's **Ask DGC to fix** sends its prompt.
+
 ## Schedules and event triggers
 
 A job has a `schedule` or an `event_trigger`, never both. Both only fire while the
@@ -1332,3 +1365,4 @@ Clients check it before using a newer control.
 | 45 | Every plugin turned on is every Pip's (no `use_plugin`, no card); `set_plugin_permission` and each plugin's level (`always_ask`, `any_changes`, `important`, `never_ask`); `web_search` on the app socket; careful mode's `Lane` for unattended runs |
 | 49 | Additive, nothing to gate on: `list_pip_runs` rows carry a failed run's `error`; `get_pip_execution` has `local_http_checks` and, when DGC knows the one-time fix, `fix` (`dgc pips execution --fix`); a Pulse setup card's `runner_notice` says when it can't run on this computer |
 | 50 | The `safe_source_v2` source rules (files DGC can't copy are left out and listed, `.dgcignore`, the project's ignore files for current files, a Pip's Excluded folders in `source_policy.exclude`, 256 MiB); `check_pip_source` and `get_pip_run_source`; new reviewer and Quill Pips start on `safe_source_v2` |
+| 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
