@@ -39,6 +39,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   and `list_pip_computer_frames` takes `pointers`, so the live view and "What it saw" draw the Pip's cursor.
 - **A payment is never Always allow.** A held submit that carries a card number now refuses Always allow
   (`asks_every_time`), and no grant for that site sends one; before, the browser's payments could be always allowed.
+- **A long run no longer forgets what it was asked.** Compaction counted each step's screenshot (and every
+  `<tool_results>` and `<system-reminder>` message) as the user speaking, so the brief's "user's own messages" filled
+  with screen captions until the ask no longer fit, and a later compaction quoted only what was said since the last
+  one. DGC's own messages are no longer the user's, and each brief quotes the words earlier briefs quoted too (the
+  newest win when they don't all fit). Measured before: two
+  180-step T-shirt runs ended "I don't have a stated request for this design yet".
 
 ### Pips: phone photos and bigger files in a Pip's chat (Pips API 52)
 

@@ -1243,8 +1243,35 @@ def summariser_role(message: dict) -> str:
                 isinstance(content, str) and content.startswith(_COMPACT_PREFIX)):
             # DGC writes these under role "user" too; neither is the user asking for something.
             return "dgc-generated (not the user)"
+        round_kind = _dgc_round(message)
+        if round_kind == "tool":
+            return _NOT_THE_USER["tool"]
+        if round_kind:
+            return "dgc-generated (not the user)"
         return "user"
     return _NOT_THE_USER.get(role, f"{role} (not the user)")
+
+
+def _dgc_round(message: dict) -> str:
+    """"tool" or "reminder" when a user-role message is DGC closing a tool round, else "".
+
+    A model reads a step's image, a text-protocol result and DGC's reminders under role "user", because
+    that is the only way they reach it. None of them is the user: a long run on a Pip's computer ends
+    every step with its screen, and compaction counted 180 of those as the user speaking -- the
+    summariser read a column of screen captions as the only `user:` lines, and the verbatim block filled
+    with them until the real ask no longer fit. The history view and session titles already skip both
+    openings (`_recall_rows`, sessions.py)."""
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, list):
+        first = next((part for part in content if isinstance(part, dict) and part.get("type") == "text"), None)
+        content = first.get("text") if first else ""
+    if not isinstance(content, str):
+        return ""
+    if content.startswith("<tool_results>"):
+        return "tool"
+    if content.startswith("<system-reminder>"):
+        return "reminder"
+    return ""
 
 
 def _real_user_turns(messages: list[dict]) -> list[dict]:
@@ -1260,7 +1287,8 @@ def _real_user_turns(messages: list[dict]) -> list[dict]:
     for m in messages:
         if not isinstance(m, dict) or m.get("role") != "user":
             continue
-        if notice_kind(m) or m.get("_dgc_pip_setup") or m.get("_dgc_steering") or m.get("_dgc_agent_message"):
+        if (notice_kind(m) or m.get("_dgc_pip_setup") or m.get("_dgc_steering") or m.get("_dgc_agent_message")
+                or _dgc_round(m)):
             continue
         content = m.get("content")
         text = content if isinstance(content, str) else ""
@@ -11344,8 +11372,18 @@ class Agent(GoalLifecycle):
         # this a compaction landing mid-tool-loop deletes every one of them and the brief becomes the
         # only record of what was asked -- which is how a session came back working on something
         # nobody had asked for, with the model able to say only "it appears in the summary".
+        # The words the previous brief quoted come first: a later compaction folds only what was said
+        # since, and a long tool loop says nothing, so from the second compaction on the ask lived only in
+        # whatever the summariser chose to write -- measured, a Pip 180 steps into a task ended "I don't
+        # have a stated request". They ride on the brief as a private field (never sent to a provider).
+        earlier = m1.get("_dgc_quoted_users") if prior else None
+        carried = ([{"role": "user", "content": text} for text in earlier if isinstance(text, str) and text.strip()]
+                   if isinstance(earlier, list) else [])
+        retained_budget = min(_RETAINED_USER_TOKENS, max(1, context_size // 8)) * _COMPACT_CHARS_PER_TOKEN
+        words = [m["content"] for m in _retain_user_turns(carried + middle, retained_budget)]
+        quoted = {"_dgc_quoted_users": words} if words else {}
         retained_users = _retained_user_block(
-            middle, min(_RETAINED_USER_TOKENS, max(1, context_size // 8)) * _COMPACT_CHARS_PER_TOKEN)
+            carried + middle, retained_budget)
         # PreCompact lifecycle hook — a user hook can snapshot state before context is summarized.
         self._run_lifecycle_hooks(
             "PreCompact", {"messages": len(self.messages)}, cancelled=self.cancelled)
@@ -11419,7 +11457,7 @@ class Agent(GoalLifecycle):
                      {"role": "user",
                       "content": f"{_COMPACT_PREFIX}\n{_COMPACT_ENVELOPE}\n{fallback}"
                                  + (f"\n\n{digest}" if digest else "") + retained_users,
-                      "_responses_compaction_display": True},
+                      "_responses_compaction_display": True, **quoted},
                      compacted_assistant]
                     + self.messages[split:])
                 self.messages, _ = _repair_tool_transcript(self.messages)
@@ -11465,7 +11503,7 @@ class Agent(GoalLifecycle):
         self.messages = (
             [self.messages[0],
              {"role": "user",
-              "content": f"{_COMPACT_PREFIX}\n{_COMPACT_ENVELOPE}\n{summary}{retained_users}"},
+              "content": f"{_COMPACT_PREFIX}\n{_COMPACT_ENVELOPE}\n{summary}{retained_users}", **quoted},
              {"role": "assistant", "content": _COMPACT_ACK}]
             + self.messages[split:])              # group-aware: never orphan a native tool call/result
         self.messages, _ = _repair_tool_transcript(self.messages)
