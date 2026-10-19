@@ -1,8 +1,8 @@
 // Pip reports reach the chat, end to end: the REAL panel, the REAL `dgc serve` of this checkout, a
 // real Pip registry in the session's HOME, and media/main.js in Chromium (test/support/panel-live.mjs).
 // A Pip attached to the chat finishes a run; its card arrives in the open chat by itself (no turn);
-// Ask DGC to fix fills the composer through the real editing path (jsdom has no execCommand) and
-// sends nothing; sending it lets the model read the whole report with pips_context; a reload draws
+// Ask DGC to fix sends one message naming the run, once (the founder, 19 Oct), and the model reads
+// the whole report with pips_context; a reload draws
 // the same card; Dismiss is saved; and the card fits a narrow panel.
 // DGC_REQUIRE_CHROMIUM=1 turns a missing browser or Python into a failure.
 import { after, before, test } from "node:test";
@@ -85,13 +85,10 @@ test("a report reaches the open chat as a card, Ask DGC to fix fills the box, an
     assert.ok(fit.overflow <= 0 && fit.logOverflow <= 0, JSON.stringify(fit));
     assert.ok(fit.right <= fit.width && fit.buttons.every(Boolean), JSON.stringify(fit));
 
-    await s.page.locator(".pip-report-fix").click();
-    const text = await s.page.locator("#input").evaluate((el) => el.value);
-    assert.match(text, new RegExp(`pips_context \\(action "report", run_id "${reportRun}"\\)`));
-    await sleep(500);
-    assert.equal(s.events.filter((e) => e.type === "turn_start").length, turnsBefore, "filling the box sends nothing");
-
-    await s.page.keyboard.press("Enter");                               // the user sends it
+    await s.page.locator(".pip-report-fix").click();                     // the user's ask: sent at once, once
+    assert.equal(await s.page.locator("#input").evaluate((el) => el.value), "", "the box is left alone");
+    assert.equal(await s.page.locator(".pip-report-fix").textContent(), "Asked DGC");
+    assert.ok(await s.page.locator(".pip-report-fix").isDisabled(), "a second click can't send it again");
     const ended = await until(() => s.events.filter((e) => e.type === "turn_end").length === 2
       && s.events.filter((e) => e.type === "turn_end").at(-1), "the fix turn to end", 60_000);
     assert.equal(ended.reason, "completed");

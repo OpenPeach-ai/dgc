@@ -231,7 +231,8 @@ test("whatever needs you turns its chip amber and says why, to the eye and to a 
   c.event({ type: "todos", todos: [...TODOS, { content: "Publish (needs your token)", status: "blocked" }] });
   assert.ok(c.chip("tasks").hasAttribute("data-need"));
   assert.equal(c.face("tasks"), "Tasks 4/8 1 blocked");
-  assert.ok(c.chip("tasks").querySelector(".chip-dot"));
+  assert.equal(c.chip("tasks").dataset.need, "error", "blocked is the Tasks row's red, as before the chip line");
+  assert.equal(c.chip("tasks").querySelector(".chip-dot"), null, "no dot");
   assert.match(c.chip("tasks").getAttribute("aria-label"), /1 blocked\. Needs you: 1 blocked$/);
 
   c.event(MONITORS({ wake_paused: true, pending_events: 3 }));

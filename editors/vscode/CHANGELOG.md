@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Ask DGC to fix sends, once.** On a Pip report card it sends DGC one message naming the run (queued behind a turn that is running) and becomes "Asked DGC", also after the chat is reopened. Before, it only filled the box, and a second click pasted the prompt again. A draft in the box is left alone.
+- **The chip line's colours are the rows' colours again.** Blocked tasks and a blocked goal show their icon and "N blocked" in the olive error colour, waiting monitors and a Pips alert in amber, with no dot and no outline. Error text in light themes is a darker olive, readable on white.
+
 ### Pips: scheduled Pips run with VS Code closed
 
 - Creating a Pip with a schedule, a commit trigger or a routine, or giving one a schedule, turns **Keep Pips running**

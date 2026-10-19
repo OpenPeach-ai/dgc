@@ -1,6 +1,7 @@
 // Pip reports reach the chat: a finished run of a Pip that reports to this chat is a card IN THE
-// TRANSCRIPT where it arrived -- never another row above the composer, never a turn. Ask DGC to fix
-// only fills the composer (the user edits and sends); Open report opens the Pips view at that run;
+// TRANSCRIPT where it arrived -- never another row above the composer, never a turn by itself. Ask DGC
+// to fix sends one message naming the run, once (the founder, 19 Oct: filling the box let a second click
+// paste the prompt again); Open report opens the Pips view at that run;
 // Dismiss removes it and tells the backend, which saves it with the chat. Live (`pip_report`) and
 // replay ({role: "pip_report"} in history) go through one renderer, so a reload draws the same card.
 import { test } from "node:test";
@@ -57,32 +58,58 @@ test("a report is a card in the transcript: the Pip, what it found, the worst fi
   assert.deepEqual(s.errors, []);
 });
 
-test("Ask DGC to fix puts a prompt naming the run in the composer and sends nothing", () => {
+const prompts = (s, from = 0) => s.posted.slice(from).filter((m) => m.type === "prompt");
+
+test("Ask DGC to fix sends one message naming the run, and only once", () => {
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
   const before = s.posted.length;
-  cards(s)[0].querySelector(".pip-report-fix").click();
-  const text = composer(s);
-  assert.match(text, /^Pip “ERP daily audit” reported 5 findings \(2 high, 2 medium, 1 low\) in run run_a{32}\./);
-  assert.match(text, /pips_context \(action "report", run_id "run_a{32}"\)/);
-  assert.match(text, /Ask me before you change any live data or services\./);
-  assert.equal(s.posted.slice(before).some((m) => ["prompt", "send", "sendPrompt", "steer"].includes(m.type)), false,
-    "the user sends it; the card never does");
+  const fix = cards(s)[0].querySelector(".pip-report-fix");
+  fix.click();
+  const sent = prompts(s, before);
+  assert.equal(sent.length, 1, "one message");
+  assert.equal(sent[0].delivery, "queue", "behind a turn that is running, never steering into it");
+  assert.match(sent[0].text, /^Pip “ERP daily audit” reported 5 findings \(2 high, 2 medium, 1 low\) in run run_a{32}\./);
+  assert.match(sent[0].text, /pips_context \(action "report", run_id "run_a{32}"\)/);
+  assert.match(sent[0].text, /Ask me before you change any live data or services\./);
+  assert.ok(fix.disabled, "a second click can't send it again");
+  assert.equal(fix.textContent, "Asked DGC");
+  fix.click();
+  assert.equal(prompts(s, before).length, 1);
+  assert.equal(composer(s), "", "the box is left alone");
+  assert.ok([...s.doc.querySelectorAll("#log .msg.user .bubble")].some((b) => b.textContent.includes(`run ${RUN}`)),
+    "the message is in the chat");
   assert.equal(cards(s).length, 1, "the card stays");
   assert.deepEqual(s.errors, []);
 });
 
-test("Ask DGC to fix never replaces a draft the user already wrote", () => {
+test("Ask DGC to fix never touches a draft the user is writing", () => {
   const s = panel();
   const input = s.doc.getElementById("input");
   input.value = "Also look at the login page";
   input.dispatchEvent(new s.dom.window.Event("input", { bubbles: true }));
   s.event({ type: "pip_report", report: FAILED });
+  const before = s.posted.length;
   cards(s)[0].querySelector(".pip-report-fix").click();
-  const text = composer(s);
-  assert.ok(text.startsWith("Also look at the login page\n\n"), JSON.stringify(text));
-  assert.match(text, /Pip “GST watchdog” failed \(run run_c{32}\): The project is too big for it to copy for review\./);
-  assert.match(text, /pips_context \(action "report", run_id "run_c{32}"\)/);
+  assert.equal(composer(s), "Also look at the login page");
+  const [sent] = prompts(s, before);
+  assert.match(sent.text, /Pip “GST watchdog” failed \(run run_c{32}\): The project is too big for it to copy for review\./);
+  assert.doesNotMatch(sent.text, /login page/);
+});
+
+test("a report already asked about says so when the chat opens again", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  cards(s)[0].querySelector(".pip-report-fix").click();
+  // The chat drawn again from its history: the prompt naming the run is there, then the card.
+  const fresh = panel();
+  const bubble = fresh.doc.createElement("div"); bubble.className = "msg user";
+  bubble.innerHTML = `<div class="bubble">Pip “ERP daily audit” reported 5 findings in run ${RUN}.</div>`;
+  fresh.doc.getElementById("log").append(bubble);
+  fresh.event({ type: "pip_report", report: REPORT });
+  const fix = cards(fresh)[0].querySelector(".pip-report-fix");
+  assert.ok(fix.disabled);
+  assert.equal(fix.textContent, "Asked DGC");
 });
 
 test("a failed run says it failed, why, and what the saved error was", () => {

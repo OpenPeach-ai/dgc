@@ -3005,6 +3005,7 @@
     fillUserBubble(bubble, parsed.text, parsed.attachments);
     m.appendChild(bubble);
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
+    markPipReportsNamedIn(parsed.text);
     return m;
   }
   // Top-level only: a row already claimed is inside its turn's box.
@@ -5167,7 +5168,7 @@
       const status = goalState.status, blocked = status === "blocked", paused = status === "paused";
       const state = blocked ? "blocked" : paused ? "paused" : "pursuing";
       return { icon: "target", word: paused ? "Paused" : "Goal", num: formatDuration(currentGoalElapsed()),
-        live: status === "active", need: blocked, needWord: blocked ? "blocked" : "",
+        live: status === "active", need: blocked, tone: "error", needWord: blocked ? "blocked" : "",
         label: `Goal, ${state}: ${String(goalState.text || "").replace(/\s+/g, " ").slice(0, 160)}`,
         tip: `Goal · ${blocked ? "blocked: it needs your decision" : state}` };
     }
@@ -5185,7 +5186,7 @@
       const failed = runs.filter((ev) => String(ev.state || "") === "failed").length, title = String(lead.title || "");
       // A failed lead says so in its number ("Failed"); one that failed behind a running lead says it beside it.
       return { icon: "troupe", word: runs.length > 1 ? `${runs.length} troupes` : "Troupe", num, live: state === "running",
-        share: sum.share, need: failed > 0, needWord: failed && state !== "failed" ? `${failed} failed` : "",
+        share: sum.share, need: failed > 0, tone: "error", needWord: failed && state !== "failed" ? `${failed} failed` : "",
         label: `Troupe${title ? ` ${title}` : ""}: ${sum.text}`, tip: `Troupe · ${title ? `${title} · ` : ""}${sum.text}` };
     }
     if (kind === "monitors") {
@@ -5195,7 +5196,7 @@
       const said = [live ? `${railCount(live, "monitor")} running` : "",
         waiting ? `${eventCount(waiting)} waiting for your next message` : "", paused ? "wake-ups paused" : ""].filter(Boolean);
       return { icon: "pulse", num: live ? String(live) : `${waiting} waiting`, after: live ? (live === 1 ? "monitor" : "monitors") : "",
-        live: live > 0 && !paused, need: waiting > 0, needWord: live && waiting ? `${waiting} waiting` : "",
+        live: live > 0 && !paused, need: waiting > 0, tone: "warn", needWord: live && waiting ? `${waiting} waiting` : "",
         label: `Monitors: ${said.join(", ")}`, tip: `Monitors · ${said.join(" · ")}` };
     }
     if (kind === "tasks") {
@@ -5203,7 +5204,7 @@
       const rows = paintedTodos, done = rows.filter((t) => t.status === "done").length;
       const blocked = rows.filter((t) => statusOf(t) === "blocked").length;
       return { icon: "checklist", word: "Tasks", num: `${done}/${rows.length}`, live: rows.some((t) => statusOf(t) === "in_progress"),
-        need: blocked > 0, needWord: blocked ? `${blocked} blocked` : "",
+        need: blocked > 0, tone: "error", needWord: blocked ? `${blocked} blocked` : "",
         label: $("tasks-main").getAttribute("aria-label") || `Tasks, ${done} of ${rows.length} done`,
         tip: `Tasks · ${done} of ${rows.length} done${blocked ? ` · ${blocked} blocked: needs you` : ""}` };
     }
@@ -5217,7 +5218,7 @@
     }
     if (kind === "pips") {
       const alert = pipsBar.dataset.reason === "alert", headline = $("pips-digest-text").textContent;
-      return { icon: "bell", num: "Pips", need: alert, needWord: alert ? "alert" : "",
+      return { icon: "bell", num: "Pips", need: alert, tone: "warn", needWord: alert ? "alert" : "",
         label: `Pips: ${headline}`, tip: `Pips · ${headline}` };
     }
     return null;
@@ -5230,7 +5231,9 @@
     const mini = typeof spec.share === "number"
       ? `<span class="chip-mini troupe-bar" aria-hidden="true"><span style="width:${spec.share}%"></span></span>` : "";
     const extra = (spec.extra || []).map(([text, cls]) => part(`chip-extra ${cls}`.trim(), text)).join("");
-    const need = spec.need ? `<span class="chip-dot" aria-hidden="true"></span>${part("chip-need", spec.needWord)}` : "";
+    // What needs you is said in words and coloured as the rows were before the chip line (the founder, 19 Oct):
+    // blocked or failed in the error red, the icon with it; waiting or an alert in amber. No dot, no outline.
+    const need = spec.need ? part("chip-need", spec.needWord) : "";
     return icon + part("chip-word", spec.word) + part("chip-num", spec.num) + part("chip-word", spec.after) + mini + extra + need;
   }
   function railChip(kind) {
@@ -5254,7 +5257,7 @@
     chip._sig = sig;
     chip.innerHTML = railChipFace(spec);
     chip.toggleAttribute("data-live", !!spec.live);
-    chip.toggleAttribute("data-need", !!spec.need);
+    if (spec.need) chip.dataset.need = spec.tone === "error" ? "error" : "warn"; else delete chip.dataset.need;
     chip.setAttribute("aria-label", spec.label + (spec.need ? `. Needs you${spec.needWord ? `: ${spec.needWord}` : ""}` : ""));
     hoverTip.retitle(chip, spec.tip);
     // Only a change of shape can change what fits: a ticking clock keeps its width.
@@ -7967,7 +7970,7 @@
   // A finished Pip run that reports to this chat arrives as a card in the transcript where it came
   // (after the turn that was running), live as a `pip_report` event and on reopen as a
   // {role: "pip_report"} marker -- one renderer for both, so a reload draws what was drawn live.
-  // Ask DGC to fix only fills the composer; the user edits and sends. Nothing here starts a turn.
+  // Ask DGC to fix sends one message naming the run (see askDgcToFix); nothing else here starts a turn.
   const PIP_REPORT_TYPES = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"];
   const PIP_REPORT_OUTCOMES = ["findings", "clear", "failed", "checks_failed", "checks_passed"];
   const PIP_REPORT_SEVERITIES = ["critical", "high", "medium", "low"];
@@ -7993,7 +7996,7 @@
     const counts = PIP_REPORT_SEVERITIES.filter((s) => n(r.counts?.[s])).map((s) => `${n(r.counts[s])} ${s}`);
     return `finished · ${pipReportPlural(n(r.total), "finding")}${counts.length ? ` (${counts.join(", ")})` : ""}`;
   }
-  // What "Ask DGC to fix" puts in the composer. It names the run so the model reads the whole report
+  // What "Ask DGC to fix" sends. It names the run so the model reads the whole report
   // itself, and keeps live systems the user's call.
   function pipReportPrompt(r) {
     const name = `Pip “${r.name}”`;
@@ -8013,18 +8016,44 @@
       + `${how}, check each finding against the code, and fix the real ones here in the project. `
       + `Ask me before you change any live data or services.`;
   }
-  function askDgcToFix(r) {
-    const prompt = pipReportPrompt(r);
-    // Never replaces a draft: it goes after what is already there, and nothing is sent.
-    const draft = composerText();
-    if (input.querySelector(".composer-pill")) {      // a draft with pills keeps them: typed in at its end
-      input.focus(); setComposerRange(draft.length);
-      insertComposerText((draft.endsWith("\n") ? "\n" : "\n\n") + prompt);
-    } else setComposerText(draft.trim() ? draft.replace(/\s+$/, "") + "\n\n" + prompt : prompt);
-    onInput(); persistDraft();
-    setComposerRange(composerText().length);
-    input.focus();
-    speak("The prompt is in the message box. Edit it, then send it.");
+  // Ask DGC to fix sends the prompt at once (the founder, 19 Oct: filling the box let a second click paste it again).
+  // The click is the user's ask; the prompt still says to ask before touching live data or services. It goes as
+  // its own message, queued behind a turn that is running, and never touches a draft in the box. A report that
+  // has been asked about says so, also after a reload: the chat already holds the prompt naming its run.
+  function pipReportAsked(runId) {
+    return [...log.querySelectorAll(".msg.user .bubble")].some((b) => b.textContent.includes(`run ${runId}`));
+  }
+  // A prompt naming a run marks that run's card as asked, wherever the card is drawn: a reopened chat replays the
+  // card before the prompt that asked about it, into a page fragment that isn't in the log yet.
+  function markPipReportsNamedIn(text) {
+    for (const [runId] of String(text || "").matchAll(/\brun_[0-9a-f]{32}\b/g)) {
+      for (const root of new Set([log, appendTarget])) {
+        for (const card of root.querySelectorAll(`.pip-report[data-run="${runId}"]`)) markPipReportAsked(card);
+      }
+    }
+  }
+  function markPipReportAsked(card) {
+    const fix = card?.querySelector(".pip-report-fix");
+    if (!fix) return;
+    fix.disabled = true; fix.textContent = "Asked DGC"; fix.classList.add("asked");
+    fix.title = "This report's prompt was sent in this chat.";
+  }
+  function askDgcToFix(r, card) {
+    if (pipReportAsked(r.run_id)) { markPipReportAsked(card); return; }
+    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Ask again in a moment."); return; }
+    if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
+    const text = pipReportPrompt(r);
+    const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+    const bubble = el("div", "bubble");
+    fillUserBubble(bubble, text, []);
+    m.appendChild(bubble); log.appendChild(m); settleBlock(m);
+    const requestId = `${promptPrefix}-${++promptSequence}`;
+    m.dataset.promptId = requestId;
+    pendingPrompts.set(requestId, { text, attachments: [], node: m, session: draftSession });
+    vscode.postMessage({ type: "prompt", text, requestId, restore: { text, attachments: [] }, delivery: "queue" });
+    markPipReportAsked(card);
+    setSending(true); scroll();
+    speak(`Asked DGC to fix what ${r.name} reported.`);
   }
   function pipReportCard(r) {
     const quiet = r.outcome === "clear" || r.outcome === "checks_passed";
@@ -8080,7 +8109,9 @@
     const button = (label, cls, title, fn) => {
       const b = el("button", cls); b.type = "button"; b.textContent = label; b.title = title; b.onclick = fn; actions.append(b); return b;
     };
-    if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", "Put a prompt about this report in the message box. Nothing is sent until you send it.", () => askDgcToFix(r));
+    if (!quiet) {
+      button("Ask DGC to fix", "act primary pip-report-fix", "Send DGC a message asking it to read this report and fix what it found. It asks you before changing live data or services.", () => askDgcToFix(r, card));
+    }
     button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, () => {
       showPips(); pipsApp?.navigate?.({ pip: r.pip_id, section: "runs", run: r.run_id });
     });
@@ -8092,6 +8123,7 @@
     });
     main.append(actions);
     card.append(face, main);
+    if (!quiet && pipReportAsked(r.run_id)) markPipReportAsked(card);
     return card;
   }
   function renderPipReport(r) {

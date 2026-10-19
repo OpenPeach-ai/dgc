@@ -409,6 +409,9 @@ body.vscode-light { --link:#6D49E8; }   /* on light: 5.3:1, and still the brand'
 /* #D1902B is 2.7:1 on white. These clear 3:1 (the border and dot: 4.4 on white, 3.6 on the hover grey) and 4.5:1
    (the words: 6.0 on white, 4.9 on the hover grey). */
 body.vscode-light, body.vscode-high-contrast-light { --need:#A86A12; --need-text:#8F5600; }
+/* The olive as text on a light ground: #839900 is 3.2:1 on white, so blocked tasks and errors read faint in light
+   themes. The same hue, darker: 5.9:1 on white, 4.8:1 on the darkest light surface. */
+body.vscode-light { --err-text:#5C6B00; }
 /* Seti's own light pair, except the three it ships too pale to clear 3:1 on a light ground. */
 body.vscode-light {
   --fk-blue:#498ba7; --fk-yellow:#8d8d2d; --fk-orange:#cc6d2e; --fk-green:#6c9438;
@@ -1135,11 +1138,11 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(2) { animation-delay: 0.6s; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(3) { animation-delay: 1.2s; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(4) { animation-delay: 1.8s; }
-/* Needs you: an amber dot and the reason, on a chip drawn like the others. --need paints the dot (3:1 or more on
-   every ground the chip sits on), --need-text the words (4.5:1). No amber outline: the founder found it loud (19 Oct). */
+/* Needs you: the reason in words, in the colours the rows had before the chip line (the founder, 19 Oct): blocked
+   or failed in --err-text with the icon, waiting or an alert in --need-text (4.5:1). No dot, no outline. */
 .rail-chip[data-need] { color: var(--text); }
-.rail-chip .chip-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--need); }
-.rail-chip .chip-need { color: var(--need-text); }
+.rail-chip[data-need="error"] > .codicon, .rail-chip[data-need="error"] .chip-need { color: var(--err-text); }
+.rail-chip[data-need="warn"] > .codicon, .rail-chip[data-need="warn"] .chip-need { color: var(--need-text); }
 .rail-line[data-fit]:not([data-fit="full"]) #workspace-changes .workspace-changes-label { display: none; }
 .rail-line[data-fit]:not([data-fit="full"]) #workspace-changes .codicon { display: inline-block; }
 .rail-line:is([data-fit="compact"], [data-fit="tight"], [data-fit="tighter"], [data-fit="wrap"]) .chip-word { display: none; }
@@ -2663,7 +2666,6 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 @media (forced-colors: active) {
   .rail-chip { border-color: CanvasText; }
   .rail-chip[data-need] { border-width: 2px; }
-  .rail-chip .chip-dot { forced-color-adjust: none; background: CanvasText; }
   .rail-pop { border-color: CanvasText; }
 }
 @media (forced-colors: active) { .troupe-bar { border: 1px solid CanvasText; } .troupe-bar > span { background: Highlight; } }
