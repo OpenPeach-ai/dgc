@@ -2866,6 +2866,28 @@ class Backend:
             self._schedule_monitors_snapshot()
         return outcomes
 
+    def _await_previous_owner(self) -> None:
+        """A reopen found monitors whose previous DGC was still exiting (the window reloaded a moment
+        before): bring them back once that process has gone and this chat is idle. Never while a turn
+        writes the transcript; gives up when the process keeps running (it still has the session)."""
+        if not self.agent.monitor_restart_awaiting():
+            return
+        agent = self.agent
+
+        def watch():
+            give_up = time.monotonic() + 600     # a turn that runs this long: the next reopen does it
+            while time.monotonic() < give_up and self.agent is agent and not getattr(agent, "stopping", False):
+                state = agent.monitor_restart_awaiting()
+                if not state:
+                    return
+                if state == "ready":
+                    with self._turn_state_lock():
+                        if not self._busy():
+                            self._bring_back_monitors(agent.restart_awaited_monitors)
+                            continue
+                time.sleep(0.5)
+        threading.Thread(target=watch, daemon=True, name="dgc-restart-await").start()
+
     def _emit_monitor_events(self, notification, delivery: str, turn_id: str = "") -> None:
         for batch in notification.batches:
             self.em.emit("monitor_event", id=batch.monitor_id, description=batch.description,
@@ -6008,6 +6030,7 @@ class Backend:
                 # Last: the chat is on screen, in the mode it reopened in. Monitors DGC's stopping
                 # ended start again (once) and each says so.
                 self._bring_back_monitors(self.agent.restart_monitors)
+                self._await_previous_owner()
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))

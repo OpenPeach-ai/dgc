@@ -1261,6 +1261,22 @@ class TUI:
                 sess._monitor_inbox.append((kind, payload))
         self._invalidate()
 
+    def _service_awaited_restart(self, sess) -> bool:
+        """A reopen found monitors whose previous DGC was still exiting: bring them back once that
+        process has gone and this session is idle (checked twice a second, not every frame)."""
+        agent = getattr(sess, "agent", None)
+        if agent is None or not getattr(agent, "_monitor_restart_awaited", None):
+            return False
+        now = time.monotonic()
+        if now < getattr(sess, "_awaited_check_at", 0.0):
+            return False
+        sess._awaited_check_at = now + 0.5
+        busy = sess._turn.is_set() or (sess._worker_thread is not None and sess._worker_thread.is_alive())
+        if busy or agent.monitor_restart_awaiting() != "ready":
+            return False
+        self._show_monitor_restarts(agent.restart_awaited_monitors(), sess)
+        return True
+
     def _monitor_event_block(self, batch) -> dict:
         safe = style_mod.terminal_safe_text
         lines = [safe(line) for line in batch.lines]
@@ -1289,6 +1305,7 @@ class TUI:
         changed = False
         th = None
         for sess in list(getattr(self, "_sessions", None) or ()):
+            changed = self._service_awaited_restart(sess) or changed
             inbox_lock = getattr(sess, "_monitor_inbox_lock", None)
             if inbox_lock is None:
                 continue
@@ -7512,19 +7529,20 @@ class TUI:
         self._show_monitor_restarts(getattr(self.agent, "restart_monitors", lambda: [])())
         self._scroll_off = 0               # resumed conversation: show the newest end, not the top
 
-    def _show_monitor_restarts(self, outcomes) -> None:
+    def _show_monitor_restarts(self, outcomes, sess=None) -> None:
         """One line per monitor a reopen (or /monitors restart) brought back, or could not."""
         if not outcomes:
             return
         th = style_mod.theme()
-        sess = self.active
+        sess = sess or self.active
+        blocks = sess.blocks if sess is not None else self.blocks
         for outcome in outcomes or ():
             if outcome.state == "restarted" and sess is not None:
                 ids = sess.__dict__.setdefault("_restarted_monitor_ids", set())
                 ids.add(outcome.id)
             hint = f" · /monitors restart {outcome.id}" if outcome.restart else ""
             color = th.faint if outcome.state in ("restarted", "expired") else th.warn
-            self.blocks.append(self._rich(f"[{color}]◉ {_esc(outcome.message)}{_esc(hint)}[/]"))
+            blocks.append(self._rich(f"[{color}]◉ {_esc(outcome.message)}{_esc(hint)}[/]"))
         if outcomes:
             self._invalidate()
 

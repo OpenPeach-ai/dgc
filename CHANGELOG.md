@@ -74,6 +74,9 @@ or 64 MiB total", because one file over 4 MiB or more than 64 MiB of committed c
 - **Editor protocol:** `ready.capabilities.monitor_restart`; a new event `monitor_restart` (one per monitor after a
   resume's other events, and the answer to the new command `restart_monitor {key}`); history replays it as
   `{role: "monitor_restart"}`. No existing event changed.
+- **Keyed on the DGC that ran it having ended.** A monitor another DGC process still runs (a window that kept the
+  session, a chat switched away in the same process) is never restarted by another opening; a reopen that finds the
+  previous DGC still exiting waits up to 30 seconds for it.
 
 ### Editor protocol: the agent map
 

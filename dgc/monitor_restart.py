@@ -22,13 +22,16 @@ The journal
       rewound      a rewind removed the turn that started it   never restarted
       expired      its time ran out while DGC was closed       never restarted
       failed       a restart did not start it                  only by the user's Restart
-      dgc_stopped  DGC stopped (closed, reloaded, killed),     restarted on the next open
-                   or the chat was closed or replaced
+      dgc_stopped  DGC stopped (closed, reloaded, killed),     restarted on the next open, once
+                   or the chat was closed or replaced          the process that ran it has ended
 
-    A record still ``running`` whose owning process is gone is a DGC that died without its
-    cleanup (SIGKILL, OOM): restarted like ``dgc_stopped``. Its ``alive_at`` heartbeat (every
-    ``HEARTBEAT_S``) says when, roughly, it stopped watching. A record whose owner still runs is
-    another DGC's monitor and is left alone.
+    Everything is keyed on the process that ran the monitor having actually ended. A record still
+    ``running`` whose owner is gone is a DGC that died without its cleanup (SIGKILL, OOM): restarted
+    like ``dgc_stopped``, its ``alive_at`` heartbeat (every ``HEARTBEAT_S``) saying roughly when it
+    stopped watching. A record whose owner still runs is left alone: that DGC still has the session
+    (a window that re-attached to it, a chat switched away in the same process). A reopen that finds
+    the owner still exiting -- the window reloaded a moment before -- waits for it, up to
+    ``WAIT_FOR_OWNER_S``, and brings the monitor back once it is gone.
 
 Permissions
     A restart is decided again under the session's permissions as they are now. A deny (plan
@@ -61,6 +64,7 @@ MAX_RECORDS = 8
 MAX_JOURNAL_BYTES = 128 * 1024
 HEARTBEAT_S = 30.0
 LEASE_WAIT_S = 10.0          # how long a restart waits for the checkout's write lease
+WAIT_FOR_OWNER_S = 30.0      # how long a reopen waits for the previous DGC to finish exiting
 
 ENDS = ("stopped", "timeout", "exited", "flood", "rewound", "expired", "failed", "dgc_stopped")
 RESTARTABLE = "dgc_stopped"
@@ -283,20 +287,34 @@ def move_running(old_target, new_target, monitors) -> None:
 
 
 # ---- reopening ---------------------------------------------------------------------------------
-def due(record: dict, me: dict | None = None) -> bool:
-    """Is this record one a reopen restarts?"""
-    if record.get("state") == "ended":
-        return record.get("end") == RESTARTABLE
+def _stopped_by_dgc(record: dict) -> bool:
+    return record.get("state") == "running" or record.get("end") == RESTARTABLE
+
+
+def _mine(record: dict, me: dict) -> bool:
     who = record.get("owner") or {}
+    return who.get("pid") == me.get("pid") and who.get("stamp") == me.get("stamp")
+
+
+def due(record: dict, me: dict | None = None) -> bool:
+    """Is this record one a reopen restarts now: DGC's stopping ended it, and the process that ran it
+    has ended? One whose process still runs is that DGC's (a window re-attached to it, or a chat
+    switched away there), and is never restarted by another opening of the session."""
     me = me or owner()
-    if who.get("pid") == me.get("pid") and who.get("stamp") == me.get("stamp"):
-        return False                          # still running in this process
-    return not owner_alive(who)               # another DGC's monitor is left alone
+    if not _stopped_by_dgc(record) or _mine(record, me):
+        return False
+    return not owner_alive(record.get("owner"))
+
+
+def awaited(record: dict, me: dict | None = None) -> bool:
+    """DGC's stopping ended it, but the process that ran it is still there: perhaps still exiting."""
+    me = me or owner()
+    return _stopped_by_dgc(record) and not _mine(record, me) and owner_alive(record.get("owner"))
 
 
 def has_due(session_file, session_root) -> bool:
     me = owner()
-    return any(due(record, me) for record in read(session_file, session_root))
+    return any(due(record, me) or awaited(record, me) for record in read(session_file, session_root))
 
 
 def _clock(at: float, other: float | None = None) -> str:
@@ -513,13 +531,51 @@ def _bring_back(agent, target, record: dict, *, by_user: bool) -> Outcome:
 
 
 def restart_all(agent) -> list:
-    """Once per reopen: bring back every monitor of this session that DGC's stopping ended."""
+    """Once per reopen: bring back every monitor of this session that DGC's stopping ended. One whose
+    process is still exiting is left to ``restart_awaited`` (the frontend asks until it is gone)."""
     target = agent._monitor_journal_target()
     if target is None:
         return []
     me = owner()
-    outcomes = [_bring_back(agent, target, record, by_user=False)
-                for record in read(*target) if due(record, me)]
+    records = read(*target)
+    outcomes = [_bring_back(agent, target, record, by_user=False) for record in records if due(record, me)]
+    waiting = {record["key"] for record in records if awaited(record, me)}
+    agent._monitor_restart_awaited = (waiting, time.monotonic() + WAIT_FOR_OWNER_S) if waiting else None
+    if outcomes:
+        agent._monitor_restart_noted(outcomes)
+    return outcomes
+
+
+def awaiting(agent) -> str:
+    """"ready" when a monitor the reopen waited on can be brought back now, "wait" while its process
+    is still there, "" when there is nothing (left) to wait for."""
+    waiting = getattr(agent, "_monitor_restart_awaited", None)
+    if not waiting:
+        return ""
+    keys, deadline = waiting
+    target = agent._monitor_journal_target()
+    me = owner()
+    records = [r for r in read(*target) if r.get("key") in keys] if target else []
+    if any(due(r, me) for r in records):
+        return "ready"
+    if time.monotonic() >= deadline or not any(awaited(r, me) for r in records):
+        agent._monitor_restart_awaited = None    # it kept running: that DGC still has the session
+        return ""
+    return "wait"
+
+
+def restart_awaited(agent) -> list:
+    """The waited-on monitors whose process has now ended: as a reopen would have brought them back."""
+    waiting = getattr(agent, "_monitor_restart_awaited", None)
+    target = agent._monitor_journal_target()
+    if not waiting or target is None:
+        return []
+    keys, deadline = waiting
+    me = owner()
+    records = [r for r in read(*target) if r.get("key") in keys]
+    outcomes = [_bring_back(agent, target, record, by_user=False) for record in records if due(record, me)]
+    left = {r["key"] for r in read(*target) if r.get("key") in keys and awaited(r, me)}
+    agent._monitor_restart_awaited = (left, deadline) if left and time.monotonic() < deadline else None
     if outcomes:
         agent._monitor_restart_noted(outcomes)
     return outcomes

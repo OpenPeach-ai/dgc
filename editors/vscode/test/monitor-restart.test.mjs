@@ -87,3 +87,23 @@ test("a note's text is text, never markup", () => {
   assert.match(lines(doc)[0].textContent, /<img src=x/);
   assert.deepEqual(errors, []);
 });
+
+test("a live restart note and the same note replayed by the restore's history are one line", () => {
+  // The restore's history snapshot after the live note (what a real reload showed): the live line, with Restart, stays.
+  const a = makeDom();
+  a.send({ type: "event", event: live(STOPPED) });
+  a.send({ type: "event", event: { type: "history", items: [{ role: "monitor_restart", ...STOPPED, at: 2, restart: false }] } });
+  assert.equal(lines(a.doc).length, 1);
+  assert.ok(lines(a.doc)[0].querySelector("button"), "the live line, with Restart, stays");
+  // The other order: the live note takes the replayed marker's place.
+  const b = makeDom();
+  b.send({ type: "event", event: { type: "history", items: [{ role: "monitor_restart", ...STOPPED, at: 2, restart: false }] } });
+  b.send({ type: "event", event: live(STOPPED) });
+  assert.equal(lines(b.doc).length, 1);
+  assert.ok(lines(b.doc)[0].querySelector("button"));
+  // Restarted by the press: the stopped line's Restart goes.
+  b.send({ type: "event", event: live({ ...STOPPED, state: "restarted", message: "restarted" }, { restart: false, by_user: true }) });
+  assert.equal(lines(b.doc).length, 2);
+  assert.equal(lines(b.doc)[0].querySelector("button"), null);
+  assert.deepEqual([...a.errors, ...b.errors], []);
+});

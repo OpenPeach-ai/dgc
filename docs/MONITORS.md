@@ -43,8 +43,9 @@ What comes back, and what does not:
   DGC does not try again; Restart is there if you want to.
 - **Not one that carried a credential.** DGC does not write a command holding a key it knows to disk, so it
   cannot restart it; the note says so.
-- **Not another DGC's.** If another DGC process still has the chat open and its monitor running, it is left
-  alone.
+- **Only once the DGC that ran it has ended.** If another DGC process still has the chat open and its monitor
+  running, it is left alone. A reopen that finds the previous DGC still exiting (the window reloaded a moment
+  before) waits for it, up to 30 seconds, and then brings the monitor back.
 
 DGC writes each monitor down in a small file beside the session (`<session>.monitors`, at most eight
 records, private to you), and removes it with the session.

@@ -2046,6 +2046,7 @@ class Agent(GoalLifecycle):
         # the ones DGC's stopping ended (dgc/monitor_restart.py). Set by load_session, taken once.
         self.monitors.journal = self._monitor_journal_target
         self._monitor_restart_due = False
+        self._monitor_restart_awaited = None     # monitors whose previous DGC was still exiting at reopen
         self.subagents = SubagentRegistry()      # this chat's task sub-agents (children share it)
         self._monitor_turn = False               # a turn DGC started on a monitor event is running
         # ---- 0.40 shared plain state (declared once here; each lane gives its fields meaning) ----
@@ -3906,6 +3907,7 @@ class Agent(GoalLifecycle):
         self._last_turn_mcp_query = ""
         self._stale_monitor_note = ""
         self._monitor_restart_due = False
+        self._monitor_restart_awaited = None
         # A persistent Python "code action" interpreter belongs to the session being torn down; its
         # in-memory namespace must not leak into the new session, so kill it here (lazily restarted).
         shutdown_python_kernels(getattr(self.ctx, "tool_owner", None))
@@ -5978,6 +5980,27 @@ class Agent(GoalLifecycle):
             return None
         from . import monitor_restart
         return monitor_restart.restart_one(self, key)
+
+    def restart_awaited_monitors(self) -> list:
+        """Monitors a reopen waited on because their previous DGC was still exiting, now that it has."""
+        from . import monitor_restart
+        try:
+            return monitor_restart.restart_awaited(self)
+        except Exception as exc:
+            self._monitor_restart_awaited = None
+            self.ui.info(self._safe_text(f"monitors were not restarted: {type(exc).__name__}"))
+            return []
+
+    def monitor_restart_awaiting(self) -> str:
+        """"ready", "wait" or "" (see dgc.monitor_restart.awaiting)."""
+        if not getattr(self, "_monitor_restart_awaited", None):
+            return ""
+        from . import monitor_restart
+        try:
+            return monitor_restart.awaiting(self)
+        except Exception:
+            self._monitor_restart_awaited = None
+            return ""
 
     def _monitor_restart_noted(self, outcomes: list) -> None:
         """Tell the model at its next turn what the user was just shown, and save it with the chat."""

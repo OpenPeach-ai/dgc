@@ -4700,6 +4700,27 @@
   // one line each, saying what was not watched in between, or why it was not started. Live and replayed alike;
   // only the live line offers Restart (a replayed one belongs to an earlier opening of the chat).
   const restartedMonitorIds = new Set();
+  // A live note and its replayed marker are one line. The restore's history snapshot can land before or after the live
+  // note (the note is saved with the chat first), so whichever comes second gives way: a replay skips a marker whose
+  // live line is on screen, and a live line takes the place of its replayed marker (the live one has the button).
+  const restartNoteId = (ev) => `${String(ev?.key || "")}:${String(ev?.state || "")}:${Number(ev?.at) || 0}`;
+  function placeRestartNote(line, ev, live) {
+    line.dataset.note = restartNoteId(ev);
+    const twins = [...log.querySelectorAll(".monitor-restart")].filter((n) => n.dataset.note === line.dataset.note);
+    if (!live) {
+      if (twins.some((n) => !n.classList.contains("hist"))) return;
+      appendTarget.appendChild(line);
+      return;
+    }
+    twins.filter((n) => n.classList.contains("hist")).forEach((n) => n.remove());
+    // Running again: the earlier line's Restart has done its job.
+    if (String(ev?.state || "") === "restarted" && ev?.key) {
+      for (const earlier of log.querySelectorAll(".monitor-restart:not(.hist)")) {
+        if (earlier.dataset.note.startsWith(`${String(ev.key)}:`)) earlier.querySelectorAll("button").forEach((b) => b.remove());
+      }
+    }
+    appendConversationContent(line);
+  }
   const MONITOR_RESTART_ICONS = { restarted: "refresh-cw", stopped: "circle-slash", expired: "history", failed: "triangle-alert" };
   function monitorRestartLine(ev, live) {
     const state = String(ev?.state || "");
@@ -4715,7 +4736,7 @@
       line.appendChild(again);
     }
     if (live && state === "restarted" && ev.id) restartedMonitorIds.add(String(ev.id));
-    if (live) appendConversationContent(line); else appendTarget.appendChild(line);
+    placeRestartNote(line, ev, live);
   }
   function renderMonitorsList() {
     if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }

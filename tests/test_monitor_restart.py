@@ -51,6 +51,13 @@ def wait_for(predicate, timeout: float = 10.0, interval: float = 0.02):
     return predicate()
 
 
+def gone_owner() -> dict:
+    """An owner process that has ended: what a reopen after a reload or a restart finds."""
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return {"pid": proc.pid, "stamp": "ended"}
+
+
 def make_config(root: Path, **settings) -> Config:
     cfg = Config()
     cfg.project_root = root
@@ -146,9 +153,11 @@ class JournalTests(unittest.TestCase):
         rewound = self.start("sleep 30", description="rewound")
         self.hub.new_epoch("shutdown", journal_end="rewound")
         self.assertEqual(self.record(rewound)["end"], "rewound")
-        me = monitor_restart.owner()
-        self.assertEqual([r["id"] for r in monitor_restart.read(*self.target) if monitor_restart.due(r, me)],
+        self.assertEqual([r["id"] for r in monitor_restart.read(*self.target) if monitor_restart._stopped_by_dgc(r)],
                          [dgc_stopped], "only DGC's stopping brings a monitor back")
+        me = monitor_restart.owner()
+        self.assertFalse(any(monitor_restart.due(r, me) for r in monitor_restart.read(*self.target)),
+                         "and only once the process that ran it has ended: this one still runs")
 
     def test_a_stop_right_before_dgc_stops_is_still_a_stop(self):
         mid = self.start("trap '' TERM; sleep 30", description="slow to die")
@@ -218,7 +227,8 @@ class ReopenTests(unittest.TestCase):
         agent.messages.append({"role": "assistant", "content": "Watching it."})
         spec = {"command": f"tail -n0 -F {self.log}", "description": "ERP sync", "timeout_ms": 600_000,
                 **args, "_dgc_permission": {"mode": mode, "allowed_by": allowed_by}}
-        out = agent.monitors.start(spec, agent.ctx)
+        with mock.patch.object(monitor_restart, "owner", return_value=gone_owner()):   # that DGC has ended
+            out = agent.monitors.start(spec, agent.ctx)
         self.assertTrue(out.startswith("started monitor"), out)
         self.assertTrue(agent._persist(), agent._last_persist_error)
         agent.monitors.new_epoch("shutdown")     # DGC stops: the editor went away
@@ -345,10 +355,11 @@ class ReopenTests(unittest.TestCase):
         agent.session_file = sessions.new_path(self.root)
         agent.messages.append({"role": "user", "content": "watch"})
         ids = []
-        for spec in ({"command": "sleep 30", "description": "stopped"},
-                     {"command": "true", "description": "exited"},
-                     {"command": "sleep 30", "description": "timed", "timeout_ms": 1000}):
-            ids.append(agent.monitors.start(spec, agent.ctx).split()[2])
+        with mock.patch.object(monitor_restart, "owner", return_value=gone_owner()):
+            for spec in ({"command": "sleep 30", "description": "stopped"},
+                         {"command": "true", "description": "exited"},
+                         {"command": "sleep 30", "description": "timed", "timeout_ms": 1000}):
+                ids.append(agent.monitors.start(spec, agent.ctx).split()[2])
         agent.monitors.stop(ids[0], "stopped")
         self.assertTrue(wait_for(lambda: all(r.get("state") == "ended"
                                              for r in monitor_restart.read(agent.session_file, self.root)), 15))
@@ -387,6 +398,58 @@ class ReopenTests(unittest.TestCase):
         agent.load_session(path)
         self.assertEqual(agent.take_stale_monitor_note(), "")
 
+    def test_a_monitor_whose_process_still_runs_is_left_alone_then_brought_back_once_it_ends(self):
+        owner = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(lambda: (owner.kill(), owner.wait()))
+        alive = {"pid": owner.pid, "stamp": monitors_mod._probes["starttime"](owner.pid)}
+        agent = self.agent("auto")
+        agent.session_file = sessions.new_path(self.root)
+        agent.messages.append({"role": "user", "content": "watch"})
+        with mock.patch.object(monitor_restart, "owner", return_value=alive):
+            agent.monitors.start({"command": "sleep 60", "description": "ERP sync", "persistent": True,
+                                  "_dgc_permission": {"mode": "auto", "allowed_by": "policy"}}, agent.ctx)
+        self.assertTrue(agent._persist())
+        agent.monitors.new_epoch("shutdown")
+        reopened, outcomes = self.reopen(agent.session_file, mode="auto")
+        self.assertEqual(outcomes, [], "its DGC still has the session (a window that kept it, or still exiting)")
+        self.assertEqual(reopened.monitor_restart_awaiting(), "wait")
+        owner.kill()
+        owner.wait()
+        self.assertEqual(reopened.monitor_restart_awaiting(), "ready")
+        later = reopened.restart_awaited_monitors()
+        self.assertEqual([o.state for o in later], ["restarted"])
+        self.assertEqual(len(reopened.monitors.running()), 1)
+        self.assertEqual(reopened.monitor_restart_awaiting(), "")
+        self.assertEqual(reopened.restart_awaited_monitors(), [], "once")
+
+    def test_one_that_keeps_running_is_given_up_on(self):
+        owner = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(lambda: (owner.kill(), owner.wait()))
+        alive = {"pid": owner.pid, "stamp": monitors_mod._probes["starttime"](owner.pid)}
+        agent = self.agent("auto")
+        agent.session_file = sessions.new_path(self.root)
+        agent.messages.append({"role": "user", "content": "watch"})
+        with mock.patch.object(monitor_restart, "owner", return_value=alive):
+            agent.monitors.start({"command": "sleep 60", "description": "kept", "persistent": True}, agent.ctx)
+        self.assertTrue(agent._persist())
+        agent.monitors.new_epoch("shutdown")
+        with mock.patch.object(monitor_restart, "WAIT_FOR_OWNER_S", 0.0):
+            reopened, outcomes = self.reopen(agent.session_file, mode="auto")
+        self.assertEqual(outcomes, [])
+        self.assertEqual(reopened.monitor_restart_awaiting(), "", "its DGC kept it: never restarted here")
+        self.assertEqual(reopened.monitors.running(), [])
+
+    def test_a_monitor_of_this_very_process_is_never_restarted_by_a_reopen_here(self):
+        agent = self.agent("auto")
+        agent.session_file = sessions.new_path(self.root)
+        agent.messages.append({"role": "user", "content": "watch"})
+        agent.monitors.start({"command": "sleep 60", "description": "here", "persistent": True}, agent.ctx)
+        self.assertTrue(agent._persist())
+        agent.monitors.new_epoch("shutdown")          # the chat was switched away in this same process
+        reopened, outcomes = self.reopen(agent.session_file, mode="auto")
+        self.assertEqual(outcomes, [])
+        self.assertEqual(reopened.monitor_restart_awaiting(), "")
+
     def test_deleting_the_session_deletes_its_journal(self):
         path, _ = self.first_run()
         journal = monitor_restart.journal_path(path, self.root)
@@ -423,8 +486,9 @@ class TuiReopenTests(unittest.TestCase):
         agent.session_file = sessions.new_path(self.root)
         agent.messages += [{"role": "user", "content": "watch the ERP log"},
                            {"role": "assistant", "content": "Watching it."}]
-        out = agent.monitors.start({"command": "sleep 60", "description": "ERP sync", "timeout_ms": 600_000,
-                                    "_dgc_permission": {"mode": "auto", "allowed_by": "policy"}}, agent.ctx)
+        with mock.patch.object(monitor_restart, "owner", return_value=gone_owner()):
+            out = agent.monitors.start({"command": "sleep 60", "description": "ERP sync", "timeout_ms": 600_000,
+                                        "_dgc_permission": {"mode": "auto", "allowed_by": "policy"}}, agent.ctx)
         self.assertTrue(out.startswith("started monitor"), out)
         self.assertTrue(agent._persist())
         agent.monitors.new_epoch("shutdown")
