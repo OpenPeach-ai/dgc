@@ -11696,7 +11696,11 @@ def test_benchmark_integrity():
         # The browser's signed_in option (the user's own Chrome, 2026-10-13) is one boolean with a nine-word line: 6,783.
         # A verifier in the `task` roster (founder, 2026-10-14: troupes had one, ordinary sub-agents did not) is one
         # roster line, shortened from 22 tokens to 20: 6,803. 6,830 keeps the same small headroom.
-        _PROBE_TOKEN_CEILING = 6830
+        # Progress updates (founder, 2026-10-19: tool calls went by with only the model's thinking to read) replace the
+        # two cadence bullets with three that name when to speak: before the first call, on a finding, a change of
+        # approach, a blocker or the first edit, and at least every five or so calls. Measured: 6,886 (+83).
+        # 6,910 keeps the same small headroom.
+        _PROBE_TOKEN_CEILING = 6910
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"
@@ -11761,10 +11765,12 @@ def test_benchmark_integrity():
             finally:
                 _cadence_agent.mcp.stop_all()
         _cadence = _cadence_prompt.split("# Response cadence", 1)[-1].split("\n# ", 1)[0]
-        check("response cadence keeps both restored bullets verbatim",
+        from dgc.presentation import PROGRESS_UPDATES as _progress_updates
+        check("response cadence keeps the progress-update rule verbatim",
               "# Response cadence" in _cadence_prompt
-              and "Before EACH group of tool calls, not just the first" in _cadence
-              and "Do not narrate trivial reads or repeat the prompt or tool cards" in _cadence)
+              and all(line in _cadence for line in _progress_updates)
+              and "Before your first tool call" in _cadence
+              and "Do not narrate each call or trivial reads" in _cadence)
         from dgc.tools import TOOL_SCHEMAS as _todo_tool_schemas
         _todo_schema = next(t["function"] for t in _todo_tool_schemas if t["function"]["name"] == "todo")
         _todo_schema_text = json.dumps(_todo_schema)

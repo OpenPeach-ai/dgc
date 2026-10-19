@@ -128,6 +128,19 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   machine could read the prompt with `ps`. On Linux the process is also named `dgc`, so `pkill python` passes it by.
   `-p -` (stdin) and Windows are unchanged.
 
+### Short updates while the agent works
+
+- **Work tells you what it is about to do, and what it found, as it goes.** Before its first tool call the agent now
+  says in one sentence what it will do, and while it works it adds a one-line update when it finds something that
+  matters, changes approach, hits a blocker or starts editing, and at least every five or so calls. One line covers a
+  batch of related calls; it does not narrate each call or repeat the plan, and the final answer is as before. The
+  old instruction asked for a line before every group of calls and was often skipped at the start: measured on five
+  coding tasks with `deepseek-v4.1-flash:cloud` and `glm-5.3:cloud` (two runs each), the opening line went from 14
+  of 20 turns to 20 of 20, the longest run of model rounds with nothing to read fell (2.1 to 1.3 on average for
+  DeepSeek, 0.7 to 0.4 for GLM), and tool calls and success rates did not change.
+- **Sub-agents no longer narrate.** Their text between tool calls was never shown, since only a sub-agent's final
+  message comes back as its result, so they are told to skip updates and put what matters in that message.
+
 ### Security
 
 - **urllib3 2.8.0** (was 2.7.0) in the runtime lock: CVE-2026-97689 and CVE-2026-97688 (a malicious or broken server
