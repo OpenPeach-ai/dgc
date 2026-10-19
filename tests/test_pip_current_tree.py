@@ -44,7 +44,7 @@ class CurrentTreeTests(unittest.TestCase):
     def test_explicit_review_required_and_model_cannot_change_source(self):
         job = self.create()
         proposal = self.store.propose(job['id'], 1, {'source_policy': TREE}, 'user')
-        self.assertEqual(self.store.get(job['id'])['source_policy'], {'mode': 'committed_only'})
+        self.assertEqual(self.store.get(job['id'])['source_policy'], pip_sources.default_policy('rook'))  # new Pips: committed, safe_source_v2
         with self.assertRaises(RegistryError): self.queue(job)
         self.registry.associate_session('chat', self.root)
         with self.assertRaises(RegistryError):

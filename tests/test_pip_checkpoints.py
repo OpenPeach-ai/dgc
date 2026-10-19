@@ -33,7 +33,9 @@ class PipCheckpointTests(unittest.TestCase):
 
     def new_pip(self, workspace=None):
         workspace = workspace or self.workspace
-        return self.store.create(workspace["id"], "Review", "Inspect source evidence", "HEAD", "fixture")
+        # These checkpoints are the original committed rules (safe_source_v1); v2 has its own tests.
+        return self.store.create(workspace["id"], "Review", "Inspect source evidence", "HEAD", "fixture",
+                                 source_policy={"mode": "committed_only"})
 
     def finding(self, title="Check validation", **changes):
         return {"title": title, "severity": "medium", "path": "source.py", "line": 1,
@@ -332,7 +334,7 @@ class PipCheckpointTests(unittest.TestCase):
                      lambda r: r.update(usage={"input_tokens": True}),
                      lambda r: r.update(usage={"unknown_field": 3}),
                      lambda r: r.update(tools_called=1_000_001), lambda r: r.update(tools_called=False),
-                     lambda r: r["snapshot"].update(bytes=64 * 1024 * 1024 + 1),
+                     lambda r: r["snapshot"].update(bytes=256 * 1024 * 1024 + 1),
                      lambda r: r.update(limitations=["x"] * 13),
                      lambda r: r.update(summary="\ud800"),
                      lambda r: r.update(summary="x" * 4001)]

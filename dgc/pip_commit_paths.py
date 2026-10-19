@@ -330,7 +330,7 @@ def validate_manifest(manifest):
             or any(key in manifest for key in ('handoff','conversation','specialists','pulse_verification',
                                                'main_chat_request','schedule','scheduled_at','schedule_occurrence'))): _fail()
     source = from_record(manifest)
-    if source['source_policy'] != {'mode':'committed_only'} or source['source_snapshot'] is not None: _fail()
+    if source['source_policy']['mode'] != 'committed_only' or source['source_snapshot'] is not None: _fail()
     _integer(manifest.get('job_version'), 1, 999999)
     if type(pin['job_version']) is not int or pin['job_version'] != manifest['job_version']: _fail()
     for key,prefix in (('pip_id','pip'),('workspace_id','ws'),('binding_id','binding')): _id(manifest.get(key), prefix)
@@ -339,7 +339,7 @@ def validate_manifest(manifest):
             or event['event_type'] not in {kind for name in policy['events'] for kind in EVENTS[name]}): _fail()
     job = manifest.get('job')
     if (type(job) is not dict or set(job) != _JOB_FIELDS or job['pip_type'] != manifest['pip_type']
-            or job['source_policy'] != {'mode':'committed_only'}): _fail()
+            or job['source_policy'] != source['source_policy']): _fail()
     _ref(job['source_ref'])
     match = None
     if selected:

@@ -16,8 +16,9 @@ class PipSourceCliTests(unittest.TestCase):
         job=self.child_cli('create','Reviewer','--goal','Inspect source')['pip']
         proposal=self.child_cli('propose',job['id'],'--expected-version','1',
             '--source-policy','current_tree','--reason','Inspect eligible uncommitted source')['proposal']
-        self.assertEqual(self.child_cli('show',job['id'])['pip']['source_policy'],{'mode':'committed_only'})
-        self.assertEqual(proposal['definition']['source_policy'],{'mode':'current_tree','exclusions':'safe_source_v1'})
+        self.assertEqual(self.child_cli('show',job['id'])['pip']['source_policy'],{'mode':'committed_only','exclusions':'safe_source_v2'})
+        # A source change proposes the current rules unless --source-rules v1 asks for the original ones.
+        self.assertEqual(proposal['definition']['source_policy'],{'mode':'current_tree','exclusions':'safe_source_v2'})
         self.assertIsNone(proposal['definition']['schedule'])
         self.assertIsNone(proposal['definition']['event_trigger'])
         changed=self.child_cli('accept',job['id'],proposal['id'],'--expected-version','1')['pip']

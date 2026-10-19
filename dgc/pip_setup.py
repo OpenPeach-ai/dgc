@@ -149,7 +149,7 @@ def needs_card(request) -> bool:
 def validate_request(value):
     _encode(value)
     if (type(value) is not dict or not _REQUIRED <= set(value)
-            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger', 'computer'})
+            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger', 'computer', 'source_exclude'})
             or (set(value) & _PINS and not _PINS <= set(value))):
         _fail('Supply the complete source-only setup; an existing Pip needs pip_id, expected_version and expected_lifecycle_revision together.')
     request = dict(value)
@@ -200,6 +200,12 @@ def validate_request(value):
             _fail('The work kind must match the Pip role.', 'unsupported_work_kind')
     if type(value['run_now']) is not bool:
         _fail('run_now must be an explicit true or false.')
+    if 'source_exclude' in value:
+        # Folders and patterns this project Pip's source copy leaves out (safe_source_v2).
+        if personal or pulse:
+            _fail('Excluded folders are for project reviewers and Quill.', 'unsupported_setup')
+        from .pip_source_rules import validate_exclude
+        request['source_exclude'] = validate_exclude(value['source_exclude'])
     if 'event_trigger' in value:
         # One trigger fits a setup card: review the committed source after each new commit to
         # source_ref. Path rules and other events stay with the Pip's own job controls.
@@ -261,10 +267,20 @@ def _scope(registry, root, session_id, personal=False):
     return workspace, binding
 
 
-def _definition(store, request, workspace_id):
+def _definition(store, request, workspace_id, saved_policy=None):
+    """The definition a card applies. saved_policy is the card's own saved source policy: a new
+    project Pip's card saved before safe_source_v2 existed keeps the original rules it showed."""
     from .pips import _definition as build_definition
+    from .pip_sources import LEGACY_COMMITTED, default_policy, validate_policy, with_exclude
     personal=request.get('scope')=='personal'
     extra = {'source_policy': {'mode':'personal'}} if personal else {}
+    if not personal and 'pip_id' not in request:
+        policy = default_policy(request['pip_type'])
+        if 'source_exclude' in request:
+            policy = with_exclude(policy, request['source_exclude'])
+        elif saved_policy == LEGACY_COMMITTED:
+            policy = dict(LEGACY_COMMITTED)
+        extra['source_policy'] = validate_policy(policy)
     if 'app_plan' in request:extra['app_plan']=request['app_plan']
     if 'web_plan' in request:extra['web_plan']=request['web_plan']
     if personal and 'pip_id' not in request:
@@ -285,11 +301,15 @@ def _definition(store, request, workspace_id):
             _fail('Setup cannot change an existing Pip character or role. Create a new Pip instead.', 'conflict')
         if not can_propose(pip['adaptation_policy']):
             _fail('This Pip does not allow model setup proposals. Use its human controls.', 'permission_denied')
-        if pip.get('event_trigger') is not None or pip['source_policy'] != {'mode': 'personal' if personal else 'committed_only'}:
+        mode = validate_policy(pip['source_policy'])['mode']
+        if pip.get('event_trigger') is not None or mode != ('personal' if personal else 'committed_only'):
             _fail('This Pip uses event triggers or current-tree source. Review those separately before using conversational calendar setup.', 'unsupported_setup')
         extra = {**extra, **{key: pip[key] for key in ('model_choice', 'adaptation_policy', 'source_policy')}, 'app_plan': request.get('app_plan',pip.get('app_plan')),
                  'web_plan': request.get('web_plan',pip.get('web_plan')), 'github_plan': pip.get('github_plan'),
                  'computer_plan': {'schema_version': 1} if request.get('computer') is True else pip.get('computer_plan')}
+        if 'source_exclude' in request:
+            # A card's Excluded folders move an existing Pip to safe_source_v2, reviewed like the rest of the card.
+            extra['source_policy'] = with_exclude(pip['source_policy'], request['source_exclude'])
     if 'model_choice' in request:
         extra['model_choice'] = request['model_choice']
     if 'verification_plan' in request:
@@ -343,7 +363,9 @@ def _load(registry, setup_id, workspace_id):
             raise ValueError()
         if definition.get('verification_plan') != request.get('verification_plan'): raise ValueError()
         personal=request.get('scope')=='personal'
-        if (definition['policy'] != ('review_required' if request['pip_type'] == 'pulse' and not personal else 'read_only') or definition['source_policy'] != {'mode': 'personal' if personal else 'committed_only'}
+        from .pip_sources import validate_policy as source_policy_of
+        if (definition['policy'] != ('review_required' if request['pip_type'] == 'pulse' and not personal else 'read_only')
+                or source_policy_of(definition['source_policy'])['mode'] != ('personal' if personal else 'committed_only')
                 or definition['event_trigger'] != request.get('event_trigger') or body['project_root'] != request['target_root']):
             raise ValueError()
         from .pip_approvals import expires_at
@@ -406,7 +428,7 @@ def _projection(registry, row, body, receipt):
             'receipt': receipt, 'permissions': body['definition']['policy'], 'source_policy': 'personal' if req.get('scope')=='personal' else 'committed_only',
             **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' else {}),
             'scope_notice': ('It has its own computer (a browser, a Terminal and files), separate from yours, and sees only what you share with it. Anything it would send or change waits for your OK.' if req.get('scope')=='personal' and body['definition'].get('computer_plan')
-                             else 'It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
+                             else 'It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else source_scope(body['definition']['source_policy'])),
             'runner_notice': ((("It can’t run on this computer yet: " + blocked + " ") if blocked else "")
                               + (f"While Pips are running, DGC checks {req['source_ref']} for new local commits and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Accepting this doesn’t start Pips."
                               if req.get('event_trigger') else 'It works while Pips are running on this computer. Creating it doesn’t start Pips.' if req.get('scope')=='personal'
@@ -417,6 +439,11 @@ def _projection(registry, row, body, receipt):
 
 def get(registry, setup_id, workspace_id):
     return _projection(registry, *_load(registry, setup_id, workspace_id))
+
+
+def card_source_policy(registry, setup_id, workspace_id):
+    """The exact source policy a card would apply (for its size check)."""
+    return _load(registry, setup_id, workspace_id)[1]['definition']['source_policy']
 
 
 def list_pending(registry, workspace_id):
@@ -571,10 +598,12 @@ Existing targets retain their actual checkpoint and reviewed finding history.
         checkpoint = pip_checkpoints.snapshot(store, pip_id)
         lifecycle = pip['lifecycle_revision'] + int(pip['status'] == 'paused')
     else:
-        checkpoint = pip_checkpoints._pin({'schema_version': 1, 'pip_id': pip_id,
+        # As pip_checkpoints.snapshot pins it: version 2 records the policy of any non-original source rules.
+        version = 1 if body['definition']['source_policy'] == {'mode': 'committed_only'} else 2
+        checkpoint = pip_checkpoints._pin({'schema_version': version, 'pip_id': pip_id,
                                           'workspace_id': body['workspace_id'], 'checkpoint': None})
     revision = source_revision(binding['canonical_root'], request['source_ref'])
-    source = pin('committed_only', source_revision=revision)
+    source = pin(body['definition']['source_policy'], source_revision=revision)
     return {'pip_id': pip_id, 'workspace_id': body['workspace_id'], 'job_version': request.get('expected_version', 0) + 1,
             'lifecycle_revision': lifecycle, 'binding_id': binding['id'], 'canonical_root': binding['canonical_root'],
             'source_revision': revision, 'checkpoint': checkpoint,
@@ -660,7 +689,7 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
             if body['counts_for_date'] is not None and _instant(now).astimezone(ZoneInfo(request['schedule']['timezone'])).date().isoformat() != body['counts_for_date']:
                 _fail("The local date changed. Review today's immediate run and the next occurrence again.", 'stale_occurrence')
             store = PipStore(registry)
-            if _definition(store, request, workspace_id) != body['definition']:
+            if _definition(store, request, workspace_id, saved_policy=body['definition']['source_policy']) != body['definition']:
                 _fail('The saved definition no longer matches this setup.', 'review_changed')
             pip_id = planned_pip_id
             if 'pip_id' in request:
@@ -719,6 +748,21 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
                                       ('accepted' if accept else 'rejected', _encode(receipt, 4096), setup_id)).rowcount
         if changed != 1: _fail('This setup was resolved elsewhere. Refresh its card.', 'conflict')
         return get(registry, setup_id, workspace_id)
+
+
+def source_scope(policy):
+    """The card's scope line, saying what a project reviewer's copy leaves out (shown on every editor)."""
+    from .pip_sources import validate_policy, rules
+    selected = validate_policy(policy)
+    if rules(selected) != 'safe_source_v2':
+        return SCOPE_NOTICE
+    exclude = selected.get('exclude', [])
+    shown = ', '.join(exclude[:12]) + (f' and {len(exclude) - 12} more' if len(exclude) > 12 else '')
+    return ('Once you accept, it’s on, with the schedule shown. '
+            'It reads committed code only, leaving out files over 4 MiB, links and anything a committed .dgcignore lists'
+            + (', and also: ' + shown if exclude else '') + '. Each run lists what it left out. '
+            'It saves a private report or documentation draft. '
+            'It doesn’t run tests, open websites, touch the running app, change project files or deploy.')
 
 
 def pulse_scope(plan):

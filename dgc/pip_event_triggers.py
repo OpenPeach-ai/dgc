@@ -82,7 +82,7 @@ def _definition(registry, pip_id):
             raise ValueError("authority")
         if spec is not None and (definition.get('pip_type') == 'quill' or 'committed_paths_changed' in spec['events']):
             from .pip_sources import validate_policy
-            if validate_policy(definition.get('source_policy', 'committed_only')) != {'mode':'committed_only'}:
+            if validate_policy(definition.get('source_policy', 'committed_only'))['mode'] != 'committed_only':
                 raise ValueError('source')
     except (ValueError, TypeError, AttributeError) as exc:
         raise RegistryError("invalid_event_trigger", "The stored event trigger is not a supported read-only definition.") from exc

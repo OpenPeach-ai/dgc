@@ -45,6 +45,34 @@ manual review of work in progress you can propose a separately reviewed
 "current tree" source; that Pip then runs only when you ask, never on a schedule
 or trigger.
 
+### What a Pip's copy leaves out
+
+Each run reads a private copy of the source. Under the current source rules
+(`safe_source_v2`, what new Pips use) a big working project doesn't stop it:
+
+- **Files it can't copy are left out and listed**, never fatal: files over 4 MiB
+  (videos, dumps, big images), links and submodules, and in a copy of your current
+  files also hard links, special files and files holding one of your configured
+  secrets. A run copies up to 256 MiB.
+- **You choose what else to leave out**: a `.dgcignore` file (written like
+  `.gitignore`, in any folder; committed, for a Pip on committed code) or the Pip's
+  **Excluded folders** on its page under Source, such as `uploads/`,
+  `docs/screenshots/` or `*.mp4`. A Pip on your current files also follows the
+  project's `.gitignore`. These only ever leave things out: no `!` line brings
+  back `.env` files, keys or the other files DGC never copies.
+- **The Pip is told** what its copy left out and why, so it doesn't report those
+  files as missing, and each run's report lists them.
+- **Check size** on the Pip's page (or `dgc pips source PIP`) says whether the source
+  fits before anything runs. When it doesn't, the message names the biggest folders
+  and how much to leave out.
+
+A Pip set up before these rules keeps the original ones (`safe_source_v1`): one file
+over 4 MiB, a link, or more than 64 MiB of code fails every run, and the failure says
+which files and folders. Move it to the current rules once: on its page, under
+Source, choose any Excluded folders and **Save**, or run
+`dgc pips propose PIP --expected-version N --source-rules v2` and accept it. Its first
+report after the change isn't compared with the earlier ones.
+
 A **Personal Pip** belongs to your DGC profile rather than a project. It is
 available from any project on this computer and is meant for your own tasks:
 planning, summaries, reminders drafted for you to send, research from a few fixed
@@ -440,8 +468,8 @@ the CLI; the two show the same saved records.
 command plan, app reads, web reads or adaptation policy is saved as a **proposal**. The proposal shows
 the complete new definition. Accepting it checks that the Pip hasn't changed since
 (`--expected-version`); a stale proposal must be reviewed again. Proposals expire
-after seven days. The main chat's own proposals are limited to a new name, goal or
-source ref; for other changes it prepares a new setup card, which you review the
+after seven days. The main chat's own proposals are limited to a new name, goal,
+source ref or Excluded folders; for other changes it prepares a new setup card, which you review the
 same way.
 
 ```sh
@@ -1002,8 +1030,10 @@ than run unconfined.
   number of helper calls you approved (1 to 3) is their only bound.
 - Up to four Pips run at once (`pips_parallel_runs`, 1 to 32), each one run at a time; at
   most 20 runs queued or running.
-- Source copies: up to 10,000 files and folders, 4 MiB per file, 64 MiB in total.
-  A committed symbolic link or submodule fails the run.
+- Source copies: up to 256 MiB and 10,000 files and folders; files over 4 MiB, links
+  and submodules are left out and listed (see What a Pip's copy leaves out). Under the
+  original rules: 64 MiB, and a file over 4 MiB, a committed symbolic link or a
+  submodule fails the run.
 - Pulse and Patch commands: up to four per run, each with 60 seconds, 30 CPU
   seconds, 512 MiB of memory per process, 32 processes and 64 KiB of output. The
   project copy is read-only to the commands; only a 64 MiB temporary folder is

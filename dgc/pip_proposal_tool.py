@@ -37,12 +37,17 @@ def _request(args):
     if not isinstance(args["request_key"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", args["request_key"]):
         raise RegistryError("invalid_request", "request_key must contain 1–64 letters, digits, underscores or hyphens.")
     changes = args["changes"]
-    if not isinstance(changes, dict) or not changes or set(changes) - set(_CHANGE_LIMITS):
-        raise RegistryError("invalid_request", "Only name, goal and source_ref may be proposed; execution and permissions cannot change.")
+    if not isinstance(changes, dict) or not changes or set(changes) - set(_CHANGE_LIMITS) - {"source_exclude"}:
+        raise RegistryError("invalid_request", "Only name, goal, source_ref and source_exclude may be proposed; execution and permissions cannot change.")
     from .pip_setup import unescape_entities          # a provider's &amp; for the model's & (as pips_setup)
+    exclude = changes.get("source_exclude")
     changes = {key: _text(unescape_entities(value) if key in ("name", "goal") else value, key, _CHANGE_LIMITS[key],
                           multiline=key == "goal")
-               for key, value in changes.items()}
+               for key, value in changes.items() if key != "source_exclude"}
+    if exclude is not None or "source_exclude" in args["changes"]:
+        # The folders and patterns the Pip's source copy leaves out; [] clears them.
+        from .pip_source_rules import validate_exclude
+        changes["source_exclude"] = validate_exclude(exclude) if exclude != [] else []
     if "source_ref" in changes and (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", changes["source_ref"])
                                     or ".." in changes["source_ref"]):
         raise RegistryError("invalid_request", "source_ref must be HEAD, a branch name or a full commit ID.")
@@ -87,8 +92,13 @@ def propose(args, ctx) -> str:
                 raise RegistryError("session_required", "The owning chat has no authoritative association with this workspace.")
             from .pips import PipStore
             store = PipStore(registry)
+            changes = dict(request["changes"])
+            if "source_exclude" in changes:
+                from .pip_sources import with_exclude
+                changes["source_policy"] = with_exclude(store._job(request["pip_id"])["source_policy"],
+                                                        changes.pop("source_exclude"))
             proposal = store.propose(
-                request["pip_id"], request["expected_version"], request["changes"], "core_proposal",
+                request["pip_id"], request["expected_version"], changes, "core_proposal",
                 request["reason"], origin_session_id=origin["session_id"],
                 request_key=request["request_key"], expected_workspace_id=workspace["id"])
             applied, note = False, ""

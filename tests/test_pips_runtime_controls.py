@@ -62,7 +62,9 @@ class RuntimeControlsTests(unittest.TestCase):
         self.addCleanup(self.registry.close)
         self.workspace = self.registry.resolve(self.root)
         self.store = pips.PipStore(self.registry)
-        self.job = self.store.create(self.workspace["id"], "Auditor", "Read committed source", "paired-browser")
+        # The original committed rules: these runs copy through clean_snapshot, which the fixtures replace.
+        self.job = self.store.create(self.workspace["id"], "Auditor", "Read committed source", "paired-browser",
+                                     source_policy={"mode": "committed_only"})
         self.config = ConfigFixture(self.root)
         self.stack = ExitStack(); self.addCleanup(self.stack.close)
         self.source = self.stack.enter_context(patch.object(pips, "source_revision", return_value="c" * 40))
@@ -230,7 +232,8 @@ class RuntimeControlsTests(unittest.TestCase):
         """Founder, 2026-10-14: a Pip run keeps going, so one long run must not hold up every other Pip."""
         import threading
         import time as clock
-        other = self.store.create(self.workspace["id"], "Second", "Read committed source", "paired-browser")
+        other = self.store.create(self.workspace["id"], "Second", "Read committed source", "paired-browser",
+                                  source_policy={"mode": "committed_only"})
         first = self.enqueue("a-1")
         second = self.enqueue("a-2")
         third = self.store.enqueue(other["id"], "b-1", "paired-browser", self.config)
@@ -261,7 +264,8 @@ class RuntimeControlsTests(unittest.TestCase):
 
     def test_one_run_at_a_time_when_set_to_one(self):
         import threading
-        other = self.store.create(self.workspace["id"], "Second", "Read committed source", "paired-browser")
+        other = self.store.create(self.workspace["id"], "Second", "Read committed source", "paired-browser",
+                                  source_policy={"mode": "committed_only"})
         self.enqueue("a-1")
         self.store.enqueue(other["id"], "b-1", "paired-browser", self.config)
         self.config.data["pips_parallel_runs"] = 1

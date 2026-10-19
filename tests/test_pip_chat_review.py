@@ -119,7 +119,9 @@ class PipChatReviewTests(unittest.TestCase):
         self.assertEqual(failure.exception.code, "invalid_cursor")
 
     def test_complete_worker_envelope_overflow_refuses_before_worker_spawn(self):
-        job = self.create()
+        # The original committed rules copy through clean_snapshot, which this test replaces.
+        job = self.store.create(self.workspace["id"], "Backend Auditor", "Inspect correctness.", "device_1",
+                                source_policy={"mode": "committed_only"})
         with patch.object(pips, "source_revision", return_value="a" * 40):
             pip_chat.send(self.store, job["id"], "Explain this source", "overflow", "review-device", self.cfg)
         row = self.store.claim_next()

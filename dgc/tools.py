@@ -253,6 +253,10 @@ TOOL_SCHEMAS = [
                                                 "cwd": {"type": "string", "maxLength": 1024}}, "required": ["argv", "cwd"]}}},
                      "required": ["kind", "network", "tests"]}}, "required": ["schema_version", "action"]},
          "source_ref": {"type": "string", "maxLength": 200, "description": "Defaults to HEAD. A ref within this project, never a directory."},
+         "source_exclude": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                            "description": "Project reviewers and Quill, optional: folders or .gitignore-style patterns its source "
+                                           "copy leaves out (uploads/, docs/screenshots/, *.mp4). The result's source_check says "
+                                           "whether the source fits a run and names the biggest folders when it doesn't."},
          "model_choice": {"type": "object", "additionalProperties": False,
                           "description": "Optional. Omit to inherit DGC's default for a new Pip or retain an existing Pip's choice. Never supply an endpoint or credential.",
                           "properties": {"mode": {"type": "string", "enum": ["default", "model"]},
@@ -278,15 +282,21 @@ TOOL_SCHEMAS = [
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["target_root", "name", "goal", "pip_type", "work_kind", "schedule", "run_now", "reason", "request_key"]),
     _fn("pips_propose", "Change an EXISTING Pip in this chat's workspace. Calling it asks the user like any tool call "
-        "(auto mode allows it); once allowed, the change is applied. Only name, goal and source_ref can change; it cannot "
-        "run work, schedule work or change permissions. Read pips_context definition first. "
+        "(auto mode allows it); once allowed, the change is applied. Only name, goal, source_ref and source_exclude can "
+        "change; it cannot run work, schedule work or change permissions. Read pips_context definition first. "
+        "source_exclude is the complete list of folders or .gitignore-style patterns its source copy leaves out "
+        "(for example uploads/ or docs/screenshots/), which also moves it to the current safe_source_v2 rules; use it "
+        "when a run failed because the source is too big, naming folders from that message. "
         "Use the same request_key for a retry of the identical draft; a changed draft needs a new key.",
         {"pip_id": {"type": "string"},
          "expected_version": {"type": "integer", "minimum": 1, "maximum": 999999},
          "changes": {"type": "object", "additionalProperties": False, "minProperties": 1,
                      "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 120},
                                     "goal": {"type": "string", "minLength": 1, "maxLength": 4000},
-                                    "source_ref": {"type": "string", "minLength": 1, "maxLength": 200}}},
+                                    "source_ref": {"type": "string", "minLength": 1, "maxLength": 200},
+                                    "source_exclude": {"type": "array", "maxItems": 32,
+                                                       "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                                                       "description": "Every folder or pattern to leave out; [] keeps none."}}},
          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["pip_id", "expected_version", "changes", "reason", "request_key"]),

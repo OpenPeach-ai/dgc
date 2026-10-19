@@ -100,21 +100,75 @@ for the same endpoint is fine.
 
 | Source policy | Used by | What the Pip reads |
 | --- | --- | --- |
-| `{"mode": "committed_only"}` (default) | Project Pips | The exact committed tree at `source_ref`, resolved to a commit when the run is queued |
-| `{"mode": "current_tree", "exclusions": "safe_source_v1"}` | Scout, Lens, Rook, Lock, Quill; manual runs only | A checked copy of the project folder as it is now, taken when the run is queued |
+| `{"mode": "committed_only", "exclusions": "safe_source_v2"}` (default for new Scout, Lens, Rook, Lock and Quill Pips, API 50) | Reviewers and Quill | The committed tree at `source_ref`, minus what the source rules, the commit's `.dgcignore` files and the Pip's Excluded folders leave out |
+| `{"mode": "committed_only"}` | Every project Pip before API 50; Patch and Pulse | The exact committed tree at `source_ref`, resolved to a commit when the run is queued (the original rules, `safe_source_v1`) |
+| `{"mode": "current_tree", "exclusions": "safe_source_v2"}` | Scout, Lens, Rook, Lock, Quill; manual runs only | A checked copy of the project folder as it is now, taken when the run is queued, under the current rules |
+| `{"mode": "current_tree", "exclusions": "safe_source_v1"}` | The same | The same copy under the original rules |
 | `{"mode": "personal"}` | Personal Pips | Nothing: an empty source folder |
+
+A `safe_source_v2` policy may add `"exclude": [...]`: the Pip's **Excluded folders**, 1 to 32 patterns in the
+`.gitignore` format (`uploads/`, `docs/screenshots/`, `*.mp4`; at most 200 characters each, no leading `!` or `#`,
+no `..` and no backslashes; listed once each, omitted when empty).
+
+**The two rule sets.** `safe_source_v1` (the original) refuses the whole copy when it meets a file it can't copy: one
+file over 4 MiB, a symbolic link or submodule (committed), a hard link or special file (current files), or more than
+64 MiB or 10,000 entries in all. `safe_source_v2` leaves such files out instead and lists them, copies up to 256 MiB
+and 10,000 files and folders, and doesn't count what a rule left out toward that (it looks through at most 100,000
+entries). What still doesn't fit fails with `snapshot_limit` and a message that gives the size, the limit, the five
+biggest folders (named as narrowly as is useful: `docs/screenshots`, not `docs`) and how much to leave out, and says
+to use `.dgcignore` or the Pip's Excluded folders. The original rules' failure names the big files and says how to
+switch. A repeated directory (a filesystem loop) still fails under both.
+
+**What safe_source_v2 leaves out, and how it decides.** Ignore rules are matched by DGC itself in Python, the way Git
+matches `.gitignore` (anchoring, trailing `/` for folders only, `*`, `?`, `[...]`, `**`, the last matching line
+wins and a deeper file's lines come later). They only ever leave things out. A `!` line brings back only what an
+earlier line of the same family left out: the `.gitignore` family (`.git/info/exclude` and every `.gitignore`), or
+the `.dgcignore` family. It never brings back what DGC's fixed rules, the other family or the Pip's list leave out,
+so `!.env` changes nothing. An ignore file over 256 KiB (2 MiB and 2,000 files in all) stops the copy rather than
+being skipped; a symbolically linked one isn't read, as Git doesn't.
+
+- **Committed source** reads the `.dgcignore` files in the commit (not uncommitted ones) and the Pip's list. The
+  project's `.gitignore` doesn't apply: Git ignores it for files you committed, and so does DGC. No fixed exclusions
+  apply, so a committed `.env` file is readable, as before. Skipped and listed: files over 4 MiB, symbolic links,
+  submodules, other non-file entries and unsafe paths.
+- **Current files** add the fixed exclusions below, the project's `.gitignore` files and `.git/info/exclude` (when
+  `.git` is a folder). Skipped and listed: files over 4 MiB, symbolic links (never followed), hard-linked files,
+  FIFOs, sockets and devices, other filesystems, folders deeper than 32, names DGC can't copy safely (control
+  characters, `\`, `:`, invalid UTF-8, paths over 1 KiB) and files that contain a configured secret.
+
+**What the Pip and the user are told.** A `safe_source_v2` copy keeps a bounded record (at most 6 KiB) of what it
+skipped (path, reason and size) and what each rule left out (the folder or file and which rule; committed source
+also counts the files and bytes under each excluded folder). What DGC's fixed rules leave out is counted, never
+named. The record is pinned with a current-file run (`source_left_out` in its manifest), saved with every run as the
+`pip_run_source_left_out` activity event, given to the worker, which tells the Pip that these paths exist, are not in
+its copy and must not be reported as missing, and returned by `get_pip_run_source {run_id}` (API 50, local only):
+`{run_id, rules, status, left_out}`, with `status` `recorded`, `not_copied_yet` (a committed copy is made when the
+run starts), `not_copied` (it ended first), `original_rules`, `no_source` or `unavailable` (the event was trimmed).
+`safe_source_v2` current-file receipts are `schema_version: 2` and add `skipped_files`.
+
+**Checked up front.** `check_pip_source {pip_id, source_policy?}` (API 50, local only) uses the selection a run uses,
+without copying, for the saved policy or an unsaved one: `{pip_id, check: {applies, fits, mode, rules, revision,
+files, bytes, limits, left_out, biggest_folders, message}}`. The main chat's `pips_setup` result carries the same
+check as `source_check`, and `run_pip_now` refuses a committed source that can't fit (nothing is queued) with the
+message above. `dgc pips source PIP` prints it.
+
+**Changing the rules.** A move to `safe_source_v2`, and any change of Excluded folders, is a job proposal reviewed like
+any source change: the Pip page's Source **Save** (your own change), `dgc pips propose --source-rules v2 --exclude …`
+then `dgc pips accept`, a setup card with `source_exclude`, or the main chat's `pips_propose` with `source_exclude`,
+which the tool's permission approves as it does a new goal. The chat can't change where the source comes from
+(committed or current files) and can't move a Pip back to the original rules. Checkpoints of any policy but
+`{"mode": "committed_only"}` are version 2 and record the policy, so the first report after a change of rules or
+Excluded folders is `source_policy_changed` and isn't compared; a new committed Pip's first report counts every
+finding as new, as version 1 does.
 
 **Committed source.** The workspace must be the repository root. DGC reads exact
 blobs with `git ls-tree` and `git cat-file`, so checkout filters, hooks and LFS don't
-apply and dirty or untracked files are excluded. Only regular and executable files
-are accepted; a committed symbolic link or submodule fails the run. No exclusions
-apply, so a committed `.env` file is readable. `source_ref` is `HEAD`, a branch or a
+apply and dirty or untracked files are excluded. `source_ref` is `HEAD`, a branch or a
 full commit ID.
 
-**Current tree.** The copy follows no links and refuses hard links, special files,
-other mount points, nesting deeper than 32 and any file that contains a configured
-secret. It is checked again after copying, before the worker starts, inside the
-worker, and after it finishes. `safe_source_v1` leaves out:
+**Current tree.** The copy follows no links, never crosses into other mount points and is checked again after copying,
+before the worker starts, inside the worker, and after it finishes. Under `safe_source_v1` it refuses hard links,
+special files, nesting deeper than 32 and any file that contains a configured secret. Both rule sets leave out:
 
 - names starting with `.env`;
 - `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `.DS_Store`, SSH private keys
@@ -280,7 +334,7 @@ decision never applies to a newer state.
 
 | Review | Created by | Pinned by | Expires |
 | --- | --- | --- | --- |
-| Job proposal | A person, the main chat (`pips_propose`: name, goal, source ref only), or a Pip's own chat (`draft_pip_change`, Personal) | `expected_version` | 7 days |
+| Job proposal | A person, the main chat (`pips_propose`: name, goal, source ref and Excluded folders only), or a Pip's own chat (`draft_pip_change`, Personal) | `expected_version` | 7 days |
 | Setup card | The main chat (`pips_setup`) | Digest of the card | 7 days, or once its next run time passes |
 | Handoff | A person or the main chat (`handoff_to_pip`) | `expected_revision` | 7 days |
 | Draft (email, calendar, connector) | A Personal Pip's chat or the main chat | Draft digest | 24 hours |
@@ -1109,7 +1163,10 @@ passed on. Personal Pips can't hand off to project Pips.
 | Specialist calls of a reviewed Patch | the reviewed `max_calls` (1–3); they share the run's lifetime, policy version 2 (version 1: 300 s, 12 requests, 64 tool calls, 4,096 tokens) |
 | Reviewed commands of a run | 300 seconds from when they start |
 | Worker input | 128 KiB |
-| Source copy | 10,000 entries, 4 MiB per file, 64 MiB total |
+| Source copy (`safe_source_v2`) | 256 MiB and 10,000 copied files and folders; files over 4 MiB are left out and listed; 100,000 entries looked at |
+| Source copy (`safe_source_v1`) | 10,000 entries, 4 MiB per file, 64 MiB total; any file over the limit fails the run |
+| Ignore files read | 256 KiB each, 2 MiB and 2,000 files in all |
+| Left-out record | 6 KiB |
 | Commands per action | 4 (Pulse 1–4, Patch 0–4) |
 | Write paths per Patch action | 32 |
 | Action JSON | 16 KiB |
@@ -1141,7 +1198,7 @@ notice, loads them automatically. A new or resumed chat starts without them.
 | `use_pips` | `UsePips` | Allowed | Loads the Pips tools |
 | `pips_context` | `PipsContext` | Allowed | Reads Pips data (below) |
 | `pips_setup` | `PipsSetup` | Allowed: outside auto mode it only saves a card the editor docks above the chat box, whose **Create Pip** is the approval | In auto mode (or on an allow rule, or your Allow on an ask rule) creates or updates the Pip; one with app reads or Pulse commands is always a card |
-| `pips_propose` | `PipsPropose` | Asks | Applies a change to a project Pip's name, goal or source ref |
+| `pips_propose` | `PipsPropose` | Asks | Applies a change to a project Pip's name, goal, source ref or Excluded folders (`source_exclude`, which moves it to `safe_source_v2`) |
 | `pips_adapt` | `PipsAdapt` | Asks | Applies a name or source-ref change that the Pip's adaptation policy allows |
 | `run_pip_now` | `PipsRun` | Asks | Queues one run of a Scout, Lens, Rook, Lock or Quill Pip, or a Personal Pip |
 | `handoff_to_pip` | `PipsHandoff` | Asks | Saves a handoff proposal |
@@ -1197,7 +1254,7 @@ ask need `--yes` there.
 | Digest | `digest [--keep]`, `notify PIP [--min-severity] [--alerts]`, `outcomes PIP` |
 | Setup cards | `setup list\|show\|accept\|reject` |
 | Changes | `propose`, `schedule`, `trigger`, `verification-plan`, `adaptation`, `adaptations`, `accept`, `reject`, `approvals`, `versions` |
-| Runs | `run`, `runs`, `report`, `cancel`, `checkpoints`, `review-finding`, `review-execution`, `export-run` |
+| Runs | `run`, `runs`, `report`, `source`, `cancel`, `checkpoints`, `review-finding`, `review-execution`, `export-run` |
 | Conversations | `messages`, `send` |
 | Handoffs | `handoff propose\|propose-artifact\|propose-personal\|review\|accept\|reject\|list` |
 | Context and memory | `context list\|record\|archive\|accept-finding\|accept-execution`, `memory source\|record\|revoke\|list`, `memory statements anchor\|record\|revoke\|list` |
@@ -1265,3 +1322,4 @@ Clients check it before using a newer control.
 | 44 | A Pip's plugins (`use_plugin`, `plugin_tools`, `call_plugin`; `list_pip_plugins`, `allow_pip_plugin`, `decline_pip_plugin`, `list_pip_plugin_uses`); a plugin action is a connector draft on the plugin's server; payment plugins refuse Always allow; Needs attention (`list_pip_attention`); what a Pip remembers (`remember`; `list_pip_notes`, `add_pip_note`, `forget_pip_note`; schema 44); careful mode (`list_pip_sites`, `set_pip_careful`, `forget_pip_site`) |
 | 45 | Every plugin turned on is every Pip's (no `use_plugin`, no card); `set_plugin_permission` and each plugin's level (`always_ask`, `any_changes`, `important`, `never_ask`); `web_search` on the app socket; careful mode's `Lane` for unattended runs |
 | 49 | Additive, nothing to gate on: `list_pip_runs` rows carry a failed run's `error`; `get_pip_execution` has `local_http_checks` and, when DGC knows the one-time fix, `fix` (`dgc pips execution --fix`); a Pulse setup card's `runner_notice` says when it can't run on this computer |
+| 50 | The `safe_source_v2` source rules (files DGC can't copy are left out and listed, `.dgcignore`, the project's ignore files for current files, a Pip's Excluded folders in `source_policy.exclude`, 256 MiB); `check_pip_source` and `get_pip_run_source`; new reviewer and Quill Pips start on `safe_source_v2` |

@@ -6,6 +6,38 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+### Pips: a big project no longer fails every run (source rules safe_source_v2, Pips API 50)
+
+A Pip on a working project (an ERP with uploads, media, screenshots and a vendored template: 3,405 committed files,
+85.3 MiB, three 6.9 MiB copies of one video) failed every run with "Snapshot exceeds 10,000 entries, 4 MiB per file
+or 64 MiB total", because one file over 4 MiB or more than 64 MiB of committed code stopped the copy.
+
+- **New source rules, `safe_source_v2`.** Files DGC can't copy are left out and listed instead of failing the run:
+  files over 4 MiB, symbolic links, submodules, and (current files) hard links, special files, other filesystems,
+  folders nested deeper than 32, names it can't copy safely and files holding one of your configured secrets. A run
+  copies up to 256 MiB (was 64 MiB); 10,000 copied files and folders as before, and files a rule leaves out no longer
+  count toward that.
+- **Your project's ignore rules, for leaving things out only.** A `.dgcignore` file (the `.gitignore` format, in any
+  folder) and a Pip's own **Excluded folders** leave things out. A Pip on your current files also follows the
+  project's `.gitignore` files and `.git/info/exclude`. They are read as plain data by DGC itself, never by running
+  Git, and only ever leave things out: a `!` line can't bring back `.env`, keys or anything else DGC's fixed rules
+  leave out. Committed source reads the `.dgcignore` files in the commit; `.gitignore` doesn't apply there, since Git
+  itself ignores it for files you committed.
+- **The Pip is told.** Its run starts with the list of what its copy left out and why, so it doesn't report those
+  files as missing. Each run keeps the list (`get_pip_run_source`, `dgc pips report`).
+- **Said before a run fails, and said plainly.** `dgc pips source PIP` and the Pip page's **Check size** say whether
+  the source fits (`check_pip_source`); setting up a Pip in the chat says so in the result, and `run_pip_now` refuses
+  a source that can't fit instead of queuing a run that will fail. When it still doesn't fit, the message gives the
+  size, the limit, the five biggest folders and how much to leave out, and names `.dgcignore` and Excluded folders.
+- **Existing Pips keep their rules** (`safe_source_v1`) and behave as before, except that the failure now names the
+  big files and folders and says how to switch. Moving a Pip to the current rules is a reviewed source change, once:
+  on its page under Source (Save), `dgc pips propose PIP --expected-version N --source-rules v2 [--exclude uploads/]`
+  then `dgc pips accept`, or the chat's `pips_propose` with `source_exclude`. New Reviewer and Quill Pips start on the
+  current rules; Patch and Pulse keep an exact committed copy. The first report after a change of rules or Excluded
+  folders isn't compared with the one before; a new committed Pip's first report counts every finding as new.
+- **Faster current-file copies.** Capturing your current files no longer flushes every file to disk (each copy is
+  checked by its digest before and after the run): 2,048 small files took 6.3 s and now take 0.5 s.
+
 ### Editor protocol: the agent map
 
 For the editor's agent map. Older clients are unaffected: everything new is a new event, a new command, or a key in

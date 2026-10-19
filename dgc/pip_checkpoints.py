@@ -244,7 +244,7 @@ def encode_result(result):
         if not isinstance(snapshot["sha256"], str) or not _HASH.fullmatch(snapshot["sha256"]):
             raise _error("Audit snapshot digest is invalid.")
         _integer(snapshot["files"], "Snapshot files", 1, 10000)
-        _integer(snapshot["bytes"], "Snapshot bytes", 0, 64 * 1024 * 1024)
+        _integer(snapshot["bytes"], "Snapshot bytes", 0, 256 * 1024 * 1024)   # safe_source_v2 copies up to 256 MiB
     return _encoded(result, MAX_PAYLOAD_BYTES).decode("utf-8")
 
 
@@ -309,7 +309,9 @@ def _validate_metadata(value, *, workspace_id=None, pip_id=None):
         if previous is not None:
             _integer(previous, "Previous checkpoint identity", 1, value["id"] - 1)
         if comparison["status"] == "compared":
-            if comparison["reason"] is not None or previous is None or baseline != previous:
+            # A committed Pip's first report has nothing before it: everything is new, as in version 1.
+            first = previous is None and baseline is None and source["source_policy"]["mode"] == "committed_only"
+            if comparison["reason"] is not None or (previous is None and not first) or baseline != previous:
                 raise _error("Compared checkpoints must name their exact prior baseline.")
         elif comparison["status"] == "unavailable":
             if (baseline is not None or comparison["reason"] not in ("no_checkpoint", "source_policy_changed")
@@ -407,7 +409,9 @@ def snapshot(store, pip_id):
         value = {"schema_version": 1, "pip_id": pip_id, "workspace_id": pip["workspace_id"], "checkpoint": None}
         from .pip_sources import validate_policy
         policy = validate_policy(store._job(pip_id).get("source_policy", "committed_only"))
-        if policy["mode"] == "current_tree":
+        if policy != {"mode": "committed_only"}:
+            # Current tree, or committed source under safe_source_v2: the checkpoint records its
+            # policy, so a change of rules or Excluded folders is never compared as like for like.
             value["schema_version"] = 2
         row = store.db.execute("SELECT id FROM pip_checkpoints WHERE pip_id=? ORDER BY id DESC LIMIT 1", (pip_id,)).fetchone()
         if row is None:
@@ -498,10 +502,13 @@ def record_completed(store, run, result):
     prior = prior_pin["checkpoint"]
     from .pip_sources import from_record
     source_pin = from_record(manifest)
-    version2 = source_pin["source_policy"]["mode"] == "current_tree" or (prior is not None and prior.get("schema_version") == 2)
+    version2 = source_pin["source_policy"] != {"mode": "committed_only"} or (prior is not None and prior.get("schema_version") == 2)
     if version2 and prior_pin["schema_version"] != 2:
         raise _error("Current-tree comparisons require an explicit version 2 checkpoint pin.")
-    comparable = prior is not None and source_pin["source_policy"] == from_record(prior)["source_policy"]
+    # A committed Pip's first report (safe_source_v2) counts every finding as new, as version 1 does;
+    # after a change of rules or Excluded folders the next report is not compared.
+    comparable = ((prior is not None and source_pin["source_policy"] == from_record(prior)["source_policy"])
+                  or (prior is None and source_pin["source_policy"]["mode"] == "committed_only"))
     encode_result(result)
     if result != source["result"]:
         raise _error("Checkpoint result does not match its authoritative completed run.", "checkpoint_mismatch")

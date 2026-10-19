@@ -80,6 +80,11 @@ The reply is a `pips_result` event that carries the nested request ID:
 - Controls run on their own worker thread, so they are allowed during a chat turn and
   never touch the chat's agent. At most 16 controls can be pending; more get a `busy`
   error.
+- `check_pip_source {pip_id, source_policy?}` and `get_pip_run_source {run_id}` (API 50, local only)
+  say whether a Pip's source fits a run (for its saved policy, or an unsaved one the Source form is
+  editing) and what one run's copy left out; see **Source** in
+  [PIPS_REFERENCE.md](PIPS_REFERENCE.md). The host refuses both before sending to a CLI below API 50,
+  and the editor sends a `safe_source_v2` policy in `propose_pip_update` only from API 50.
 - `introduce_pip {pip_id}` (API 43, local only) queues a new Personal Pip's first message once and
   returns `{run, message}` like `send_pip_message`. That message has `intro: true` in
   `list_pip_messages`; the editor hides it and shows the Pip typing until its reply arrives.

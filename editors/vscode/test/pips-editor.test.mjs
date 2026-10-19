@@ -1576,3 +1576,68 @@ test('the Runs page says which chats get its reports as a card, or how to attach
  const older=setup();await older.drain();
  assert.equal(older.d.querySelector('.report-chats'),null,'an older CLI sends no count, and the page says nothing');
 });
+
+// safe_source_v2 (Pips API 50): the Source section's Excluded folders, its size check and a run's left-out list.
+const v2Policy={mode:'committed_only',exclusions:'safe_source_v2'};
+const leftOut={schema_version:1,rules:'safe_source_v2',skipped:[{path:'frontend/intro.mp4',reason:'too_large',bytes:7235174}],skipped_count:1,skipped_bytes:7235174,excluded:[{path:'docs/screenshots/',rule:'pip',files:160,bytes:14260633}],excluded_count:{fixed:0,gitignore:0,dgcignore:0,pip:160},omitted:0};
+test('safe_source_v2 policies, receipts and left-out records are checked exactly',()=>{
+ const {sourcePolicy,sourceSnapshot,sourceLeftOut,leftOutLines,sourceRules,sourceWithExcludes,sourceExcludeError}=model.exports;
+ assert.deepEqual(sourcePolicy({...v2Policy,exclude:['uploads/']}),{...v2Policy,exclude:['uploads/']});
+ assert.equal(sourceRules({mode:'committed_only'}),'safe_source_v1');assert.equal(sourceRules(v2Policy),'safe_source_v2');assert.equal(sourceRules({mode:'personal'}),null);
+ for(const p of [{...v2Policy,exclude:[]},{...v2Policy,exclude:['!.env']},{...v2Policy,exclude:['../x']},{...v2Policy,exclude:['a','a']},{...v2Policy,exclude:['./a']},{...v2Policy,exclusions:'safe_source_v3'},{mode:'committed_only',exclude:['x']},{...v2Policy,exclude:Array.from({length:33},(_,i)=>'d'+i+'/')}])assert.throws(()=>sourcePolicy(p));
+ assert.deepEqual(sourceWithExcludes({mode:'committed_only'},[]),v2Policy);
+ assert.deepEqual(sourceWithExcludes({mode:'current_tree',exclusions:'safe_source_v1'},['uploads/']),{mode:'current_tree',exclusions:'safe_source_v2',exclude:['uploads/']});
+ assert.match(sourceExcludeError('!keep'),/only leave things out/);assert.equal(sourceExcludeError('docs/screenshots/'),'');
+ const receipt={...treeReceipt,schema_version:2,exclusions:'safe_source_v2',skipped_files:3,bytes:200*1048576};
+ assert.deepEqual(sourceSnapshot(receipt),receipt);assert.throws(()=>sourceSnapshot({...receipt,bytes:268435457}));assert.throws(()=>sourceSnapshot({...treeReceipt,skipped_files:0}));
+ assert.deepEqual(leftOutLines(leftOut),['frontend/intro.mp4 · skipped, over the 4 MiB per-file limit (6.9 MiB)','docs/screenshots/ · left out by Excluded folders (160 files, 13.6 MiB)']);
+ for(const bad of [{...leftOut,rules:'safe_source_v1'},{...leftOut,skipped:[{path:'x',reason:'eaten'}]},{...leftOut,excluded:[{path:'.env',rule:'fixed'}]},{...leftOut,extra:1}])assert.throws(()=>sourceLeftOut(bad));
+ // A committed Pip's first report under the current rules is compared with nothing: everything is new.
+ const first=checkpoint({schema_version:2,source_policy:v2Policy,source_snapshot:null,baseline_checkpoint_id:null,comparison:{status:'compared',reason:null,previous_checkpoint_id:null},counts:{total:1,new:1,repeated:0,not_observed:0}});
+ const identity={id:'r1',pip_id:'a',workspace_id:'ws'};
+ assert.equal(model.exports.runCheckpoint(first,identity).comparison.status,'compared');
+ assert.throws(()=>model.exports.runCheckpoint({...first,...treeSource},identity));   // a current-tree first report stays uncompared
+});
+test('Excluded folders: an older-rules Pip adds, removes and saves folders under the current rules and keeps its schedule',async()=>{
+ const schedule={type:'interval',minutes:30,missed_policy:'coalesce_latest'};
+ const jobs=[job('a',{pip_type:'rook',source_policy:{mode:'committed_only'},schedule})],x=setup({apiVersion:50,jobs,conversation:true});await x.drain();x.click('[data-tab=job]');
+ const form=()=>x.d.querySelector('#source-form');
+ assert.match(form().textContent,/older source rules/);assert.match(form().textContent,/None yet/);
+ x.input('#sourceExcludeInput','!secret');x.click('#add-source-exclude');assert.match(form().textContent,/can only leave things out/);assert.equal(form().querySelectorAll('[data-remove-source-exclude]').length,0);
+ for(const value of ['uploads/','./docs/screenshots/','uploads/']){x.input('#sourceExcludeInput',value);x.click('#add-source-exclude');}
+ assert.deepEqual([...form().querySelectorAll('.source-excludes code')].map(e=>e.textContent),['uploads/','docs/screenshots/']);
+ x.click('[data-remove-source-exclude="0"]');x.input('#sourceExcludeInput','*.mp4');   // typed, not added yet: Save adds it
+ x.submit('#source-form');
+ const req=x.requests('propose_pip_update')[0];
+ assert.deepEqual(JSON.parse(JSON.stringify(req.request.changes)),{source_policy:{mode:'committed_only',exclusions:'safe_source_v2',exclude:['docs/screenshots/','*.mp4']}});
+ const policy=JSON.parse(JSON.stringify(req.request.changes.source_policy));
+ x.answer(req,{proposal:proposal({definition:{...proposal().definition,source_policy:policy,schedule}})});await flush();
+ x.answer(x.requests('accept_pip_update')[0],{pip:job('a',{current_version:2,source_policy:policy,schedule})});await x.drain();
+ assert.match(x.d.body.textContent,/Source saved\. Its next run uses it\./);assert.equal(x.requests('run_pip').length,0);
+});
+test('Check size sends the unsaved choice and shows what fits, what is left out and the biggest folders',async()=>{
+ const jobs=[job('a',{source_policy:v2Policy})],x=setup({apiVersion:50,jobs,conversation:true});await x.drain();x.click('[data-tab=job]');
+ assert.doesNotMatch(x.d.querySelector('#source-form').textContent,/older source rules/);
+ x.input('#sourceExcludeInput','docs/screenshots/');x.click('#add-source-exclude');x.click('#check-source');
+ const req=x.requests('check_pip_source')[0];assert.deepEqual(JSON.parse(JSON.stringify(req.request)),{type:'check_pip_source',pip_id:'a',source_policy:{...v2Policy,exclude:['docs/screenshots/']}});
+ const limits={bytes:268435456,entries:10000,file_bytes:4194304};
+ x.answer(req,{pip_id:'a',check:{applies:true,fits:true,mode:'committed_only',rules:'safe_source_v2',revision:'a'.repeat(40),files:3242,bytes:53477376,limits,left_out:leftOut,biggest_folders:[{path:'backend/app',bytes:15518924,files:1000}],message:null}});await flush();
+ const text=x.d.querySelector('.source-check').textContent;assert.match(text,/Fits: 3,242 files, 51\.0 MiB of the 256\.0 MiB a run can copy/);assert.match(text,/frontend\/intro\.mp4 · skipped/);assert.match(text,/Biggest folders: backend\/app 14\.8 MiB/);
+ assert.equal(x.requests('propose_pip_update').length,0);   // checking saves nothing
+ x.click('#check-source');x.answer(x.requests('check_pip_source')[1],{pip_id:'a',check:{applies:true,fits:false,mode:'committed_only',rules:'safe_source_v2',revision:null,files:3402,bytes:67700000,limits,left_out:null,biggest_folders:[{path:'docs/screenshots',bytes:14260633,files:160}],message:'This Pip’s committed source is too big to copy for a run.'}});await flush();
+ assert.match(x.d.querySelector('.source-check[role=alert]').textContent,/too big to copy[\s\S]*docs\/screenshots 13\.6 MiB/);
+});
+test('before Pips API 50 there are no Excluded folders and the host refuses the new source controls',async()=>{
+ const x=setup({apiVersion:49,jobs:[job('a')],conversation:true});await x.drain();x.click('[data-tab=job]');
+ assert.ok(x.d.querySelector('#source-form'));assert.equal(x.d.querySelector('#sourceExcludeInput'),null);assert.equal(x.d.querySelector('#check-source'),null);
+ const b=bridge();b.editor.ready({...b.caps,pips_api_version:49},{});
+ for(const request of [{type:'check_pip_source',pip_id:'a'},{type:'get_pip_run_source',run_id:'r1'}]){b.receive({type:'pipsRequest',id:request.type,request});assert.match(b.posted.at(-1).error.message,/Update DGC to check what a Pip/);}
+ assert.equal(b.sent.length,0);
+});
+test('a run shows what its copy left out, read with get_pip_run_source',async()=>{
+ const r=run('r1','a',{manifest:{...run().manifest,source_policy:v2Policy,source_snapshot:null}});
+ const x=setup({apiVersion:50,jobs:[job('a',{source_policy:v2Policy})],runs:[r]});await x.drain({get_pip_run_source:req=>({run_id:req.run_id,rules:'safe_source_v2',status:'recorded',left_out:leftOut})});
+ assert.equal(x.requests('get_pip_run_source')[0].request.run_id,'r1');
+ const pane=x.d.querySelector('[aria-label="Run report"]');assert.match(pane.querySelector('.source-left-out summary').textContent,/Left out of this run’s copy \(2\)/);
+ assert.match(pane.textContent,/docs\/screenshots\/ · left out by Excluded folders \(160 files, 13\.6 MiB\)/);assert.match(pane.textContent,/the Pip was told so/);
+});

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from .pip_tree_snapshot import EXCLUSIONS, validate_receipt
+from .pip_tree_snapshot import EXCLUSIONS, EXCLUSIONS_V2, validate_receipt, validate_policy as _source_shape
 from .workspace_registry import RegistryError
 
 _MISSING = object()
@@ -25,19 +25,50 @@ def _error(message, code='invalid_source_policy'):
     return RegistryError(code, message)
 
 
+LEGACY_COMMITTED = {'mode': 'committed_only'}
+
+
 def validate_policy(value=_MISSING):
-    """Canonicalize the omitted/legacy committed default; explicit null is invalid."""
+    """Canonicalize the omitted/legacy committed default; explicit null is invalid.
+
+    A missing or legacy policy is committed source under the original rules (safe_source_v1),
+    never anything newer: moving to safe_source_v2 is a reviewed change.
+    """
     if value is _MISSING or value == 'committed_only':
         return {'mode': 'committed_only'}
-    if not isinstance(value, dict) or len(value) > 2:
+    if not isinstance(value, dict) or len(value) > 3:
         raise _error('Use a supported explicit source policy; current_tree also requires its fixed exclusion policy.')
     if set(value) == {'mode'} and value['mode'] == 'personal':
         return {'mode': 'personal'}
-    if set(value) == {'mode'} and value['mode'] == 'committed_only':
-        return {'mode': 'committed_only'}
-    if set(value) == {'mode', 'exclusions'} and value['mode'] == 'current_tree' and value['exclusions'] == EXCLUSIONS:
-        return {'mode': 'current_tree', 'exclusions': EXCLUSIONS}
-    raise _error('Choose committed_only, or explicitly review current_tree with safe_source_v1 exclusions.')
+    return _source_shape(value)
+
+
+def rules(policy):
+    """The named source rules of a project policy: safe_source_v1 (original) or safe_source_v2."""
+    return EXCLUSIONS_V2 if validate_policy(policy).get('exclusions') == EXCLUSIONS_V2 else EXCLUSIONS
+
+
+def committed(policy):
+    """True for committed source under either rule set."""
+    return validate_policy(policy)['mode'] == 'committed_only'
+
+
+def default_policy(pip_type):
+    """What a NEW project Pip reads: committed source under safe_source_v2 for reviewers and
+    Quill. Patch and Pulse work on an exact committed copy, so they keep the original rules."""
+    current = isinstance(pip_type, str) and pip_type in _SOURCE_TYPES     # an invalid type is refused by its own check
+    return {'mode': 'committed_only', 'exclusions': EXCLUSIONS_V2} if current else dict(LEGACY_COMMITTED)
+
+
+def with_exclude(policy, exclude):
+    """The same mode under safe_source_v2 with this Excluded folders list (empty clears it)."""
+    selected = validate_policy(policy)
+    if selected['mode'] == 'personal':
+        raise _error('Personal Pips have no project source to leave things out of.', 'unsupported_source')
+    value = {'mode': selected['mode'], 'exclusions': EXCLUSIONS_V2}
+    if exclude:
+        value['exclude'] = list(exclude)
+    return validate_policy(value)
 
 
 def validate_job(policy, *, pip_type, schedule=None, event_trigger=None):
@@ -49,6 +80,9 @@ def validate_job(policy, *, pip_type, schedule=None, event_trigger=None):
         raise _error('The source policy requires an available, explicitly identified Pip type.')
     if selected['mode'] == 'personal' and event_trigger is not None:
         raise _error('Personal jobs do not watch project events.', 'unsupported_source')
+    if selected['mode'] == 'committed_only' and selected != LEGACY_COMMITTED and pip_type not in _SOURCE_TYPES:
+        raise _error('Patch and Pulse work on an exact committed copy with the original source rules; '
+                     'Excluded folders are for Scout, Lens, Rook, Lock and Quill.', 'unsupported_source')
     if selected['mode'] == 'current_tree':
         if pip_type not in _SOURCE_TYPES:
             raise _error('Current-tree source is limited to read-only auditors and Quill. Patch and Pulse require committed Git source.', 'unsupported_source')

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "check_pip_source", "get_pip_run_source",
     "list_pip_plugins", "list_pip_plugin_uses", "list_pip_attention", "list_pip_notes", "list_pip_sites", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit",
     "list_pip_routines", "list_pip_shared", "get_pip_computers", "list_pip_apps",
     "list_pip_computer_files", "read_pip_computer_file", "list_pip_computer_terminal", "get_pip_computer_desktop",
@@ -221,7 +222,12 @@ MUTATION_COMMANDS |= API47_MUTATIONS
 # API 48: a Pip's news (failed runs, new findings) dismissed until it does something new; local only.
 API48_MUTATIONS = frozenset({'mark_pip_news_seen'})
 MUTATION_COMMANDS |= API48_MUTATIONS
+# API 50: whether a Pip's source fits a run, and what one run's copy left out (safe_source_v2); local only.
+API50_READS = frozenset({'check_pip_source', 'get_pip_run_source'})
+READ_COMMANDS |= API50_READS
 COMMAND_FIELDS = {
+    'check_pip_source': frozenset({'pip_id', 'source_policy'}),
+    'get_pip_run_source': frozenset({'run_id'}),
     'list_pip_plugins': frozenset({'pip_id'}),
     'allow_pip_plugin': frozenset({'pip_id', 'grant_id'}),
     'decline_pip_plugin': frozenset({'pip_id', 'grant_id'}),
@@ -482,7 +488,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API48_MUTATIONS:
+        if command in API50_READS:
+            minimum = 50
+        elif command in API48_MUTATIONS:
             minimum = 48
         elif command in API47_MUTATIONS:
             minimum = 47
@@ -612,6 +620,9 @@ class Pips:
         if (command == 'propose_pip_update' and isinstance(values.get('changes'), dict)
                 and 'source_policy' in values['changes'] and version < 11):
             raise DGCUnsupportedError('Reviewed source policies require a runtime advertising Pips API 11 or newer')
+        policy = values['changes'].get('source_policy') if command == 'propose_pip_update' and isinstance(values.get('changes'), dict) else None
+        if isinstance(policy, Mapping) and policy.get('exclusions') == 'safe_source_v2' and version < 50:
+            raise DGCUnsupportedError('The safe_source_v2 source rules and Excluded folders require a runtime advertising Pips API 50 or newer')
         changes = values.get('changes')
         if version < 21 and (
                 (command == 'propose_pip_update' and isinstance(changes, dict) and 'verification_plan' in changes)

@@ -19,7 +19,8 @@ class ParentTests(unittest.TestCase):
     def saved(self, role='rook', *, selected=None):
         job=self.store.create(self.workspace['id'],'Path review','Inspect the approved source.','human',pip_type=role)
         policy=events.validate_event_trigger({'events':[paths.EVENT,'context_updated'],'commit_paths':RULES})
-        definition=pips._definition(job['name'],job['goal'],pip_type=role,event_trigger=policy)
+        # A path trigger saved under the original committed rules (safe_source_v1), as its manifest below says.
+        definition=pips._definition(job['name'],job['goal'],pip_type=role,event_trigger=policy,source_policy={'mode':'committed_only'})
         self.registry.db.execute('INSERT INTO pip_versions VALUES(?,?,?,?,?,?)',
             (job['id'],2,pips._json(definition),'human','Reviewed fixture',NOW))
         self.registry.db.execute('UPDATE pips SET current_version=2 WHERE id=?',(job['id'],))

@@ -325,7 +325,7 @@ class LocalPipsTests(unittest.TestCase):
 
     def test_snapshot_bounds_before_file_allocation(self):
         commit = self.commit()
-        with patch.object(pips, "MAX_FILE_BYTES", 4), self.assertRaisesRegex(RegistryError, "Snapshot exceeds"):
+        with patch.object(pips, "MAX_FILE_BYTES", 4), self.assertRaisesRegex(RegistryError, "per-file limit"):
             pips.clean_snapshot(self.root, commit, self.base / "snapshot")
         self.assertFalse((self.base / "snapshot").exists())
 

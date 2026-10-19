@@ -13,6 +13,11 @@ History may carry `{role: "pip_report", report}` items.
 ChatDGC's outline: the command `chatdgc_outline` (offered as `ready.capabilities.chatdgc.outline`) and its answer, the
 event `chatdgc_outline` (every prompt of a chat, oldest first, with the widgets its replies made), are in the vendored
 protocol and the TypeScript SDK's known events, so neither SDK drops it.
+Pips API 50: `check_pip_source {pip_id, source_policy?}` (whether a Pip's source fits a run now, and what its copy
+leaves out) and `get_pip_run_source {run_id}` (what one run's copy left out) are reads in both SDKs, local only. A
+`propose_pip_update` whose `changes.source_policy` uses the `safe_source_v2` rules
+(`{"mode": "committed_only" | "current_tree", "exclusions": "safe_source_v2", "exclude"?: [...]}`) needs API 50; both
+SDKs refuse it against an older runtime.
 
 The editor's agent map added two events, `background_shells` and `background_output`, to the vendored protocol and
 the TypeScript SDK's known events, so neither SDK drops them; and the commands `list_background_shells`,

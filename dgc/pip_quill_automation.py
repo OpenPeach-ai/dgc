@@ -74,7 +74,12 @@ def _job(value):
     for key, maximum in (('name',120), ('goal',4000), ('source_ref',200)):
         text = value[key]
         if not isinstance(text, str) or not 1 <= len(text) <= maximum or text != text.strip() or '\0' in text: _fail()
-    if (value['pip_type'] != 'quill' or value['source_policy'] != {'mode':'committed_only'}
+    from .pip_sources import validate_policy
+    try:
+        committed = validate_policy(value['source_policy']) == value['source_policy'] and value['source_policy']['mode'] == 'committed_only'
+    except RegistryError:
+        committed = False
+    if (value['pip_type'] != 'quill' or not committed
             or validate_model_choice(value['model_choice']) != value['model_choice']): _fail()
     return _digest(value, MAX_DEFINITION_BYTES)
 
@@ -96,7 +101,7 @@ def validate_manifest(manifest):
     source = from_record(manifest)
     if (manifest.get('pip_type') != 'quill' or manifest.get('run_kind') != 'draft'
             or manifest.get('policy') != 'read_only' or manifest.get('tools') != sorted(READ_TOOLS)
-            or source['source_policy'] != {'mode':'committed_only'} or source['source_snapshot'] is not None
+            or source['source_policy']['mode'] != 'committed_only' or source['source_snapshot'] is not None
             or any(key in manifest for key in ('handoff','specialists','conversation','audit_checkpoint','changes_since_checkpoint','pip_memory','main_chat_request'))): _fail()
     for key, prefix in (('pip_id','pip'),('workspace_id','ws')):
         if (not isinstance(grant[key], str) or re.fullmatch(prefix+'_[0-9a-f]{32}', grant[key]) is None

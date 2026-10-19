@@ -12,6 +12,18 @@
   shows it when you open it, and a reload draws the same card. A Pip's Runs page says where its reports go, or how
   to attach it to a chat.
 
+### Pips: Excluded folders and a size check (needs DGC with Pips API 50)
+
+- **Source, on a Pip's page (Advanced):** a list of **Excluded folders** (add one, remove one; `uploads/`,
+  `docs/screenshots/` or `*.mp4`, written as in `.gitignore`), saved with the current source rules. A Pip on the
+  older rules says so: one file over 4 MiB or more than 64 MiB of code fails its every run, and Save moves it to the
+  rules that leave such files out and list them. Saving the list keeps the Pip's schedule; only switching to your
+  current files still turns it off.
+- **Check size** checks the choice before you save it: whether it fits a run, what each run leaves out, and the
+  biggest folders when it doesn't.
+- **A run's report lists what its copy left out** (skipped files and why, and what your ignore files and Excluded
+  folders left out).
+
 ### Agent map
 
 - **The agents pill opens the agent map**, as in Claude Code, and so does `/agents`. The pill counts the agents

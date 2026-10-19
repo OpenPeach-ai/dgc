@@ -189,6 +189,20 @@ def run(args, ctx):
             if registry.db.execute('SELECT 1 FROM pip_runs WHERE pip_id=? AND idempotency_key=?', (checked['pip_id'], key)).fetchone() is None:
                 from .pip_runtime import require_supervisor
                 require_supervisor(ctx.config)
+                from .pips import PipStore as Store
+                from .pip_sources import validate_policy
+                pip = Store(registry).get(checked['pip_id'])
+                # Only for a request the queue would accept: a stale version or another role is refused
+                # there first, before any source is read.
+                if (validate_policy(pip.get('source_policy', 'committed_only'))['mode'] == 'committed_only'
+                        and pip['current_version'] == checked['expected_version']
+                        and pip['status'] == 'active' and pip['pip_type'] in READ_ONLY_ROLES):
+                    # Say now, not after a run fails: a source that can't be copied never fits a later run either.
+                    from .pip_source_check import check as check_source
+                    found = check_source(registry, pip)
+                    if not found['fits']:
+                        raise RegistryError('snapshot_limit', found['message'] + ' Nothing was queued. Propose the '
+                                            'folders to leave out with pips_propose source_exclude, then run it again.')
             from .pips import PipStore
             queued = PipStore(registry).enqueue(checked["pip_id"], key, actor, ctx.config, main_chat_request=pin)
         from .pip_sources import from_record

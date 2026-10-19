@@ -32,8 +32,9 @@ def check_root(root, expected):
 
 
 class PreparedSource:
-    def __init__(self, run_id, path, receipt, identity):
+    def __init__(self, run_id, path, receipt, identity, left_out=None):
         self.run_id, self.path, self.receipt, self.root_identity = run_id, path, receipt, identity
+        self.left_out = left_out    # safe_source_v2: what the copy skipped or excluded
         self.retained = False
 
     def retain(self):
@@ -42,7 +43,7 @@ class PreparedSource:
 
 
 @contextlib.contextmanager
-def prepare(directory, root, run_id, *, secrets=()):
+def prepare(directory, root, run_id, *, secrets=(), policy=None):
     """Capture outside SQL; discard only our exclusive directory on failure/retry.
 
     No filesystem I/O deadline is claimed. A malicious same-user replacement may
@@ -75,10 +76,11 @@ def prepare(directory, root, run_id, *, secrets=()):
         identity = (info.st_dev, info.st_ino)
         expected = root_identity(root)
         path = directory / 'runs' / run_id / 'source'
-        receipt = trees.capture(root, path, secrets=secrets, expected_root=expected)
+        report = {}
+        receipt = trees.capture(root, path, secrets=secrets, expected_root=expected, policy=policy, report=report)
         source_info = os.stat('source', dir_fd=owned, follow_symlinks=False)
         source_identity = (source_info.st_dev, source_info.st_ino)
-        result = PreparedSource(run_id, path, receipt, expected)
+        result = PreparedSource(run_id, path, receipt, expected, report.get('left_out'))
         yield result
     except (OSError, trees.WorkspaceBoundaryError) as exc:
         raise RegistryError('snapshot_unavailable', 'The private run source could not be prepared safely. No new source was queued.') from exc

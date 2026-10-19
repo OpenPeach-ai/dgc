@@ -238,7 +238,9 @@ function checkpointMetadata(value,pip,workspace) {
   if(c.status==='unavailable'){
    if(value.baseline_checkpoint_id!==null||!['no_checkpoint','source_policy_changed'].includes(c.reason)||(c.reason==='no_checkpoint')!==(c.previous_checkpoint_id===null)||!['new','repeated','not_observed'].every(k=>value.counts[k]===null))fail();return value;
   }
-  if(c.status!=='compared'||c.reason!==null||c.previous_checkpoint_id===null||value.baseline_checkpoint_id!==c.previous_checkpoint_id)fail();
+  // A committed Pip's first report under safe_source_v2 is compared with nothing: everything is new, as in version 1.
+  const first=c.previous_checkpoint_id===null&&value.baseline_checkpoint_id===null&&sourcePin(value).kind==='committed_only';
+  if(c.status!=='compared'||c.reason!==null||c.previous_checkpoint_id===null&&!first||value.baseline_checkpoint_id!==c.previous_checkpoint_id)fail();
  }else if(typeof value.source_revision!=='string'||!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.source_revision)||Object.hasOwn(value,'source_snapshot')||Object.hasOwn(value,'source_policy')||Object.hasOwn(value,'comparison'))fail();
  if(!['new','repeated','not_observed'].every(k=>integer(value.counts[k],0,16))||value.counts.new+value.counts.repeated!==value.counts.total||value.baseline_checkpoint_id===null&&(value.counts.repeated!==0||value.counts.not_observed!==0))fail();
  return value;
@@ -415,7 +417,7 @@ export function documentationDraft(result){
   const textWithin=(s,max,single=false)=>typeof s==='string'&&!!s.trim()&&bytes(s)<=max&&!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(s)&&!(single?/[\x00-\x1f\x7f]/:/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/).test(s);
   if(!record(result)||Object.keys(result).sort().join()!=='draft,snapshot,summary,tests_executed,title,tools_called,usage,verification'||!textWithin(result.title,160,true)||!textWithin(result.summary,2000)||result.tests_executed!==false||result.verification!==DRAFT_VERIFICATION||!Number.isSafeInteger(result.tools_called)||result.tools_called<1||result.tools_called>1000000||!record(result.usage)||Object.entries(result.usage).some(([k,v])=>!['input_tokens','output_tokens','cached_input_tokens','reasoning_tokens','requests'].includes(k)||!Number.isSafeInteger(v)||v<0))fail();
   const d=result.draft,a=d?.artifact,s=result.snapshot;
-  if(!record(d)||Object.keys(d).sort().join()!=='artifact,citations,markdown'||!textWithin(d.markdown,24576)||!record(a)||Object.keys(a).sort().join()!=='bytes,path,sha256'||a.path!=='artifacts/documentation.md'||!hexDigest(a.sha256)||a.bytes!==bytes(d.markdown)||!record(s)||Object.keys(s).sort().join()!=='bytes,files,sha256'||!hexDigest(s.sha256)||!Number.isSafeInteger(s.files)||s.files<0||s.files>10000||!Number.isSafeInteger(s.bytes)||s.bytes<0||s.bytes>67108864||!Array.isArray(d.citations)||!d.citations.length||d.citations.length>16)fail();
+  if(!record(d)||Object.keys(d).sort().join()!=='artifact,citations,markdown'||!textWithin(d.markdown,24576)||!record(a)||Object.keys(a).sort().join()!=='bytes,path,sha256'||a.path!=='artifacts/documentation.md'||!hexDigest(a.sha256)||a.bytes!==bytes(d.markdown)||!record(s)||Object.keys(s).sort().join()!=='bytes,files,sha256'||!hexDigest(s.sha256)||!Number.isSafeInteger(s.files)||s.files<0||s.files>10000||!Number.isSafeInteger(s.bytes)||s.bytes<0||s.bytes>268435456||!Array.isArray(d.citations)||!d.citations.length||d.citations.length>16)fail();
   for(const c of d.citations){if(!record(c)||Object.keys(c).sort().join()!=='excerpt,line,path,verification'||!textWithin(c.path,1024,true)||c.path.startsWith('/')||/[\\:]/.test(c.path)||c.path.split('/').some(p=>!p||['.','..','.git'].includes(p))||!Number.isSafeInteger(c.line)||c.line<1||c.line>100000||!textWithin(c.excerpt,1000)||c.excerpt.split('\n').length>8||c.verification!=='source_excerpt_only')fail();}
   if(bytes(JSON.stringify(result))>61440)fail();return result;
 }
@@ -515,7 +517,7 @@ export function eventRunPin(manifest){
  if(!record(p)||Object.keys(p).sort().join()!==(e?.event_type==='workspace_committed_paths_changed'?'checked_at,commit_path_match,event,expected_after_seq,history_may_be_incomplete,job_version,policy,source_semantics':'checked_at,event,expected_after_seq,history_may_be_incomplete,job_version,policy,source_semantics')||p.job_version!==manifest.job_version||!Number.isSafeInteger(p.job_version)||p.job_version<1||p.job_version>999999||manifest.policy!=='read_only'||!['rook','scout','lens','lock','quill'].includes(manifest.pip_type??'rook')||(manifest.pip_type==='quill'?manifest.run_kind!=='draft':!['audit',undefined].includes(manifest.run_kind))||typeof p.history_may_be_incomplete!=='boolean'||p.source_semantics!=='Current approved committed source at enqueue; event metadata does not select a historical checkout.')fail();
  const spec=eventTrigger(p.policy),mapping={context_updated:['workspace_context_recorded','workspace_context_archived','workspace_finding_accepted','workspace_execution_recorded'],finding_accepted:['pip_finding_accepted'],commit_changed:['workspace_commit_changed'],session_turn_completed:['workspace_session_turn_completed'],committed_paths_changed:['workspace_committed_paths_changed']};
  if(!spec||Object.keys(p.policy).sort().join()!==(spec.commit_paths?'commit_paths,events,minimum_minutes,missed_policy':'events,minimum_minutes,missed_policy')||spec.commit_paths&&!sameJson(spec.commit_paths,p.policy.commit_paths)||JSON.stringify(spec.events)!==JSON.stringify(p.policy.events)||spec.minimum_minutes!==p.policy.minimum_minutes||spec.missed_policy!==p.policy.missed_policy||!record(e)||Object.keys(e).sort().join()!=='created_at,event_id,event_type,seq'||typeof e.event_id!=='string'||!e.event_id||new TextEncoder().encode(e.event_id).length>128||/[\u0000-\u001f\u007f]/.test(e.event_id)||!Number.isSafeInteger(e.seq)||e.seq<1||!Number.isSafeInteger(p.expected_after_seq)||p.expected_after_seq<0||p.expected_after_seq>=e.seq||!spec.events.flatMap(v=>mapping[v]).includes(e.event_type)||typeof e.created_at!=='string'||e.created_at.length>40||!Number.isFinite(Date.parse(e.created_at))||typeof p.checked_at!=='string'||p.checked_at.length>32||!Number.isFinite(Date.parse(p.checked_at))||Date.parse(p.checked_at)<Date.parse(e.created_at))fail();if(spec.commit_paths){
-  if(!pathId(e.event_id,'evt')||!canonicalTime(e.created_at)||!canonicalTime(p.checked_at)||!['pip','ws','binding'].every((prefix,i)=>pathId(manifest[['pip_id','workspace_id','binding_id'][i]],prefix))||manifest.requested_by!=='local-event-trigger'||manifest.run_kind!==(manifest.pip_type==='quill'?'draft':'audit')||!pathCommit(manifest.source_revision)||sourcePin(manifest).kind!=='committed_only'||['handoff','conversation','specialists','pulse_verification','main_chat_request','schedule','scheduled_at','schedule_occurrence'].some(k=>Object.hasOwn(manifest,k))||!pathKeys(manifest.job,'goal,model_choice,name,pip_type,source_policy,source_ref')||manifest.job.pip_type!==manifest.pip_type||!sameJson(manifest.job.source_policy,{mode:'committed_only'})||!pathRef(manifest.job.source_ref))fail();
+  if(!pathId(e.event_id,'evt')||!canonicalTime(e.created_at)||!canonicalTime(p.checked_at)||!['pip','ws','binding'].every((prefix,i)=>pathId(manifest[['pip_id','workspace_id','binding_id'][i]],prefix))||manifest.requested_by!=='local-event-trigger'||manifest.run_kind!==(manifest.pip_type==='quill'?'draft':'audit')||!pathCommit(manifest.source_revision)||sourcePin(manifest).kind!=='committed_only'||['handoff','conversation','specialists','pulse_verification','main_chat_request','schedule','scheduled_at','schedule_occurrence'].some(k=>Object.hasOwn(manifest,k))||!pathKeys(manifest.job,'goal,model_choice,name,pip_type,source_policy,source_ref')||manifest.job.pip_type!==manifest.pip_type||!committedPolicy(manifest.job.source_policy)||!pathRef(manifest.job.source_ref))fail();
   if(e.event_type==='workspace_committed_paths_changed')commitPathMatch(p.commit_path_match,manifest,e,spec);
  }return p;
 }
@@ -540,7 +542,7 @@ export function draftAutomationPin(manifest){
  const id=(v,prefix)=>typeof v==='string'&&v.length===prefix.length+32&&v.startsWith(prefix)&&/^[a-f0-9]+$/.test(v.slice(prefix.length));
  if(!record(grant)||Object.keys(grant).sort().join()!==keys||new TextEncoder().encode(JSON.stringify(grant)).length>4096||grant.schema_version!==1||!['schedule','event'].includes(grant.trigger)||manifest.run_kind!=='draft'||manifest.policy!=='read_only'||grant.trigger!==manifest.trigger||grant.job_version!==manifest.job_version||!Number.isSafeInteger(grant.job_version)||grant.job_version<1||grant.job_version>999999||!id(grant.pip_id,'pip_')||!id(grant.workspace_id,'ws_')||grant.pip_id!==manifest.pip_id||grant.workspace_id!==manifest.workspace_id||!sha(grant.definition_digest)||!sha(grant.job_digest)||!sha(grant.digest)||!record(manifest.job)||manifest.job.pip_type!=='quill'||sourcePin(manifest).kind!=='committed_only')fail();
  const job=manifest.job,choice=job.model_choice;
- if(Object.keys(job).sort().join()!=='goal,model_choice,name,pip_type,source_policy,source_ref'||!sameJson(job.source_policy,{mode:'committed_only'})||!sameJson(manifest.tools,['glob','grep','read_file','repo_map','todo'])||['handoff','specialists','conversation','audit_checkpoint','changes_since_checkpoint','pip_memory','main_chat_request'].some(k=>Object.hasOwn(manifest,k)))fail();
+ if(Object.keys(job).sort().join()!=='goal,model_choice,name,pip_type,source_policy,source_ref'||!committedPolicy(job.source_policy)||!sameJson(manifest.tools,['glob','grep','read_file','repo_map','todo'])||['handoff','specialists','conversation','audit_checkpoint','changes_since_checkpoint','pip_memory','main_chat_request'].some(k=>Object.hasOwn(manifest,k)))fail();
  for(const [key,max] of [['name',120],['goal',4000],['source_ref',200]])if(typeof job[key]!=='string'||!job[key]||job[key]!==job[key].trim()||[...job[key]].length>max||job[key].includes('\0'))fail();
  if(!record(choice)||!(Object.keys(choice).join()==='mode'&&choice.mode==='default'||Object.keys(choice).sort().join()==='mode,model'&&choice.mode==='model'&&typeof choice.model==='string'&&choice.model.length<=256&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]*$/.test(choice.model)&&!/[\r\n]/.test(choice.model)&&!choice.model.includes('://')))fail();
  const o=grant.occurrence;
@@ -649,17 +651,87 @@ export function pulseProgress(run){
  return p;
 }
 
+/** A Pip's own Excluded folders (safe_source_v2, Pips API 50): 1-32 patterns in the .gitignore format that only leave things out. */
+export const MAX_SOURCE_EXCLUDES=32;
+export function sourceExcludeError(item){
+ const value=typeof item==='string'?item.trim().replace(/^(?:\.\/)+/,''):'';
+ if(!value)return 'Type a folder or pattern, like uploads/ or *.mp4.';
+ if(value.length>200)return 'Use at most 200 characters.';
+ if(/^[!#]/.test(value))return 'A pattern can only leave things out, so it can’t start with ! or #.';
+ if(value.includes('\\')||/[\u0000-\u001f\u007f]/.test(value))return 'Use plain characters, without backslashes.';
+ if(value.split('/').includes('..'))return 'Stay inside the project: no .. in the path.';
+ if(!value.replace(/[/*]/g,''))return 'Name a folder or file pattern, not everything.';
+ return '';
+}
+export function sourceExcludes(values){
+ if(!Array.isArray(values)||values.length<1||values.length>MAX_SOURCE_EXCLUDES)throw new Error('List 1 to 32 folders or patterns to leave out.');
+ const cleaned=[];
+ for(const item of values){const why=sourceExcludeError(item);if(why)throw new Error(why);const value=item.trim().replace(/^(?:\.\/)+/,'');if(!cleaned.includes(value))cleaned.push(value);}
+ return cleaned;
+}
+/** Committed source under either rule set, in its saved canonical form (event and automation pins). */
+function committedPolicy(value){try{const p=sourcePolicy(value);return p.mode==='committed_only'&&sameJson(p,value);}catch{return false;}}
 export function sourcePolicy(value){
  if(record(value)&&Object.keys(value).join()==='mode'&&value.mode==='personal')return {mode:'personal'};
  if(value===undefined||value==='committed_only')return {mode:'committed_only'};
  if(record(value)&&Object.keys(value).sort().join()==='mode'&&value.mode==='committed_only')return {mode:'committed_only'};
  if(record(value)&&Object.keys(value).sort().join()==='exclusions,mode'&&value.mode==='current_tree'&&value.exclusions==='safe_source_v1')return {mode:'current_tree',exclusions:'safe_source_v1'};
+ // safe_source_v2 (Pips API 50): either source, with an optional Excluded folders list.
+ const keys=record(value)?Object.keys(value).sort().join():'';
+ if((keys==='exclusions,mode'||keys==='exclude,exclusions,mode')&&['committed_only','current_tree'].includes(value.mode)&&value.exclusions==='safe_source_v2'){
+  const policy={mode:value.mode,exclusions:'safe_source_v2'};
+  if(Object.hasOwn(value,'exclude')){const list=sourceExcludes(value.exclude);if(JSON.stringify(list)!==JSON.stringify(value.exclude))throw new Error('This Pip’s Excluded folders are not in their saved form. Refresh.');policy.exclude=list;}
+  return policy;
+ }
  throw new Error('This Pip reads code in a way this editor doesn’t know. Refresh, or update DGC.');
+}
+/** 'safe_source_v1' (the original rules), 'safe_source_v2', or null for a Personal Pip. */
+export function sourceRules(value){const p=sourcePolicy(value);return p.mode==='personal'?null:p.exclusions==='safe_source_v2'?'safe_source_v2':'safe_source_v1';}
+/** The policy to save: the same source with these Excluded folders under safe_source_v2 ([] keeps none). */
+export function sourceWithExcludes(value,list){
+ const p=sourcePolicy(value);if(p.mode==='personal')throw new Error('Personal Pips have no project source.');
+ const next={mode:p.mode,exclusions:'safe_source_v2'};if(list.length)next.exclude=sourceExcludes(list);return sourcePolicy(next);
 }
 export function sourcePolicyLabel(value){try{if(sourcePolicy(value).mode==='personal')return 'Personal · no project access';return sourcePolicy(value).mode==='current_tree'?'Your current files · only when you ask':'Committed code';}catch{return 'Not supported here';}}
 export function sourceSnapshot(value){
  const integer=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
+ if(record(value)&&value.exclusions==='safe_source_v2'){
+  // safe_source_v2 receipts also count the files the copy skipped: up to 256 MiB copied, 100,000 entries looked at.
+  if(Object.keys(value).sort().join()!=='bytes,consistency,excluded_directories,excluded_entries,exclusions,files,kind,schema_version,sha256,skipped_files'||value.schema_version!==2||value.kind!=='current_tree'||typeof value.sha256!=='string'||!/^[a-f0-9]{64}$/.test(value.sha256)||value.consistency!=='checked_non_atomic'||!integer(value.files,1,10000)||!integer(value.bytes,0,268435456)||!integer(value.excluded_entries,0,100000)||!integer(value.excluded_directories,0,value.excluded_entries)||!integer(value.skipped_files,0,100000)||value.files+value.excluded_entries+value.skipped_files>100000)throw new Error('The current-tree snapshot receipt is invalid.');
+  return value;
+ }
  if(!record(value)||Object.keys(value).sort().join()!=='bytes,consistency,excluded_directories,excluded_entries,exclusions,files,kind,schema_version,sha256'||value.schema_version!==1||value.kind!=='current_tree'||!/^[a-f0-9]{64}$/.test(value.sha256)||typeof value.sha256!=='string'||value.exclusions!=='safe_source_v1'||value.consistency!=='checked_non_atomic'||!integer(value.files,1,10000)||!integer(value.bytes,0,67108864)||!integer(value.excluded_entries,0,10000)||!integer(value.excluded_directories,0,value.excluded_entries)||value.files+value.excluded_entries>10000)throw new Error('The current-tree snapshot receipt is invalid.');
+ return value;
+}
+const LEFT_OUT_REASONS={too_large:'over the 4 MiB per-file limit',link:'a symbolic link',hard_link:'a hard-linked file',special:'not a regular file',submodule:'a submodule',unsupported_name:'a name DGC can’t copy safely',too_deep:'nested deeper than 32 folders',other_filesystem:'on another filesystem',secret:'holds one of your configured secrets'};
+const LEFT_OUT_RULES={gitignore:'the project’s ignore files',dgcignore:'.dgcignore',pip:'Excluded folders'};
+/** What a safe_source_v2 copy skipped or left out (get_pip_run_source, check_pip_source), checked. */
+export function sourceLeftOut(value){
+ const fail=()=>{throw new Error('The record of what this copy left out is invalid.');};
+ const count=v=>Number.isSafeInteger(v)&&v>=0;
+ if(!record(value)||Object.keys(value).sort().join()!=='excluded,excluded_count,omitted,rules,schema_version,skipped,skipped_bytes,skipped_count'||value.schema_version!==1||value.rules!=='safe_source_v2'||!Array.isArray(value.skipped)||!Array.isArray(value.excluded)||value.skipped.length+value.excluded.length>400||!count(value.skipped_count)||!count(value.skipped_bytes)||!count(value.omitted)||!record(value.excluded_count)||Object.keys(value.excluded_count).sort().join()!=='dgcignore,fixed,gitignore,pip'||!Object.values(value.excluded_count).every(count))fail();
+ for(const item of value.skipped)if(!record(item)||Object.keys(item).filter(k=>k!=='bytes').sort().join()!=='path,reason'||typeof item.path!=='string'||!item.path||item.path.length>300||!Object.hasOwn(LEFT_OUT_REASONS,item.reason)||Object.hasOwn(item,'bytes')&&!count(item.bytes))fail();
+ for(const item of value.excluded)if(!record(item)||Object.keys(item).filter(k=>k!=='files'&&k!=='bytes').sort().join()!=='path,rule'||typeof item.path!=='string'||!item.path||item.path.length>301||!Object.hasOwn(LEFT_OUT_RULES,item.rule)||Object.hasOwn(item,'files')!==Object.hasOwn(item,'bytes')||Object.hasOwn(item,'files')&&(!count(item.files)||!count(item.bytes)))fail();
+ return value;
+}
+export const sizeText=n=>n>=1048576?(n/1048576).toFixed(1)+' MiB':n>=1024?Math.round(n/1024)+' KiB':n+' bytes';
+/** Plain lines for a left-out record: skipped files and why, then what the rules left out. */
+export function leftOutLines(value){
+ const v=sourceLeftOut(value),lines=[];
+ for(const item of v.skipped)lines.push(`${item.path} · skipped, ${LEFT_OUT_REASONS[item.reason]}${Object.hasOwn(item,'bytes')?' ('+sizeText(item.bytes)+')':''}`);
+ for(const item of v.excluded)lines.push(`${item.path} · left out by ${LEFT_OUT_RULES[item.rule]}${Object.hasOwn(item,'files')?` (${item.files} files, ${sizeText(item.bytes)})`:''}`);
+ if(v.excluded_count.fixed)lines.push(`${v.excluded_count.fixed} more left out by DGC’s fixed rules (credentials, version control, dependencies, caches, build output)`);
+ if(v.omitted)lines.push(`${v.omitted} more not listed`);
+ return lines;
+}
+/** check_pip_source's answer, checked for what the Source section shows. */
+export function sourceCheck(value){
+ const fail=()=>{throw new Error('The source check is invalid.');};
+ const count=v=>Number.isSafeInteger(v)&&v>=0;
+ if(!record(value)||typeof value.applies!=='boolean'||typeof value.fits!=='boolean'||!count(value.files)||!count(value.bytes)||!Array.isArray(value.biggest_folders)||value.biggest_folders.length>5||!(value.message===null||typeof value.message==='string'&&value.message.length<=4000))fail();
+ for(const item of value.biggest_folders)if(!record(item)||typeof item.path!=='string'||!count(item.bytes)||!count(item.files))fail();
+ if(value.left_out!=null)sourceLeftOut(value.left_out);
+ if(value.applies&&(!record(value.limits)||!count(value.limits.bytes)||!count(value.limits.entries)))fail();
  return value;
 }
 export function sourcePin(value){

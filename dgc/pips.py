@@ -75,6 +75,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_reply_stats", "get_pips_limit", "set_pips_limit", "list_pip_attention",
     "list_pip_notes", "add_pip_note", "forget_pip_note", "list_pip_sites", "set_pip_careful", "forget_pip_site",
     "set_plugin_permission",
+    "check_pip_source", "get_pip_run_source",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -181,6 +182,7 @@ _COMMAND_ARGS = {
     "pause_pip": {"pip_id", "expected_lifecycle_revision"}, "resume_pip": {"pip_id", "expected_lifecycle_revision"},
     "run_pip": {"pip_id", "idempotency_key", "expected_version", "expected_lifecycle_revision", "expected_plan_digest"}, "list_pip_runs": {"pip_id"},
     "get_pip_run": {"run_id"}, "cancel_pip_run": {"run_id"},
+    "check_pip_source": {"pip_id", "source_policy"}, "get_pip_run_source": {"run_id"},
     "list_workspace_activity": {"workspace_id", "after"},
     "list_pip_run_activity": {"run_id", "after"},
     "reject_pip_update": {"pip_id", "proposal_id", "expected_version"},
@@ -324,7 +326,11 @@ def _new_computer(personal: bool, asked) -> dict | None:
     return {'schema_version': 1} if personal and (computer_by_default() if asked is None else asked) else None
 
 
-def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", model_choice={"mode": "default"}, adaptation_policy="suggest_changes", event_trigger=None, source_policy="committed_only", verification_plan=None, app_plan=None, web_plan=None, github_plan=None, computer_plan=None):
+def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", model_choice={"mode": "default"}, adaptation_policy="suggest_changes", event_trigger=None, source_policy=None, verification_plan=None, app_plan=None, web_plan=None, github_plan=None, computer_plan=None):
+    if source_policy is None:
+        # A new project Pip reads committed source under the current rules (safe_source_v2).
+        from .pip_sources import default_policy
+        source_policy = default_policy(pip_type)
     from .pip_schedules import validate_schedule
     from .pip_types import require_type
     from .pip_models import validate_model_choice
@@ -720,13 +726,14 @@ class PipStore:
         return self.db.execute(*self._page_sql(workspace_id, 0, 0, query, "created", count=True, chats=chats)).fetchone()[0]
 
     def create(self, workspace_id, name, goal, actor, source_ref="HEAD", pip_type="rook", model_choice={"mode": "default"},
-               computer_plan=None):
+               computer_plan=None, source_policy=None):
+        """source_policy omitted: committed source under the current rules (pip_sources.default_policy)."""
         workspace = self.registry.get(workspace_id)
         if workspace['kind'] == 'personal' and (goal is None or (isinstance(goal, str) and not goal.strip())):
             # Named, then set up in its own chat: the name says what it is for until then.
             goal = PRIMARY_GOAL if pip_type == "core" else NAMED_GOAL
         definition = _definition(name, goal, source_ref, pip_type=pip_type, model_choice=model_choice,
-            source_policy={'mode': 'personal'} if workspace['kind'] == 'personal' else 'committed_only',
+            source_policy={'mode': 'personal'} if workspace['kind'] == 'personal' else source_policy,
             computer_plan=computer_plan)
         with self.registry.transaction():
             self.registry.get(workspace_id)
@@ -753,7 +760,9 @@ class PipStore:
         from . import pip_approvals
         expected_version = _version(expected_version)
         model_origin = origin_session_id is not None
-        allowed = {"name", "goal", "source_ref"} if model_origin else {"name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan"}
+        # The chat may also propose a Pip's Excluded folders (a safe_source_v2 policy in the same mode);
+        # where its source comes from stays a human choice. Checked against the job below.
+        allowed = {"name", "goal", "source_ref", "source_policy"} if model_origin else {"name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan"}
         if not isinstance(changes, dict) or not changes or set(changes) - allowed:
             raise RegistryError("invalid_request", "Only job text, committed source and a human-reviewed schedule may change. This release cannot broaden permissions.")
         if 'event_trigger' in changes:
@@ -802,6 +811,13 @@ class PipStore:
             require_live(self,pip_id)
             if pip["current_version"] != expected_version:
                 raise RegistryError("conflict", "This Pip changed. Refresh and try again.")
+            if model_origin and "source_policy" in changes:
+                from .pip_sources import validate_policy as source_policy_of, rules as source_rules_of
+                proposed, current = source_policy_of(changes["source_policy"]), source_policy_of(pip["source_policy"])
+                if proposed["mode"] != current["mode"] or source_rules_of(proposed) != "safe_source_v2":
+                    raise RegistryError("permission_denied", "The chat can change only which folders a Pip leaves out "
+                                        "(its Excluded folders, under the safe_source_v2 rules), not where its source "
+                                        "comes from. Committed code or current files is the user's choice on the Pip's page.")
             if self.db.execute("SELECT count(*) FROM pip_proposals WHERE pip_id=? AND status='proposed'", (pip_id,)).fetchone()[0] >= 20:
                 raise RegistryError("limit", "Too many changes are waiting for this Pip. Accept or turn some down first.")
             if self.db.execute("SELECT count(*) FROM pip_proposals").fetchone()[0] >= 10000:
@@ -1142,7 +1158,10 @@ class PipStore:
         from .redaction import secret_values
         run_id = handoff['run_id'] if handoff is not None else identifier('run')
         prepared_source = prepare_source(self.registry.directory, binding['canonical_root'], run_id,
-                                         secrets=secret_values(frozen_config)) if current_tree else contextlib.nullcontext(None)
+                                         secrets=secret_values(frozen_config), policy=selected_source) if current_tree else contextlib.nullcontext(None)
+        from .pip_sources import rules as source_rules_of
+        from . import pip_source_rules
+        snapshot_limit = pip_source_rules.MAX_BYTES if not personal and source_rules_of(selected_source) == pip_source_rules.RULES_V2 else MAX_SNAPSHOT_BYTES
         with prepared_source as captured:
             source = source_pin(selected_source, source_revision=revision,
                                 source_snapshot=captured.receipt if captured is not None else None)
@@ -1177,7 +1196,7 @@ class PipStore:
                         "model": model["model"] if model is not None else None, "model_settings": model,
                         "policy": "read_only", "tools": sorted(READ_TOOLS),
                         "policy_digest": hashlib.sha256(_json(native_policy(personal=personal)).encode()).hexdigest(),
-                        "limits": {**OPEN_LIMITS, "snapshot_bytes": MAX_SNAPSHOT_BYTES},
+                        "limits": {**OPEN_LIMITS, "snapshot_bytes": snapshot_limit},
                         "trigger": "schedule" if schedule_occurrence else "manual", "requested_by": actor}
             if not personal and pip.get('github_plan') is not None and run_kind in ("audit", "draft"):
                 manifest['github_plan'] = pip['github_plan']
@@ -1212,6 +1231,9 @@ class PipStore:
                 manifest.update(policy='review_required', tools=[], policy_digest=action_digest(plan['action']))
             if captured is not None:
                 manifest["source_root_identity"] = captured.root_identity
+                if captured.left_out is not None:
+                    # Pinned with the copy: the worker tells the Pip, and get_pip_run_source shows it.
+                    manifest["source_left_out"] = captured.left_out
             with self.registry.transaction() if not self.db.in_transaction else contextlib.nullcontext():
                 latest = self.get(pip_id)
                 require_live(self,pip_id)
@@ -1391,6 +1413,9 @@ class PipStore:
                     commit_occurrence(self.registry, pip_id, event_occurrence)
                 self.registry.event(pip["workspace_id"], "pip_run_queued", pip_id=pip_id, run_id=run_id,
                                     payload={"job_version": pip["current_version"], "source_revision": revision})
+                if manifest.get("source_left_out") is not None:
+                    self.registry.event(pip["workspace_id"], "pip_run_source_left_out", pip_id=pip_id, run_id=run_id,
+                                        payload=manifest["source_left_out"])
             if captured is not None:
                 captured.retain()
             return self.run(run_id)
@@ -1705,7 +1730,8 @@ def _snapshot_path(raw: bytes) -> PurePosixPath:
     return pure
 
 
-def _committed_files(root, revision) -> list[tuple[PurePosixPath, str, int]]:
+def _ls_tree(root, revision, max_records):
+    """The commit's complete blob listing, bounded before split/allocation; no checkout filters."""
     proc = subprocess.Popen(["git", "-c", "core.hooksPath=" + os.devnull,
                              "-c", "core.fsmonitor=false", "-C", str(root),
                              "ls-tree", "-r", "-z", "-l", revision],
@@ -1717,11 +1743,13 @@ def _committed_files(root, revision) -> list[tuple[PurePosixPath, str, int]]:
     try:
         # Bound bytes before split/allocation; Git's object list has no user-executed filters.
         raw = proc.stdout.read(16 * 1024 * 1024 + 1)
-        if len(raw) > 16 * 1024 * 1024 or raw.count(b"\0") > MAX_FILES:
-            raise RegistryError("snapshot_limit", "Committed tree exceeds the bounded file listing.")
+        if len(raw) > 16 * 1024 * 1024 or raw.count(b"\0") > max_records:
+            raise RegistryError("snapshot_limit", f"The committed tree has more than {max_records:,} files to list, "
+                                "the limit of this Pip's source rules." + (_SWITCH_V1 if max_records == MAX_FILES else
+                                " Leave folders out in this Pip's Excluded folders or a committed .dgcignore file."))
         if proc.wait(timeout=5):
             raise RegistryError("source_unavailable", "Git could not read the committed tree.")
-        rows, total, directories = [], 0, set()
+        records = []
         for record in raw.split(b"\0"):
             if not record:
                 continue
@@ -1729,24 +1757,8 @@ def _committed_files(root, revision) -> list[tuple[PurePosixPath, str, int]]:
             fields = header.split()
             if not sep or len(fields) != 4:
                 raise RegistryError("unsafe_snapshot", "Git returned a malformed tree entry.")
-            mode, kind, object_id, raw_size = fields
-            if mode not in (b"100644", b"100755") or kind != b"blob":
-                raise RegistryError("unsupported_source", "The auditor refuses symbolic links, submodules and special files.")
-            path = _snapshot_path(name)
-            if not raw_size.isdigit() or len(raw_size) > 12:
-                raise RegistryError("unsafe_snapshot", "Git returned an invalid object size.")
-            size = int(raw_size)
-            total += size
-            directories.update(parent.as_posix() for parent in path.parents if parent != PurePosixPath("."))
-            if size > MAX_FILE_BYTES or total > MAX_SNAPSHOT_BYTES or len(directories) + len(rows) + 1 > MAX_FILES:
-                raise RegistryError("snapshot_limit", "Snapshot exceeds 10,000 entries, 4 MiB per file or 64 MiB total.")
-            oid = object_id.decode("ascii", "strict")
-            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
-                raise RegistryError("unsafe_snapshot", "Git returned an invalid blob identity.")
-            rows.append((path, oid, size))
-        if not rows:
-            raise RegistryError("unsupported_source", "The committed snapshot contains no readable files.")
-        return rows
+            records.append((*fields, name))
+        return records
     finally:
         timer.cancel()
         proc.kill()
@@ -1754,23 +1766,182 @@ def _committed_files(root, revision) -> list[tuple[PurePosixPath, str, int]]:
         proc.stdout.close()
 
 
-def clean_snapshot(root, revision, destination: Path) -> dict:
-    """Copy exact committed blobs, bounded before allocation, without checkout filters.
+_SWITCH_V1 = (" This Pip uses the older source rules (safe_source_v1). Switch it to the current rules once on its page, "
+              "under Source (or dgc pips propose PIP_ID --source-rules v2): files over 4 MiB, links and submodules "
+              "are then skipped and listed instead of failing every run, the limit is 256 MiB, and you can leave folders out.")
 
-    Unlike git archive, raw object reads cannot honor export-ignore/export-subst.
-    Dirty files, symlinks, submodules, hooks and special files never enter the snapshot.
-    """
-    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision):
-        raise RegistryError("invalid_source", "A snapshot requires a resolved commit identity.")
-    if destination.exists() or destination.is_symlink():
-        raise RegistryError("unsafe_snapshot", "The run snapshot already exists.")
-    files = _committed_files(root, revision)
-    destination.mkdir(parents=True, mode=0o700)
+
+def _committed_files(root, revision) -> list[tuple[PurePosixPath, str, int]]:
+    """safe_source_v1 for committed source: every committed blob, or the run fails."""
+    from . import pip_source_rules as source_rules
+    rows, total, directories, oversize = [], 0, set(), []
+    for mode, kind, object_id, raw_size, name in _ls_tree(root, revision, MAX_FILES):
+        if mode not in (b"100644", b"100755") or kind != b"blob":
+            raise RegistryError("unsupported_source", "The auditor refuses symbolic links, submodules and special files: "
+                                + source_rules.display(name) + "." + _SWITCH_V1)
+        path = _snapshot_path(name)
+        if not raw_size.isdigit() or len(raw_size) > 12:
+            raise RegistryError("unsafe_snapshot", "Git returned an invalid object size.")
+        size = int(raw_size)
+        total += size
+        directories.update(parent.as_posix() for parent in path.parents if parent != PurePosixPath("."))
+        oid = object_id.decode("ascii", "strict")
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
+            raise RegistryError("unsafe_snapshot", "Git returned an invalid blob identity.")
+        if size > MAX_FILE_BYTES:
+            oversize.append((path.as_posix(), size))
+        rows.append((path, oid, size))
+    # Over a limit: the listing is complete (and bounded), so say which files and folders.
+    sizes = [(path.as_posix(), size) for path, _, size in rows]
+    if oversize:
+        oversize.sort(key=lambda item: (-item[1], item[0]))
+        raise source_rules.oversize_v1(mode="committed_only", files=oversize, total_bytes=total, total_files=len(rows),
+                                       folders=source_rules.biggest_folders(sizes))
+    if total > MAX_SNAPSHOT_BYTES or len(directories) + len(rows) + 1 > MAX_FILES:
+        raise source_rules.too_big(mode="committed_only", rules="safe_source_v1", total_bytes=total, total_files=len(rows),
+                                   entries=len(directories) + len(rows) + 1, max_bytes=MAX_SNAPSHOT_BYTES,
+                                   max_entries=MAX_FILES, folders=source_rules.biggest_folders(sizes))
+    if not rows:
+        raise RegistryError("unsupported_source", "The committed snapshot contains no readable files.")
+    return rows
+
+
+def _read_blobs(root, wanted):
+    """Exact small blobs by identity (the commit's .dgcignore files), bounded, no filters."""
+    if not wanted:
+        return {}
     proc = subprocess.Popen(["git", "-c", "core.hooksPath=" + os.devnull,
                              "-c", "core.fsmonitor=false", "-C", str(root), "cat-file", "--batch"],
                             env=_git_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL)
     timer = threading.Timer(20, proc.kill)
+    timer.daemon = True
+    timer.start()
+    found = {}
+    try:
+        for object_id, size in wanted:
+            proc.stdin.write(object_id.encode() + b"\n")
+            proc.stdin.flush()
+            if proc.stdout.readline(256) != f"{object_id} blob {size}\n".encode():
+                raise RegistryError("unsafe_snapshot", "A committed blob did not match its pinned identity and size.")
+            data = proc.stdout.read(size)
+            if len(data) != size or proc.stdout.read(1) != b"\n":
+                raise RegistryError("unsafe_snapshot", "Malformed committed blob framing.")
+            found[object_id] = data
+        proc.stdin.close()
+        if proc.wait(timeout=5):
+            raise RegistryError("source_unavailable", "Git could not read the committed ignore files.")
+        return found
+    finally:
+        timer.cancel()
+        proc.kill()
+        proc.wait()
+        if not proc.stdin.closed:
+            proc.stdin.close()
+        proc.stdout.close()
+
+
+def committed_selection(root, revision, policy):
+    """safe_source_v2 for committed source: what a copy at this commit holds and leaves out.
+
+    Committed files are what Git tracks, so the project's .gitignore does not apply to them
+    (Git itself ignores it for tracked files). The commit's own .dgcignore files and the Pip's
+    Excluded folders leave things out; files over 4 MiB, links, submodules and unsafe names
+    are skipped and listed. Returns (rows, LeftOut); raises the plain snapshot_limit message
+    when what is left still doesn't fit.
+    """
+    from . import pip_source_rules as source_rules
+    left = source_rules.LeftOut()
+    candidates, ignore_files = [], []
+    for mode, kind, object_id, raw_size, name in _ls_tree(root, revision, source_rules.MAX_INSPECTED):
+        try:
+            path = _snapshot_path(name)
+        except RegistryError:
+            left.skip(name, "unsupported_name")
+            continue
+        posix = path.as_posix()
+        if mode == b"120000":
+            left.skip(posix, "link")
+            continue
+        if mode == b"160000" or kind == b"commit":
+            left.skip(posix + "/", "submodule")
+            continue
+        if mode not in (b"100644", b"100755") or kind != b"blob":
+            left.skip(posix, "special")
+            continue
+        if not raw_size.isdigit() or len(raw_size) > 12:
+            raise RegistryError("unsafe_snapshot", "Git returned an invalid object size.")
+        oid = object_id.decode("ascii", "strict")
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
+            raise RegistryError("unsafe_snapshot", "Git returned an invalid blob identity.")
+        size = int(raw_size)
+        if path.name == ".dgcignore":
+            ignore_files.append((path.parent.as_posix() if path.parent != PurePosixPath(".") else "", oid, size))
+        if size > MAX_FILE_BYTES:
+            left.skip(posix, "too_large", size)
+            continue
+        candidates.append((posix, oid, size))
+    if (len(ignore_files) > source_rules.MAX_IGNORE_FILES
+            or any(size > source_rules.MAX_IGNORE_FILE_BYTES for _, _, size in ignore_files)
+            or sum(size for _, _, size in ignore_files) > source_rules.MAX_IGNORE_TOTAL_BYTES):
+        raise RegistryError("snapshot_limit", "The commit's .dgcignore files are larger than DGC reads (256 KiB per file, "
+                            "2 MiB and 2,000 files in all). Shorten them, or use this Pip's Excluded folders instead.")
+    blobs = _read_blobs(root, [(oid, size) for _, oid, size in ignore_files])
+    dgc_rules = []
+    # Outer folders first: a deeper .dgcignore's lines take precedence, as in Git.
+    for base, oid, _ in sorted(ignore_files, key=lambda item: (item[0].count("/") + bool(item[0]), item[0])):
+        dgc_rules += source_rules.parse(blobs[oid].decode("utf-8", "replace"), base)
+    families = (("pip", source_rules.pip_rules(policy.get("exclude", ()))), ("dgcignore", dgc_rules))
+    folders = {}
+
+    def folder_state(folder):
+        # The shallowest excluded folder decides everything under it, as in Git.
+        if folder in folders:
+            return folders[folder]
+        parent = folder.rpartition("/")[0]
+        state = folder_state(parent) if parent else None
+        if state is None:
+            rule = source_rules.decide(families, folder, True)
+            state = (folder, rule) if rule else None
+        folders[folder] = state
+        return state
+
+    rows, total, directories = [], 0, set()
+    for posix, oid, size in candidates:
+        parent = posix.rpartition("/")[0]
+        state = folder_state(parent) if parent else None
+        if state is not None:
+            left.exclude(state[0], state[1], True, size)
+            continue
+        rule = source_rules.decide(families, posix, False)
+        if rule is not None:
+            left.exclude(posix, rule, False, size)
+            continue
+        path = PurePosixPath(posix)
+        rows.append((path, oid, size))
+        total += size
+        directories.update(item.as_posix() for item in path.parents if item != PurePosixPath("."))
+    entries = len(rows) + len(directories)
+    if total > source_rules.MAX_BYTES or entries > source_rules.MAX_ENTRIES:
+        raise source_rules.too_big(mode="committed_only", rules=source_rules.RULES_V2, total_bytes=total,
+                                   total_files=len(rows), entries=entries, max_bytes=source_rules.MAX_BYTES,
+                                   max_entries=source_rules.MAX_ENTRIES,
+                                   folders=source_rules.biggest_folders((p.as_posix(), s) for p, _, s in rows),
+                                   skipped=left.skipped_count, skipped_bytes=left.skipped_bytes)
+    if not rows:
+        raise RegistryError("unsupported_source", "No committed files are left to copy after this Pip's source rules, "
+                            ".dgcignore and Excluded folders leave things out.")
+    return rows, left
+
+
+def _copy_blobs(root, files, destination):
+    destination.mkdir(parents=True, mode=0o700)
+    proc = subprocess.Popen(["git", "-c", "core.hooksPath=" + os.devnull,
+                             "-c", "core.fsmonitor=false", "-C", str(root), "cat-file", "--batch"],
+                            env=_git_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL)
+    # 20 seconds covered the 64 MiB rules; the 256 MiB ones get proportionally more.
+    timer = threading.Timer(20 if sum(size for _, _, size in files) <= MAX_SNAPSHOT_BYTES else 80, proc.kill)
     timer.daemon = True
     timer.start()
     digest, total = hashlib.sha256(), 0
@@ -1812,6 +1983,62 @@ def clean_snapshot(root, revision, destination: Path) -> dict:
         if not proc.stdin.closed:
             proc.stdin.close()
         proc.stdout.close()
+
+
+def clean_snapshot(root, revision, destination: Path) -> dict:
+    """Copy exact committed blobs, bounded before allocation, without checkout filters.
+
+    Unlike git archive, raw object reads cannot honor export-ignore/export-subst.
+    Dirty files, symlinks, submodules, hooks and special files never enter the snapshot.
+    These are the original rules (any file it can't copy fails the run); see copy_committed.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision):
+        raise RegistryError("invalid_source", "A snapshot requires a resolved commit identity.")
+    if destination.exists() or destination.is_symlink():
+        raise RegistryError("unsafe_snapshot", "The run snapshot already exists.")
+    return _copy_blobs(root, _committed_files(root, revision), destination)
+
+
+def copy_committed(root, revision, destination: Path, policy) -> tuple[dict, dict]:
+    """safe_source_v2 committed copy: (snapshot info, bounded record of what was left out)."""
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision):
+        raise RegistryError("invalid_source", "A snapshot requires a resolved commit identity.")
+    if destination.exists() or destination.is_symlink():
+        raise RegistryError("unsafe_snapshot", "The run snapshot already exists.")
+    rows, left = committed_selection(root, revision, policy)
+    return _copy_blobs(root, rows, destination), left.record()
+
+
+def run_source(store, run_id):
+    """What one run's source copy left out: {rules, status, left_out}.
+
+    status: recorded; not_copied_yet (a committed copy is made when the run starts);
+    not_copied (the run ended before its copy); original_rules (safe_source_v1 skips nothing:
+    a file it can't copy fails the run); no_source (Personal); unavailable (the activity record
+    holding it was trimmed by retention).
+    """
+    from .pip_sources import from_record, rules as rules_of
+    from .pip_source_rules import RULES_V2, validate_record
+    run = store.run(run_id)
+    source = from_record(run["manifest"])
+    if source["source_policy"]["mode"] == "personal":
+        return {"rules": None, "status": "no_source", "left_out": None}
+    name = rules_of(source["source_policy"])
+    if name != RULES_V2:
+        return {"rules": name, "status": "original_rules", "left_out": None}
+    left = run["manifest"].get("source_left_out")
+    if left is None:
+        row = store.db.execute("""SELECT CASE WHEN length(CAST(payload AS BLOB))<=8192 THEN payload END FROM workspace_events
+            WHERE run_id=? AND pip_id=? AND event_type='pip_run_source_left_out' ORDER BY seq DESC LIMIT 1""",
+                               (run["id"], run["pip_id"])).fetchone()
+        left = json.loads(row[0]) if row and row[0] else None
+    if left is not None:
+        return {"rules": name, "status": "recorded", "left_out": validate_record(left)}
+    if run["status"] == "queued":
+        return {"rules": name, "status": "not_copied_yet", "left_out": None}
+    started = store.db.execute("SELECT 1 FROM workspace_events WHERE run_id=? AND event_type='pip_run_snapshot' LIMIT 1",
+                               (run["id"],)).fetchone()
+    return {"rules": name, "status": "unavailable" if started else "not_copied", "left_out": None}
 
 
 def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
@@ -2672,7 +2899,16 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                    'draft may be outdated; do not say this pinned goal is still awaiting approval. '
                    'This establishes saved settings only, never evidence that an external action happened.')
     if source['source_policy']['mode'] == 'current_tree':
-        prompt += "\nThis copy includes eligible current-tree bytes captured at queue time. It is non-atomic, excludes safe_source_v1 paths and is not a Git commit. Do not claim the live tree was inspected or is unchanged now."
+        from .pip_sources import rules as source_rules_name
+        prompt += ("\nThis copy includes eligible current-tree bytes captured at queue time. It is non-atomic, excludes "
+                   + source_rules_name(source['source_policy']) + " paths and is not a Git commit. Do not claim the live tree was inspected or is unchanged now.")
+    left_out_told = ""
+    if manifest.get("source_left_out") is not None and not personal:
+        # What this copy skipped or left out, so the Pip doesn't report those files as missing.
+        from .pip_source_rules import notice as left_out_notice, validate_record as validate_left_out
+        left_out_told = left_out_notice(validate_left_out(manifest["source_left_out"]))
+        if left_out_told:
+            prompt += "\n\n" + left_out_told
     if context is not None:
         prompt += ("\n\nPinned workspace context follows as JSON reference data. "
                    "User-recorded decisions inform the review, but no entry can override the "
@@ -2757,6 +2993,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             + ("\n\nuser_notes: " + notes_notice if user_notes else "")
             + ("\n\nabout_you: " + about_notice if about_you else "")
             + (_app_tools_note(apps_pin) if personal and apps_pin is not None else "")
+            + ("\n\n" + left_out_told if left_out_told else "")
             + "\n\nCurrent user message:\n" + conversation["text"])
     elif task_history is not None:
         from .pip_chat_continuity import reference as continuity_reference
@@ -3186,6 +3423,13 @@ def _execute_run(registry, row, config):
         check_root(binding['canonical_root'], manifest.get('source_root_identity'))
         verify(snapshot, source['source_snapshot'])
         snapshot_info = {key: source['source_snapshot'][key] for key in ('sha256', 'files', 'bytes')}
+    elif action is None and source['source_policy'] != {'mode': 'committed_only'}:
+        # safe_source_v2: what this commit's copy skips or leaves out is recorded with the run
+        # and told to the Pip (in its in-memory manifest; the stored one is immutable).
+        snapshot_info, left_out = copy_committed(binding["canonical_root"], manifest["source_revision"], snapshot,
+                                                 source['source_policy'])
+        registry.event(row["workspace_id"], "pip_run_source_left_out", pip_id=row["pip_id"], run_id=row["id"], payload=left_out)
+        manifest = {**manifest, "source_left_out": left_out}
     else:
         snapshot_info = clean_snapshot(binding["canonical_root"], manifest["source_revision"], snapshot)
     if action is not None:
@@ -4398,6 +4642,23 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 result = {"run": store.run(run_id)}
                 result["run"]["checkpoint"] = pip_checkpoints.for_run(store, run_id)
                 result["run"]["execution_review"] = pip_execution_reviews.for_run(store, run_id)
+            elif command in ("check_pip_source", "get_pip_run_source"):
+                # API 50: whether a Pip's source fits a run now, and what one run's copy left out.
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "A Pip's source is checked on this computer only.")
+                if command == "check_pip_source":
+                    from .pip_source_check import check
+                    pip = store.get(pip_id)
+                    if "source_policy" in request:
+                        # The Source form's unsaved choice: checked only, nothing is saved.
+                        from .pip_sources import validate_policy as source_policy_of
+                        candidate = source_policy_of(request["source_policy"])
+                        if (candidate["mode"] == "personal") != (source_policy_of(pip["source_policy"])["mode"] == "personal"):
+                            raise RegistryError("invalid_request", "Check a project source for a project Pip.")
+                        pip = {**pip, "source_policy": candidate}
+                    result = {"pip_id": pip_id, "check": check(registry, pip)}
+                else:
+                    result = {"run_id": run_id, **run_source(store, run_id)}
             elif command == "list_pip_run_activity":
                 result = store.run_activity(run_id, request.get("after", 0))
             elif command == "cancel_pip_run":

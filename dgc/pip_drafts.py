@@ -261,7 +261,7 @@ def validate_result(result, *, snapshot=None, secrets=(), published=False):
     if (not isinstance(info, dict) or set(info) != {"sha256", "files", "bytes"}
             or not isinstance(info["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", info["sha256"])
             or type(info["files"]) is not int or not 0 <= info["files"] <= 10000
-            or type(info["bytes"]) is not int or not 0 <= info["bytes"] <= 64 * 1024 * 1024):
+            or type(info["bytes"]) is not int or not 0 <= info["bytes"] <= 256 * 1024 * 1024):   # safe_source_v2
         _fail("The draft source snapshot metadata is invalid.")
     if published:
         expected = {"path": ARTIFACT_PATH, "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}

@@ -233,6 +233,7 @@ def parser():
                       help="reply-only requested reasoning; supply with --context-size; no permission change")
     job(command("runs", "list retained runs of a Pip"))
     command("report", "read a run, findings and limitations").add_argument("run_id")
+    job(command("source", "check whether a Pip's source fits a run now, and what its copy leaves out"))
     command("capacity", "inspect retained capacity across this runner and current workspace; no cleanup")
     export = command("export-run", "write a private projected evidence file; does not export transcripts or reclaim storage")
     export.add_argument("run_id")
@@ -305,6 +306,14 @@ def parser():
         propose.add_argument("--" + flag)
     propose.add_argument('--source-policy', choices=('committed_only', 'current_tree'),
                          help='propose a source choice; current_tree also proposes removing schedules and event triggers')
+    propose.add_argument('--source-rules', choices=('v1', 'v2'),
+                         help='source rules: v2 (safe_source_v2, the default for any source change) leaves out files over '
+                              '4 MiB, links and what .gitignore/.dgcignore list, and lists them; v1 fails on any of them')
+    excludes = propose.add_mutually_exclusive_group()
+    excludes.add_argument('--exclude', action='append', default=None, metavar='PATTERN',
+                          help='a folder or .gitignore-style pattern the source copy leaves out (repeat; the complete list, '
+                               'up to 32), for example uploads/ or docs/screenshots/')
+    excludes.add_argument('--no-excludes', action='store_true', help='propose leaving nothing out beyond the source rules')
     web = propose.add_mutually_exclusive_group()
     web.add_argument("--web-page", action="append", default=None, metavar="URL",
                      help="Personal Pips: an exact https page DGC reads before each run (repeat, up to four reads in all)")
@@ -585,13 +594,29 @@ def _read_action_json(args, *, maximum=MAX_ACTION_JSON_BYTES, label="Action"):
     return value
 
 
+def _wants_source_rules(args):
+    return getattr(args, 'command', None) == 'propose' and (
+        getattr(args, 'source_rules', None) is not None or getattr(args, 'exclude', None) is not None
+        or getattr(args, 'no_excludes', False))
+
+
+def _source_policy_from_args(args, mode):
+    """The proposed source policy: safe_source_v2 unless --source-rules v1, with --exclude's list."""
+    if args.source_rules == 'v1':
+        if args.exclude or args.no_excludes:
+            raise RegistryError('invalid_request', 'Excluded folders need the v2 source rules; drop --source-rules v1.')
+        return {'mode': 'committed_only'} if mode == 'committed_only' else {'mode': 'current_tree', 'exclusions': 'safe_source_v1'}
+    from .pip_sources import with_exclude
+    return with_exclude({'mode': mode, 'exclusions': 'safe_source_v2'}, args.exclude or [])
+
+
 def _request(args):
     name = args.command
     if getattr(args, 'personal', False):
         with WorkspaceRegistry() as registry:
             args.workspace_id = registry.personal()['id']
     mapping = {"accounts": "list_pip_accounts", "connections": "list_pip_connections", "inspect-connection": "inspect_pip_connection", "execution": "get_pip_execution", "models": "list_pip_models", "messages": "list_pip_messages", "send": "send_pip_message", "types": "list_pip_types", "workspaces": "list_workspaces", "list": "list_pips", "create": "create_pip",
-        "show": "get_pip", "run": "run_pip", "runs": "list_pip_runs", "report": "get_pip_run",
+        "show": "get_pip", "run": "run_pip", "runs": "list_pip_runs", "report": "get_pip_run", "source": "check_pip_source",
         "cancel": "cancel_pip_run", "pause": "pause_pip", "resume-job": "resume_pip",
         "propose": "propose_pip_update", "accept": "accept_pip_update", "reject": "reject_pip_update",
         "versions": "list_pip_versions", "activity": "list_workspace_activity",
@@ -759,9 +784,9 @@ def _request(args):
         if args.model or args.default_model:
             changes["model_choice"] = {"mode": "model", "model": args.model} if args.model else {"mode": "default"}
         if args.source_policy:
-            changes['source_policy'] = {'mode': args.source_policy}
+            # Without --exclude the mode alone is known here; main() completes a list change.
+            changes['source_policy'] = _source_policy_from_args(args, args.source_policy)
             if args.source_policy == 'current_tree':
-                changes['source_policy']['exclusions'] = 'safe_source_v1'
                 changes.update(schedule=None, event_trigger=None)
         if args.no_web_reads and args.web_search:
             raise RegistryError("invalid_request", "Use --no-web-reads alone, or list the reads to keep.")
@@ -793,8 +818,8 @@ def _request(args):
             if not repository:
                 raise RegistryError("invalid_request", "This project has no GitHub origin. Name the repository with --github-repo OWNER/NAME.")
             changes["github_plan"] = validate_github_plan({"schema_version": 1, "repository": repository, "reads": github_reads})
-        if not changes:
-            raise RegistryError("invalid_request", "Provide --name, --goal, --source-ref, web reads or GitHub reads for the proposed change.")
+        if not changes and not _wants_source_rules(args):
+            raise RegistryError("invalid_request", "Provide --name, --goal, --source-ref, --source-rules, --exclude, web reads or GitHub reads for the proposed change.")
         request["changes"] = changes
         if args.reason:
             request["reason"] = args.reason
@@ -821,7 +846,24 @@ def usage_text(item) -> str:
     return text
 
 
+def source_check_text(check) -> str:
+    """dgc pips source: whether the source fits a run, what is left out, the biggest folders."""
+    from .pip_source_check import summary
+    from .pip_source_rules import notice, size_text
+    lines = [summary(check)]
+    if check.get("applies") and check.get("left_out"):
+        told = notice(check["left_out"], heading="Left out of each run's copy:")
+        if told:
+            lines.append(told)
+    if check.get("applies") and check.get("biggest_folders"):
+        lines.append("Biggest folders: " + ", ".join(f"{item['path']} {size_text(item['bytes'])}"
+                                                     for item in check["biggest_folders"]))
+    return "\n".join(lines)
+
+
 def _format(value):
+    if "check" in value and isinstance(value["check"], dict) and "fits" in value["check"]:
+        return source_check_text(value["check"])
     if "computer" in value and isinstance(value["computer"], dict) and "granted" in value["computer"]:
         item = value["computer"]
         lines = [("Has a computer." if item["granted"] else "No computer. Give one with: dgc pips computer give PIP")
@@ -1176,8 +1218,15 @@ def _format(value):
         row = value["pip"]
         from .pip_sources import validate_policy as source_policy
         source = source_policy(row.get('source_policy', 'committed_only'))
-        source_label = ('Current tree with safe_source_v1 exclusions; manual requests only'
-                        if source['mode'] == 'current_tree' else 'Committed ref: ' + row['source_ref'])
+        from .pip_sources import rules as source_rules_of
+        rules_name = source_rules_of(source) if source['mode'] != 'personal' else None
+        source_label = ('Current tree with ' + rules_name + ' exclusions; manual requests only'
+                        if source['mode'] == 'current_tree' else 'Personal · no project access' if source['mode'] == 'personal'
+                        else 'Committed ref: ' + row['source_ref'] + ' · ' + rules_name
+                        + (' (the original rules: a file over 4 MiB, a link or a source over 64 MiB fails every run;'
+                           ' switch with dgc pips propose --source-rules v2)' if rules_name == 'safe_source_v1' else ''))
+        if source.get('exclude'):
+            source_label += '\nExcluded folders: ' + ', '.join(source['exclude'])
         lines = [f'{row["name"]} ({row["id"]})', f'{row["status"]} · version {row["current_version"]} · {row["policy"]} · {row["trigger"]}',
                  "Type: " + row.get("pip_type", "rook"), "Source: " + source_label, "Goal: " + row["goal"]]
         lines += _run_here_lines(row)
@@ -1200,7 +1249,11 @@ def _format(value):
                  source['label'] + ': ' + source['identity']]
         if source['source_snapshot'] is not None:
             receipt = source['source_snapshot']
-            lines.append(f"Captured {receipt['files']} files / {receipt['bytes']} bytes with safe_source_v1 exclusions; checked non-atomic copy.")
+            lines.append(f"Captured {receipt['files']} files / {receipt['bytes']} bytes with {receipt['exclusions']} exclusions"
+                         + (f", {receipt['skipped_files']} skipped" if receipt.get('skipped_files') else '') + "; checked non-atomic copy.")
+        if isinstance(value.get("source"), dict) and value["source"].get("left_out"):
+            from .pip_source_rules import notice
+            lines.append(notice(value["source"]["left_out"], heading="Left out of this run's source copy:"))
         if run.get("error"):
             lines.append("Error: " + str(run["error"].get("message", run["error"])))
         report = run.get("result")
@@ -1765,6 +1818,16 @@ def handle_command(config, argv, *, in_chat=False):
             request = _request(args)
             if config.get("pips_enabled", False) is not True:
                 raise RegistryError("disabled", "Pips are disabled in this profile. Run dgc pips enable to turn them on.")
+            if _wants_source_rules(args) and not args.source_policy:
+                # --source-rules or --exclude alone keep the Pip's current source (committed or current files).
+                shown = pips.handle_control(config, {"type": "get_pip", "pip_id": args.pip_id, "request_id": identifier("cli")},
+                                            "local-console", start_worker=False)
+                if not shown["ok"]:
+                    raise RegistryError(shown["error"]["code"], shown["error"]["message"])
+                mode = shown["result"]["pip"]["source_policy"]["mode"]
+                if mode == "personal":
+                    raise RegistryError("unsupported_source", "Personal Pips have no project source to leave things out of.")
+                request.setdefault("changes", {})["source_policy"] = _source_policy_from_args(args, mode)
             if args.command in ("run", "send") or (args.command == "handoff" and args.handoff_action == "accept"):
                 _require_supervisor()
             if args.command == 'email-draft' and args.email_action == 'prepare' and 'message' not in request:
@@ -1834,6 +1897,12 @@ def handle_command(config, argv, *, in_chat=False):
             if not response["ok"]:
                 raise RegistryError(response["error"]["code"], response["error"]["message"])
             result = response["result"]
+            if args.command == "report":
+                # What this run's copy left out (safe_source_v2), shown with the report.
+                source = pips.handle_control(config, {"type": "get_pip_run_source", "run_id": args.run_id,
+                                                      "request_id": identifier("cli")}, "local-console", start_worker=False)
+                if source["ok"]:
+                    result = {**result, "source": source["result"]}
         result = redact_value(result, secret_values(config))
         text = json.dumps(result, ensure_ascii=False, indent=2) if args.json or args.command == "status" else _format(result)
         print(terminal_safe_text(text))

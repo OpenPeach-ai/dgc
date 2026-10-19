@@ -343,6 +343,7 @@ class ContextStore:
                           **{key: finding[key] for key in ("severity", "path", "line", "evidence")}}
             from .pip_sources import from_record
             source = from_record(manifest)
-            if source['source_policy']['mode'] == 'current_tree':
+            if source['source_policy'] != {'mode': 'committed_only'}:
+                # Current tree, or committed source under safe_source_v2: keep the exact policy.
                 provenance.update(schema_version=2, **source)
             return self._append(view, "finding", finding["title"], finding["evidence"], actor, provenance)

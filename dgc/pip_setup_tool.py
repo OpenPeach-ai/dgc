@@ -34,6 +34,31 @@ def _create(registry, setup, request, config):
     return {'setup': accepted}, ''
 
 
+def _source_check(registry, setup, request):
+    """Would the new or changed Pip's source fit a run? Said with the card, before any run fails."""
+    if request.get('scope') == 'personal' or request.get('pip_type') == 'pulse':
+        return None
+    from .pip_source_check import check, summary
+    try:
+        policy = pip_setup.card_source_policy(registry, setup['id'], setup['workspace_id'])
+        found = check(registry, {'workspace_id': setup['workspace_id'], 'source_policy': policy,
+                                 'source_ref': request.get('source_ref', 'HEAD')})
+    except RegistryError as exc:
+        return {'fits': None, 'message': 'The source could not be checked: ' + str(exc)}
+    return {key: found[key] for key in ('fits', 'rules', 'files', 'bytes', 'biggest_folders')} | {
+        'message': found['message'] or summary(found)}
+
+
+def _with_check(payload, check):
+    if check is None:
+        return payload
+    payload['source_check'] = check
+    if check.get('fits') is False:
+        payload['message'] += (' Its source does not fit a run yet, so every run would fail: ' + check['message']
+                               + ' Tell the user, and propose source_exclude with the folders to leave out.')
+    return payload
+
+
 def propose(args, ctx) -> str:
     args = dict(args)
     create_now = args.pop('_dgc_create_now', None) is True   # set by the agent, never by the model
@@ -65,30 +90,31 @@ def propose(args, ctx) -> str:
             warning = ({'cannot_run_here': blocked} if blocked else {})
             caution = (" It can't run on this computer yet: " + blocked + " Tell the user that plainly, with the fix, "
                        "and never say it is working or checking." if blocked else "")
+            check = _source_check(registry, setup, request) if setup['status'] == 'pending' else None
             if setup['status'] == 'pending' and not pip_setup.needs_card(request) and not create_now:
-                return json.dumps({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
+                return json.dumps(_with_check({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
                                    'execution_started': False,
                                    'message': 'Shown to the user as a card above the chat box. They create it there with '
                                               'one click (Create Pip), see the details, or say not now. Say in a sentence '
-                                              'what the Pip will do; never claim it is on.'},
+                                              'what the Pip will do; never claim it is on.'}, check),
                                   ensure_ascii=False, separators=(',', ':'))
             if setup['status'] == 'pending' and not pip_setup.needs_card(request):
                 created, note = _create(registry, setup, request, ctx.config)
                 if created is not None:
-                    return json.dumps({'setup': created['setup'], 'created': True, 'review_required': False,
+                    return json.dumps(_with_check({'setup': created['setup'], 'created': True, 'review_required': False,
                                        'job_changed_by_this_call': True, 'execution_started': created['setup']['receipt']['run_id'] is not None,
                                        'message': 'Created and on. Tell the user it exists, when it runs, and that they can pause, '
-                                                  'change or delete it in Pips.'},
+                                                  'change or delete it in Pips.'}, check),
                                       ensure_ascii=False, separators=(',', ':'))
-                return json.dumps({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
+                return json.dumps(_with_check({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
                                    'execution_started': False,
-                                   'message': 'Saved as a card for the user to review, because ' + note},
+                                   'message': 'Saved as a card for the user to review, because ' + note}, check),
                                   ensure_ascii=False, separators=(',', ':'))
-            return json.dumps({'setup': setup, 'review_required': setup['status'] == 'pending',
+            return json.dumps(_with_check({'setup': setup, 'review_required': setup['status'] == 'pending',
                                'job_changed_by_this_call': False, 'execution_started': False, **warning,
                                'message': ('This Pip runs commands on a schedule, so it is shown '
                                            'to the user as a card above the chat box, and it exists only once they choose Create Pip there. '
-                                           'Mention the card; never claim it is on.' + caution)},
+                                           'Mention the card; never claim it is on.' + caution)}, check),
                               ensure_ascii=False, separators=(',', ':'))
     except RegistryError:
         raise

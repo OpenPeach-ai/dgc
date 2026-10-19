@@ -244,7 +244,8 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 49 (additive, nothing new to gate on): list_pip_runs rows carry a failed run's error; get_pip_execution has
 # `local_http_checks` and, when DGC knows the one-time fix, `fix`; a Pulse setup card's runner_notice says when it
 # can't run on this computer.
-PIPS_API_VERSION = 49
+# API 50: the safe_source_v2 source rules (source_policy.exclude), check_pip_source and get_pip_run_source.
+PIPS_API_VERSION = 50
 
 
 def _pips_platform_supported() -> bool:
