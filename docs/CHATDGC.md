@@ -154,16 +154,29 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   page or a file can't plant one), never a password, key or account number, and at most three a reply.
   Temporary chats neither read nor write it.
 - **Deep research.** Press **Deep research** in the box, then ask. ChatDGC first shows a research plan: a
-  title and the steps it will take. It starts by itself after 15 seconds, or press **Start now**; **Edit**
-  pauses it so you can change the steps or keep it to a few websites. Then it searches and reads in up to
-  three rounds, about 20 pages in all, PDFs included, and each page that helps becomes a short note. The card
-  shows what it's searching and reading as it goes. To steer it, type in **Add to the research**: it reads
-  that next. Then it writes one report from the notes, citing them as [1], and checks every citation against
-  its note; a claim its note doesn't support loses the citation, and **How it was researched** lists those.
-  **Open report** shows the report full screen with its contents and sources; **Export…** saves it as
-  Markdown. Stop keeps everything found: **Write the report from N sources** finishes from there, and **Keep
-  researching** carries on. If the chat isn't on screen when it finishes, VS Code says so. It needs a context
-  window of at least 16k (32k is the default). With `deepseek-v4.1-flash:cloud` a run took two to five minutes.
+  title, the steps it will take, and how deep it goes. It starts by itself after 15 seconds, or press **Start
+  now**; **Edit** pauses it so you can change the steps, keep it to a few websites, or choose **How deep**:
+  - **Quick**: up to 3 rounds, 15 pages and 5 minutes of reading.
+  - **Standard** (the default): up to 6 rounds, 40 pages and 15 minutes.
+  - **Thorough**: up to 10 rounds, 80 pages and 30 minutes.
+
+  Set the default with `chatdgc_research_depth` (`quick`, `standard` or `thorough`) in `~/.dgc/config.json`.
+  Then it researches in rounds. Each round it reviews what it has against the plan: which steps are covered, what's
+  still missing, and where sources disagree. It searches for those, picks the most promising results from
+  everything found (primary sources first, no more than four pages from one site), and reads them in full, PDFs
+  included, several at once. Each page that helps becomes a note with its figures, its date and the steps it bears
+  on. A page linked twice, redirected to one already read, or copied from one is read once. It won't call the
+  research done before three rounds and about half its pages. The card shows the round, the pages read out of
+  its budget, the sources found, what's still missing, and a tick on each step that's covered. To steer it, type
+  in **Add to the research**: it reads that next. Then it writes one report from the notes, citing them as [1],
+  and checks every citation against its note; a claim its note doesn't support loses the citation, and **How it
+  was researched** lists those. A line under the report says how it was researched: rounds, searches, sources
+  found and read, minutes, and how many citations hold up. **Open report** shows the report full screen with its
+  contents and sources; **Export…** saves it as Markdown. Stop keeps everything found: **Write the report from N
+  sources** finishes from there, and **Keep researching** carries on where it stopped (with a little more time and
+  pages if its budget was spent). If the chat isn't on screen when it finishes, VS Code says so. It needs a context
+  window of at least 16k (32k is the default). With `deepseek-v4.1-flash:cloud` a Standard run took about ten
+  minutes and read 35 to 40 pages.
 - **Questions in an answer.** When what the model would say next depends on something only you know, it can
   ask you inside its answer. A card shows the question with a few answers to pick from and a **Something
   else** box for your own. The answer goes on below the card. **Continue** sends a message the model wrote
@@ -432,10 +445,14 @@ carries `memory: [{op: "saved"|"forgot", id, text}]`.
 
 Deep research reports its progress as `chatdgc_research` with the reply's `research` as it is: `status`
 (`planning`, `planned`, `running`, `writing`, `checking`, `done`, `stopped` or `failed`), `question`,
-`plan`, `round`, `reads`, `notes` (number, title and address), the latest `activity` (`search`, `read`,
-`note`, `skip`, `round`, `write`, `check`, `checked`, `steer`, `wait`, `info`, `error`), `steers`, and, at
-the end, `check` (`claims`, `checked`, `supported`, `unsupported`, `invalid`). The saved reply keeps every
-note's words and all its activity. The report streams as `chatdgc_delta` on the plan's reply.
+`plan`, `depth` (`quick`, `standard` or `thorough`) and its `budget` (`rounds`, `pages`, `minutes`, `least`),
+`round`, `reads` (pages tried), `opened` (pages read), `whole` (of those, read in full), `found` (distinct
+results), `searches`, `seconds`, `covered` (plan steps the sources cover), `gaps` and `conflicts`, `notes`
+(number, title and address), the latest `activity` (`search`, `read`, `note`, `skip`, `round`, `gap`,
+`conflict`, `pick`, `write`, `check`, `checked`, `steer`, `wait`, `info`, `error`), `steers`, and, at the end,
+`check` (`claims`, `checked`, `supported`, `unsupported`, `invalid`) and `how` (the line on how it was
+researched). The saved reply keeps every note's words and all its activity. The report streams as
+`chatdgc_delta` on the plan's reply. `chatdgc_research_start`'s `plan` may carry `depth` for that run.
 
 After every turn, and when a chat opens, `chatdgc_context` reports `used` tokens out of `window` (the
 model's own maximum is in `limit`), with `source` saying whether the model counted them (`reported`: its

@@ -189,6 +189,25 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 
 ### ChatDGC
 
+- **Deep research goes deeper, and says how.** It used to stop after three rounds and 20 pages, about two minutes with
+  `deepseek-v4.1-flash:cloud`, and the model never saw what was missing. Now each round starts with a review of the
+  notes so far against the plan: which steps are covered, what's still missing, and where sources disagree. The next
+  searches go after those. Every result found joins one pool, and the model picks what to read from titles and
+  snippets, primary sources first, at most four pages from one site. A page linked twice, redirected to one already
+  read, or copied from one is read once. Notes are longer and keep each page's date. It can't call the research done
+  before three rounds and half its pages. A failed search is asked again once. How deep it goes is set for you
+  (Standard: up to 40 pages in up to 15 minutes); **Edit → How deep** picks Quick (15 pages, 5 minutes) or Thorough
+  (80 pages, 30 minutes) for one run, and `chatdgc_research_depth` in the config sets the default. On three test
+  questions a Standard run took about ten minutes, searched 30 to 34 times, found 136 to 158 sources, read 35 to 40
+  pages and cited 27 to 33 of them; before, it took two minutes, searched 13 to 15 times, read 19 pages and cited 13
+  to 19. The card shows the round and pages read out of the budget and the sources found, says what's still missing,
+  and ticks each covered step in the plan. Under the report, one line says how it was researched (rounds, searches,
+  sources found and read, minutes, citations that hold up), and an export ends with it. The report no longer talks
+  about "the notes" or leaves "per ," and "Source:." where citation marks were taken out, and a table's "Source"
+  column of marks, which read as empty cells, gives them to the fact beside it. **Keep researching** after
+  a spent budget adds 10 pages and five minutes. `chatdgc_research` carries `depth`, `budget`, `found`, `opened`,
+  `whole`, `searches`, `seconds`, `covered`, `gaps`, `conflicts` and `how` in its open `research` object; no event or
+  command changed shape.
 - **A chat's outline, whatever is on screen.** `chatdgc_outline` (offered as `ready.capabilities.chatdgc.outline`)
   answers with every prompt of a chat, oldest first: its first words (or what it attached), when it was sent, and the
   widgets the replies to it made (deleted ones marked). A long chat opens on its latest pages, so the editor's Widgets
