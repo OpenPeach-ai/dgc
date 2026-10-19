@@ -328,3 +328,117 @@ def set_on(enabled, *, runner_online, dgc_home=None, **options) -> dict:
         spec = _agent_spec(_home(dgc_home), **options)
         return _mac_on(spec, runner_online) if enabled else _mac_off(spec)
     raise RegistryError("service_unsupported", status(dgc_home)["reason"])
+
+
+# ---------------------------------------------------------------- turned on for a schedule (founder, 2026-10-18)
+
+# The user's own switch (the Pips view's Controls, dgc pips keep-running) records their choice in the
+# registry's metadata. DGC turns the switch on by itself only while no "off" is recorded.
+CHOICE_KEY = "keep_running_choice"
+NOTICE_KEY = "keep_running_notice:"          # + setup id: what accepting that setup said, for the chat
+TURNED_ON = ("Your scheduled Pips now run even when VS Code is closed. Turn this off in the Pips view, "
+             "under Controls (Keep Pips running), or with dgc pips keep-running off.")
+STAYS_OFF = ("Keep Pips running is off, as you chose, so its schedule runs only while Pips are running (VS Code "
+             "open, or dgc pips serve). Turn it on in the Pips view, under Controls.")
+
+
+def record_choice(registry, enabled):
+    """The user's own on or off. DGC never turns an off back on."""
+    from contextlib import nullcontext
+    with registry.transaction() if not registry.db.in_transaction else nullcontext():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (CHOICE_KEY, "on" if enabled else "off"))
+
+
+def choice(registry):
+    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (CHOICE_KEY,)).fetchone()
+    return row[0] if row and row[0] in ("on", "off") else None
+
+
+def _turned_off_before(dgc_home=None, **options) -> bool:
+    """An off chosen before choices were recorded leaves traces: Linux keeps the unit installed but not
+    enabled, macOS keeps the agent's label in launchd's disabled list. WSL leaves none."""
+    try:
+        if sys.platform.startswith("linux") and not wsl.version():
+            value = pip_service.status(_home(dgc_home), **options)
+            return bool(value["installed"]) and value.get("enabled_state") != "enabled"
+        if sys.platform == "darwin":
+            return _agent_disabled(_agent_spec(_home(dgc_home), **options))
+    except (RegistryError, OSError):
+        return False
+    return False
+
+
+def _account_home() -> bool:
+    """A login service belongs to the account: never set one up for a HOME that isn't the account's own
+    (a test, a sandbox or a borrowed profile)."""
+    try:
+        import pwd
+        return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve() == Path.home().resolve()
+    except (ImportError, KeyError, OSError):
+        return False
+
+
+def for_schedule(registry, *, runner_online, dgc_home=None, **options):
+    """After a Pip gets a schedule, a trigger or a routine: let it run with the editor closed.
+
+    Turns Keep Pips running on, the way its switch does, unless the user chose it off. Returns None when
+    there is nothing to say (it was on), else {"turned_on": bool, "notice": str}, one plain sentence or two
+    for the user and the model. Never raises: the Pip exists whatever happens here.
+    """
+    if not _account_home():
+        # A login service belongs to the account's own HOME; for any other (a test, a sandbox) there is
+        # nothing to turn on and nothing to say, and the service manager is never asked.
+        return None
+    try:
+        if choice(registry) == "off":
+            return {"turned_on": False, "notice": STAYS_OFF}
+        state = status(dgc_home, **options)
+        if state["on"]:
+            return None
+        if not state["supported"]:
+            return {"turned_on": False, "notice": "Its schedule runs only while Pips are running on this computer. "
+                    + state["reason"]}
+        if _turned_off_before(dgc_home, **options):
+            record_choice(registry, False)             # the off it chose before, recorded now
+            return {"turned_on": False, "notice": STAYS_OFF}
+        state = set_on(True, runner_online=runner_online, dgc_home=dgc_home, **options)
+    except (RegistryError, OSError) as exc:
+        return {"turned_on": False, "notice": "DGC couldn't turn on Keep Pips running (" + str(exc).rstrip(".")
+                + "), so its schedule runs only while VS Code is open or dgc pips serve runs. Turn it on in the Pips "
+                "view, under Controls, or run dgc pips keep-running on."}
+    if not state.get("on"):
+        return {"turned_on": False, "notice": "DGC couldn't turn on Keep Pips running, so its schedule runs only while "
+                "VS Code is open or dgc pips serve runs. Turn it on in the Pips view, under Controls."}
+    notice = TURNED_ON
+    if state.get("platform") == "linux" and not state.get("while_logged_out"):
+        user = os.environ.get("USER") or Path.home().name
+        notice += (" They run while you are logged in; to keep them running while you are logged out too, run "
+                   f"sudo loginctl enable-linger {user}.")
+    return {"turned_on": True, "notice": notice}
+
+
+def needs_runner(command, result) -> bool:
+    """Whether a control's result left a Pip with something only the runner starts."""
+    if not isinstance(result, dict):
+        return False
+    if command == "accept_pip_setup":
+        setup = result.get("setup") or {}
+        return setup.get("status") == "accepted" and bool(setup.get("schedule") or setup.get("event_trigger"))
+    if command == "accept_pip_update":
+        pip = result.get("pip") or {}
+        return bool(pip.get("schedule") or pip.get("event_trigger"))
+    if command in ("add_pip_routine", "update_pip_routine", "decide_pip_routine"):
+        return (result.get("routine") or {}).get("status") == "on"
+    return False
+
+
+def remember(registry, setup_id, notice):
+    """What accepting a setup said about Keep Pips running, so the chat that proposed it hears it too."""
+    from contextlib import nullcontext
+    with registry.transaction() if not registry.db.in_transaction else nullcontext():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (NOTICE_KEY + str(setup_id), str(notice)[:1000]))
+
+
+def remembered(registry, setup_id):
+    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (NOTICE_KEY + str(setup_id),)).fetchone()
+    return row[0] if row else None

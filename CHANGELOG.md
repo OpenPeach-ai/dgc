@@ -6,6 +6,20 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+### Pips: scheduled Pips run with VS Code closed
+
+- **Keep Pips running turns itself on** the first time a Pip gets a schedule, a commit trigger or a routine
+  (setup cards, the chat's setup, the Pips view and `dgc pips accept`), the same way its switch does: a systemd user
+  service on Linux (and lingering where the system allows it), a LaunchAgent on macOS, a Windows sign-in entry for
+  WSL. The result says it plainly: "Your scheduled Pips now run even when VS Code is closed. Turn this off in the Pips
+  view, under Controls (Keep Pips running), or with dgc pips keep-running off." The chat that set the Pip up is told
+  the same sentence.
+- **Your off stays off.** Turning the switch off (or on) is now recorded as your choice, and an off from before this
+  release is recognised by what it left behind (a Linux unit installed but not enabled, a macOS agent launchd lists
+  as disabled). DGC then says the schedule runs only while Pips are running.
+- **When it can't, it says what to do**, such as `sudo loginctl enable-linger USER` to keep running while logged out,
+  or turning it on in the Pips view. The Pip is created either way.
+
 ### Pips: a big project no longer fails every run (source rules safe_source_v2, Pips API 50)
 
 A Pip on a working project (an ERP with uploads, media, screenshots and a vendored template: 3,405 committed files,

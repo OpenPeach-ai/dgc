@@ -432,7 +432,8 @@ def _projection(registry, row, body, receipt):
             'runner_notice': ((("It can’t run on this computer yet: " + blocked + " ") if blocked else "")
                               + (f"While Pips are running, DGC checks {req['source_ref']} for new local commits and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Accepting this doesn’t start Pips."
                               if req.get('event_trigger') else 'It works while Pips are running on this computer. Creating it doesn’t start Pips.' if req.get('scope')=='personal'
-                              else 'Its schedule runs only while Pips are running on this computer. Accepting this doesn’t start Pips.'))[:2000],
+                              else 'Its schedule runs only while Pips are running on this computer. Accepting this doesn’t start Pips.')
+                              + _keep_running_line(registry, req))[:2000],
             'run_now_policy': (("Its first task counts as today's; the next one is on its next scheduled day." if req.get('scope')=='personal' else "This first run counts as today's; the next scheduled run is tomorrow.")
                                if body['counts_for_date'] else ('It also does its task once, right after you create it.' if req.get('scope')=='personal' else 'It also runs once right after you accept, as well as on the schedule shown.') if req['run_now'] else None)}
 
@@ -748,6 +749,17 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
                                       ('accepted' if accept else 'rejected', _encode(receipt, 4096), setup_id)).rowcount
         if changed != 1: _fail('This setup was resolved elsewhere. Refresh its card.', 'conflict')
         return get(registry, setup_id, workspace_id)
+
+
+def _keep_running_line(registry, req):
+    """What accepting a card with a schedule or a trigger does about Keep Pips running (pip_keep_running)."""
+    if req.get('schedule') is None and req.get('event_trigger') is None:
+        return ''
+    from .pip_keep_running import choice
+    if choice(registry) == 'off':
+        return ' Keep Pips running is off, as you chose, so it runs only while Pips are running.'
+    return (' Accepting this also turns on Keep Pips running if it is off, so it runs even when VS Code is closed '
+            '(turn that off in the Pips view, under Controls).')
 
 
 def source_scope(policy):

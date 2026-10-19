@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Pips: scheduled Pips run with VS Code closed
+
+- Creating a Pip with a schedule, a commit trigger or a routine, or giving one a schedule, turns **Keep Pips running**
+  on when it is off and you haven't turned it off yourself, and the Pips view says so: "Your scheduled Pips now run
+  even when VS Code is closed. Turn this off in the Pips view, under Controls (Keep Pips running)…". A setup card
+  with a schedule says so before you accept it.
+
 ### Pip reports in the chat
 
 - **A finished Pip run appears in the chat it reports to,** as a card in the transcript where it arrived (after

@@ -31,6 +31,13 @@ def _create(registry, setup, request, config):
         accepted = pip_setup.review(registry, setup['id'], setup['workspace_id'], setup['digest'], actor, config, True)
     except RegistryError as exc:
         return None, str(exc)
+    from . import pip_keep_running
+    if pip_keep_running.needs_runner('accept_pip_setup', {'setup': accepted}):
+        # As the user's own Create Pip does (pips.handle_control): never fails the creation.
+        from .pip_daemon import runner_status
+        told = pip_keep_running.for_schedule(registry, runner_online=bool(runner_status(registry).get('online')))
+        if told is not None:
+            return {'setup': accepted, 'keep_running_notice': told['notice']}, ''
     return {'setup': accepted}, ''
 
 
@@ -101,10 +108,13 @@ def propose(args, ctx) -> str:
             if setup['status'] == 'pending' and not pip_setup.needs_card(request):
                 created, note = _create(registry, setup, request, ctx.config)
                 if created is not None:
+                    told = created.get('keep_running_notice')
                     return json.dumps(_with_check({'setup': created['setup'], 'created': True, 'review_required': False,
                                        'job_changed_by_this_call': True, 'execution_started': created['setup']['receipt']['run_id'] is not None,
+                                       **({'keep_running_notice': told} if told else {}),
                                        'message': 'Created and on. Tell the user it exists, when it runs, and that they can pause, '
-                                                  'change or delete it in Pips.'}, check),
+                                                  'change or delete it in Pips.'
+                                                  + (' Also tell them, in these words: ' + told if told else '')}, check),
                                       ensure_ascii=False, separators=(',', ':'))
                 return json.dumps(_with_check({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
                                    'execution_started': False,

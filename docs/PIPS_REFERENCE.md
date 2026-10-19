@@ -889,7 +889,16 @@ last}`. The editor's own notice reads `get_pip_digest` from the extension host e
 
 **Keep Pips running** (API 41). `get_pips_keep_running` and `set_pips_keep_running
 {enabled}` (local user only) return `{platform, supported, reason, on, starts_at_login,
-restarts_after_failure, while_logged_out}`. On Linux, on installs the managed user unit
+restarts_after_failure, while_logged_out}`. `set_pips_keep_running` also records the user's choice
+(`keep_running_choice` in the registry's metadata). When a local `accept_pip_setup`,
+`accept_pip_update`, `add_pip_routine`, `update_pip_routine` or `decide_pip_routine` leaves a Pip with a
+schedule, an event trigger or a routine that is on, and the switch is off, DGC turns it on as the switch
+does, unless the recorded choice is off (or an earlier off left its trace: a Linux unit installed but not
+enabled, a macOS agent in launchd's disabled list, which is then recorded as the choice), or `HOME` isn't
+the account's own. The result then carries `keep_running_notice`: one plain sentence (turned on, left
+off as chosen, or what to do when it couldn't, such as `sudo loginctl enable-linger USER`). The chat's
+`pips_setup` result says the same, and the setup notice to the proposing chat repeats it. It never fails
+the change. On Linux, on installs the managed user unit
 (format 2: `Restart=on-failure`, `RestartSec=30`; an earlier DGC unit for the same home is
 replaced, any other differing unit is refused), enables it, starts it unless a runner is
 already online, and asks `loginctl enable-linger` when lingering is off. On macOS, on writes

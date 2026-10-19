@@ -1641,3 +1641,12 @@ test('a run shows what its copy left out, read with get_pip_run_source',async()=
  const pane=x.d.querySelector('[aria-label="Run report"]');assert.match(pane.querySelector('.source-left-out summary').textContent,/Left out of this run’s copy \(2\)/);
  assert.match(pane.textContent,/docs\/screenshots\/ · left out by Excluded folders \(160 files, 13\.6 MiB\)/);assert.match(pane.textContent,/the Pip was told so/);
 });
+test('saving a scheduled Pip says so when DGC turned on Keep Pips running',async()=>{
+ const schedule={type:'interval',minutes:30,missed_policy:'coalesce_latest'},told='Your scheduled Pips now run even when VS Code is closed. Turn this off in the Pips view, under Controls (Keep Pips running), or with dgc pips keep-running off.';
+ const jobs=[job('a',{source_policy:v2Policy,schedule})],x=setup({apiVersion:50,jobs,conversation:true});await x.drain();x.click('[data-tab=job]');
+ x.input('#sourceExcludeInput','uploads/');x.submit('#source-form');
+ const req=x.requests('propose_pip_update')[0],policy=JSON.parse(JSON.stringify(req.request.changes.source_policy));
+ x.answer(req,{proposal:proposal({definition:{...proposal().definition,source_policy:policy,schedule}})});await flush();
+ x.answer(x.requests('accept_pip_update')[0],{pip:job('a',{current_version:2,source_policy:policy,schedule}),keep_running_notice:told});await x.drain();
+ assert.ok(x.d.body.textContent.includes('Source saved. Its next run uses it. '+told));
+});

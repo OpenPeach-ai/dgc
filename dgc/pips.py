@@ -4445,6 +4445,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 else:
                     result = {"keep_running": pip_keep_running.set_on(
                         request.get("enabled"), runner_online=bool(runner_status(registry).get("online")))}
+                    # The user's own choice: a later schedule never turns an off back on.
+                    pip_keep_running.record_choice(registry, request.get("enabled"))
             elif command in STATEMENT_COMMANDS:
                 from . import pip_memory_statements
                 if command == "get_pip_statement_anchor":
@@ -4741,6 +4743,16 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 result = {"context": context}
             else:
                 result = registry.activity(workspace_id, request.get("after", 0))
+            from . import pip_keep_running
+            if actor in ("editor-user", "local-console") and pip_keep_running.needs_runner(command, result):
+                # A schedule, trigger or routine runs only while the runner does: keep it running with the
+                # editor closed (founder, 2026-10-18), unless the user chose that off. Never fails the change.
+                from .pip_daemon import runner_status
+                told = pip_keep_running.for_schedule(registry, runner_online=bool(runner_status(registry).get("online")))
+                if told is not None:
+                    result = {**result, "keep_running_notice": told["notice"]}
+                    if command == "accept_pip_setup":
+                        pip_keep_running.remember(registry, result["setup"]["id"], told["notice"])
         from .redaction import redact_value, secret_values
         from .pip_pulse_results import prepare_display
         result = prepare_display(result, secret_values(config))

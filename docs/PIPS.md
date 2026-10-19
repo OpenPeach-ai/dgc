@@ -187,6 +187,13 @@ starts it when you sign in (see **Windows** below). Turning it off
 stops the runner starting on its own; the runner running now keeps going until you stop
 it. It never turns Pips on and never clears an emergency stop.
 
+**DGC turns it on for you** the first time a Pip gets a schedule, a commit trigger or a
+routine, so the schedule doesn't depend on VS Code being open, and says so: "Your scheduled
+Pips now run even when VS Code is closed." Once you turn the switch off yourself, DGC leaves
+it off and says the schedule runs only while Pips are running. When it can't turn it on
+(the system refuses, or lingering on Linux needs `sudo loginctl enable-linger $USER`), it
+says what to do; the Pip is created either way.
+
 Otherwise:
 
 - **Start runner** in the Pips view. The runner keeps going when the editor

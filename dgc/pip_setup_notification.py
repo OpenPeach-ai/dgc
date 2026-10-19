@@ -95,6 +95,8 @@ def notify(backend, config, request):
                                'name':setup['name'],'pip_type':setup['pip_type'],'run_id':setup['receipt']['run_id']})
         if notice is None:
             raise RegistryError('invalid_receipt','The saved approval receipt is invalid.')
+        from .pip_keep_running import remembered
+        keep_running = remembered(registry, setup['id'])     # what accepting it said about Keep Pips running
     # Session/root changes use the dispatch guard. Recheck after the SQLite read
     # so a slow approval lookup cannot wake the newly selected conversation.
     with backend._dispatch_guard() if hasattr(backend, "_dispatch_guard") else nullcontext():
@@ -121,7 +123,8 @@ def notify(backend, config, request):
                 'The editor already shows it is on and when it first runs, so say so in a sentence or two at most, without IDs, '
                 'and add only what the user still needs to know. '
                 'Do not recreate it, request another run, or infer success from a queued run. Read current status if useful. '
-                'Continue the existing task. Keep unanswered questions open; this receipt is not an answer or permission for other work.')
+                'Continue the existing task. Keep unanswered questions open; this receipt is not an answer or permission for other work.'
+                + (' Also tell the user, in these words: ' + keep_running if keep_running else ''))
             state, _ = backend._start_turn(text, delivery='steer', kind='pip_setup')
             if state not in ('started','queued','steered'):
                 raise RegistryError('busy','Setup is saved. The chat cannot receive its notification yet; retry shortly.')

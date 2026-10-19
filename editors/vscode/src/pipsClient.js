@@ -1489,7 +1489,7 @@ async function resolveSetup(review){
  const token=scope(),workspace=S.workspace.id;S.busy=true;renderReview();
  try{const result=await send(review.request.type,{setup_id:review.request.setup_id,expected_digest:review.request.expected_digest});if(token!==scope()||!usable())return;const accepted=review.request.type==='accept_pip_setup',s=pipSetupResolution(result.setup,review.setup,accepted);
  closeReview();setupRows=setupRows.filter(row=>row.id!==s.id);S.busy=false;
- if(accepted){const selecting=select(s.receipt.pip_id),selectedScope=scope();await selecting;if(selectedScope!==scope()||!usable()||S.workspace?.id!==workspace)return;S.notice=s.source_policy==='personal'?(s.receipt.run_id?`${s.name} is on and starting its first task.`:`${s.name} is on. It works ${s.next_run_at?'on its schedule and ':''}when you ask.`):s.receipt.run_id?`${s.name} is on and starting its first run. ${s.pip_type==='pulse'?'Check its results before you count it as passing.':s.work_kind==='documentation_draft'?'Its first draft is on the way.':'It reviews the code; it doesn’t test the running app.'}`:s.next_run_at?`${s.name} is on. Its first run is ${date(s.next_run_at)}.`:`${s.name} is on. It runs when you ask.`;}else S.notice='Rejected. Nothing was created or changed.';
+ if(accepted){const selecting=select(s.receipt.pip_id),selectedScope=scope();await selecting;if(selectedScope!==scope()||!usable()||S.workspace?.id!==workspace)return;S.notice=s.source_policy==='personal'?(s.receipt.run_id?`${s.name} is on and starting its first task.`:`${s.name} is on. It works ${s.next_run_at?'on its schedule and ':''}when you ask.`):s.receipt.run_id?`${s.name} is on and starting its first run. ${s.pip_type==='pulse'?'Check its results before you count it as passing.':s.work_kind==='documentation_draft'?'Its first draft is on the way.':'It reviews the code; it doesn’t test the running app.'}`:s.next_run_at?`${s.name} is on. Its first run is ${date(s.next_run_at)}.`:`${s.name} is on. It runs when you ask.`;S.notice+=keepRunningTold(result);}else S.notice='Rejected. Nothing was created or changed.';
  await refresh(true);
  }catch(error){if(token===scope()){if(S.review){S.review.error=errorText(error);renderReview();}else setError(error);}}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
@@ -1914,7 +1914,7 @@ function routineCards(){
 }
 async function routineCall(command,args,id,notice){
  if(S.busy||!usable()||routineBusy)return null;const token=scope(),pip=S.selected;routineBusy=id||'form';routineError='';render();
- try{const result=await send(command,{pip_id:pip,...args});if(token!==scope())return null;if(notice)S.notice=notice;await loadRoutines();return result||{};}
+ try{const result=await send(command,{pip_id:pip,...args});if(token!==scope())return null;if(notice)S.notice=notice+keepRunningTold(result);await loadRoutines();return result||{};}
  catch(error){if(token===scope()){routineError=errorText(error);if(!routineEditing)S.error=routineError;}return null;}
  finally{if(token===scope()){routineBusy='';render();}}
 }
@@ -2435,14 +2435,16 @@ function changeSummary(v){
 }
 // A change the user makes in this view is theirs: it is saved and accepted in one step, with the
 // reason filled in. `same` checks the saved definition matches the choice before accepting it.
+/** The backend's sentence about Keep Pips running after a schedule, trigger or routine was saved. */
+function keepRunningTold(result){if(typeof result?.keep_running_notice!=='string'||!result.keep_running_notice)return '';keepState.asked=false;return ' '+result.keep_running_notice;}
 async function applyOwnChange(changes,same,notice){
  if(S.busy||!usable()||!S.pip)return false;const pip=S.pip,token=scope();S.busy=true;S.error='';render();
  try{
   const proposal=(await send('propose_pip_update',{pip_id:pip.id,expected_version:pip.current_version,changes,reason:'Changed in the Pips view.'})).proposal;
   if(token!==scope())return false;
   if(!record(proposal)||proposal.pip_id!==pip.id||!record(proposal.definition)||!same(proposal.definition))throw Error('The saved change differs from your choice. Refresh and try again.');
-  await send('accept_pip_update',{pip_id:pip.id,proposal_id:proposal.id,expected_version:pip.current_version});
-  if(token!==scope())return false;S.notice=notice;await refresh(true);return true;
+  const accepted=await send('accept_pip_update',{pip_id:pip.id,proposal_id:proposal.id,expected_version:pip.current_version});
+  if(token!==scope())return false;S.notice=notice+keepRunningTold(accepted);await refresh(true);return true;
  }catch(error){if(token===scope())S.error=errorText(error);return false;}
  finally{if(token===scope()){S.busy=false;render();}}
 }
@@ -3008,6 +3010,7 @@ document.addEventListener('click',event=>{
         if(['accept_pip_update','reject_pip_update'].includes(review.request.type)&&S.approvalsLoaded)void loadApprovals();
         const named=S.pip?.name||'This Pip',aside=review.setsAside?` ${review.setsAside===1?'The other waiting change was':`The ${review.setsAside} other waiting changes were`} set aside, not approved.`:'';
         S.notice=review.request.type==='review_pip_finding'?'Saved. Workspace context didn’t change.':review.request.type==='stop_pips'?'All Pips are stopping.':review.request.type==='pips_enable'?'Pips are off.':review.request.type==='accept_pip_update'?`${named} is updated.${aside}`:review.request.type==='reject_pip_update'?`Dismissed. ${named} stays as it was.`:'Saved.';
+        if(review.request.type==='accept_pip_update')S.notice+=keepRunningTold(result);
       });break;
     }
   }
