@@ -33,6 +33,9 @@ for (const width of [300, 460]) {
       if (skipOrFail(t)) return;
       const page = await openThinkingPage(browser, { width, theme, height: 1400, events: SCENARIOS.all });
       try {
+        // The withheld block before the second command is a mark on that step now, inside its folded
+        // line: open the lines, so the row measured is the one a reader sees.
+        await page.evaluate(() => document.querySelectorAll(".tool-group").forEach((group) => { group.open = true; }));
         const facts = await page.evaluate((contrastSource) => {
           const contrast = eval(contrastSource);
           const log = document.getElementById("log");
@@ -49,6 +52,7 @@ for (const width of [300, 460]) {
           const hintRect = hint.getBoundingClientRect();
           const by = headers[1].querySelector(".thought-by").getBoundingClientRect();
           const staticRow = document.querySelector(".thought-static");
+          if (!staticRow.checkVisibility()) throw new Error("the withheld row is not on screen");
           return {
             overflow: Math.max(log.scrollWidth - log.clientWidth,
               document.documentElement.scrollWidth - window.innerWidth),
@@ -93,11 +97,13 @@ test("forced colours keep the hint, the note and the static row visible", async 
   const page = await openThinkingPage(browser, { width: 300, theme: "hc", height: 1400, events: SCENARIOS.all });
   try {
     await page.emulateMedia({ forcedColors: "active" });
+    await page.evaluate(() => document.querySelectorAll(".tool-group").forEach((group) => { group.open = true; }));
     const facts = await page.evaluate(() => {
       const visible = (node) => {
         const rect = node.getBoundingClientRect();
         const style = getComputedStyle(node);
-        return rect.width > 4 && rect.height > 4 && style.visibility !== "hidden" && style.display !== "none"
+        // A folded group's contents still report a box in Chromium; checkVisibility says what is drawn.
+        return node.checkVisibility() && rect.width > 4 && rect.height > 4 && style.visibility !== "hidden" && style.display !== "none"
           && style.color !== style.backgroundColor && style.color !== "rgba(0, 0, 0, 0)";
       };
       return {
@@ -166,11 +172,13 @@ test("a block whose text is not here says so inside its body", async (t) => {
   if (skipOrFail(t)) return;
   const page = await openThinkingPage(browser, { width: 300, theme: "light-modern", height: 1000, events: SCENARIOS.missing });
   try {
+    // The first two blocks follow the git log step in its stretch: they are the last rows of its line.
+    await page.evaluate(() => document.querySelectorAll(".tool-group").forEach((group) => { group.open = true; }));
     await page.evaluate(() => document.querySelectorAll(".disclosure").forEach((button) => button.click()));
     const facts = await page.evaluate((contrastSource) => {
       const contrast = eval(contrastSource);
       return [...document.querySelectorAll(".thought-cut")].map((node) => ({
-        text: node.textContent, visible: node.getBoundingClientRect().height > 8, ratio: contrast(node) }));
+        text: node.textContent, visible: node.checkVisibility() && node.getBoundingClientRect().height > 8, ratio: contrast(node) }));
     }, CONTRAST_SOURCE);
     assert.deepEqual(facts.map((fact) => fact.text), ["The text of this reasoning is not in this view.",
       "The text of this reasoning was not kept.", "… the rest of this reasoning was not kept."]);

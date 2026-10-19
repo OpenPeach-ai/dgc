@@ -3160,6 +3160,7 @@
     if (hint.id) turn.id = hint.id;
     turn.timer = setInterval(renderTurnMeta, 200);
     resumeLiveTurn(turn, hint);
+    syncLiveStep();                          // the stretch the reload caught working gets its live row
   }
   function resumeLiveTurn(t, hint) {
     if (!t) return;
@@ -4102,6 +4103,7 @@
     if (!cards.length) {
       if (all.length) group.classList.add("agent-owned");
       if (turn && turn.toolGroup === group) turn.toolGroup = null;
+      syncLiveStep();
       return;
     }
     group.classList.remove("agent-owned");
@@ -4123,6 +4125,9 @@
       sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
     }
     summary.textContent = sentence;
+    // The thinking that led to the steps rides on them as marks; the line adds it up: "· thought 13s".
+    const thought = thoughtWords(group);
+    if (thought) summary.appendChild(el("span", "tg-thought")).textContent = ` · ${thought}`;
     // The icon tracks what is happening NOW: running cards while any is running, then everything
     // that actually ran. "No tools ran" keeps the denied steps' own mark — a refused `rm -rf dist`
     // is still a command, and saying so is strictly more useful than a shrug.
@@ -4130,6 +4135,66 @@
       headerIcon(running.length ? running : executed.length ? executed : cards));
     // Error counts stay visible in the summary. Tool output only expands on
     // the reader's click; progress and failures never take over their scroll.
+    syncLiveStep();
+  }
+  // "thought 13s": the main model's finished thinking inside a group (the marks on its steps and a
+  // thought that ended the stretch), from the seconds the backend stated. A block still streaming
+  // is not counted yet; blocks that kept no timing make it plain "thought".
+  function thoughtWords(group) {
+    const ended = [...group.querySelectorAll(".disclosure:not(.agent-owned), .thought-static:not(.agent-owned)")]
+      .filter((node) => node.dataset.seconds !== undefined);
+    if (!ended.length) return "";
+    const seconds = ended.reduce((sum, node) => sum + (Number(node.dataset.seconds) || 0), 0);
+    return seconds >= 0.5 ? `thought ${Math.round(seconds)}s` : "thought";
+  }
+  // A thought's label as a mark on a step: "thought 2s", "thought", "thinking…". The word is its own
+  // span, so a narrow side bar can keep just the seconds beside the mark's bulb (main.css).
+  function markWords(label) {
+    const text = String(label || "").trim();
+    return text === "Thinking…" ? "thinking…" : text.replace(/^Thought for /, "thought ").replace(/^Thought$/, "thought");
+  }
+  function paintMarkLabel(label, words) {
+    if (!label || label.textContent === words) return;
+    const [word, ...rest] = words.split(" ");
+    label.replaceChildren(el("span", "tm-word"), document.createTextNode(rest.length ? ` ${rest.join(" ")}` : ""));
+    label.firstChild.textContent = word;
+  }
+  // One line per stretch of work. Everything the model does between two pieces of prose it wrote is one
+  // group, and its thinking no longer ends the group (that was decision D7: think, step, think, step drew
+  // a "Thought" row and a "Ran 1 command" row each time, twelve rows for six commands). The main model's
+  // thinking since the stretch's last step -- drawn inside the open group while the stretch works, or
+  // just above the activity row before its first step -- becomes marks on the step it led to. A
+  // sub-agent's hidden rows are passed over; anything else on screen (prose, a note, a notice, an
+  // approval card) is where the thinking stops belonging to this step, and it stays where it is.
+  function pendingThoughts() {
+    const found = [];
+    let node = turn.toolGroup ? turn.toolGroup.lastElementChild
+      : turn.act ? turn.act.previousElementSibling : turn.block.lastElementChild;
+    for (; node && node.tagName !== "SUMMARY"; node = node.previousElementSibling) {
+      if (node.classList.contains("agent-owned")) continue;
+      if (!node.matches(".disclosure, .reasoning, .thought-static")) break;
+      found.unshift(node);
+    }
+    return found;
+  }
+  // The same rows, moved, never redrawn: a header becomes a small mark after the step's name, and its
+  // body (the thought's text, as it was) opens under the step's head. A block that is somehow still
+  // streaming keeps streaming into it.
+  function markThoughts(card, nodes) {
+    const head = card.querySelector(":scope > .head");
+    let at = head?.querySelector(":scope > .tool-toggle");
+    if (!at) return;
+    let below = head;
+    for (const node of nodes) {
+      if (node.matches(".reasoning")) { below.after(node); below = node; continue; }
+      node.classList.add("thought-mark");
+      at.after(node); at = node;
+      if (node._reason) paintReasonGroup(node._reason);
+      else {
+        const label = node.querySelector(".thought-label");
+        paintMarkLabel(label, markWords(label?.textContent));
+      }
+    }
   }
   // A DGC delegation from the chat's own model: the step that starts a sub-agent the transcript
   // draws as an agent line. The exact name, not canonicalTool(): Claude's and Codex's own "Task"
@@ -4150,10 +4215,14 @@
       if (turn.toolGroup) { (turn.leftGroups ||= []).push(turn.toolGroup); turn.toolGroup = null; }
       card.classList.add("asked-standalone");
       appendTurnContent(card);
+      syncLiveStep();
       return;
     }
     const spawn = isTopLevelSpawn(card) || (card.dataset.toolName === "run_pip_now" && !agentIdFromCall(card.dataset.callId));
     if (spawn && turn.toolGroup) { (turn.leftGroups ||= []).push(turn.toolGroup); turn.toolGroup = null; }
+    // The thinking that led to a step of the main model's own rides on it. A delegation's thinking
+    // stays a row: its group hides once the agent starts, and the thought must not hide with it.
+    const thoughts = spawn || agentIdFromCall(card.dataset.callId) ? [] : pendingThoughts();
     if (!turn.toolGroup) {
       turn.toolGroup = appendTurnContent(el("details", "tool-group"));
       turn.toolGroup.innerHTML = `<summary><span class="tg-icon" data-icon="wrench" aria-hidden="true">${icon("wrench")}</span>`
@@ -4163,8 +4232,69 @@
       turn.toolGroup.open = false;
     }
     turn.toolGroup.appendChild(card);
+    if (thoughts.length) markThoughts(card, thoughts);
     refreshToolGroup(turn.toolGroup);
-    if (spawn) turn.toolGroup = null;
+    if (spawn) { turn.toolGroup = null; syncLiveStep(); }
+  }
+  // ---- the step running now -----------------------------------------------------------------------
+  // While a stretch works, one row under its line says what it is doing now: the step running, with
+  // its timer ("Running npm test 2.1s"), "Thinking… 3s" while the model thinks between steps, or the
+  // last step done until the next one starts. It is one row, updated in place, from the stretch's first
+  // step until prose (or the turn's end) closes the stretch; then it goes and the line stays. An opened
+  // group shows the steps themselves, so the row hides under it. A replayed turn has nothing running.
+  function syncLiveStep() {
+    if (!turn) return;
+    const owner = turn;
+    // (A reloaded turn is adopted while its page is still a fragment on its way into the log, so the
+    // group need not be connected yet.)
+    const group = !replaying && owner.toolGroup?.parentNode && !owner.toolGroup.classList.contains("agent-owned")
+      ? owner.toolGroup : null;
+    if (!group) {
+      owner.liveStep?.remove(); owner.liveStep = null;
+      clearInterval(owner.liveTick); owner.liveTick = 0;
+      return;
+    }
+    let live = owner.liveStep;
+    if (!live) {
+      live = owner.liveStep = el("div", "tg-live");
+      live.innerHTML = '<span class="tg-live-spin codicon codicon-loading" aria-hidden="true"></span>'
+        + '<span class="tg-live-verb"></span> <span class="tg-live-arg"></span> <span class="tg-live-time"></span>';
+    }
+    if (group.nextElementSibling !== live) group.after(live);
+    paintLiveStep(owner);
+    if (!owner.liveTick) {
+      owner.liveTick = setInterval(() => {
+        if (turn !== owner || !owner.liveStep?.isConnected) { clearInterval(owner.liveTick); owner.liveTick = 0; return; }
+        paintLiveStep(owner);
+      }, 250);
+    }
+  }
+  function paintLiveStep(owner) {
+    const live = owner.liveStep, group = owner.toolGroup;
+    if (!live || !group) return;
+    const items = [...group.children].filter((node) => node.matches(".tool, .disclosure, .thought-static")
+      && !node.classList.contains("agent-owned") && !node.classList.contains("pip-run-owned"));
+    const last = items.at(-1);
+    const runningCard = items.filter((node) => node.matches(".tool") && node.dataset.status === "running").at(-1);
+    const reason = last?._reason;
+    let state = "done", verb = "", arg = "", time = "";
+    if (reason && reasonLabel(reason) === "Thinking…") {
+      state = "thinking"; verb = "Thinking…";
+      const seconds = reason.startedAt == null ? 0 : Math.floor((Date.now() - reason.startedAt) / 1000);
+      time = seconds >= 1 ? `${seconds}s` : "";
+    } else if (runningCard || last?.matches(".tool")) {
+      const card = runningCard || last;
+      state = runningCard ? "running" : "done";
+      verb = card.querySelector(".verb")?.textContent || "";
+      arg = card.querySelector(".arg")?.textContent || "";
+      time = card.querySelector(".tool-time")?.textContent || "";
+    } else if (reason) verb = reasonLabel(reason);
+    else if (last) verb = (last.querySelector(".thought-label")?.textContent || "").trim();
+    if (live.dataset.state !== state) live.dataset.state = state;
+    for (const [selector, text] of [[".tg-live-verb", verb], [".tg-live-arg", arg], [".tg-live-time", time]]) {
+      const node = live.querySelector(selector);
+      if (node.textContent !== text) node.textContent = text;
+    }
   }
 
   // Tools whose summary is a shell command, so there is something worth copying verbatim.
@@ -8818,8 +8948,9 @@
     agentsOnBackendExit(msg); imagesOnBackendExit(msg); retryOnBackendExit(msg); askOnBackendExit(msg);
   }
   // Anything drawn at turn level between tool rounds (text, a model-retry line, an inline thought
-  // note, a withheld-thinking row, a collapsed reasoning group, an image row with no step) ends the
-  // open tool group, so the next tool card starts a new group below it rather than joining one above.
+  // note, an image row with no step, and a sub-agent's thinking) ends the open tool group, so the next
+  // tool card starts a new group below it rather than joining one above. The main model's own
+  // collapsed thinking and withheld-thinking rows no longer do (see pendingThoughts).
   // Retiring changes ownership, never the user's expansion choice. Groups
   // start collapsed, and remain in the state the reader selected.
   function retireToolGroup(group) { /* No automatic expansion or folding. */ }
@@ -8831,6 +8962,7 @@
     // The groups a delegation split off earlier in the step (see appendTool) fold now too: every
     // release point comes after the step's results, live and replayed alike.
     for (const group of turn.leftGroups?.splice(0) || []) retireToolGroup(group);
+    syncLiveStep();                          // the stretch is over: its live row goes, its line stays
   }
   function endToolGroup() { releaseToolGroup(); }
   // ---- end 0.40 shared ----------------------------------------------------------------------------
@@ -13022,7 +13154,16 @@
   function paintReasonGroup(group) {
     if (!group?.button) return;
     const label = group.button.querySelector(".thought-label");
-    if (label) label.textContent = ` ${reasonLabel(group)}`;
+    const words = reasonLabel(group);
+    if (group.button.classList.contains("thought-mark")) paintMarkLabel(label, markWords(words));
+    else if (label) label.textContent = ` ${words}`;
+    // The seconds a finished block stated, for its stretch's line ("· thought 13s"); "" for none kept.
+    const ended = group.parts.length && group.parts.every((part) => part.ended);
+    if (!ended) delete group.button.dataset.seconds;
+    else group.button.dataset.seconds = group.parts.every((part) => Number.isFinite(part.seconds))
+      ? String(group.parts.reduce((sum, part) => sum + part.seconds, 0)) : "";
+    const host = group.button.closest(".tool-group");
+    if (host) refreshToolGroup(host);
   }
   function makeReasonGroup(identity) {
     const button = el("button", "disclosure"), body = el("div", "reasoning");
@@ -13051,15 +13192,21 @@
     };
     const group = { button, body, parts: [], open: true, ...identity,
                     startedAt: replaying ? null : Date.now() };
+    button._reason = group;
     return group;
   }
-  // A collapsed group, an inline note and a withheld row are all drawn at turn level, so each ends
-  // the tool group: a tool card after them opens a new group below (decision D7).
+  // The main model's collapsed thinking belongs to the stretch of work it is in: inside the open group
+  // while the stretch works (its live row says "Thinking…"), at turn level before the stretch's first
+  // step. The next step of its own wears it as a mark (pendingThoughts); prose after it leaves it as the
+  // group's last row, counted on the line. Decision D7 -- every thought ended the tool group, so a
+  // tool card after it opened a new group below -- now holds only for a sub-agent's thinking.
   function openReasonGroup(identity) {
     finishReasoning();
-    endToolGroup();
+    if (identity.agent) endToolGroup();
+    const stretch = identity.agent ? null : turn.toolGroup;
     const group = makeReasonGroup(identity);
-    appendTurnContent(group.button); appendTurnContent(group.body);
+    if (stretch) stretch.append(group.button, group.body);
+    else { appendTurnContent(group.button); appendTurnContent(group.body); }
     turn.reasonGroup = group;
     paintReasonGroup(group);
     return group;
@@ -13135,9 +13282,19 @@
   // stay in the group, parts after it move to a new group after the note.
   function reasonGroupToNote(entry) {
     const group = entry.group;
+    const hadFocus = document.activeElement === group.button;   // before any move, which drops focus
+    // A note is prose the reader sees, so it never folds into a stretch's line: a block drawn inside
+    // the open group leaves it at turn level first (a mark, after the group it was in).
+    const host = group.button.closest(".tool-group");
+    if (host) {
+      if (host === turn.toolGroup && !group.button.closest(".tool")) { appendTurnContent(group.button); appendTurnContent(group.body); }
+      else (host.nextElementSibling?.classList.contains("tg-live") ? host.nextElementSibling : host).after(group.button, group.body);
+      group.button.classList.remove("thought-mark");
+      paintReasonGroup(group);
+      refreshToolGroup(host);
+    }
     const index = group.parts.indexOf(entry);
     const before = group.parts.slice(0, index), after = group.parts.slice(index + 1);
-    const hadFocus = document.activeElement === group.button;
     const note = reasonNoteFrom(entry, entry.text.data);
     entry.part.remove();
     if (!before.length) {
@@ -13181,7 +13338,10 @@
   function withheldRow(ev, identity) {
     finishReasoning();
     const seconds = Number.isFinite(ev.seconds) ? Math.max(0, ev.seconds) : null;
-    const previous = turn.act?.previousElementSibling;
+    // Like a collapsed group (openReasonGroup): the main model's row stays in the open stretch, and
+    // only a sub-agent's ends the tool group.
+    const stretch = identity.agent ? null : turn.toolGroup;
+    const previous = stretch ? stretch.lastElementChild : turn.act?.previousElementSibling;
     if (previous?.classList.contains("thought-static") && previous.dataset.provider === identity.provider
         && (previous.dataset.agent || "") === identity.agent) {
       // Consecutive withheld blocks read as one row.
@@ -13189,7 +13349,8 @@
       previous.dataset.seconds = known ? String(Number(previous.dataset.seconds) + seconds) : "";
       previous.querySelector(".thought-label").textContent =
         ` ${known ? reasonDuration(Number(previous.dataset.seconds)) : "Thought"}`;
-      endToolGroup();
+      if (stretch) refreshToolGroup(stretch);
+      if (identity.agent) endToolGroup();
       return;
     }
     const row = el("div", "thought-static"); row.dataset.source = "withheld";
@@ -13210,8 +13371,9 @@
     row.appendChild(label);
     const prov = reasonProvenance("withheld", identity.provider);
     if (prov) row.appendChild(prov);
-    appendTurnContent(row);
-    endToolGroup();
+    if (stretch) { stretch.appendChild(row); refreshToolGroup(stretch); }
+    else appendTurnContent(row);
+    if (identity.agent) endToolGroup();
   }
   function reasoningEnd(ev) {
     const blocks = turn.reasonBlocks || (turn.reasonBlocks = new Map());

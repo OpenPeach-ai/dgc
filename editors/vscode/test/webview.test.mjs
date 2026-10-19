@@ -1641,9 +1641,17 @@ test("a running command is shown once, on its card, while the header and activit
   event({ type: "turn_activity", turn_id: "t1", state: "tool", label: "Running a command", detail: command.slice(0, 120) });
   event({ type: "tool_call", call_id: "c1", name: "bash", args: { command }, summary: command });
   const block = doc.querySelector(".msg.dgc");
-  const occurrences = block.textContent.split(command).length - 1;
-  assert.equal(occurrences, 1, "the command appears exactly once in the turn");
-  assert.match(block.querySelector(".tool .arg").textContent, /npm test -- --runInBand/, "and that once is the card");
+  // On screen once: the card holds it inside the folded group, and the live row under the group's line
+  // shows the step running now. An opened group shows the card, and the live row steps aside.
+  const count = (node) => node.textContent.split(command).length - 1;
+  const rest = block.cloneNode(true);
+  rest.querySelectorAll(".tool, .tg-live").forEach((node) => node.remove());
+  assert.equal(count(rest), 0, "neither the header nor the activity row repeats the command");
+  assert.equal(count(block.querySelector(".tool")), 1);
+  assert.match(block.querySelector(".tool .arg").textContent, /npm test -- --runInBand/, "the card holds it");
+  assert.equal(block.querySelector(".tool-group").open, false, "inside the folded group");
+  assert.equal(count(block.querySelector(".tool-group + .tg-live")), 1, "the live row under the line shows it");
+  assert.match(mainCss, /\.tool-group\[open\] \+ \.tg-live \{ display: none; \}/, "and steps aside when the group opens");
   const label = block.querySelector(".tool-group-label").textContent;
   assert.equal(label, "Running a command");
   assert.doesNotMatch(label, /npm|\/home/);

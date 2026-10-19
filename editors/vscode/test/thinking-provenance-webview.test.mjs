@@ -241,7 +241,10 @@ test("a withheld block is a static row, merged with a directly preceding one, pl
   assert.equal(doc.querySelectorAll(".thought-static").length, 2, "prose between rows keeps them apart");
 });
 
-test("tool order: a note or a collapsed group between two tool calls opens a new tool group (D7)", () => {
+// D7 used to make every thought end the tool group. An inline note still does (it is prose the reader
+// sees); the main model's collapsed thinking no longer does: it rides on the step it led to as a mark,
+// and the stretch stays one line (tool-rows-one-line.test.mjs has the founder's whole sequence).
+test("tool order: a note between two tool calls opens a new tool group; a collapsed thought joins the next step", () => {
   const { send, doc } = makeDom();
   send(start());
   send(ev({ type: "tool_call", call_id: "a", name: "bash", args: { command: "ls" }, summary: "ls" }));
@@ -261,8 +264,17 @@ test("tool order: a note or a collapsed group between two tool calls opens a new
   send(end("t1:think2", "raw", { seconds: 1 }));
   send(ev({ type: "tool_call", call_id: "c", name: "bash", args: { command: "git status" }, summary: "git status" }));
   groups = [...doc.querySelectorAll(".tool-group")];
-  assert.equal(groups.length, 3, "a collapsed reasoning group splits the tool group too");
-  assert.equal(groups[2].previousElementSibling.classList.contains("reasoning"), true);
+  assert.equal(groups.length, 2, "a collapsed reasoning group no longer splits the tool group");
+  assert.deepEqual([...groups[1].querySelectorAll(":scope > .tool")].map((card) => card.dataset.callId), ["b", "c"]);
+  const card = groups[1].querySelector('.tool[data-call-id="c"]');
+  const mark = card.querySelector(":scope > .head > .disclosure.thought-mark");
+  assert.ok(mark, "the thought is a mark on the step it led to");
+  assert.equal(squash(accessibleName(mark)), "thought 1s, raw");
+  assert.equal(doc.getElementById(mark.getAttribute("aria-controls")).parentElement, card);
+  assert.equal(doc.getElementById(mark.getAttribute("aria-controls")).textContent, "Thinking between tools.");
+  assert.equal(groups[1].querySelector(".tool-group-label").textContent, "Running a command · thought 1s");
+  assert.equal(doc.querySelectorAll("#log .msg.dgc > .disclosure, #log .msg.dgc > .reasoning").length, 0,
+    "no thought row is left at turn level");
 });
 
 test("hide-reasoning hides groups, bodies, notes and static rows", () => {

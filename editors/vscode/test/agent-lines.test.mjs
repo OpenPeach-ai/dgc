@@ -352,9 +352,11 @@ test("the step around a spawn: earlier tools stay above, later ones open a group
   p.event({ type: "tool_result", call_id: "b1", name: "bash", output: "a.py", is_error: false });
   const turnBlock = p.doc.querySelector(".msg.dgc");
   const sequence = () => [...turnBlock.children].filter((n) => !n.matches(".role, .thinking")).map((n) =>
-    n.matches(".agent-line") ? "line"
+    n.matches(".agent-line") ? "line" : n.matches(".tg-live") ? "live"
       : `${n.classList.contains("agent-owned") ? "hidden" : "group"}:${[...n.querySelectorAll(":scope > .tool")].map((c) => c.dataset.toolName).join(",")}:${n.open ? "open" : "folded"}`);
-  assert.deepEqual(sequence(), ["group:read_file:folded", "hidden:task:folded", "line", "group:bash:folded"],
+  // The stretch still working (the bash group) has its live row under it; the group the spawn split
+  // off is done with its own.
+  assert.deepEqual(sequence(), ["group:read_file:folded", "hidden:task:folded", "line", "group:bash:folded", "live"],
     "every group starts compact without changing step order");
   p.event({ type: "text_delta", text: "Done." });
   assert.deepEqual(sequence().slice(0, 4), ["group:read_file:folded", "hidden:task:folded", "line", "group:bash:folded"],

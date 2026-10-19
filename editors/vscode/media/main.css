@@ -883,6 +883,23 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool-group.running > summary > .tg-icon { color: var(--accent); animation: icon-pulse 1.4s ease-in-out infinite; }
 .tool-group > .diff { margin: var(--sp-1) 0 var(--sp-2); }
 @media (prefers-reduced-motion: reduce) { .tool-group.running > summary > .tg-icon { animation: none; } }
+/* One line per stretch of work: the line adds up the thinking on its steps ("· thought 13s"), and while
+   the stretch works one row under it says what runs now. The row is updated in place, never redrawn;
+   an opened group shows the steps themselves, so the row steps aside. Its spinner sits under the
+   line's icon and its words start where the line's words do. */
+.tool-group-label .tg-thought { color: var(--thought-muted, var(--muted)); }
+body.hide-reasoning .tool-group-label .tg-thought { display: none; }
+.tg-live { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; margin-top: calc(-1 * var(--sp-1));
+  font: var(--w-reg) var(--t-xs)/1.5 var(--sans); color: var(--muted); }
+.tool-group[open] + .tg-live { display: none; }
+.tg-live-spin { flex: none; width: var(--icon); font-size: 12px; line-height: 1; text-align: center; color: var(--accent-text); animation: tg-spin 1.1s linear infinite; }
+.tg-live[data-state="done"] .tg-live-spin { visibility: hidden; animation: none; }
+.tg-live-verb { flex: none; color: var(--text); white-space: nowrap; }
+.tg-live[data-state="done"] .tg-live-verb { color: var(--muted); }
+.tg-live-arg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); color: var(--text); }
+.tg-live-time { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+@keyframes tg-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tg-live-spin { animation: none; } }
 .tool { border: 1px solid transparent; border-radius: var(--r-md); background: transparent; overflow: hidden; }
 .tool:hover, .tool.open { border-color: var(--border); background: var(--term); }
 .tool .head { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2) 0 0; font: var(--w-med) var(--t-sm)/1.45 var(--sans); }
@@ -2549,6 +2566,23 @@ body.ask-docked #tasks-panel { display: none; }
 .thought-note > p:last-of-type { display: inline; margin: 0; }
 .thought-hint { font-size: var(--t-xs); white-space: nowrap; user-select: none; color: var(--thought-muted, var(--muted)); }
 body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display: none !important; }
+/* A thought that led to a step is a small mark on that step's row, "thought 2s": the same header and
+   body as a "Thought for 2s · raw" row, moved there. The provenance stays for screen readers; the
+   body opens under the step's head. A withheld block's mark has nothing to open. */
+.tool .thought-mark { flex: none; display: inline-flex; align-items: center; height: 18px; margin: 0; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: var(--r-full); background: transparent;
+  color: var(--thought-muted, var(--muted)); font: var(--w-reg) var(--t-xs)/16px var(--sans); white-space: nowrap; }
+.tool button.thought-mark { cursor: pointer; }
+.tool button.thought-mark:hover, .tool button.thought-mark[aria-expanded="true"] { color: var(--text); border-color: var(--border-strong); }
+.tool .thought-mark .thought-chev { display: none; }
+.tool .thought-mark::before { content: "\ea61" / ""; font: normal normal normal 11px/1 codicon; margin-right: 3px; }
+@media (max-width: 360px) {
+  .tool .thought-mark .tm-word { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+}
+.tool .thought-mark .thought-prov { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.tool > .reasoning { margin: 0 var(--sp-2) var(--sp-2) var(--sp-6); }
 @media (max-width: 360px) {
   .thought-by { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important;
     margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important;
