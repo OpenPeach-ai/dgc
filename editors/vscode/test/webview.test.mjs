@@ -1055,8 +1055,13 @@ test("stream batching flushes final text and partial changes stay explicit", () 
   for (const text of ["Complete ", "answer ", "with **formatting**."]) send({ type: "event", event: { type: "text_delta", text } });
   send({ type: "event", event: { type: "turn_end", reason: "completed" } });
   assert.equal(doc.querySelector(".text.final").textContent.trim(), "Complete answer with formatting.");
-  send({ type: "chat_changes", total: 900, files: [], notices: ["Showing 500 of 900 changed files."] });
-  assert.match(doc.getElementById("changes-count").textContent, /partial scan/);
+  // A partial scan's counts are a floor: "+1 −82173 · partial scan" read as a total and was wrong.
+  send({ type: "chat_changes", total: 900, additions: 12, deletions: 3, files: [], notices: ["Showing 500 of 900 changed files."] });
+  assert.equal(doc.getElementById("changes-count").textContent, "At least 900 files changed in this chat");
+  assert.match(doc.getElementById("changesbar").title, /real totals may be higher/);
+  assert.equal(doc.getElementById("changes-add").textContent, "+12");
+  send({ type: "chat_changes", total: 1, additions: 1, deletions: 1, files: [], notices: ["Some changes could not be recorded."] });
+  assert.equal(doc.getElementById("changes-count").textContent, "At least 1 file changed in this chat");
   // A bounded scan that recorded NOTHING is the same kind of statement, not a failure: it is the
   // ordinary mid-turn state on a large repository. It used to read "Changes unavailable", which
   // says the feature is broken rather than that the scan could not reach that far.
@@ -1067,6 +1072,7 @@ test("stream batching flushes final text and partial changes stay explicit", () 
   send({ type: "chat_changes", total: 900, files: [], notices: ["Showing 500 of 900 changed files."] });
   doc.getElementById("changes-review-button").click();
   assert.match(doc.getElementById("changes-review-list").textContent, /Showing 500 of 900/);
+  assert.match(doc.getElementById("changes-review-summary").textContent, /^At least 900 files changed/);
   assert.deepEqual(errors, []);
 });
 

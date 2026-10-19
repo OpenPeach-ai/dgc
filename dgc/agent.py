@@ -5902,6 +5902,12 @@ class Agent(GoalLifecycle):
                 self.config.project_root, on_change=self._persist,
                 max_message_count=len(self.messages))
             self.chat_changes = ChatChanges.from_state(self.config.project_root, record.get("chat_changes"))
+            # A journal saved before the partial-scan fix holds deletions of files still on disk;
+            # drop them here so the reopened chat shows true numbers with nothing to do.
+            try:
+                self.chat_changes.repair()
+            except (OSError, ValueError):
+                pass
             return len(loaded)
 
     def take_stale_monitor_note(self) -> str:

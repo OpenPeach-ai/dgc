@@ -62,6 +62,25 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   shared `~/.mcp-auth`, which DGC never touches (other apps use it). A remote server you had already signed in to
   asks you to sign in once more.
 
+### Fixed
+
+- **Changes in this chat no longer lists files nobody touched as deleted.** In a large project the scan behind it
+  stops reading at 64 MiB or 5 seconds, but it still compared every file it had listed, so a file one scan read and
+  the other didn't reach counted as deleted (or created). A long session in a ~104 MiB repository showed
+  "+1 −82173": 497 "deleted" files that were all still on disk, 85 of them counted twice, and the 500-file limit
+  left room for only 3 of the real edits. Now:
+  - A file is compared only when both scans know it: they read it, Git says it is unmodified (the content it holds
+    is then known without reading it), or one of DGC's file tools wrote it. A file only one scan reached is left
+    out, and the journal says it is partial.
+  - A file is recorded as deleted only after checking it is gone. A file that became ignored or untracked is not
+    deleted.
+  - The scan reads first what this run's tools wrote and what the chat already changed, then what Git reports as
+    changed, then the rest. In a Git repository the files it doesn't reach are ones Git vouches for, so the result
+    is usually complete there now; a shell edit or a commit of a file past the cut-off is still recorded.
+  - Sessions saved before this fix are repaired when they open: a "deleted" file still on disk exactly as it was
+    is dropped, and so is a deletion counted twice. Edits the old scan never recorded can't be recovered, so such
+    a session stays marked partial.
+
 ### ChatDGC
 
 - **A chat's outline, whatever is on screen.** `chatdgc_outline` (offered as `ready.capabilities.chatdgc.outline`)

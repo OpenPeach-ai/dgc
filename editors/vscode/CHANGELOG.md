@@ -287,6 +287,10 @@
   DGC's file, which could not be fetched until the remote connection was up, or pointed at the old version's
   folder. Now the tab carries the picture itself, so it shows from the first moment, in the light and dark themes.
   A tab saved by an older version gets the fix the first time you show it.
+- **A partial count says it is a floor.** When DGC can't check every file, the bar above the prompt box reads
+  "At least 12 files changed in this chat", and its tooltip says the real totals may be higher. It used to put
+  "partial scan" beside numbers that read as totals, and the totals themselves were wrong ("+1 −82173"); that part
+  is fixed in DGC itself.
 - **Install DGC Voice installs it.** DGC Voice isn't on the Marketplace or Open VSX yet, so the button opened the
   Extensions view on a search for `@id:vibedgc.dgc-voice` that found nothing. DGC now carries DGC Voice inside its
   own package and installs it from there (from the Marketplace instead, once it's there and not older), on the

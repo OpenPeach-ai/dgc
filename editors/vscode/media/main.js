@@ -4869,17 +4869,19 @@
       notices: Array.isArray(next?.notices) ? next.notices.map(String).slice(0, 34) : [],
     };
     changesBar.hidden = changeState.total === 0 && !changeState.notices.length;
-    // "Changes unavailable" read as "this is broken" for the state it actually describes: a scan
-    // that hit its bounds and therefore cannot say whether anything changed. It is the ordinary
-    // mid-turn state on a large repository -- `capture()` stops at its deadline or file cap and
-    // compares only the names BOTH sides saw, so an edit outside that prefix is UNKNOWN, not
-    // absent. Say that, and say it the same way as the case just below it, so the two read as one
-    // scale rather than one number and one failure. The reason itself is on the bar's title.
-    $("changes-count").textContent = changeState.notices.length
-      ? (changeState.total ? `${changeState.total} changed in this chat · partial scan`
-                           : "Changes not recorded · partial scan")
-      : `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed in this chat`;
-    changesBar.title = ["Changes recorded during runs in this chat; existing workspace changes are excluded", ...changeState.notices].join("\n");
+    // A notice means the scan could not check every file. `capture()` compares only what BOTH
+    // sides know, so what it recorded is real but some changes may be missing: the counts are a
+    // floor, not totals. "+1 −82173 · partial scan" read as a total and was wrong; say "At least"
+    // instead. "Changes unavailable" read as "this is broken" for the empty case, which is the same
+    // statement with nothing recorded yet. The reason itself is on the bar's title.
+    const partialChanges = changeState.notices.length > 0;
+    const changedFiles = `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed in this chat`;
+    $("changes-count").textContent = partialChanges
+      ? (changeState.total ? `At least ${changedFiles}` : "Changes not recorded · partial scan")
+      : changedFiles;
+    changesBar.title = ["Changes recorded during runs in this chat; existing workspace changes are excluded",
+      ...(partialChanges && changeState.total ? ["Not every file could be checked, so the real totals may be higher."] : []),
+      ...changeState.notices].join("\n");
     $("changes-add").hidden = $("changes-del").hidden = changeState.total === 0;
     $("changes-add").textContent = `+${changeState.additions}`;
     $("changes-del").textContent = `−${changeState.deletions}`;
@@ -4893,7 +4895,8 @@
       ? "Saved before/after snapshots from this chat’s runs in this chat’s folder. Existing changes and edits between runs are excluded. Concurrent edits during a run may be included."
       : "All pending changes since the last Git commit, including edits made before this chat or by other tools.";
     const summary = $("changes-review-summary"), list = $("changes-review-list");
-    summary.innerHTML = `<span>${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed</span><span class="change-add">+${changeState.additions}</span><span class="change-del">−${changeState.deletions}</span>`;
+    const floor = reviewScope === "chat" && changeState.total && changeState.notices?.length ? "At least " : "";
+    summary.innerHTML = `<span>${floor}${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed</span><span class="change-add">+${changeState.additions}</span><span class="change-del">−${changeState.deletions}</span>`;
     list.innerHTML = changeState.files.length ? changeState.files.map((item, index) =>
       `<button type="button" class="change-row" data-change="${index}" title="${esc(item.error || (item.staged ? "Includes staged changes" : "Review change"))}"><span class="change-kind codicon codicon-${item.deleted ? "trash" : item.untracked ? "new-file" : "diff-modified"}" aria-hidden="true"></span><span class="change-path">${esc(item.path)}</span><span class="change-add">${item.counted === false || item.binary ? "—" : "+" + Math.max(0, Number(item.additions) || 0)}</span><span class="change-del">${item.counted === false || item.binary ? "—" : "−" + Math.max(0, Number(item.deletions) || 0)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")
       : '<div class="surface-empty">No workspace changes remain.</div>';
