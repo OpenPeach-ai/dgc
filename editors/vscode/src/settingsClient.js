@@ -39,7 +39,7 @@ const errors = new Map(), pending = new Map(), skillPending = new Map();
 // A plugin's key field (GitHub's token, Brevo's key): what is typed so far, survives the page redrawing under it;
 // a Save or Remove waiting on DGC; and what DGC said back. Keyed plugin|server|variable. The key itself goes to DGC
 // once and is never sent back here: the page only learns whether one is saved.
-const keyDrafts = new Map(), keyPending = new Map(), keyNotes = new Map();
+const keyDrafts = new Map(), keyPending = new Map(), keyNotes = new Map(), scopeNotes = new Map();
 const send = m => vscode.postMessage(m);
 const switchHTML = (on, label, attrs = '', disabled = false) => `<button type="button" class="switch${on ? ' on' : ''}" role="switch" aria-checked="${!!on}" aria-label="${esc(label)}" ${attrs}${disabled ? ' disabled' : ''}><i></i></button>`;
 const ui = {
@@ -623,6 +623,7 @@ function bindPlugins(main) {
     main.querySelectorAll('[data-browser]').forEach(b => b.onclick = () => send({ type: 'openSignIn' }));
     main.querySelectorAll('[data-copy-code]').forEach(b => b.onclick = () => send({ type: 'copy', text: b.dataset.copyCode }));
     main.querySelectorAll('[data-key-sign-in]').forEach(b => b.onclick = () => { const row = items.find(r => r.name === b.dataset.keySignIn); if (!row) return; pending.set(row.name, true); errors.delete(row.name); send({type: 'installPlugin', name: row.name}); render(); });
+    main.querySelectorAll('[data-sign-in-again]').forEach(b => b.onclick = () => { const row = items.find(r => r.name === b.dataset.signInAgain); const k = row?.keys?.find(key => key.sign_in_scopes); if (!k) return; pending.set(row.name, true); errors.delete(row.name); send({type: 'signInAgain', name: row.name, scopes: k.sign_in_scopes.filter(p => p.chosen && !p.always).map(p => p.id)}); render(); });
     main.querySelectorAll('[data-desktop-setup]').forEach(b => b.onclick = openDesktopSetup);
     main.querySelectorAll('[data-cancel-connect]').forEach(b => b.onclick = () => { send({ type: 'cancelSignIn' }); });
     main.querySelectorAll('a[data-external]').forEach(a => a.onclick = e => { e.preventDefault(); send({ type: 'openPluginLink', url: a.getAttribute('href') }); });
@@ -657,29 +658,61 @@ function openDesktopSetup() {
     };
 }
 const keyId = (row, k) => `${row.name}|${k.server}|${k.env}`;
+// "What DGC may do on GitHub": the permissions Sign in with GitHub asks for. The always-on ones are shown ticked and
+// can't be unticked; the rest are off until turned on. A change is saved at once (dgc serve keeps it), and a sign-in
+// already made keeps what it has until Sign in again, because GitHub asks the user to approve any change.
+const scopeChanged = k => !!k.signed_in && (k.sign_in_scopes || []).some(p => !!p.chosen !== !!p.held);
+function scopeChecklist(row, k, id) {
+    const list = k.sign_in_scopes, provider = esc(k.sign_in), busy = keyPending.get(id) === 'scopes' || pending.has(row.name);
+    const asked = list.filter(p => p.asked && !p.chosen).map(p => esc(p.label));
+    const items = list.map(p => `<label class="review-choice scope-choice${p.always ? ' always' : ''}">`
+        + (p.always ? '<input type="checkbox" checked disabled>'
+            : `<input type="checkbox" data-scope-choice="${esc(p.id)}"${p.chosen ? ' checked' : ''}${busy ? ' disabled' : ''}>`)
+        + `<span><strong>${esc(p.label)}</strong><code>${esc(p.scope)}</code>${p.always ? '<em class="scope-tag">Always on</em>' : ''}`
+        + `${p.asked && !p.held ? '<em class="scope-tag asked">A tool asked for this</em>' : ''}`
+        + `<span>${esc(p.description)}</span></span></label>`).join('');
+    const note = scopeNotes.get(id) || {};
+    return `<fieldset class="sign-in-scopes" data-scopes-for="${esc(id)}"><legend>What DGC may do on ${provider}</legend>`
+        + `<p class="note">Signing in asks ${provider} for what’s ticked.</p>`
+        + (asked.length ? `<p class="note scope-asked" role="status">A ${provider} tool asked for ${asked.join(', ')}. Turn it on here, then sign in${k.signed_in ? ' again' : ''}.</p>` : '')
+        + items + '</fieldset>'
+        + (note.error ? `<p class="error-message scope-note" role="alert">${esc(note.error)}</p>`
+            : note.message ? `<p class="note scope-note" role="status">${esc(note.message)}</p>` : '');
+}
+function scopeSummary(row, k) {
+    if (!k.signed_in) return '';
+    const held = (k.sign_in_scopes || []).filter(p => p.held).map(p => p.short).join(', ');
+    const again = scopeChanged(k)
+        ? `<p class="note scope-change">You changed what DGC may do. ${esc(k.sign_in)} asks you to approve that, so it takes a new sign-in. Until then your sign-in keeps what it has.</p>`
+            + `<div class="actions key-sign-in"><button class="save" data-sign-in-again="${esc(row.name)}"${pending.has(row.name) ? ' disabled' : ''}>${pending.has(row.name) ? 'Signing in…' : 'Sign in again'}</button></div>` : '';
+    return `<p class="scope-summary"><strong>Signed in with:</strong> ${esc(held || 'nothing listed above')}</p>` + again;
+}
 function keyPanels(row, keys) {
     const failure = errors.get(row.name) || row.connection_error || '';
     return keys.map((k, index) => {
         const id = keyId(row, k), note = keyNotes.get(id) || {}, busy = keyPending.get(id) || '';
         const label = k.label || 'API key';
         const ready = k.saved || k.from_environment;
-        const signedIn = !ready && row.connected && k.sign_in;
+        const signedIn = !ready && k.sign_in && (row.connected || k.signed_in);
         const state = k.saved ? `<span class="status connected key-saved">Saved</span>` : signedIn ? `<span class="status connected key-saved">Signed in</span>` : '';
         const kept = k.stored === 'file' ? "in an owner-only file on this computer (there's no system keychain DGC can use here)" : 'in your system keychain';
         const where = k.saved ? `Your ${esc(label)} is saved ${kept}. It isn't shown again; paste a new one to replace it.`
             : k.from_environment ? `DGC is using <code>${esc(k.env)}</code> from the environment it started with. A ${esc(label)} saved here is used instead.`
-            : signedIn ? `Connected with your ${esc(k.sign_in)} sign-in, kept in your system keychain. A ${esc(label)} saved here is used instead.`
+            : signedIn && row.connected ? `Connected with your ${esc(k.sign_in)} sign-in, kept in your system keychain. A ${esc(label)} saved here is used instead.`
+            : signedIn ? `Signed in with ${esc(k.sign_in)}, kept on this computer; not connected right now. A ${esc(label)} saved here is used instead.`
             : k.sign_in ? `Sign in with ${esc(k.sign_in)} in your browser, or paste your own ${esc(label)} here and choose Save, then Connect.`
             : `${esc(row.display_name)} connects with your own ${esc(label)}. Paste it here and choose Save, then Connect.`;
-        const signInButton = k.sign_in && !ready && !row.connected
-            ? `<div class="actions key-sign-in"><button class="save" data-key-sign-in="${esc(row.name)}"${pending.has(row.name) ? ' disabled' : ''}>${pending.has(row.name) ? 'Signing in…' : `Sign in with ${esc(k.sign_in)}`}</button></div>` : '';
+        const scopes = k.sign_in && !ready && Array.isArray(k.sign_in_scopes) && k.sign_in_scopes.length
+            ? scopeChecklist(row, k, id) + scopeSummary(row, k) : '';
+        const signInButton = k.sign_in && !ready && !row.connected && !scopeChanged(k)
+            ? `<div class="actions key-sign-in"><button class="save" data-key-sign-in="${esc(row.name)}"${pending.has(row.name) ? ' disabled' : ''}>${pending.has(row.name) ? (k.signed_in ? 'Connecting…' : 'Signing in…') : k.signed_in ? 'Connect' : `Sign in with ${esc(k.sign_in)}`}</button></div>` : '';
         const links = [k.create_url ? link(k.create_url, k.create_label || 'Create one') : '', k.help_url ? link(k.help_url, 'How it works') : ''].filter(Boolean).join(' · ');
         // A connection that failed for want of a key is this panel's own message above; any other is said here --
         // but not while a new Connect is running: the last attempt's error is no longer the news.
         const connecting = pending.has(row.name);
         const problem = note.error || (!connecting && (ready || k.sign_in) && keys.length === index + 1 ? failure : '');
         return `<section class="connector-panel plugin-key" aria-label="${esc(label)}"><div class="connector-heading"><div class="copy"><h3>${esc(label)}</h3></div>${state}</div>`
-            + `<p class="key-where">${where}</p>${signInButton}${links ? `<p>${links}</p>` : ''}`
+            + `<p class="key-where">${where}</p>${scopes}${signInButton}${links ? `<p>${links}</p>` : ''}`
             + (k.permissions ? `<p class="note key-permissions"><strong>Permissions it needs.</strong> ${esc(k.permissions)}</p>` : '')
             + `<form class="mcp-form key-form" data-key-form="${esc(id)}"><label>${esc(label)}<input type="password" id="plugin-key-${index}" data-key-input="${esc(id)}" autocomplete="off" spellcheck="false" placeholder="${esc(k.saved ? 'Saved. Paste a new one to replace it' : k.placeholder || 'Paste it here')}"${busy ? ' disabled' : ''}></label>`
             + `<div class="actions"><button class="save" type="submit"${busy ? ' disabled' : ''}>${busy === 'save' ? 'Saving…' : 'Save'}</button>${k.saved ? `<button type="button" class="secondary" data-key-remove="${esc(id)}"${busy ? ' disabled' : ''}>${busy === 'remove' ? 'Removing…' : 'Remove'}</button>` : ''}</div></form>`
@@ -707,6 +740,14 @@ function bindKeys(main, row) {
             send({type: 'savePluginKey', name: row.name, server: k.server, env: k.env, key});
             render();
         };
+        const box = [...main.querySelectorAll('[data-scopes-for]')].find(f => f.dataset.scopesFor === id);
+        box?.querySelectorAll('[data-scope-choice]').forEach(input => input.onchange = () => {
+            const scopes = [...box.querySelectorAll('[data-scope-choice]')].filter(i => i.checked).map(i => i.dataset.scopeChoice);
+            for (const p of k.sign_in_scopes || []) if (!p.always) p.chosen = scopes.includes(p.id);
+            keyPending.set(id, 'scopes'); scopeNotes.delete(id);
+            send({type: 'setPluginSignInScopes', name: row.name, scopes});
+            render();
+        });
         const remove = [...main.querySelectorAll('[data-key-remove]')].find(b => b.dataset.keyRemove === id);
         if (remove) remove.onclick = () => { keyPending.set(id, 'remove'); keyNotes.delete(id); errors.delete(row.name); send({type: 'removePluginKey', name: row.name, server: k.server, env: k.env}); render(); };
     }
@@ -848,9 +889,10 @@ window.addEventListener('message', event => {
         const row = items.find(r => r.name === msg.name);
         for (const k of row?.keys || []) {
             if (msg.server && k.server !== msg.server) continue;
+            if (msg.kind === 'scopes' && !k.sign_in_scopes) continue;
             const id = keyId(row, k);
             keyPending.delete(id);
-            keyNotes.set(id, msg.error ? {error: msg.error} : {message: msg.message || ''});
+            (msg.kind === 'scopes' ? scopeNotes : keyNotes).set(id, msg.error ? {error: msg.error} : {message: msg.message || ''});
         }
         if (section === 'plugins') render();
     }

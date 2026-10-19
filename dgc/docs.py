@@ -830,6 +830,15 @@ the app's public client id: DGC shows a short code, copies it and opens github.c
 you approve DGC there. It is offered once DGC has a GitHub app to sign in with (the catalog's, or
 `github_sign_in_client_id` in `~/.dgc/config.json`); until then, the token field is the way in.
 
+**What DGC may do on GitHub.** Above the button, a checklist decides what the sign-in asks GitHub
+for. Code, issues and pull requests (`repo`), your organisations (`read:org`) and your profile and
+email (`read:user user:email`) are always on; Notifications, Gists, Projects and Packages (read,
+write) are off until you turn them on. Signed in, the page says what the sign-in has. GitHub asks
+you to approve any change, so a sign-in keeps what it has until you choose **Sign in again**. A
+GitHub tool that needs a permission you didn't turn on says which one and where to turn it on; it
+never widens the sign-in by itself. In a terminal: `dgc plugin show github`, and
+`dgc plugin sign-in github --scopes notifications,gist` (or `none`).
+
 For desktop SSH/remote editors, DGC requests callback forwarding before opening sign-in. If the
 editor changes the callback port or address, forward the remote callback port to the same local
 port in the Ports panel and reconnect. Browser-only remote editors that require another callback

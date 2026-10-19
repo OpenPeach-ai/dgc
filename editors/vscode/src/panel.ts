@@ -476,7 +476,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private settingsPreviews = new Map<string, any>();
   private settingsPreviewRequests = new Map<string, string>();
   /** A plugin key Save or Remove in flight: its request id, to the plugin and server it was for. */
-  private settingsKeyRequests = new Map<string, { name: string; server: string }>();
+  private settingsKeyRequests = new Map<string, { name: string; server: string; kind?: "scopes" }>();
   private createdPluginFiles = new Set<string>();
   private settingsMcpOperation = 0;
   // ---- 0.40 images: refs this panel was shown, the stored path an `image` answer named for each,
@@ -3402,7 +3402,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const keyRequest = ["plugin_operation", "command_rejected"].includes(ev.type)
       ? this.settingsKeyRequests.get(String((ev as any).request_id || "")) : undefined;
     if (keyRequest && (ev.type === "plugin_operation"
-        || ["set_plugin_key", "remove_plugin_key"].includes(String((ev as any).command || "")))) {
+        || ["set_plugin_key", "remove_plugin_key", "set_plugin_sign_in_scopes"].includes(String((ev as any).command || "")))) {
       this.settingsKeyRequests.delete(String((ev as any).request_id || ""));
       this.settingsEditor?.webview.postMessage({ type: "pluginKeyResult", ...keyRequest,
         ...(ev.type === "plugin_operation" ? { message: String((ev as any).message || "") }
@@ -3428,6 +3428,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const requested = this.settingsPreviewRequests.get(String(ev.request_id || ""));
       this.settingsPreviewRequests.delete(String(ev.request_id || ""));
       this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", requested, action: ev.command, message: ev.message });
+    }
+    if (ev.type === "command_rejected" && ev.command === "set_plugin_sign_in_scopes"
+        && this.settingsInstalls.has(String(ev.request_id || ""))) {
+      // Sign in again didn't connect: said on the plugin's page, like a Connect that failed there.
+      const name = this.settingsInstalls.get(String(ev.request_id || ""));
+      this.settingsInstalls.delete(String(ev.request_id));
+      this.pendingSignIn = undefined; this.openedSignIn = undefined;
+      this.pendingSignInServer = "";
+      this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
+      this.settingsEditor?.webview.postMessage({ type: "pluginResult", name, error: String(ev.message || "Sign-in didn't finish.") });
+      return;
     }
     if (ev.type === "command_rejected" && ev.command === "install_plugin") {
       const name = this.settingsInstalls.get(String(ev.request_id || ""));
@@ -6294,6 +6305,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         : { type: "remove_plugin_key" as const, request_id: requestId, name, ...(server ? { server } : {}), ...(env ? { env } : {}) };
       if (!this.sendPluginCommand(command)) {
         this.settingsKeyRequests.delete(requestId);
+        reply("DGC couldn't reach its backend. Try again.");
+      }
+    } else if (msg?.type === "setPluginSignInScopes" || msg?.type === "signInAgain") {
+      // "What DGC may do on GitHub": dgc serve keeps the choice (beside the plugin's permission level) and asks GitHub
+      // for exactly that at the next sign-in. Sign in again sets the current sign-in aside and signs in with it now,
+      // answered like a Connect from this page.
+      const name = String(msg.name || ""), again = msg.type === "signInAgain";
+      const scopes = (Array.isArray(msg.scopes) ? msg.scopes : [])
+        .filter((id: unknown): id is string => typeof id === "string" && /^[a-z][a-z0-9_]{0,31}$/.test(id)).slice(0, 16);
+      if (!PLUGIN_ID.test(name)) return;
+      const reply = (error: string) => this.settingsEditor?.webview.postMessage(again
+        ? { type: "pluginResult", name, error } : { type: "pluginKeyResult", name, server: "", kind: "scopes", error });
+      if (this.lastReadyEvent && this.lastReadyEvent.capabilities?.plugin_sign_in_scopes !== true) {
+        reply("This DGC CLI can't choose what a sign-in may do yet. Update it, then choose here.");
+        return;
+      }
+      const requestId = this.nextRequestId(again ? "settings-plugin" : "plugin-key");
+      if (again) this.settingsInstalls.set(requestId, name);
+      else this.settingsKeyRequests.set(requestId, { name, server: "", kind: "scopes" });
+      if (!this.sendPluginCommand({ type: "set_plugin_sign_in_scopes", request_id: requestId, name, scopes,
+                                    ...(again ? { sign_in_again: true } : {}) })) {
+        this.settingsInstalls.delete(requestId); this.settingsKeyRequests.delete(requestId);
         reply("DGC couldn't reach its backend. Try again.");
       }
     } else if (msg?.type === "openSignIn") {

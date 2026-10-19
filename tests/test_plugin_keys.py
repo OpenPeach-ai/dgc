@@ -27,6 +27,11 @@ from dgc import plugin_credentials, plugins
 from dgc.mcp import MCPManager
 
 PAT = "github_pat_fixture0123456789"
+# Every scope GitHub's MCP server lists in its metadata (api.githubcopilot.com, 19 Oct 2026). A sign-in used to ask
+# for all of them; it asks for what the user chose on GitHub's page now.
+GITHUB_SCOPES = ["repo", "read:org", "read:user", "user:email", "read:packages", "write:packages", "read:project",
+                 "project", "gist", "notifications"]
+ALWAYS_ON = "repo read:org read:user user:email"
 
 
 class GitHub:
@@ -40,6 +45,9 @@ class GitHub:
         self.approved = threading.Event()
         self.denied = False
         self.issued = 0
+        self.scopes: dict[str, set] = {}         # the scopes each issued token has, as GitHub grants them
+        self.refused: list[str] = []             # tools refused for a missing scope
+        self.last_scope = ""
         github = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -60,7 +68,7 @@ class GitHub:
                 path, base = urlsplit(self.path).path, github.base
                 if path == "/.well-known/oauth-protected-resource/mcp/":
                     return self.reply({"resource": base + "/mcp/", "authorization_servers": [base + "/login/oauth"],
-                                       "scopes_supported": ["repo", "read:org"]})
+                                       "scopes_supported": GITHUB_SCOPES})
                 if path == "/.well-known/oauth-authorization-server/login/oauth":
                     return self.reply({"issuer": base + "/login/oauth",
                                        "authorization_endpoint": base + "/login/oauth/authorize",
@@ -77,6 +85,7 @@ class GitHub:
                 form = {k: v[0] for k, v in parse_qs(data.decode()).items()}
                 if path == "/login/device/code":
                     github.device_requests.append(form)
+                    github.last_scope = form.get("scope", "")
                     return self.reply({"device_code": "fixture-device", "user_code": "WDJB-MJHT",
                                        "verification_uri": base + "/login/device", "expires_in": 900, "interval": 1})
                 if path == "/login/oauth/access_token":
@@ -95,7 +104,13 @@ class GitHub:
                     github.issued += 1
                     token = f"gho_fixture{github.issued}"
                     github.accepted.add(token)
-                    return self.reply({"access_token": token, "token_type": "bearer", "scope": "repo,read:org",
+                    # GitHub answers with the scopes it granted, comma-separated and normalised: project stands
+                    # for read:project too, as write:packages does for read:packages.
+                    granted = set(github.last_scope.split())
+                    granted -= {"read:project"} if "project" in granted else set()
+                    granted -= {"read:packages"} if "write:packages" in granted else set()
+                    github.scopes[token] = granted
+                    return self.reply({"access_token": token, "token_type": "bearer", "scope": ",".join(sorted(granted)),
                                        "expires_in": 28800, "refresh_token": "fixture-refresh"})
                 if path != "/mcp/":
                     return self.reply({}, 404)
@@ -114,7 +129,16 @@ class GitHub:
                     result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
                               "serverInfo": {"name": "github-mcp-server", "version": "1"}}
                 elif request["method"] == "tools/list":
-                    result = {"tools": [{"name": "get_me", "description": "Who am I", "inputSchema": {"type": "object"}}]}
+                    result = {"tools": [{"name": "get_me", "description": "Who am I", "inputSchema": {"type": "object"}},
+                                        {"name": "list_notifications", "description": "Your notifications",
+                                         "inputSchema": {"type": "object"}}]}
+                elif (request["params"] or {}).get("name") == "list_notifications" and token in github.scopes \
+                        and "notifications" not in github.scopes[token]:
+                    # GitHub's step-up: a tool whose scope the token lacks answers 403 insufficient_scope.
+                    github.refused.append("list_notifications")
+                    return self.reply({"message": "insufficient scope"}, 403, {"WWW-Authenticate": (
+                        f'Bearer error="insufficient_scope", scope="notifications", '
+                        f'resource_metadata="{base}/.well-known/oauth-protected-resource/mcp/"')})
                 else:
                     result = {"content": [{"type": "text", "text": "ok"}]}
                 return self.reply({"jsonrpc": "2.0", "id": request["id"], "result": result})
@@ -504,7 +528,7 @@ class GitHubSignInTests(Fixture):
         self.assertIn("WDJB-MJHT", self.shown["message"])
         self.assertNotIn("_dgc_bridge_callback", self.shown, "no loopback callback in a device sign-in")
         self.assertEqual(self.github.device_requests[0]["client_id"], "Iv1.fixture")
-        self.assertEqual(self.github.device_requests[0]["scope"], "repo read:org")
+        self.assertEqual(self.github.device_requests[0]["scope"], ALWAYS_ON)
         self.assertTrue(all("client_secret" not in poll for poll in self.github.polls))
         self.assertEqual(self.github.authorizations[-1], "Bearer gho_fixture1")
         saved = plugin_credentials.load("github")
@@ -553,6 +577,213 @@ class GitHubSignInTests(Fixture):
         self.assertIn("github", self.manager.servers, self.manager.failures)
         self.assertEqual(self.github.device_requests, [])
         self.assertEqual(self.github.authorizations[-1], f"Bearer {PAT}")
+
+
+
+class GitHubSignInPermissionTests(Fixture):
+    """What DGC may do on GitHub: the user chooses the scopes a Sign in with GitHub asks for (founder, 19 Oct 2026).
+    Before, the sign-in asked for every scope GitHub's MCP server lists in its metadata."""
+
+    config_values = {"github_sign_in_client_id": "Iv1.fixture"}
+    approve_in_browser = GitHubSignInTests.approve_in_browser
+
+    def sign_in(self):
+        config = Config(**self.config_values)
+        self.connect(config, handler=self.approve_in_browser)
+        self.assertIn("github", self.manager.servers, self.manager.failures)
+        return config
+
+    def permissions(self, config):
+        return {p["id"]: p for p in self.row(config)["keys"][0]["sign_in_scopes"]}
+
+    def test_by_default_the_sign_in_asks_github_only_for_the_always_on_permissions(self):
+        self.sign_in()
+        self.assertEqual(self.github.device_requests[0]["scope"], "repo read:org read:user user:email",
+                         "not every scope GitHub's metadata lists")
+
+    def test_the_sign_in_asks_github_for_exactly_the_permissions_chosen(self):
+        plugins.set_sign_in_scopes("github", ["notifications", "gists", "projects"])
+        self.sign_in()
+        self.assertEqual(self.github.device_requests[0]["scope"].split(),
+                         [*ALWAYS_ON.split(), "notifications", "gist", "read:project", "project"])
+
+    def test_the_page_lists_the_permissions_always_on_first_and_the_optional_ones_off(self):
+        rows = self.row(Config(**self.config_values))["keys"][0]["sign_in_scopes"]
+        self.assertEqual([(p["id"], p["always"], p["chosen"]) for p in rows], [
+            ("code", True, True), ("organisations", True, True), ("profile", True, True),
+            ("notifications", False, False), ("gists", False, False), ("projects", False, False),
+            ("packages_read", False, False), ("packages_write", False, False)])
+        self.assertEqual(rows[0]["label"], "Code, issues and pull requests")
+        self.assertEqual(rows[0]["scope"], "repo")
+        self.assertTrue(all(p["description"] for p in rows), "each says what it lets DGC do")
+        self.assertFalse(self.row(Config(**self.config_values))["keys"][0]["signed_in"])
+
+    def test_a_saved_choice_persists_and_an_unknown_one_is_refused(self):
+        plugins.set_sign_in_scopes("github", ["notifications", "code"])     # an always-on one is simply always on
+        saved = json.loads(plugins.STATE_PATH.read_text())["sign_in_scopes"]
+        self.assertEqual(saved, {"github": ["notifications"]})
+        self.assertTrue(self.permissions(Config(**self.config_values))["notifications"]["chosen"])
+        with self.assertRaisesRegex(plugins.PluginError, r"no permission called 'admin'.*notifications, gists"):
+            plugins.set_sign_in_scopes("github", ["admin"])
+        self.assertEqual(json.loads(plugins.STATE_PATH.read_text())["sign_in_scopes"], {"github": ["notifications"]})
+        plugins.set_sign_in_scopes("github", [])
+        self.assertFalse(self.permissions(Config(**self.config_values))["notifications"]["chosen"])
+
+    def test_once_signed_in_the_page_says_what_the_sign_in_has_and_a_change_needs_a_new_one(self):
+        plugins.set_sign_in_scopes("github", ["notifications"])
+        config = self.sign_in()
+        key = self.row(config)["keys"][0]
+        self.assertTrue(key["signed_in"])
+        self.assertEqual([p["id"] for p in key["sign_in_scopes"] if p["held"]],
+                         ["code", "organisations", "profile", "notifications"])
+        result = plugins.set_sign_in_scopes("github", ["notifications", "projects"])
+        self.assertIn("Your sign-in keeps what it has until you sign in again: GitHub asks you to approve a change.",
+                      result["message"])
+        self.assertFalse(self.permissions(config)["projects"]["held"], "the sign-in made keeps what it has")
+        self.assertEqual(len(self.github.device_requests), 1, "saving a choice signs nobody in")
+
+    def test_sign_in_again_asks_github_again_with_the_new_choice(self):
+        config = self.sign_in()
+        plugins.set_sign_in_scopes("github", ["notifications", "packages_write"])
+        plugins.sign_in_again(config, self.manager, "github", input_handler=self.approve_in_browser)
+        self.assertIn("github", self.manager.servers, self.manager.failures)
+        self.assertEqual(self.github.device_requests[-1]["scope"].split(),
+                         [*ALWAYS_ON.split(), "notifications", "write:packages"])
+        self.assertEqual(plugin_credentials.load("github")["tokens"]["access_token"], "gho_fixture2")
+        # GitHub drops read:packages from what it granted (write:packages includes it): reading still counts as held.
+        self.assertEqual(plugin_credentials.load("github")["tokens"]["scope"], "notifications,read:org,read:user,repo,"
+                                                                              "user:email,write:packages")
+        held = [p["id"] for p in self.row(config)["keys"][0]["sign_in_scopes"] if p["held"]]
+        self.assertEqual(held, ["code", "organisations", "profile", "notifications", "packages_read",
+                                "packages_write"])
+
+    def test_a_sign_in_again_that_is_cancelled_keeps_the_sign_in_there_was(self):
+        config = self.sign_in()
+        plugins.set_sign_in_scopes("github", ["gists"])
+        self.github.denied = True
+        outcome = plugins.sign_in_again(config, self.manager, "github", input_handler=self.approve_in_browser)
+        self.assertEqual(plugin_credentials.load("github")["tokens"]["access_token"], "gho_fixture1")
+        self.assertIn("github", self.manager.servers, "connected again with the sign-in it had")
+        self.assertTrue(outcome["kept"])
+        self.assertIn("cancelled", outcome["failure"].lower())
+
+    def test_a_tool_that_needs_a_permission_not_chosen_says_which_and_where_to_turn_it_on(self):
+        config = self.sign_in()
+        said = self.manager.call("mcp__github__list_notifications", {})
+        self.assertEqual(self.github.refused, ["list_notifications"])
+        self.assertIn("GitHub needs your permission for Notifications to do this. Turn it on under “What DGC may do "
+                      "on GitHub” on GitHub’s page in Settings → Plugins, then choose Sign in again.", said)
+        self.assertEqual(len(self.github.device_requests), 1, "a tool never widens the sign-in by itself")
+        self.assertTrue(self.permissions(config)["notifications"]["asked"], "the page marks what the tool asked for")
+        self.assertFalse(self.permissions(config)["gists"]["asked"])
+        # A new chat still connects with the sign-in there is: the ask waits for the user on the page.
+        self.manager.stop_all()
+        fresh = MCPManager(self.root)
+        self.addCleanup(fresh.stop_all)
+        fresh.connect_all(config.values["mcp_servers"], startup=True, _background=True)
+        self.assertIn("github", fresh.servers, fresh.failures)
+        # Turned on there and signed in again, the tool works.
+        plugins.set_sign_in_scopes("github", ["notifications"])
+        plugins.sign_in_again(config, fresh, "github", input_handler=self.approve_in_browser)
+        self.assertIn("notifications", self.github.device_requests[-1]["scope"].split())
+        self.assertNotIn("ERROR", fresh.call("mcp__github__list_notifications", {}))
+        self.assertFalse(self.permissions(config)["notifications"]["asked"], "answered by the new sign-in")
+
+    def test_a_new_chat_that_has_to_sign_in_again_asks_for_the_chosen_permissions(self):
+        config = self.sign_in()
+        plugins.set_sign_in_scopes("github", ["notifications"])
+        self.manager.stop_all()
+        saved = plugin_credentials.load("github")             # the token was revoked at GitHub and can't refresh
+        self.github.accepted.discard(saved["tokens"]["access_token"])
+        saved["tokens"].pop("refresh_token")
+        plugin_credentials.save("github", saved)
+        fresh = MCPManager(self.root)
+        self.addCleanup(fresh.stop_all)
+        fresh.connect_all(config.values["mcp_servers"], startup=True, _background=True)
+        self.assertNotIn("github", fresh.servers, "nobody is there to enter a code at startup")
+        self.assertEqual(self.github.device_requests[-1]["scope"], ALWAYS_ON + " notifications",
+                         "not every scope GitHub's metadata lists")
+
+    # the terminal ------------------------------------------------------------------------------------------------
+    def test_dgc_plugin_sign_in_with_scopes_and_dgc_plugin_show(self):
+        config = Config(**self.config_values)
+        ui = SimpleNamespace(mcp_input=lambda server, _kind, params, cancel=None:
+                             self.approve_in_browser(server, "elicitation/create", params, cancel))
+        with patch("builtins.print") as printed:
+            plugins.handle(config, ["sign-in", "github", "--scopes", "notifications,gist"], ui=ui, manager=self.manager)
+        said = "\n".join(str(c.args[0]) for c in printed.call_args_list)
+        self.assertIn("Saved. DGC asks GitHub for: code, issues, pull requests, organisations, profile, notifications, "
+                      "gists.", said)
+        self.assertIn("github is connected", said)
+        self.assertEqual(self.github.device_requests[-1]["scope"], ALWAYS_ON + " notifications gist")
+        with patch("builtins.print") as printed:
+            plugins.handle(config, ["show", "github"])
+        shown = "\n".join(str(c.args[0]) for c in printed.call_args_list)
+        self.assertIn("Signed in with: code, issues, pull requests, organisations, profile, notifications, gists.", shown)
+        self.assertIn("[x] Notifications (notifications)", shown)
+        self.assertIn("[ ] Projects (read:project project)", shown)
+        self.assertIn("[x] Code, issues and pull requests (repo)  always on", shown)
+        # A different choice is a new sign-in, asked of GitHub at once.
+        with patch("builtins.print") as printed:
+            plugins.handle(config, ["sign-in", "github", "--scopes", "none"], ui=ui, manager=self.manager)
+        self.assertIn("GitHub asks you to approve the change, so DGC signs in again.",
+                      "\n".join(str(c.args[0]) for c in printed.call_args_list))
+        self.assertEqual(self.github.device_requests[-1]["scope"], ALWAYS_ON)
+        # A choice made on the page since: a plain sign-in asks again with it.
+        plugins.set_sign_in_scopes("github", ["projects"])
+        with patch("builtins.print"):
+            plugins.handle(config, ["sign-in", "github"], ui=ui, manager=self.manager)
+        self.assertEqual(self.github.device_requests[-1]["scope"], ALWAYS_ON + " read:project project")
+        requests = len(self.github.device_requests)
+        with patch("builtins.print"):
+            plugins.handle(config, ["sign-in", "github"], ui=ui, manager=self.manager)
+        self.assertEqual(len(self.github.device_requests), requests, "unchanged: the sign-in there is is used")
+        with self.assertRaisesRegex(plugins.PluginError, "no permission called 'admin'"):
+            plugins.handle(config, ["sign-in", "github", "--scopes", "admin"], ui=ui, manager=self.manager)
+
+    # the editor --------------------------------------------------------------------------------------------------
+    def test_the_editor_saves_the_choice_and_signs_in_again_with_it(self):
+        from dgc.editor_protocol import command_error
+        from dgc.headless import Backend
+        config = self.sign_in()
+        command = {"type": "set_plugin_sign_in_scopes", "request_id": "s1", "name": "github", "scopes": ["notifications"]}
+        self.assertIsNone(command_error(command))
+        self.assertIsNone(command_error({**command, "sign_in_again": True}))
+        self.assertIsNotNone(command_error({**command, "scopes": "notifications"}), "a list, by id")
+        events = []
+        backend = object.__new__(Backend)
+        backend.config = config
+        backend.agent = SimpleNamespace(mcp=self.manager, _handle_mcp_input=self.approve_in_browser)
+        backend.em = SimpleNamespace(emit=lambda kind, **kw: events.append({"type": kind, **kw}))
+        backend._editor_plugins = lambda **kw: plugins.catalog_for_editor(connected=set(self.manager.servers),
+                                                                          config=config, opening=kw.get("opening", ""))
+        backend._plugin_sign_in_scopes(command)()
+        self.assertEqual([e["type"] for e in events], ["plugin_operation", "plugin_catalog"])
+        self.assertIn("until you sign in again", events[0]["message"])
+        key = next(r for r in events[1]["items"] if r["name"] == "github")["keys"][0]
+        self.assertTrue(next(p for p in key["sign_in_scopes"] if p["id"] == "notifications")["chosen"])
+        events.clear()
+        backend._plugin_sign_in_scopes({**command, "request_id": "s2", "sign_in_again": True})()
+        self.assertEqual([e["type"] for e in events], ["plugin_catalog", "plugin_catalog"], events)
+        self.assertEqual(self.github.device_requests[-1]["scope"], ALWAYS_ON + " notifications")
+        key = next(r for r in events[-1]["items"] if r["name"] == "github")["keys"][0]
+        self.assertTrue(next(p for p in key["sign_in_scopes"] if p["id"] == "notifications")["held"])
+        events.clear()
+        self.github.denied = True
+        backend._plugin_sign_in_scopes({**command, "request_id": "s4", "scopes": [], "sign_in_again": True})()
+        self.assertEqual([e["type"] for e in events], ["plugin_catalog", "command_rejected", "plugin_catalog"])
+        self.assertIn("Your sign-in from before is still there and keeps what it had.", events[1]["message"])
+        self.assertIn("github", self.manager.servers)
+        self.github.denied = False
+        events.clear()
+        backend._plugin_sign_in_scopes({**command, "request_id": "s3", "scopes": ["admin"]})()
+        self.assertEqual(events[0]["type"], "command_rejected")
+        self.assertEqual(events[0]["command"], "set_plugin_sign_in_scopes")
+
+    def test_ready_offers_sign_in_permissions(self):
+        import inspect
+        from dgc import headless
+        self.assertIn('"plugin_sign_in_scopes": True', inspect.getsource(headless.Backend))
 
 
 if __name__ == "__main__":

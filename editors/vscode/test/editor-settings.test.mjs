@@ -647,6 +647,98 @@ test('GitHub: a token from the environment is named as the fallback; a half-type
   assert.equal(x.d.querySelector('[data-key-input]').value,'github_pat_half');
 });
 
+// "What DGC may do on GitHub" (founder, 19 Oct 2026: "make the user decide"). The rows are dgc serve's: each
+// permission, whether the next sign-in asks for it (chosen), whether the sign-in made has it (held), and whether a
+// tool asked for it.
+const permission=(id,label,short,scope,always=false)=>({id,label,short,scope,always,chosen:always,held:false,asked:false,description:`What ${label} lets DGC do.`});
+const githubScopes=[permission('code','Code, issues and pull requests','code, issues, pull requests','repo',true),
+  permission('organisations','Your organisations','organisations','read:org',true),
+  permission('profile','Your profile and email','profile','read:user user:email',true),
+  permission('notifications','Notifications','notifications','notifications'),permission('gists','Gists','gists','gist'),
+  permission('projects','Projects','projects','read:project project'),
+  permission('packages_read','Packages — read','reading packages','read:packages'),
+  permission('packages_write','Packages — write','publishing packages','write:packages')];
+const signInKey=(scopes=githubScopes,extra={})=>({...githubKey,sign_in:'GitHub',signed_in:false,sign_in_scopes:scopes.map(p=>({...p})),...extra});
+const scopeBox=(x,id)=>x.d.querySelector(`[data-scope-choice=${id}]`);
+
+test('GitHub: above Sign in with GitHub, what DGC may do: the always-on ones ticked for good, the rest off until turned on',()=>{
+  const x=setup();openGithub(x,{...github,keys:[signInKey()]});
+  const box=x.d.querySelector('.sign-in-scopes');
+  assert.equal(box.querySelector('legend').textContent,'What DGC may do on GitHub');
+  assert.ok(box.compareDocumentPosition(x.d.querySelector('[data-key-sign-in]'))&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'the checklist comes before the button');
+  const rows=[...box.querySelectorAll('.scope-choice')];
+  assert.deepEqual(rows.map(r=>r.querySelector('strong').textContent),['Code, issues and pull requests','Your organisations','Your profile and email','Notifications','Gists','Projects','Packages — read','Packages — write']);
+  for(const row of rows.slice(0,3)){
+    const input=row.querySelector('input');
+    assert.equal(input.checked,true,'always on');assert.equal(input.disabled,true,'and can not be unticked');
+    assert.match(row.textContent,/Always on/);
+  }
+  for(const row of rows.slice(3)){const input=row.querySelector('input');assert.equal(input.checked,false,'off by default');assert.equal(input.disabled,false);}
+  assert.equal(rows[0].querySelector('code').textContent,'repo','the GitHub scope it asks for');
+  assert.match(rows[0].textContent,/What Code, issues and pull requests lets DGC do\./,'and its one line');
+  assert.match(rows[5].querySelector('code').textContent,/read:project project/);
+  scopeBox(x,'notifications').checked=true;scopeBox(x,'notifications').dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.deepEqual({...x.sent.at(-1),scopes:[...x.sent.at(-1).scopes]},{type:'setPluginSignInScopes',name:'github',scopes:['notifications']});
+  assert.equal(scopeBox(x,'gists').disabled,true,'one save at a time');
+  x.message({type:'pluginKeyResult',name:'github',server:'',kind:'scopes',message:'Saved. Signing in asks GitHub for: code, issues, pull requests, organisations, profile, notifications.'});
+  assert.match(x.d.querySelector('.scope-note').textContent,/Signing in asks GitHub for: .*notifications/);
+  assert.equal(x.d.querySelector('.key-note'),null,'said beside the checklist, not the key field');
+  assert.equal(scopeBox(x,'notifications').checked,true);
+  scopeBox(x,'gists').checked=true;scopeBox(x,'gists').dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.deepEqual([...x.sent.at(-1).scopes],['notifications','gists']);
+  x.message({type:'pluginKeyResult',name:'github',server:'',kind:'scopes',error:"GitHub has no permission called 'x'."});
+  assert.match(x.d.querySelector('.scope-note[role=alert]').textContent,/no permission called/);
+  const saved=setup();openGithub(saved,{...github,keys:[signInKey(githubScopes.map(p=>p.id==='projects'?{...p,chosen:true}:p))]});
+  assert.equal(scopeBox(saved,'projects').checked,true,'a saved choice is shown as saved');
+});
+
+test('GitHub: signed in, the page says what with; a change says GitHub asks again and offers Sign in again',()=>{
+  const held=githubScopes.map(p=>['code','organisations','profile','notifications'].includes(p.id)?{...p,chosen:true,held:true}:p);
+  const x=setup();openGithub(x,{...github,connected:true,keys:[signInKey(held,{signed_in:true})]});
+  assert.equal(x.d.querySelector('.scope-summary').textContent,'Signed in with: code, issues, pull requests, organisations, profile, notifications');
+  assert.equal(x.d.querySelector('[data-sign-in-again]'),null,'nothing to approve while the choice is what it has');
+  scopeBox(x,'gists').checked=true;scopeBox(x,'gists').dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.match(x.d.querySelector('.scope-change').textContent,/You changed what DGC may do\. GitHub asks you to approve that, so it takes a new sign-in\./);
+  x.message({type:'pluginKeyResult',name:'github',server:'',kind:'scopes',message:'Saved.'});
+  x.click('[data-sign-in-again]');
+  assert.deepEqual({...x.sent.at(-1),scopes:[...x.sent.at(-1).scopes]},{type:'signInAgain',name:'github',scopes:['notifications','gists']});
+  assert.match(x.d.querySelector('[data-sign-in-again]').textContent,/Signing in…/);
+  assert.equal(scopeBox(x,'projects').disabled,true,'the choice holds still while it signs in');
+  const after=held.map(p=>p.id==='gists'?{...p,chosen:true,held:true}:p);
+  x.message({type:'plugins',items:[{...github,connected:true,keys:[signInKey(after,{signed_in:true})]}]});
+  x.message({type:'pluginResult',name:'github'});
+  assert.equal(x.d.querySelector('.scope-summary').textContent,'Signed in with: code, issues, pull requests, organisations, profile, notifications, gists');
+  assert.equal(x.d.querySelector('[data-sign-in-again]'),null);
+  // Turning one off is a change too: GitHub issues a sign-in with less only when asked again.
+  scopeBox(x,'notifications').checked=false;scopeBox(x,'notifications').dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.ok(x.d.querySelector('[data-sign-in-again]'));
+  assert.deepEqual([...x.sent.at(-1).scopes],['gists']);
+  // Signed in but not connected (the server off, or GitHub unreachable): said as that, and the button connects.
+  const away=setup();openGithub(away,{...github,connected:false,keys:[signInKey(held,{signed_in:true})]});
+  assert.match(away.d.querySelector('.key-where').textContent,/Signed in with GitHub, kept on this computer; not connected right now/);
+  assert.equal(away.d.querySelector('[data-key-sign-in]').textContent,'Connect');
+});
+
+test('GitHub: a permission a tool asked for is marked, and the page says to turn it on and sign in again',()=>{
+  const held=githubScopes.map(p=>p.always?{...p,held:true}:p.id==='notifications'?{...p,asked:true}:p);
+  const x=setup();openGithub(x,{...github,connected:true,keys:[signInKey(held,{signed_in:true})]});
+  const asked=scopeBox(x,'notifications').closest('.scope-choice');
+  assert.match(asked.querySelector('.scope-tag.asked').textContent,/A tool asked for this/);
+  assert.equal(x.d.querySelectorAll('.scope-tag.asked').length,1);
+  assert.match(x.d.querySelector('.scope-asked').textContent,/A GitHub tool asked for Notifications\. Turn it on here, then sign in again\./);
+  scopeBox(x,'notifications').checked=true;scopeBox(x,'notifications').dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.d.querySelector('.scope-asked'),null,'turned on: Sign in again is what is left');
+  assert.ok(x.d.querySelector('[data-sign-in-again]'));
+});
+
+test('GitHub: with a token saved there is no checklist: the token decides what DGC may do',()=>{
+  const x=setup();openGithub(x,{...github,keys:[signInKey(githubScopes,{saved:true})]});
+  assert.equal(x.d.querySelector('.sign-in-scopes'),null);
+  const plain=setup();openGithub(plain,{...github,keys:[{...githubKey,sign_in:'GitHub'}]});
+  assert.equal(plain.d.querySelector('.sign-in-scopes'),null,'an older DGC sends no checklist; the button still works');
+  assert.ok(plain.d.querySelector('[data-key-sign-in]'));
+});
+
 test('GitHub: Sign in with GitHub, once DGC has an app for it, connects and shows the code to enter',()=>{
   const x=setup();openGithub(x,{...github,keys:[{...githubKey,sign_in:'GitHub'}]});
   assert.match(x.d.querySelector('.key-where').textContent,/Sign in with GitHub in your browser, or paste your own GitHub personal access token/);

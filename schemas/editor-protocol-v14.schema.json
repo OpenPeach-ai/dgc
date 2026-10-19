@@ -7952,6 +7952,38 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "set_plugin_sign_in_scopes"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "scopes": {
+              "type": "array"
+            },
+            "sign_in_again": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "list_plugin_marketplaces"
             },
             "chat_id": {

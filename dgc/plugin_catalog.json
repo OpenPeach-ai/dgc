@@ -416,7 +416,18 @@
       "kind": "device",
       "provider": "GitHub",
       "client_id": "Ov23li4FkrCcivrU2Ec2",
-      "client_id_setting": "github_sign_in_client_id"
+      "client_id_setting": "github_sign_in_client_id",
+      "scopes": [
+       {"id": "code", "always": true, "scope": "repo", "label": "Code, issues and pull requests", "short": "code, issues, pull requests", "description": "Read and change code, issues and pull requests in the repositories you can reach, private ones too."},
+       {"id": "organisations", "always": true, "scope": "read:org", "label": "Your organisations", "short": "organisations", "description": "See the organisations and teams you belong to."},
+       {"id": "profile", "always": true, "scope": "read:user user:email", "label": "Your profile and email", "short": "profile", "description": "See your profile and the email addresses on your account."},
+       {"id": "notifications", "scope": "notifications", "label": "Notifications", "short": "notifications", "description": "Read your notifications, mark them read, and watch or unwatch repositories."},
+       {"id": "gists", "scope": "gist", "label": "Gists", "short": "gists", "description": "Create and change your gists."},
+       {"id": "projects", "scope": "read:project project", "label": "Projects", "short": "projects", "description": "Read and change your GitHub Projects boards."},
+       {"id": "packages_read", "scope": "read:packages", "label": "Packages — read", "short": "reading packages", "description": "Download packages from GitHub Packages and see their versions."},
+       {"id": "packages_write", "scope": "write:packages", "label": "Packages — write", "short": "publishing packages", "description": "Publish packages and new versions to GitHub Packages."}
+      ],
+      "implies": {"project": "read:project", "write:packages": "read:packages", "user": "read:user user:email", "write:org": "read:org", "admin:org": "write:org read:org"}
      }
     }
    },

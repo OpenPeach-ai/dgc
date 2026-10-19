@@ -295,7 +295,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_background_shells", "stop_background_shell", "get_background_output",
     "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
     "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
-    "set_plugin_key", "remove_plugin_key",
+    "set_plugin_key", "remove_plugin_key", "set_plugin_sign_in_scopes",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
 # Config fields added to protocol v14 after it first shipped. An editor validates every event it
@@ -2110,7 +2110,10 @@ class Backend:
                           # list_sessions takes limit, offset and query; an item found by what was said
                           # carries match (dgc/session_index).
                           "session_paging": True,
-                          "plugin_management": True, "plugin_keys": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
+                          "plugin_management": True, "plugin_keys": True,
+                          # set_plugin_sign_in_scopes: what a plugin's sign-in may do (GitHub's checklist), and
+                          # Sign in again with it; the plugin list's keys carry sign_in_scopes and signed_in.
+                          "plugin_sign_in_scopes": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "steer_queued": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
@@ -4895,6 +4898,49 @@ class Backend:
             self.em.emit("plugin_catalog", request_id=request, items=items)
         return terminal
 
+    def _plugin_sign_in_scopes(self, cmd: dict):
+        """Save what a plugin's sign-in may do; with sign_in_again, sign in with it now (answered like Connect)."""
+        from . import plugins
+        request, name = str(cmd.get("request_id") or ""), str(cmd.get("name") or "")
+        reject = lambda message: (lambda: self.em.emit(  # noqa: E731
+            "command_rejected", command="set_plugin_sign_in_scopes", reason="plugin", request_id=request,
+            message=message))
+        try:
+            result = plugins.set_sign_in_scopes(name, list(cmd.get("scopes") or []))
+            if not cmd.get("sign_in_again"):
+                items = self._editor_plugins()
+
+                def saved():
+                    self.em.emit("plugin_operation", request_id=request, action="set_plugin_sign_in_scopes",
+                                 name=name, message=result["message"])
+                    self.em.emit("plugin_catalog", request_id=request, items=items)
+                return saved
+            self.em.emit("plugin_catalog", items=self._editor_plugins(opening=name), request_id=request)
+            from .mcp import _AnyCancel
+            own = threading.Event()
+            record, server, _sign_in, _choices = plugins._sign_in_entry(name)
+            self._install_cancel, self._installing_servers = own, {server}
+            try:
+                outcome = plugins.sign_in_again(self.config, self.agent.mcp, name,
+                                                input_handler=self.agent._handle_mcp_input,
+                                                cancel=_AnyCancel(getattr(self, "_package_cancel", None), own))
+            finally:
+                self._install_cancel, self._installing_servers = None, set()
+            if outcome["kept"]:
+                failure = ((outcome["failure"].rstrip(".") or "The new sign-in didn't finish")
+                           + ". Your sign-in from before is still there and keeps what it had.")
+            else:
+                failure = "" if server in self.agent.mcp.servers else str(self.agent.mcp.failures.get(server) or "")
+            items = self._editor_plugins(connected=set(self.agent.mcp.servers))
+
+            def signed_in():
+                if failure:
+                    reject(failure)()
+                self.em.emit("plugin_catalog", request_id=request, items=items)
+            return signed_in
+        except (plugins.PluginError, OSError, ValueError) as exc:
+            return reject(str(exc))
+
     def _plugin_operation(self, cmd: dict) -> None:
         from . import plugins, plugin_registry
         request = str(cmd.get("request_id", ""))
@@ -6508,9 +6554,10 @@ class Backend:
             if callable(terminal): terminal()
         elif t == "list_plugins":
             self.em.emit("plugin_catalog", items=self._editor_plugins(), **_request_fields(request_id))
-        elif t in ("set_plugin_key", "remove_plugin_key"):
+        elif t in ("set_plugin_key", "remove_plugin_key", "set_plugin_sign_in_scopes"):
             # On the package slot like Connect: saving a key changes what DGC can reach, not what a turn may do.
-            if not self._start_package_reader(lambda: self._plugin_key(cmd), label="plugin-key"):
+            run = self._plugin_sign_in_scopes if t == "set_plugin_sign_in_scopes" else self._plugin_key
+            if not self._start_package_reader(lambda: run(cmd), label="plugin-key"):
                 self.em.emit("command_rejected", command=t, reason="busy", request_id=cmd.get("request_id"),
                              message="Another plugin operation is running. Try again in a moment.")
         elif t == "install_plugin":

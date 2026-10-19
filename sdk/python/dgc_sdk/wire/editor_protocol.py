@@ -696,6 +696,12 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # ready.capabilities.plugin_keys. The key goes to the system keychain and never comes back to the editor.
     "set_plugin_key": {"request_id": _S(), "name": _S(), "key": _S(), "server": _S(False), "env": _S(False)},
     "remove_plugin_key": {"request_id": _S(), "name": _S(), "server": _S(False), "env": _S(False)},
+    # What a plugin's sign-in may do (GitHub's checklist "What DGC may do on GitHub"): ``scopes`` names the optional
+    # permissions turned on, by the ids in plugin_catalog keys[].sign_in_scopes (the always-on ones are implied). It
+    # takes effect at the next sign-in, answered with plugin_operation and plugin_catalog. ``sign_in_again`` sets the
+    # current sign-in aside and signs in with the choice at once, answered like a Connect: plugin_catalog, and
+    # command_rejected if it didn't connect. Offered when ready.capabilities.plugin_sign_in_scopes.
+    "set_plugin_sign_in_scopes": {"request_id": _S(), "name": _S(), "scopes": _A(), "sign_in_again": _B(False)},
     "list_plugin_marketplaces": {"request_id": _S()},
     "add_plugin_marketplace": {"request_id": _S(), "source": _S()},
     "remove_plugin_marketplace": {"request_id": _S(), "name": _S()},

@@ -407,6 +407,13 @@
 
 ### Plugins
 
+- **What DGC may do on GitHub.** Above Sign in with GitHub, a checklist: code, issues and pull requests, your
+  organisations, and your profile and email are always on (ticked, not untickable); Notifications, Gists, Projects,
+  Packages — read and Packages — write are off until you turn them on, each with a line on what it lets DGC do and the
+  GitHub scope it asks for. Your choice is saved at once. Signed in, the page says what with ("Signed in with: code,
+  issues, pull requests, organisations, profile, notifications"); after a change it says GitHub asks you to approve
+  it and offers **Sign in again**. A permission a GitHub tool asked for is marked "A tool asked for this". Needs a DGC
+  CLI with `plugin_sign_in_scopes`.
 - Hosted plugins no longer need Node.js: the CLI connects to them itself and keeps their sign-ins in your system
   keychain. The MCP server form's transport now reads **Remote (Streamable HTTP or SSE)**.
 - **A key field on the plugin's own page.** GitHub (personal access token), Brevo (MCP server API key) and Arize AX

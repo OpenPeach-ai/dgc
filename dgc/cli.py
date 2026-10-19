@@ -2499,7 +2499,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "protocol": "dgc protocol describe|validate     inspect or validate the editor/headless contract",
     "bug": "dgc bug                            where to report a bug or request a feature",
     "skills": "dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]",
-    "plugin": "dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME|key NAME [--remove]|installed",
+    "plugin": "dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME [--scopes A,B|none]|show NAME|key NAME [--remove]|installed",
     "pips": "dgc pips enable|workspaces|workspace|list|create|show|run|runs|report|cancel|pause|resume-job|archive|restore|propose|accept|reject|versions|context|session-outcome|memory|notifications|activity|serve|status|stop|resume  (dgc pips COMMAND --help)",
     "mcp": "dgc mcp ...                        manage MCP servers, resources, prompts and connections",
 }

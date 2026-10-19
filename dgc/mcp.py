@@ -490,6 +490,16 @@ def _has_device_sign_in(name: str, spec: dict) -> bool:
             and isinstance(tokens.get("access_token"), str) and bool(tokens["access_token"]))
 
 
+def _signed_in_launch(name: str, spec: dict) -> dict:
+    """A device sign-in's launch, without the key header, with the plugin's chosen sign-in permissions
+    (plugins.signed_in_launch)."""
+    try:
+        from .plugins import signed_in_launch
+        return signed_in_launch(name, spec)
+    except Exception:  # noqa: BLE001 -- the saved sign-in still works without the checklist
+        return {k: v for k, v in spec.items() if k != "auth_env"}
+
+
 def _missing_key_message(name: str, env_name: str) -> str:
     try:
         from .plugins import missing_key_message
@@ -1747,8 +1757,9 @@ class MCPManager:
                     and isinstance(env_names, list) and auth_env in env_names and auth_env not in configured_env):
                 if _has_device_sign_in(name, raw_spec):
                     # No key, but the user signed in with the service instead (Sign in with GitHub): DGC's own
-                    # client sends that sign-in, and refreshes it, in place of a key header.
-                    launch_spec = {k: v for k, v in raw_spec.items() if k != "auth_env"}
+                    # client sends that sign-in, and refreshes it, in place of a key header -- with the permissions
+                    # chosen on the plugin's page, so a sign-in it has to make again asks for exactly those.
+                    launch_spec = _signed_in_launch(name, raw_spec)
                 else:
                     # Its key is nowhere: say what to do, not "header refers to GITHUB_PAT_TOKEN, which isn't set".
                     self.failures[name] = _missing_key_message(name, auth_env)

@@ -643,6 +643,49 @@ test("a plugin's key goes to dgc serve once, only to a CLI that keeps keys, and 
   assert.match(settings.at(-1).error, /can't keep a plugin's key yet\. Update it/);
 });
 
+test("What DGC may do on GitHub: the choice and Sign in again go to dgc serve, only one that offers them, answered on the page", async () => {
+  const settings = [], chat = [], commands = [];
+  const { provider } = catalogHarness([]);
+  provider.lastReadyEvent = { capabilities: { plugin_management: true, plugin_keys: true, plugin_sign_in_scopes: true } };
+  provider.settingsEditor = { webview: { postMessage: m => settings.push(m) } };
+  provider.post = m => chat.push(m);
+  provider.pluginLogo = () => "";
+  provider.backend = { send: () => true };
+  provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  await provider.onSettingsMessage({ type: "setPluginSignInScopes", name: "github", scopes: ["notifications", "../x", 7] });
+  assert.deepEqual({ ...commands[0], request_id: "" },
+    { type: "set_plugin_sign_in_scopes", request_id: "", name: "github", scopes: ["notifications"] });
+  provider.onEvent({ type: "plugin_operation", request_id: commands[0].request_id, action: "set_plugin_sign_in_scopes",
+    name: "github", message: "Saved. Signing in asks GitHub for: code, issues, pull requests, organisations, profile, notifications." });
+  assert.deepEqual(settings.at(-1), { type: "pluginKeyResult", name: "github", server: "", kind: "scopes",
+    message: "Saved. Signing in asks GitHub for: code, issues, pull requests, organisations, profile, notifications." });
+  await provider.onSettingsMessage({ type: "setPluginSignInScopes", name: "github", scopes: ["admin"] });
+  provider.onEvent({ type: "command_rejected", request_id: commands[1].request_id, command: "set_plugin_sign_in_scopes",
+    reason: "plugin", message: "GitHub has no permission called 'admin'." });
+  assert.deepEqual(settings.at(-1), { type: "pluginKeyResult", name: "github", server: "", kind: "scopes",
+    error: "GitHub has no permission called 'admin'." });
+  // Sign in again: answered like a Connect from the page, its failure said there and not in the chat.
+  await provider.onSettingsMessage({ type: "signInAgain", name: "github", scopes: ["notifications", "gists"] });
+  assert.deepEqual({ ...commands[2], request_id: "" }, { type: "set_plugin_sign_in_scopes", request_id: "", name: "github",
+    scopes: ["notifications", "gists"], sign_in_again: true });
+  provider.onEvent({ type: "command_rejected", request_id: commands[2].request_id, command: "set_plugin_sign_in_scopes",
+    reason: "plugin", message: "Sign-in cancelled." });
+  assert.deepEqual(settings.at(-1), { type: "pluginResult", name: "github", error: "Sign-in cancelled." });
+  await provider.onSettingsMessage({ type: "signInAgain", name: "github", scopes: [] });
+  provider.onEvent({ type: "plugin_catalog", request_id: commands[3].request_id, items: [{ name: "github", installed: true, opening: true }] });
+  assert.equal(settings.some(m => m.type === "pluginResult" && !m.error && settings.indexOf(m) > settings.length - 3), false,
+    "still signing in while the plugin is opening");
+  provider.onEvent({ type: "plugin_catalog", request_id: commands[3].request_id, items: [{ name: "github", installed: true, connected: true }] });
+  assert.ok(settings.some(m => m.type === "pluginResult" && m.name === "github" && !m.error), "then it is done");
+  assert.equal(chat.filter(m => m.event?.type === "command_rejected").length, 0, "the chat never hears about it");
+  provider.lastReadyEvent = { capabilities: { plugin_management: true, plugin_keys: true } };
+  const sent = commands.length;
+  await provider.onSettingsMessage({ type: "setPluginSignInScopes", name: "github", scopes: ["gists"] });
+  await provider.onSettingsMessage({ type: "signInAgain", name: "github", scopes: ["gists"] });
+  assert.equal(commands.length, sent, "a CLI without plugin_sign_in_scopes is never sent the command");
+  assert.match(settings.at(-1).error, /can't choose what a sign-in may do yet\. Update it/);
+});
+
 test("Sign in with GitHub shows its code, copies it and opens GitHub only after the user agrees", async () => {
   // A device sign-in: dgc serve's own client sets the code (as it sets the loopback callback), so the editor opens
   // the page at once -- after saying the code, copying it, and the user choosing to go on.

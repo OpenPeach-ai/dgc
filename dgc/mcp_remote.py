@@ -710,10 +710,31 @@ class RemoteAuth:
             return self.authorize(parse_www_authenticate(header), stale)
 
     def needs_step_up(self) -> bool:
+        if self._chosen_scope():
+            return False                                 # the user's checklist decides; a tool's ask is shown there
         try:
             return bool(self._load(force=True).get("step_up_scope"))
         except credentials.CredentialError:
             return False
+
+    def _chosen_scope(self) -> bool:
+        """The sign-in asks for a scope the user chose on the plugin's page (Sign in with GitHub's checklist)."""
+        static = self.options.static_client or {}
+        return static.get("scope_choice") is True and isinstance(static.get("scope"), str)
+
+    def _needs_permission(self, wanted: str) -> str:
+        """A tool needs a scope the user didn't choose: which permission, in the words of the plugin's checklist."""
+        static = self.options.static_client or {}
+        labels = static.get("scope_labels") if isinstance(static.get("scope_labels"), dict) else {}
+        provider = str(static.get("provider") or "") or urlsplit(self.options.url).hostname or "The service"
+        named = list(dict.fromkeys(str(labels.get(s) or "")[:80] or f"the {s[:60]} permission"
+                                   for s in wanted.split()[:8]))
+        where = f"“What DGC may do on {provider}” on {provider}’s page in Settings → Plugins, then choose Sign in again."
+        if not named:
+            return f"{provider} needs more access to do this. Check what's turned on under {where}"
+        what = named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1]
+        return (f"{provider} needs your permission for {what} to do this. "
+                f"Turn {'it' if len(named) == 1 else 'them'} on under {where}")
 
     def on_forbidden(self, header: str, stale: dict) -> bool:
         """A 403 asking for more scope (MCP's step-up): sign in again for it. False for any other 403."""
@@ -725,6 +746,16 @@ class RemoteAuth:
 
     def authorize(self, challenge: dict, stale: dict, *, step_up: bool = False) -> bool:
         """Sign in through the browser. Raises SignInDeclined when the user said no or nobody can be asked."""
+        if step_up and self._chosen_scope():
+            # The user chose what this sign-in may do: a tool that needs more never widens it by itself. Its ask is
+            # kept (the plugin's page marks that permission) and the tool is told which permission to turn on.
+            wanted = str(challenge.get("scope") or "")
+            with credentials.locked(self.name, cancelled=self.cancelled, timeout=60):
+                saved = self._load(force=True)
+                if saved and wanted:
+                    self._store({**saved, "step_up_scope": " ".join(dict.fromkeys(
+                        [*str(saved.get("step_up_scope") or "").split(), *wanted.split()]))})
+            raise SignInDeclined(self._needs_permission(wanted))
         with credentials.locked(self.name, cancelled=self.cancelled, timeout=self.options.auth_timeout + 60):
             if not step_up:
                 fresh = self._load(force=True).get("tokens") or {}
@@ -752,7 +783,7 @@ class RemoteAuth:
             if step_up and challenge.get("scope"):
                 held = str((saved.get("tokens") or {}).get("scope") or scope or "").split()
                 scope = " ".join(dict.fromkeys([*held, *challenge["scope"].split()]))
-            if saved.get("step_up_scope"):               # more access a tool asked for since the last sign-in
+            if saved.get("step_up_scope") and not self._chosen_scope():   # more a tool asked for since the last sign-in
                 scope = " ".join(dict.fromkeys([*scope.split(), *str(saved["step_up_scope"]).split()]))
             device = self._device_client()
             if device is not None:

@@ -733,6 +733,21 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 
 ### Plugins
 
+- **You choose what Sign in with GitHub may do.** The sign-in asks GitHub for exactly the permissions chosen on
+  GitHub's page (or with `dgc plugin sign-in github --scopes notifications,gist`), not every scope GitHub's MCP server
+  lists: code, issues and pull requests (`repo`), your organisations (`read:org`) and your profile and email
+  (`read:user user:email`) always; Notifications, Gists, Projects and Packages (read, write) only when turned on. The
+  choice is kept with the plugin in `installed.json`. A sign-in already made keeps what it has until you sign in
+  again, since GitHub asks you to approve a change; `dgc plugin sign-in` signs in again when the choice changed, and a
+  sign-in again that is cancelled keeps the one there was. `dgc plugin show github` lists the permissions, which are
+  on, and what the sign-in has.
+- **A GitHub tool that needs a permission you didn't choose says which one,** in plain words, and where to turn it on
+  ("GitHub needs your permission for Notifications to do this. Turn it on under “What DGC may do on GitHub” …"). It no
+  longer widens the sign-in by itself or holds the next connection for it; GitHub's page marks the permission a tool
+  asked for. A sign-in DGC has to make again in a later chat asks for the chosen permissions too.
+- Editor protocol: new command `set_plugin_sign_in_scopes {request_id, name, scopes, sign_in_again?}` (capability
+  `plugin_sign_in_scopes`); the plugin list's keys carry `sign_in_scopes` (each permission: `chosen`, `held`,
+  `asked`) and `signed_in`.
 - **A cancelled sign-in says so.** A plugin whose sign-in you cancelled or declined now reads "Sign-in cancelled.
   Connect again when you're ready." on its card and in `/mcp`, and any other connection you stop reads "Connection
   cancelled.", instead of the raw "initialize failed: cancelled by user".

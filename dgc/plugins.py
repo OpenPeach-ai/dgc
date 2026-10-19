@@ -594,7 +594,7 @@ def _editor_keys(entry: dict, record: dict, config=None) -> list[dict]:
             continue
         saved = set(plugin_keys.saved_names(server, spec))
         client = sign_in_client(server, spec, config, entry)
-        for name in plugin_keys.key_names(spec)[:8]:
+        for index, name in enumerate(plugin_keys.key_names(spec)[:8]):
             described = plugin_keys.describe(entry, name)
             rows.append({'server': server, 'env': name, 'saved': name in saved,
                          # Where it was saved: the system keychain, or the owner-only file where there is none.
@@ -602,8 +602,24 @@ def _editor_keys(entry: dict, record: dict, config=None) -> list[dict]:
                          'from_environment': name in os.environ,
                          # Sign in with the service instead (GitHub), offered only once DGC has an app to do it with.
                          'sign_in': client['provider'] or entry.get('display_name') or 'the service' if client else '',
+                         **({} if index or not client else _sign_in_permissions(entry, server, spec, described)),
                          **{k: v for k, v in described.items() if k != 'sign_in'}})
     return rows[:16]
+
+
+def _sign_in_permissions(entry: dict, server: str, spec: dict, described: dict) -> dict:
+    """The page's checklist "What DGC may do on GitHub": each permission, whether the next sign-in asks for it, whether
+    the current sign-in has it, and whether a tool asked for it. Nothing for a sign-in without a checklist."""
+    sign_in = described.get('sign_in') or {}
+    choices = sign_in_choices(sign_in)
+    if not choices:
+        return {}
+    chosen = set(chosen_sign_in_scopes(str(entry.get('name') or ''), choices))
+    held = _held_choices(server, spec, sign_in, choices)
+    asked = set(_asked_choices(server, spec, choices))
+    return {'signed_in': held is not None,
+            'sign_in_scopes': [{**c, 'chosen': c['id'] in chosen, 'held': held is not None and c['id'] in held,
+                                'asked': c['id'] in asked} for c in choices]}
 
 
 def _key_server(record: dict, server: str = '', env: str = '') -> tuple[str, dict, str]:
@@ -787,19 +803,271 @@ def sign_in_client(server: str, spec: dict, config=None, entry: dict | None = No
     client_id = client_id or str(found.get('client_id') or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9._-]{1,128}', client_id):
         return None
-    return {'client_id': client_id, 'grant': 'device', 'provider': str(found.get('provider') or '')[:40]}
+    owner = entry if entry and entry.get('name') else _key_entry(server)
+    return {'client_id': client_id, 'grant': 'device', 'provider': str(found.get('provider') or '')[:40],
+            **_chosen_sign_in(str(owner.get('name') or ''), found)}
 
 
 def _signing_in(spec: dict, client: dict) -> dict:
-    """This connection signs in with the service (DGC's own client runs the device flow) instead of sending a key."""
+    """This connection signs in with the service (DGC's own client runs the device flow) instead of sending a key.
+    With a permission checklist (GitHub's), the sign-in asks for exactly what the user chose, and a tool that needs
+    more is told which permission to add on the plugin's page instead of widening the sign-in by itself."""
     launch = {k: v for k, v in spec.items() if k != 'auth_env'}
-    launch['args'] = [*spec.get('args', []), '--static-oauth-client-info',
-                      json.dumps({'client_id': client['client_id'], 'grant': 'device'}, separators=(',', ':'))]
+    info = {'client_id': client['client_id'], 'grant': 'device'}
+    if client.get('scope'):
+        info.update({'scope': client['scope'], 'scope_choice': True, 'provider': client.get('provider') or '',
+                     'scope_labels': client.get('scope_labels') or {}})
+    launch['args'] = [*spec.get('args', []), '--static-oauth-client-info', json.dumps(info, separators=(',', ':'))]
     return launch
 
 
-_USAGE = ("dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME|key NAME [--remove]|"
-          "uninstall NAME|marketplace list|add SOURCE|remove NAME|refresh NAME|installed")
+# What a sign-in may do: the permissions a plugin's sign-in offers (the catalog's sign_in.scopes, GitHub's checklist
+# "What DGC may do on GitHub"). The always-on ones are what its tools need to work at all; the optional ones are off
+# until the user turns them on, and the choice is kept per plugin in installed.json beside its permission level.
+_CHOICE_ID = re.compile(r'[a-z][a-z0-9_]{0,31}')
+_SCOPE_LIST = re.compile(r'[A-Za-z0-9:._-]{1,60}( [A-Za-z0-9:._-]{1,60}){0,7}')
+
+
+def sign_in_choices(sign_in: dict) -> list[dict]:
+    """The permissions a sign-in offers, in the catalog's order: {id, label, short, description, scope, always}."""
+    rows, seen = [], set()
+    for item in (sign_in.get('scopes') if isinstance(sign_in, dict) and isinstance(sign_in.get('scopes'), list) else [])[:16]:
+        if not isinstance(item, dict):
+            continue
+        ident, scope = str(item.get('id') or ''), str(item.get('scope') or '')
+        if not _CHOICE_ID.fullmatch(ident) or not _SCOPE_LIST.fullmatch(scope) or ident in seen:
+            continue
+        seen.add(ident)
+        label = str(item.get('label') or ident)[:80]
+        rows.append({'id': ident, 'label': label, 'short': str(item.get('short') or label)[:80],
+                     'description': str(item.get('description') or '')[:200], 'scope': scope,
+                     'always': item.get('always') is True})
+    return rows
+
+
+def chosen_sign_in_scopes(name: str, choices: list[dict]) -> list[str]:
+    """The ids the next sign-in asks for: the always-on ones and the optional ones the user turned on (none by
+    default)."""
+    saved = _state().get('sign_in_scopes')
+    picked = saved.get(name) if isinstance(saved, dict) else None
+    picked = {p for p in picked if isinstance(p, str)} if isinstance(picked, list) else set()
+    return [c['id'] for c in choices if c['always'] or c['id'] in picked]
+
+
+def _scope_text(choices: list[dict], ids) -> str:
+    wanted = set(ids)
+    return ' '.join(dict.fromkeys(s for c in choices if c['id'] in wanted for s in c['scope'].split()))
+
+
+def _chosen_sign_in(name: str, sign_in: dict) -> dict:
+    """The scope a sign-in asks for, and the plain name of each scope (for a tool that needs one not chosen)."""
+    choices = sign_in_choices(sign_in)
+    if not choices:
+        return {}
+    labels = {scope: c['label'] for c in choices for scope in c['scope'].split()}
+    return {'scope': _scope_text(choices, chosen_sign_in_scopes(name, choices)), 'scope_labels': labels}
+
+
+def _sign_in_entry(name: str) -> tuple[dict, str, dict, list[dict]]:
+    """An installed plugin's sign-in that offers permissions: (record, server, its sign_in, the choices)."""
+    from . import plugin_keys
+    record = next((r for r in _installed() if r.get('name') == name), None)
+    if record is None:
+        raise PluginError(f'{name} is not installed. Run: dgc plugin install {name}')
+    for server, spec in record_servers(record).items():
+        names = plugin_keys.key_names(spec)
+        if names and spec.get('transport') == 'remote':
+            sign_in = plugin_keys.describe(_key_entry(server) or record, names[0]).get('sign_in') or {}
+            choices = sign_in_choices(sign_in)
+            if choices:
+                return record, server, sign_in, choices
+    raise PluginError(f"{record.get('display_name') or name} has no sign-in permissions to choose.")
+
+
+def set_sign_in_scopes(name: str, ids) -> dict:
+    """Save which optional permissions a plugin's next sign-in asks for. Takes effect at the next sign-in: the service
+    asks the user to approve a change, so a sign-in already made keeps what it has until they sign in again."""
+    if not isinstance(name, str) or not sources.NAME.fullmatch(name):
+        raise PluginError('Name an installed plugin.')
+    if not isinstance(ids, (list, tuple)) or any(not isinstance(i, str) for i in ids) or len(ids) > 16:
+        raise PluginError('Choose the permissions by name.')
+    with _registry_lock():
+        record, server, sign_in, choices = _sign_in_entry(name)
+        known = {c['id']: c for c in choices}
+        unknown = [i for i in ids if i not in known]
+        if unknown:
+            offered = ', '.join(c['id'] for c in choices if not c['always'])
+            raise PluginError(f"{record.get('display_name') or name} has no permission called {unknown[0]!r}. "
+                              f"Choose from: {offered}.")
+        state = _state()
+        saved = state.get('sign_in_scopes') if isinstance(state.get('sign_in_scopes'), dict) else {}
+        state['sign_in_scopes'] = {**saved, name: [c['id'] for c in choices if not c['always'] and c['id'] in ids]}
+        sources.write_json(STATE_PATH, state)
+    chosen = chosen_sign_in_scopes(name, choices)
+    provider = str(sign_in.get('provider') or record.get('display_name') or name)
+    held = _held_choices(server, record_servers(record)[server], sign_in, choices)
+    message = f"Saved. Signing in asks {provider} for: {_shorts(choices, chosen)}."
+    if held is not None and set(held) != set(chosen):
+        message += (f" Your sign-in keeps what it has until you sign in again: {provider} asks you to approve a "
+                    "change.")
+    return {'chosen': chosen, 'held': held, 'provider': provider, 'message': message}
+
+
+def _choice_changed(name: str) -> bool:
+    """Signed in, with a choice saved since that differs from what the sign-in has."""
+    try:
+        record, server, sign_in, choices = _sign_in_entry(name)
+    except PluginError:
+        return False
+    held = _held_choices(server, record_servers(record)[server], sign_in, choices)
+    return held is not None and set(held) != set(chosen_sign_in_scopes(name, choices))
+
+
+def _choice_ids(choices: list[dict], text: str) -> list[str]:
+    """`--scopes notifications,gist`: each by its id or by a GitHub scope it stands for; "none" for none."""
+    picked = []
+    for word in [w for w in re.split(r'[\s,]+', str(text or '').strip()) if w]:
+        if word.lower() == 'none':
+            continue
+        found = next((c for c in choices if c['id'] == word.lower().replace('-', '_')), None) \
+            or next((c for c in choices if word in c['scope'].split()), None)
+        if found is None:
+            offered = ', '.join(c['id'] for c in choices if not c['always'])
+            raise PluginError(f"There's no permission called {word!r}. Choose from: {offered} (or none).")
+        if not found['always'] and found['id'] not in picked:
+            picked.append(found['id'])
+    return picked
+
+
+def describe_sign_in(name: str) -> list[str]:
+    """`dgc plugin show NAME`: what the plugin is, and for a sign-in with permissions, what it has and asks for."""
+    record = next((r for r in _installed() if r.get('name') == name), None)
+    if record is None:
+        raise PluginError(f'{name} is not installed. Run: dgc plugin install {name}')
+    lines = [f"{record.get('display_name') or name} ({name})  license={record.get('license') or 'none'}  "
+             f"skills={len(record.get('skills') or [])}  servers={', '.join(record_servers(record)) or 'none'}"]
+    try:
+        _record, server, sign_in, choices = _sign_in_entry(name)
+    except PluginError:
+        return lines
+    spec = record_servers(record)[server]
+    provider = str(sign_in.get('provider') or record.get('display_name') or name)
+    chosen = chosen_sign_in_scopes(name, choices)
+    held = _held_choices(server, spec, sign_in, choices)
+    if missing_keys(server, spec) == []:
+        lines.append(f"Connects with the key saved on its page (or in the environment), not a {provider} sign-in.")
+    elif held is None:
+        lines.append(f"Not signed in with {provider}. Sign in: dgc plugin sign-in {name}")
+    else:
+        lines.append(f"Signed in with: {_shorts(choices, held)}.")
+    lines.append(f"What DGC may do on {provider}:")
+    for c in choices:
+        mark = 'x' if c['id'] in chosen else ' '
+        lines.append(f"  [{mark}] {c['label']} ({c['scope']}){'  always on' if c['always'] else ''}"
+                     f"{'  (a tool asked for this)' if c['id'] in _asked_choices(server, spec, choices) else ''}")
+    if held is not None and set(held) != set(chosen):
+        lines.append(f"The next sign-in asks for what's ticked; {provider} asks you to approve the change. "
+                     f"Sign in again: dgc plugin sign-in {name} --scopes "
+                     + (','.join(c['id'] for c in choices if c['id'] in chosen and not c['always']) or 'none'))
+    else:
+        lines.append(f"Change it: dgc plugin sign-in {name} --scopes A,B  (from "
+                     + ', '.join(c['id'] for c in choices if not c['always']) + "; or none)")
+    return lines
+
+
+def _shorts(choices: list[dict], ids) -> str:
+    wanted = set(ids)
+    return ', '.join(c['short'] for c in choices if c['id'] in wanted) or 'nothing'
+
+
+def _saved_sign_in(server: str, spec: dict) -> dict:
+    """This server's device sign-in as mcp_remote kept it, or {} (none, unreadable, or another address's)."""
+    from . import plugin_credentials
+    try:
+        saved = plugin_credentials.load(server) or {}
+    except Exception:  # noqa: BLE001 -- an unreadable keychain has no sign-in to show
+        return {}
+    tokens = saved.get('tokens') if isinstance(saved.get('tokens'), dict) else {}
+    client = saved.get('client') if isinstance(saved.get('client'), dict) else {}
+    if saved.get('url') != spec.get('url') or client.get('grant') != 'device' or not tokens.get('access_token'):
+        return {}
+    return saved
+
+
+def _held_choices(server: str, spec: dict, sign_in: dict, choices: list[dict]) -> list[str] | None:
+    """The permissions the current sign-in has (None when there is none): every scope of a choice granted, or implied
+    by one granted. GitHub lists the scopes it granted, normalised (project stands for read:project too)."""
+    saved = _saved_sign_in(server, spec)
+    if not saved:
+        return None
+    granted = {s for s in re.split(r'[\s,]+', str(saved['tokens'].get('scope') or '')) if s}
+    implies = sign_in.get('implies') if isinstance(sign_in.get('implies'), dict) else {}
+    for scope in list(granted):
+        granted |= set(str(implies.get(scope) or '').split())
+    return [c['id'] for c in choices if set(c['scope'].split()) <= granted]
+
+
+def _asked_choices(server: str, spec: dict, choices: list[dict]) -> list[str]:
+    """The permissions a tool asked for since the last sign-in (mcp_remote keeps the scope it was refused for)."""
+    asked = set(str(_saved_sign_in(server, spec).get('step_up_scope') or '').split())
+    return [c['id'] for c in choices if asked & set(c['scope'].split())]
+
+
+def signed_in_launch(server: str, spec: dict) -> dict:
+    """A server signed in before (no key; Sign in with GitHub), launched without its key header and with the permissions
+    chosen on its page, so a sign-in it has to make again asks for exactly those."""
+    from . import plugin_keys
+    names = plugin_keys.key_names(spec)
+    saved = _saved_sign_in(server, spec)
+    entry = _key_entry(server)
+    plain = {k: v for k, v in spec.items() if k != 'auth_env'}
+    if not names or not saved or not entry:
+        return plain
+    sign_in = plugin_keys.describe(entry, names[0]).get('sign_in') or {}
+    chosen = _chosen_sign_in(str(entry.get('name') or ''), sign_in)
+    if not chosen or not re.fullmatch(r'[A-Za-z0-9._-]{1,128}', str(saved['client'].get('client_id') or '')):
+        return plain
+    return _signing_in(spec, {'client_id': saved['client']['client_id'], 'grant': 'device',
+                              'provider': str(sign_in.get('provider') or '')[:40], **chosen})
+
+
+def sign_in_again(config, manager, name: str, *, input_handler, cancel=None) -> dict:
+    """Sign in again with the permissions chosen now: the current sign-in is set aside, then the device flow runs. If
+    the new sign-in doesn't finish, the old one is put back, so a cancelled sign-in never leaves the plugin signed
+    out. GitHub can't revoke an app's token without the app's secret, which DGC doesn't ship: the old token is
+    deleted from this computer, and stays listed at github.com/settings/applications until the user revokes it."""
+    from . import plugin_credentials
+    record, server, _sign_in, _choices = _sign_in_entry(name)
+    if missing_keys(server, record_servers(record)[server]) == []:
+        raise PluginError(f"{record.get('display_name') or name} connects with the key saved on its page, not a "
+                          "sign-in. Remove the key to sign in instead.")
+    try:
+        old = plugin_credentials.load(server)
+    except plugin_credentials.CredentialError as exc:
+        raise PluginError(f"DGC couldn't read the current sign-in: {exc}") from None
+    if manager is not None and hasattr(manager, 'disconnect'):
+        manager.disconnect(server)
+    if old is not None:
+        plugin_credentials.delete(server)
+    failure = ''
+    try:
+        connect(config, manager, record, input_handler=input_handler, cancel=cancel)
+    finally:
+        try:
+            fresh = plugin_credentials.load(server)
+        except plugin_credentials.CredentialError:
+            fresh = None
+        if fresh is None and old is not None:
+            failure = str(getattr(manager, 'failures', {}).get(server) or '')
+            plugin_credentials.save(server, old)
+            if manager is not None:
+                connect(config, manager, record, input_handler=None)
+    return {'server': server, 'signed_in': fresh is not None, 'kept': fresh is None and old is not None,
+            'failure': failure}
+
+
+_USAGE = ("dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME [--scopes A,B|none]|show NAME|"
+          "key NAME [--remove]|uninstall NAME|marketplace list|add SOURCE|remove NAME|refresh NAME|installed")
 
 
 def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
@@ -878,6 +1146,10 @@ def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
         for row in rows:
             print(f"{row['name']}  {row.get('license')}  skills={len(row.get('skills') or [])}")
         return 0
+    if action == "show" and len(argv) == 2:
+        for line in describe_sign_in(argv[1]):
+            print(line)
+        return 0
     if action in ("install", "sign-in") and len(argv) >= 2:
         name = argv[1]
         entry = next((row for row in load_catalog()["plugins"] if row["name"] == name), None)
@@ -886,6 +1158,7 @@ def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
         accept = ""
         if "--accept-license" in argv:
             accept = argv[argv.index("--accept-license") + 1]
+        again = False
         if action == "install":
             record = install(entry, accept_license=accept)
             print(f"installed {record['name']}  skills={len(record['skills'])}")
@@ -893,8 +1166,24 @@ def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
             record = next((row for row in _installed() if row.get("name") == name), None)
             if record is None:
                 raise PluginError(f"{name} is not installed")
+            if "--scopes" in argv:
+                at = argv.index("--scopes") + 1
+                if at >= len(argv):
+                    raise PluginError("usage: dgc plugin sign-in NAME --scopes A,B (or none)")
+                _record, server, _found, choices = _sign_in_entry(name)
+                result = set_sign_in_scopes(name, _choice_ids(choices, argv[at]))
+                # A sign-in already made keeps what it has: a different choice is a new sign-in.
+                again = result["held"] is not None and set(result["held"]) != set(result["chosen"])
+                print(f"Saved. DGC asks {result['provider']} for: {_shorts(choices, result['chosen'])}."
+                      + (f" {result['provider']} asks you to approve the change, so DGC signs in again."
+                         if again else ""))
+            else:
+                again = _choice_changed(name)        # chosen on the page since the last sign-in
         if record.get("sign_in_url") and manager is not None and ui is not None:
-            connect(config, manager, record, input_handler=cli_mcp_input(ui))
+            if again:
+                sign_in_again(config, manager, name, input_handler=cli_mcp_input(ui))
+            else:
+                connect(config, manager, record, input_handler=cli_mcp_input(ui))
             names = set(record_servers(record))
             waiting = [n for n, spec in record_servers(record).items()
                        if n not in manager.servers and missing_keys(n, spec)
