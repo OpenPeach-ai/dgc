@@ -31,7 +31,8 @@ import json
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import window as fit_window
@@ -39,11 +40,18 @@ from .store import now
 
 MIN_WINDOW = 16384            # tokens: the notes and the report need room
 # How deep: at most `rounds` rounds, `pages` pages read and `minutes` of reading, then it writes from what it has. The
-# model may call it enough only after MIN_ROUNDS rounds and `least` pages. Standard is the default (Settings: the
-# config's `chatdgc_research_depth`); the plan's editor changes it for one run.
+# model may call it enough only after MIN_ROUNDS rounds and `least` pages. Standard is the default (the config's
+# `chatdgc_research_depth` changes it); the plan's editor changes it for one run. DEPTHS is a 32k window's; a bigger
+# window reads more (depths()), so the writer, who reads every note in 55% of the window, gets each note as whole as
+# at 32k: there, 40 notes have about 1,800 characters each (2.2 characters per token of window, over 40).
 DEPTHS = {"quick": {"rounds": 3, "pages": 15, "minutes": 5, "least": 8},
           "standard": {"rounds": 6, "pages": 40, "minutes": 15, "least": 20},
           "thorough": {"rounds": 10, "pages": 80, "minutes": 30, "least": 40}}
+WIDER = ((131072, {"standard": {"rounds": 10, "pages": 80, "minutes": 25, "least": 40},       # 3,600 characters a note
+                   "thorough": {"rounds": 16, "pages": 160, "minutes": 50, "least": 80}}),    # 1,800
+         (65536, {"standard": {"rounds": 8, "pages": 60, "minutes": 20, "least": 30},         # 2,400
+                  "thorough": {"rounds": 13, "pages": 120, "minutes": 40, "least": 60}}))     # 1,200 (900 at 32k)
+HOSTED_WINDOW = 131072        # what research uses on a hosted model (no memory of yours), unless Settings sets a window
 DEFAULT_DEPTH = "standard"
 MORE = {"rounds": 2, "pages": 10, "minutes": 5}   # Keep researching, once the budget is spent
 MIN_ROUNDS = 3
@@ -63,9 +71,12 @@ MAX_SITES = 5
 MAX_STEER_CHARS, MAX_STEERS = 1000, 10
 MAX_ACTIVITY = 600
 WORKERS = 4                   # pages fetched and noted at once, and citation batches checked at once
-SEARCH_WORKERS = 3            # searches run at once
-SEARCH_RETRY_SECONDS = 2.0    # a failed search is asked again once, after this pause
+SEARCH_WORKERS = 4            # searches run at once
+SEARCH_RETRY_SECONDS = 2.0    # a failed search is asked again once, after this pause, when the round has time
+SEARCH_SECONDS = 20           # a round waits this long for its searches, at most,
+SEARCH_GRACE = 8              # and this long for the rest once one has answered
 CHECK_BATCH = 6                # claims put to the model at once: fewer notes to hold while it judges
+PASSAGE_CHARS = 3000          # a page's passage for a claim its note didn't back (less in a small window)
 SEND_ACTIVITY = 60            # activity lines in a progress event; the saved reply keeps them all
 KEPT_OUT = ("notes", "activity", "read", "searched", "pool", "seen")   # big lists the progress event leaves out
 
@@ -144,7 +155,9 @@ NOTER = (
 WRITER = (
     "You write the report for deep research, from the numbered notes below and nothing else. Each note is what "
     "one web page says. Cite each fact right after it as [n], n being the note it comes from (two notes: [2][5]). "
-    "Never cite a number that isn't a note, and never add a fact no note gives. The reader sees the report, not "
+    "Never cite a number that isn't a note, and never add a fact no note gives. Cite every note a sentence or a "
+    "table row draws on, and keep it to what those notes say: no \"every\", \"all\" or \"none\" a note doesn't "
+    "say, and no name a note doesn't give. The reader sees the report, not "
     "the notes, and doesn't see the citation marks: never write \"the notes\", \"note 4\" or \"per [3]\", never "
     "use a citation as a word, and never give citations a line or a table column of their own (\"Source: [3]\"); "
     "put each one right after the fact or figure it backs, inside its table cell. When it matters who says "
@@ -156,9 +169,23 @@ WRITER = (
     "citation and say which is more recent or more authoritative. Don't list the sources at the end: they're "
     "added. Write in Markdown, as long as the notes support (usually 1,200 to 3,000 words). Write only the report.")
 CHECKER = (
-    "You check a research report's citations. Each claim below cites notes by number, and the notes follow. "
-    "For each claim, say whether the notes it cites support it: supported means the notes say it, or plainly "
-    "imply it; a claim with figures, names or dates the notes don't give is not supported.")
+    "You check a research report's citations, one source at a time. Each claim below cites sources by number, and "
+    "what each source says follows: a note of its page, or a passage of the page itself. Read each claim's facts one "
+    "by one (figures, names, dates, what is said of them). For each claim, first why: in a few words, which of its "
+    "facts its cited sources give and which none gives. Then backed_by, the numbers of its cited sources that say "
+    "part of it or all of it; holds, true when those sources together give every one of its facts and false when "
+    "even one fact is in none of them; and, when it doesn't hold, missing: the facts no source gives. Holds agrees "
+    "with why: if why finds every fact, holds is true.")
+REPAIRER = (
+    "You repair a research report's claims that a check found none of their cited sources back. For each claim you "
+    "get the notes it cited and a few related ones. First why: a few plain words for the reader (\"The source gives "
+    "77.2%, not 77.4%\"). Then judgement: true when the sentence is the report's own judgement, advice or conclusion "
+    "drawn from facts given elsewhere (\"plan on APIs for anything larger\"), not a fact a source would state. Then "
+    "as_written: true when the notes do give all of it, as it is written. Otherwise corrected: the claim rewritten to "
+    "say only what the notes say (another figure, date, name or scope, or without the part no note gives), citing the "
+    "notes that say it as [n], as one sentence. Correct rather than drop: a sentence with one wrong or unsupported "
+    "part is corrected, keeping what the notes do give. Leave corrected empty only when no note gives anything like "
+    "it; the claim is then removed. Never add a fact no note gives.")
 
 
 class ResearchError(Exception):
@@ -191,8 +218,41 @@ NOTE_SCHEMA = _schema({"relevant": {"type": "boolean"},
                        "steps": {"type": "array", "items": {"type": "integer"},
                                  "description": "Numbers of the plan's steps the note bears on."}},
                       ["relevant", "note"])
+# `why` comes first in each verdict, so the model reasons before it decides (a verdict once said "Figures match the
+# cited sources" and still didn't hold).
 CHECK_SCHEMA = _schema({"verdicts": {"type": "array", "items": _schema(
-    {"id": {"type": "integer"}, "supported": {"type": "boolean"}}, ["id", "supported"])}}, ["verdicts"])
+    {"id": {"type": "integer"},
+     "why": {"type": "string", "description": "Which of its facts its cited sources give, and which none gives."},
+     "backed_by": {"type": "array", "items": {"type": "integer"},
+                   "description": "The cited sources that say part or all of it."},
+     "holds": {"type": "boolean", "description": "True when together they give every fact of the claim."},
+     "missing": {"type": "string", "description": "When it doesn't hold: the facts no cited source gives."}},
+    ["id", "why", "backed_by", "holds"])}}, ["verdicts"])
+REPAIR_SCHEMA = _schema({"repairs": {"type": "array", "items": _schema(
+    {"id": {"type": "integer"},
+     "why": {"type": "string", "description": "A few plain words for the reader."},
+     "judgement": {"type": "boolean", "description": "True when it's the report's own judgement or advice."},
+     "as_written": {"type": "boolean", "description": "True when the notes give all of it as written."},
+     "corrected": {"type": "string", "description": "The claim corrected, with its citations; empty to remove it."}},
+    ["id", "why", "judgement", "as_written", "corrected"])}}, ["repairs"])
+# A verdict's own words saying the claim is backed ("All figures appear in the cited sources", "no correction needed"):
+# then it isn't removed on a "doesn't hold" that contradicts them.
+SAYS_BACKED = re.compile(
+    r"(?i)\b(?:all (?:the |its |of its |these )?(?:figures|facts|cells|values|details|numbers|parts)\b[^.;]{0,30}?\b"
+    r"(?:appear|are (?:given|backed|stated|supported|there|in|correct)|match)|(?:figures|facts|cells|values) match|"
+    r"match(?:es)? the (?:cited )?(?:sources|notes)|(?:is|are) (?:fully )?(?:backed|supported) (?:as|by)|"
+    r"backed as (?:stated|written)|no correction (?:is )?needed|nothing (?:is )?missing|no facts? (?:is |are )?missing|"
+    r"\b(?:all|every|each)\b[^.;]{0,80}?\b(?:appears?|is given|are given|is stated|are stated|matche?s?) in the "
+    r"(?:cited )?(?:notes|sources|pages?))")
+
+
+def says_backed(text: str) -> bool:
+    """Whether a verdict's reason says the claim is backed (and doesn't say "not" just before it)."""
+    for found in SAYS_BACKED.finditer(str(text or "")):
+        before = str(text)[max(0, found.start() - 14):found.start()].lower()
+        if not re.search(r"\b(?:not|no|never|nothing|none)\b|n't", before):
+            return True
+    return False
 
 
 def _json_in(text: str) -> dict | None:
@@ -269,19 +329,29 @@ def depth_of(value) -> str:
     return value if value in DEPTHS else DEFAULT_DEPTH
 
 
-def depth_words(depth: str) -> str:
+def depths(room: int) -> dict:
+    """Each depth's budget for a window of ``room`` tokens (DEPTHS, and WIDER for a big one)."""
+    out = {name: dict(budget) for name, budget in DEPTHS.items()}
+    for least, wider in WIDER:
+        if room >= least:
+            out.update({name: dict(budget) for name, budget in wider.items()})
+            break
+    return out
+
+
+def depth_words(depth: str, budget: dict | None = None) -> str:
     """'Standard: reads up to 40 pages, in up to 15 minutes' (as the plan's card says it)."""
-    b = DEPTHS[depth_of(depth)]
+    b = budget or DEPTHS[depth_of(depth)]
     return f"{depth_of(depth).capitalize()}: reads up to {b['pages']} pages, in up to {b['minutes']} minutes"
 
 
-def plan_text(plan: dict, depth: str | None = None) -> str:
+def plan_text(plan: dict, depth: str | None = None, budget: dict | None = None) -> str:
     """The plan as the conversation keeps it (history, copy, export)."""
     lines = [f"**Research plan: {plan['title']}**", ""] + [f"{i}. {s}" for i, s in enumerate(plan["steps"], 1)]
     if plan.get("sites"):
         lines += ["", "Only these sites: " + ", ".join(plan["sites"])]
     if depth:
-        lines += ["", depth_words(depth) + "."]
+        lines += ["", depth_words(depth, budget) + "."]
     return "\n".join(lines)
 
 
@@ -337,13 +407,17 @@ class Research:
     `state["seconds"]` counts the time spent in all runs of it (a stopped one carries on with what's left)."""
 
     def __init__(self, engine, state: dict, *, client_for, room: int, search, fetch=fetch_page, said=None,
-                 save=None, cancel: threading.Event | None = None, clock=time.monotonic, tools: bool = True):
+                 save=None, cancel: threading.Event | None = None, clock=time.monotonic, tools: bool = True,
+                 pages=None):
         self.engine, self.state, self.client_for, self.room = engine, state, client_for, room
+        # Where each page's text is kept as it was read (`<n>.txt`, n its note), for the citation check's second
+        # look; on disk, never in the state. None: not kept (a temporary chat).
+        self.pages = Path(pages) if pages is not None else None
         self.search, self.fetch, self.said, self.save = search, fetch, said, save
         self.cancel = cancel or threading.Event()
         self.clock, self.tools = clock, tools
         self.lock = threading.Lock()
-        self.state.setdefault("budget", dict(DEPTHS[depth_of(state.get("depth"))]))
+        self.state.setdefault("budget", depths(room)[depth_of(state.get("depth"))])
         self._since = clock()
         # Pages read, however they were linked or redirected; and the text of each long one, so a copy is skipped.
         self._pages = {_key(u) for u in state.get("read") or []} | {_key(n["url"]) for n in state.get("notes") or []}
@@ -493,19 +567,20 @@ class Research:
                 out.append(q)
         return bool(found.get("enough")) and not out, out[:MAX_QUERIES]
 
-    def _search_one(self, query: str) -> list[dict]:
-        """One search, asked again once after a pause when it fails (a keyless search times out or comes back empty
-        now and then, more so with several at once)."""
+    def _search_one(self, query: str, until: float) -> list[dict] | None:
+        """One search, asked again once after a pause when it fails and there's time before ``until`` (a keyless
+        search times out or comes back empty now and then, more so with several at once). None: it failed."""
         sites = self.state["plan"].get("sites") or []
         scoped = query if not sites else f"{query} " + " OR ".join(f"site:{s}" for s in sites)
         for attempt in (1, 2):
             try:
                 return list(self.search(scoped) or [])[:RESULTS_PER_QUERY]
             except Exception as exc:              # noqa: BLE001 -- one failed search, said; the others go on
-                if attempt == 1 and not self.cancel.wait(SEARCH_RETRY_SECONDS):
+                if (attempt == 1 and time.monotonic() + SEARCH_RETRY_SECONDS < until - 5
+                        and not self.cancel.wait(SEARCH_RETRY_SECONDS)):
                     continue
                 self.log("error", f"Search failed: {' '.join(str(exc).split())[:200]}")
-        return []
+        return None
 
     def _candidates(self, queries: list[str]) -> list[dict]:
         """This round's searches, run a few at once. Their results join the pool, best first across them (each
@@ -518,8 +593,33 @@ class Research:
             self.log("search", query)
         if self.stopped() or not queries:
             return []
-        with ThreadPoolExecutor(max_workers=SEARCH_WORKERS, thread_name_prefix="dgc-research-search") as pool:
-            lists = list(pool.map(self._search_one, queries))
+        # A round waits SEARCH_SECONDS for its searches at most, and SEARCH_GRACE once one has answered: a keyless
+        # search that keeps failing can take a minute a query (its own retries, then ours), and that was most of a
+        # 26-minute run. What hasn't answered by then is left (its thread finishes on its own) and counted as failed.
+        until = time.monotonic() + SEARCH_SECONDS
+        pool = ThreadPoolExecutor(max_workers=SEARCH_WORKERS, thread_name_prefix="dgc-research-search")
+        futures = [pool.submit(self._search_one, query, until) for query in queries]
+        done, pending, answered = set(), set(futures), None
+        while pending and not self.stopped():
+            left = until - time.monotonic()
+            if answered is not None:
+                left = min(left, answered + SEARCH_GRACE - time.monotonic())
+            if left <= 0:
+                break
+            finished, pending = wait(pending, timeout=left, return_when=FIRST_COMPLETED)
+            done |= finished
+            if answered is None and any(f.result() for f in finished):
+                answered = time.monotonic()
+        pool.shutdown(wait=False, cancel_futures=True)
+        lists = []
+        for query, future in zip(queries, futures):
+            found = future.result() if future in done else None
+            if future not in done:
+                self.log("error", f"Search took too long: {query}")
+            if found is None:
+                with self.lock:
+                    self.state["failed"] = int(self.state.get("failed") or 0) + 1
+            lists.append(found or [])
         fresh = []
         with self.lock:
             seen = set(self.state.get("seen") or []) | self._pages
@@ -669,6 +769,12 @@ class Research:
             if bears:
                 entry["steps"] = bears
             notes.append(entry)
+        if self.pages is not None:
+            try:
+                self.pages.mkdir(parents=True, exist_ok=True)
+                (self.pages / f"{entry['n']}.txt").write_text(text[:limit], encoding="utf-8")
+            except OSError:
+                pass                              # the check then has the note alone
         self.log("note", entry["title"], url=final, n=entry["n"])
         self.keep()
 
@@ -765,56 +871,322 @@ class Research:
         return text
 
     def check(self, report: str) -> str:
-        """Every citation checked, a few batches at once; returns the report with the ones that don't hold removed."""
+        """Every citation checked, one source at a time, and the claims no source backs repaired rather than left
+        standing uncited:
+
+          1. Each cited claim is put to the model with what each of its sources says (a few claims at a time, batches
+             side by side). A claim keeps the citations whose note backs it; it holds up when one does.
+          2. A claim none backs gets a second chance from the pages themselves (kept on disk as they were read): the
+             passage of each cited page with the claim's figures, names and words. A note is 2,400 characters of a
+             page; the page may say what the note left out.
+          3. What's still unbacked goes back to the model once, in one call: correct it to what the sources say (with
+             their citations), or delete it. Corrections are checked once more; what still isn't backed goes.
+
+        Sentences that cite nothing (the writer's own reasoning) aren't touched. Returns the report as checked;
+        `state["check"]` says what held up, what was corrected and what was removed, and why (`check.json` beside the
+        pages keeps every verdict)."""
+        started = time.monotonic()
         self.state["status"] = "checking"
-        self.log("check", "Checking the citations")
+        self.log("check", "Checking the citations, one source at a time")
         notes = {n["n"]: n for n in self.state.get("notes") or []}
         invalid = [int(x) for x in CITE.findall(report) if int(x) not in notes]
         report = UNCITE.sub(lambda m: m.group(0) if int(m.group(1)) in notes else "", report)
         report = without_source_columns(without_source_lines(report))
-        claims = []
-        for line_no, line in enumerate(report.split("\n")):
-            # A table row is one claim (its cells mean nothing apart); prose, a sentence at a time.
-            parts = [line] if line.lstrip().startswith("|") else re.split(r"(?<=[.!?])\s+(?=[A-Z*(\"“])", line)
-            for sentence in parts:
-                cited = sorted({int(x) for x in CITE.findall(sentence)})
-                words = CITE.sub("", sentence).strip(" |*-#")
-                if cited and len(words) > 3:
-                    claims.append({"id": len(claims) + 1, "line": line_no, "text": sentence, "claim": words,
-                                   "cites": cited})
+        lines = report.split("\n")
+        claims = _claims(lines)
+        # 1. Each source on its own.
+        self._judge(claims, {n: notes[n]["note"] for n in notes}, "first")
+        checked = [c for c in claims if "first" in c]
+        for claim in claims:
+            claim["backed"] = sorted(claim.get("first") or [])
+        # 2. The pages, for what no note backed.
+        unbacked = [c for c in checked if not c["backed"]]
+        if unbacked and not self.stopped():
+            evidence = {}
+            for claim in unbacked:
+                claim["passages"] = {}
+                for n in claim["cites"][:3]:
+                    found = self._passage(n, claim["claim"])
+                    if found:
+                        claim["passages"][n] = found
+                        evidence[(claim["id"], n)] = found
+            asked = [c for c in unbacked if c["passages"]]
+            if asked:
+                self._judge(asked, evidence, "page", keyed=True)
+                for claim in asked:
+                    claim["backed"] = sorted(claim.get("page") or [])
+        # 3. A table row isn't repaired whole or removed (a comparison would silently lose a model): each of its cells
+        #    is checked on its own, and a cell no source gives says "not given". Sentences go back to the model once.
+        rows = [c for c in checked if not c["backed"] and c["row"]]
+        if rows and not self.stopped():
+            self._check_cells(rows, notes)
+        broken = [c for c in checked if not c["backed"] and not c["row"]]
+        if broken and not self.stopped():
+            self._repair(broken, notes)
+            fixed = [c for c in broken if c.get("repair", {}).get("text")]
+            if fixed:
+                again = [{**c, "claim": c["repair"]["claim"], "cites": c["repair"]["cites"]} for c in fixed]
+                self._judge(again, {n: notes[n]["note"] for n in notes}, "recheck")
+                for claim, judged in zip(fixed, again):
+                    claim["recheck"] = judged.get("recheck") or []
+        # Apply: fewer citations, a correction, a judgement kept uncited, or the claim gone.
+        corrected, removed, judged, sources = [], [], [], {"cited": 0, "backed": 0}
+        for claim in checked:
+            sources["cited"] += len(claim["cites"])
+            sources["backed"] += len(claim.get("first") or [])
+            if claim.get("cells"):                                  # a row, cell by cell
+                claim["now"], blanked = claim["cells"]["row"], claim["cells"]["blanked"]
+                claim["backed"] = claim["cells"]["backed"]
+                claim["final"] = "cells" if blanked else "rechecked"
+                if blanked:
+                    corrected.append({"claim": claim["claim"][:300], "now": claim["cells"]["claim"][:300],
+                                      "why": ("No source gives " + "; ".join(blanked))[:200]})
+            elif claim["backed"]:
+                keep = set(claim["backed"])
+                claim["now"] = UNCITE.sub(lambda m: m.group(0) if int(m.group(1)) in keep else "", claim["text"])
+                claim["final"] = "kept" if "page" not in claim or not claim.get("page") else "page"
+            elif claim.get("repair", {}).get("action") == "keep" and claim.get("recheck"):
+                claim["backed"] = sorted(claim["recheck"])                # held up when checked again, as written
+                keep = set(claim["backed"])
+                claim["now"] = UNCITE.sub(lambda m: m.group(0) if int(m.group(1)) in keep else "", claim["text"])
+                claim["final"] = "rechecked"
+            elif claim.get("repair", {}).get("action") == "judgement":
+                claim["now"] = UNCITE.sub("", claim["text"])           # the report's own reasoning: no citation
+                claim["final"] = "judgement"
+                judged.append({"claim": claim["claim"][:300], "why": claim["repair"].get("why", "")[:200]})
+            elif claim.get("repair", {}).get("text") and claim.get("recheck"):
+                claim["now"] = claim["repair"]["text"]
+                claim["final"] = "corrected"
+                corrected.append({"claim": claim["claim"][:300], "now": UNCITE.sub("", claim["now"]).strip(" |")[:300],
+                                  "why": claim["repair"].get("why", "")[:200]})
+            else:
+                claim["now"] = ""
+                claim["final"] = "removed"
+                why = ((claim.get("repair") or {}).get("why") or
+                       (f"no source gives {claim.get('page_missing') or claim.get('first_missing')}"
+                        if claim.get("page_missing") or claim.get("first_missing") else ""))
+                removed.append({"claim": claim["claim"][:300], "cites": claim["cites"],
+                                "why": ("No source backed it" + (f": {why}" if why else "."))[:240]})
+        lines = _apply(lines, checked)
+        first = sum(1 for c in checked if c.get("first"))
+        page = sum(1 for c in checked if c.get("final") == "page")
+        held = sum(1 for c in checked if c["backed"] and c.get("final") not in ("cells", "corrected"))
+        self.state["check"] = {"claims": len(claims), "checked": len(checked), "supported": held, "first": first,
+                               "page": page, "rechecked": held - first - page, "sources": sources,
+                               "corrected": corrected[:50], "judgement": judged[:50],
+                               "removed": removed[:50], "unsupported": [{"claim": r["claim"], "cites": r["cites"]}
+                                                                        for r in removed][:50],
+                               "invalid": len(invalid), "seconds": round(time.monotonic() - started, 1)}
+        self._keep_check(claims, notes)
+        said = f"{held} of {len(checked)} cited claims hold up"
+        if corrected or removed:
+            said += f"; {len(corrected)} corrected, {len(removed)} removed"
+        self.log("checked", said)
+        return "\n".join(lines)
 
-        def verdicts(batch: list[dict]) -> dict:
+    def _judge(self, claims: list[dict], evidence: dict, field: str, *, keyed: bool = False) -> None:
+        """The model's verdict on each claim, source by source, a few claims at a time (CHECK_BATCH, batches side by
+        side): ``claim[field]`` is the cited sources that back it. ``evidence`` is what each source says, by number,
+        or by (claim, number) when ``keyed`` (each claim's own passages)."""
+        def run(batch: list[dict]) -> None:
             if self.stopped():
-                return {}
-            used = sorted({n for c in batch for n in c["cites"]})
+                return
+            if keyed:
+                said = [(c, n, evidence[(c["id"], n)]) for c in batch for n in c["cites"] if (c["id"], n) in evidence]
+                shown = "\n\n".join(f"[{n}] (for claim {c['id']}, a passage of the page itself)\n{text}"
+                                     for c, n, text in said)
+            else:
+                used = sorted({n for c in batch for n in c["cites"] if n in evidence})
+                shown = "\n\n".join(f"[{n}] {evidence[n]}" for n in used)
             asked = ("Claims:\n" + "\n".join(f"{c['id']}. {c['claim'][:400]} (cites {', '.join(map(str, c['cites']))})"
-                                              for c in batch)
-                     + "\n\nNotes:\n" + "\n\n".join(f"[{n}] {notes[n]['note']}" for n in used))
+                                              for c in batch) + "\n\nNotes:\n" + shown)
             try:
                 found = structured(self.client(), CHECKER, asked, "citation_check", CHECK_SCHEMA,
                                    tools=self.tools, cancel=self.cancel)
-            except ResearchError:
-                return {}                         # unchecked, and counted as such below
-            return {v.get("id"): v.get("supported") for v in found.get("verdicts") or [] if isinstance(v, dict)}
-        batches = [claims[start:start + CHECK_BATCH] for start in range(0, len(claims), CHECK_BATCH)]
+            except Exception:                     # noqa: BLE001 -- unchecked, and counted as such
+                return
+            for verdict in found.get("verdicts") or []:
+                if not isinstance(verdict, dict):
+                    continue
+                claim = next((c for c in batch if str(c["id"]) == str(verdict.get("id"))), None)
+                if claim is None:
+                    continue
+                backed = verdict.get("backed_by")
+                missing = " ".join(str(verdict.get("missing") or "").split()).strip(" .")
+                why = " ".join(str(verdict.get("why") or "").split())
+                holds = verdict.get("holds")
+                if isinstance(holds, str) and holds.strip().lower() in ("true", "false"):
+                    holds = holds.strip().lower() == "true"
+                if holds is False and backed and says_backed(why) and not missing:
+                    holds = True                  # its own reason says every fact is there: the reason stands
+                    claim[field + "_contradiction"] = why[:240]
+                if why:
+                    claim[field + "_why"] = why[:240]
+                if isinstance(holds, bool):
+                    # Its own word on the whole claim: what it put in `missing` is only why, when it doesn't hold.
+                    missing = "" if holds else (missing or "a fact of it")
+                elif NOTHING_MISSING.match(missing):
+                    missing = ""
+                if isinstance(backed, (list, str)):
+                    # A claim holds only when its sources give all of it: one fact none gives, and none backs it.
+                    claim[field] = [] if missing else sorted({int(x) for x in _list(backed) if str(x).strip().isdigit()}
+                                                             & set(claim["cites"]))
+                    if missing:
+                        claim[field + "_missing"] = missing[:240]
+                elif isinstance(verdict.get("supported"), bool):          # a verdict for the claim as a whole
+                    claim[field] = list(claim["cites"]) if verdict["supported"] else []
+        batches = [claims[i:i + CHECK_BATCH] for i in range(0, len(claims), CHECK_BATCH)]
         with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="dgc-research-check") as pool:
-            found = list(pool.map(verdicts, batches))
-        unsupported = []
-        for batch, said in zip(batches, found):
-            for claim in batch:
-                claim["checked"] = claim["id"] in said
-                if said.get(claim["id"]) is False:
-                    unsupported.append(claim)
-        lines = report.split("\n")
-        for claim in unsupported:
-            lines[claim["line"]] = lines[claim["line"]].replace(claim["text"], UNCITE.sub("", claim["text"]), 1)
-        checked = [c for c in claims if c.get("checked")]
-        self.state["check"] = {"claims": len(claims), "checked": len(checked),
-                               "supported": len(checked) - len(unsupported),
-                               "unsupported": [{"claim": c["claim"][:300], "cites": c["cites"]} for c in unsupported][:50],
-                               "invalid": len(invalid)}
-        self.log("checked", f"{len(checked) - len(unsupported)} of {len(checked)} cited claims hold up")
-        return "\n".join(lines)
+            list(pool.map(run, batches))
+
+    def _check_cells(self, rows: list[dict], notes: dict) -> None:
+        """Table rows no source backs whole, cell by cell: each cell (its row's label with it) is checked against the
+        row's sources, then against their pages; a cell none gives becomes "not given", and the row stays.
+        ``row["cells"]``: {row (as now written), claim (its words), blanked ("Release (Aug 26)"), backed}."""
+        cells = []
+        for row in rows:
+            parts, heads = _cells(row["text"]), row.get("heads") or []
+            label = CITE.sub("", parts[0]).strip()
+            for k in range(1, len(parts)):
+                value = CITE.sub("", parts[k]).strip()
+                if not value.strip("—–-*_ ") or value.casefold() in ("not given", "n/a", "none", "unknown"):
+                    continue
+                head = heads[k] if k < len(heads) else ""
+                cells.append({"id": len(cells) + 1, "row_id": row["id"], "k": k, "value": value, "cites": row["cites"],
+                              "row": False, "claim": f"{heads[0] + ': ' if heads else ''}{label}; "
+                                                     f"{head + ': ' if head else ''}{value}"})
+        self._judge(cells, {n: notes[n]["note"] for n in notes}, "first")
+        loose = [c for c in cells if not c.get("first")]
+        evidence = {}
+        for cell in loose:
+            for n in cell["cites"][:3]:
+                found = self._passage(n, cell["claim"])
+                if found:
+                    evidence[(cell["id"], n)] = found
+        if evidence and not self.stopped():
+            self._judge([c for c in loose if any((c["id"], n) in evidence for n in c["cites"])], evidence, "page",
+                        keyed=True)
+        for row in rows:
+            parts, heads = _cells(row["text"]), row.get("heads") or []
+            mine = [c for c in cells if c["row_id"] == row["id"]]
+            if not mine or any("first" not in c for c in mine):
+                continue                              # a cell went unchecked: the row is left as it is
+            backed, blanked = set(), []
+            for cell in mine:
+                by = set(cell.get("first") or cell.get("page") or [])
+                backed |= by
+                if by:
+                    parts[cell["k"]] = cell["value"] + "".join(f" [{n}]" for n in sorted(by))
+                else:
+                    head = heads[cell["k"]] if cell["k"] < len(heads) else "a cell"
+                    blanked.append(f"{head} ({cell['value'][:60]})")
+                    parts[cell["k"]] = "not given"
+            parts[0] = CITE.sub("", parts[0]).strip()
+            text = "| " + " | ".join(parts) + " |"
+            row["cells"] = {"row": text, "claim": UNCITE.sub("", text).strip(" |"), "blanked": blanked,
+                            "backed": sorted(backed), "checked": [{"value": c["value"], "first": c.get("first"),
+                                                                   "page": c.get("page"), "why": c.get("first_why")}
+                                                                  for c in mine]}
+
+    def _passage(self, n: int, claim: str) -> str:
+        """The passage of page ``n`` (as read, kept on disk) most like ``claim``: its figures count most, then its
+        names, then its words. At most PASSAGE_CHARS, less in a small window."""
+        if self.pages is None:
+            return ""
+        try:
+            text = (self.pages / f"{int(n)}.txt").read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            return ""
+        size = max(800, min(PASSAGE_CHARS, int(self.room * fit_window.FILE_SHARE) * fit_window.CHARS_PER_TOKEN
+                            // (CHECK_BATCH * 2)))
+        return passage(text, claim, size)
+
+    def _repair(self, claims: list[dict], notes: dict) -> None:
+        """One call (more only when they don't fit the window) for the claims nothing backs: each is corrected to
+        what the sources say, with their citations, or deleted. ``claim["repair"]``: {action, text, claim, cites,
+        why}; a correction that cites nothing, or a table row that lost its cells, counts as deleted."""
+        budget = int(self.room * 0.5) * fit_window.CHARS_PER_TOKEN
+        groups, size, group = [], 0, []
+        for claim in claims:
+            related = [n for n in _related(claim["claim"], notes) if n not in claim["cites"]][:2]
+            claim["offered"] = claim["cites"] + related
+            need = 400 + 1000 * len(claim["offered"])
+            if group and size + need > budget:
+                groups.append(group)
+                group, size = [], 0
+            group.append(claim)
+            size += need
+        if group:
+            groups.append(group)
+
+        def run(group: list[dict]) -> None:
+            if self.stopped():
+                return
+            used = sorted({n for c in group for n in c["offered"]})
+            each = max(400, budget // max(1, len(used)) - 100)
+            asked = ("Claims no source backs:\n" + "\n".join(
+                f"{c['id']}. {c['claim'][:400]} (cited {', '.join(map(str, c['cites']))}"
+                + (f"; no source gives: {c.get('page_missing') or c.get('first_missing')}"
+                   if c.get("page_missing") or c.get("first_missing") else "") + ")"
+                for c in group) + "\n\nNotes:\n" + "\n\n".join(f"[{n}] {notes[n]['note'][:each]}" for n in used))
+            try:
+                found = structured(self.client(), REPAIRER, asked, "repair_claims", REPAIR_SCHEMA, tools=self.tools,
+                                   cancel=self.cancel)
+            except Exception:                     # noqa: BLE001 -- unrepaired: removed
+                return
+            for fix in found.get("repairs") or []:
+                if not isinstance(fix, dict):
+                    continue
+                claim = next((c for c in group if str(c["id"]) == str(fix.get("id"))), None)
+                if claim is None:
+                    continue
+                why = " ".join(str(fix.get("why") or "").split())[:200]
+                flag = lambda name: fix.get(name) is True or str(fix.get(name)).strip().lower() == "true"  # noqa: E731
+                if "as_written" in fix or "corrected" in fix:          # {as_written, corrected}; else {action, text}
+                    corrected = " ".join(str(fix.get("corrected") or "").split())
+                    if flag("judgement"):
+                        fix = {"action": "judgement"}
+                    elif flag("as_written") or (not corrected and says_backed(why)):
+                        fix = {"action": "keep"}      # the notes give it as written, its answer says: checked again
+                    else:
+                        fix = {"action": "correct", "text": corrected}
+                text = " ".join(str(fix.get("text") or "").split())
+                cites = sorted({int(x) for x in CITE.findall(text) if int(x) in notes})
+                text = UNCITE.sub(lambda m: m.group(0) if int(m.group(1)) in notes else "", text)
+                action = str(fix.get("action") or "").lower()
+                if action == "judgement":
+                    claim["repair"] = {"action": "judgement", "why": why}
+                    continue
+                if action == "correct" and _same(text, claim["text"]):
+                    action = "keep"                   # a "correction" that changes nothing isn't one
+                if action == "keep":                       # the notes give it as written, it says: checked again
+                    claim["repair"] = {"action": "keep", "text": claim["text"], "claim": claim["claim"],
+                                       "cites": claim["cites"], "why": why}
+                    continue
+                if action != "correct" or not cites:
+                    claim["repair"] = {"action": "delete", "why": why}
+                    continue
+                claim["repair"] = {"action": "correct", "text": text, "claim": UNCITE.sub("", text).strip(" |"),
+                                   "cites": cites, "why": why}
+        with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="dgc-research-repair") as pool:
+            list(pool.map(run, groups))
+
+    def _keep_check(self, claims: list[dict], notes: dict) -> None:
+        """Every verdict, beside the pages (never on the wire): each claim, its sources and their addresses, what
+        each check said, the passages the pages gave, the repair, and what became of it."""
+        if self.pages is None:
+            return
+        out = [{key: claim.get(key) for key in ("id", "text", "claim", "cites", "first", "first_why", "first_missing",
+                                                 "first_contradiction", "passages", "page", "page_why", "page_missing",
+                                                 "repair", "recheck", "recheck_why", "recheck_missing", "cells",
+                                                 "backed", "final", "now") if key in claim}
+               | {"urls": {n: notes[n]["url"] for n in claim["cites"] if n in notes}} for claim in claims]
+        try:
+            self.pages.mkdir(parents=True, exist_ok=True)
+            (self.pages / "check.json").write_text(json.dumps({"check": self.state.get("check"), "claims": out},
+                                                              ensure_ascii=False, indent=1), encoding="utf-8")
+        except OSError:
+            pass
 
     def how(self) -> str:
         """How it was researched, in one line under the report (`state["how"]`; the screen shows it after the report,
@@ -827,15 +1199,23 @@ class Research:
         whole, used = int(s.get("whole") or 0), len(s.get("notes") or [])
         minutes = float(s.get("seconds") or 0) / 60
         plural = lambda n, word: f"{n} {word}{'' if n == 1 else 's'}"            # noqa: E731
-        parts = [plural(rounds, "round") + " of searching and reading", f"{searches} search{'' if searches == 1 else 'es'}",
+        failed = int(s.get("failed") or 0)
+        parts = [plural(rounds, "round") + " of searching and reading",
+                 f"{searches} search{'' if searches == 1 else 'es'}" + (f" ({failed} failed)" if failed else ""),
                  plural(int(s.get("found") or 0), "source") + " found",
                  plural(opened, "page") + " read" + (f" ({whole} in full)" if whole < opened else " in full" if opened else ""),
                  f"{used} of them used", "under a minute" if minutes < 1 else plural(round(minutes), "minute")]
         line = "How this was researched: " + ", ".join(parts) + "."
+        if failed >= 3 and failed * 5 >= searches:
+            line += " Many searches failed, so it read from fewer sources than it could have."
         check = s.get("check") or {}
         if check.get("checked"):
             line += (f" Citations checked: {check['supported']} of {check['checked']} cited claims hold up against "
-                     "their sources.")
+                     "their sources")
+            fixed, gone = len(check.get("corrected") or []), len(check.get("removed") or [])
+            said = ([f"{fixed} corrected"] if fixed else []) + \
+                ([f"{gone} removed: no source backed {'it' if gone == 1 else 'them'}"] if gone else [])
+            line += ("; " + ", ".join(said) if said else "") + "."
         s["how"] = line
         return line
 
@@ -856,6 +1236,111 @@ def without_source_lines(report: str) -> str:
         if set(CITE.findall(found.group(1))) <= set(CITE.findall(rest)):
             lines[i] = None
     return "\n".join(x for x in lines if x is not None)
+
+
+def _claims(lines: list[str]) -> list[dict]:
+    """The report's cited claims: a sentence of prose, or a table row put as "column: value" under its table's heads
+    (a bare row, "Qwen3.8-27B | 27B | 262K | Apache 2.0", says too little to judge, and the check read supported rows
+    as unsupported). Each: id, line, text (as written, marks and all), claim (its words), cites, row."""
+    claims, heads = [], None
+    for line_no, line in enumerate(lines):
+        row = line.lstrip().startswith("|")
+        if row:
+            if line_no + 1 < len(lines) and TABLE_RULE.match(lines[line_no + 1]):
+                heads = _cells(CITE.sub("", line))
+                continue
+            if TABLE_RULE.match(line):
+                continue
+            parts = [line]
+        else:
+            heads = None
+            parts = re.split(r"(?<=[.!?])\s+(?=[A-Z*(\"“])", line)
+        for sentence in parts:
+            cited = sorted({int(x) for x in CITE.findall(sentence)})
+            words = UNCITE.sub("", sentence).strip(" |*-#")
+            if row and heads:
+                cells = _cells(CITE.sub("", line))
+                if len(cells) == len(heads):
+                    words = "; ".join(f"{head}: {cell}" if head else cell for head, cell in zip(heads, cells)
+                                      if cell.strip("—–-* ").strip())
+            if cited and len(words) > 3:
+                claims.append({"id": len(claims) + 1, "line": line_no, "text": sentence, "claim": words,
+                               "cites": cited, "row": row, "heads": heads if row else None})
+    return claims
+
+
+def _same(a: str, b: str) -> bool:
+    """Two wordings that say the same, marks, case and spacing aside."""
+    flat = lambda t: re.sub(r"[\W_]+", " ", UNCITE.sub("", str(t or ""))).casefold().strip()  # noqa: E731
+    return flat(a) == flat(b)
+
+
+def _apply(lines: list[str], claims: list[dict]) -> list[str]:
+    """The report with each claim as it now stands (``now``: fewer citations, corrected, or "" for gone). A table row
+    nothing backs goes whole; a list item left with nothing goes too."""
+    out: list[str | None] = list(lines)
+    touched = set()
+    for claim in claims:
+        i, now = claim["line"], claim.get("now")
+        if out[i] is None or now is None or now == claim["text"]:
+            continue
+        touched.add(i)
+        if claim["row"]:
+            out[i] = now or None
+        else:
+            out[i] = out[i].replace(claim["text"], now, 1)
+    for i in touched:
+        line = out[i]
+        if line is None:
+            continue
+        lead = lines[i][:len(lines[i]) - len(lines[i].lstrip())]        # the indent it had, as written
+        body = re.sub(r"[ \t]{2,}", " ", line.strip())
+        body = re.sub(r"\s+([.,;:])", r"\1", body)
+        out[i] = None if re.fullmatch(r"(?:[-*•+]|\d{1,2}[.)])?[\s*_]*", body) else lead + body
+    return [line for line in out if line is not None]
+
+
+STOP = frozenset("about above after again against among because before being below between could during every "
+                 "first other their there these those through under until where which while would should since "
+                 "still while within without whose".split())
+NOTHING_MISSING = re.compile(r"(?i)^(?:|none|nothing|n/?a|-|—|no\b.*\bmissing|nothing\b.*\bmissing|all\b.*\b(?:given|backed|"
+                             r"supported|stated))\W*$")
+FIGURE = re.compile(r"\d[\d,.]*\d%?|\d%")
+
+
+def _keys(text: str) -> tuple[set, set, set]:
+    """A claim's figures (without thousands commas), names and longer words: what to look for on a page."""
+    figures = {x.replace(",", "") for x in FIGURE.findall(text)}
+    names = set(re.findall(r"\b[A-Z][A-Za-z0-9.-]{2,}", text))
+    words = {w.lower() for w in re.findall(r"[A-Za-z]{5,}", text)} - STOP
+    return figures, names, words
+
+
+def _score(chunk: str, keys: tuple[set, set, set]) -> int:
+    figures, names, words = keys
+    flat, low = chunk.replace(",", ""), chunk.lower()
+    return 3 * sum(f in flat for f in figures) + 2 * sum(n in chunk for n in names) + sum(w in low for w in words)
+
+
+def passage(text: str, claim: str, size: int) -> str:
+    """The stretch of ``text`` (at most ``size`` characters) most like ``claim``: where most of its figures, names
+    and words are. A page that short is all of it."""
+    if len(text) <= size:
+        return text
+    keys, step = _keys(claim), max(200, size // 3)
+    best, at = -1, 0
+    for start in range(0, len(text) - size + step, step):
+        score = _score(text[start:start + size], keys)
+        if score > best:
+            best, at = score, start
+    return text[at:at + size]
+
+
+def _related(claim: str, notes: dict) -> list[int]:
+    """Notes most like a claim, best first (for a repair that may cite another note)."""
+    keys = _keys(claim)
+    scored = sorted(((_score(n["note"], keys), number) for number, n in notes.items()), reverse=True)
+    return [number for score, number in scored if score > 0]
 
 
 SOURCE_HEAD = re.compile(r"(?i)^[*_]*(?:sources?|refs?|references?|citations?)[*_]*$")

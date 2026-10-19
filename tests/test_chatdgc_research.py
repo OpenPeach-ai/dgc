@@ -173,7 +173,8 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual("".join(written), "".join(REPORT), "the report streams like any reply")
         text = done["text"]
         self.assertNotIn("[7]", text, "a number that isn't a note is dropped")
-        self.assertIn("The flat needs no UK visa.", text, "a claim its source doesn't support loses the citation")
+        self.assertNotIn("UK visa", text, "a claim no source backs, and that can't be corrected, goes: it isn't left "
+                                          "standing uncited, looking like fact")
         self.assertIn("A 2% surcharge applies to non-residents [2]. Banks also charge fees.", text)
         self.assertIn("| SDLT surcharge | 2% [2] |", text, "a table row is checked whole")
         check = state["check"]
@@ -294,7 +295,8 @@ class ResearchTests(unittest.TestCase):
         exported = self.engine.export(chat["id"], "report", reply["id"])
         self.assertTrue(exported.startswith("# Buying a London flat from India"))
         self.assertIn("## Sources\n\n1. [LRS](https://rbi.org.in/lrs)\n2. [SDLT](https://gov.uk/sdlt)", exported)
-        self.assertIn("Citations checked: 4 of 5 cited claims hold up against their sources.", exported)
+        self.assertIn("Citations checked: 4 of 5 cited claims hold up against their sources; 1 removed: no source "
+                      "backed it.", exported)
         # Its words as the chat shows them: no citation marks (its sources are listed at its end); the reply keeps them.
         self.assertIn("under the LRS.", exported)
         self.assertNotRegex(exported, r"\[\d{1,3}\]")

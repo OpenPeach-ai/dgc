@@ -639,6 +639,13 @@ class ChatEngine:
                 return
         self.store.delete(chat_id)
         self._canvases.remove_chat(chat_id)
+        if chat_canvas.CHAT_ID.fullmatch(str(chat_id)):
+            import shutil
+            shutil.rmtree(self.store.root / "research" / chat_id, ignore_errors=True)
+
+    def _research_pages(self, chat_id: str, message_id: str):
+        """Where a research reply keeps the pages it read (and its check's verdicts): the chat's own folder."""
+        return self.store.root / "research" / chat_id / re.sub(r"[^A-Za-z0-9_-]", "", str(message_id))[:80]
 
     # -- a turn
 
@@ -780,8 +787,35 @@ class ChatEngine:
 
     # -- deep research (research.py): a plan to edit or start, then rounds of reading, then a checked report
 
+    def _hosted(self, client) -> bool:
+        """Whether the model runs somewhere else (a :cloud model, or a server that isn't this machine or on its
+        network), so a bigger window costs none of the user's memory."""
+        import ipaddress
+        from urllib.parse import urlsplit
+        name = str(getattr(client, "model", "") or "").lower()
+        if name.endswith((":cloud", "-cloud")):
+            return True
+        host = (urlsplit(str(getattr(client, "base_url", "") or getattr(self.config, "base_url", "") or "")).hostname
+                or "").lower()
+        if "." not in host or host.endswith((".local", ".lan", ".home", ".internal")):
+            return False                          # localhost, a machine on the network by its name
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return True                           # a provider's address
+        return not (address.is_private or address.is_loopback or address.is_link_local)
+
     def _research_room(self, client) -> int:
-        room, _ = fit_window.window(client, self._preset())
+        """The window research works in. The model decides how deep it goes: on a hosted model, research uses up to
+        HOSTED_WINDOW of the model's own window (the chat's window, Settings -> ChatDGC -> Window, is about memory on
+        this machine), and a bigger window reads more pages (research.depths)."""
+        room, limit = fit_window.window(client, self._preset())
+        if limit > room and self._hosted(client):
+            room = max(room, min(limit, research.HOSTED_WINDOW))
+            try:
+                client.context_size = room
+            except Exception:                     # noqa: BLE001 -- a client without the setting still works
+                pass
         if room < research.MIN_WINDOW:
             raise ChatEngineError("Deep research needs a context window of at least 16k: choose 32k or more in "
                                   "Settings \u2192 ChatDGC \u2192 Window, or a model that has one.")
@@ -801,7 +835,7 @@ class ChatEngine:
         chat = self._chat(chat_id)
         self._choose(chat, model, thinking, "off")
         client = self.client(chat.get("model") or None)
-        self._research_room(client)
+        room = self._research_room(client)
         if not chat["messages"] and chat["title"] in ("New chat", "Temporary chat") and not chat.get("temporary"):
             chat["title"] = title_from(text)
         context = "\n\n".join(self._plain(m) for m in chat["messages"][-6:])[-6000:]
@@ -823,10 +857,11 @@ class ChatEngine:
             if cancel is not None and cancel.is_set():
                 raise ChatEngineError("Stopped before the plan was made.") from exc
             raise ChatEngineError(_failure_text(exc)) from exc
-        depth = research.depth_of(self.config.get("chatdgc_research_depth"))
+        depth, budgets = research.depth_of(self.config.get("chatdgc_research_depth")), research.depths(room)
         state = {"status": "planned", "question": text, "plan": plan, "thinking": thinking_level, "depth": depth,
-                 "budget": dict(research.DEPTHS[depth])}
-        reply = {"id": reply_id, "role": "assistant", "text": research.plan_text(plan, depth), "created_at": now(),
+                 "budget": budgets[depth], "depths": budgets}
+        reply = {"id": reply_id, "role": "assistant", "text": research.plan_text(plan, depth, budgets[depth]),
+                 "created_at": now(),
                  "model": name or chat.get("model") or "", "finish": "stop", "research": state}
         chat["messages"].append(reply)
         self._save(chat)
@@ -855,14 +890,15 @@ class ChatEngine:
                 raise ChatEngineError(str(exc)) from exc
             if isinstance(plan, dict) and plan.get("depth"):
                 state["depth"] = research.depth_of(plan.get("depth"))
-        if state.get("status") == "planned" or not isinstance(state.get("budget"), dict):
-            state["depth"] = research.depth_of(state.get("depth") or self.config.get("chatdgc_research_depth"))
-            state["budget"] = dict(research.DEPTHS[state["depth"]])
         if write and not state.get("notes"):
             raise ChatEngineError("There's nothing found yet to write from.")
         model = chat.get("model") or None
         client = self.client(model)
         room = self._research_room(client)
+        if state.get("status") == "planned" or not isinstance(state.get("budget"), dict):
+            state["depth"] = research.depth_of(state.get("depth") or self.config.get("chatdgc_research_depth"))
+            state["depths"] = research.depths(room)
+            state["budget"] = state["depths"][state["depth"]]
         name = str(getattr(client, "model", "") or "")
         if on_start is not None:
             on_start(None, message_id)
@@ -879,9 +915,19 @@ class ChatEngine:
         # Research reads more results a search than a reply does (the default search; a stand-in is used as it is).
         searcher = (lambda query: self._search(query, n=research.RESULTS_PER_QUERY)) \
             if self._searcher == self._search else self._searcher
-        run = research.Research(self, state, client_for=lambda: self.client(model), room=room, search=searcher,
+        def client_for():
+            """Each step's own connection, in research's window (sent to Ollama as num_ctx)."""
+            made = self.client(model)
+            try:
+                made.context_size = room
+            except Exception:                     # noqa: BLE001
+                pass
+            return made
+        # The pages as read, for the citation check's second look: beside the chat, never in the reply.
+        pages = None if chat.get("temporary") else self._research_pages(chat["id"], message_id)
+        run = research.Research(self, state, client_for=client_for, room=room, search=searcher,
                                 fetch=self._fetcher, said=said, save=lambda _: self._save(chat), cancel=cancel,
-                                tools=name not in self._toolless)
+                                tools=name not in self._toolless, pages=pages)
         with self._lock:
             self._researching[(chat["id"], message_id)] = run
         try:
