@@ -12,6 +12,33 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 - **A Pip report is never lost to its summary.** A summary over 4,000 characters is cut at its last sentence that fits and marked, and a missing one is written from the findings, each with a note in the report's limitations. Before, "report summary must be text between 1 and 4000 characters" failed the whole run, and even the one format repair never ran (three failed runs in a row on a real project).
 
+### Pips: eyes and a cursor (Pips API 53)
+
+- **A Pip whose model can see uses its computer by sight too.** Besides the page's text and refs, it can `look` at its
+  browser (a JPEG of at most 1280 × 800) and `click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag` and
+  `scroll_at` where it points, each answered with a new screenshot that marks the mouse with a red ring. A drag moves
+  in real steps, so canvas and drag-and-drop editors register it (an HTML drag the page starts is finished with drag
+  events). `type` with no ref types into what has focus. Only a run whose own model lists `vision` is offered the
+  position steps. Measured on 23 targets: deepseek-v4.1-flash:cloud 21/23 (0.8 s a click), qwen3.8:27b 23/23
+  (8.7 s), qwen3-vl:8b 11/23 (109 s; it thinks before every answer).
+- **Each model is asked for points in its own scale.** Qwen3's vision models answer on 0-1000 across the image even
+  when asked for pixels (qwen3.8 hit 0/23 read as pixels, 23/23 as 0-1000); DGC tells each model its scale and catches
+  an answer that can only be the other one.
+- **Passwords and payment cards are blacked out of every screenshot a model sees**: password, card, expiry, CVC and
+  one-time-code fields in the page and in every frame (including another site's, asked through its own session),
+  and the whole of a payment provider's frame. The mask is drawn in DGC's own isolated world, never on the page, and
+  a screen it can't mask is not sent.
+- **`upload`** puts a file from the Pip's Files into a page's file field or the button that opens its file chooser;
+  the chat's photos are in Files › From chat. Choosing sends nothing; the page's upload is held for the user.
+- **A text-only Pip says so in one line, with a card.** Asked to look, or sent photos, a Pip whose model can't see
+  replies "**glm-5.3:cloud can't see images.**" with three choices: use a model that can see for that (the vision
+  relay, which answers in words and names points), switch the Pip to it, or not now. DGC picks the model from the
+  user's own, the same kind first; the answer is kept per Pip (`get_pip_eyes`, `set_pip_eyes`).
+- **You see where it clicks.** `use_pip_computer_view` frames carry `pointer`, op `pointer` returns it without a frame,
+  and `list_pip_computer_frames` takes `pointers`, so the live view and "What it saw" draw the Pip's cursor.
+- **A payment is never Always allow.** A held submit that carries a card number now refuses Always allow
+  (`asks_every_time`), and no grant for that site sends one; before, the browser's payments could be always allowed.
+
 ### Pips: phone photos and bigger files in a Pip's chat (Pips API 52)
 
 - **A Pip's chat takes what the Work chat takes.** Photos and files no longer ride inside the request, where the

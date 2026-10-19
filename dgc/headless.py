@@ -250,7 +250,10 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 52: send_pip_message takes `spooled_images` and `spooled_files` (files the editor put in the image spool,
 # as the Work chat's prompt does): 8 MiB a photo and 32 MiB of photos a message, documents up to 16 MiB, an iPhone
 # photo (HEIC) kept as a JPEG; get_pip_message_image takes `as_file` and answers with the kept file's path.
-PIPS_API_VERSION = 52
+# API 53: a Pip's eyes and cursor (pip_eyes): get_pip_eyes and set_pip_eyes (how a Pip whose model reads text only
+# sees: ask, relay or off); list_pip_computer_frames takes `pointers` (each step that acted by position says where);
+# use_pip_computer_view takes op "pointer" (where the Pip last acted, no frame) and its frames carry `pointer`.
+PIPS_API_VERSION = 53
 
 
 def _pips_platform_supported() -> bool:

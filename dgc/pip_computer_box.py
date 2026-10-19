@@ -51,6 +51,93 @@ MAX_HELD = 8                          # held writes per browser; more are droppe
 MAX_SUMMARY_FIELDS = 24
 SECRET_FIELD = re.compile(r"pass|pwd|secret|token|otp|cvv|cvc|pin\b|card|iban|ssn", re.I)
 
+# What a Pip that can see is never shown (BoxedBrowser.screenshot_for_model): these run in DGC's own isolated
+# world, so the page's scripts can neither see them nor change the built-ins they use.
+# A password, card number, expiry, security code or one-time code: by its type, its autocomplete token, its
+# name, label or placeholder, or a value that looks like a card number. A frame a payment provider puts on the
+# page (Stripe, Braintree, Adyen...) is covered whole.
+_SECRET_BOXES_JS = r"""function () {
+  const NAME = /pass(word|wd|code)?|pwd|otp|one.?time|cvv|cvc|csc|card.?(num|no|number)|cc.?(num|no|number)|security.?code|expir|exp.?(date|month|year|mm|yy)|iban|ssn|\bpin\b/i;
+  const FRAME = /stripe|braintree|adyen|checkout\.com|paypal|squareup|razorpay|recurly|spreedly|worldpay|cybersource|authorize\.net|klarna|verygoodsecurity|basistheory|payment|card|cvc|secure.?field|pci/i;
+  const secret = (el) => {
+    const type = (el.getAttribute('type') || el.type || '').toLowerCase();
+    if (type === 'password') return true;
+    const auto = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/);
+    if (auto.some((t) => /^(cc-|current-password$|new-password$|one-time-code$)/.test(t))) return true;
+    const words = [el.name, el.id, el.getAttribute('aria-label'), el.getAttribute('placeholder'),
+                   el.getAttribute('data-elements-stable-field-name')].join(' ');
+    if (NAME.test(words)) return true;
+    if (/\d{4}\s?\d{4}\s?\d{4}/.test(el.getAttribute('placeholder') || '')) return true;
+    const digits = String(el.value || '').replace(/[\s-]/g, '');
+    return /^\d{13,19}$/.test(digits);
+  };
+  const shown = (r) => r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0;
+  const boxes = [];
+  const visit = (doc, ox, oy, depth) => {
+    for (const el of doc.querySelectorAll('input, textarea, select')) {
+      if (!secret(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (shown(r)) boxes.push([ox + r.left, oy + r.top, r.width, r.height]);
+    }
+    // Frames are asked one by one (screenshot_for_model): only a payment provider's is covered whole here.
+    for (const f of doc.querySelectorAll('iframe, frame')) {
+      const r = f.getBoundingClientRect();
+      if (shown(r) && FRAME.test([f.src, f.name, f.title, f.id].join(' '))) boxes.push([ox + r.left, oy + r.top, r.width, r.height]);
+    }
+  };
+  visit(document, 0, 0, 0);
+  return {boxes: boxes.slice(0, 200), width: window.innerWidth, height: window.innerHeight,
+          ratio: window.devicePixelRatio || 1};
+}"""
+# The screenshot redrawn in an OffscreenCanvas (never on the page): fitted to its size, the boxes blacked out.
+_COMPOSE_JS = r"""async function (b64, boxes, width, height, perCss, quality, mark) {
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const picture = await createImageBitmap(new Blob([bytes], {type: 'image/jpeg'}));
+  const canvas = new OffscreenCanvas(width, height), g = canvas.getContext('2d');
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+  g.drawImage(picture, 0, 0, width, height);
+  g.fillStyle = '#000';
+  for (const b of boxes) g.fillRect(b[0] * perCss - 3, b[1] * perCss - 3, b[2] * perCss + 6, b[3] * perCss + 6);
+  if (mark) {
+    // Where the mouse is after the Pip's last step (and the path of a drag): a red ring it can see.
+    const x = mark[0] * perCss, y = mark[1] * perCss;
+    if (mark.length > 3 && mark[2] !== null) {
+      g.setLineDash([5, 4]); g.lineWidth = 2; g.strokeStyle = 'rgba(230, 30, 30, 0.75)';
+      g.beginPath(); g.moveTo(mark[2] * perCss, mark[3] * perCss); g.lineTo(x, y); g.stroke(); g.setLineDash([]);
+    }
+    g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.lineWidth = 4; g.strokeStyle = 'rgba(255, 255, 255, 0.9)'; g.stroke();
+    g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.lineWidth = 2; g.strokeStyle = 'rgba(230, 30, 30, 0.95)'; g.stroke();
+  }
+  const blob = await canvas.convertToBlob({type: 'image/jpeg', quality: quality});
+  const out = new Uint8Array(await blob.arrayBuffer());
+  let text = '';
+  for (let i = 0; i < out.length; i += 0x8000) text += String.fromCharCode.apply(null, out.subarray(i, i + 0x8000));
+  return {data: btoa(text), width: width, height: height};
+}"""
+# What is at a point, in a few words: its role and its name, never what a field holds.
+_ELEMENT_AT_JS = r"""function (x, y) {
+  let doc = document, el = document.elementFromPoint(x, y), ox = 0, oy = 0;
+  for (let depth = 0; el && /^(IFRAME|FRAME)$/.test(el.tagName) && depth < 4; depth++) {
+    let inner = null;
+    try { inner = el.contentDocument; } catch (e) { inner = null; }
+    if (!inner) return 'a frame from another site';
+    const r = el.getBoundingClientRect(); ox += r.left; oy += r.top;
+    doc = inner; el = inner.elementFromPoint(x - ox, y - oy);
+  }
+  if (!el) return 'nothing (outside the page)';
+  const target = el.closest('a, button, input, textarea, select, label, summary, [role], [onclick], [contenteditable], canvas, video, img, svg') || el;
+  const tag = target.tagName.toLowerCase();
+  const type = (target.getAttribute('type') || '').toLowerCase();
+  const role = target.getAttribute('role') || ({a: 'link', button: 'button', textarea: 'text box', select: 'dropdown',
+    canvas: 'canvas', img: 'image', svg: 'icon', label: 'label', video: 'video', summary: 'summary'})[tag]
+    || (tag === 'input' ? (['checkbox', 'radio', 'file', 'range', 'color'].includes(type) ? type : ['submit', 'button', 'reset'].includes(type) ? 'button' : 'text field') : tag);
+  const clean = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const name = clean(target.getAttribute('aria-label') || target.getAttribute('alt') || target.getAttribute('title')
+    || (tag === 'input' || tag === 'textarea' ? target.getAttribute('placeholder') || target.getAttribute('name') : target.innerText));
+  return role + (name ? ' "' + name + '"' : '');
+}"""
+
 # Inside the box: a TCP listener for Chromium's --proxy-server, relaying each connection to the
 # Unix socket DGC bound into the box. Plain stdlib Python; it is the only process besides Chrome.
 FORWARDER = r'''
@@ -679,6 +766,10 @@ class BoxedBrowser(BrowserSession):
         self._pipe: _Pipe | None = None
         self._attached: dict[str, str] = {}      # targetId -> its first (gated) session
         self._pages: set[str] = set()             # the targets that are tabs (their main frame's id)
+        self._kinds: dict[str, str] = {}          # targetId -> page, iframe, worker...
+        self._parents: dict[str, str] = {}        # targetId -> the session it was attached from ("" the browser)
+        self._drag_data = None                    # an HTML drag Chrome caught during drag() (Input.dragIntercepted)
+        self._chooser = None                      # a file chooser the page opened while DGC answers it (set_files)
         # Careful mode (pip_careful), during a run: url -> True when its site may load. A page on any
         # other site waits, like a submit, until the user allows the site.
         self.site_gate = None
@@ -794,6 +885,8 @@ class BoxedBrowser(BrowserSession):
             info = params.get("targetInfo", {}) or {}
             if child:
                 self._attached.setdefault(str(info.get("targetId", "")), child)
+                self._kinds.setdefault(str(info.get("targetId", "")), str(info.get("type", "")))
+                self._parents.setdefault(str(info.get("targetId", "")), str(message.get("sessionId", "")))
                 if info.get("type") == "page":
                     self._pages.add(str(info.get("targetId", "")))
                 self._guard(child)
@@ -801,6 +894,10 @@ class BoxedBrowser(BrowserSession):
                 self._fire("Runtime.runIfWaitingForDebugger", {}, child)
         elif method == "Fetch.requestPaused":
             self._gate(params, message.get("sessionId", ""))
+        elif method == "Input.dragIntercepted":
+            self._drag_data = params.get("data")
+        elif method == "Page.fileChooserOpened" and isinstance(params.get("backendNodeId"), int):
+            self._chooser = params
         elif method == "Page.frameNavigated" and not (params.get("frame") or {}).get("parentId"):
             self.acted_at = 0.0          # a new page: its own requests are not the last action's effect
         super()._observe(message)
@@ -875,17 +972,91 @@ class BoxedBrowser(BrowserSession):
         if held is not None:
             self._fire("Fetch.failRequest", {"requestId": held.request_id, "errorReason": "BlockedByClient"}, held.session_id)
 
-    # -- the user's own hands (live view); the model never uses these ----------------------
+    # -- hands by position: the user's live view, and a Pip that can see --------------------
+    # Every one of these starts the window in which a write is the Pip's (or the user's), so a
+    # submit a click by position causes is held exactly as one a click on a ref causes.
 
-    def click_at(self, x: float, y: float) -> None:
+    def click_at(self, x: float, y: float, *, button: str = "left", count: int = 1) -> None:
         self.acted_at = time.monotonic()
-        for kind in ("mousePressed", "mouseReleased"):
-            self.command("Input.dispatchMouseEvent", {"type": kind, "x": float(x), "y": float(y),
-                                                      "button": "left", "clickCount": 1})
+        x, y = float(x), float(y)
+        self.command("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "button": "none", "buttons": 0})
+        mask = {"left": 1, "right": 2, "middle": 4}.get(button, 1)
+        for click in range(1, max(1, int(count)) + 1):
+            for kind in ("mousePressed", "mouseReleased"):
+                self.command("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": button,
+                                                          "buttons": mask if kind == "mousePressed" else 0,
+                                                          "clickCount": click})
+
+    def hover_at(self, x: float, y: float) -> None:
+        self.acted_at = time.monotonic()
+        self.command("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": float(x), "y": float(y),
+                                                  "button": "none", "buttons": 0})
+
+    def drag(self, x1: float, y1: float, x2: float, y2: float, *, steps: int = 12) -> None:
+        """Press at one point, move there in real steps, release at the other: canvas editors (a T-shirt
+        designer, a drawing app) only see a drag that moves. An HTML drag-and-drop the page starts is
+        caught by Chrome and finished with drag events at the same points."""
+        self.acted_at = time.monotonic()
+        x1, y1, x2, y2 = float(x1), float(y1), float(x2), float(y2)
+        steps = max(2, min(int(steps), 40))
+        self._drag_data = None
+        intercept = True
+        try:
+            self.command("Input.setInterceptDrags", {"enabled": True})
+        except BrowserError:
+            intercept = False                   # an older Chrome: mouse moves only
+        try:
+            self.command("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x1, "y": y1, "button": "none", "buttons": 0})
+            self.command("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x1, "y": y1, "button": "left",
+                                                      "buttons": 1, "clickCount": 1})
+            dragging = False
+            for step in range(1, steps + 1):
+                x = x1 + (x2 - x1) * step / steps
+                y = y1 + (y2 - y1) * step / steps
+                if self._drag_data is not None:
+                    self.command("Input.dispatchDragEvent", {"type": "dragOver" if dragging else "dragEnter",
+                                                             "x": x, "y": y, "data": self._drag_data})
+                    dragging = True
+                else:
+                    self.command("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "button": "left",
+                                                              "buttons": 1})
+                self._pump(0.02)
+            if self._drag_data is not None:
+                self.command("Input.dispatchDragEvent", {"type": "drop", "x": x2, "y": y2, "data": self._drag_data})
+            self.command("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x2, "y": y2, "button": "left",
+                                                      "buttons": 0, "clickCount": 1})
+        finally:
+            self._drag_data = None
+            if intercept:
+                try:
+                    self.command("Input.setInterceptDrags", {"enabled": False})
+                except BrowserError:
+                    pass
+        self.acted_at = time.monotonic()
+
+    def scroll_at(self, x: float, y: float, dy: float, dx: float = 0.0) -> None:
+        self.acted_at = time.monotonic()
+        self.command("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": float(x), "y": float(y),
+                                                  "deltaX": float(dx), "deltaY": float(dy)})
 
     def insert_text(self, text: str) -> None:
         self.acted_at = time.monotonic()
         self.command("Input.insertText", {"text": str(text)[:2000]})
+
+    def type_into_focus(self, text: str) -> None:
+        """Type into whatever has focus, a key at a time (an editor's canvas text box listens for keys)."""
+        self.acted_at = time.monotonic()
+        text = str(text)[:2000]
+        if len(text) > 400:
+            self.command("Input.insertText", {"text": text})
+            return
+        for ch in text:
+            if ch == "\n":
+                self.press("enter")
+                continue
+            self.command("Input.dispatchKeyEvent", {"type": "keyDown", "text": ch, "unmodifiedText": ch, "key": ch})
+            self.command("Input.dispatchKeyEvent", {"type": "keyUp", "key": ch})
+        self.acted_at = time.monotonic()
 
     def scroll_by(self, dy: float) -> None:
         self.command("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": self.viewport[0] / 2,
@@ -896,6 +1067,248 @@ class BoxedBrowser(BrowserSession):
         import base64
         result = self.command("Page.captureScreenshot", {"format": "jpeg", "quality": quality}, timeout=30)
         return base64.b64decode(result.get("data", ""))
+
+    # -- the Pip's eyes ------------------------------------------------------------------------
+
+    def css_viewport(self) -> tuple[float, float]:
+        """The page's visible area in CSS pixels: what a click at (x, y) is measured against."""
+        metrics = self.command("Page.getLayoutMetrics")
+        view = metrics.get("cssLayoutViewport") or metrics.get("layoutViewport") or {}
+        width, height = float(view.get("clientWidth") or 0), float(view.get("clientHeight") or 0)
+        if width <= 0 or height <= 0:
+            width, height = float(self.viewport[0]), float(self.viewport[1])
+        return width, height
+
+    def _isolated(self) -> int:
+        """A fresh isolated world in the page: DGC's own scripts there see the page's DOM with the browser's
+        own built-ins, never the page's scripts, and the page sees nothing of them."""
+        tree = self.command("Page.getFrameTree")
+        frame_id = ((tree.get("frameTree") or {}).get("frame") or {}).get("id")
+        if not frame_id:
+            raise BrowserError("the page has no frame to look at")
+        made = self.command("Page.createIsolatedWorld", {"frameId": frame_id, "worldName": "dgc-eyes",
+                                                         "grantUniveralAccess": False})
+        return int(made["executionContextId"])
+
+    def _in_world(self, context: int, function: str, *args, timeout: float = 20) -> object:
+        result = self.command("Runtime.callFunctionOn", {
+            "functionDeclaration": function, "executionContextId": context, "awaitPromise": True,
+            "returnByValue": True, "arguments": [{"value": arg} for arg in args]}, timeout=timeout)
+        if result.get("exceptionDetails"):
+            raise BrowserError("the screen could not be prepared")
+        return (result.get("result") or {}).get("value")
+
+    def secret_boxes(self) -> dict:
+        """Where passwords, card numbers, security codes and one-time codes are on the screen, in CSS
+        pixels ({boxes: [[x, y, width, height]...], width, height, ratio}): fields in the page and in each
+        of its frames (same site or not, in this process or another), and the whole of every frame a
+        payment provider puts on the page. ``width``/``height`` are the window's CSS size, ``ratio`` its
+        device pixels per CSS pixel. A frame DGC can't ask is covered whole."""
+        found = self._in_world(self._isolated(), _SECRET_BOXES_JS)
+        if not isinstance(found, dict):
+            raise BrowserError("the screen could not be checked for passwords")
+        boxes = list(found.get("boxes") or [])
+        # Frames in this tab's own process (same site, or another site Chrome keeps here): each asked in
+        # its own isolated world, its fields placed by the box of the frame that holds them.
+        tree = self.command("Page.getFrameTree").get("frameTree") or {}
+        pending = list(tree.get("childFrames") or [])
+        while pending:
+            node = pending.pop()
+            pending.extend(node.get("childFrames") or [])
+            frame_id = str((node.get("frame") or {}).get("id", ""))
+            if not frame_id or frame_id in self._attached:
+                continue                       # a frame from another site in its own process: below
+            origin = self._frame_origin(frame_id)
+            if origin is None:
+                continue                       # not on the screen
+            try:
+                made = self.command("Page.createIsolatedWorld", {"frameId": frame_id, "worldName": "dgc-eyes",
+                                                                 "grantUniveralAccess": False})
+                inner = self._in_world(int(made["executionContextId"]), _SECRET_BOXES_JS)
+            except (BrowserError, KeyError, TypeError, ValueError, socket.timeout):
+                inner = None
+            if not isinstance(inner, dict):
+                boxes.append(origin[2])        # couldn't ask it: all of it
+                continue
+            boxes.extend([origin[0] + float(b[0]), origin[1] + float(b[1]), float(b[2]), float(b[3])]
+                         for b in (inner.get("boxes") or [])[:50])
+        # A frame from another site in its own process: asked through its own session, placed by the box of
+        # the frame on this tab that holds it (the frame itself, or the one it is nested in).
+        page_session = getattr(self._ws, "session_id", "")
+        for target, session in list(self._attached.items()):
+            if self._kinds.get(target) != "iframe":
+                continue
+            top, hops = target, 0
+            while self._parents.get(top) not in (page_session, None) and hops < 8:
+                parent = self._session_target(self._parents.get(top))
+                if parent is None:
+                    break
+                top, hops = parent, hops + 1
+            if self._parents.get(top) != page_session:
+                continue                      # a frame of another tab
+            try:
+                inner = self._session_eval(session, "(" + _SECRET_BOXES_JS + ")()")
+            except (BrowserError, socket.timeout, OSError):
+                inner = None
+            if isinstance(inner, dict) and not inner.get("boxes"):
+                continue
+            origin = self._frame_origin(top)
+            if origin is None:
+                continue
+            if top == target and isinstance(inner, dict):
+                boxes.extend([origin[0] + float(b[0]), origin[1] + float(b[1]), float(b[2]), float(b[3])]
+                             for b in inner["boxes"][:50])
+            else:
+                boxes.append(origin[2])       # nested deeper, or it would not answer: all of it
+        found["boxes"] = [[float(v) for v in b[:4]] for b in boxes if isinstance(b, (list, tuple)) and len(b) >= 4][:200]
+        return found
+
+    def _frame_origin(self, frame_id: str):
+        """Where a frame's content starts on the screen, and its whole box: (left, top, [x, y, w, h]), or
+        None when it isn't shown. A frame DGC can't place covers the whole screen."""
+        try:
+            owner = self.command("DOM.getFrameOwner", {"frameId": frame_id})
+            model = self.command("DOM.getBoxModel", {"backendNodeId": owner["backendNodeId"]}).get("model") or {}
+        except BrowserError as error:
+            if "box model" in str(error).lower() or "could not compute" in str(error).lower():
+                return None                    # not rendered (display: none)
+            return 0.0, 0.0, [0.0, 0.0, 1e5, 1e5]
+        except (KeyError, TypeError):
+            return 0.0, 0.0, [0.0, 0.0, 1e5, 1e5]
+        try:
+            content = [float(v) for v in model.get("content") or []]
+            border = [float(v) for v in model.get("border") or []]
+            left, top = min(content[0::2]), min(content[1::2])
+            bx, by = min(border[0::2]), min(border[1::2])
+            return left, top, [bx, by, max(border[0::2]) - bx, max(border[1::2]) - by]
+        except (ValueError, IndexError):
+            return 0.0, 0.0, [0.0, 0.0, 1e5, 1e5]
+
+    def _session_target(self, session):
+        for target, known in self._attached.items():
+            if known == session:
+                return target
+        return None
+
+    def _session_eval(self, session: str, expression: str):
+        """Evaluate in another target's session (a frame from another site); its reply comes back by id."""
+        self._next_id += 1
+        want = self._next_id
+        self._pipe.send({"id": want, "method": "Runtime.evaluate", "sessionId": session,
+                         "params": {"expression": expression, "returnByValue": True, "awaitPromise": True}})
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            self._pipe.settimeout(max(0.05, deadline - time.monotonic()))
+            message = self._pipe.recv()
+            if message.get("id") == want:
+                if "error" in message or (message.get("result") or {}).get("exceptionDetails"):
+                    raise BrowserError("frame evaluation failed")
+                return ((message.get("result") or {}).get("result") or {}).get("value")
+            self._observe(message)
+        raise socket.timeout("frame evaluation timed out")
+
+    def screenshot_for_model(self, *, max_width: int = 1280, max_height: int = 800, quality: int = 70,
+                             mark: dict | None = None) -> dict:
+        """What a Pip that can see is shown: the browser's visible page as a JPEG of at most
+        max_width x max_height, with every password and payment-card field blacked out first.
+
+        Returns {data, width, height, scale, masked}: ``scale`` is image pixels per CSS pixel, so a point
+        the model names in the image is (x / scale, y / scale) on the page. A screen whose secret fields
+        can't be blacked out is never returned: BrowserError instead."""
+        import base64
+        from . import image_views
+        self.start()
+        found = self.secret_boxes()
+        boxes = found["boxes"]
+        shot = self.command("Page.captureScreenshot", {"format": "jpeg", "quality": 88}, timeout=30)
+        data = str(shot.get("data", ""))
+        raw = base64.b64decode(data) if data else b""
+        size = image_views.dimensions(raw) if raw else None
+        if not size or not size[0] or not size[1]:
+            raise BrowserError("the browser returned an empty screenshot")
+        shot_width, shot_height = int(size[0]), int(size[1])
+        fit = min(1.0, max_width / shot_width, max_height / shot_height)
+        width, height = max(1, round(shot_width * fit)), max(1, round(shot_height * fit))
+        css_width = float(found.get("width") or 0) or float(shot_width)
+        per_css = shot_width / css_width * fit             # image pixels per CSS pixel
+        # Always re-encoded in DGC's own isolated world: the boxes blacked out, the size fitted, one quality.
+        context = self._isolated()
+        ring = ([float(mark["x"]), float(mark["y"]), mark.get("from_x"), mark.get("from_y")]
+                if isinstance(mark, dict) and "x" in mark and "y" in mark else None)
+        done = self._in_world(context, _COMPOSE_JS, data, boxes, width, height, per_css, quality / 100, ring, timeout=30)
+        if not isinstance(done, dict) or not isinstance(done.get("data"), str) or not done["data"]:
+            raise BrowserError("the screen has a password or card field DGC could not hide")
+        out = base64.b64decode(done["data"])
+        measured = image_views.dimensions(out)
+        if not measured or (int(measured[0]), int(measured[1])) != (width, height):
+            raise BrowserError("the screen could not be prepared")
+        return {"data": out, "width": width, "height": height, "scale": per_css, "masked": len(boxes)}
+
+    def element_at(self, x: float, y: float) -> str:
+        """What is at a point, in a few words (its role and name; never what a field holds)."""
+        try:
+            context = self._isolated()
+            said = self._in_world(context, _ELEMENT_AT_JS, float(x), float(y))
+        except (BrowserError, socket.timeout, OSError):
+            return ""
+        return str(said or "")[:120]
+
+    def screen_offset(self) -> tuple[float, float] | None:
+        """Where the page's top-left corner is on the computer's screen (a window on its desktop)."""
+        if self.display_dir is None:
+            return None
+        try:
+            context = self._isolated()
+            spot = self._in_world(context, "function(){return [window.screenX, window.screenY, window.outerWidth,"
+                                           " window.innerWidth, window.outerHeight, window.innerHeight];}")
+            sx, sy, ow, iw, oh, ih = (float(v) for v in spot)
+        except (BrowserError, socket.timeout, OSError, TypeError, ValueError):
+            return None
+        return sx + max(0.0, (ow - iw) / 2), sy + max(0.0, oh - ih)
+
+    def set_files(self, paths: list[str], *, ref: str = "", point: tuple[float, float] | None = None) -> str:
+        """Put files (paths inside the box) into a page's file input: a ref to an <input type=file>, or
+        the button (by ref or by point) that opens the page's file chooser, which DGC answers itself.
+        Choosing a file sends nothing: the page's own upload, when it makes one, is held like any write."""
+        self.start()
+        if ref and point is None:
+            element = self._locator(ref)
+            kind = self.evaluate_json("(() => { const el = " + element + "; return el ? (el.tagName === 'INPUT'"
+                                      " && (el.type || '').toLowerCase() === 'file' ? 'input' : 'other') : 'missing'; })()")
+            if kind == "missing":
+                raise BrowserError(f"{ref} is not on the page. Take a fresh read: refs change whenever the page does.")
+            if kind == "input":
+                node = self.command("Runtime.evaluate", {"expression": element})
+                object_id = (node.get("result") or {}).get("objectId")
+                if not object_id:
+                    raise BrowserError(f"{ref} could not be used")
+                self.command("DOM.setFileInputFiles", {"files": list(paths), "objectId": object_id})
+                self.acted_at = time.monotonic()
+                return "input"
+        self._chooser = None
+        self.command("Page.setInterceptFileChooserDialog", {"enabled": True})
+        try:
+            if point is not None:
+                self.click_at(point[0], point[1])
+            else:
+                self.click(ref)
+            deadline = time.monotonic() + 5
+            while self._chooser is None and time.monotonic() < deadline:
+                self._pump(0.2)
+            chooser = self._chooser
+        finally:
+            self._chooser = None
+            try:
+                self.command("Page.setInterceptFileChooserDialog", {"enabled": False})
+            except BrowserError:
+                pass
+        if chooser is None:
+            raise BrowserError("that did not open a file chooser. Use the page's file field or its upload button.")
+        if chooser.get("mode") == "selectSingle":
+            paths = list(paths)[:1]
+        self.command("DOM.setFileInputFiles", {"files": list(paths), "backendNodeId": chooser["backendNodeId"]})
+        self.acted_at = time.monotonic()
+        return "chooser"
 
     def pump(self, seconds: float) -> None:
         """Let the page run (and the gate see its requests) for a while."""

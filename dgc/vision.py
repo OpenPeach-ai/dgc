@@ -65,7 +65,7 @@ class VisionRoute:
     origin: str                  # "sub-agent model", "agent viewer" or "main model"
     adef: object = None          # the named AgentDef, or None
     effort: str = ""
-    kind: str = "subagent"       # "subagent" | "agent" | "main"
+    kind: str = "subagent"       # "subagent" | "agent" | "main" | "pip" (a Pip's eyes, pip_eyes)
 
     @property
     def label(self) -> str:
@@ -139,6 +139,15 @@ def _client_for(agent, kind: str, adef):
         return agent._new_client(base, config.api_key, config.model,
                                  api_mode=str(config.get("api_mode", "auto")), source="subagent")
     return agent._subagent_client(adef)
+
+
+def _route_client(agent, route: VisionRoute):
+    """The client for one look. A Pip's own eyes (pip_eyes) are a model on the Pip's own connection."""
+    if route.kind == "pip":
+        config = agent.config
+        return agent._new_client(str(config.base_url or ""), config.api_key, route.model,
+                                 api_mode=str(config.get("api_mode", "auto")), source="subagent")
+    return _client_for(agent, route.kind, route.adef)
 
 
 def _cache_key(agent) -> tuple:
@@ -246,7 +255,7 @@ def look(agent, route: VisionRoute, images: list, question: str, *,
     per-request state, and parallel `view_image` calls may look at once.
     """
     try:
-        client = _client_for(agent, route.kind, route.adef)
+        client = _route_client(agent, route)
     except Exception as exc:
         return False, f"could not reach the vision model: {type(exc).__name__}: {exc}"
     if client is None:
@@ -254,7 +263,7 @@ def look(agent, route: VisionRoute, images: list, question: str, *,
         return False, "the vision model is now the chat's own model"
     client.provider_state = "stateless"
     try:
-        window = int(agent._subagent_window(route.adef) or 0) if route.kind != "main" else 0
+        window = int(agent._subagent_window(route.adef) or 0) if route.kind not in ("main", "pip") else 0
     except Exception:
         window = 0
     if window:

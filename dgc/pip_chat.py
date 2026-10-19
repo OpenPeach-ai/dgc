@@ -936,7 +936,7 @@ def reply_plugins(db, run_id):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "context" in result:
         # What filled its window besides the chat (pip_chat_breakdown), for the meter's breakdown.
@@ -944,6 +944,12 @@ def insert_reply(store, run, result, now):
         validate_context(result["context"])
     if "plugins" in result and used_plugins(result["plugins"]) is None:
         raise RegistryError("invalid_reply", "This reply's plugins are invalid.")
+    if "eyes" in result:
+        # It couldn't see (pip_eyes): its choices are DGC's own card, answered by a tap.
+        from .pip_eyes import labels, validate_card
+        card = validate_card(result["eyes"])
+        if "choices" not in result or result["choices"] != list(labels(card["model"], card["vision_model"]).values()):
+            raise RegistryError("invalid_reply", "This reply's eyes card is invalid.")
     if "computer" in result:
         # A chat that used the Pip's computer: how many steps, and what it left waiting for the user.
         used = result["computer"]
@@ -986,6 +992,9 @@ def insert_reply(store, run, result, now):
                      "assistant", text, run["manifest"]["model"], now))
     for index, label in enumerate(choices):
         store.db.execute("INSERT INTO pip_chat_choices VALUES(?,?,?)", (reply_id, index, label))
+    if "eyes" in result:
+        from .pip_eyes import record_card
+        record_card(store, run, result["eyes"], reply_id)
     from .pip_chat_continuity import commit
     commit(store, run, result, now)
 
@@ -1069,9 +1078,11 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         if not _intro and isinstance(key, str) and key.startswith(DGC_KEYS):
             raise RegistryError("invalid_request", "That message key is reserved for messages DGC writes.")
         if images is not None or spooled_images is not None:
-            store._job(pip_id)
+            job = store._job(pip_id)
             given, spooled_images = spooled_images, None
             images = store_images(store.registry.directory, pip_id, images, given)
+            if images and job.get("computer_plan") is not None:
+                _copy_photos_to_computer(store.registry.directory, pip_id, images)
         if files is not None or spooled_files is not None:
             job = store._job(pip_id)
             given, spooled_files = spooled_files, None
@@ -1085,8 +1096,14 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
     req = request(text, key, chat_options, images=images, files=files)
     run = prior(store, pip_id, req, actor)
     if run is None:
+        # A tap on the card a Pip that couldn't see showed (pip_eyes): applied before the run is queued, so a
+        # switch to a model that sees already holds for it.
+        from .pip_eyes import answer, bind
+        decided = None if _intro else answer(store, pip_id, text, actor, config)
         run = store.enqueue(pip_id, "chat_" + hashlib.sha256(key.encode()).hexdigest(), actor, config,
                             conversation_request=req)
+        if decided is not None:
+            bind(store, pip_id, run["id"], decided)
     row = store.db.execute("SELECT m.*,r.status FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
                            "WHERE m.run_id=? AND m.role='user'", (run["id"],)).fetchone()
     message = _message(row)
@@ -1097,6 +1114,25 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
     if attached:
         message["files"] = attached
     return {"run": run, "message": message}
+
+
+def computer_photo_names(images) -> list[str]:
+    """What a message's photos are called in its Pip's Files (From chat): one name per photo, kept once."""
+    return [f"photo-{item['sha256'][:12]}.{_IMAGE_EXT[item['mime']]}" for item in validate_images(images)]
+
+
+def _copy_photos_to_computer(directory, pip_id, images) -> None:
+    """A Pip with a computer finds the photos you sent in its Files too, under From chat, to upload to a site."""
+    from .pip_computer import computer_root
+    from .pip_computer_files import add_raw_file, files_root
+    folder = files_root(computer_root(directory, pip_id))
+    for name, item, path in zip(computer_photo_names(images), images, image_paths(directory, pip_id, images)):
+        if (folder / "From chat" / name).exists():
+            continue
+        try:
+            add_raw_file(folder, "From chat", name, Path(path).read_bytes(), maximum=MAX_CHAT_IMAGE_BYTES)
+        except (RegistryError, OSError):
+            pass                       # a full computer still gets the message; the Pip sees the photo in chat
 
 
 def _copy_to_computer(directory, pip_id, files) -> None:
