@@ -33,7 +33,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **A text-only Pip says so in one line, with a card.** Asked to look, or sent photos, a Pip whose model can't see
   replies "**glm-5.3:cloud can't see images.**" with three choices: use a model that can see for that (the vision
   relay, which answers in words and names points), switch the Pip to it, or not now. DGC picks the model from the
-  user's own, the same kind first; the answer is kept per Pip (`get_pip_eyes`, `set_pip_eyes`).
+  user's own, the same kind first; the answer is kept per Pip (`get_pip_eyes`, `set_pip_eyes`). One that works
+  around a canvas from the text, or says it couldn't see, gets the same line and card after its reply.
 - **You see where it clicks.** `use_pip_computer_view` frames carry `pointer`, op `pointer` returns it without a frame,
   and `list_pip_computer_frames` takes `pointers`, so the live view and "What it saw" draw the Pip's cursor.
 - **A payment is never Always allow.** A held submit that carries a card number now refuses Always allow

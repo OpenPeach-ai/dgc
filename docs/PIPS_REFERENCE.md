@@ -1069,7 +1069,10 @@ scale, which the tool then reads; photos sent in the chat are described the same
 conversation run whose model calls `look` ends its turn there, and a message with photos is not sent
 to the model at all; the reply is one line, `**MODEL can't see images.**`, with three choices (an
 options card, `choices`): "Use VISION to see, keep MODEL for the rest", "Switch this Pip to VISION",
-"Not now" (shortened to fit 80 characters). The reply's `eyes` records the card
+"Not now" (shortened to fit 80 characters). A model that never asks to look gets the same card after
+its own reply when its run read a page at least 15% drawn on canvases (`read` then also says so in its
+text) or its reply says it can't see images, the screen, the canvas or the design; its words stay, and
+the line follows them. The reply's `eyes` records the card
 (`pip_eyes_asked:PIP_ID`). When the user's next message is exactly one of those choices and the card
 is still the Pip's latest reply, `send_pip_message` applies it before queueing the run: `relay` and
 `off` are saved, and a switch proposes and accepts the Pip's `model_choice` (checked against the

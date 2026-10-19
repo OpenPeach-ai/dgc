@@ -2426,6 +2426,10 @@ def _attached_files(config, manifest: dict, files, has_computer: bool) -> str:
     return note
 
 
+# A text-only model saying it couldn't see what it needed (pip_eyes asks once how it should see).
+_CANNOT_SEE = re.compile(r"\b(?:can(?:no|'|’)t|cannot|unable to|not able to|no way to)\s+(?:see|view|look at|make out)\s+"
+                         r"(?:the\s+|your\s+|this\s+|that\s+|any\s+)?(?:images?|pictures?|photos?|screenshots?|screen|canvas|design|visuals?)\b",
+                         re.I)
 WORDLESS_REPAIR = ("This message is from DGC, not the user. You did not write a reply. Write it now, in two or three short "
                    "sentences: what you did on your computer, how it ended, and anything left for the user. No more steps.")
 CARD_CLAIM_REPAIR = ("This message is from DGC, not the user. Your reply tells the user about a card or draft below it, but you "
@@ -2558,7 +2562,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_eyes
     eyes_pin = (pip_eyes.validate_pin(manifest['computer_eyes'])
                 if personal and kind in ('personal_task', 'conversation') and 'computer_eyes' in manifest else None)
-    eyes = {'mode': None, 'convention': 'pixels', 'seen': {}, 'card': None, 'shot': None}
+    eyes = {'mode': None, 'convention': 'pixels', 'seen': {}, 'card': None, 'shot': None, 'needs': False}
     # A Personal Pip's skills: instructions it may load, never tools or permissions.
     # A reviewed handoff stays the narrow task it was approved as: no skills there.
     pip_skills = (personal_skills(config) if personal and kind in ('personal_task', 'conversation') and 'handoff' not in manifest
@@ -2989,6 +2993,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     except ValueError as exc:
                         return f'error: {exc}'
                 reply = pip_computer.worker_reply(computer_pin, op, args)
+                if reply.get('visual') and mode in ('ask', 'off', 'blind'):
+                    # A page its text can't show (a canvas): one that can't see is told, and asks once below.
+                    eyes['needs'] = True
                 if 'image' not in reply:
                     return reply['text']
                 eyes['shot'] = (reply['width'], reply['height'])
@@ -3351,7 +3358,16 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if said or choices_cut is not None:
                 # Ended at its choices, the turn has no closing text of its own: the reply is what it said.
                 final = "\n\n".join(said)
-            if eyes['card'] is not None:
+            if (eyes['card'] is None and choices_candidate is None and eyes_pin is not None and eyes_pin['choice'] == 'ask'
+                    and eyes_pin.get('vision_model') and eyes['mode'] == 'ask'
+                    and (eyes['needs'] or _CANNOT_SEE.search(final or ''))):
+                # It worked from the text, but the page needed seeing (a canvas), or it said it couldn't see: what it
+                # did stays, and the one line and the card follow it.
+                eyes['card'] = {'model': str(manifest.get('model') or getattr(agent.client, 'model', '')),
+                                'vision_model': eyes_pin['vision_model']}
+                final = ((final.rstrip() + '\n\n') if final.strip() else '') + pip_eyes.line(eyes['card']['model'])
+                choices_candidate = list(pip_eyes.labels(eyes['card']['model'], eyes['card']['vision_model']).values())
+            elif eyes['card'] is not None:
                 # It can't see: one plain line, and the choices (pip_eyes) as its card.
                 final = pip_eyes.line(eyes['card']['model'])
                 choices_candidate = list(pip_eyes.labels(eyes['card']['model'], eyes['card']['vision_model']).values())

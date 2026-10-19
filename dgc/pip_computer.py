@@ -98,6 +98,7 @@ OPS = TEXT_OPS + ("look",) + POINT_OPS + ("upload",)
 # Files and the Terminal: no browser, so they never wait on (or hold) the browser.
 DESK_OPS = ("files", "open_file", "run")
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+VISUAL_SHARE = 0.15                  # this much of the screen on canvases: a page its text can't show
 UPLOADS = ".dgc-uploads"            # in the computer's home, beside Files: the Terminal never sees it
 
 
@@ -471,7 +472,22 @@ class Host:
                     "it, and do not keep opening pages. Stop now and tell the user in one sentence that the site wants "
                     "them to finish its check on your computer's screen (Open its computer); you carry on once they "
                     "have. It is a check box or picture puzzle, not a sign-in.")
-        return f"{_UNTRUSTED_PAGE}\nURL: {data.get('url', '')}\nTitle: {data.get('title', '')}\n{text}"
+        self.visual = Host._drawn_share(self) >= VISUAL_SHARE
+        drawn = ("\n[Part of this page is drawn on a canvas, which its text can't show: look at it to see what is "
+                 "there.]") if self.visual else ""
+        return f"{_UNTRUSTED_PAGE}\nURL: {data.get('url', '')}\nTitle: {data.get('title', '')}\n{text}{drawn}"
+
+    def _drawn_share(self) -> float:
+        """How much of the visible page is drawn on canvases (a design editor, a map, a game): text can't show it."""
+        try:
+            share = self.browser.evaluate_json(
+                "(() => { const w = innerWidth, h = innerHeight; let drawn = 0;"
+                " for (const c of document.querySelectorAll('canvas')) { const r = c.getBoundingClientRect();"
+                "  drawn += Math.max(0, Math.min(r.right, w) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, h) - Math.max(r.top, 0)); }"
+                " return w * h ? drawn / (w * h) : 0; })()")
+        except Exception:                  # noqa: BLE001 - a page that won't say is read as text
+            return 0.0
+        return float(share) if isinstance(share, (int, float)) else 0.0
 
     def _check_for_human(self, data: dict, text: str) -> bool:
         """Record (or clear) that this computer needs the user for a robot check."""
@@ -533,7 +549,7 @@ class Host:
                 if op == "open":
                     self.browser.navigate(_safe_url(args.get("url")))
                 elif op == "read":
-                    return {"text": self._read()}
+                    return {"text": self._read(), "visual": bool(getattr(self, "visual", False))}
                 elif op == "click":
                     self.browser.click(str(args.get("ref", "")))
                 elif op == "type":
@@ -554,7 +570,7 @@ class Host:
                 self._frame(f"{op} {args.get('url') or args.get('ref') or args.get('key') or ''}".strip())
                 if held:
                     return {"text": self._held_text(held)}
-                return {"text": self._read()}
+                return {"text": self._read(), "visual": bool(getattr(self, "visual", False))}
             except (BrowserError, RegistryError, OSError, ValueError) as error:
                 return {"text": f"error: {str(error)[:500]}"}
             except Exception as error:                     # noqa: BLE001 - never into the worker
@@ -940,6 +956,8 @@ def worker_reply(pin: dict, op: str, args: dict, *, timeout: float = 120) -> dic
                 raw += chunk
         reply = json.loads(raw.decode("utf-8"))
         out = {"text": str(reply.get("text", "error: no reply"))[:MAX_TEXT + 1000]}
+        if reply.get("visual") is True:
+            out["visual"] = True          # the page draws on a canvas its text can't show (pip_eyes)
         image, width, height = reply.get("image"), reply.get("width"), reply.get("height")
         if (isinstance(image, str) and 0 < len(image) <= MAX_SHOT_CHARS and type(width) is int and type(height) is int
                 and 0 < width <= 4096 and 0 < height <= 4096):

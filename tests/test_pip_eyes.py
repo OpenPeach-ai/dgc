@@ -208,6 +208,17 @@ class HostTests(unittest.TestCase):
                 host._upload({"path": bad, "ref": "e7"})
         self.assertEqual(len(chosen), 1, "a link, a folder or a path outside Files never reaches the page")
 
+    def test_a_page_drawn_on_a_canvas_is_said_so_with_its_text(self):
+        for share, said in ((0.4, True), (0.05, False)):
+            browser = types.SimpleNamespace(snapshot=lambda: {"url": "https://tees.example/", "title": "Tees", "lines": ["- button \"Add text\" [e5]"]},
+                                            evaluate_json=lambda expression, share=share: share)
+            host = types.SimpleNamespace(browser=browser, _check_for_human=lambda data, text: False)
+            host._drawn_share = pip_computer.Host._drawn_share.__get__(host)
+            text = pip_computer.Host._read(host)
+            self.assertIn('Add text', text)
+            self.assertEqual("drawn on a canvas" in text, said)
+            self.assertEqual(host.visual, said)
+
     def test_a_live_frame_says_its_own_size_and_where_the_cursor_is(self):
         # A headless 1280x900 window shows a 1280x813 page: the user's clicks and the Pip's cursor are placed by
         # the frame's own size, not the configured one.
@@ -376,7 +387,7 @@ class WorkerTests(unittest.TestCase):
     """The worker: a model that sees gets each screen as an image; one that can't says so in one line."""
     setUp = catalog_setup
 
-    def run_turn(self, model, eyes, replies, *, sees, images=None):
+    def run_turn(self, model, eyes, replies, *, sees, images=None, visual=False):
         from dgc.llm import ChatResult, LLMClient, ToolCall
         pip = self.store.create(self.registry.personal()["id"], "Tees", None, "editor-user", pip_type="lens",
                                 model_choice={"mode": "model", "model": model}, computer_plan={"schema_version": 1})
@@ -389,7 +400,7 @@ class WorkerTests(unittest.TestCase):
             if op in ("look",) + pip_computer.POINT_OPS:
                 return {"text": f"Your screen now (1280x800 pixels) after {op}.", "image": base64.b64encode(JPEG).decode(),
                         "width": 1280, "height": 800}
-            return {"text": "page text"}
+            return {"text": "page text", **({"visual": True} if visual else {})}
         socket = pip_computer.RunSocket(types.SimpleNamespace(act=act), "run_" + "c" * 32)
         self.addCleanup(socket.close)
         manifest = {**raw, "computer_socket": socket.pin(), "computer_eyes": eyes}
@@ -439,6 +450,22 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(result["text"], "**glm-5.3:cloud can't see images.**")
         self.assertEqual(result["choices"], list(pip_eyes.labels("glm-5.3:cloud", "deepseek-v4.1-flash:cloud").values()))
         self.assertEqual(result["eyes"], {"model": "glm-5.3:cloud", "vision_model": "deepseek-v4.1-flash:cloud"})
+
+    def test_a_canvas_page_a_text_only_model_worked_around_still_asks_once_after_what_it_said(self):
+        # A text-only model may never ask to look: it reads, does what text allows, and says it couldn't check.
+        eyes = {"choice": "ask", "vision_model": "deepseek-v4.1-flash:cloud", "convention": "pixels"}
+        said = "I added the text. I pressed the up arrow a few times, but I have no way to check where it sits."
+        result, seen, asked = self.run_turn("glm-5.3:cloud", eyes, [{"op": "read"}, said], sees=False, visual=True)
+        self.assertEqual(result["text"], said + "\n\n**glm-5.3:cloud can't see images.**", "what it did stays, the line follows")
+        self.assertEqual(result["choices"], list(pip_eyes.labels("glm-5.3:cloud", "deepseek-v4.1-flash:cloud").values()))
+        plain, _, _ = self.run_turn("glm-5.3:cloud", eyes, [{"op": "read"}, "Your order total is $24."], sees=False)
+        self.assertNotIn("eyes", plain, "a page its text shows asks nothing")
+        told, _, _ = self.run_turn("glm-5.3:cloud", eyes, [{"op": "read"}, "My model can't see images, so I couldn't check the design."],
+                                   sees=False)
+        self.assertIn("eyes", told, "saying it can't see asks too")
+        off = {**eyes, "choice": "off"}
+        quiet, _, _ = self.run_turn("glm-5.3:cloud", off, [{"op": "read"}, said], sees=False, visual=True)
+        self.assertNotIn("eyes", quiet, "after Not now it never asks again")
 
     def test_photos_for_a_model_that_cannot_see_bring_the_card_without_a_model_request(self):
         dot = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
@@ -654,3 +681,11 @@ class RealEyesTests(unittest.TestCase):
             self.browser.pump(0.3)
         self.assertTrue(self.held and self.held[0].site, "a new site waits, however it was clicked")
         self.assertEqual(self.held[0].summary()["host"], PAY)
+
+    def test_how_much_of_a_page_is_drawn_on_canvases(self):
+        self.assertEqual(self.browser.navigate(self.base + "/drag"), "loaded")
+        host = types.SimpleNamespace(browser=self.browser)
+        share = pip_computer.Host._drawn_share(host)
+        width, height = self.browser.evaluate_json("[innerWidth, innerHeight]")
+        self.assertAlmostEqual(share, 600 * 300 / (width * height), places=3)
+        self.assertGreater(share, pip_computer.VISUAL_SHARE)

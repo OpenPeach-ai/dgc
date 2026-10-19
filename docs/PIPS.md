@@ -888,7 +888,8 @@ it sees what happened.
 
 A Pip whose model reads text only (glm-5.3:cloud or deepseek-v4-pro:cloud, for example) still uses
 the page's text. When it needs to see (a canvas, a picture, or photos you sent it), it says so in one
-line, **glm-5.3:cloud can't see images.**, with three choices:
+line, **glm-5.3:cloud can't see images.**, with three choices. If it worked on a page drawn on a canvas
+from the page's text alone, or said it couldn't see, its reply stays and the line and choices follow it:
 
 - **Use deepseek-v4.1-flash:cloud to see, keep glm-5.3:cloud for the rest**: a model that can see
   looks at the screen or the photos for it and answers in words, naming the points it can click.
