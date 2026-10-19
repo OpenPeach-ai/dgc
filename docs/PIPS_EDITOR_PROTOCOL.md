@@ -107,6 +107,25 @@ The reply is a `pips_result` event that carries the nested request ID:
   documents the main chat reads), 2 MB in all within the same 2,800,000-character budget as the
   images. A listed user message carries `files: [{index, name, bytes}]`. The host refuses `files`
   before sending to a CLI below API 43, and refuses images and files over the shared budget.
+- From API 52 the host sends a message's photos and files the main chat's way: it writes each into
+  the backend's image spool (`ready.capabilities.image_spool_dir`, mode 0600, a fresh random name)
+  and sends `spooled_images: [{name, media_type}]` and `spooled_files: [{name, spool}]` instead of
+  `images` and `files`, so the frame carries names, not megabytes. The view still hands the host data
+  URIs; the host checks them against the API 52 limits first (8 MB a photo and 32 MB of photos, up to
+  64; up to 16 files, a document 16 MB, a text or code file 1 MB, 32 MB in all) and removes what it
+  wrote when the send never reaches DGC or DGC refuses it. An iPhone photo goes as `image/heic` or
+  `image/heif`, and DGC keeps it as a JPEG; the view shows its chip by name, since Chromium can't draw
+  one. A spool the host can't write falls back to the inline path when the message fits it. The host
+  refuses `spooled_images`, `spooled_files` and `as_file` from the view (they are the host's), with
+  "Update DGC…" below API 52; see **Photos and files through the spool** in
+  [PIPS_REFERENCE.md](PIPS_REFERENCE.md).
+- From API 52 the host reads a sent photo itself: it sends `get_pip_message_image` with
+  `as_file: true`, checks the answer's `path` is a regular file named by its digest under the Pips
+  state's `chat_images/<pip_id>/`, of the size and type DGC said, and gives the view the usual
+  `{image}`. A big thumbnail is redrawn small in the view; clicking it posts
+  `pipsOpenPhoto {pip_id, message_id, index}`, and the host opens the original in an editor tab under
+  a readable name (`Photo 1.jpg`). Under hidden WSL the bridge translates that `path` like the main
+  chat's image paths.
 - `run_pip`, `send_pip_message` and `accept_pip_handoff` first check that the
   independent runner is live (a fresh heartbeat and a held lease). The backend never
   starts a worker of its own to run Pips work. If the runner stops after the check,

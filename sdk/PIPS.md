@@ -164,6 +164,7 @@ job with `create_pip` and a reviewed update.
 | 48 | `mark_pip_news_seen`: one Pip's news (failed runs, new findings) dismissed until it does something new |
 | 50 | The `safe_source_v2` source rules in `changes.source_policy` (with an optional `exclude` list); `check_pip_source {pip_id, source_policy?}` and `get_pip_run_source {run_id}`, local only |
 | 51 | `list_pip_run_posts {pip_id, before_id?, limit?}`: what a Pip's runs posted in its own chat (`pips.run_posts()` / `pips.runPosts()`) |
+| 52 | `send_pip_message`'s `spooled_images` [{name, media_type}] and `spooled_files` [{name, spool}]: photos and files through the image spool (`pips.spool(data, suffix=)` writes one and returns its name); `get_pip_message_image`'s `as_file` |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -273,13 +274,25 @@ Revising replaces the card with a new pending card that uses another model.
 | `list_pip_run_activity` | R | `run_id`, `after?` |
 | `list_pip_checkpoints` | R | `pip_id`, `before_id?`, `limit?` |
 | `list_pip_messages` | R | `pip_id`, `before_id?`, `limit?` |
-| `send_pip_message` | M | `pip_id`, `text`, `idempotency_key`, `chat_options?`, `images?` (API 43: up to 4 image data URIs, 2 MB in all; `text` may then be empty), `files?` (API 43: up to 4 `{name, data}`, sharing the 2 MB budget with the images) |
+| `send_pip_message` | M | `pip_id`, `text`, `idempotency_key`, `chat_options?`, `images?` (API 43: up to 4 image data URIs, 2 MB in all; `text` may then be empty), `files?` (API 43: up to 4 `{name, data}`, sharing the 2 MB budget with the images), `spooled_images?` (API 52: up to 64 `{name, media_type}` naming files in the image spool; 8 MB a photo, 32 MB in all; `image/heic` and `image/heif` are kept as JPEG), `spooled_files?` (API 52: up to 16 `{name, spool}`; a document 16 MB, a text or code file 1 MB, 32 MB in all) |
 | `introduce_pip` | M | `pip_id`; a Personal Pip's first message, queued once (API 43) |
-| `get_pip_message_image` | R | `pip_id`, `message_id`, `index`; one image from a chat message as `image`, a data URI (API 43) |
+| `get_pip_message_image` | R | `pip_id`, `message_id`, `index`, `as_file?`; one image from a chat message as `image`, a data URI (API 43), or with `as_file: true` where its kept file is, `{path, mime, bytes}` (API 52) |
 
 `run_pip` and `send_pip_message` need a running local runner. Queueing is not
 completion: read the run until it reaches a terminal status. Reusing an
 `idempotency_key` with the same content returns the original run.
+
+Photos and files bigger than the inline 2 MB go through the runtime's image spool (API 52), as the
+editor sends them. `pips.spool(data, suffix=".jpg")` (TypeScript: `await pips.spool(bytes, { suffix:
+".jpg" })`) writes the bytes into `ready.capabilities.image_spool_dir` under a fresh name, readable
+only by you, and returns that name; send it in `spooled_images` (with its `media_type`) or
+`spooled_files` (with your file's own `name`). The runtime reads it, checks it and removes it.
+
+```python
+name = pips.spool(open("bill.jpg", "rb").read(), suffix=".jpg")
+pips.mutate("send_pip_message", {"pip_id": pip_id, "text": "What do I owe?", "idempotency_key": key,
+                                 "spooled_images": [{"name": name, "media_type": "image/jpeg"}]}, approved=True)
+```
 
 `chat_options` sets the Pip's context window and reasoning effort:
 `{"context_size": 2048–1048576, "thinking": "off" | "low" | "medium" | "high" | "xhigh"}`.

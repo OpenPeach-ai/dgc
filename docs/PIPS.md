@@ -582,11 +582,25 @@ and apply to its replies and to everything it does on its own (schedules, routin
 triggers, handoffs). A new Pip starts with DGC's context window. They don't change the
 Pip's job. A Pip answers only while the runner is running.
 
-You can send a Personal Pip images and files with a message, as in the main chat: use the attach
-button, paste, or drop them on the message box. Images, text and code files, and PDF, Word,
-Excel, PowerPoint, OpenDocument, RTF, CSV and TSV files are accepted, up to 4 images and 4 files
-and 2 MB in all. The Pip sees the images and reads the files' text; a Pip with a computer also
-finds the files in its Files, under **From chat**.
+You can send a Personal Pip photos and files with a message, as in the main chat: use the attach
+button, paste, or drop them on the message box. Images (PNG, JPEG, GIF, WebP, BMP), text and code
+files, and PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV and TSV files are accepted. The
+Pip sees the photos and reads the files' text; a Pip with a computer also finds the files in its
+Files, under **From chat**.
+
+- **How much:** a photo can be up to 8 MB and one message up to 32 MB of photos, with no limit on
+  how many beyond that (64 at most). Files can be up to 16 at a time: a document up to 16 MB, a text
+  or code file up to 1 MB, 32 MB in all. The editor hands them to DGC the way the main chat does, so
+  a phone photo of a bill goes as it is. (With a DGC CLI before Pips API 52, the old limit stays:
+  4 images and 4 files, 2 MB in all.)
+- **iPhone photos:** a HEIC or HEIF photo is turned into a JPEG automatically, and the chat keeps the
+  JPEG. On a Mac this always works. On Linux DGC uses what the computer has (libheif's
+  `heif-convert`, ImageMagick, libvips, or the GNOME image loader that Ubuntu's desktop includes); if
+  there is nothing, the message says to install `libheif-examples` or send the photo as a JPEG, and
+  nothing is sent.
+- **Big photos:** a photo over 2,500 pixels on its long side is sent to the model at 2,500 pixels as
+  a high-quality, lightly sharpened JPEG, so small print stays readable. The chat keeps your original: its thumbnail
+  shows it, and clicking the thumbnail opens it in an editor tab at full size.
 
 **Skills.** A Personal Pip has your DGC skills that fit everyday work: your own skills, plugin
 skills, and the built-in **deep-research**, **dataviz** and **plan** (the code-only built-ins stay

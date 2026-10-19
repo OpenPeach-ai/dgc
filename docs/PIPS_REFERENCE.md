@@ -1118,6 +1118,55 @@ control handler and both SDKs bound them on their own (4 data URIs, 2,800,000 ch
 and hold the rest of the message to its usual limit. Registry schema 36 adds the
 `pip_chat_images` table.
 
+**Photos and files through the spool** (API 52). Inline, the 4 MiB command frame caps a message's
+images and files at four of each and 2 MB in all. From API 52, `send_pip_message` also takes them
+the way the main chat's `prompt` takes `spooled_images`: the client writes each file into the
+backend's image spool (`ready.capabilities.image_spool_dir`, created and owned by the backend,
+files 0600) and sends only names.
+
+| Field | Shape | Limits |
+| --- | --- | --- |
+| `spooled_images` | `[{name, media_type}]`: the file's bare name in the spool, and `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/bmp`, `image/heic` or `image/heif` | 1 to 64; 8 MiB a photo, 32 MiB in all (`attachments.MAX_SPOOLED_IMAGE_*`) |
+| `spooled_files` | `[{name, spool}]`: your file's own name, and its bare name in the spool | 1 to 16; a document 16 MiB, a text or code file (CSV and TSV too) 1 MiB, 32 MiB in all (`attachments.MAX_DOCUMENT_*`, `MAX_TEXT_FILE_BYTES`) |
+
+A name is a bare file name: no folder, no `..`, nothing absolute. The backend reads each one no
+further than its limit, checks it exactly as an inline one (an image's bytes must be the type it
+claims; a document must start the way its kind does) and removes it from the spool, whether the
+send succeeds or is refused. Only this computer's own controllers (`editor-user`,
+`local-console`) may name spool files; anyone else gets `local_only`. The names are bounded on
+their own, outside the request's 256-item budget, and carry no data. Inline `images` and `files`
+keep working as before, for an older client.
+
+An iPhone photo (`image/heic`, `image/heif`, checked by its `ftyp` brand) is kept as the JPEG it
+becomes (`photos.heic_to_jpeg`): at most 4,096 pixels on its long side, quality 92. DGC uses the
+first converter the computer has: macOS's `sips`; Pillow with pillow-heif in DGC's own Python;
+libvips (`vipsthumbnail`); ImageMagick; libheif's `heif-dec` or `heif-convert`; GdkPixbuf through
+the system's `python3` (with heif-gdk-pixbuf, as on Ubuntu's desktop); then `ffmpeg`. With none
+that reads HEIC, the send is refused with one sentence (`To send iPhone photos (HEIC) from this
+computer, install heif-convert (the libheif-examples package) or send them as JPEG.`) and nothing
+is kept.
+
+The registry schema stays 46. A registry made earlier holds `pip_chat_images` and `pip_chat_files`
+with the inline limits in their `CHECK`s (index 0–3, 2 MiB); the first message that brings images
+or files rebuilds both, rows kept, in its own transaction, with the new bounds (images: index
+0–63, 8 MiB; files: index 0–15, 16 MiB). An older DGC still opens the registry and reads them.
+
+`get_pip_message_image` takes `as_file` (API 52): with `true` the result is `{pip_id, message_id,
+index, path, mime, bytes}`, where the kept file is, instead of `image`. A photo of 8 MiB is more
+than any protocol frame carries as a data URI, so the editor reads the kept file itself; the
+backend checks it against its digest first, either way.
+
+**Photos for the model.** Wherever DGC sends a prompt's images to a model (a Pip's chat, the main
+chat, the terminal), one over 2,500 pixels on its long side is sent at 2,500 pixels
+(`photos.for_model`), as a JPEG of quality 90 (a PNG stays a PNG), upright by its EXIF
+orientation and lightly sharpened (Lanczos with an unsharp mask of radius 1.2 and amount 0.6, where
+the converter has one). Nothing is upscaled, a GIF is left alone, and the chat keeps the original:
+only the model's copy is smaller. The same converters do it, except that for shrinking ffmpeg comes
+before GdkPixbuf, which can't sharpen; with none, the model gets the original. Measured with
+`deepseek-v4.1-flash:cloud` on five phone photos of paperwork in one message (24 runs each), a
+6.5-point claim reference on a bill read exactly 24/24 from the sharpened 2,500-pixel copy, 14–21/24
+from an unsharpened GdkPixbuf shrink, and 22–24/24 from the 4,032-pixel original.
+
 **Skills** (API 43). A Personal Pip's task and chat runs get the skills `discover_skills` finds
 outside any project (user, portable user and plugin skills, and the built-ins `deep-research`,
 `dataviz` and `plan`), minus the user's `disabled_skills`. The prompt lists each name and
@@ -1366,3 +1415,4 @@ Clients check it before using a newer control.
 | 49 | Additive, nothing to gate on: `list_pip_runs` rows carry a failed run's `error`; `get_pip_execution` has `local_http_checks` and, when DGC knows the one-time fix, `fix` (`dgc pips execution --fix`); a Pulse setup card's `runner_notice` says when it can't run on this computer |
 | 50 | The `safe_source_v2` source rules (files DGC can't copy are left out and listed, `.dgcignore`, the project's ignore files for current files, a Pip's Excluded folders in `source_policy.exclude`, 256 MiB); `check_pip_source` and `get_pip_run_source`; new reviewer and Quill Pips start on `safe_source_v2` |
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
+| 52 | Photos and files in a Pip's chat through the backend's spool: `send_pip_message` takes `spooled_images` (8 MiB a photo, 32 MiB in all, up to 64; HEIC kept as JPEG) and `spooled_files` (a document 16 MiB, text 1 MiB, 32 MiB in all, up to 16), local only; `get_pip_message_image` takes `as_file` and answers with the kept file's `path`. A large photo goes to the model at 2,500 pixels |
