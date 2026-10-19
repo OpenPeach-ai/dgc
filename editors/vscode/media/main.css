@@ -2719,3 +2719,67 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report.quiet .pip-report-actions button.act { min-height: 0; padding: 2px var(--sp-2); border-color: transparent;
   background: transparent; color: var(--link); font-size: var(--t-xs); }
 .pip-report.quiet .pip-report-actions button.act:hover { border-color: var(--border-strong); }
+/* Two lines until opened (the founder, 19 Oct: two quiet cards took 134px). Line one: the Pip, what it found, when,
+   a chevron; line two: the worst finding or why it failed, with Fix · Open · ✕. A clean run is line one alone.
+   Opened, line two goes and the whole card shows under line one. Cards that arrive together sit together. */
+/* The space between transcript blocks is #log's gap (var(--sp-4)); cards add none of their own, and cards that arrive
+   together close it to 4px, so two of them read as one list. */
+.pip-report.slim { margin: 0; padding: 6px var(--sp-3) 6px 12px; gap: 10px; cursor: pointer; }
+.pip-report.slim.quiet { margin: 0; padding: 2px var(--sp-3) 2px 12px; }
+.pip-report.slim + .pip-report.slim { margin-top: calc(4px - var(--sp-4)); }
+.pip-report.slim .pip-report-face, .pip-report.slim .pip-report-face .dgc-plush { width: 22px; height: 22px; margin-top: 2px; }
+.pip-report.slim.quiet .pip-report-face, .pip-report.slim.quiet .pip-report-face .dgc-plush { width: 18px; height: 18px; margin-top: 0; }
+.pip-report.slim .pip-report-main { display: block; }
+.pip-report-line1, .pip-report-line2 { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
+.pip-report-line1 { font: var(--w-reg) var(--t-sm)/1.45 var(--sans); border-radius: var(--r-sm); outline: none; }
+.pip-report-line1:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.pip-report-line-name { flex: 0 1 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); font-weight: var(--w-semi); }
+.pip-report-line-state { flex: 0 0 auto; color: var(--muted); }
+.pip-report-line-state[data-bad] { color: var(--del-text); font-weight: var(--w-semi); }
+.pip-report-fill { flex: 1 1 0; min-width: 0; }
+.pip-report-line-when { flex: none; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
+.pip-report-chevron { flex: none; align-self: center; color: var(--muted); font-size: 14px; transition: transform .12s; }
+.pip-report.slim[data-fold="open"] > .pip-report-main > .pip-report-line1 .pip-report-chevron,
+.pip-report-group[data-fold="open"] > .pip-report-group-head .pip-report-chevron { transform: rotate(90deg); }
+.pip-report-line2 { margin-top: 1px; font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.pip-report-line2 .pip-report-sev { min-width: 0; }
+.pip-report-line-what { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.pip-report-line2 .pip-report-where { flex: 0 10 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.pip-report-slim-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.pip-report-slim-actions button { min-height: 0; height: 20px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--link); font: var(--w-semi) var(--t-xs)/1 var(--sans); cursor: pointer;
+  display: inline-flex; align-items: center; }
+.pip-report-slim-actions button:hover { border-color: var(--border-strong); background: var(--surface2); }
+.pip-report-slim-actions button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.pip-report-slim-actions .pip-report-dismiss-slim { width: 20px; padding: 0; justify-content: center; color: var(--muted); }
+.pip-report-slim-actions .pip-report-dismiss-slim .codicon { font-size: 12px; }
+.pip-report-slim-actions .asked { color: var(--muted); font-weight: var(--w-reg); cursor: default; }
+.pip-report-slim-actions .asked:hover { border-color: transparent; background: transparent; }
+/* Closed: the long parts stay out of sight. Open: line two goes, the whole card shows (its name and time are line one's). */
+.pip-report.slim[data-fold="closed"] .pip-report-head, .pip-report.slim[data-fold="closed"] .pip-report-findings,
+.pip-report.slim[data-fold="closed"] .pip-report-more, .pip-report.slim[data-fold="closed"] .pip-report-detail,
+.pip-report.slim[data-fold="closed"] > .pip-report-main > .pip-report-actions { display: none; }
+.pip-report.slim[data-fold="open"] .pip-report-line2,
+.pip-report.slim:not(.quiet)[data-fold="open"] .pip-report-line1 .pip-report-slim-actions { display: none; }
+.pip-report.slim[data-fold="open"] .pip-report-head .pip-report-name, .pip-report.slim[data-fold="open"] .pip-report-head .pip-report-when { display: none; }
+.pip-report.slim.quiet[data-fold="open"] > .pip-report-main > .pip-report-actions { display: none; }
+.pip-report.slim.quiet[data-fold="open"] { border-color: var(--border); background: var(--surface); }
+/* Three or more together: one line until opened. */
+.pip-report-group { display: flex; flex-direction: column; min-width: 0; margin: 0; border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--surface); }
+.pip-report-group-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; width: 100%; padding: 5px var(--sp-3);
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
+  text-align: left; white-space: nowrap; cursor: pointer; }
+.pip-report-group-head:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.pip-report-group-head:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.pip-report-group-faces { flex: none; display: inline-flex; }
+.pip-report-group-faces > span { display: block; width: 20px; height: 20px; margin-left: -6px; border-radius: 50%; }
+.pip-report-group-faces > span:first-child { margin-left: 0; }
+.pip-report-group-faces .dgc-plush { display: block; width: 20px; height: 20px; }
+.pip-report-group-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.pip-report-group-title b { color: var(--text-strong); font-weight: var(--w-semi); }
+.pip-report-group-head .pip-report-line-when { margin-left: auto; }
+.pip-report-group[data-fold="closed"] > .pip-report { display: none; }
+.pip-report-group > .pip-report.slim { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+.pip-report-group > .pip-report.slim:last-child { border-radius: 0 0 var(--r-md) var(--r-md); }
+@media (prefers-reduced-motion: reduce) { .pip-report-chevron { transition: none; } }

@@ -127,7 +127,65 @@ test("a clean run is one quiet line with no fix to ask for", () => {
   const [card] = cards(s);
   assert.ok(card.classList.contains("quiet"));
   assert.equal(card.querySelector(".pip-report-state").textContent, "finished · nothing found");
-  assert.deepEqual([...card.querySelectorAll("button")].map((b) => b.textContent), ["Open report", "Dismiss"]);
+  assert.equal(card.querySelector(".pip-report-fix, .pip-report-fix-slim"), null, "no fix to ask for");
+  assert.deepEqual([...card.querySelectorAll(".pip-report-slim-actions button")].map((b) => b.textContent || b.getAttribute("aria-label")),
+    ["Open", "Dismiss"], "its one line carries Open and ✕");
+  assert.equal(card.querySelector(".pip-report-line2"), null, "one line");
+});
+
+// The founder (19 Oct): the cards took too much room ("just 2 lines"); three that arrive together are one line.
+test("a report is two lines until opened: what it found, then the worst finding with Fix, Open and ✕", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  const [card] = cards(s);
+  assert.equal(card.dataset.fold, "closed");
+  const line1 = card.querySelector(".pip-report-line1"), line2 = card.querySelector(".pip-report-line2");
+  assert.equal(line1.querySelector(".pip-report-line-name").textContent, "ERP daily audit");
+  assert.equal(line1.querySelector(".pip-report-line-state").textContent, "5 findings · 2 high");
+  assert.equal(line2.querySelector(".pip-report-sev").textContent, "high");
+  assert.equal(line2.querySelector(".pip-report-line-what").textContent, "GST total skips cess");
+  assert.equal(line2.querySelector(".pip-report-where").textContent, "app/gst.py:88");
+  assert.deepEqual([...line2.querySelectorAll("button")].map((b) => b.textContent || b.getAttribute("aria-label")), ["Fix", "Open", "Dismiss"]);
+  line1.click();
+  assert.equal(card.dataset.fold, "open", "a click opens the whole card");
+  assert.equal(line1.getAttribute("aria-expanded"), "true");
+  line1.dispatchEvent(new s.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(card.dataset.fold, "closed", "Enter closes it again");
+  const before = s.posted.filter((m) => m.type === "prompt").length;
+  line2.querySelector(".pip-report-fix-slim").click();
+  assert.equal(s.posted.filter((m) => m.type === "prompt").length, before + 1, "Fix sends the message");
+  assert.equal(card.dataset.fold, "closed", "pressing Fix doesn't open the card");
+  assert.deepEqual([...card.querySelectorAll(".pip-report-fix, .pip-report-fix-slim")].map((b) => [b.textContent, b.disabled]),
+    [["Asked DGC", true], ["Asked DGC", true]]);
+});
+
+test("a failed run's second line says why", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: FAILED });
+  const [card] = cards(s);
+  assert.equal(card.querySelector(".pip-report-line-state").textContent, "failed");
+  assert.equal(card.querySelector(".pip-report-line2 .pip-report-sev").textContent, "why");
+  assert.equal(card.querySelector(".pip-report-line-what").textContent, FAILED.reason);
+});
+
+test("three reports that arrive together are one line, opened to their rows; two stay two", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  s.event({ type: "pip_report", report: FAILED });
+  assert.equal(s.doc.querySelector("#log .pip-report-group"), null, "two cards are not grouped");
+  s.event({ type: "pip_report", report: CLEAR });
+  const group = s.doc.querySelector("#log .pip-report-group");
+  assert.ok(group, "three are");
+  assert.equal(group.querySelectorAll(":scope > .pip-report").length, 3);
+  assert.equal(group.querySelector(".pip-report-group-title").textContent, "3 Pip reports · 1 failed · 5 findings · 1 clear");
+  assert.equal(group.dataset.fold, "closed");
+  group.querySelector(".pip-report-group-head").click();
+  assert.equal(group.dataset.fold, "open");
+  // Dismissing one leaves two: they stand on their own again.
+  group.querySelector(".pip-report[data-outcome='clear'] .pip-report-dismiss-slim").click();
+  assert.equal(s.doc.querySelector("#log .pip-report-group"), null);
+  assert.equal(cards(s).length, 2);
+  assert.deepEqual(s.errors, []);
 });
 
 test("Open report opens the Pips view at that run", () => {

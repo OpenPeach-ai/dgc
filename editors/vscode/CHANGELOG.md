@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Pip report cards are two lines.** Line one: the Pip, what it found ("5 findings · 2 high", "failed", "nothing found") and when; line two: the worst finding or why it failed, with Fix · Open · ✕. A clean run is one line. A click (or Enter) opens the whole card. Cards that arrive together sit 4px apart instead of a block apart, and three or more fold into one line ("3 Pip reports · 1 failed · 5 findings · 1 clear"). Two quiet cards went from 134px to about 56px.
+
 - **Steer now, Steer all.** A queued message ("you · queued", from Alt+Enter or a Pip report's Ask DGC to fix) has Steer now: it goes into the running turn the way Enter-while-working does, and the model reads it at its next step instead of after the turn. Steer all, beside "N queued", sends every one. A turn that can't take it says so and the message stays queued.
 
 - **"Show more" on a long prompt no longer sits on its text.** It has a strip of its own under the first three lines; over the faded last line, the words ran into it.

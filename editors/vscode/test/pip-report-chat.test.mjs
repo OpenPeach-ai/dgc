@@ -80,15 +80,18 @@ test("a report reaches the open chat as a card, Ask DGC to fix fills the box, an
       const box = card.getBoundingClientRect();
       return { overflow: card.scrollWidth - card.clientWidth, logOverflow: log.scrollWidth - log.clientWidth,
         right: box.right, width: innerWidth,
-        buttons: [...card.querySelectorAll("button")].map((b) => { const r = b.getBoundingClientRect(); return r.right <= innerWidth && r.width > 0; }) };
+        // The buttons on screen (closed, the second line's Fix · Open · ✕; the whole card's row waits behind the fold).
+        buttons: [...card.querySelectorAll("button")].filter((b) => b.getClientRects().length)
+          .map((b) => { const r = b.getBoundingClientRect(); return r.right <= innerWidth && r.width > 0; }) };
     });
     assert.ok(fit.overflow <= 0 && fit.logOverflow <= 0, JSON.stringify(fit));
     assert.ok(fit.right <= fit.width && fit.buttons.every(Boolean), JSON.stringify(fit));
 
-    await s.page.locator(".pip-report-fix").click();                     // the user's ask: sent at once, once
+    assert.ok(fit.buttons.length >= 3, "Fix, Open and ✕ are on the card's second line");
+    await s.page.locator(".pip-report-fix-slim").click();                // the user's ask: sent at once, once
     assert.equal(await s.page.locator("#input").evaluate((el) => el.value), "", "the box is left alone");
-    assert.equal(await s.page.locator(".pip-report-fix").textContent(), "Asked DGC");
-    assert.ok(await s.page.locator(".pip-report-fix").isDisabled(), "a second click can't send it again");
+    assert.equal(await s.page.locator(".pip-report-fix-slim").textContent(), "Asked DGC");
+    assert.ok(await s.page.locator(".pip-report-fix-slim").isDisabled(), "a second click can't send it again");
     const ended = await until(() => s.events.filter((e) => e.type === "turn_end").length === 2
       && s.events.filter((e) => e.type === "turn_end").at(-1), "the fix turn to end", 60_000);
     assert.equal(ended.reason, "completed");
@@ -104,7 +107,7 @@ test("a report reaches the open chat as a card, Ask DGC to fix fills the box, an
     const replayed = await cards(s.page);
     assert.deepEqual(replayed.map((c) => c.html), liveCards.map((c) => c.html), "replay draws what live drew");
 
-    await s.page.locator(".pip-report-dismiss").click();
+    await s.page.locator(".pip-report-dismiss-slim").click();
     await sleep(800);
     await s.reloadWebview({ width: 360, height: 760 });
     await s.ready();

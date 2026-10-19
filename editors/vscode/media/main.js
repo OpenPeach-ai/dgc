@@ -8126,10 +8126,10 @@
     }
   }
   function markPipReportAsked(card) {
-    const fix = card?.querySelector(".pip-report-fix");
-    if (!fix) return;
-    fix.disabled = true; fix.textContent = "Asked DGC"; fix.classList.add("asked");
-    fix.title = "This report's prompt was sent in this chat.";
+    for (const fix of card?.querySelectorAll(".pip-report-fix, .pip-report-fix-slim") || []) {
+      fix.disabled = true; fix.textContent = "Asked DGC"; fix.classList.add("asked");
+      fix.title = "This report's prompt was sent in this chat.";
+    }
   }
   function askDgcToFix(r, card) {
     if (pipReportAsked(r.run_id)) { markPipReportAsked(card); return; }
@@ -8199,34 +8199,138 @@
     if (Number.isSafeInteger(r.earlier) && r.earlier > 0) more.push(`${pipReportPlural(r.earlier, "earlier run")} not shown`);
     if (more.length) { const p = el("p", "pip-report-more"); p.textContent = more.join(" · "); main.append(p); }
     const actions = el("div", "pip-report-actions");
-    const button = (label, cls, title, fn) => {
-      const b = el("button", cls); b.type = "button"; b.textContent = label; b.title = title; b.onclick = fn; actions.append(b); return b;
+    const button = (label, cls, title, fn, into = actions) => {
+      const b = el("button", cls); b.type = "button"; b.textContent = label; b.title = title;
+      b.onclick = (event) => { event.stopPropagation(); fn(); }; into.append(b); return b;
     };
-    if (!quiet) {
-      button("Ask DGC to fix", "act primary pip-report-fix", "Send DGC a message asking it to read this report and fix what it found. It asks you before changing live data or services.", () => askDgcToFix(r, card));
-    }
-    button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, () => {
-      showPips(); pipsApp?.navigate?.({ pip: r.pip_id, section: "runs", run: r.run_id });
-    });
-    button("Dismiss", "act pip-report-dismiss", "Remove this card from the chat. The report stays in Pips.", () => {
-      const next = card.nextElementSibling;
+    const fixTitle = "Send DGC a message asking it to read this report and fix what it found. It asks you before changing live data or services.";
+    const openReport = () => { showPips(); pipsApp?.navigate?.({ pip: r.pip_id, section: "runs", run: r.run_id }); };
+    const dismiss = () => {
+      const group = card.parentElement?.closest(".pip-report-group");
+      const next = card.nextElementSibling || group?.nextElementSibling;
       card.remove();
+      if (group) paintPipReportGroup(group);
       if (pipReportsLive) vscode.postMessage({ type: "pipReportDismiss", run_id: r.run_id });
-      (next?.querySelector?.("button") || input).focus({ preventScroll: true });
-    });
+      (next?.querySelector?.("button, [tabindex='0']") || input).focus({ preventScroll: true });
+    };
+    if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", fixTitle, () => askDgcToFix(r, card));
+    button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, openReport);
+    button("Dismiss", "act pip-report-dismiss", "Remove this card from the chat. The report stays in Pips.", dismiss);
     main.append(actions);
+    // Two lines until opened (the founder, 19 Oct: the cards took too much room). Line one: the Pip, what it found,
+    // when, and a chevron; line two: the worst finding or why it failed, with Fix, Open and Dismiss. A clean run is
+    // the first line alone. Opening shows the whole card below them (today's), so nothing is drawn twice.
+    card.classList.add("slim"); card.dataset.fold = "closed";
+    card.dataset.total = String(Number.isSafeInteger(r.total) ? r.total : 0);
+    const short = pipReportShort(r);
+    const line1 = el("div", "pip-report-line1");
+    line1.tabIndex = 0; line1.setAttribute("role", "button"); line1.setAttribute("aria-expanded", "false");
+    line1.setAttribute("aria-label", `${r.name}: ${state}. Show details`);
+    const name1 = el("span", "pip-report-line-name"); name1.textContent = r.name.slice(0, 120);
+    const state1 = el("span", "pip-report-line-state"); state1.textContent = short.text;
+    if (short.bad) state1.dataset.bad = "";
+    line1.append(name1, state1, el("span", "pip-report-fill"));
+    const time1 = window.DgcTime?.node(Date.parse(String(r.finished_at || "")), "pip-report-line-when");
+    if (time1) line1.append(time1);
+    const slimActs = el("span", "pip-report-slim-actions");
+    if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, () => askDgcToFix(r, card), slimActs);
+    button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
+    const x = button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, slimActs);
+    x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
+    const chevron = el("span", "pip-report-chevron codicon codicon-chevron-right"); chevron.setAttribute("aria-hidden", "true");
+    const fold = (open = card.dataset.fold !== "open") => {
+      card.dataset.fold = open ? "open" : "closed"; line1.setAttribute("aria-expanded", String(open));
+    };
+    line1.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fold(); } });
+    card.addEventListener("click", (event) => { if (!event.target.closest("button, a, .pip-report-findings, .pip-report-detail")) fold(); });
+    if (quiet) { line1.append(slimActs, chevron); main.prepend(line1); }
+    else {
+      line1.append(chevron);
+      const line2 = el("div", "pip-report-line2");
+      const sev = el("span", "pip-report-sev"), what = el("span", "pip-report-line-what");
+      sev.dataset.severity = short.sev; sev.textContent = short.sev === "failed" ? "why" : short.sev;
+      what.textContent = short.what;
+      line2.append(sev, what);
+      if (short.where) { const where = el("span", "pip-report-where"); where.textContent = short.where; line2.append(where); }
+      line2.append(el("span", "pip-report-fill"), slimActs);
+      main.prepend(line1, line2);
+    }
     card.append(face, main);
     if (!quiet && pipReportAsked(r.run_id)) markPipReportAsked(card);
     return card;
   }
+  // The card's first two lines, from the report: "5 findings · 2 high" and the worst finding; "failed" and why.
+  function pipReportShort(r) {
+    const n = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : 0);
+    const top = Array.isArray(r.findings) ? r.findings[0] : null;
+    if (r.outcome === "failed") return { text: "failed", bad: true, sev: "failed", what: String(r.reason || "It stopped with an error.").slice(0, 300) };
+    if (r.outcome === "clear") return { text: "nothing found" };
+    if (r.outcome === "checks_passed") return { text: pipReportState(r).replace(/^finished · /, "") };
+    if (r.outcome === "checks_failed") {
+      return { text: pipReportState(r).replace(/^finished · /, ""), bad: true, sev: "failed",
+               what: String((Array.isArray(r.failed_checks) && r.failed_checks[0]) || "A check failed.").slice(0, 300) };
+    }
+    const high = n(r.counts?.critical) + n(r.counts?.high);
+    return { text: `${pipReportPlural(n(r.total), "finding")}${high ? ` · ${high} high` : ""}`, bad: high > 0,
+             sev: PIP_REPORT_SEVERITIES.includes(top?.severity) ? top.severity : "", what: String(top?.title || "").slice(0, 200),
+             where: typeof top?.path === "string" && top.path ? top.path.slice(0, 300) + (Number.isSafeInteger(top.line) && top.line > 0 ? `:${top.line}` : "") : "" };
+  }
+  // Three or more reports with nothing between them are one line until opened: "3 Pip reports · 1 failed · 5 findings".
+  function groupPipReports(card) {
+    if (!card?.parentNode) return;
+    let start = card;
+    while (start.previousElementSibling?.matches(".pip-report, .pip-report-group")) start = start.previousElementSibling;
+    const run = [];
+    for (let node = start; node && node.matches(".pip-report, .pip-report-group"); node = node.nextElementSibling) run.push(node);
+    const cards = run.flatMap((node) => (node.matches(".pip-report-group") ? [...node.querySelectorAll(":scope > .pip-report")] : [node]));
+    if (cards.length < 3) return;
+    let group = run.find((node) => node.matches(".pip-report-group"));
+    if (!group) {
+      group = el("div", "pip-report-group"); group.dataset.fold = "closed";
+      const head = el("button", "pip-report-group-head"); head.type = "button"; head.setAttribute("aria-expanded", "false");
+      head.addEventListener("click", () => {
+        const open = group.dataset.fold !== "open";
+        group.dataset.fold = open ? "open" : "closed"; head.setAttribute("aria-expanded", String(open));
+      });
+      group.append(head);
+      start.before(group);
+    }
+    for (const c of cards) if (c.parentNode !== group) group.append(c);
+    for (const other of run) if (other !== group && other.matches(".pip-report-group")) other.remove();
+    paintPipReportGroup(group);
+  }
+  function paintPipReportGroup(group) {
+    const cards = [...group.querySelectorAll(":scope > .pip-report")];
+    if (cards.length < 3) { for (const c of cards) group.before(c); group.remove(); return; }
+    const failed = cards.filter((c) => c.dataset.outcome === "failed" || c.dataset.outcome === "checks_failed").length;
+    const findings = cards.reduce((sum, c) => sum + (c.dataset.outcome === "findings" ? Number(c.dataset.total) || 0 : 0), 0);
+    const clear = cards.filter((c) => c.dataset.outcome === "clear" || c.dataset.outcome === "checks_passed").length;
+    const parts = [failed && `${failed} failed`, findings && pipReportPlural(findings, "finding"), clear && `${clear} clear`].filter(Boolean);
+    const head = group.querySelector(":scope > .pip-report-group-head");
+    const faces = el("span", "pip-report-group-faces"); faces.setAttribute("aria-hidden", "true");
+    for (const c of cards.slice(-3)) { const f = el("span"); f.innerHTML = c.querySelector(".pip-report-face")?.innerHTML || ""; faces.append(f); }
+    const title = el("span", "pip-report-group-title");
+    const lead = el("b"); lead.textContent = `${cards.length} Pip reports`;
+    title.append(lead, document.createTextNode(parts.length ? ` · ${parts.join(" · ")}` : ""));
+    const when = cards.at(-1).querySelector(".pip-report-line-when")?.cloneNode(true);
+    const chevron = el("span", "pip-report-chevron codicon codicon-chevron-right"); chevron.setAttribute("aria-hidden", "true");
+    head.replaceChildren(faces, title, ...(when ? [when] : []), chevron);
+    head.setAttribute("aria-label", `${cards.length} Pip reports${parts.length ? `: ${parts.join(", ")}` : ""}. Show them`);
+  }
   function renderPipReport(r) {
     if (!validPipReport(r)) return;
     // One card per run: a replay replaces the live card it repeats.
-    for (const old of [...log.querySelectorAll(".pip-report")]) if (old.dataset.run === r.run_id) old.remove();
+    for (const old of [...log.querySelectorAll(".pip-report")]) {
+      if (old.dataset.run !== r.run_id) continue;
+      const group = old.parentElement?.closest(".pip-report-group");
+      old.remove();
+      if (group) paintPipReportGroup(group);
+    }
     const card = pipReportCard(r);
-    if (replaying) { card.classList.add("hist"); appendTarget.appendChild(card); return; }
+    if (replaying) { card.classList.add("hist"); appendTarget.appendChild(card); groupPipReports(card); return; }
     const stick = atBottom();
     log.appendChild(card);
+    groupPipReports(card);
     speak(`Pip ${r.name} ${pipReportState(r)}`);
     if (stick || following) scroll(); else noteNewContent();
   }
