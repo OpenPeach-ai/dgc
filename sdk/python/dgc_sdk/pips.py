@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "get_pip_eyes",
     "list_pip_run_posts",
     "check_pip_source", "get_pip_run_source",
     "list_pip_plugins", "list_pip_plugin_uses", "list_pip_attention", "list_pip_notes", "list_pip_sites", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit",
@@ -69,6 +70,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "set_pip_eyes",
     "mark_pip_news_seen",
     "set_pip_chat_options",
     "set_plugin_permission",
@@ -235,7 +237,18 @@ READ_COMMANDS |= API51_READS
 API52_FIELDS = {'send_pip_message': frozenset({'spooled_images', 'spooled_files'}),
                 'get_pip_message_image': frozenset({'as_file'})}
 SPOOLED_IMAGE_TYPES = frozenset({'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/heic', 'image/heif'})
+# API 53: a Pip's eyes and cursor. get_pip_eyes / set_pip_eyes: how a Personal Pip whose model reads text only sees
+# (choice ask, relay or off); list_pip_computer_frames' pointers (each step that acted by position says where);
+# use_pip_computer_view's op "pointer" (where the Pip last acted, without a frame). Local only.
+API53_READS = frozenset({'get_pip_eyes'})
+API53_MUTATIONS = frozenset({'set_pip_eyes'})
+READ_COMMANDS |= API53_READS
+MUTATION_COMMANDS |= API53_MUTATIONS
+API53_FIELDS = {'list_pip_computer_frames': frozenset({'pointers'})}
+EYES_CHOICES = frozenset({'ask', 'relay', 'off'})
 COMMAND_FIELDS = {
+    'get_pip_eyes': frozenset({'pip_id'}),
+    'set_pip_eyes': frozenset({'pip_id', 'choice'}),
     'list_pip_run_posts': frozenset({'pip_id', 'before_id', 'limit'}),
     'check_pip_source': frozenset({'pip_id', 'source_policy'}),
     'get_pip_run_source': frozenset({'run_id'}),
@@ -284,7 +297,7 @@ COMMAND_FIELDS = {
     'get_pip_computer': frozenset({'pip_id'}),
     'list_pip_computer_actions': frozenset({'pip_id', 'limit'}),
     'get_pip_computer_frame': frozenset({'run_id', 'frame'}),
-    'list_pip_computer_frames': frozenset({'run_id'}),
+    'list_pip_computer_frames': frozenset({'run_id', 'pointers'}),
     'decide_pip_computer_action': frozenset({'action_id', 'expected_digest', 'approve'}),
     'stop_pip_computer': frozenset({'pip_id'}),
     'open_pip_computer': frozenset({'pip_id'}),
@@ -523,7 +536,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API51_READS:
+        if command in API53_READS | API53_MUTATIONS:
+            minimum = 53
+        elif command in API51_READS:
             minimum = 51
         elif command in API50_READS:
             minimum = 50
@@ -617,6 +632,13 @@ class Pips:
             if version < 52:
                 raise DGCUnsupportedError('Photos and files through the spool, and as_file, require a runtime advertising Pips API 52 or newer')
             _check_api52_fields(values)
+        if API53_FIELDS.get(command, frozenset()) & set(values) or (command == 'use_pip_computer_view' and values.get('op') == 'pointer'):
+            if version < 53:
+                raise DGCUnsupportedError("Where a Pip acted by position (pointers, the view's pointer) requires a runtime advertising Pips API 53 or newer")
+            if 'pointers' in values and type(values['pointers']) is not bool:
+                raise DGCConfigError('pointers must be true or false')
+        if command == 'set_pip_eyes' and values.get('choice') not in EYES_CHOICES:
+            raise DGCConfigError('choice must be ask, relay or off')
         if (command in ('propose_pip_calendar_action','prepare_pip_calendar_draft')
                 and isinstance(values.get('event'),dict)
                 and {'attendees','repeat','send_invitations'}.intersection(values['event']) and version < 38):

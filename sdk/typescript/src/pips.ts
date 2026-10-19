@@ -15,6 +15,7 @@ export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  get_pip_eyes: { pip_id: string };
   list_pip_shared: { pip_id: string; kind: "links" | "media" | "files" };
   get_pip_computers: Record<string, never>;
   list_pip_apps: Record<string, never>;
@@ -39,7 +40,7 @@ export type PipReadParams = {
   list_pip_computer_actions: { pip_id: string; limit?: number };
   get_pip_computer_frame: { run_id: string; frame: string };
   get_pip_message_image: { pip_id: string; message_id: string; index: number; as_file?: boolean };
-  list_pip_computer_frames: { run_id: string };
+  list_pip_computer_frames: { run_id: string; pointers?: boolean };
   list_pip_action_grants: { pip_id: string };
   list_pip_feedback: { pip_id: string };
   export_pip: { pip_id: string };
@@ -118,6 +119,7 @@ export type PipMutationParams = {
   forget_pip_note: { pip_id: string; note_id?: string; all?: true; shared?: true };
   set_pip_careful: { pip_id: string; on: boolean };
   set_pip_chat_options: { pip_id: string; chat_options: PipChatOptions };
+  set_pip_eyes: { pip_id: string; choice: "ask" | "relay" | "off" };
   set_plugin_permission: { plugin: string; level: "always_ask" | "any_changes" | "important" | "never_ask" };
   forget_pip_site: { pip_id: string; site: string };
   set_pips_limit: { max_pips: number };
@@ -197,6 +199,8 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   update_pip_computers: [],
   reset_pip_computer: ["pip_id"],
   list_pip_apps: [],
+  get_pip_eyes: ["pip_id"],
+  set_pip_eyes: ["choice", "pip_id"],
   list_pip_plugins: ["pip_id"],
   allow_pip_plugin: ["pip_id", "grant_id"],
   decline_pip_plugin: ["pip_id", "grant_id"],
@@ -239,7 +243,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   get_pip_computer: ["pip_id"],
   list_pip_computer_actions: ["pip_id", "limit"],
   get_pip_computer_frame: ["run_id", "frame"],
-  list_pip_computer_frames: ["run_id"],
+  list_pip_computer_frames: ["pointers", "run_id"],
   decide_pip_computer_action: ["action_id", "expected_digest", "approve"],
   stop_pip_computer: ["pip_id"],
   open_pip_computer: ["pip_id"],
@@ -613,6 +617,15 @@ function checkApi52Fields(values: Record<string, unknown>): void {
   }
   if (Object.hasOwn(values, "as_file") && typeof values.as_file !== "boolean") throw new DGCConfigError("as_file must be true or false");
 }
+// API 53: a Pip's eyes and cursor. get_pip_eyes / set_pip_eyes: how a Personal Pip whose model reads text only sees
+// (choice ask, relay or off); list_pip_computer_frames' pointers (each step that acted by position says where);
+// use_pip_computer_view's op "pointer" (where the Pip last acted, without a frame). Local only.
+const API53_READS = new Set(["get_pip_eyes"]);
+const API53_MUTATIONS = new Set(["set_pip_eyes"]);
+for (const command of API53_READS) READS.add(command);
+for (const command of API53_MUTATIONS) MUTATIONS.add(command);
+const API53_FIELDS: Readonly<Record<string, readonly string[]>> = { list_pip_computer_frames: ["pointers"] };
+const EYES_CHOICES = new Set(["ask", "relay", "off"]);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -701,7 +714,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -767,6 +780,13 @@ export class Pips {
       }
       checkApi52Fields(values);
     }
+    if ((API53_FIELDS[command] || []).some((key) => Object.hasOwn(values, key)) || command === "use_pip_computer_view" && values.op === "pointer") {
+      if ((this.caps.pips_api_version as number) < 53) {
+        throw new DGCUnsupportedError("Where a Pip acted by position (pointers, the view's pointer) requires a runtime advertising Pips API 53 or newer");
+      }
+      if (Object.hasOwn(values, "pointers") && typeof values.pointers !== "boolean") throw new DGCConfigError("pointers must be true or false");
+    }
+    if (command === "set_pip_eyes" && !EYES_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be ask, relay or off");
     if (Object.keys(values).some((key) => !COMMAND_FIELDS[command].includes(key))) throw new DGCConfigError("Unknown or reserved Pip parameter");
     if (["list_pip_notes", "add_pip_note", "forget_pip_note"].includes(command) && Object.hasOwn(values, "shared")
       && (this.caps.pips_api_version as number) < 46)

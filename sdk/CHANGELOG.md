@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pips API 53: `get_pip_eyes` (read) and `set_pip_eyes` (mutation, `choice` ask, relay or off), `list_pip_computer_frames`'
+  `pointers` and `use_pip_computer_view`'s op `pointer`, in both SDKs; each is refused before API 53.
 - Editor protocol: new command `steer_queued {request_ids}` (capability `steer_queued`).
 - Editor protocol: new command `set_plugin_sign_in_scopes {request_id, name, scopes, sign_in_again?}` (capability
   `plugin_sign_in_scopes`): what a plugin's sign-in may do, such as Sign in with GitHub's permissions.
