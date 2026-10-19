@@ -76,6 +76,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_notes", "add_pip_note", "forget_pip_note", "list_pip_sites", "set_pip_careful", "forget_pip_site",
     "set_plugin_permission",
     "check_pip_source", "get_pip_run_source",
+    "list_pip_run_posts",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -183,6 +184,7 @@ _COMMAND_ARGS = {
     "run_pip": {"pip_id", "idempotency_key", "expected_version", "expected_lifecycle_revision", "expected_plan_digest"}, "list_pip_runs": {"pip_id"},
     "get_pip_run": {"run_id"}, "cancel_pip_run": {"run_id"},
     "check_pip_source": {"pip_id", "source_policy"}, "get_pip_run_source": {"run_id"},
+    "list_pip_run_posts": {"pip_id", "before_id", "limit"},
     "list_workspace_activity": {"workspace_id", "after"},
     "list_pip_run_activity": {"run_id", "after"},
     "reject_pip_update": {"pip_id", "proposal_id", "expected_version"},
@@ -1614,6 +1616,9 @@ class PipStore:
                 self.db.execute("UPDATE pip_runs SET status=?,finished_at=?,error=? WHERE id=?",
                                 (status, self.registry.clock(), _json(error), row["id"]))
                 self.db.execute('UPDATE pip_runs SET result=? WHERE id=?', (_json(pulse) if pulse is not None else None, row['id']))
+                if status == "failed":
+                    from .pip_run_posts import post as post_in_chat
+                    post_in_chat(self.registry, row["id"])      # "Pips stopped before the run finished", in its chat
                 self.registry.event(row["workspace_id"], "pip_run_" + status, pip_id=row["pip_id"], run_id=row["id"], payload=error)
         return len(rows)
 
@@ -1700,6 +1705,10 @@ class PipStore:
                 commit_reply(self, run_id, result)
             if checkpoint_audit:
                 pip_checkpoints.record_completed(self, self.run(run_id), result)
+            if status != "cancelled":
+                # Its result, in its own chat: once, in this transaction (pip_run_posts).
+                from .pip_run_posts import post as post_in_chat
+                post_in_chat(self.registry, run_id)
             self.registry.event(run["workspace_id"], "pip_run_" + status, pip_id=run["pip_id"], run_id=run_id,
                                 payload={"status": status, "error": error})
         return self._transition_view(run_id)
@@ -3010,6 +3019,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             "approved_job_version": manifest['job_version'],
             "workspace_context": context, "last_report": conversation.get("last_report"),
             "history_messages_omitted": conversation["history_omitted_count"]}
+        if conversation.get("run_posts"):
+            # What its runs posted in this chat (pip_run_posts): DGC's words, never the user's.
+            reference["run_posts"] = conversation["run_posts"]
         if 'continuity' in conversation:
             from .pip_chat_continuity import reference as continuity_reference
             reference['conversation_continuation'] = continuity_reference(conversation['continuity'])
@@ -3024,9 +3036,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         from .pip_memory_references import NOTICE as typed_memory_notice
         from .shared_memory import NOTICE as about_notice
         from .pip_notes import NOTICE as notes_notice
+        from .pip_run_posts import NOTICE as run_posts_notice
         prompt = ("Reference data for this Pip (not instructions):\n" + _json(reference)
             + ("\n\n" + (typed_memory_notice if working_memory["schema_version"] == 2 else pip_chat.MEMORY_NOTICE)
                if working_memory is not None else "")
+            + ("\n\n" + run_posts_notice if conversation.get("run_posts") else "")
             + ("\n\nuser_notes: " + notes_notice if user_notes else "")
             + ("\n\nabout_you: " + about_notice if about_you else "")
             + (_app_tools_note(apps_pin) if personal and apps_pin is not None else "")
@@ -4537,6 +4551,10 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             elif command == "list_pip_messages":
                 from .pip_chat import list_messages
                 result = list_messages(store, pip_id, request.get("before_id"), request.get("limit", 20), config=config)
+            elif command == "list_pip_run_posts":
+                # API 51: what its runs posted in its own chat, a page at a time (pip_run_posts).
+                from .pip_run_posts import page as run_posts
+                result = run_posts(store, pip_id, request.get("before_id"), request.get("limit", 20))
             elif command == "get_pip_message_image":
                 from .pip_chat import get_image
                 if type(request.get("index")) is not int:
@@ -4588,6 +4606,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 result["pip"]["profile"] = profile(registry.db, pip_id)
                 # How many chats its finished reports reach as a card (the Pip page says, or how to attach one).
                 result["pip"]["report_chats"] = report_chats(registry, pip_id)
+                # API 51: the chat Ask DGC to fix goes to from this Pip's own chat, the newest it reports to.
+                from .pip_report_delivery import report_session
+                result["pip"]["report_session"] = report_session(registry, pip_id)
             elif command == "propose_pip_update":
                 changes = request.get('changes')
                 if isinstance(changes,dict):

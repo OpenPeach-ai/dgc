@@ -135,6 +135,25 @@ def report_chats(registry, pip_id: str) -> int:
     return len(ids)
 
 
+def report_session(registry, pip_id: str) -> str | None:
+    """The newest chat this Pip reports to (attached, or set up there), or None: where Ask DGC to fix
+    goes from the Pip's own chat."""
+    found: list[tuple[str, str]] = [(row[1], row[0]) for row in registry.db.execute(
+        "SELECT session_id,created_at FROM session_pip_attachments WHERE pip_id=?", (pip_id,))]
+    for session, raw in registry.db.execute("""SELECT session_id,receipt FROM pip_setup_proposals
+            WHERE status='accepted' AND length(CAST(receipt AS BLOB))<=4096 LIMIT 2000"""):
+        try:
+            receipt = json.loads(raw)
+        except (TypeError, ValueError, RecursionError):
+            continue
+        if (isinstance(receipt, dict) and receipt.get("pip_id") == pip_id and receipt.get("accepted") is True
+                and isinstance(receipt.get("resolved_at"), str)):
+            found.append((receipt["resolved_at"], session))
+    found = [(at, session) for at, session in found
+             if isinstance(at, str) and isinstance(session, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session)]
+    return max(found)[1] if found else None
+
+
 def _pip(db, pip_id: str) -> dict | None:
     row = db.execute("""SELECT p.status,CASE WHEN length(CAST(v.definition AS BLOB))<=24576 THEN v.definition END
         FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version WHERE p.id=?""", (pip_id,)).fetchone()

@@ -733,6 +733,11 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     report = _last_report(store, pip["id"])
     context = {"text": req["text"], "history": history, "history_omitted_count": 0,
                "last_report": report, "continuity": continuity}
+    from .pip_run_posts import recent as recent_posts
+    posts = recent_posts(store, pip["id"])
+    if posts:
+        # What its runs posted in this chat, as reference beside last_report: never a turn, never the user's words.
+        context["run_posts"] = posts
     if req.get("images"):
         context["images"] = req["images"]
     if req.get("files"):
@@ -941,7 +946,7 @@ def _copy_to_computer(directory, pip_id, files) -> None:
 
 
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) - {"images", "files"} not in (
+    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -949,6 +954,9 @@ def validate_context(value):
         validate_images(value["images"])
     if "files" in value:
         validate_files(value["files"])
+    if "run_posts" in value:
+        from .pip_run_posts import validate_recent
+        validate_recent(value["run_posts"])
     if 'continuity' in value:
         from .pip_chat_continuity import _validate_envelope
         _validate_envelope(value['continuity'])

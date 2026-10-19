@@ -245,7 +245,9 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # `local_http_checks` and, when DGC knows the one-time fix, `fix`; a Pulse setup card's runner_notice says when it
 # can't run on this computer.
 # API 50: the safe_source_v2 source rules (source_policy.exclude), check_pip_source and get_pip_run_source.
-PIPS_API_VERSION = 50
+# API 51: a finished run posts its result in its Pip's own chat; list_pip_run_posts reads them, and get_pip says
+# the chat Ask DGC to fix goes to (report_session).
+PIPS_API_VERSION = 51
 
 
 def _pips_platform_supported() -> bool:
