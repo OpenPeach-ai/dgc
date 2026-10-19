@@ -197,8 +197,14 @@ class ServiceTests(unittest.TestCase):
         self.home.chmod(0o770)
         me = pwd.getpwuid(os.getuid())
         # Writable by a group someone else is in: refused.
-        with patch("grp.getgrgid", return_value=grp.struct_group((me.pw_name, "x", me.pw_gid, ["someone-else"]))):
+        with patch("grp.getgrgid", return_value=grp.struct_group(("docker", "x", me.pw_gid, ["someone-else"]))):
             self.assertCode("unsafe_service_path", service.preview, self.home, **self.options)
+            # The message names the folder, who can write it and the fix (a real ~/.local was 775 under the shared
+            # docker group, and the bare message left the user nothing to act on).
+            with self.assertRaises(RegistryError) as caught:
+                service.preview(self.home, **self.options)
+            self.assertIn(f"{self.home} is writable by the docker group", str(caught.exception))
+            self.assertIn("chmod go-w", str(caught.exception))
         # A group of one (Ubuntu's private groups): nobody else can write, so it is accepted.
         with patch("grp.getgrgid", return_value=grp.struct_group((me.pw_name, "x", me.pw_gid, []))), \
                 patch("pwd.getpwall", return_value=[me]):

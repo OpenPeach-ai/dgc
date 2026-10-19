@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import selectors
 import signal
+import shlex
 import stat
 import subprocess
 import sys
@@ -60,6 +61,14 @@ def _only_mine(gid):
     return not any(entry.pw_gid == gid and entry.pw_uid != me.pw_uid for entry in pwd.getpwall())
 
 
+def _group_name(gid):
+    import grp
+    try:
+        return grp.getgrgid(gid).gr_name
+    except KeyError:
+        return f"group {gid}"
+
+
 def _safe_chain(path, *, missing=False):
     """No symlinks, unowned writable parents, or non-directory path ancestors."""
     for item in (Path(path.anchor), *reversed(path.parents), path):
@@ -78,7 +87,11 @@ def _safe_chain(path, *, missing=False):
             # Group-writable is fine when the group is only you: Ubuntu gives each user a private
             # group and a 002 umask, so ~/.config is often 775 (OpenSSH's StrictModes rule).
             if info.st_mode & 0o002 or not (info.st_uid == os.getuid() and _only_mine(info.st_gid)):
-                _error("unsafe_service_path", "Service directory paths must not be writable by another user.")
+                # Name the folder and the fix: "must not be writable by another user" alone left a real user
+                # (~/.local group-writable by the shared docker group) with nothing to act on.
+                who = "anyone" if info.st_mode & 0o002 else f"the {_group_name(info.st_gid)} group"
+                _error("unsafe_service_path", f"Service directory paths must not be writable by another user: {item} "
+                       f"is writable by {who}. Fix it with: chmod go-w {shlex.quote(str(item))}")
 
 
 def _private_state(home):
