@@ -981,11 +981,31 @@ class BoxedBrowser(BrowserSession):
         x, y = float(x), float(y)
         self.command("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "button": "none", "buttons": 0})
         mask = {"left": 1, "right": 2, "middle": 4}.get(button, 1)
-        for click in range(1, max(1, int(count)) + 1):
-            for kind in ("mousePressed", "mouseReleased"):
-                self.command("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": button,
-                                                          "buttons": mask if kind == "mousePressed" else 0,
-                                                          "clickCount": click})
+        # A right click is for the page's own menu. The browser's menu would open on the computer's screen, where
+        # the Pip can neither see nor use it and it stays until someone closes it: DGC's own isolated world cancels
+        # it for this one click (the page's handlers still run).
+        world = self._quiet_menu() if button == "right" else None
+        try:
+            for click in range(1, max(1, int(count)) + 1):
+                for kind in ("mousePressed", "mouseReleased"):
+                    self.command("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": button,
+                                                              "buttons": mask if kind == "mousePressed" else 0,
+                                                              "clickCount": click})
+        finally:
+            if world is not None:
+                try:
+                    self._in_world(world, "function () { window.removeEventListener('contextmenu', window.__dgcQuiet, true); return true; }")
+                except (BrowserError, socket.timeout, OSError):
+                    pass
+
+    def _quiet_menu(self):
+        try:
+            world = self._isolated()
+            self._in_world(world, "function () { window.__dgcQuiet = (e) => e.preventDefault();"
+                                  " window.addEventListener('contextmenu', window.__dgcQuiet, true); return true; }")
+            return world
+        except (BrowserError, socket.timeout, OSError, KeyError, TypeError, ValueError):
+            return None
 
     def hover_at(self, x: float, y: float) -> None:
         self.acted_at = time.monotonic()

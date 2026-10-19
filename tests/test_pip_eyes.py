@@ -652,6 +652,13 @@ class RealEyesTests(unittest.TestCase):
         log = json.loads(self.browser.evaluate_json("JSON.stringify(window.log)"))
         self.assertGreaterEqual(log["moves"], 10, "a drag moves in steps, so a canvas editor sees it")
         self.assertEqual((log["contextmenu"], log["dbl"], log["wheel"], log["dropped"]), (1, 1, 240, "item"))
+        # The Pip's right click reaches the page, never opening the browser's own menu on the computer's screen.
+        self.browser.evaluate_json("(() => { window.__menus = []; addEventListener('contextmenu', e => __menus.push(e.defaultPrevented)); return 1; })()")
+        self.browser.click_at(700, 300, button="right")      # off the canvas: no page handler cancels it
+        self.browser.pump(0.3)
+        self.assertEqual(self.browser.evaluate_json("window.__menus"), [True], "DGC cancelled the browser's menu")
+        self.browser.evaluate_json("(() => { document.body.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true})); return 1; })()")
+        self.assertEqual(self.browser.evaluate_json("window.__menus"), [True, False], "only for that click: the user's menu is theirs")
         self.assertEqual(self.browser.element_at(100, 420), 'button "Upload a photo"')
         (self.root / "home" / "Files" / "photo.jpg").write_bytes(JPEG)
         self.assertEqual(self.browser.set_files(["/home/pip/Files/photo.jpg"], point=(100, 420)), "chooser")
