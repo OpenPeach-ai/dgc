@@ -228,6 +228,19 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   corrected, 2 removed: no source backed them"), and a click on it lists each claim, what it said and why.
   On the coding-models and home-loan questions, 86% and 84% of cited claims held up at the first check, 8 and 7
   were corrected, 1 each removed, and the check took 30 to 40 seconds.
+- **Deep research's citation check looks at the figures themselves, and corrects before it removes.** A hand check of
+  two reports found a kept claim whose figure was on none of its pages (the note it was judged by was wrong), and
+  both removals wrong. Now every number in a claim that's kept must be on one of its cited pages as read, in any
+  form (8.00% is 8%, 1,000 is 1000, ₹70 lakh is 70,00,000); one that isn't sends the claim to the page check and the
+  repair, with no model needed to spot it. The report's own arithmetic (an EMI, 80% of a price) on figures its pages
+  give is kept, uncited, rather than swapped for another example. A verdict that holds but doubts itself ("hmm",
+  "but") is looked at again, and one whose sources back the claim with nothing missing can't remove it. A repair
+  that would remove a claim part of which is sourced gets a second, stricter try (fix the figure, or say who claims
+  it); removal is left for claims no source gives at all, or with a figure no page has. Corrections are asked for as
+  one plain sentence, and checked against the page as well as the note. The question's own figures (₹70 lakh) count
+  as given, and a page whose ₹ was decoded wrongly still gives its figures. On the coding-models and home-loan
+  questions, the guard caught 3 and 8 claims whose figures their pages don't have, 6 and 4 were corrected, none was
+  removed, and the check took about 30 seconds.
 - **A flaky web search no longer stretches deep research.** A round waits 30 seconds for its searches at most (a
   keyless search that kept failing made one run take 26 minutes), four run at once, and the line under the report
   says how many searches failed, and plainly when many did.

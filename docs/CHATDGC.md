@@ -179,8 +179,12 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   don't. A claim no note backs gets a second look at the pages themselves (kept beside the chat as they were read,
   and deleted with it): the passage with its figures and names. If no page backs it either, it goes back to the
   model once, to be corrected to what the sources say, with their citations, or deleted; a correction is checked
-  again, and a fact still not backed is removed. A sentence that is the report's own judgement or advice, drawn
-  from facts given elsewhere, stays without a citation. A table row is never removed: it is checked cell by cell,
+  again, and a fact still not backed is removed. Every number in a claim that's kept must be on one of its cited
+  pages, in any form (8.00% is 8%, ₹70 lakh is 70,00,000): one that isn't sends the claim back through the page
+  check and the repair. A repair that would remove a claim part of which is sourced gets a second try; removal is
+  only for claims no source gives at all, or with a figure no page has. A sentence that is the report's own
+  judgement or advice, or its own arithmetic (an EMI, 80% of a price) on figures its pages give, stays without a
+  citation. A table row is never removed: it is checked cell by cell,
   and a cell no source gives reads "not given". Nothing factual is left standing uncited, and sentences that cite
   nothing (the report's own reasoning) aren't touched. A round waits 30 seconds for its searches at most, so a
   web search that keeps failing doesn't stretch a run; when many fail, the line under the report says so. A line under the report says how it was researched: rounds,
