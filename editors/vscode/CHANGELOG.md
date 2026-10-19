@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A Pip's status opens its latest run.** "Report ready", "Last run failed" and the like under a Pip's name read like a link and did nothing; they open that run on the Runs tab now, scrolled to its report.
+
 - **Ask DGC to fix sends, once.** On a Pip report card it sends DGC one message naming the run (queued behind a turn that is running) and becomes "Asked DGC", also after the chat is reopened. Before, it only filled the box, and a second click pasted the prompt again. A draft in the box is left alone.
 - **The chip line's colours are the rows' colours again.** Blocked tasks and a blocked goal show their icon and "N blocked" in the olive error colour, waiting monitors and a Pips alert in amber, with no dot and no outline. Error text in light themes is a darker olive, readable on white.
 

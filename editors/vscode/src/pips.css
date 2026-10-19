@@ -510,3 +510,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .pip-page-row.plugin-level .row-words{flex:1 1 200px}
 .pip-page-row.plugin-level .row-words small{white-space:normal;overflow:visible}
 .pip-page-row.plugin-level select{flex:1 1 100%;max-width:100%;margin-left:42px}
+/* The Pip page's status names its latest run and opens it: words in the line, a link's look on hover and focus. */
+button.link.last-run{display:inline;min-height:0;padding:0;border:0;border-radius:3px;font:inherit;color:inherit;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent);text-underline-offset:2px;cursor:pointer}
+button.link.last-run:hover{background:transparent;color:var(--pip-ink);text-decoration-color:currentColor}
+button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscode-focusBorder));outline-offset:2px}
