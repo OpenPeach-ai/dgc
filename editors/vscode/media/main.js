@@ -926,6 +926,8 @@
         getState:() => { const state=vscode.getState(); return state?.pipsScope===document.documentElement.dataset.draftScope ? state.pips : undefined; },
         setState:state => vscode.setState({...vscode.getState(),pips:state,pipsScope:document.documentElement.dataset.draftScope}),
         close:closePips,
+        // Ask DGC to fix, from a Pip's own chat (Pips API 51): the prompt the Work chat's card sends, sent once.
+        onAskDgc:({report, session} = {}) => askDgcFromPips(report, session),
         onSetupPrompt:prompt => {
           // Preparing a message is never sending it or replacing the user's work.
           if (composerText() || input.querySelector(".composer-pill") || attachments.length || pendingImageFiles || pendingImageBytes) return 'The main chat already has a draft or attachments. Send or save that draft before describing this setup.';
@@ -6051,6 +6053,7 @@
         renderHistory(ev.items || []);
         if (Array.isArray(ev.todos)) renderTodos(ev.todos);
         if (!replaying) releaseHeldEvents(ev.complete === true ? ev.seq : -1);
+        if (pipAsks.length) flushPipAsks();
         break;
       case "recall": renderHistory._absorbRecall?.(ev); break;
       case "rewound":
@@ -8307,6 +8310,30 @@
     setSending(true); scroll();
     speak(`Asked DGC to fix what ${r.name} reported.`);
   }
+  // From a Pip's own chat. A page with a chat sends it here, as the card would. The side bar's Sessions home has no
+  // chat: the host opens the chat the Pip reports to (or a new one) in its tab, and that chat sends it (pipAskDgc).
+  function askDgcFromPips(r, session) {
+    if (!validPipReport(r) || !["audit", "checks"].includes(r.kind)) return "This run can't be sent to the Work chat.";
+    if (chatPlace === "home") {
+      vscode.postMessage({ type: "pipAskDgc", report: r, session: /^[A-Za-z0-9_-]{1,128}$/.test(String(session || "")) ? session : "" });
+      return true;
+    }
+    closePips();
+    askDgcToFix(r, null);
+    return true;
+  }
+  // A chat a Pip's Ask DGC to fix opened: it sends once this chat is ready and its transcript is in, so a run already
+  // asked about here is not asked again.
+  const pipAsks = [];
+  function queuePipAsk(r) {
+    if (!validPipReport(r) || !["audit", "checks"].includes(r.kind) || pipAsks.length >= 8) return;
+    pipAsks.push(r);
+    flushPipAsks();
+  }
+  function flushPipAsks() {
+    if (!sessionReady || replaying) return;
+    while (pipAsks.length) { const r = pipAsks.shift(); if (!pipReportAsked(r.run_id)) askDgcToFix(r, null); }
+  }
   function pipReportCard(r) {
     const quiet = r.outcome === "clear" || r.outcome === "checks_passed";
     const card = el("div", `pip-report${quiet ? " quiet" : ""}`);
@@ -8677,6 +8704,7 @@
       return;
     }
     if (msg.type === "pipsOpen") { showPips(); return; }
+    if (msg.type === "pipAskDgc") { queuePipAsk(msg.report); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
     if (msg.type === "chatdgc_list") { if (chatPlace === "home") renderChats(msg); return; }
     if (msg.type === "chatdgc_projects") {
@@ -8722,6 +8750,7 @@
       reconnectPending = false; returnedPrompts.length = 0;
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
       backendLive = true; backendDown = false; armTodoClearTimer();
+      if (pipAsks.length) setTimeout(flushPipAsks, 800);    // a new chat has no transcript to wait for
       renderUnconfirmedDrafts();
     }
     else if (msg.type === "state") {

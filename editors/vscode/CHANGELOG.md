@@ -16,6 +16,22 @@
 - **Ask DGC to fix sends, once.** On a Pip report card it sends DGC one message naming the run (queued behind a turn that is running) and becomes "Asked DGC", also after the chat is reopened. Before, it only filled the box, and a second click pasted the prompt again. A draft in the box is left alone.
 - **The chip line's colours are the rows' colours again.** Blocked tasks and a blocked goal show their icon and "N blocked" in the olive error colour, waiting monitors and a Pips alert in amber, with no dot and no outline. Error text in light themes is a darker olive, readable on white.
 
+### A Pip's runs in its own chat (needs DGC with Pips API 51)
+
+- **Each run is a message from the Pip in its chat**, where you can ask about it: its face and name, "Today's
+  audit found 5 things, 2 of them high", the top three findings with severity and file:line, **Open full report**
+  and **Ask DGC to fix**. A failed run says what stopped it in plain words, that nothing in your project was
+  changed and when it runs again, with **See what happened** and **Run again now**. A clean run is one quiet line.
+  A Personal Pip's scheduled result is its message, with **Open full result**. A reload draws the same.
+- **Runs is now History** (Results, for a Personal Pip). Each row says what the run found ("5 findings · 2 high",
+  "Nothing found", "Didn't finish · …") instead of "Report ready", and Open full report lands there at that run.
+- **The status under a Pip's name says what its last run found** ("Today's audit: 5 findings") and goes to that
+  post in the chat.
+- **Ask DGC to fix, from the Pip's chat**, sends the Work chat card's prompt to the chat the Pip reports to, in its
+  tab (a new chat when it reports to none), once; the button then reads "Asked DGC".
+- Runs nobody replied to that are more than a day old fold into one line ("4 earlier runs"), so a week of nightly
+  runs doesn't bury the chat; History keeps every one.
+
 ### Pips: scheduled Pips run with VS Code closed
 
 - Creating a Pip with a schedule, a commit trigger or a routine, or giving one a schedule, turns **Keep Pips running**

@@ -3911,6 +3911,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       ` This copy stays out of the way — close it, or run <b>DGC: Focus Chat</b> to come back.</body></html>`;
   }
 
+  /** A Pip's run, asked about from its own chat: this chat sends the Work chat card's prompt when it is ready. */
+  askFromPips(report: unknown): void {
+    this.inVisiblePanel(() => this.post({ type: "pipAskDgc", report }));
+  }
+
   private inVisiblePanel(action: () => void): void {
     this.focus();
     if (this.webviewReady) { action(); return; }
@@ -4000,6 +4005,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "speakStop": {
         const owner = msg.from === "pips" && !this.tab ? this.micPips : this.micChat;
         await this.readAloudService().handle(owner, msg);
+        return;
+      }
+      case "pipAskDgc": {
+        // Ask DGC to fix, from a Pip's own chat (Pips API 51). The side bar's Sessions home has no chat: the chat the
+        // Pip reports to opens in its tab (a new one when it has none) and sends the Work chat card's prompt, once.
+        if (!this.home || !this.places) return;
+        const report = msg.report;
+        if (!report || typeof report !== "object" || !/^run_[0-9a-f]{32}$/.test(String(report.run_id || ""))) return;
+        const session = /^[A-Za-z0-9_-]{1,128}$/.test(String(msg.session || "")) ? String(msg.session) : "";
+        this.places.open(session).askFromPips(report);
         return;
       }
       case "pipsReady":
