@@ -164,7 +164,7 @@ test("keyboard: the arrows move along the chips, Enter and Space open, Esc close
 });
 
 for (const theme of ["dark-modern", "light-modern"]) {
-  test(`${theme}: what needs you is amber, with words that clear 4.5:1 and a border that clears 3:1`, async (t) => {
+  test(`${theme}: what needs you is an amber dot and words (4.5:1), on a chip outlined like the rest`, async (t) => {
     if (skipOrFail(t)) return;
     const { page, errors } = await openRailScene(browser, { width: 900, height: 820, theme, attention: true });
     try {
@@ -172,7 +172,9 @@ for (const theme of ["dark-modern", "light-modern"]) {
         const read = (kind) => {
           const chip = document.querySelector(`#rail-chips .rail-chip[data-kind="${kind}"]`);
           const need = chip.querySelector(".chip-need");
+          const dot = chip.querySelector(".chip-dot");
           return { need: chip.hasAttribute("data-need"), border: getComputedStyle(chip).borderTopColor,
+            dot: dot ? getComputedStyle(dot).backgroundColor : "",
             bg: getComputedStyle(chip).backgroundColor, word: need ? need.textContent : "", wordColor: need ? getComputedStyle(need).color : "",
             label: chip.getAttribute("aria-label") };
         };
@@ -187,9 +189,10 @@ for (const theme of ["dark-modern", "light-modern"]) {
         assert.match(c.label, new RegExp(`Needs you: ${word}$`));
         const ground = await paint(page, g.ground, "#000000");
         const bg = await paint(page, c.bg, ground);
-        const text = await paint(page, c.wordColor, bg), border = await paint(page, c.border, ground);
+        const text = await paint(page, c.wordColor, bg), dot = await paint(page, c.dot, bg);
         assert.ok(contrastRatio(text, bg) >= 4.5, `${kind} words ${text} on ${bg}: ${contrastRatio(text, bg).toFixed(2)}`);
-        assert.ok(contrastRatio(border, ground) >= 3, `${kind} border ${border} on ${ground}: ${contrastRatio(border, ground).toFixed(2)}`);
+        assert.ok(contrastRatio(dot, bg) >= 3, `${kind} dot ${dot} on ${bg}: ${contrastRatio(dot, bg).toFixed(2)}`);
+        assert.equal(c.border, g.goal.border, `${kind}: no amber outline, the same border as a chip that doesn't need you`);
       }
       // At side-bar width the reason stays on screen: it takes the number's place before anything wraps.
       await page.setViewportSize({ width: 460, height: 820 });

@@ -1135,9 +1135,9 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(2) { animation-delay: 0.6s; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(3) { animation-delay: 1.2s; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(4) { animation-delay: 1.8s; }
-/* Needs you: amber border, an amber dot and the reason. --need paints the border and the dot (3:1 or more on every
-   ground the chip sits on), --need-text the words (4.5:1). */
-.rail-chip[data-need] { border-color: var(--need); color: var(--text); }
+/* Needs you: an amber dot and the reason, on a chip drawn like the others. --need paints the dot (3:1 or more on
+   every ground the chip sits on), --need-text the words (4.5:1). No amber outline: the founder found it loud (19 Oct). */
+.rail-chip[data-need] { color: var(--text); }
 .rail-chip .chip-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--need); }
 .rail-chip .chip-need { color: var(--need-text); }
 .rail-line[data-fit]:not([data-fit="full"]) #workspace-changes .workspace-changes-label { display: none; }
