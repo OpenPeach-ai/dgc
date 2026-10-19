@@ -157,10 +157,16 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   title, the steps it will take, and how deep it goes. It starts by itself after 15 seconds, or press **Start
   now**; **Edit** pauses it so you can change the steps, keep it to a few websites, or choose **How deep**:
   - **Quick**: up to 3 rounds, 15 pages and 5 minutes of reading.
-  - **Standard** (the default): up to 6 rounds, 40 pages and 15 minutes.
-  - **Thorough**: up to 10 rounds, 80 pages and 30 minutes.
+  - **Standard** (the default): up to 6 rounds, 40 pages and 15 minutes; more on a model with a bigger window.
+  - **Thorough**: up to 10 rounds, 80 pages and 30 minutes; more on a model with a bigger window.
 
-  Set the default with `chatdgc_research_depth` (`quick`, `standard` or `thorough`) in `~/.dgc/config.json`.
+  The model sets how far Standard and Thorough go. The report is written from every note at once, so a bigger
+  window takes more pages without cutting any note shorter: with a window of 64k, Standard reads up to 60 pages
+  (20 minutes) and Thorough 120; with 128k or more, Standard reads up to 80 (25 minutes) and Thorough 160. A model
+  that runs elsewhere (a `:cloud` model, or a provider) researches in up to 128k of its own window, since that takes
+  none of your memory; a model on your machine or network keeps the chat's window (**Settings → ChatDGC →
+  Window**). The plan's card and **How deep** show the numbers for the model you're using. Set the default depth
+  with `chatdgc_research_depth` (`quick`, `standard` or `thorough`) in `~/.dgc/config.json`.
   Then it researches in rounds. Each round it reviews what it has against the plan: which steps are covered, what's
   still missing, and where sources disagree. It searches for those, picks the most promising results from
   everything found (primary sources first, no more than four pages from one site), and reads them in full, PDFs
@@ -169,14 +175,22 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   research done before three rounds and about half its pages. The card shows the round, the pages read out of
   its budget, the sources found, what's still missing, and a tick on each step that's covered. To steer it, type
   in **Add to the research**: it reads that next. Then it writes one report from the notes, citing them as [1],
-  and checks every citation against its note; a claim its note doesn't support loses the citation, and **How it
-  was researched** lists those. A line under the report says how it was researched: rounds, searches, sources
-  found and read, minutes, and how many citations hold up. **Open report** shows the report full screen with its
+  and checks every citation, one source at a time: a claim keeps the sources that back it and drops the ones that
+  don't. A claim no note backs gets a second look at the pages themselves (kept beside the chat as they were read,
+  and deleted with it): the passage with its figures and names. If no page backs it either, it goes back to the
+  model once, to be corrected to what the sources say, with their citations, or deleted; a correction is checked
+  again, and a fact still not backed is removed. A sentence that is the report's own judgement or advice, drawn
+  from facts given elsewhere, stays without a citation. A table row is never removed: it is checked cell by cell,
+  and a cell no source gives reads "not given". Nothing factual is left standing uncited, and sentences that cite
+  nothing (the report's own reasoning) aren't touched. A round waits 30 seconds for its searches at most, so a
+  web search that keeps failing doesn't stretch a run; when many fail, the line under the report says so. A line under the report says how it was researched: rounds,
+  searches, sources found and read, minutes, how many citations hold up, and how many claims were corrected or
+  removed; when there are some, a click on that line lists each one, what it said, and why. **Open report** shows the report full screen with its
   contents and sources; **Export…** saves it as Markdown. Stop keeps everything found: **Write the report from N
   sources** finishes from there, and **Keep researching** carries on where it stopped (with a little more time and
   pages if its budget was spent). If the chat isn't on screen when it finishes, VS Code says so. It needs a context
-  window of at least 16k (32k is the default). With `deepseek-v4.1-flash:cloud` a Standard run took about ten
-  minutes and read 35 to 40 pages.
+  window of at least 16k (32k is the default). With `deepseek-v4.1-flash:cloud` (a 1M window, so 80 pages at
+  Standard) a run took six to seven minutes.
 - **Questions in an answer.** When what the model would say next depends on something only you know, it can
   ask you inside its answer. A card shows the question with a few answers to pick from and a **Something
   else** box for your own. The answer goes on below the card. **Continue** sends a message the model wrote
@@ -445,13 +459,17 @@ carries `memory: [{op: "saved"|"forgot", id, text}]`.
 
 Deep research reports its progress as `chatdgc_research` with the reply's `research` as it is: `status`
 (`planning`, `planned`, `running`, `writing`, `checking`, `done`, `stopped` or `failed`), `question`,
-`plan`, `depth` (`quick`, `standard` or `thorough`) and its `budget` (`rounds`, `pages`, `minutes`, `least`),
+`plan`, `depth` (`quick`, `standard` or `thorough`) and its `budget` (`rounds`, `pages`, `minutes`, `least`), every
+depth's budget for this model's window as `depths`,
 `round`, `reads` (pages tried), `opened` (pages read), `whole` (of those, read in full), `found` (distinct
 results), `searches`, `seconds`, `covered` (plan steps the sources cover), `gaps` and `conflicts`, `notes`
 (number, title and address), the latest `activity` (`search`, `read`, `note`, `skip`, `round`, `gap`,
 `conflict`, `pick`, `write`, `check`, `checked`, `steer`, `wait`, `info`, `error`), `steers`, and, at the end,
-`check` (`claims`, `checked`, `supported`, `unsupported`, `invalid`) and `how` (the line on how it was
-researched). The saved reply keeps every note's words and all its activity. The report streams as
+`failed` (searches that failed), `check` (`claims`, `checked`, `supported`, `first` (held up at the first check),
+`page` (held up against the page), `rechecked`, `sources` (`cited`, `backed`: citations, and those whose source
+backed the claim), `corrected` (`claim`, `now`, `why`), `removed` (`claim`, `cites`, `why`), `judgement` (`claim`,
+`why`: kept as the report's own reasoning, uncited), `unsupported` (the removed ones), `invalid`, `seconds`) and
+`how` (the line on how it was researched). The saved reply keeps every note's words and all its activity. The report streams as
 `chatdgc_delta` on the plan's reply. `chatdgc_research_start`'s `plan` may carry `depth` for that run.
 
 After every turn, and when a chat opens, `chatdgc_context` reports `used` tokens out of `window` (the

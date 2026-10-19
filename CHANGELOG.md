@@ -208,6 +208,29 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   a spent budget adds 10 pages and five minutes. `chatdgc_research` carries `depth`, `budget`, `found`, `opened`,
   `whole`, `searches`, `seconds`, `covered`, `gaps`, `conflicts` and `how` in its open `research` object; no event or
   command changed shape.
+- **Deep research goes as deep as the model allows.** Standard's budget follows the model's window: 40 pages at
+  32k, 60 at 64k, 80 at 128k or more (Thorough doubles each), so the report, written from every note at once, never
+  gets a note cut shorter than at 32k. A model that runs elsewhere (a `:cloud` model, or a provider) researches in up
+  to 128k of its own window, since that takes none of your memory; a model on your machine keeps the chat's window.
+  Each step is now sent that window too (a local model used to get DGC's general one). The plan's card, **How deep**,
+  the progress and the line under the report show the real numbers. With `deepseek-v4.1-flash:cloud` a Standard
+  run now reads about 75 pages in six to seven minutes. **Edit → How deep** and `chatdgc_research_depth` still decide.
+- **Deep research checks each citation against its own source, and repairs what none backs.** A claim keeps the
+  sources that give all of it and drops the others. One none backs gets a second look at the page itself (kept
+  beside the chat as it was read, deleted with it): the passage with its figures and names. If still nothing backs it,
+  it goes back to the model once, in one call, to be corrected to what the sources say, with their citations, or
+  deleted; corrections are checked again, and a fact still not backed is removed. Before, such a claim stayed in the
+  report without its citation, looking like fact. The report's own judgement or advice stays, uncited; a table row
+  is checked cell by cell and keeps its place, with "not given" in a cell no source gives, so a comparison never
+  loses a model. Each verdict gives its reason first, and one whose reason says the claim is backed doesn't remove
+  it. Sentences that cite nothing are left alone. A table row is checked under its table's heads ("Model: …;
+  Licence: …"), and the writer cites every note a claim draws on. The line under the report says what it did ("1
+  corrected, 2 removed: no source backed them"), and a click on it lists each claim, what it said and why.
+  On the coding-models and home-loan questions, 86% and 84% of cited claims held up at the first check, 8 and 7
+  were corrected, 1 each removed, and the check took 30 to 40 seconds.
+- **A flaky web search no longer stretches deep research.** A round waits 30 seconds for its searches at most (a
+  keyless search that kept failing made one run take 26 minutes), four run at once, and the line under the report
+  says how many searches failed, and plainly when many did.
 - **A chat's outline, whatever is on screen.** `chatdgc_outline` (offered as `ready.capabilities.chatdgc.outline`)
   answers with every prompt of a chat, oldest first: its first words (or what it attached), when it was sent, and the
   widgets the replies to it made (deleted ones marked). A long chat opens on its latest pages, so the editor's Widgets
