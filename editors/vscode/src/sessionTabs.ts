@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { randomBytes } from "crypto";
 import { ChatPlaces, ChatTabInit, DgcViewProvider } from "./panel";
+import { tabIcon } from "./tabIcon";
 
 /** The editor-tab chat (#3 Sessions home). One tab is one session, with a `dgc serve` of its own. */
 export const CHAT_EDITOR = "dgc.chatEditor";
@@ -93,9 +94,9 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
   }
 
   private adopt(panel: vscode.WebviewPanel, key: string, session: string): DgcViewProvider {
-    // Not the activity bar's dgc.svg: its currentColor is black in a tab, invisible on a dark theme.
-    panel.iconPath = { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-light.svg"),
-                       dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "dgc-tab-dark.svg") };
+    // Not the activity bar's dgc.svg: its currentColor is black in a tab, invisible on a dark theme. Inline, so a
+    // reload draws it before the tab is revived (tabIcon.ts).
+    panel.iconPath = tabIcon(this.context.extensionUri, "dgc-tab");
     const provider = this.make({
       key, session, places: this, host: this.sidebar,
       title: (text) => { if (this.tabs.get(key)?.panel === panel) panel.title = tabTitle(text); },

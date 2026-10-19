@@ -25,7 +25,10 @@ const world = { panels: [], serializers: [], warnings: [], answer: undefined, pi
 function fakePanel(viewType, title) {
   const disposed = new Emitter(), received = new Emitter();
   const panel = {
-    viewType, title, revealed: 0, disposedCount: 0, iconPath: undefined,
+    viewType, title, revealed: 0, disposedCount: 0, icon: undefined,
+    // As VS Code's: a disposed panel throws when its icon is set.
+    get iconPath() { return this.icon; },
+    set iconPath(value) { if (this.disposedCount) throw new Error("Webview is disposed"); this.icon = value; },
     webview: { options: {}, html: "", cspSource: "vscode-resource:", asWebviewUri: (uri) => uri, posted: [],
       postMessage(message) { this.posted.push(message); return Promise.resolve(true); },
       onDidReceiveMessage: received.event },
@@ -44,7 +47,8 @@ globalThis.__DGC_TEST_VSCODE = {
   TabInputText, TabInputCustom,
   EventEmitter: Emitter,
   Disposable: { from: (...items) => ({ dispose() { for (const i of items) i?.dispose?.(); } }) },
-  Uri: { joinPath: (...parts) => ({ toString: () => parts.map((p) => String(p?.toString?.() ?? p)).join("/") }),
+  Uri: { joinPath: (...parts) => ({ toString: () => parts.map((p) => String(p?.toString?.() ?? p)).join("/"),
+                                     fsPath: parts.map((p) => String(p?.fsPath ?? p?.toString?.() ?? p)).join("/") }),
     file: (p) => ({ scheme: "file", fsPath: p, path: p, toString: () => `file://${p}` }),
     parse: (value) => {
       const file = /^file:\/\/(\/.*)$/.exec(value);
@@ -643,12 +647,21 @@ test("a widget opens again as you left it: its fields kept as you type, never an
   assert.equal(kept["dgc.chatdgcWidgetFields"][WG], undefined);
 });
 
+/** What an icon URI draws: the SVG inside a data: URI (nothing to fetch), or "" for a link to a file. */
+const drawn = (uri) => {
+  const m = /^data:image\/svg\+xml;base64,(.+)$/.exec(String(uri));
+  return m ? Buffer.from(m[1], "base64").toString("utf8") : "";
+};
+const mark = (theme) => readFileSync(join(root, `media/chatdgc-tab-${theme}.svg`), "utf8");
+const installed = () => { const c = new ChatDGC({ extensionUri: { fsPath: root, toString: () => root } }); c.attach(host); return c; };
+
 test("ChatDGC's tabs wear its own mark, the speech bubble, so they aren't taken for DGC's sessions", () => {
+  const chat = installed();
   chat.open("");
   chat.openLibrary();
   const [tab, library] = world.panels;
   for (const panel of [tab, library]) {
-    assert.deepEqual([String(panel.iconPath.light), String(panel.iconPath.dark)], ["ext/media/chatdgc-tab-light.svg", "ext/media/chatdgc-tab-dark.svg"]);
+    assert.deepEqual([drawn(panel.iconPath.light), drawn(panel.iconPath.dark)], [mark("light"), mark("dark")], "the SVG itself, light and dark");
   }
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const command = manifest.contributes.commands.find((c) => c.command === "dgc.newChatDGC");
@@ -795,6 +808,25 @@ test("a reload brings each chat back in its tab, once", async () => {
   opened(first, { id: ID(9), title: "Back" });
   await serializer.deserializeWebviewPanel(second, { conversation: ID(9) });
   assert.equal(second.disposedCount, 1, "a second copy of the same chat closes");
+});
+
+test("a chat's tab revived after a reload gets the mark itself, even one behind another tab; a second copy gets nothing", async () => {
+  const chat = installed();
+  chat.register();
+  const { serializer } = world.serializers.find((s) => s.viewType === CHATDGC_EDITOR);
+  // VS Code revives a tab that was behind another only once it is shown; until then it draws the icon it saved, so
+  // that icon must need nothing fetched (a remote window's connection is not up yet; an update moved the folder).
+  const behind = fakePanel(CHATDGC_EDITOR, "Trip");
+  await serializer.deserializeWebviewPanel(behind, { conversation: ID(5) });
+  assert.deepEqual([drawn(behind.iconPath.light), drawn(behind.iconPath.dark)], [mark("light"), mark("dark")]);
+  assert.doesNotMatch(String(behind.iconPath.dark), /media|vibedgc|file:/, "nothing names the extension's folder");
+  const twin = fakePanel(CHATDGC_EDITOR, "Trip");
+  await serializer.deserializeWebviewPanel(twin, { conversation: ID(5) });
+  assert.equal(twin.disposedCount, 1, "one chat, one tab");
+  assert.equal(twin.iconPath, undefined, "a disposed panel is given nothing (VS Code throws)");
+  const fresh = fakePanel(CHATDGC_EDITOR, "x");
+  await serializer.deserializeWebviewPanel(fresh, undefined);         // a new chat's tab: no state saved
+  assert.equal(drawn(fresh.iconPath.dark), mark("dark"));
 });
 
 test("rename, pin and archive from the tab's menu", async () => {

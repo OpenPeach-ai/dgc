@@ -4,6 +4,7 @@ import { mkdirSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
+import { tabIcon } from "./tabIcon";
 import type { Dictation, DictationOwner, ReadAloud } from "./voice";
 
 /**
@@ -310,8 +311,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   /** ChatDGC's own mark (DGC's three slashes in a speech bubble), so its tabs aren't taken for DGC's sessions. */
   private chatdgcIcon(): { light: vscode.Uri; dark: vscode.Uri } {
-    return { light: vscode.Uri.joinPath(this.context.extensionUri, "media", "chatdgc-tab-light.svg"),
-             dark: vscode.Uri.joinPath(this.context.extensionUri, "media", "chatdgc-tab-dark.svg") };
+    return tabIcon(this.context.extensionUri, "chatdgc-tab");
   }
 
   private library?: vscode.WebviewPanel;

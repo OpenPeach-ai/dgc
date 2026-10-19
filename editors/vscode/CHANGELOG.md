@@ -281,6 +281,12 @@
 
 ### Fixed
 
+- **Session and ChatDGC tabs keep their logo after a reload.** After Reload Window in a Remote SSH window (Cursor's
+  too), or after installing a new DGC version, these editor tabs came back blank. VS Code redraws a saved tab's icon
+  before DGC revives the tab, and a tab behind another is revived only when you show it. The icon was a link to
+  DGC's file, which could not be fetched until the remote connection was up, or pointed at the old version's
+  folder. Now the tab carries the picture itself, so it shows from the first moment, in the light and dark themes.
+  A tab saved by an older version gets the fix the first time you show it.
 - **Install DGC Voice installs it.** DGC Voice isn't on the Marketplace or Open VSX yet, so the button opened the
   Extensions view on a search for `@id:vibedgc.dgc-voice` that found nothing. DGC now carries DGC Voice inside its
   own package and installs it from there (from the Marketplace instead, once it's there and not older), on the

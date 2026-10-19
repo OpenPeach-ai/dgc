@@ -4,6 +4,7 @@
 // (canvasEditor.ts) sends the whole Markdown as you type; only the part that changed is replaced here, and the
 // file is saved once you pause, like a doc.
 import * as vscode from "vscode";
+import { tabIcon } from "./tabIcon";
 
 export const CANVAS_DOC_VIEW = "dgc.chatdgcCanvasDoc";
 const SAVE_AFTER_MS = 1200;
@@ -115,8 +116,7 @@ export class CanvasDocEditor implements vscode.CustomTextEditorProvider {
     }
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, name)).toString();
     panel.webview.html = canvasDocDocument(asset, panel.webview.cspSource);
-    panel.iconPath = { light: vscode.Uri.joinPath(this.extensionUri, "media", "chatdgc-tab-light.svg"),
-                       dark: vscode.Uri.joinPath(this.extensionUri, "media", "chatdgc-tab-dark.svg") };
+    panel.iconPath = tabIcon(this.extensionUri, "chatdgc-tab");
     this.open.set(panel, document);
     if (panel.active) { this.activePanel = panel; this.changed.fire(); }
 

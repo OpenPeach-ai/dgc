@@ -23,7 +23,10 @@ const world = { panels: [], serializers: [], warnings: [], infos: [], answer: un
 function fakePanel(viewType, title) {
   const viewState = new Emitter(), disposed = new Emitter();
   const panel = {
-    viewType, title, visible: true, active: true, revealed: 0, disposedCount: 0, iconPath: undefined,
+    viewType, title, visible: true, active: true, revealed: 0, disposedCount: 0, icon: undefined,
+    // As VS Code's: a disposed panel throws when its icon is set.
+    get iconPath() { return this.icon; },
+    set iconPath(value) { if (this.disposedCount) throw new Error("Webview is disposed"); this.icon = value; },
     webview: { options: {}, html: "", cspSource: "vscode-resource:", asWebviewUri: (uri) => uri, posted: [],
       postMessage(message) { this.posted.push(message); return Promise.resolve(true); },
       onDidReceiveMessage() { return { dispose() {} }; } },
@@ -38,7 +41,8 @@ function fakePanel(viewType, title) {
 }
 globalThis.__DGC_TEST_VSCODE = {
   Uri: { joinPath: (...parts) => ({ toString: () => parts.map(String).join("/"), fsPath: parts.map(String).join("/") }),
-    file: (p) => ({ fsPath: p, toString: () => `file://${p}` }) },
+    file: (p) => ({ fsPath: p, toString: () => `file://${p}` }),
+    parse: (value) => ({ scheme: value.split(":")[0], toString: () => value }) },
   EventEmitter: Emitter,
   ViewColumn: { Active: -1, Beside: -2 },
   StatusBarAlignment: { Left: 1 },
@@ -210,6 +214,36 @@ test("after a reload a tab comes back on its session, once", async () => {
   await tabs.deserializeWebviewPanel(junk, { chatTab: { key: "<script>", session: "../x" } });
   assert.match(made.at(-1).tab.key, /^[a-f0-9]{16}$/, "a state that is not a key gets a fresh one");
   assert.equal(made.at(-1).sessionId(), "", "and a session that is not an id is a new session");
+});
+
+/** What an icon URI draws: the SVG inside a data: URI (nothing to fetch), or "" for a link to a file. */
+const drawn = (uri) => {
+  const m = /^data:image\/svg\+xml;base64,(.+)$/.exec(String(uri));
+  return m ? Buffer.from(m[1], "base64").toString("utf8") : "";
+};
+const svg = (name) => readFileSync(join(root, "media", name), "utf8");
+
+test("a tab's icon carries its own SVG, so a reload draws it before the tab is revived, and after an update", async () => {
+  const { tabs, made } = windowWith();
+  tabs.open("");
+  const fresh = world.panels[0];
+  assert.equal(drawn(fresh.iconPath.light), svg("dgc-tab-light.svg"), "the light mark itself, not a link to it");
+  assert.equal(drawn(fresh.iconPath.dark), svg("dgc-tab-dark.svg"), "and the dark one: VS Code still picks by theme");
+  // A tab that was behind another when the window reloaded: VS Code revives it only once it is shown.
+  const behind = fakePanel("dgc.chatEditor", "Visits");
+  behind.visible = false; behind.active = false;
+  await tabs.deserializeWebviewPanel(behind, { chatTab: { key: "0123456789abcdef", session: "20261006-101500-a1" } });
+  assert.equal(made.at(-1).sessionId(), "20261006-101500-a1");
+  assert.equal(drawn(behind.iconPath.light), svg("dgc-tab-light.svg"));
+  assert.equal(drawn(behind.iconPath.dark), svg("dgc-tab-dark.svg"));
+  assert.notEqual(behind.iconPath, fresh.iconPath, "a pair of its own: VS Code sends an icon only when the object changes");
+  // A second copy of the same session closes before it is given anything (setting a disposed panel's icon throws).
+  const twin = fakePanel("dgc.chatEditor", "copy");
+  await tabs.deserializeWebviewPanel(twin, { chatTab: { key: "fedcba9876543210", session: "20261006-101500-a1" } });
+  assert.equal(twin.disposedCount, 1);
+  assert.equal(twin.iconPath, undefined);
+  // Nothing in it names the extension's folder, which an update replaces (and Remote - SSH fetches over the connection).
+  assert.doesNotMatch(String(behind.iconPath.dark), /media|vibedgc|file:/);
 });
 
 test("the status bar shows the tab you last worked in, and the side bar's chat once no tab is open", () => {
