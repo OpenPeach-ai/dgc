@@ -27,6 +27,7 @@ rounds (open_deep_research, GPT Researcher, Jina's node-DeepResearch, Claude Res
 """
 from __future__ import annotations
 
+import bisect
 import json
 import re
 import threading
@@ -177,15 +178,18 @@ CHECKER = (
     "even one fact is in none of them; and, when it doesn't hold, missing: the facts no source gives. Holds agrees "
     "with why: if why finds every fact, holds is true.")
 REPAIRER = (
-    "You repair a research report's claims that a check found none of their cited sources back. For each claim you "
-    "get the notes it cited and a few related ones. First why: a few plain words for the reader (\"The source gives "
-    "77.2%, not 77.4%\"). Then judgement: true when the sentence is the report's own judgement, advice or conclusion "
-    "drawn from facts given elsewhere (\"plan on APIs for anything larger\"), not a fact a source would state. Then "
-    "as_written: true when the notes do give all of it, as it is written. Otherwise corrected: the claim rewritten to "
-    "say only what the notes say (another figure, date, name or scope, or without the part no note gives), citing the "
-    "notes that say it as [n], as one sentence. Correct rather than drop: a sentence with one wrong or unsupported "
-    "part is corrected, keeping what the notes do give. Leave corrected empty only when no note gives anything like "
-    "it; the claim is then removed. Never add a fact no note gives.")
+    "You repair a research report's claims that a check found their cited sources don't back. For each claim you get "
+    "the notes it cited and a few related ones. First why: a few plain words for the reader (\"The source gives "
+    "77.2%, not 77.4%\"). Then judgement: true when the sentence is the report's own judgement, advice or conclusion, "
+    "or its own arithmetic on figures the sources give (an EMI, a total, 80% of a price), not a fact a source would "
+    "state; it then stays as written, without a citation. Then as_written: true when the notes give all of it as it is "
+    "written. Otherwise corrected: the claim rewritten as one plain, natural sentence that says only what the notes "
+    "say, keeping its wording where it was right: fix a wrong figure, date or name, drop the part no note gives, or "
+    "say who claims it (\"one guide calls it the best ...\"), citing the notes that say it as [n]. Correct rather than "
+    "remove: leave corrected empty only when no part of the claim is in any note. Never add a fact no note gives.")
+STRICTER = (
+    "Second try. None of these may be removed while any part of it is in a note: correct each one, keeping what the "
+    "notes give, fixing or dropping the rest, or saying who claims it.")
 
 
 class ResearchError(Exception):
@@ -894,12 +898,15 @@ class Research:
         report = without_source_columns(without_source_lines(report))
         lines = report.split("\n")
         claims = _claims(lines)
-        # 1. Each source on its own.
-        self._judge(claims, {n: notes[n]["note"] for n in notes}, "first")
+        # 1. Each source on its own. A claim held with doubt in its reason ("hmm", "but"), or with a figure that's on
+        #    none of its cited pages (the note it was judged by can be wrong), is looked at again.
+        said_notes = {n: notes[n]["note"] for n in notes}
+        self._judge(claims, said_notes, "first")
         checked = [c for c in claims if "first" in c]
         for claim in claims:
             claim["backed"] = sorted(claim.get("first") or [])
-        # 2. The pages, for what no note backed.
+            self._guard(claim, "first")
+        # 2. The pages, for what no note backed (or backed with doubt, or with a figure no page gives).
         unbacked = [c for c in checked if not c["backed"]]
         if unbacked and not self.stopped():
             evidence = {}
@@ -915,25 +922,39 @@ class Research:
                 self._judge(asked, evidence, "page", keyed=True)
                 for claim in asked:
                     claim["backed"] = sorted(claim.get("page") or [])
+                    self._guard(claim, "page")
         # 3. A table row isn't repaired whole or removed (a comparison would silently lose a model): each of its cells
-        #    is checked on its own, and a cell no source gives says "not given". Sentences go back to the model once.
+        #    is checked on its own, and a cell no source gives says "not given".
         rows = [c for c in checked if not c["backed"] and c["row"]]
         if rows and not self.stopped():
             self._check_cells(rows, notes)
+        # 4. The report's own arithmetic (an EMI, 80% of a price) on figures its pages give is derived, not sourced:
+        #    it stays, without a citation. The rest goes back to the model: corrected, kept as judgement, or (only
+        #    when no part of it is in any note) removed. A correction is checked again, figures and all, and what
+        #    doesn't pass gets a second, stricter try.
         broken = [c for c in checked if not c["backed"] and not c["row"]]
-        if broken and not self.stopped():
-            self._repair(broken, notes)
-            fixed = [c for c in broken if c.get("repair", {}).get("text")]
-            if fixed:
-                again = [{**c, "claim": c["repair"]["claim"], "cites": c["repair"]["cites"]} for c in fixed]
-                self._judge(again, {n: notes[n]["note"] for n in notes}, "recheck")
-                for claim, judged in zip(fixed, again):
-                    claim["recheck"] = judged.get("recheck") or []
-        # Apply: fewer citations, a correction, a judgement kept uncited, or the claim gone.
+        for claim in broken:
+            if "figures_off" not in claim:
+                claim["figures_off"] = self._figures_off(claim["text"], claim["cites"])
+            context = f"{claim['text']} {self.state.get('question') or ''}"
+            if claim.get("figures_off") and all(_derivable(x, context) for x in claim["figures_off"]):
+                claim["derived"] = True
+        broken = [c for c in broken if not c.get("derived")]
+        for attempt in (1, 2):
+            if not broken or self.stopped():
+                break
+            self._repair(broken, notes, strict=attempt == 2)
+            self._recheck([c for c in broken if c.get("repair", {}).get("text")], said_notes)
+            broken = [c for c in broken if c.get("repair", {}).get("action") != "judgement" and not c.get("ok")]
+            if attempt == 1:
+                for claim in broken:
+                    claim["repair1"] = claim.pop("repair", None)
+        # Apply: fewer citations, a correction, kept without a citation (judgement, arithmetic), or gone.
         corrected, removed, judged, sources = [], [], [], {"cited": 0, "backed": 0}
         for claim in checked:
             sources["cited"] += len(claim["cites"])
             sources["backed"] += len(claim.get("first") or [])
+            fix = claim.get("repair") or {}
             if claim.get("cells"):                                  # a row, cell by cell
                 claim["now"], blanked = claim["cells"]["row"], claim["cells"]["blanked"]
                 claim["backed"] = claim["cells"]["backed"]
@@ -944,34 +965,54 @@ class Research:
             elif claim["backed"]:
                 keep = set(claim["backed"])
                 claim["now"] = UNCITE.sub(lambda m: m.group(0) if int(m.group(1)) in keep else "", claim["text"])
-                claim["final"] = "kept" if "page" not in claim or not claim.get("page") else "page"
-            elif claim.get("repair", {}).get("action") == "keep" and claim.get("recheck"):
+                claim["final"] = "kept" if not claim.get("page") else "page"
+            elif claim["row"]:
+                claim["now"], claim["final"] = claim["text"], "unchecked"   # a row whose cells couldn't all be checked
+            elif claim.get("derived") or fix.get("action") == "judgement":
+                claim["now"] = UNCITE.sub("", claim["text"])           # the report's own reasoning: no citation
+                claim["final"] = "judgement"
+                judged.append({"claim": claim["claim"][:300], "why": (
+                    "The report's own arithmetic on figures its sources give" if claim.get("derived")
+                    else fix.get("why", ""))[:200]})
+            elif fix.get("action") == "keep" and claim.get("ok"):
                 claim["backed"] = sorted(claim["recheck"])                # held up when checked again, as written
                 keep = set(claim["backed"])
                 claim["now"] = UNCITE.sub(lambda m: m.group(0) if int(m.group(1)) in keep else "", claim["text"])
                 claim["final"] = "rechecked"
-            elif claim.get("repair", {}).get("action") == "judgement":
-                claim["now"] = UNCITE.sub("", claim["text"])           # the report's own reasoning: no citation
-                claim["final"] = "judgement"
-                judged.append({"claim": claim["claim"][:300], "why": claim["repair"].get("why", "")[:200]})
-            elif claim.get("repair", {}).get("text") and claim.get("recheck"):
-                claim["now"] = claim["repair"]["text"]
+            elif fix.get("text") and claim.get("ok"):
+                claim["now"] = fix["text"]
                 claim["final"] = "corrected"
                 corrected.append({"claim": claim["claim"][:300], "now": UNCITE.sub("", claim["now"]).strip(" |")[:300],
-                                  "why": claim["repair"].get("why", "")[:200]})
+                                  "why": fix.get("why", "")[:200]})
+            elif not claim.get("figures_off") and (claim.get("page") or claim.get("recheck")):
+                # A verdict found its sources give all of it, and none of its figures is wrong: it stays, cited.
+                claim["backed"] = sorted(claim.get("page") or claim.get("recheck"))
+                keep = set(claim["backed"])
+                claim["now"] = UNCITE.sub(lambda m: m.group(0) if int(m.group(1)) in keep else "", claim["text"])
+                claim["final"] = "rechecked"
+            elif not claim.get("figures_off") and self._partly_backed(claim):
+                # No correction held, but part of it is in its sources and none of its figures is wrong: it's kept,
+                # without a citation, rather than lost (removal is only for what no source gives at all).
+                claim["now"] = UNCITE.sub("", claim["text"])
+                claim["final"] = "judgement"
+                judged.append({"claim": claim["claim"][:300],
+                               "why": "Its sources give part of it; kept without a citation"})
             else:
                 claim["now"] = ""
                 claim["final"] = "removed"
-                why = ((claim.get("repair") or {}).get("why") or
+                why = (f"no cited page gives {', '.join(claim['figures_off'][:4])}" if claim.get("figures_off") else
+                       fix.get("why") or (claim.get("repair1") or {}).get("why") or
                        (f"no source gives {claim.get('page_missing') or claim.get('first_missing')}"
                         if claim.get("page_missing") or claim.get("first_missing") else ""))
                 removed.append({"claim": claim["claim"][:300], "cites": claim["cites"],
                                 "why": ("No source backed it" + (f": {why}" if why else "."))[:240]})
         lines = _apply(lines, checked)
-        first = sum(1 for c in checked if c.get("first"))
+        first = sum(1 for c in checked if c.get("first") and not c.get("caught_first"))
         page = sum(1 for c in checked if c.get("final") == "page")
         held = sum(1 for c in checked if c["backed"] and c.get("final") not in ("cells", "corrected"))
+        caught = [c for c in checked if c.get("caught")]
         self.state["check"] = {"claims": len(claims), "checked": len(checked), "supported": held, "first": first,
+                               "figures": len(caught),
                                "page": page, "rechecked": held - first - page, "sources": sources,
                                "corrected": corrected[:50], "judgement": judged[:50],
                                "removed": removed[:50], "unsupported": [{"claim": r["claim"], "cites": r["cites"]}
@@ -984,7 +1025,8 @@ class Research:
         self.log("checked", said)
         return "\n".join(lines)
 
-    def _judge(self, claims: list[dict], evidence: dict, field: str, *, keyed: bool = False) -> None:
+    def _judge(self, claims: list[dict], evidence: dict, field: str, *, keyed: bool = False,
+               label: str = "a passage of the page itself") -> None:
         """The model's verdict on each claim, source by source, a few claims at a time (CHECK_BATCH, batches side by
         side): ``claim[field]`` is the cited sources that back it. ``evidence`` is what each source says, by number,
         or by (claim, number) when ``keyed`` (each claim's own passages)."""
@@ -993,8 +1035,7 @@ class Research:
                 return
             if keyed:
                 said = [(c, n, evidence[(c["id"], n)]) for c in batch for n in c["cites"] if (c["id"], n) in evidence]
-                shown = "\n\n".join(f"[{n}] (for claim {c['id']}, a passage of the page itself)\n{text}"
-                                     for c, n, text in said)
+                shown = "\n\n".join(f"[{n}] (for claim {c['id']}, {label})\n{text}" for c, n, text in said)
             else:
                 used = sorted({n for c in batch for n in c["cites"] if n in evidence})
                 shown = "\n\n".join(f"[{n}] {evidence[n]}" for n in used)
@@ -1017,9 +1058,14 @@ class Research:
                 holds = verdict.get("holds")
                 if isinstance(holds, str) and holds.strip().lower() in ("true", "false"):
                     holds = holds.strip().lower() == "true"
-                if holds is False and backed and says_backed(why) and not missing:
+                if holds is False and backed and not missing:
+                    holds = True                  # sources back it and nothing is missing: it can't be unbacked
+                    claim[field + "_contradiction"] = why[:240] or "no fact missing"
+                elif holds is False and backed and says_backed(why):
                     holds = True                  # its own reason says every fact is there: the reason stands
                     claim[field + "_contradiction"] = why[:240]
+                if holds is True and DOUBT.search(why):
+                    claim[field + "_doubt"] = why[:240]   # held, with doubt in its reason: looked at again
                 if why:
                     claim[field + "_why"] = why[:240]
                 if isinstance(holds, bool):
@@ -1027,6 +1073,8 @@ class Research:
                     missing = "" if holds else (missing or "a fact of it")
                 elif NOTHING_MISSING.match(missing):
                     missing = ""
+                if isinstance(backed, (list, str)) and _list(backed) and missing:
+                    claim["partial"] = True       # a source gives part of it
                 if isinstance(backed, (list, str)):
                     # A claim holds only when its sources give all of it: one fact none gives, and none backs it.
                     claim[field] = [] if missing else sorted({int(x) for x in _list(backed) if str(x).strip().isdigit()}
@@ -1038,6 +1086,78 @@ class Research:
         batches = [claims[i:i + CHECK_BATCH] for i in range(0, len(claims), CHECK_BATCH)]
         with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="dgc-research-check") as pool:
             list(pool.map(run, batches))
+
+    def _guard(self, claim: dict, field: str) -> None:
+        """After a verdict that holds: doubt in its reason, or a figure on none of the claim's cited pages, and it
+        doesn't hold yet (it's looked at again). The figures part needs no model: 8.00% is 8%, 1,000 is 1000, ₹70
+        lakh is 70,00,000."""
+        if not claim["backed"]:
+            return
+        if field == "first" and claim.get("first_doubt"):
+            claim["backed"] = []                  # looked at again, against the pages (once: doubt never removes)
+            return
+        off = self._figures_off(claim["text"], claim["cites"])
+        if off:
+            claim["figures_off"], claim["backed"], claim["caught"] = off, [], True
+            if field == "first":
+                claim["caught_first"] = True
+
+    def _recheck(self, claims: list[dict], said_notes: dict) -> None:
+        """A repair checked once: the corrected claim (or the claim as written, when the repair says the notes give
+        it) against its notes, without doubt in the verdict, and its figures on its cited pages. ``claim["ok"]``."""
+        if not claims:
+            return
+        again = [{**c, "claim": c["repair"]["claim"], "cites": c["repair"]["cites"]} for c in claims]
+        # Each source's note and the passage of its page with the corrected claim's figures: a correction may come
+        # from the page where the note was wrong.
+        evidence = {}
+        for claim in again:
+            for n in claim["cites"]:
+                if n in said_notes:
+                    found = self._passage(n, claim["claim"])
+                    evidence[(claim["id"], n)] = said_notes[n] + (f"\n\nFrom the page itself:\n{found}" if found else "")
+        self._judge(again, evidence, "recheck", keyed=True, label="its note, and a passage of the page itself")
+        for claim, judged in zip(claims, again):
+            claim["recheck"] = judged.get("recheck") or []
+            for key in ("recheck_why", "recheck_missing", "recheck_doubt"):
+                if key in judged:
+                    claim[key] = judged[key]
+            off = self._figures_off(claim["repair"]["text"], claim["repair"]["cites"])
+            if off:
+                claim["recheck_figures_off"] = off
+            claim["ok"] = bool(claim["recheck"]) and not off
+
+    @staticmethod
+    def _partly_backed(claim: dict) -> bool:
+        """Whether any verdict found a cited source giving part of the claim."""
+        for field in ("first", "page", "recheck"):
+            if claim.get(field + "_why") and claim.get(field + "_missing") and \
+                    not NOTHING_MISSING.match(claim.get(field + "_missing") or ""):
+                if any(str(n) in claim.get(field + "_why", "") for n in claim["cites"]):
+                    return True
+        return bool(claim.get("partial"))
+
+    def _figures_off(self, text: str, cites: list[int]) -> list[str]:
+        """The figures in ``text`` that are on none of the cited pages as they were read (none when the pages
+        weren't kept)."""
+        if self.pages is None:
+            return []
+        pages = [got for got in (self._page_figures(n) for n in cites) if got is not None]
+        if not pages:
+            return []
+        # The question's own figures (₹70 lakh, 2026) are the user's, not a source's.
+        asked = _page_figures(str(self.state.get("question") or ""))
+        return [raw for raw, figure in _figures(UNCITE.sub("", str(text or "")))
+                if not _on_page(figure, asked) and not any(_on_page(figure, page) for page in pages)]
+
+    def _page_figures(self, n: int):
+        cache = self.__dict__.setdefault("_figures_cache", {})
+        if n not in cache:
+            try:
+                cache[n] = _page_figures((self.pages / f"{int(n)}.txt").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                cache[n] = None
+        return cache[n]
 
     def _check_cells(self, rows: list[dict], notes: dict) -> None:
         """Table rows no source backs whole, cell by cell: each cell (its row's label with it) is checked against the
@@ -1072,8 +1192,16 @@ class Research:
             if not mine or any("first" not in c for c in mine):
                 continue                              # a cell went unchecked: the row is left as it is
             backed, blanked = set(), []
+            context = f"{row['text']} {self.state.get('question') or ''}"
             for cell in mine:
                 by = set(cell.get("first") or cell.get("page") or [])
+                off = self._figures_off(cell["value"], row["cites"])
+                if by and off:
+                    by = set()                    # a figure on none of the row's pages
+                if not by and off and all(_derivable(x, context, cue=False) for x in off):
+                    cell["derived"] = True        # the row's own arithmetic (0.5% of ₹70 lakh is ₹35,000): it stays
+                    parts[cell["k"]] = cell["value"]
+                    continue
                 backed |= by
                 if by:
                     parts[cell["k"]] = cell["value"] + "".join(f" [{n}]" for n in sorted(by))
@@ -1101,7 +1229,7 @@ class Research:
                             // (CHECK_BATCH * 2)))
         return passage(text, claim, size)
 
-    def _repair(self, claims: list[dict], notes: dict) -> None:
+    def _repair(self, claims: list[dict], notes: dict, strict: bool = False) -> None:
         """One call (more only when they don't fit the window) for the claims nothing backs: each is corrected to
         what the sources say, with their citations, or deleted. ``claim["repair"]``: {action, text, claim, cites,
         why}; a correction that cites nothing, or a table row that lost its cells, counts as deleted."""
@@ -1124,10 +1252,12 @@ class Research:
                 return
             used = sorted({n for c in group for n in c["offered"]})
             each = max(400, budget // max(1, len(used)) - 100)
-            asked = ("Claims no source backs:\n" + "\n".join(
+            asked = ((STRICTER + "\n\n" if strict else "") + "Claims no source backs:\n" + "\n".join(
                 f"{c['id']}. {c['claim'][:400]} (cited {', '.join(map(str, c['cites']))}"
                 + (f"; no source gives: {c.get('page_missing') or c.get('first_missing')}"
-                   if c.get("page_missing") or c.get("first_missing") else "") + ")"
+                   if c.get("page_missing") or c.get("first_missing") else "")
+                + (f"; no cited page has the figure {', '.join(c['figures_off'][:4])}" if c.get("figures_off") else "")
+                + (f"; tried before: {(c.get('repair1') or {}).get('text') or 'removing it'}" if strict else "") + ")"
                 for c in group) + "\n\nNotes:\n" + "\n\n".join(f"[{n}] {notes[n]['note'][:each]}" for n in used))
             try:
                 found = structured(self.client(), REPAIRER, asked, "repair_claims", REPAIR_SCHEMA, tools=self.tools,
@@ -1177,9 +1307,11 @@ class Research:
         if self.pages is None:
             return
         out = [{key: claim.get(key) for key in ("id", "text", "claim", "cites", "first", "first_why", "first_missing",
-                                                 "first_contradiction", "passages", "page", "page_why", "page_missing",
-                                                 "repair", "recheck", "recheck_why", "recheck_missing", "cells",
-                                                 "backed", "final", "now") if key in claim}
+                                                 "first_contradiction", "first_doubt", "figures_off", "caught",
+                                                 "passages", "page", "page_why", "page_missing", "page_doubt",
+                                                 "derived", "repair1", "repair", "recheck", "recheck_why",
+                                                 "recheck_missing", "recheck_doubt", "recheck_figures_off", "ok",
+                                                 "cells", "backed", "final", "now") if key in claim}
                | {"urls": {n: notes[n]["url"] for n in claim["cites"] if n in notes}} for claim in claims]
         try:
             self.pages.mkdir(parents=True, exist_ok=True)
@@ -1267,6 +1399,115 @@ def _claims(lines: list[str]) -> list[dict]:
                 claims.append({"id": len(claims) + 1, "line": line_no, "text": sentence, "claim": words,
                                "cites": cited, "row": row, "heads": heads if row else None})
     return claims
+
+
+# Doubt in a verdict's reason that still held ("hmm, that's 8%/7% with registration"): looked at again.
+DOUBT = re.compile(r"(?i)\b(?:hmm+|not the same|contradict\w*|inconsisten\w*|mismatch\w*|discrepan\w*|"
+                   r"doesn't match|does not match|differs? from|wait)\b")
+# A number not inside a word or another number (ASCII only before it: a page decoded wrongly writes ₹ as "â¹").
+NUMBER = re.compile(r"(?<![A-Za-z0-9_.,])(\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)(\s*%)?"
+                    r"(?:\s*(lakhs?|lacs?|crores?|cr|thousand|million|mn|billion|bn|trillion|[kmbt])\b)?", re.I)
+SCALES = {"lakh": 1e5, "lakhs": 1e5, "lac": 1e5, "lacs": 1e5, "crore": 1e7, "crores": 1e7, "cr": 1e7, "thousand": 1e3,
+          "k": 1e3, "million": 1e6, "mn": 1e6, "m": 1e6, "billion": 1e9, "bn": 1e9, "b": 1e9, "trillion": 1e12, "t": 1e12}
+
+
+def _figures(text: str, every: bool = False) -> list[tuple[str, tuple]]:
+    """The numbers in ``text``, each as (as written, (value, decimals, value with its scale word or None)): ₹70 lakh is
+    (70, 0, 7000000). Without ``every`` (a claim's own), small whole numbers on their own (1 to 9, as in "3 rounds")
+    are left out, they're on any page, and so are numbers inside a name ("Qwen3.8-27B", "35B-A3B", "20-fold")."""
+    out, text = [], str(text or "")
+    for found in NUMBER.finditer(text):
+        digits, percent, scale = found.group(1), found.group(2), (found.group(3) or "").lower()
+        try:
+            value = float(digits.replace(",", ""))
+        except ValueError:
+            continue
+        if not every:
+            before, after = text[max(0, found.start() - 2):found.start()], text[found.end():found.end() + 2]
+            if not percent and not scale and "." not in digits and value < 10:
+                continue
+            if re.fullmatch(r"[A-Za-z0-9]-", before) or re.match(r"-[A-Za-z]", after):
+                continue
+        decimals = len(digits.split(".")[1]) if "." in digits else 0
+        out.append((found.group(0).strip(), (value, decimals, value * SCALES[scale] if scale in SCALES else None)))
+    return out
+
+
+def _on_page(figure: tuple, page) -> bool:
+    """Whether a claim's figure is on a page (``page``: its rounded numbers, by decimals, and its sorted values):
+    exactly, rounded as the claim rounds it (24.347 GiB is 24.3), or, with a scale word, within 0.6% (131K is
+    131,072 tokens)."""
+    value, decimals, scaled = figure
+    rounded, ordered = page
+    if round(value, min(decimals, 3)) in rounded[min(decimals, 3)]:
+        return True
+    if scaled:
+        at = bisect.bisect_left(ordered, scaled * 0.994)
+        return at < len(ordered) and ordered[at] <= scaled * 1.006
+    return False
+
+
+def _page_figures(text: str):
+    values = []
+    for _raw, (value, _decimals, scaled) in _figures(text, every=True):
+        values.append(value)
+        if scaled:
+            values.append(scaled)
+    return ({d: {round(v, d) for v in values} for d in range(4)}, sorted(values))
+
+
+def _values(text: str, percent: bool | None = None) -> list[float]:
+    """The values of the numbers in ``text`` (with a scale word, both: 70 and 7000000 for ₹70 lakh); ``percent``
+    True or False keeps only percentages, or only the rest."""
+    out = []
+    for found in NUMBER.finditer(str(text or "")):
+        if percent is not None and bool(found.group(2)) != percent:
+            continue
+        try:
+            value = float(found.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        scale = (found.group(3) or "").lower()
+        out.append(value)
+        if scale in SCALES:
+            out.append(value * SCALES[scale])
+    return out
+
+
+# Words of a sentence that does sums (an EMI, a total, what's left): the only place a figure is taken as derived.
+ARITHMETIC = re.compile(r"(?i)\b(?:totals?|totalling|totaling|comes? to|works? out|leaving|leaves|left over|remaining|"
+                        r"sum|difference|gap|emi|instal+ments?|a month|per month|monthly|each month|in all|altogether|"
+                        r"of which|times|twice|half|down payment)\b|[=×]|%\s+of\b")
+
+
+def _derivable(raw: str, text: str, cue: bool = True) -> bool:
+    """Whether the figure ``raw`` is the report's own arithmetic on the other figures of its sentence, in a sentence
+    that does sums (ARITHMETIC): a share, a product, a sum or difference, a ratio, or a loan's monthly instalment
+    (₹70 lakh over 20 years at 8.75% is about ₹61,900 a month)."""
+    mine = _values(raw)
+    if not mine or (cue and not ARITHMETIC.search(str(text))):
+        return False
+    rest = str(text).replace(raw, " ", 1)
+    others = [v for v in _values(rest) if v]
+    close = lambda x, y: abs(x - y) <= max(0.015 * abs(x), 0.5)            # noqa: E731
+    for x in mine:
+        # A share of an amount (0.5% of ₹70 lakh is ₹35,000), always; other sums only in a sentence that does sums.
+        if any(close(x, p * a / 100) for p in _values(rest, percent=True) for a in _values(rest, percent=False)
+               if a >= 1000):
+            return True
+        for i, a in enumerate(others if cue else []):
+            for j, b in enumerate(others):
+                if i == j:
+                    continue
+                if any(close(x, y) for y in (a * b / 100, a * b, a / b, a / b * 100, a + b, a - b)):
+                    return True
+        for principal in (v for v in others if v >= 1e5):
+            for rate in (v for v in others if 1 <= v <= 30):
+                for years in (v for v in others if 1 <= v <= 40 and v != rate):
+                    i, n = rate / 1200, int(round(years * 12))
+                    if close(x, principal * i * (1 + i) ** n / ((1 + i) ** n - 1)):
+                        return True
+    return False
 
 
 def _same(a: str, b: str) -> bool:

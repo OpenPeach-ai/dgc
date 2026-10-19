@@ -82,7 +82,7 @@ class Web:
             self.fetched.append(url)
         if self.on_fetch is not None:
             self.on_fetch(url)
-        return url, f"{url} says something specific about it, with figures. " * 40
+        return url, f"{url} says something specific about it, with figures: rates from 7.5%, fees 0.5%. " * 40
 
 
 def note_of(user: str) -> dict:
@@ -332,7 +332,7 @@ def judge(user: str) -> dict:
     head, _, rest = user.partition("\n\nNotes:\n")
     evidence = {}
     for block in re.split(r"\n\n(?=\[\d+\] )", rest):
-        m = re.match(r"\[(\d+)\] (?:\(for claim (\d+), a passage of the page itself\)\n)?(.*)", block, re.S)
+        m = re.match(r"\[(\d+)\] (?:\(for claim (\d+), [^)\n]*\)\n)?(.*)", block, re.S)
         evidence[(m[2], int(m[1])) if m[2] else int(m[1])] = m[3]
     verdicts = []
     for number, words, cites in re.findall(r"^(\d+)\. (.*) \(cites ([\d, ]+)\)$", head, re.M):
@@ -410,35 +410,186 @@ class Citations(Stand):
                          [("Axis | not given", "No source gives Rate (9.99%)"),
                           ("ICICI's rate starts at 8.75%.", "The source gives 8.75%, not 8.50%")])
         self.assertEqual(sorted(r["claim"][:5] for r in check["removed"]), ["Kotak", "SBI i"])
-        self.assertEqual(len([c for c in self.world["calls"] if c["kind"] == "repair"]), 1, "one call repairs them all")
+        self.assertEqual(len([c for c in self.world["calls"] if c["kind"] == "repair"]), 2,
+                         "one call repairs them all, and one stricter call what it didn't fix")
         self.assertIn("Citations checked: 3 of 7 cited claims hold up against their sources; 2 corrected, 2 removed: "
                       "no source backed them.", run.how())
 
     def test_a_fact_no_source_gives_means_no_source_backs_the_claim(self):
         """Sources that say part of a claim don't back it when a fact of it is in none of them (a release date only
-        the writer had): it isn't held up, and goes the way of any unbacked claim, with what was missing as why."""
+        the writer had). With its page kept, the date is on none of its cited pages: when no repair fixes it, it
+        goes, saying which figure. Without the page, part of it is in its source: kept, without a citation."""
         self.world["answers"].update(
             check=lambda user: {"verdicts": [{"id": 1, "backed_by": [1], "missing": "the date, 27 July 2026"}]},
             repair=lambda user: {"repairs": [{"id": 1, "as_written": False, "corrected": ""}]})
-        state = {"question": "q", "plan": {"title": "t", "steps": ["s"], "sites": []}, "notes": [dict(self.Citations_NOTE)]}
-        run = research.Research(None, state, client_for=lambda: Model(self.world), room=32768, search=None)
-        report = run.check("Kimi K3 (2.8T) went up on 27 July 2026 [1]. It is big.")
-        self.assertEqual(report, "It is big.")
-        self.assertEqual((state["check"]["supported"], state["check"]["sources"]), (0, {"cited": 1, "backed": 0}))
-        self.assertEqual(state["check"]["removed"][0]["why"], "No source backed it: no source gives the date, 27 July 2026")
-        repair = next(c for c in self.world["calls"] if c["kind"] == "repair")
-        self.assertIn("no source gives: the date, 27 July 2026", repair["user"])
+        temp = tempfile.TemporaryDirectory(prefix="chatdgc-research-pages-")
+        self.addCleanup(temp.cleanup)
+        (Path(temp.name) / "1.txt").write_text("Kimi K3 has 2.8T total parameters. " * 20)
+        for pages in (Path(temp.name), None):
+            self.world["calls"].clear()
+            state = {"question": "q", "plan": {"title": "t", "steps": ["s"], "sites": []},
+                     "notes": [dict(self.Citations_NOTE)]}
+            run = research.Research(None, state, client_for=lambda: Model(self.world), room=32768, search=None,
+                                    pages=pages)
+            report = run.check("Kimi K3 (2.8T) went up on 27 July 2026 [1]. It is big.")
+            self.assertEqual((state["check"]["supported"], state["check"]["sources"]), (0, {"cited": 1, "backed": 0}))
+            repair = next(c for c in self.world["calls"] if c["kind"] == "repair")
+            self.assertIn("no source gives: the date, 27 July 2026", repair["user"])
+            if pages:
+                self.assertEqual(report, "It is big.")
+                self.assertEqual(state["check"]["removed"][0]["why"], "No source backed it: no cited page gives 27, 2026")
+            else:
+                self.assertEqual(report, "Kimi K3 (2.8T) went up on 27 July 2026. It is big.")
+                self.assertEqual(state["check"]["judgement"][0]["why"], "Its sources give part of it; kept without a citation")
 
     Citations_NOTE = {"n": 1, "title": "Kimi", "url": "https://kimi.example", "note": "- Kimi K3: 2.8T total parameters."}
 
-    def run_check(self, report, verdicts, repairs=None, notes=None):
+    def run_check(self, report, verdicts, repairs=None, notes=None, pages=None, question="q"):
         answers = iter(verdicts)
+        fixes = iter(repairs if repairs and isinstance(repairs[0], list) else [repairs or []] * 2)
         self.world["answers"].update(check=lambda user: {"verdicts": next(answers)},
-                                     repair=lambda user: {"repairs": repairs or []})
-        state = {"question": "q", "plan": {"title": "t", "steps": ["s"], "sites": []},
+                                     repair=lambda user: {"repairs": next(fixes)})
+        state = {"question": question, "plan": {"title": "t", "steps": ["s"], "sites": []},
                  "notes": notes or [dict(self.Citations_NOTE)]}
-        run = research.Research(None, state, client_for=lambda: Model(self.world), room=32768, search=None)
+        kept = None
+        if pages:
+            temp = tempfile.TemporaryDirectory(prefix="chatdgc-research-pages-")
+            self.addCleanup(temp.cleanup)
+            kept = Path(temp.name)
+            for n, text in pages.items():
+                (kept / f"{n}.txt").write_text(text)
+        run = research.Research(None, state, client_for=lambda: Model(self.world), room=32768, search=None, pages=kept)
         return run.check(report), state["check"]
+
+    def calls(self, kind):
+        return [c for c in self.world["calls"] if c["kind"] == kind]
+
+    def test_a_figure_on_none_of_its_pages_isnt_kept_on_its_notes_word(self):
+        """The checker trusted a wrong note (Kimi K3 "1.56 TB"; the page has 594 GB, and 51.56 in a score): a figure on
+        none of the cited pages, in any form (8.00% is 8%, 1,000 is 1000, ₹70 lakh is 70,00,000), sends the claim to
+        the page check and the repair, whatever the note said. Counted as caught."""
+        notes = [{"n": 1, "title": "Kimi", "url": "https://kimi.example", "note": "- Kimi K3 weights: 1.56 TB."}]
+        pages = {1: "Kimi K3 MXFP4 weights are 594 GB. It scores 51.56 on one test. " * 10}
+        report, check = self.run_check(
+            "Kimi K3's weights are 1.56 TB [1].",
+            [[{"id": 1, "why": "The note gives 1.56 TB.", "backed_by": [1], "holds": True}],
+             [{"id": 1, "why": "The page gives 594 GB.", "backed_by": [], "holds": False, "missing": "1.56 TB"}],
+             [{"id": 1, "why": "The page gives 594 GB.", "backed_by": [1], "holds": True}]],
+            [{"id": 1, "why": "The page gives 594 GB, not 1.56 TB.", "judgement": False, "as_written": False,
+              "corrected": "Kimi K3's MXFP4 weights are 594 GB [1]."}], notes=notes, pages=pages)
+        self.assertEqual(report, "Kimi K3's MXFP4 weights are 594 GB [1].")
+        self.assertEqual((check["figures"], check["first"], len(check["corrected"])), (1, 0, 1))
+        self.assertEqual(len(self.calls("check")), 3, "first check, the page, and the correction")
+        self.assertIn("no cited page has the figure 1.56", self.calls("repair")[0]["user"])
+        self.assertIn("From the page itself:", self.calls("check")[-1]["user"], "a correction is checked against its page")
+        same = {1: "Fees are 8% of 1000 on ₹70,00,000 loans. " * 5}
+        report, check = self.run_check("Fees are 8.00% of 1,000 on ₹70 lakh loans [1].",
+                                       [[{"id": 1, "why": "Given.", "backed_by": [1], "holds": True}]],
+                                       notes=notes, pages=same)
+        self.assertEqual((report, check["figures"]), ("Fees are 8.00% of 1,000 on ₹70 lakh loans [1].", 0),
+                         "the same figures, written another way")
+        rounded = {1: "At 131,072 tokens it needs 24.347 GiB; Ornith-1.5-35B-A3B and Qwen3.8-27B both load. " * 5}
+        report, check = self.run_check("At 131K tokens Qwen3.8-27B needs 24.3 GiB, 20-fold more [1].",
+                                       [[{"id": 1, "why": "Given.", "backed_by": [1], "holds": True}]],
+                                       notes=notes, pages=rounded)
+        self.assertEqual(check["figures"], 0, "rounded as the page's figure rounds, a scale word within 0.6%, and "
+                                              "numbers inside a name or a compound word aren't figures")
+        report, check = self.run_check("For a ₹70 lakh flat, SBI charges 8% [1].",
+                                       [[{"id": 1, "why": "Given.", "backed_by": [1], "holds": True}]],
+                                       notes=notes, pages=same, question="Home loans for a ₹70 lakh flat in Pune")
+        self.assertEqual(check["figures"], 0, "the question's own figures are the user's, not a source's")
+        garbled = {1: "On \u00e2\u00b950 lakh: up to \u00e2\u00b925,000. Table says up to \u00e2\u00b91,00,000. " * 5}
+        report, check = self.run_check("On ₹50 lakh it's ₹25,000 or ₹1,00,000 [1].",
+                                       [[{"id": 1, "why": "Given.", "backed_by": [1], "holds": True}]],
+                                       notes=notes, pages=garbled)
+        self.assertEqual(check["figures"], 0, "a page that writes ₹ as â¹ still has its figures")
+
+    def test_a_rows_own_arithmetic_stays_in_its_cell(self):
+        notes = [{"n": 4, "title": "HDFC", "url": "https://hdfc.example", "note": "- HDFC: processing fee 0.50%."}]
+        report, check = self.run_check(
+            "| Lender | Fee | On this loan |\n|---|---|---|\n| HDFC | 0.50% [4] | about ₹35,000 [4] |",
+            [[{"id": 1, "why": "No ₹35,000.", "backed_by": [4], "holds": False, "missing": "₹35,000"}],
+             [{"id": 1, "why": "No ₹35,000.", "backed_by": [4], "holds": False, "missing": "₹35,000"}],
+             [{"id": 1, "why": "Given.", "backed_by": [4], "holds": True},
+              {"id": 2, "why": "Not given.", "backed_by": [], "holds": False, "missing": "₹35,000"}],
+             [{"id": 2, "why": "Not given.", "backed_by": [], "holds": False, "missing": "₹35,000"}]],
+            notes=notes, pages={4: "HDFC processing fee: 0.50% of the loan. " * 10},
+            question="Home loans for a ₹70 lakh flat in Pune")
+        self.assertEqual(report.splitlines()[-1], "| HDFC | 0.50% [4] | about ₹35,000 |",
+                         "0.5% of ₹70 lakh: computed, kept without a citation, not blanked")
+        report, check = self.run_check(
+            "| Lender | Fee |\n|---|---|\n| HDFC | 9.99% [4] |",
+            [[{"id": 1, "why": "No.", "backed_by": [], "holds": False, "missing": "9.99%"}]],
+            notes=notes, pages={4: "HDFC processing fee: 0.50% of the loan. " * 10})
+        self.assertEqual(report.splitlines()[-1], "| HDFC | 9.99% [4] |", "a row whose cells couldn't be checked stays")
+
+    def test_the_reports_own_arithmetic_is_derived_not_sourced(self):
+        """₹70 lakh over 20 years at 8.75% is about ₹61,900 a month: computed, not on any page. It stays, without a
+        citation, and isn't swapped for another example; no repair is asked for."""
+        notes = [{"n": 2, "title": "Rates", "url": "https://rates.example", "note": "- 8.75% for loans over ₹70 lakh."}]
+        pages = {2: "Loans over ₹70 lakh: 8.75% for up to 20 years. " * 10}
+        report, check = self.run_check(
+            "A ₹70 lakh loan over 20 years at 8.75% costs about ₹61,900 a month [2].",
+            [[{"id": 1, "why": "No EMI given.", "backed_by": [2], "holds": False, "missing": "₹61,900"}],
+             [{"id": 1, "why": "No EMI given.", "backed_by": [2], "holds": False, "missing": "₹61,900"}]],
+            notes=notes, pages=pages)
+        self.assertEqual(report, "A ₹70 lakh loan over 20 years at 8.75% costs about ₹61,900 a month.")
+        self.assertEqual(check["judgement"], [{"claim": "A ₹70 lakh loan over 20 years at 8.75% costs about ₹61,900 a month.",
+                                               "why": "The report's own arithmetic on figures its sources give"}])
+        self.assertEqual(self.calls("repair"), [])
+        self.assertFalse(research._derivable("32 GB", "On a 24 GB GPU or a 32 GB Mac, Qwen3.8-27B at 8 bits is best."),
+                         "figures that happen to add up, in a sentence that does no sums, aren't arithmetic")
+        self.assertTrue(research._derivable("₹56 lakh", "The bank lends 80% of ₹70 lakh, ₹56 lakh, leaving the rest."))
+        self.assertTrue(research._derivable("₹35,000", "| HDFC | 0.50% | about ₹35,000 | Home loans for a ₹70 lakh flat",
+                                            cue=False), "a share of an amount, in a table row")
+        self.assertFalse(research._derivable("40B", "| GLM-5.3 | Aug 14; Aug 28, 2026 | ~753B MoE, ~40B active |", cue=False),
+                         "in a row, only a share of an amount counts: other sums are coincidence")
+
+    def test_doubt_in_a_verdicts_reason_means_a_second_look(self):
+        """Kept with "hmm, that's 6% + 1% for men" in its reason: it goes to the page check, not straight through."""
+        pages = {1: "Stamp duty in Pune is 6% + 1% for men and 5% + 1% for women. " * 10}
+        notes = [{"n": 1, "title": "Duty", "url": "https://duty.example", "note": "- Stamp duty 5% + 1% + 1%."}]
+        report, check = self.run_check(
+            "Stamp duty is 5% + 1% + 1% [1].",
+            [[{"id": 1, "why": "The note agrees, hmm, but the page says 6% + 1% for men.", "backed_by": [1],
+               "holds": True}],
+             [{"id": 1, "why": "Men pay 6% + 1%.", "backed_by": [], "holds": False, "missing": "5% + 1% + 1%"}],
+             [{"id": 1, "why": "Given.", "backed_by": [1], "holds": True}]],
+            [{"id": 1, "why": "Men pay 6% + 1%, women 5% + 1%.", "judgement": False, "as_written": False,
+              "corrected": "Stamp duty is 6% + 1% for men and 5% + 1% for women [1]."}], notes=notes, pages=pages)
+        self.assertEqual(report, "Stamp duty is 6% + 1% for men and 5% + 1% for women [1].")
+        self.assertEqual(len(self.calls("check")), 3)
+
+    def test_a_plain_but_in_a_reason_isnt_doubt(self):
+        """Doubt is "hmm", "not the same", "doesn't match": a reason saying "gives X but not Y" with holds true isn't
+        sent back (it sent good claims round the loop until they were lost)."""
+        report, check = self.run_check("Kimi K3 has 2.8T parameters [1].",
+                                       [[{"id": 1, "why": "Gives 2.8T, but not the date; the claim has none.",
+                                          "backed_by": [1], "holds": True}]])
+        self.assertEqual((report, len(self.calls("check"))), ("Kimi K3 has 2.8T parameters [1].", 1))
+
+    def test_a_verdict_with_its_sources_and_nothing_missing_cant_be_a_removal(self):
+        report, check = self.run_check("Kimi K3 has 2.8T parameters [1].",
+                                       [[{"id": 1, "why": "Odd wording.", "backed_by": [1], "holds": False}]])
+        self.assertEqual((report, check["supported"], self.calls("repair")), ("Kimi K3 has 2.8T parameters [1].", 1, []))
+
+    def test_a_claim_part_of_which_is_sourced_is_corrected_not_removed(self):
+        """The report's main answer ("Qwen3.8-27B is the strongest you can run", one figure off and a ranking no source
+        makes) was removed. A repair that would remove a claim part of which is in a note gets a second, stricter try,
+        which corrects it (fix the figure, say who ranks it)."""
+        notes = [{"n": 29, "title": "Guide", "url": "https://guide.example",
+                  "note": "- The best local LLM for coding in 2026 is Qwen3.8 27B."}]
+        report, check = self.run_check(
+            "Qwen3.8-27B (27.8B) is the strongest model you can run on your desk [29].",
+            [[{"id": 1, "why": "27B, not 27.8B; no ranking.", "backed_by": [29], "holds": False, "missing": "27.8B"}],
+             [{"id": 1, "why": "Given.", "backed_by": [29], "holds": True}]],
+            [[{"id": 1, "why": "No source ranks it.", "judgement": False, "as_written": False, "corrected": ""}],
+             [{"id": 1, "why": "27B, and one guide calls it the best.", "judgement": False, "as_written": False,
+               "corrected": "One guide calls Qwen3.8-27B the best local model for coding in 2026 [29]."}]],
+            notes=notes)
+        self.assertEqual(report, "One guide calls Qwen3.8-27B the best local model for coding in 2026 [29].")
+        self.assertEqual((len(check["corrected"]), check["removed"]), (1, []))
+        self.assertIn("Second try", self.calls("repair")[1]["user"])
 
     def test_a_verdict_whose_reason_says_backed_isnt_removed(self):
         """Reasons come first, and a "doesn't hold" its own reason contradicts ("All figures appear in the cited
