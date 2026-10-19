@@ -138,7 +138,7 @@ test("a report is two lines until opened: what it found, then the worst finding 
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
   const [card] = cards(s);
-  assert.equal(card.dataset.fold, "closed");
+  assert.equal(card.dataset.shown, "closed");
   const line1 = card.querySelector(".pip-report-line1"), line2 = card.querySelector(".pip-report-line2");
   assert.equal(line1.querySelector(".pip-report-line-name").textContent, "ERP daily audit");
   assert.equal(line1.querySelector(".pip-report-line-state").textContent, "5 findings · 2 high");
@@ -147,14 +147,14 @@ test("a report is two lines until opened: what it found, then the worst finding 
   assert.equal(line2.querySelector(".pip-report-where").textContent, "app/gst.py:88");
   assert.deepEqual([...line2.querySelectorAll("button")].map((b) => b.textContent || b.getAttribute("aria-label")), ["Fix", "Open", "Dismiss"]);
   line1.click();
-  assert.equal(card.dataset.fold, "open", "a click opens the whole card");
+  assert.equal(card.dataset.shown, "open", "a click opens the whole card");
   assert.equal(line1.getAttribute("aria-expanded"), "true");
   line1.dispatchEvent(new s.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  assert.equal(card.dataset.fold, "closed", "Enter closes it again");
+  assert.equal(card.dataset.shown, "closed", "Enter closes it again");
   const before = s.posted.filter((m) => m.type === "prompt").length;
   line2.querySelector(".pip-report-fix-slim").click();
   assert.equal(s.posted.filter((m) => m.type === "prompt").length, before + 1, "Fix sends the message");
-  assert.equal(card.dataset.fold, "closed", "pressing Fix doesn't open the card");
+  assert.equal(card.dataset.shown, "closed", "pressing Fix doesn't open the card");
   assert.deepEqual([...card.querySelectorAll(".pip-report-fix, .pip-report-fix-slim")].map((b) => [b.textContent, b.disabled]),
     [["Asked DGC", true], ["Asked DGC", true]]);
 });
@@ -178,9 +178,9 @@ test("three reports that arrive together are one line, opened to their rows; two
   assert.ok(group, "three are");
   assert.equal(group.querySelectorAll(":scope > .pip-report").length, 3);
   assert.equal(group.querySelector(".pip-report-group-title").textContent, "3 Pip reports · 1 failed · 5 findings · 1 clear");
-  assert.equal(group.dataset.fold, "closed");
+  assert.equal(group.dataset.shown, "closed");
   group.querySelector(".pip-report-group-head").click();
-  assert.equal(group.dataset.fold, "open");
+  assert.equal(group.dataset.shown, "open");
   // Dismissing one leaves two: they stand on their own again.
   group.querySelector(".pip-report[data-outcome='clear'] .pip-report-dismiss-slim").click();
   assert.equal(s.doc.querySelector("#log .pip-report-group"), null);

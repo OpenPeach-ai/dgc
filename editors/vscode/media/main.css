@@ -2739,8 +2739,8 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report-fill { flex: 1 1 0; min-width: 0; }
 .pip-report-line-when { flex: none; color: var(--muted); font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
 .pip-report-chevron { flex: none; align-self: center; color: var(--muted); font-size: 14px; transition: transform .12s; }
-.pip-report.slim[data-fold="open"] > .pip-report-main > .pip-report-line1 .pip-report-chevron,
-.pip-report-group[data-fold="open"] > .pip-report-group-head .pip-report-chevron { transform: rotate(90deg); }
+.pip-report.slim[data-shown="open"] > .pip-report-main > .pip-report-line1 .pip-report-chevron,
+.pip-report-group[data-shown="open"] > .pip-report-group-head .pip-report-chevron { transform: rotate(90deg); }
 .pip-report-line2 { margin-top: 1px; font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
 .pip-report-line2 .pip-report-sev { min-width: 0; }
 .pip-report-line-what { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
@@ -2756,14 +2756,14 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report-slim-actions .asked { color: var(--muted); font-weight: var(--w-reg); cursor: default; }
 .pip-report-slim-actions .asked:hover { border-color: transparent; background: transparent; }
 /* Closed: the long parts stay out of sight. Open: line two goes, the whole card shows (its name and time are line one's). */
-.pip-report.slim[data-fold="closed"] .pip-report-head, .pip-report.slim[data-fold="closed"] .pip-report-findings,
-.pip-report.slim[data-fold="closed"] .pip-report-more, .pip-report.slim[data-fold="closed"] .pip-report-detail,
-.pip-report.slim[data-fold="closed"] > .pip-report-main > .pip-report-actions { display: none; }
-.pip-report.slim[data-fold="open"] .pip-report-line2,
-.pip-report.slim:not(.quiet)[data-fold="open"] .pip-report-line1 .pip-report-slim-actions { display: none; }
-.pip-report.slim[data-fold="open"] .pip-report-head .pip-report-name, .pip-report.slim[data-fold="open"] .pip-report-head .pip-report-when { display: none; }
-.pip-report.slim.quiet[data-fold="open"] > .pip-report-main > .pip-report-actions { display: none; }
-.pip-report.slim.quiet[data-fold="open"] { border-color: var(--border); background: var(--surface); }
+.pip-report.slim[data-shown="closed"] .pip-report-head, .pip-report.slim[data-shown="closed"] .pip-report-findings,
+.pip-report.slim[data-shown="closed"] .pip-report-more, .pip-report.slim[data-shown="closed"] .pip-report-detail,
+.pip-report.slim[data-shown="closed"] > .pip-report-main > .pip-report-actions { display: none; }
+.pip-report.slim[data-shown="open"] .pip-report-line2,
+.pip-report.slim:not(.quiet)[data-shown="open"] .pip-report-line1 .pip-report-slim-actions { display: none; }
+.pip-report.slim[data-shown="open"] .pip-report-head .pip-report-name, .pip-report.slim[data-shown="open"] .pip-report-head .pip-report-when { display: none; }
+.pip-report.slim.quiet[data-shown="open"] > .pip-report-main > .pip-report-actions { display: none; }
+.pip-report.slim.quiet[data-shown="open"] { border-color: var(--border); background: var(--surface); }
 /* Three or more together: one line until opened. */
 .pip-report-group { display: flex; flex-direction: column; min-width: 0; margin: 0; border: 1px solid var(--border);
   border-radius: var(--r-md); background: var(--surface); }
@@ -2779,7 +2779,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report-group-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .pip-report-group-title b { color: var(--text-strong); font-weight: var(--w-semi); }
 .pip-report-group-head .pip-report-line-when { margin-left: auto; }
-.pip-report-group[data-fold="closed"] > .pip-report { display: none; }
+.pip-report-group[data-shown="closed"] > .pip-report { display: none; }
 .pip-report-group > .pip-report.slim { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
 .pip-report-group > .pip-report.slim:last-child { border-radius: 0 0 var(--r-md) var(--r-md); }
 @media (prefers-reduced-motion: reduce) { .pip-report-chevron { transition: none; } }

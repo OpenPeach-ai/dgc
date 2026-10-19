@@ -8250,7 +8250,7 @@
     // Two lines until opened (the founder, 19 Oct: the cards took too much room). Line one: the Pip, what it found,
     // when, and a chevron; line two: the worst finding or why it failed, with Fix, Open and Dismiss. A clean run is
     // the first line alone. Opening shows the whole card below them (today's), so nothing is drawn twice.
-    card.classList.add("slim"); card.dataset.fold = "closed";
+    card.classList.add("slim"); card.dataset.shown = "closed";
     card.dataset.total = String(Number.isSafeInteger(r.total) ? r.total : 0);
     const short = pipReportShort(r);
     const line1 = el("div", "pip-report-line1");
@@ -8268,8 +8268,8 @@
     const x = button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, slimActs);
     x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
     const chevron = el("span", "pip-report-chevron codicon codicon-chevron-right"); chevron.setAttribute("aria-hidden", "true");
-    const fold = (open = card.dataset.fold !== "open") => {
-      card.dataset.fold = open ? "open" : "closed"; line1.setAttribute("aria-expanded", String(open));
+    const fold = (open = card.dataset.shown !== "open") => {
+      card.dataset.shown = open ? "open" : "closed"; line1.setAttribute("aria-expanded", String(open));
     };
     line1.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fold(); } });
     card.addEventListener("click", (event) => { if (!event.target.closest("button, a, .pip-report-findings, .pip-report-detail")) fold(); });
@@ -8316,11 +8316,11 @@
     if (cards.length < 3) return;
     let group = run.find((node) => node.matches(".pip-report-group"));
     if (!group) {
-      group = el("div", "pip-report-group"); group.dataset.fold = "closed";
+      group = el("div", "pip-report-group"); group.dataset.shown = "closed";
       const head = el("button", "pip-report-group-head"); head.type = "button"; head.setAttribute("aria-expanded", "false");
       head.addEventListener("click", () => {
-        const open = group.dataset.fold !== "open";
-        group.dataset.fold = open ? "open" : "closed"; head.setAttribute("aria-expanded", String(open));
+        const open = group.dataset.shown !== "open";
+        group.dataset.shown = open ? "open" : "closed"; head.setAttribute("aria-expanded", String(open));
       });
       group.append(head);
       start.before(group);
