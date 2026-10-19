@@ -6,6 +6,7 @@ import errno
 import hashlib
 import json
 import io
+import itertools
 import os
 import signal
 import tempfile
@@ -263,8 +264,10 @@ class ProcessCaptureTests(unittest.TestCase):
 
     def test_stdout_close_does_not_skip_owned_deadline(self):
         code = 'import os;os.close(1);os.close(2);r,w=os.pipe();os.read(r,1)'
-        # The fake clock advances deterministically; no elapsed-time assertion.
-        with patch.object(execution.time, 'monotonic', side_effect=[0, 0, 0, 2]):
+        # The fake clock advances deterministically; no elapsed-time assertion. It stays past the
+        # deadline once there: a loaded machine makes _capture look at the clock more often, and a
+        # fixed list of four readings ran out (StopIteration) under the full suite.
+        with patch.object(execution.time, 'monotonic', side_effect=itertools.chain([0, 0, 0], itertools.repeat(2))):
             result = execution._capture([execution.sys.executable, '-I', '-c', code], maximum=64, timeout=1, env={})
         self.assertEqual(result['status'], 'timed_out')
 
