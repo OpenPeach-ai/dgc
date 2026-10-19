@@ -346,6 +346,28 @@ class LocalPipsTests(unittest.TestCase):
         self.assertEqual(result["findings"], [], "an excerpt that isn't exact is never a verified finding")
         self.assertIn("its quoted code isn't at that line", result["limitations"][0])
 
+    def test_a_long_or_missing_summary_never_loses_the_report(self):
+        # The founder's .111 ERP Pips failed three runs in a row on "report summary must be text between 1 and 4000
+        # characters" (2026-10-19): a request error, so even the format repair never ran.
+        self.commit()
+        finding = {"title": "Example", "severity": "low", "path": "source.py", "line": 2, "evidence": "    return 'hello'"}
+        long = ("The bridge is frozen. " * 300).strip()
+        result = pips.validate_report(json.dumps({"summary": long, "findings": [finding], "limitations": []}),
+                                      self.root, read_calls=1)
+        self.assertLessEqual(len(result["summary"]), 4000)
+        self.assertTrue(result["summary"].endswith("frozen. …"), "cut at a sentence, and marked")
+        self.assertEqual(len(result["findings"]), 1, "the verified finding is kept")
+        self.assertIn("shortened the summary", result["limitations"][-1])
+        for missing in ({}, {"summary": ""}, {"summary": "   "}, {"summary": None}):
+            with self.subTest(missing=missing):
+                result = pips.validate_report(json.dumps({**missing, "findings": [finding], "limitations": []}),
+                                              self.root, read_calls=1)
+                self.assertEqual(result["summary"], "1 finding: Example")
+                self.assertIn("wrote this summary", result["limitations"][-1])
+        with self.assertRaises(RegistryError) as raised:   # not text: the format repair's job
+            pips.validate_report(json.dumps({"summary": 5, "findings": [], "limitations": []}), self.root, read_calls=1)
+        self.assertEqual(raised.exception.code, "invalid_report")
+
     def test_claim_of_success_without_source_read_refused(self):
         report = json.dumps({"summary": "All good", "findings": [], "limitations": []})
         with self.assertRaisesRegex(RegistryError, "did not successfully inspect"):

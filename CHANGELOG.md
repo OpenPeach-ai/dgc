@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Pip report is never lost to its summary.** A summary over 4,000 characters is cut at its last sentence that fits and marked, and a missing one is written from the findings, each with a note in the report's limitations. Before, "report summary must be text between 1 and 4000 characters" failed the whole run, and even the one format repair never ran (three failed runs in a row on a real project).
+
 ### Pips: scheduled Pips run with VS Code closed
 
 - **Keep Pips running turns itself on** the first time a Pip gets a schedule, a commit trigger or a routine

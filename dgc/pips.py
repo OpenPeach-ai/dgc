@@ -2041,6 +2041,41 @@ def run_source(store, run_id):
     return {"rules": name, "status": "unavailable" if started else "not_copied", "left_out": None}
 
 
+REPORT_SUMMARY_MAX = 4000
+
+
+def _report_summary(value, findings):
+    """The summary as a run can keep it, and a note when DGC had to touch it (ERP review, 2026-10-19).
+
+    A summary is the model's own prose; nothing in it is verified against the source, so it is never a reason to
+    lose a report. A small model writing 4,500 characters, or leaving the field out, failed three runs in a row with
+    "report summary must be text between 1 and 4000 characters" -- raised as a request error, so even the format
+    repair never ran. Too long: cut at the last sentence (or word) that fits, and say so. Missing or empty: name
+    what the findings are. Anything that isn't text stays a format error the repair can fix.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        titles = [f.get("title") for f in findings if isinstance(f, dict) and isinstance(f.get("title"), str)]
+        if not titles:
+            return "No findings.", "DGC wrote this summary: the report had none."
+        head = "; ".join(t.strip() for t in titles[:5] if t.strip())[:REPORT_SUMMARY_MAX - 40]
+        return (f"{len(findings)} finding{'s' if len(findings) != 1 else ''}: {head}",
+                "DGC wrote this summary from the findings: the report had none.")
+    if not isinstance(value, str):
+        raise RegistryError("invalid_report", "The report summary must be text.")
+    text = value.replace("\x00", "").strip()
+    if not text:
+        return _report_summary(None, findings)
+    if len(text) <= REPORT_SUMMARY_MAX:
+        return text, None
+    room = REPORT_SUMMARY_MAX - 2
+    cut = text[:room]
+    end = max(cut.rfind(". "), cut.rfind(".\n"), cut.rfind("\n\n"))
+    if end < room // 2:
+        end = cut.rfind(" ")
+    cut = cut[:end + 1 if end > 0 else room].rstrip()
+    return cut + " …", f"DGC shortened the summary to fit {REPORT_SUMMARY_MAX:,} characters (it was {len(text):,})."
+
+
 def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
     if read_calls < 1:
         raise RegistryError("unverified_report", "The model did not successfully inspect a source file.")
@@ -2088,11 +2123,13 @@ def validate_report(text: str, snapshot: Path, *, read_calls: int) -> dict:
                             "Return one JSON object with summary, findings and limitations using bounded values.") from None
     if not isinstance(report, dict) or set(report) - {"summary", "findings", "limitations"}:
         raise RegistryError("invalid_report", "The audit report has unsupported fields.")
-    summary = _text(report.get("summary"), "report summary", 4000)
     limitations = report.get("limitations", [])
     findings = report.get("findings")
     if not isinstance(findings, list) or len(findings) > 16 or not isinstance(limitations, list) or len(limitations) > 12:
         raise RegistryError("invalid_report", "The audit must contain at most 16 findings and 12 limitations.")
+    summary, summary_note = _report_summary(report.get("summary"), findings)
+    if summary_note and len(limitations) < 12:
+        limitations = [*limitations, summary_note]
     clean, withheld = [], []
     for finding_index, finding in enumerate(findings, 1):
         expected_fields = {"title", "severity", "path", "line", "evidence"}
