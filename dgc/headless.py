@@ -2112,7 +2112,7 @@ class Backend:
                           "session_paging": True,
                           "plugin_management": True, "plugin_keys": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
-                          "live_steering": True, "live_modes": True, "question_forms": True,
+                          "live_steering": True, "steer_queued": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
                           # The client answers with set_workspace_roots.ask_options when it can
                           # draw the options too; ready.capabilities is a free-form object, so
@@ -2409,6 +2409,47 @@ class Backend:
 
     def _queued_prompt_count(self):
         return sum(1 for item in self._queue if len(item) < 4 or item[3] != "pip_setup")
+
+    def _steer_queued(self, request_ids) -> tuple[list[str], str]:
+        """Move queued prompts into the running turn as steering, in queue order ("Steer now", "Steer all").
+
+        The founder (2026-10-19): a queued message sat as "you · queued" with nothing to do but wait for the
+        turn to end. Only the user's own prompts move (never a continue, resume or Pip-setup turn), and only
+        while a model turn is running that can take steering; each one that moves is announced exactly as an
+        Enter-while-working message is (prompt_accepted "steered", then steering_update "applied"). Returns
+        (the ids that moved, why none could when that is the case)."""
+        wanted = [i for i in request_ids if isinstance(i, str) and i]
+        moved: list[str] = []
+        lock = self._turn_state_lock()
+        with lock:
+            config = getattr(self, "config", getattr(self.agent, "config", None))
+            config_get = getattr(config, "get", None)
+            engine = config_get("subscription_engine", "") if callable(config_get) else ""
+            if getattr(self, "_worker", None) is None or getattr(self, "_foreground_worker", None) is not None:
+                return moved, "No turn is running, so a queued message starts as the next one."
+            if engine or self.agent.cancelled.is_set() or getattr(self, "_running_turn_kind", "") == "monitor":
+                return moved, "This turn can't take a message now; it stays queued for the next turn."
+            steers = getattr(self, "_steer_payloads", {})
+            from .pip_references import format_references
+            for item in [q for q in self._queue if len(q) > 4 and q[4] in wanted and q[3] == "prompt"]:
+                text, images, context, _kind, identity = item[:5]
+                references = item[5] if len(item) > 5 else None
+                if identity in steers:
+                    continue
+                model_text = (_format_editor_context(redact_value(context, secret_values(config)))
+                              + format_references(redact_value(references, secret_values(config))) + text)
+                steers[identity] = (text, images, context) + ((references,) if references else ())
+                self._steer_payloads = steers
+                if not self.agent.steer(model_text, images=images, request_id=identity):
+                    steers.pop(identity, None)
+                    break                     # this turn stopped taking steering: the rest stay queued
+                self._queue.remove(item)
+                moved.append(identity)
+                self.em.emit("prompt_accepted", request_id=identity, state="steered")
+            count = self._queued_prompt_count()
+        if moved:
+            self.em.emit("queued", count=count, text="")
+        return moved, "" if moved else "That message is no longer waiting in the queue."
 
     def _announce_peer(self, status: str = "idle") -> None:
         """Leave (or refresh) this backend's note in the peer registry.
@@ -5216,6 +5257,17 @@ class Backend:
                 self.em.emit("command_rejected", command=t, reason="duplicate_request",
                              message="This follow-up is already awaiting delivery.", **_request_fields(request_id))
 
+        elif t == "steer_queued":
+            ids = cmd.get("request_ids")
+            if (not isinstance(ids, list) or not 1 <= len(ids) <= _MAX_QUEUED_TURNS
+                    or not all(isinstance(i, str) and 0 < len(i) <= 200 for i in ids)):
+                self.em.emit("command_rejected", command=t, reason="invalid_request",
+                             message="Name the queued messages to steer with.", **_request_fields(request_id))
+                return
+            moved, why = self._steer_queued(ids)
+            if not moved:
+                self.em.emit("command_rejected", command=t, reason="not_steerable", message=why,
+                             **_request_fields(request_id))
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()
             parts = text[1:].split(None, 1) if text.startswith("/") else []

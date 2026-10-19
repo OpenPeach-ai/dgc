@@ -1339,8 +1339,20 @@
   // `agent_control_foreground`), and the background shells with their output (`background_tasks`).
   let agentControlLive = false, agentControlForeground = false, backgroundTasksLive = false;
   let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
+  let steerQueuedLive = false;           // ready.capabilities.steer_queued: a queued message can be steered in now
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
-  function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
+  function renderQueued() {
+    queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : "";
+    // Steer all: every queued message of this chat into the running turn at once.
+    const waiting = [...queuedPrompts.values()].filter((entry) => entry.node?.isConnected && !entry.node.querySelector(".steer-now:disabled"));
+    if (queuedCount > 1 && steerQueuedLive && waiting.length > 1) {
+      const all = el("button", "steer-all", "Steer all");
+      all.type = "button";
+      all.title = "Send every queued message to the running turn now";
+      all.addEventListener("click", () => steerQueuedNow(waiting.map((entry) => entry.node)));
+      queuedEl.append(" · ", all);
+    }
+  }
 
   // ---- one renderer, two sources ----
   // A restored turn is built by the builders that build a live one -- same classes, same answer
@@ -2333,6 +2345,38 @@
     if (!words) { if (note) note.remove(); return; }
     if (!note) { note = el("div", "steer-note"); node.appendChild(note); }
     note.textContent = words;
+    // A queued message can be steered into the running turn instead of waiting for it to end (the founder,
+    // 19 Oct): the same as pressing Enter while the model works, so it keeps going and reads it at its next step.
+    if (state === "queued" && steerQueuedLive && !replaying) {
+      const now = el("button", "steer-now", "Steer now");
+      now.type = "button";
+      now.title = "Send this to the running turn now, instead of after it";
+      now.addEventListener("click", () => steerQueuedNow([node]));
+      note.append(" · ", now);
+    }
+  }
+  // Move queued messages (their request ids) into the running turn; the backend answers each that moved with
+  // prompt_accepted "steered", which needs the row back among the pending prompts.
+  function steerQueuedNow(nodes) {
+    const ids = [];
+    for (const [id, entry] of [...queuedPrompts]) {
+      if (!nodes.includes(entry.node)) continue;
+      queuedPrompts.delete(id); pendingPrompts.set(id, entry); ids.push(id);
+      const button = entry.node.querySelector(".steer-now");
+      if (button) { button.disabled = true; button.textContent = "Steering…"; }
+    }
+    if (ids.length) vscode.postMessage({ type: "steerQueued", request_ids: ids });
+    renderQueued();
+  }
+  // A Steer now the backend could not do (the turn just ended, or can't take a message): those rows are queued again.
+  function steerQueuedRefused() {
+    for (const [id, entry] of [...pendingPrompts]) {
+      const button = entry.node?.querySelector?.(".steer-now");
+      if (!button || !button.disabled) continue;
+      pendingPrompts.delete(id); queuedPrompts.set(id, entry);
+      button.disabled = false; button.textContent = "Steer now";
+    }
+    renderQueued();
   }
 
   function settleBlock(node) {
@@ -5823,6 +5867,7 @@
         agentControlForeground = agentControlLive && ev.capabilities?.agent_control_foreground === true;
         backgroundTasksLive = Number(ev.capabilities?.background_tasks?.version) >= 1;
         pipReportsLive = ev.capabilities?.pip_reports === 1;
+        steerQueuedLive = nativeSteering && ev.capabilities?.steer_queued === true;
         // This panel draws Pip reports: ask for this chat's (none is sent, or taken, until it does).
         if (pipReportsLive) vscode.postMessage({ type: "pipReportsWatch" });
         agentMapCapabilities();
@@ -6576,6 +6621,7 @@
         // that did not take): a refusal of its polling must not fill the chat with lines.
         if (["get_background_output", "list_background_shells", "stop_background_shell"].includes(ev.command)
             || (ev.command === "agent_control" && String(ev.request_id || "").startsWith("agent-stop-"))) break;
+        if (ev.command === "steer_queued") { steerQueuedRefused(); sysLine(ev.message || "That message stays queued for the next turn."); break; }
         if (ev.command === "list_prompt_pips") {
           if (pipPicker.active && ev.request_id === pipPicker.id) { pipPicker.loading=false; pipPicker.error=String(ev.message || "Pip references are unavailable."); renderPipPicker(); }
           break;

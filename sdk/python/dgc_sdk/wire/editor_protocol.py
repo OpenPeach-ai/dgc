@@ -618,6 +618,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
                "skills": _A(False), "templates": _A(False),
                "workflow": _f("string", required=False, enum=("plan", "review", "init"))},
     "slash_command": {"text": _S()},
+    # Move queued prompts (by their request_id) into the running turn as steering: "Steer now" / "Steer all".
+    # Each that moves is announced as prompt_accepted "steered"; none moving is command_rejected
+    # "not_steerable". Sent only to a CLI whose ready.capabilities has steer_queued.
+    "steer_queued": {"request_ids": _A(), "request_id": _S(False)},
     # v14: ``question_forms`` is still accepted and ignored (every v14 client takes question
     # forms); it is removed in v15.
     # ``open_asks`` is how a client says it can show a question the turn did not stop for. The

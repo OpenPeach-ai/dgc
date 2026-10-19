@@ -297,6 +297,7 @@ export async function panelSession({ browser, python, model, name, config = {}, 
 export const transcript = (page) => page.evaluate(() => [...document.querySelectorAll("#log .msg.user, #log .msg.dgc, #log > .sys, #log .hist > .sys, #log .turn > .sys")]
   .map((node) => node.matches(".msg.user")
     ? `${node.querySelector(".role")?.textContent}: ${node.querySelector(".bubble")?.textContent}`
-      + ([...node.querySelectorAll("button")].map((b) => ` [${b.textContent}]`).join(""))
+      // Steer now rides on every queued row (its "you · queued" label already says so), so it is not listed.
+      + ([...node.querySelectorAll("button:not(.steer-now)")].map((b) => ` [${b.textContent}]`).join(""))
     : node.matches(".msg.dgc") ? `DGC: ${node.querySelector(".thinking")?.textContent.trim()}`
       : `sys: ${node.textContent.trim()}`));

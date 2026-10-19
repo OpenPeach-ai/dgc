@@ -4438,6 +4438,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // The panel draws Pip reports (ready.capabilities.pip_reports): this chat's start arriving.
         if (this.lastReadyEvent?.capabilities?.pip_reports === 1) { be.send({ type: "watch_pip_reports" }); }
         break;
+      case "steerQueued": {
+        // "Steer now" / "Steer all" on queued messages (ready.capabilities.steer_queued): they move into the running
+        // turn as steering; the backend answers with prompt_accepted "steered" for each, or a command_rejected.
+        const ids = Array.isArray(msg.request_ids) ? msg.request_ids.filter((i: unknown) => typeof i === "string" && i.length > 0 && i.length <= 200).slice(0, 16) : [];
+        if (this.lastReadyEvent?.capabilities?.steer_queued === true && ids.length) be.send({ type: "steer_queued", request_ids: ids });
+        break;
+      }
       case "pipReportDismiss":
         // A Pip report's card in this chat's transcript (ready.capabilities.pip_reports): the panel
         // has already removed it; the backend saves that with the chat.

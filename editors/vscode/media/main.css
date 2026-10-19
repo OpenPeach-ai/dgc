@@ -521,6 +521,11 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
   font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: left;
 }
 .msg.user[data-steer="applied"] > .steer-note { color: var(--accent-text, var(--accent)); }
+/* Steer now / Steer all: link-like, in the note's own line and size. */
+.steer-note .steer-now, #queued .steer-all { padding: 0 2px; border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--link, var(--accent-text)); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.steer-note .steer-now:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+.steer-note .steer-now:focus-visible, #queued .steer-all:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 /* A prompt opens a new exchange, so it stands a step further from the turn before it than from the
    reply it asks for. Nothing sits above the first one. */
 .msg.user { align-items: flex-end; margin-top: var(--sp-2); }

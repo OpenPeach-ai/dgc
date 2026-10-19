@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Editor protocol: new command `steer_queued {request_ids}` (capability `steer_queued`).
+
 Monitors restarted when a session is reopened (backend `ready.capabilities.monitor_restart`): the event
 `monitor_restart` (`key`, `id`, `state` restarted|stopped|expired|failed, `message`, `stopped_at`, `at`, `restart`,
 `by_user`) is part of the vendored protocol and the TypeScript SDK's known events, so neither SDK drops it, and the

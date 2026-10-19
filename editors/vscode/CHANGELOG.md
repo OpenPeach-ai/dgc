@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Steer now, Steer all.** A queued message ("you · queued", from Alt+Enter or a Pip report's Ask DGC to fix) has Steer now: it goes into the running turn the way Enter-while-working does, and the model reads it at its next step instead of after the turn. Steer all, beside "N queued", sends every one. A turn that can't take it says so and the message stays queued.
+
 - **"Show more" on a long prompt no longer sits on its text.** It has a strip of its own under the first three lines; over the faded last line, the words ran into it.
 
 - **A Pip's status opens its latest run.** "Report ready", "Last run failed" and the like under a Pip's name read like a link and did nothing; they open that run on the Runs tab now, scrolled to its report.

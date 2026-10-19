@@ -7267,6 +7267,30 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "steer_queued"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_ids": {
+              "type": "array"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "set_workspace_roots"
             },
             "chat_id": {

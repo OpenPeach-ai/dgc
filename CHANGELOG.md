@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Steer a queued message into the running turn.** New editor command `steer_queued {request_ids}` (offered as `ready.capabilities.steer_queued`): the user's queued prompts move, in queue order, into the running turn as steering; each is announced as `prompt_accepted` "steered", and none moving is `command_rejected` "not_steerable" with the reason.
+
 - **Sign in with GitHub works out of the box.** DGC ships its registered GitHub app (OAuth App "DGC", device sign-in, no secret): the GitHub plugin page offers Sign in with GitHub — DGC shows a short code and opens github.com/login/device — beside the token field.
 
 - **A Pip report is never lost to its summary.** A summary over 4,000 characters is cut at its last sentence that fits and marked, and a missing one is written from the findings, each with a note in the report's limitations. Before, "report summary must be text between 1 and 4000 characters" failed the whole run, and even the one format repair never ran (three failed runs in a row on a real project).
