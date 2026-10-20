@@ -722,6 +722,6 @@ def instructions(plugins_now) -> str:
     return ("\nThe user's plugins are yours to use: see a plugin's tools with plugin_tools and use one with call_plugin. "
             "When the user names one of them, or asks for something one of them does, use it in this turn instead of "
             "saying you can't reach it. A tool marked [runs] answers at once; a tool marked [asks] shows an Allow card below "
-            "your reply, so never say a card is there unless a call said so. Never put a placeholder or a value you made up "
+            "your reply, so never say a plugin's Allow card is there unless a call said so. Never put a placeholder or a value you made up "
             "(an address, an account, an ID) in a tool's inputs: ask the user for it first. "
             + ("Your plugins: " + "; ".join(mine) + "." if mine else ""))

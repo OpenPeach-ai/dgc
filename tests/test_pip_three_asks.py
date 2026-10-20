@@ -64,6 +64,9 @@ class Instructions(unittest.TestCase):
         self.assertIn("with no card yet, ask for it before you press Pay, never after", said)
         self.assertIn("all of it in one short message that names each thing", said)
         self.assertIn("you can still type into them by their ref", said, "its eyes don't see card fields; its hands can type them")
+        # "I can't tell you a card is waiting below. Should I press Pay again?" -- above the held payment's card.
+        self.assertIn("DGC shows it as a card below your reply, so never say there is no card or offer to press it again", said)
+        self.assertNotIn("Never say a card is there unless", said)
         _, seen = self.turn(["I can't pay it for you."], computer=False)
         said = self.system(seen)
         self.assertIn("You cannot book, buy, pay, reserve or sign up for anything.", said, "without a computer it really can't")

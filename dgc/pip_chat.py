@@ -601,7 +601,7 @@ PLUGIN_UNKNOWN = ("{plugin} did not answer, so it may or may not have happened. 
 PLUGIN_ALLOWED = ("This message is from DGC, not the user. The user allowed you to use {plugin}. See its tools with "
                   "plugin_tools, then call the one you need with call_plugin in this turn, and carry on with what they "
                   "asked in a short message. A [reads] tool answers at once; any other tool shows an Allow card below your "
-                  "reply only once you call it, so never say a card is there unless call_plugin said so.")
+                  "reply only once you call it, so never say a plugin's Allow card is there unless call_plugin said so.")
 COMPUTER_DONE = ("This message is from DGC, not the user. The user approved what your computer was holding, and "
                  "DGC sent it exactly as the page made it: {what}. Use your computer to read the page and see what "
                  "happened. Then tell the user in a short message, and carry on with what they asked if more is "
@@ -926,7 +926,7 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
         again = _photos_of_the_ask(store, pip["id"], within=2)
         if again:
             context["images"] = again
-    elif not str(req.get("request_key") or "").startswith(DGC_KEYS):
+    elif not str(req.get("request_key") or "").startswith(DGC_KEYS) and not _answers_eyes_card(store, pip["id"]):
         # The user's next message answers what the Pip asked about that ask (a card, an address): the photos come
         # once more. Given only "Use my card 4242…", a Pip paying three bills said "I couldn't find the UHID anywhere
         # in what you've sent" -- it was on the bills (three-asks test, 2026-10-20). Only the message right after.
@@ -936,6 +936,14 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     if req.get("files"):
         context["files"] = req["files"]
     return context
+
+
+def _answers_eyes_card(store, pip_id) -> bool:
+    """The Pip's latest reply was DGC's "<model> can't see images." card (pip_eyes): the photos go with its answer
+    there, through the model that sees, not again here."""
+    last = store.db.execute("SELECT text FROM pip_chat_messages WHERE pip_id=? AND role='assistant' ORDER BY seq DESC LIMIT 1",
+                            (pip_id,)).fetchone()
+    return last is not None and str(last[0] or "").rstrip().endswith("can't see images.**")
 
 
 def _photos_of_the_ask(store, pip_id, within=1):

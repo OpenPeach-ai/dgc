@@ -27,6 +27,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   ("pip-test.example") and opened that bare name, which didn't load; it is now told the exact page it wanted.
 - **After a Reject, the page comes back.** A rejected submit left Chrome's "This page has been blocked by Chrome" on
   the Pip's screen; its browser now goes back to the page that made it.
+- **A Pip no longer denies its own cards.** Told "never say a card is there unless connect_app said so", a Pip said
+  "I can't tell you a card is waiting below. Should I press Pay again?" right above its held payment. That rule now
+  names the Connect and plugin cards only, and a Pip is told its computer's holds show as cards.
 - **One decision per hold.** A reply that leaves something waiting on its computer shows only that card's buttons: a
   Pip's own "Allow the site, go ahead" beside it only sent words, and the site asked again. A held site is named to
   the Pip, so it no longer writes about one site while the card asks about another.

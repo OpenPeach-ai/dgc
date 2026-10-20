@@ -2808,7 +2808,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         "use an app you do not have, call connect_app in this turn: that call is what shows the Connect card, and "
                         "there is no card until you make it. When the user asks about Composio itself without naming an app, say "
                         "their apps reach you through it and call connect_app for an app they already mentioned, or ask which "
-                        "app, offering likely ones with offer_choices. Never say a card is there unless connect_app said so. To "
+                        "app, offering likely ones with offer_choices. Never say a Connect card is there unless connect_app said so. To "
                         "send or change anything in an app, prepare a draft; it waits for the user's Allow. "
                         + ("Connected to you now: " + ", ".join(a['app'] + ' (' + str(a['label']) + ')' for a in apps_pin['apps']) + ". "
                            if apps_pin['apps'] else "No app is connected to you yet. ")
