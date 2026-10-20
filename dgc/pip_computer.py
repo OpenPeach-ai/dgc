@@ -928,7 +928,8 @@ class Host:
         if size > MAX_UPLOAD_BYTES or len(raw) > MAX_UPLOAD_BYTES:
             raise ValueError("that file is over 64 MB")
         ref, point = str(args.get("ref") or ""), None
-        if not ref:
+        # A file picker the page already opened (status says so) needs no ref: the file goes into it.
+        if not ref and getattr(self.browser, "chooser", None) is None:
             if args.get("x") is None:
                 raise ValueError("say where to put it: a ref to the file field or upload button, or x,y")
             point = self._css_point(args.get("x"), args.get("y"), self.shot or self._geometry())

@@ -39,6 +39,10 @@ document.getElementById('list').innerHTML = items.map(i => '<li>' + i + '</li>')
 STOCK = b"""<!doctype html><title>Blue Mug</title><h1>Blue Mug</h1><p>Stock: <span id="s">checking</span></p>
 <script>fetch('/api/stock?item=blue-mug&token=abc123secret').then(r => { if (!r.ok) throw new Error('stock service answered ' + r.status); return r.json(); })
 .catch(e => console.error('Stock check failed: ' + e.message));</script>"""
+# A photo button whose file field is hidden: its click opens the page's own file picker.
+PHOTO = b"""<!doctype html><title>Photo</title><input type="file" id="f" style="display:none"
+ onchange="document.getElementById('n').textContent = 'Chosen: ' + this.files[0].name">
+<button onclick="document.getElementById('f').click()">Add photo</button><p id="n"></p>"""
 # A sign-in popup that finishes and closes itself.
 CLOSER = b"""<!doctype html><title>Partner sign-in</title><p>Signing you in</p><script>setTimeout(() => window.close(), 6000)</script>"""
 ROBOT = b"""<!doctype html><title>One more step</title><h1>One more step</h1><p>Please verify you are human to see the reviews.</p>
@@ -78,7 +82,7 @@ def serve():
                 return self.reply(500, b'{"error": "down"}', "application/json")
             if path == "/report.csv":
                 return self.reply(200, b"item,price\nmug,450\n", "text/csv", [("Content-Disposition", 'attachment; filename="report.csv"')])
-            pages = {"/spec": SPEC, "/slow": SLOW, "/stock": STOCK, "/robot": ROBOT, "/drag": DRAG, "/closer": CLOSER}
+            pages = {"/spec": SPEC, "/slow": SLOW, "/stock": STOCK, "/robot": ROBOT, "/drag": DRAG, "/closer": CLOSER, "/photo": PHOTO}
             return self.reply(200, pages.get(path, DESK))
 
         def do_POST(self):
@@ -239,6 +243,17 @@ class SturdierBrowserTests(unittest.TestCase):
         back = self.act("read")
         self.assertTrue(back.startswith("The tab you were on closed itself; you are on tab t1 now."), back[:300])
         self.assertIn("Download report", back)
+
+    def test_a_file_picker_the_page_opens_waits_for_upload(self):
+        from dgc import pip_computer_files as desk
+        (desk.files_root(self.host.root) / "note.txt").write_text("hello")
+        page = self.act("open", url=self.url + "/photo")
+        said = self.act("click", ref=ref(page, "button", "Add photo"))
+        self.assertIn("The page opened a file picker: put a file from your Files in it with upload (path).", said)
+        self.assertIn("A file picker is open", self.act("status"))
+        put = self.act("upload", path="note.txt")
+        self.assertIn('Appeared: "Chosen: note.txt"', put)
+        self.assertIn("No dialog or file picker is open.", self.act("status"))
 
     def test_a_confirm_waits_for_the_pip_and_ok_downloads_into_files(self):
         page = self.act("open", url=self.url + "/")
