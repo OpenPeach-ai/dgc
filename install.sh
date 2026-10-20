@@ -8,6 +8,9 @@
 #   DGC_BIN       where the dgc launcher goes (default ~/.local/bin)
 #   DGC_BASE_URL  where the release is downloaded from (default https://vibedgc.com)
 set -euo pipefail
+# What DGC installs is writable by you alone. Ubuntu's default umask (0002) left every file of a
+# release group-writable, and Keep Pips running then refused to start from it, rightly.
+umask 022
 
 BASE="${DGC_BASE_URL:-https://vibedgc.com}"
 FORCE="${DGC_FORCE_OVERWRITE:-0}"

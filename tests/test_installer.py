@@ -1019,6 +1019,21 @@ def fake_legacy_tree(tree: Path, launcher: Path) -> None:
 
 class QaInstallerRegressions(unittest.TestCase):
 
+    def test_a_group_writable_umask_still_installs_files_only_you_can_change(self):
+        # Ubuntu's default umask 0002 left all of a release group-writable (4,810 of 4,815 files on
+        # the founder's .111), and Keep Pips running refused it: "DGC service entry points must be
+        # trusted regular files".
+        home = new_home("umask-002")
+        env = clean_env(home)
+        SITE.publish(release("0.90.3"))
+        done = subprocess.run(["bash", "-c", f'umask 002; exec bash "{INSTALLER}"'], env=env, capture_output=True,
+                              text=True, timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL, cwd=str(home))
+        self.assertEqual(done.returncode, 0, output(done)[-3000:])
+        version = home / ".local" / "share" / "dgc" / "versions" / "0.90.3"
+        writable = [str(path) for path in [version, *version.rglob("*")]
+                    if not path.is_symlink() and path.lstat().st_mode & 0o022]
+        self.assertEqual(writable[:5], [], f"{len(writable)} entries others can change")
+
     def test_a_custom_install_on_path_is_updated_in_place_when_no_location_is_given(self):
         # A 0.38 CLI's `dgc update` pipes the installer into bash with no DGC_DIR or DGC_BIN. The
         # installer used to build a second copy in the defaults and say "updated" while the

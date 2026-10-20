@@ -213,6 +213,30 @@ class ServiceTests(unittest.TestCase):
         executable = self.base / "python"; executable.write_text("x"); executable.chmod(0o777)
         self.assertCode("invalid_service_python", service.preview, self.home, python_executable=executable, **self.options)
 
+    def test_files_writable_only_by_your_own_group_run_and_a_shared_group_is_named_with_the_fix(self):
+        # An install made under Ubuntu's umask 0002 left every DGC file 664: Keep Pips running refused it with
+        # "DGC service entry points must be trusted regular files" on the founder's .111 although the group
+        # was his alone.
+        import grp
+        import pwd
+        root = self.base / "release"
+        (root / "dgc").mkdir(parents=True, mode=0o755)
+        for name in ("__init__.py", "cli.py"):
+            (root / "dgc" / name).write_text("x")
+            (root / "dgc" / name).chmod(0o664)
+        me = pwd.getpwuid(os.getuid())
+        with patch("grp.getgrgid", return_value=grp.struct_group((me.pw_name, "x", me.pw_gid, []))), \
+                patch("pwd.getpwall", return_value=[me]):
+            service.preview(self.home, package_root=root, **self.options)
+        with patch("grp.getgrgid", return_value=grp.struct_group(("docker", "x", me.pw_gid, ["someone-else"]))):
+            with self.assertRaises(RegistryError) as caught:
+                service.preview(self.home, package_root=root, **self.options)
+            self.assertEqual(caught.exception.code, "invalid_service_source")
+            self.assertIn("can be changed by the docker group", str(caught.exception))
+            self.assertIn(f"chmod -R go-w {root}", str(caught.exception))
+        (root / "dgc" / "cli.py").chmod(0o666)
+        self.assertCode("invalid_service_source", service.preview, self.home, package_root=root, **self.options)
+
     def test_existing_unit_symlink_fifo_hardlink_large_or_nonprivate_refused(self):
         self.units.mkdir()
         self.file.symlink_to(self.base / "other")

@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Keep Pips running works on a standard Ubuntu account.** Ubuntu's default umask (0002) made the installer leave every DGC file group-writable, and Keep Pips running then refused to start with "DGC service entry points must be trusted regular files". The installer now writes files only you can change, files writable only by your own group are accepted (as folders already were), and a group someone else is in is named with the one-line fix.
+
 - **A Pip with a computer pays and orders when you ask, and you type the card.** "Pay these medical bills" got a
   perfect reading of three bills and then "I can't make payments"; birthday shirts got "I can't complete a purchase".
   A Personal Pip with a computer was still told it could never buy or pay. Now it fills in everything but the card

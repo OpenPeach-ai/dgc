@@ -155,8 +155,15 @@ def preview(dgc_home=None, *, unit_directory=None, python_executable=None, packa
             info = entry.lstat()
         except FileNotFoundError:
             _error("invalid_service_source", "The selected package root does not contain DGC.")
-        if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid()) or info.st_mode & 0o022:
+        if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid()):
             _error("invalid_service_source", "DGC service entry points must be trusted regular files.")
+        # Group-writable is fine when the group is only you, as for the folders above: an install made
+        # under Ubuntu's umask 0002 (before the installer set its own) left every file 664, and Keep Pips
+        # running refused it although nobody else could write a byte.
+        if info.st_mode & 0o002 or (info.st_mode & 0o020 and not (info.st_uid == os.getuid() and _only_mine(info.st_gid))):
+            who = "anyone" if info.st_mode & 0o002 else f"the {_group_name(info.st_gid)} group"
+            _error("invalid_service_source", f"DGC's files in {source} can be changed by {who}, so Pips won't run "
+                   f"from them. Fix it once in a terminal: chmod -R go-w {shlex.quote(str(source))}")
     python = _executable(python_executable if python_executable is not None else sys.executable)
     directory = _path(unit_directory if unit_directory is not None else
                       Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd" / "user", "User unit directory")
