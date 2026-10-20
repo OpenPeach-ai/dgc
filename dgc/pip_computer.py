@@ -180,8 +180,8 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                         "from the latest read (type's submit true then presses Enter); check/uncheck a box; hover over a "
                         "ref; drag ref onto to (a ref); press sends a key such as Enter (or ctrl+a, Delete); back, forward, "
                         "reload. wait (seconds, at most 30) until text shows (gone true: until it goes), a ref or selector "
-                        "shows, the address has url, or the page loads. A link that opens a tab moves you to it; tabs "
-                        "lists them, and action open (url), switch or close (tab: t2) changes them. status: where you are, "
+                        "shows, the address has url, or the page loads. A link that opens a tab moves you to it; op tabs "
+                        "with action list, open (url), switch or close (tab: t2) manages them. status: where you are, "
                         "an open dialog or file picker, your downloads. dialog answers the page's confirm or prompt: "
                         "accept true (OK) or false (Cancel), text for a prompt. "
                         "sign_in signs you in on the page's sign-in form (or give site, its address) with "
@@ -721,6 +721,7 @@ class Host:
 
     def _act(self, op: str, args: dict) -> dict:
         from .browser import BrowserError
+        op, args = _tab_slip(op, args)
         if op in DESK_OPS:
             return {"text": self._desk(op, args)}
         with self.lock:
@@ -2120,6 +2121,16 @@ def _asking(host) -> str:
 
 def _dialog_in_the_way(host, op: str) -> str:
     return "" if op in DIALOG_FREE_OPS else _asking(host)
+
+
+def _tab_slip(op: str, args: dict) -> tuple[str, dict]:
+    """The slips small models make with tabs (measured 2026-10-21: three runs in three asked for op "switch" or
+    "action"): taken as the tabs step they meant, before careful mode or anything else looks at it."""
+    if op == "switch" and args.get("tab"):
+        return "tabs", {**args, "action": "switch"}
+    if op == "action" and args.get("action") in TAB_ACTIONS:
+        return "tabs", args
+    return op, args
 
 
 def _recover_tab(host) -> str:

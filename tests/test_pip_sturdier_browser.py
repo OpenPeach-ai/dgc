@@ -223,6 +223,9 @@ class SturdierBrowserTests(unittest.TestCase):
         self.assertRegex(said, r"Recorded as step 2\.$")
         listed = self.act("tabs")
         self.assertRegex(listed, r'Your tabs: t1 "Desk" \S+; t2 "Spec sheet" \S+/spec \(in front\)\.')
+        back = self.act("switch", tab="t1")       # a small model's slip for tabs with action switch
+        self.assertIn("You are on tab t1 now.", back)
+        self.assertIn("You are on tab t2 now.", self.act("action", action="switch", tab="t2"))
         back = self.act("tabs", action="switch", tab="t1")
         self.assertIn("You are on tab t1 now.", back)
         self.assertIn("Download report", back)
@@ -232,7 +235,7 @@ class SturdierBrowserTests(unittest.TestCase):
         self.assertIn("that is your only tab", self.act("tabs", action="close", tab="t2"))
         # The timeline's screenshots carry the step numbers the Pip is told.
         labels = [f["label"] for f in pip_computer.frames(self.registry.directory, self.run_row["id"])]
-        self.assertEqual([label.split(" · ")[0] for label in labels], ["Step 1", "Step 2", "Step 3", "Step 4"])
+        self.assertEqual([label.split(" · ")[0] for label in labels], [f"Step {n}" for n in range(1, 7)])
         self.assertTrue(labels[1].startswith('Step 2 · Clicked "Spec sheet"'), labels)
 
     def test_a_popup_that_closes_itself_leaves_the_pip_on_the_tab_that_opened_it(self):
