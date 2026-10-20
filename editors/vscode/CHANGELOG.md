@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **follow-redirects 1.16.1** for the Open VSX publishing tool (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c: credential headers kept across a cross-origin redirect). It is a build tool, not part of the extension.
 - **markdown-it 15.0.3.** A security fix in the Markdown parser (GHSA-r7fv-28h4-cvq7: unmatched closing quotes with smart quotes took quadratic time).
 - **A Pip's computer has apps (Pips API 54).** Its dock adds an image editor, Documents and a PDF viewer when the
   computer has them; when it doesn't, the computer tab asks once, in one line saying what and how big, with
