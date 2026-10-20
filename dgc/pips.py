@@ -3275,6 +3275,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         if manifest.get('user_turn') is False:
             # DGC's own "carry on" turn: the photos are the ones the user's ask brought (pip_chat._photos_of_the_ask).
             prompt += "\nThe photos the user sent with what they asked are attached again here."
+        elif manifest.get('conversation_photos_again') is True:
+            prompt += "\nThe photos the user sent with their previous message are attached again here; this message brought none."
         if computer_pin is not None:
             from .pip_chat import computer_photo_names
             prompt += ("\nThe photos are also in your computer's Files, in From chat: "
@@ -3860,6 +3862,12 @@ def _execute_run(registry, row, config):
         from .pip_chat import image_paths
         manifest = {**manifest, 'conversation_image_paths': [
             str(path) for path in image_paths(registry.directory, row['pip_id'], conversation_pin['images'])]}
+        if manifest.get('user_turn') is True:
+            # The user's own message brought none: they are its ask's photos, again (pip_chat._photos_of_the_ask).
+            own = registry.db.execute("SELECT count(*) FROM pip_chat_images i JOIN pip_chat_messages m ON m.id=i.message_id "
+                                      "WHERE m.run_id=? AND m.role='user'", (row['id'],)).fetchone()[0]
+            if not own:
+                manifest = {**manifest, 'conversation_photos_again': True}
     if personal and isinstance(conversation_pin, dict) and conversation_pin.get('files'):
         # Files likewise: the worker reads the kept files, re-checking each by digest.
         from .pip_chat import file_paths

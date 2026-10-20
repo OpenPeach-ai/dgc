@@ -923,6 +923,13 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     if req.get("images"):
         context["images"] = req["images"]
     elif str(req.get("request_key") or "").startswith(FOLLOW_UP_KEYS):
+        again = _photos_of_the_ask(store, pip["id"], within=2)
+        if again:
+            context["images"] = again
+    elif not str(req.get("request_key") or "").startswith(DGC_KEYS):
+        # The user's next message answers what the Pip asked about that ask (a card, an address): the photos come
+        # once more. Given only "Use my card 4242…", a Pip paying three bills said "I couldn't find the UHID anywhere
+        # in what you've sent" -- it was on the bills (three-asks test, 2026-10-20). Only the message right after.
         again = _photos_of_the_ask(store, pip["id"])
         if again:
             context["images"] = again
@@ -931,21 +938,26 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     return context
 
 
-def _photos_of_the_ask(store, pip_id):
+def _photos_of_the_ask(store, pip_id, within=1):
     """A turn DGC writes so the Pip carries on (after an Allow, a Reject, a connected app, a robot check) sees the
     photos the user's own latest message brought: three bills, sent once. Without them, the turn after "Allow" on the
-    hospital's site said "I don't have the bill photos or their numbers" (three-asks test, 2026-10-20). None when that
-    message brought none, or a kept photo is gone."""
+    hospital's site said "I don't have the bill photos or their numbers" (three-asks test, 2026-10-20). ``within``: how
+    many of the user's own latest messages to look back over (2 for DGC's turns, so "here's my card" after the photos
+    keeps them). None when those brought none, or a kept photo is gone."""
     for row in store.db.execute("SELECT id,request_key FROM pip_chat_messages WHERE pip_id=? AND role='user' "
                                 "ORDER BY seq DESC LIMIT 40", (pip_id,)):
         if str(row["request_key"] or "").startswith(DGC_KEYS):
             continue
+        # The user's own latest messages (the one being written is not saved yet): the newest photos among them.
+        within -= 1
         try:
             images = [{"sha256": r[0], "mime": r[1], "bytes": r[2]} for r in store.db.execute(
                 "SELECT sha256,mime,bytes FROM pip_chat_images WHERE message_id=? ORDER BY idx", (row["id"],))]
         except sqlite3.Error:
             return None                   # a registry from before photos: none
         if not images:
+            if within > 0:
+                continue
             return None
         try:
             image_paths(store.registry.directory, pip_id, images)

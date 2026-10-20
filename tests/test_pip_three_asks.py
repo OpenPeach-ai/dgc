@@ -196,7 +196,15 @@ class RejectFollowUp(unittest.TestCase):
             return manifest["conversation"].get("images")
         self.assertEqual(carry_on(1), sent["conversation"]["images"], "the bills it was paying come with the turn after Allow")
         self.assertEqual(len(self.store.db.execute("SELECT * FROM pip_chat_images").fetchall()), 1, "kept once, not again")
-        later = pip_chat.send(self.store, pip["id"], "thanks, now just tell me the total", "k2", "editor-user", self.cfg)["run"]
+        answer = pip_chat.send(self.store, pip["id"], "Use my card 4242 4242 4242 4242, 12/34, 123", "k2", "editor-user", self.cfg)["run"]
+        answered = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (answer["id"],)).fetchone()[0])
+        self.assertEqual(answered["conversation"].get("images"), sent["conversation"]["images"],
+                         "the user's next message (the card it asked for) comes with the bills again")
+        self.store.claim_next(); self.store.finish(answer["id"], result={"text": "Paying bill 1."})
+        self.assertEqual(carry_on(3), sent["conversation"]["images"], "after the card, the turn after a Reject still sees them")
+        later = pip_chat.send(self.store, pip["id"], "thanks, now just tell me the total", "k3", "editor-user", self.cfg)["run"]
+        later_manifest = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (later["id"],)).fetchone()[0])
+        self.assertIsNone(later_manifest["conversation"].get("images"), "only the message right after the photos")
         self.store.claim_next(); self.store.finish(later["id"], result={"text": "₹12,895."})
         self.assertIsNone(carry_on(2), "a newer ask of the user's without photos brings none")
 
