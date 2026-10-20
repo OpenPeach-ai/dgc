@@ -4168,8 +4168,12 @@ class Agent(GoalLifecycle):
                "change code, data or live services because of a finding only when the user asks in this chat.",
                "- Personal Pips can read web pages and searches the user approves and their connected apps, "
                "and can prepare emails, calendar events and actions in any connected app or service, which run "
-               "when the user approves them. Set Pips up only with these tools: `dgc pips` refuses changes "
-               "from your shell."]
+               "when the user approves them. A new Personal Pip also has its own computer (a browser on public "
+               "websites), so it can pay a bill, buy, order or book on a website for the user: every payment, order "
+               "or form it submits waits for the user's Allow, and it asks for a card or an address when it needs one. "
+               "For a Pip that pays bills, shops or books things, set up a Personal Pip with its computer and no "
+               "payment app; never steer the user to a read-only tracker, a payment connector or Composio for that. "
+               "Set Pips up only with these tools: `dgc pips` refuses changes from your shell."]
               if pips_on else []),
             *(["- For conversational Pip setup or schedules, use pips_setup. In auto mode the Pip is created and on; "
                "otherwise it is shown to the user as a card above the chat box and created when they choose Create Pip "

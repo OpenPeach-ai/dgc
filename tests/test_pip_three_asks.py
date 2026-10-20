@@ -97,6 +97,22 @@ class Instructions(unittest.TestCase):
         self.assertIn("use kind 'email' with a search for those mails, not a daily schedule", said)
 
 
+class MainChat(unittest.TestCase):
+    """"Make me a Pip that pays my bills for me" got a card recommending a read-only Gmail bill tracker ("No payments
+    are ever made"): the main chat didn't know a Personal Pip's computer pays and orders on the user's Allow."""
+    def setUp(self):
+        from tests.test_pips_tool_loading import PipsToolLoadingTests
+        PipsToolLoadingTests.setUp(self)
+
+    def test_the_main_chat_knows_a_personal_pip_can_pay_and_order_on_the_users_allow(self):
+        from dgc.llm import ToolCall
+        self.agent._handle_call(ToolCall(id="c1", name="use_pips", arguments={}))
+        said = self.agent.system_prompt()
+        self.assertIn("so it can pay a bill, buy, order or book on a website for the user", said)
+        self.assertIn("every payment, order or form it submits waits for the user's Allow", said)
+        self.assertIn("never steer the user to a read-only tracker, a payment connector or Composio for that", said)
+
+
 class RejectFollowUp(unittest.TestCase):
     def setUp(self):
         fixtures.LocalPipsTests.setUp(self)

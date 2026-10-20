@@ -11,6 +11,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   computer was still told it could never buy or pay. Now it goes all the way to the site's Pay or Order button, which
   DGC holds for your Allow (a payment every time), types the card you give it, and asks once, naming everything it
   still needs (a card, an address). A Pip without a computer still says it can't.
+- **The main chat makes a Pip that pays.** Asked for "a Pip that pays my bills for me", it offered a read-only Gmail
+  bill tracker ("No payments are ever made") after asking to run Composio's connection tool. It now knows a Personal
+  Pip's own computer pays, orders and books on websites with your Allow, and sets that up with no payment app.
 - **Reject tells the Pip.** After you reject what its computer holds (a payment, an order, a new site), the Pip says in
   its chat what wasn't done and goes on with the rest of what you asked (the second and third bill). Before, it went
   quiet. Only once, only while the chat still ends at that reply, and only for a Reject in the last ten minutes.
