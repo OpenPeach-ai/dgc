@@ -340,7 +340,7 @@ _SNAPSHOT_JS = r"""
   let counter = 0, truncated = false;
   // A password, card or one-time code: by its type, any autocomplete token ("billing cc-number", "section-x cc-csc"),
   // or a name a page gives it when it shows a password as text.
-  const secret = (el) => (el.type || '').toLowerCase() === 'password'
+  const secret = (el) => (el.type || '').toLowerCase() === 'password' || el.hasAttribute('data-dgc-secret')
     || (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/)
          .some((t) => /^(cc-|current-password$|new-password$|one-time-code$)/.test(t))
     || /pass(word|wd|code)?|pwd|otp|cvv|cvc|card.?num|security.?code/i.test((el.name || '') + ' ' + (el.id || ''));
@@ -895,7 +895,7 @@ class BrowserSession:
             " if (!el) return JSON.stringify({ok: false});"
             " el.scrollIntoView({block: 'center', inline: 'center'});"
             " const r = el.getBoundingClientRect();"
-            " const hidden = (el.type || '').toLowerCase() === 'password'"
+            " const hidden = (el.type || '').toLowerCase() === 'password' || el.hasAttribute('data-dgc-secret')"
             "   || (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/)"
             "        .some((t) => /^(cc-|current-password$|new-password$|one-time-code$)/.test(t))"
             "   || /pass(word|wd|code)?|pwd|otp|cvv|cvc|card.?num|security.?code/i.test((el.name || '') + ' ' + (el.id || ''));"

@@ -6,6 +6,22 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Pip signs in by itself with a login you saved (Pips API 56).** A Pip never saw or typed a password, so every
+  sign-in, and every expired session, needed you on its screen. Now, when a Personal Pip meets a sign-in page with no
+  saved login, its chat shows **Save a login for SITE so PIP can sign in itself?** with **Save login…** (the username,
+  the password and, optionally, the site's authenticator key or otpauth:// link) and **Not now**. Save, and the Pip
+  signs in at once: DGC finds the username, password and code boxes, types each value into the page as real input
+  (and the 6-digit code it makes from the key), and sends that one sign-in to that site, which is let through; every
+  other submit still waits for your Allow. The Pip is told only what was filled, never a value; every answer its
+  computer gives it is scrubbed of saved secrets, and a box DGC typed a password or code into is blacked out of every
+  screenshot and hidden in its page read. A later sign-in, an expired session included, needs no step from you. The
+  same form is on the Pip's page under **Logins**, which lists where each login fills, its username, whether it fills
+  a code (never the key) and which Pips may use it (only this one, unless you choose all), with **Remove**. Logins are
+  sealed on this computer under a key of their own (`pips/logins`, files only you can read), never in the Pips
+  database, an export, a shared Pip, the chat or a log, and redaction knows every saved password and key. A Pip's
+  Chrome no longer offers to save passwords itself. 1Password isn't connected yet: its Python SDK is a compiled 7 MB core
+  per Python version and platform, still 0.x, that every DGC install would have to carry.
+
 - **One Pip can no longer break the Pips list.** A Personal Pip the main chat made in Pulse's role with a daily routine made every Pips list fail with "Pulse schedules require a reviewed verification plan": reading Pips back checked it as a project Pulse, which creating it rightly did not.
 
 - **A Personal Pip can run on your own Claude Code or Codex (Pips API 55).** A Pip on "Same as DGC" couldn't run

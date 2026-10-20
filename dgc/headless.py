@@ -263,7 +263,13 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # MCP server DGC runs for that run. model_choice takes {"mode": "subscription", "engine": "claude" | "codex"}, and
 # "Same as DGC" follows DGC's subscription default; list_pip_models adds `subscriptions` [{engine, name}] and, when
 # DGC's default is a subscription, `default_engine` {engine, name, available, reason?}. Project Pips refuse it.
-PIPS_API_VERSION = 55
+# API 56: saved logins (pip_logins, pip_login_fill). list_pip_logins {pip_id?} (sites, hosts, usernames, has_code,
+# which Pips; never a password or key), save_pip_login {pip_id, site | action_id + expected_digest, username, password,
+# totp?, pips "only" | "all"}, remove_pip_login {login_id} and grant_pip_login {login_id, pips "all" | [pip ids]}. A
+# Personal Pip's computer has a sign_in step: DGC types the saved login (and its one-time code) into the page and lets
+# that one submit through; with none saved, its chat shows a computer action of kind "login" (Save login…, or Not now
+# with decide_pip_computer_action approve false).
+PIPS_API_VERSION = 56
 
 
 def _pips_platform_supported() -> bool:

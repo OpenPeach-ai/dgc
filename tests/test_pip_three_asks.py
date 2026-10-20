@@ -67,7 +67,9 @@ class Instructions(unittest.TestCase):
         self.assertIn(pip_computer.CARD_ON_SCREEN, said)
         self.assertEqual(pip_computer.CARD_ON_SCREEN, "Everything's filled in on my screen. Open my computer (the screen "
                          "button at the top of this chat), type your card into the payment form, and press Pay.")
-        self.assertIn("You never see or type passwords or payment card details", said)
+        # Saved logins (API 56): a code is a secret like a password; a sign-in is DGC's to type (sign_in).
+        self.assertIn("You never see or type passwords, one-time codes or payment card details", said)
+        self.assertIn("use sign_in on its sign-in page", said)
         self.assertIn("the user types those on your screen", said)
         for old in ("You can type card details into a payment form", "ask for it before you press Pay",
                     "you can still type into them by their ref"):

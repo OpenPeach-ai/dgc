@@ -60,6 +60,8 @@ _SECRET_BOXES_JS = r"""function () {
   const NAME = /pass(word|wd|code)?|pwd|otp|one.?time|cvv|cvc|csc|card.?(num|no|number)|cc.?(num|no|number)|security.?code|expir|exp.?(date|month|year|mm|yy)|iban|ssn|\bpin\b/i;
   const FRAME = /stripe|braintree|adyen|checkout\.com|paypal|squareup|razorpay|recurly|spreedly|worldpay|cybersource|authorize\.net|klarna|verygoodsecurity|basistheory|payment|card|cvc|secure.?field|pci/i;
   const secret = (el) => {
+    // A box DGC typed a saved password or one-time code into (pip_login_fill), whatever the page calls it.
+    if (el.hasAttribute('data-dgc-secret')) return true;
     const type = (el.getAttribute('type') || el.type || '').toLowerCase();
     if (type === 'password') return true;
     const auto = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/);
@@ -545,6 +547,9 @@ def capability(home: Path | None = None) -> dict:
 # computer "Save card?" covered the page after every checkout, and saying yes would keep a card in the
 # Pip's profile. Off before each start; Chrome rewrites Preferences on exit and keeps what it doesn't own.
 _QUIET_AUTOFILL = {"credit_card_enabled": False, "profile_enabled": False}
+# Nor does Chrome keep passwords there: a saved login lives in DGC's sealed store (pip_logins) only, and a password the
+# user types on its screen stays theirs. "Save password?" and its breach check are off with it.
+_QUIET_PASSWORDS = {"password_manager_enabled": False, "password_manager_leak_detection": False}
 
 
 def quiet_profile(profile: Path) -> None:
@@ -558,9 +563,14 @@ def quiet_profile(profile: Path) -> None:
         if not isinstance(data, dict):
             return
         autofill = data.get("autofill") if isinstance(data.get("autofill"), dict) else {}
-        if all(autofill.get(k) is v for k, v in _QUIET_AUTOFILL.items()):
+        profile_prefs = data.get("profile") if isinstance(data.get("profile"), dict) else {}
+        if (all(autofill.get(k) is v for k, v in _QUIET_AUTOFILL.items())
+                and all(profile_prefs.get(k) is v for k, v in _QUIET_PASSWORDS.items())
+                and data.get("credentials_enable_service") is False):
             return
         data["autofill"] = {**autofill, **_QUIET_AUTOFILL}
+        data["profile"] = {**profile_prefs, **_QUIET_PASSWORDS}
+        data["credentials_enable_service"] = False
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data), encoding="utf-8")
     except (OSError, ValueError):
@@ -827,6 +837,9 @@ class BoxedBrowser(BrowserSession):
         # other site waits, like a submit, until the user allows the site.
         self.site_gate = None
         self.acted_at = 0.0                       # the last click, typing, key or choice (see acting())
+        # A saved login's one submit (pip_login_fill.LoginPass), while DGC signs the Pip in: let through, once.
+        self.login_pass = None
+        self.login_sent: list[str] = []
 
     # -- lifecycle -------------------------------------------------------------------------
 
@@ -994,6 +1007,19 @@ class BoxedBrowser(BrowserSession):
             if self.on_write is not None:
                 self.on_write(held)
             return
+        login = self.login_pass
+        if login is not None and verb not in READ_METHODS:
+            headers = {str(k).lower(): str(v) for k, v in (request.get("headers") or {}).items()}
+            if login.admits(str(request.get("url", "")), str(request.get("postData", "") or ""), headers.get("content-type", "")):
+                # The sign-in form DGC just filled with a saved login, sent to that login's site: the saved login is the
+                # user's say-so for this one request. The pass is spent, and what the page sends next is its own.
+                self.login_pass = None
+                parts = urlsplit(str(request.get("url", "")))
+                self.login_sent.append(f"{verb} {parts.hostname or ''}{parts.path or '/'}"[:300])
+                del self.login_sent[:-20]
+                self.acted_at = 0.0
+                self._fire("Fetch.continueRequest", {"requestId": request_id}, session)
+                return
         inner_form = kind == "Document" and str(params.get("frameId", "")) not in self._pages
         if (verb in READ_METHODS or kind in TELEMETRY_KINDS
                 or (kind in BACKGROUND_KINDS or inner_form) and not self.acting()):

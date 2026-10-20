@@ -79,6 +79,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_run_posts",
     "get_pip_eyes", "set_pip_eyes",
     "get_pip_computer_apps", "set_pip_computer_apps",
+    "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -120,6 +121,9 @@ _COMMAND_ARGS = {
     "set_pip_chat_options": {"pip_id", "chat_options"},
     "get_pip_eyes": {"pip_id"}, "set_pip_eyes": {"pip_id", "choice"},
     "get_pip_computer_apps": set(), "set_pip_computer_apps": {"choice"},
+    # Saved logins (pip_logins, API 56): a save carries the password and the authenticator key; nothing answers with them.
+    "list_pip_logins": {"pip_id"}, "remove_pip_login": {"login_id"}, "grant_pip_login": {"login_id", "pips"},
+    "save_pip_login": {"pip_id", "site", "username", "password", "totp", "pips", "action_id", "expected_digest"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
     "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
@@ -4403,7 +4407,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             raise RegistryError("invalid_memory", "Do not put configured credentials in a Pip memory or its review reason.")
         if command in ("archive_pip", "restore_pip") and redact_value(request.get("reason"), secret_values(config)) != request.get("reason"):
             raise RegistryError("invalid_archive", "Do not put configured credentials in a Pip lifecycle reason.")
+        # A login being saved is the one request that must keep its password and key as typed: redacting them (a
+        # password already saved, saved again) would keep "[REDACTED]" as the password. They go to the sealed store
+        # only, and nothing answers with them.
+        credentials = ({k: request[k] for k in ("username", "password", "totp") if k in request}
+                       if command == "save_pip_login" else {})
         request = redact_value(request, secret_values(config))
+        request.update(credentials)
         choice = request.get("model_choice") if command == "create_pip" else (
             request.get("changes", {}).get("model_choice") if command == "propose_pip_update" and isinstance(request.get("changes"), dict) else None)
         has_choice = ((command == "create_pip" and "model_choice" in request) or
@@ -4420,7 +4430,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -4659,6 +4669,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError('local_only', "A Pip computer's apps are on this computer only.")
                 result = {"apps": pip_apps.offer() if command == 'get_pip_computer_apps'
                           else pip_apps.answer(request.get('choice'), actor)}
+            elif command in ('list_pip_logins', 'save_pip_login', 'remove_pip_login', 'grant_pip_login'):
+                # Saved logins (pip_logins): kept sealed on this computer, typed into a page by DGC when the Pip signs
+                # in; a save from the card in its chat also answers that card (the Pip then signs in by itself).
+                from . import pip_logins
+                result = pip_logins.handle(registry, command, request, actor)
             elif command in ('get_pip_eyes', 'set_pip_eyes'):
                 # How a Personal Pip sees (pip_eyes): whether its model can, and when it can't, the user's choice.
                 from . import pip_eyes

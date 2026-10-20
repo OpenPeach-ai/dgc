@@ -621,6 +621,14 @@ COMPUTER_NOT_ALLOWED = ("This message is from DGC, not the user. The user didn't
 COMPUTER_ALLOWED = ("This message is from DGC, not the user. The user allowed {what}. Nothing was done yet: "
                     "do it now with your computer, exactly as you meant to, then carry on with what they asked and "
                     "tell them in a short message.")
+# A login the user saved from the card a sign_in left (pip_logins, Pips API 56): the Pip signs in by itself now.
+COMPUTER_LOGIN_SAVED = ("This message is from DGC, not the user. The user saved a login for {site}. {where}Use sign_in "
+                        "there now: DGC types the username, password and code and sends them, and you are told what was "
+                        "filled, never the values. Then read the page and carry on with what they asked, in a short "
+                        "message. Never ask for a password or a code.")
+COMPUTER_LOGIN_NOT_NOW = ("This message is from DGC, not the user. The user chose Not now: they won't save a login for {site} "
+                          "now. Don't ask again. If you still need to sign in there, tell them in one sentence that they can "
+                          "sign in on your screen (Open its computer); carry on with anything else they asked.")
 INTRO = ("This message is from DGC, not the user. The user has just created you in the Pips view and "
          "named you \"{name}\". That is your name: introduce yourself as {name}, never by your character's name. "
          "Write your first message to them. Say hello and who you are in one sentence. Guess from your name what they would like help with, then say what you can do for "
@@ -653,6 +661,12 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
     """The chat's next turn once a submit its run held has been sent: the Pip looks and replies."""
     what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
     key = COMPUTER_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    if summary.get("kind") == "login":
+        page = str(summary.get("sign_in_page") or summary.get("page") or "")
+        where = (f"Its sign-in page is {page[:300]}: open it if it isn't open. " if page.startswith(("https://", "http://"))
+                 else "Open its sign-in page if it isn't open. ")
+        text = COMPUTER_LOGIN_SAVED.format(site=str(summary.get("site") or summary.get("host") or "the site")[:255], where=where)
+        return send(store, pip_id, text, key, "local-computer", config, _intro=True)
     if summary.get("kind") in ("site", "text"):
         # Careful mode held it before anything happened: the Pip does it now, once.
         # The page it wanted, not just the site: told "visit pip-test.example", a Pip opened that bare name instead of
@@ -669,6 +683,9 @@ def continue_after_rejection(store, pip_id, action_id, summary, config):
     """The chat's next turn once the user rejected a hold from its reply: the Pip says what wasn't done and goes
     on with the rest of the ask (pip_computer._continue_rejected decides whether it is due)."""
     key = COMPUTER_KEY + "no_" + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    if summary.get("kind") == "login":
+        text = COMPUTER_LOGIN_NOT_NOW.format(site=str(summary.get("site") or summary.get("host") or "that site")[:255])
+        return send(store, pip_id, text, key, "local-computer", config, _intro=True)
     if summary.get("kind") in ("site", "text"):
         what = (f"you to visit {summary.get('site') or summary.get('host', 'that site')}" if summary["kind"] == "site"
                 else f"you to put that on {summary.get('host') or 'the page'}")
