@@ -871,7 +871,19 @@ class Host:
                 self._frame("Sent after your approval")
                 return "sent"
             self.browser.drop(ref)
+            self._back_from_drop()
             return None
+
+    def _back_from_drop(self) -> None:
+        """A rejected page submit leaves Chrome's "This page has been blocked by Chrome" where the page was: the user
+        watching saw that after a Reject (three-asks test, 2026-10-20). Go back to the page that made it."""
+        try:
+            self.browser.pump(0.5)
+            if str(json.loads(self.browser.evaluate_json("JSON.stringify(location.href)")) or "").startswith("chrome-error:"):
+                self.browser.evaluate_json("(() => { history.back(); return true; })()")
+                self.browser.pump(1.5)
+        except Exception:                                  # noqa: BLE001 - a page it can't read stays as it is
+            pass
 
 
 HOSTS: dict[str, Host] = {}

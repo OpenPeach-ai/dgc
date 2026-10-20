@@ -20,6 +20,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **The turn after an Allow still sees your photos.** When a Pip carries on after you allow a site or a submit, connect
   an app or finish a robot check, the photos your ask brought come with it again. It had said "I don't have the bill
   photos" right after you allowed the hospital's site.
+- **After a Reject, the page comes back.** A rejected submit left Chrome's "This page has been blocked by Chrome" on
+  the Pip's screen; its browser now goes back to the page that made it.
 - **One decision per hold.** A reply that leaves something waiting on its computer shows only that card's buttons: a
   Pip's own "Allow the site, go ahead" beside it only sent words, and the site asked again. A held site is named to
   the Pip, so it no longer writes about one site while the card asks about another.

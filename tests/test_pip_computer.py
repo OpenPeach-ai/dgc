@@ -234,6 +234,9 @@ class PipComputerTests(unittest.TestCase):
         self.assertEqual(pip_computer.tick(self.registry, self.cfg)["rejected"], 1)
         self.assertEqual(self.received, [])
         self.assertFalse(pip_computer.HOSTS[pip["id"]].browser.held)
+        # Back on the page that made it, not Chrome's "This page has been blocked" (three-asks test, 2026-10-20).
+        where = json.loads(pip_computer.HOSTS[pip["id"]].browser.evaluate_json("JSON.stringify(location.href)"))
+        self.assertFalse(where.startswith("chrome-error:"), where)
         self.run_worker(pip)                           # a second hold, then the kill switch
         pending = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"]
         self.assertEqual(len(pending), 1)
