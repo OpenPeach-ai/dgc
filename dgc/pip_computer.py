@@ -249,16 +249,17 @@ DESKTOP_NOTICE = ("Your computer is a whole desktop, like a person's: the browse
                   "click, look) for web pages, and the desktop steps for apps and anything outside the page: launch_app "
                   "opens an app (with a file from your Files), desktop_look shows the whole screen, and desktop_click, "
                   "desktop_type, desktop_key and the rest work in any window. Save what you make in your Files "
-                  "(/home/pip/Files). Like the Terminal, the apps reach public websites, never this computer or the "
-                  "user's network. When the user asks you to design something (a "
-                  "shirt, a card, a poster), the design is yours to make in the image editor, first, before you open any "
-                  "shop: launch_app images; press F2, click near the top of the page and type their words; press Escape, "
-                  "then make the text big with desktop_key \"ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] "
-                  "ctrl+] ctrl+] ctrl+] ctrl+]\" (each ctrl+] is one size up); add a shape or two: click the rectangle or "
-                  "ellipse in the left toolbar, then drag on the page (they come in colour). Save it as a PNG: File > "
-                  "Export..., type "
-                  "/home/pip/Files/NAME.png as the name, press Enter, then OK. Only then go to the shop and put that PNG "
-                  "on the product with upload (its upload button); a shop's own text tool is not your design.")
+                  "(/home/pip/Files in the apps; in your Terminal the same folder is ~). Like the Terminal, the apps reach public websites, never this computer or the "
+                  "user's network. When the user asks you to design something (a shirt, a card, a poster), make the "
+                  "design yourself in the image editor, before you open any shop, and never with a script in the "
+                  "Terminal: 1. launch_app images (if your design is already open there, bring it to the front with "
+                  "focus_window instead). 2. Press F2, click near the top of the page, type their words, press Escape. "
+                  "3. desktop_key \"ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+]\" "
+                  "makes that text big. 4. Add a shape or two: click the rectangle or ellipse in the left toolbar, then "
+                  "drag on the page; they come filled in colour, so leave the colours as they are. 5. Export it: "
+                  "desktop_key ctrl+shift+e, desktop_type /home/pip/Files/NAME.png, desktop_key Enter, then Enter again "
+                  "for PNG Options. 6. Check NAME.png is in your Files (files), then go to the shop and put that PNG on "
+                  "the product with upload (its upload button); a shop's own text tool is not your design.")
 
 
 def validate_plan(plan):

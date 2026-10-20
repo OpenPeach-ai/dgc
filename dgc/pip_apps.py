@@ -56,7 +56,8 @@ MAX_RUNNING = 6
 OFFER = "apps.json"
 # LibreOffice opens with none of its first-run screens: no tip of the day, no "what's new" or donation bars, no
 # crash reporter, no recovery dialog (a Pip's app that was stopped is not a crash to recover), macros off, and its
-# Open, Save and Export dialogs start in the computer's Files (they opened in /tmp).
+# Open, Save and Export dialogs start in the computer's Files (they opened in /tmp), and in Draw ctrl+shift+e is Export:
+# a Pip makes a PNG with keys alone (its File menu and the export dialog's type list are small targets).
 LIBREOFFICE_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
 <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="ShowTipOfTheDay" oor:op="fuse"><value>false</value></prop></item>
@@ -71,6 +72,7 @@ LIBREOFFICE_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
 <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
 <item oor:path="/org.openoffice.Office.Paths/Paths/org.openoffice.Office.Paths:NamedPath['Work']"><prop oor:name="WritePath" oor:op="fuse"><value>file:///home/pip/Files</value></prop></item>
+<item oor:path="/org.openoffice.Office.Accelerators/PrimaryKeys/Modules/org.openoffice.Office.Accelerators:Module['com.sun.star.drawing.DrawingDocument']"><node oor:name="E_SHIFT_MOD1" oor:op="replace"><prop oor:name="Command"><value xml:lang="en-US">.uno:ExportTo</value></prop></node></item>
 </oor:items>
 """
 

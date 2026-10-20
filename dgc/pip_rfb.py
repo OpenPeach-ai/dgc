@@ -260,12 +260,11 @@ class Screen:
 
     def type_text(self, text: str) -> None:
         """Type into whatever has focus, a character at a time (Unicode too)."""
-        for index, ch in enumerate(str(text)):
+        for ch in str(text):
             sym = keysym_for(ch)
             self.key(sym, True)
             self.key(sym, False)
-            if index % 8 == 7:
-                time.sleep(0.01)
+            time.sleep(0.006)          # a capital's shift, pressed and let go by the server, settles before the next key
 
     def close(self) -> None:
         try:
