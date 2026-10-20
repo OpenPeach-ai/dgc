@@ -49,7 +49,7 @@ BACKGROUND_KINDS = frozenset({"XHR", "Fetch", "EventSource"})
 ACTION_SECONDS = 5.0
 MAX_HELD = 8                          # held writes per browser; more are dropped, not queued
 MAX_SUMMARY_FIELDS = 24
-SECRET_FIELD = re.compile(r"pass|pwd|secret|token|otp|cvv|cvc|pin\b|card|iban|ssn", re.I)
+SECRET_FIELD = re.compile(r"pass|pwd|secret|token|otp|cvv|cvc|pin\b(?![\W_]*code)|card|iban|ssn", re.I)
 
 # What a Pip that can see is never shown (BoxedBrowser.screenshot_for_model): these run in DGC's own isolated
 # world, so the page's scripts can neither see them nor change the built-ins they use.
@@ -66,6 +66,9 @@ _SECRET_BOXES_JS = r"""function () {
     if (auto.some((t) => /^(cc-|current-password$|new-password$|one-time-code$)/.test(t))) return true;
     const words = [el.name, el.id, el.getAttribute('aria-label'), el.getAttribute('placeholder'),
                    el.getAttribute('data-elements-stable-field-name')].join(' ');
+    // An Indian delivery address's "PIN code" is a postal code, not a secret: a Pip typed 411045 and then told
+    // the user the field "looks masked to me" (three-asks test, 2026-10-20).
+    if (auto.includes('postal-code') || /pin.?code|postal|zip/i.test(words)) return false;
     if (NAME.test(words)) return true;
     if (/\d{4}\s?\d{4}\s?\d{4}/.test(el.getAttribute('placeholder') || '')) return true;
     const digits = String(el.value || '').replace(/[\s-]/g, '');

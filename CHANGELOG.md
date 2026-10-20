@@ -12,6 +12,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   (asking once for what it lacks, such as an address) and says in one line to open its computer, type the card into
   the payment form and press Pay. Your own Pay on its screen is your approval: sent at once, and the Pip is told and
   goes on to the next bill. A Pip without a computer still says it can't.
+- **An address's PIN code is not a secret.** A delivery form's "PIN code" (an Indian postal code) was blacked out on
+  the Pip's screen like a card PIN, and the Pip told the user it "looks masked". A field named or marked as a postal
+  code is shown now; a PIN on its own still counts as secret.
 - **Card numbers stay out of a Pip's chat.** Cards follow the password rule: a message with a card number (13 to 19
   digits passing the card check, spaces or dashes allowed; bill, UHID, phone and account numbers don't count) is
   refused, in the editor before it is sent and in DGC (`card_in_chat`, the SDKs included): nothing of it is kept or

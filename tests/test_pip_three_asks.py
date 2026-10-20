@@ -74,6 +74,9 @@ class Instructions(unittest.TestCase):
             self.assertNotIn(old, said, "the old flow asked for the card in chat")
         # "I can't tell you a card is waiting below. Should I press Pay again?" -- above the held payment's card.
         self.assertIn("DGC shows it as a card below your reply, so never say there is no card or offer to press it again", said)
+        # "I can't put an Allow card here myself -- that permission has to come from DGC's side" (2026-10-20).
+        self.assertIn("DGC also shows its own cards there, without you making them: a new site to allow, and anything your "
+                      "computer holds.", said)
         self.assertNotIn("Never say a card is there unless", said)
         _, seen = self.turn(["I can't pay it for you."], computer=False)
         said = self.system(seen)
@@ -114,6 +117,16 @@ class CardsStayOutOfTheChat(unittest.TestCase):
     anything of the message is stored; bill, UHID, phone and account numbers still go through."""
     def setUp(self):
         fixtures.LocalPipsTests.setUp(self)
+
+    def test_an_address_pin_code_is_not_a_secret(self):
+        from dgc.pip_computer_box import SECRET_FIELD
+        for name in ("pin code", "pin-code", "pincode", "pin_code", "postal_code"):
+            self.assertIsNone(SECRET_FIELD.search(name), name)
+        for name in ("pin", "card_pin", "atm-pin", "password", "card_number", "cvv"):
+            self.assertIsNotNone(SECRET_FIELD.search(name), name)
+        from dgc import pip_computer_box
+        js = pip_computer_box._SECRET_BOXES_JS
+        self.assertIn("if (auto.includes('postal-code') || /pin.?code|postal|zip/i.test(words)) return false;", js)
 
     def test_card_numbers_and_the_numbers_on_a_bill(self):
         from dgc.cards import card_number

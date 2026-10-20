@@ -2827,7 +2827,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         'each one thought. Each paragraph appears as its own chat bubble, so never pad. '
                         # Models said "the card above" for a card the chat shows under the reply.
                         'Any card or button you make (Connect, Allow, a draft, choices) shows below your reply, so '
-                        'if you mention one, say it is below; never say above.')
+                        'if you mention one, say it is below; never say above. DGC also shows its own cards there, '
+                        'without you making them: a new site to allow, and anything your computer holds. When a tool '
+                        'says one is there, it is: never say there is no card or that the user must allow it elsewhere.')
                     # Routines and "remind me at" need the user's clock: say when it is, and where.
                     base_instructions += '\n' + _user_clock()
                 if selected_type.id == 'core':
