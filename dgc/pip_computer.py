@@ -578,6 +578,12 @@ class Host:
         if self.frames_dir is None or self.frames >= MAX_FRAMES_PER_RUN:
             return None
         try:
+            # Where the picture is taken: the page as it is now (a click that moved to another page doesn't update the
+            # browser's own idea of its address, and the timeline showed the page the step started on).
+            Host._page_said(self)
+        except Exception:                  # noqa: BLE001 - the last known address will do
+            pass
+        try:
             # A sign-in step's frame is blacked out like what the Pip sees: never a raw screen with a code on it.
             data = (self.browser.screenshot_for_model(max_width=1024, max_height=640, quality=55)["data"] if masked
                     else self.browser.screenshot_jpeg())

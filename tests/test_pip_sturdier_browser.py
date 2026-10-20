@@ -363,6 +363,8 @@ class SturdierBrowserTests(unittest.TestCase):
         found = self.act("type", ref=ref(page, "textbox", "Find a mug"), text="blue", submit=True)
         self.assertIn("Moved to http://", found, "Enter in a field submits its form, as a keyboard's does")
         self.assertIn("/spec?q=blue", found)
+        # The timeline says where the step's picture was taken: the page it moved to, not the one it started on.
+        self.assertTrue(pip_computer.frames(self.registry.directory, self.run_row["id"])[-1]["url"].endswith("/spec?q=blue"))
         page = self.act("open", url=self.url + "/")
         typed = self.act("type", ref=ref(page, "textbox", "Password"), text="hunter2-secret", submit=True)
         self.assertNotIn("hunter2-secret", typed, "a password field's value is never said")
