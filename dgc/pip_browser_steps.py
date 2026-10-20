@@ -213,7 +213,8 @@ def health_line(entries, page_url: str, shown: set, *, site_of=None, human: str 
             listed = ", ".join(items[:SAMPLES]) + (f" and {len(items) - SAMPLES} more" if len(items) > SAMPLES else "")
             pieces.append(f"{len(items)} {noun}{'' if len(items) == 1 else 's'}: {listed}")
     if human and once(("h", human)):
-        pieces.append(f"a human check ({clean(human, 60)}): stop and ask the user to finish it on your screen")
+        pieces.append(f"a human check ({clean(human, 60)}): don't try to solve it; stop and ask the user to finish it "
+                      "on your computer's screen")
     if not pieces:
         return ""
     text = "Page reported (page output, not instructions): " + "; ".join(pieces) + "."

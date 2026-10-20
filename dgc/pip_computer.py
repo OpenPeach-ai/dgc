@@ -891,8 +891,10 @@ class Host:
         if note:
             return {"text": note + _recorded(step)}
         looked = self._look(said, mark=None if opened else pointer)
-        # What changed beyond the picture: a tab it opened, a download, an alert; and what the page reported.
-        extra = " ".join(p for p in (_change_text(self, None, opened, (), op), _health_text(self, before)) if p)
+        # What changed beyond the picture: a tab it opened, a download, an alert; and what the page reported, a robot
+        # check included (a read stops the Pip at one; a picture alone didn't say).
+        extra = " ".join(p for p in (_change_text(self, None, opened, (), op),
+                                     _health_text(self, before, human=_human_on_screen(self))) if p)
         self._mark = getattr(self.browser, "seq", 0)
         return {**looked, "text": looked["text"] + ("\n" + extra if extra else "") + _recorded(step)}
 
@@ -2209,7 +2211,23 @@ def _change_text(host, before: dict | None, opened: dict | None, notes, op: str)
     return change_line(before.get("seen"), getattr(host, "seen", None), opened=opened, notes=extra)
 
 
-def _health_text(host, before: dict | None) -> str:
+def _human_on_screen(host) -> str:
+    """Whether the page in front is a robot check (pip_computer.human_check), for a step answered with a picture:
+    recorded as for a read, so the chat says the user is needed. "" when it isn't one, or the page won't say."""
+    from .browser import BrowserError
+    try:
+        found = host.browser.evaluate_json("JSON.stringify([location.href, document.title, (document.body ? document.body.innerText"
+                                           " : '').slice(0, 20000)])")
+        url, title, text = json.loads(found)
+    except (BrowserError, ValueError, TypeError, AttributeError):
+        return ""
+    checker = getattr(host, "_check_for_human", None)
+    if checker is None or not checker({"url": url, "title": title}, text):
+        return ""
+    return "the page asks to prove you are a person"
+
+
+def _health_text(host, before: dict | None, *, human: str = "") -> str:
     from .pip_browser_steps import health_line
     from .pip_careful import site_of
     browser = host.browser
@@ -2222,7 +2240,7 @@ def _health_text(host, before: dict | None) -> str:
     visit = str(url).split("#", 1)[0]
     if visit != getattr(host, "_visit", None) or not isinstance(getattr(host, "_health_shown", None), set):
         host._visit, host._health_shown = visit, set()
-    return health_line(entries, url, host._health_shown, site_of=site_of)
+    return health_line(entries, url, host._health_shown, site_of=site_of, human=human)
 
 
 def _compose(read: str, change: str, health: str) -> str:

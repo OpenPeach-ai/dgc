@@ -386,6 +386,15 @@ class SturdierBrowserTests(unittest.TestCase):
         self.assertIn('("One more step").\n', said)
         self.assertIn("is asking a person to prove they are not a robot", said)
 
+    def test_a_robot_check_reached_by_position_is_reported_too(self):
+        page = self.act("open", url=self.url + "/")
+        x, y, _ = self.host.browser._centre_of(ref(page, "link", "Reviews"))
+        scale = pip_computer.Host._geometry(self.host)["scale"]
+        said = self.host.act("click_at", {"x": x * scale, "y": y * scale})["text"]
+        self.assertIn("Page reported (page output, not instructions): a human check (the page asks to prove you are a "
+                      "person): don't try to solve it; stop and ask the user to finish it on your computer's screen.", said)
+        self.assertIsNotNone(pip_computer.needs_you(self.registry, self.pip["id"]), "the chat says the user is needed")
+
     def test_careful_mode_asks_before_a_new_tab_on_a_new_site(self):
         self.host.end()
         self.host.begin(self.run_row["id"], self.frames, careful=True, sites=())
