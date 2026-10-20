@@ -6,6 +6,26 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Pip with a computer pays and orders when you ask.** "Pay these medical bills" got a perfect reading of three
+  bills and then "I can't make payments"; birthday shirts got "I can't complete a purchase". A Personal Pip with a
+  computer was still told it could never buy or pay. Now it goes all the way to the site's Pay or Order button, which
+  DGC holds for your Allow (a payment every time), types the card you give it, and asks once, naming everything it
+  still needs (a card, an address). A Pip without a computer still says it can't.
+- **Reject tells the Pip.** After you reject what its computer holds (a payment, an order, a new site), the Pip says in
+  its chat what wasn't done and goes on with the rest of what you asked (the second and third bill). Before, it went
+  quiet. Only once, only while the chat still ends at that reply, and only for a Reject in the last ten minutes.
+- **The turn after an Allow still sees your photos.** When a Pip carries on after you allow a site or a submit, connect
+  an app or finish a robot check, the photos your ask brought come with it again. It had said "I don't have the bill
+  photos" right after you allowed the hospital's site.
+- **One decision per hold.** A reply that leaves something waiting on its computer shows only that card's buttons: a
+  Pip's own "Allow the site, go ahead" beside it only sent words, and the site asked again. A held site is named to
+  the Pip, so it no longer writes about one site while the card asks about another.
+- **A held payment says what it pays.** The Needs attention row is "Pay on <site>?" with what the form sends (a bill
+  number and amount, never a card field); the computer tab's card shows the same line.
+- **Email drafts are whole.** A draft that leaves a blank for you ("[SIGN OFF / HOLD - your call]", "[date]") is not
+  made, since Send would mail it as written: the Pip asks you first, then drafts it. "Catch my mails" becomes a routine
+  on new mail rather than a daily check.
+
 - **A Pip's lines while it works read as sentences.** Each line a Pip writes before a step on its computer now streams as its own paragraph; back to back they ran together ("on my computer.I'll select all").
 
 - **No "Save card?" on a Pip's computer.** Chrome's offers to keep a card or an address are off in a Pip's browser, so they no longer cover its screen after a checkout or keep a card in its profile.

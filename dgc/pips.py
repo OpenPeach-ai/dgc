@@ -2780,8 +2780,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     + reach +
                     "You have no file, project or command tools of your own. DGC may give you approved app and web reads as reference data. To the user, call these what they are (their email, a web page), never \"reads\" or \"the controller\". "
                     "Only describe email or calendar records if they are present in the supplied references. Never claim to have completed an external action. "
-                    "You cannot book, buy, pay, reserve or sign up for anything. When a task asks for that, gather the details from the references "
-                    "(what, where, when, price, links) and say plainly what the user needs to do to complete it. "
+                    + (pip_computer.ERRANDS + " " if computer_pin is not None else
+                       "You cannot book, buy, pay, reserve or sign up for anything. When a task asks for that, gather the details from the references "
+                       "(what, where, when, price, links) and say plainly what the user needs to do to complete it. ") +
                     "Explain when a requested task needs a connection or reviewed capability that is unavailable. "
                     "Return the useful result directly and concisely. Do not narrate internal policy flags, handoff schemas, "
                     "validation, or actions nobody requested. Mention unavailable access only when it prevents the requested work. "
@@ -2917,6 +2918,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         return ('Not drafted, so there is no draft below your reply: ' + guessed[0] + ' is not an address '
                                 'the user gave you or that you read in their apps. Write the email text in your reply and '
                                 'ask the user for the exact address; never guess one.')
+                    blank = pip_message_drafts.placeholder(candidate)
+                    if blank:
+                        return ('Not drafted, so there is no draft below your reply: it leaves ' + blank + ' for the user to '
+                                'fill, and Send would mail it as written. Ask them for that in one short question '
+                                '(offer_choices), then draft the whole email with their answer.')
                     if email_candidate is not None and candidate != email_candidate:
                         return "One email draft is already prepared. Ask for another reply to change it."
                     email_candidate = candidate
@@ -3266,6 +3272,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 or any(Path(path).name != f"{item['sha256']}.{_IMAGE_EXT[item['mime']]}" for path, item in zip(paths, items))):
             raise RegistryError('invalid_images', 'The images for this message were not handed over intact.')
         agent._pending_images = [read_image(path, item) for path, item in zip(paths, items)]
+        if manifest.get('user_turn') is False:
+            # DGC's own "carry on" turn: the photos are the ones the user's ask brought (pip_chat._photos_of_the_ask).
+            prompt += "\nThe photos the user sent with what they asked are attached again here."
         if computer_pin is not None:
             from .pip_chat import computer_photo_names
             prompt += ("\nThe photos are also in your computer's Files, in From chat: "
@@ -3280,7 +3289,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             photos = [p for p in eyes_pin['photos'] if Path(p['path']).name == f"{p['item']['sha256']}.{_IMAGE_EXT[p['item']['mime']]}"]
             agent._pending_images = [read_image(p['path'], p['item']) for p in photos]
             prompt += "\nThe photos they sent with their earlier message are attached again here."
-    elif (conversation is not None and conversation.get('images') and eyes_pin is not None
+    elif (conversation is not None and conversation.get('images') and eyes_pin is not None and manifest.get('user_turn') is not False
             and eyes_pin['choice'] == 'ask' and eyes_pin.get('vision_model') and agent._pip_eyes() == 'ask'):
         # Photos for a model that can't see, and the user hasn't chosen how it sees: it says so in one line,
         # with the choices, rather than answering about pictures it never saw.

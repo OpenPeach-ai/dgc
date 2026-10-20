@@ -330,7 +330,9 @@ def schema() -> dict:
         "when: {kind:'schedule', schedule:{type:'daily', time:'HH:MM', timezone:'Area/City'} or "
         "{type:'cron', cron:'MM HH * * 1-5', timezone:'Area/City'} for weekdays, or {type:'interval', minutes:N} "
         "or {type:'once', at:ISO time with offset}} | {kind:'email', query:'a Gmail search', every_minutes:5-60} "
-        "(needs Gmail connected to you) | {kind:'calendar', lead_minutes:5-120} (needs Google Calendar)."),
+        "(needs Gmail connected to you) | {kind:'calendar', lead_minutes:5-120} (needs Google Calendar). When the user "
+        "wants mail caught as it comes in (\"catch my mails\", \"when an email from my boss arrives\"), use kind 'email' "
+        "with a search for those mails, not a daily schedule."),
         "parameters": {"type": "object", "additionalProperties": False, "required": ["title", "prompt", "when"],
                        "properties": {"title": {"type": "string", "description": "A short name, like Morning brief."},
                                       "prompt": {"type": "string", "description": "What you will do each time, in the user's words."},

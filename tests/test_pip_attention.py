@@ -82,7 +82,10 @@ class AttentionTests(unittest.TestCase):
         pip = self.source["id"]
         for kind, summary, title in (("site", {"kind": "site", "site": "amazon.in", "host": "www.amazon.in"}, "Visit amazon.in?"),
                                      ("text", {"kind": "text", "host": "shop.example"}, "Put what it read from your apps on shop.example?"),
-                                     ("form", {"method": "POST", "host": "shop.example"}, "Send this on shop.example?")):
+                                     ("form", {"method": "POST", "host": "shop.example"}, "Send this on shop.example?"),
+                                     ("pay", {"method": "POST", "host": "pay.hospital.example", "payment": True,
+                                              "fields": [{"name": "billno", "value": "SMH/OP/26/118734"}, {"name": "amount", "value": "5350.00"},
+                                                         {"name": "card_number", "value": "•••"}]}, "Pay on pay.hospital.example?")):
             with self.registry.transaction():
                 self.registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",
                                          ("compact_" + kind[0] * 32, pip, self.source["workspace_id"], self.run["id"], "host_x", "r-" + kind,
@@ -90,4 +93,7 @@ class AttentionTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 items = {i["card"]: i for i in self.control("list_pip_attention")["items"]}
                 self.assertEqual(items["compact_" + kind[0] * 32]["title"], title)
+                if kind == "pay":
+                    # It says what it pays, never a hidden card field (three-asks test, 2026-10-20).
+                    self.assertEqual(items["compact_" + kind[0] * 32]["detail"], "billno SMH/OP/26/118734 · amount 5350.00")
 

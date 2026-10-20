@@ -300,7 +300,7 @@ class CarefulComputerTests(unittest.TestCase):
         from dgc import pip_careful
         pip, host = self.host()
         said = host.call("open", {"url": self.url})
-        self.assertTrue(said.startswith("Held: that site is new for this user"), said)
+        self.assertTrue(said.startswith(f"Held: {TEST_HOST} is new for this user"), said)   # it names the card's site
         [action] = pip_computer.list_actions(self.registry, pip["id"])
         self.assertEqual((action["summary"]["kind"], action["summary"]["site"]), ("site", TEST_HOST))
         self.assertIn("A change is already waiting", host.call("read", {}), "the run stops at the card")

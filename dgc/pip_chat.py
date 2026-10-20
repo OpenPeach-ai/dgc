@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 from pathlib import Path
 
 from .workspace_registry import RegistryError, identifier
@@ -577,6 +578,8 @@ ROUTINE_KEY = "routine_"          # a routine's turn (pip_routines): the Pip doe
 # After the user allows a plugin the Pip asked for (pip_plugins), DGC asks it to carry on, under this key.
 PLUGINS_KEY = "plugins_"
 DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY)
+# The turns DGC writes so the Pip carries on with what the user asked: they see the photos of that ask again.
+FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY)
 CHECK_DONE = ("This message is from DGC, not the user. The user says they finished {host}'s check on your computer's "
               "screen. Read the page again and carry on with what they asked. If the site still asks for a check, "
               "stop and tell them in one sentence.")
@@ -603,6 +606,12 @@ COMPUTER_DONE = ("This message is from DGC, not the user. The user approved what
                  "DGC sent it exactly as the page made it: {what}. Use your computer to read the page and see what "
                  "happened. Then tell the user in a short message, and carry on with what they asked if more is "
                  "needed. Do not repeat that change.")
+COMPUTER_REJECTED = ("This message is from DGC, not the user. The user chose Reject, so DGC dropped what your computer was "
+                     "holding, unsent: {what}. Don't do it again or look for another way to do it. If they asked you for more "
+                     "than that one thing (another bill, another order), carry on with the rest now; otherwise stop. Tell them "
+                     "in a short message what was not done.")
+COMPUTER_NOT_ALLOWED = ("This message is from DGC, not the user. The user didn't allow {what}, so you must not. Carry on with "
+                        "anything else they asked that doesn't need it, and tell them in a short message what you couldn't do.")
 COMPUTER_ALLOWED = ("This message is from DGC, not the user. The user allowed {what}. Nothing was done yet: "
                     "do it now with your computer, exactly as you meant to, then carry on with what they asked and "
                     "tell them in a short message.")
@@ -644,6 +653,19 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
                    else f"you to put that on {summary.get('host') or 'the page'}: {(summary.get('fields') or [{}])[0].get('value', '')}")
         return send(store, pip_id, COMPUTER_ALLOWED.format(what=allowed[:400]), key, "local-computer", config, _intro=True)
     return send(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config, _intro=True)
+
+
+def continue_after_rejection(store, pip_id, action_id, summary, config):
+    """The chat's next turn once the user rejected a hold from its reply: the Pip says what wasn't done and goes
+    on with the rest of the ask (pip_computer._continue_rejected decides whether it is due)."""
+    key = COMPUTER_KEY + "no_" + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    if summary.get("kind") in ("site", "text"):
+        what = (f"you to visit {summary.get('site') or summary.get('host', 'that site')}" if summary["kind"] == "site"
+                else f"you to put that on {summary.get('host') or 'the page'}")
+        return send(store, pip_id, COMPUTER_NOT_ALLOWED.format(what=what[:400]), key, "local-computer", config, _intro=True)
+    what = (("a payment: " if summary.get("payment") is True else "")
+            + f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}")[:300]
+    return send(store, pip_id, COMPUTER_REJECTED.format(what=what), key, "local-computer", config, _intro=True)
 
 
 def continue_after_app(store, pip_id, link, config):
@@ -894,9 +916,37 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
         context["run_posts"] = posts
     if req.get("images"):
         context["images"] = req["images"]
+    elif str(req.get("request_key") or "").startswith(FOLLOW_UP_KEYS):
+        again = _photos_of_the_ask(store, pip["id"])
+        if again:
+            context["images"] = again
     if req.get("files"):
         context["files"] = req["files"]
     return context
+
+
+def _photos_of_the_ask(store, pip_id):
+    """A turn DGC writes so the Pip carries on (after an Allow, a Reject, a connected app, a robot check) sees the
+    photos the user's own latest message brought: three bills, sent once. Without them, the turn after "Allow" on the
+    hospital's site said "I don't have the bill photos or their numbers" (three-asks test, 2026-10-20). None when that
+    message brought none, or a kept photo is gone."""
+    for row in store.db.execute("SELECT id,request_key FROM pip_chat_messages WHERE pip_id=? AND role='user' "
+                                "ORDER BY seq DESC LIMIT 40", (pip_id,)):
+        if str(row["request_key"] or "").startswith(DGC_KEYS):
+            continue
+        try:
+            images = [{"sha256": r[0], "mime": r[1], "bytes": r[2]} for r in store.db.execute(
+                "SELECT sha256,mime,bytes FROM pip_chat_images WHERE message_id=? ORDER BY idx", (row["id"],))]
+        except sqlite3.Error:
+            return None                   # a registry from before photos: none
+        if not images:
+            return None
+        try:
+            image_paths(store.registry.directory, pip_id, images)
+        except RegistryError:
+            return None
+        return images
+    return None
 
 
 def insert_user(store, pip, req, run_id, model, now):
@@ -986,6 +1036,10 @@ def insert_reply(store, run, result, now):
     if not row or (row["workspace_id"], row["pip_id"]) != (run["workspace_id"], run["pip_id"]):
         raise RegistryError("invalid_history", "The conversation run has no matching user message.")
     choices = validate_choices(result["choices"]) if "choices" in result else []
+    if choices and "eyes" not in result and _left_waiting(store, run, result):
+        # What its computer holds has its own card (Allow, Send once, Reject): that is the decision. A Pip's own
+        # "Allow the site, go ahead" beside it only sent words, so the site asked again (three-asks test, 2026-10-20).
+        choices = []
     reply_id = identifier("message")
     store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at) "
                      "VALUES(?,?,?,?,?,?,?,?)", (reply_id, run["pip_id"], run["workspace_id"], run["id"],
@@ -1145,6 +1199,16 @@ def _copy_to_computer(directory, pip_id, files) -> None:
             add_raw_file(folder, "From chat", item["name"], read_file(path, item), maximum=MAX_CHAT_DOCUMENT_BYTES)
         except RegistryError:
             pass                       # a full computer still gets the message; the Pip reads the file in chat
+
+
+def _left_waiting(store, run, result) -> bool:
+    """Whether this reply's run left something on the Pip's computer waiting for the user."""
+    held = (result.get("computer") or {}).get("held") or []
+    if not held:
+        return False
+    marks = ",".join("?" * len(held))
+    return store.db.execute(f"SELECT 1 FROM pip_computer_actions WHERE run_id=? AND status='pending' AND id IN ({marks}) LIMIT 1",
+                            (run["id"], *held)).fetchone() is not None
 
 
 def validate_context(value):
