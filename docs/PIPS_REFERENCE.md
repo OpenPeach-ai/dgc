@@ -1073,6 +1073,79 @@ covered whole. The screenshot is then redrawn in an `OffscreenCanvas` in that wo
 800, the boxes filled black (3 px wider each side), and re-encoded; if that fails, no screenshot is
 sent. Timeline frames, the live view and approval cards are unchanged.
 
+**Saved logins** (API 56, `pip_logins`, `pip_login_fill`, `pip_totp`). A login is `{id: login_HEX32, site, hosts,
+exact, username, password, totp: {secret, algorithm, digits, period} | null, pips: "all" | [pip ids], sign_in_page,
+source: "card" | "page", created_at, updated_at, last_used_at}`, at most 200, each field at most 512 characters.
+`site` is the registrable domain of the address it was saved for (`pip_careful.site_of`), `hosts` the sign-in hosts
+seen (the card's page host, or the typed address's), `sign_in_page` that page without its query. The same site and
+username saved again replaces the password (and the key, when one is given), adds hosts and widens `pips`. They live
+in `<pips>/logins/logins.sealed`: `DGC-LOGINS-SEALED-1\n`, a 16-byte nonce, the JSON XORed with
+HMAC-SHA256(enc, nonce || counter) blocks, and HMAC-SHA256(mac, magic || nonce || ciphertext); enc and mac are
+HMAC-SHA256 of the 32-byte key in `logins.key` (64 hex characters) with fixed labels. Both files are written
+atomically, 0600, the folder 0700, with an `flock` on `logins/.lock`; the key is created once (a hard link, so two
+processes never race to different keys). A file that fails its tag, has no key, or isn't a regular file opens as an
+empty store (one line to stderr, never the contents). Every value a process saves or reads is kept in memory for
+`redaction.secret_values`, which also reads this profile's sealed file when it changes (by its stat).
+`pip_totp.parse_key` takes base32 (any case, spaces, dashes and padding ignored; at least 10 bytes) or an
+`otpauth://totp/` URI (`secret`, `algorithm` SHA1 | SHA256 | SHA512, `digits` 6-8, `period` 10-300); `hotp` URIs are
+refused. Codes are RFC 6238 with T0 = 0.
+
+Requests, local user only (`local_only` otherwise), Personal Pips only: `list_pip_logins {pip_id?}` → `{logins:
+[{id, site, hosts, username, has_code, pips, source, created_at, last_used_at, usable?}]}` (`usable` with `pip_id`);
+`save_pip_login {pip_id, username, password, totp?, pips?: "only" | "all", site | action_id + expected_digest}` →
+`{login, action?}`; `remove_pip_login {login_id}` → `{removed, login_id}`; `grant_pip_login {login_id, pips: "all" |
+[pip ids]}` → `{login}`. No answer carries a password or a key. `handle_control` keeps a save's `username`,
+`password` and `totp` as sent (redacting them would store a mask once DGC knows them) and passes them to the store
+only. With `action_id`, the action must be this Pip's pending computer action of kind `login` with that digest; the
+login takes the card's host and sign-in page, and the action is approved in the same request.
+
+The `computer` tool has `sign_in {site?}` (every computer, eyes or not, so a subscription brain gets it too). On the
+current page (https, or http to a loopback host; never plain http to another computer) DGC uses the most recently
+used login this Pip may use whose site or hosts match the page's host; with `site` and the page elsewhere, or on a
+page of its site with no username, email or password box, it opens the login's `sign_in_page` first (careful mode
+checks it like `open`). With none, it records a computer action of
+kind `login` (`request_ref` `careful:ID`, nothing paused; summary `{method: "SIGN IN", host, path, page, site, shown,
+sign_in_page, fields: []}`), adds it to the run's held actions, and answers `No saved login for SITE…`; a second
+`sign_in` while it is pending answers that it is there, and after a `Not now` (a rejected one in the last 24 hours)
+that the user chose not to. `decide_pip_computer_action` approve on a `login` action is refused (`save_login`), as is
+`always_allow_pip_computer_action`; the supervisor's tick turns an approved one `sent` and continues the chat with
+"The user saved a login for SITE… Use sign_in there now", and a rejected one with "The user chose Not now…".
+
+`SignIn` (pip_login_fill) runs in the supervisor on the Pip's `BoxedBrowser`, in a fresh isolated world for each
+script. `FIND` marks this step's username, password and code boxes (`data-dgc-login="NONCE:STEP:NAME"`): visible,
+enabled `input`s; a code box by `autocomplete=one-time-code`, a strong hint (otp, 2fa, mfa, two-factor, one-time,
+authenticator) on a text, number or password box, or a weak one (verif, security code, passcode, "code") on a text or
+number box, never a postal, promo, card (`cc-*`, cvv, cvc, csc) or gift box, and a group of 4+ one-character boxes
+as one code; the password is a `type=password` box (`current-password` first, never `new-password`); the username
+the user-like box before it in the same form. `FOCUS` marks a password or code box `data-dgc-secret` before
+typing, focuses it and empties it with the native value setter and an `input` event; the value goes in with
+`Input.insertText`. `CHECK` answers which marked boxes now hold something (booleans). Then `LoginPass {hosts, site,
+exact, values, until: now + 15 s}` is set on the browser and Enter is pressed in the last box; if within 2 s nothing
+was submitted (a `submit` or `beforeunload` listener writes `data-dgc-login-sent` on the document) and nothing
+changed, the form's own submit control (or a button named sign in, log in, continue, next, submit, verify or confirm)
+is clicked at its centre. The write gate (`BoxedBrowser._gate`) lets exactly one non-GET request through while the
+pass is live: to a host in `hosts` (or on `site` unless `exact`), whose body carries one of `values` (a form field
+equal to it, a JSON string equal to it, or the value raw, JSON-escaped or URL-encoded in the text), and that carries
+no card number; it then clears the pass and `acted_at`. Anything else is held as before; a held request's shown
+field values that a saved secret would be scrubbed from show `•••`. The step's outcome is read for up to 8 s (`STATE`:
+the address changed, the marked boxes are gone, the page is leaving, a new alert, a robot check). The next step
+waits up to 10 s for a password or code box (5 s for a code when the login has a key, 1.5 s otherwise). A code is
+made at the moment it is typed, waiting for the next period when fewer than 3 s are left. A step that shows the box
+already filled is a refusal (`The site did not accept the saved login…`, the boxes DGC filled are emptied, nothing
+is sent twice). At most three steps and 40 s.
+
+`Host.act` scrubs every answer (`Scrubber`): the store's passwords and keys (by the sealed file's stat), the
+passwords typed on this computer, and each code for five minutes (not inside a longer number), in raw, JSON-escaped,
+HTML-escaped and URL-encoded forms of four characters or more, as `••••••`. Timeline labels and addresses are
+scrubbed too, and a sign-in step's timeline frame is the masked picture (`screenshot_for_model`, 1024 × 640). The
+snapshot (`read`) and `_SECRET_BOXES_JS` treat a `data-dgc-secret` box as a secret, so `read` shows `value=(hidden)`
+and every picture the Pip sees blacks it out. When a fill leaves a secret on a page (not sent), `secret_hold {url,
+until: now + 60 s}` refuses `drag`, `desktop_drag`, `desktop_key` and `desktop_type` on that page until it changes,
+and at the end DGC empties the boxes itself. `read` on a page with a password box, or a username or email box, adds
+a line saying `sign_in` can sign it in (with a saved login, or a card). A Pip's Chrome profile has
+`credentials_enable_service`, `profile.password_manager_enabled` and `profile.password_manager_leak_detection`
+false, so Chrome never offers to save a password.
+
 *Points.* Most models name a point in the image's pixels; Qwen3's vision models (qwen3-vl, qwen3.5,
 qwen3.6, qwen3.8) answer on a 0-1000 scale across the image, even when asked for pixels.
 `pip_eyes.convention_for` gives each model its own scale and the tool description says it plainly;
@@ -1593,5 +1666,6 @@ Clients check it before using a newer control.
 | 50 | The `safe_source_v2` source rules (files DGC can't copy are left out and listed, `.dgcignore`, the project's ignore files for current files, a Pip's Excluded folders in `source_policy.exclude`, 256 MiB); `check_pip_source` and `get_pip_run_source`; new reviewer and Quill Pips start on `safe_source_v2` |
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
+| 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
 | 54 | Pips use the whole desktop (`pip_desktop_eyes`, `pip_apps`): a run whose model sees gets `desktop_look`, `desktop_click`, `desktop_double_click`, `desktop_right_click`, `desktop_hover`, `desktop_drag`, `desktop_scroll`, `desktop_type`, `desktop_key`, `windows`, `focus_window` and `launch_app`, with secrets blacked out of the whole screen; an image editor, a document editor and a PDF viewer, each in its own box, online through the computer's egress proxy like the Terminal; `get_pip_computer_apps`, `set_pip_computer_apps` |
 | 52 | Photos and files in a Pip's chat through the backend's spool: `send_pip_message` takes `spooled_images` (8 MiB a photo, 32 MiB in all, up to 64; HEIC kept as JPEG) and `spooled_files` (a document 16 MiB, text 1 MiB, 32 MiB in all, up to 16), local only; `get_pip_message_image` takes `as_file` and answers with the kept file's `path`. A large photo goes to the model at 2,500 pixels |

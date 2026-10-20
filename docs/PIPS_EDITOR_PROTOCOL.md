@@ -256,6 +256,23 @@ routines use your NAME plan's usage." No event changes: the run streams the same
 `model_choice` before sending to a CLI below API 55 ("Update DGC to run a Pip on your own
 Claude Code or Codex."); an older editor shows such a Pip's model as **Same as DGC**.
 
+**Saved logins** (API 56). Four `pips_control` requests: `list_pip_logins {pip_id?}`,
+`save_pip_login {pip_id, username, password, totp?, pips?: "only" | "all", site | action_id +
+expected_digest}`, `remove_pip_login {login_id}` and `grant_pip_login {login_id, pips: "all" |
+[pip ids]}`; no event and no event field changes. A Pip computer's `actions` may include one of
+kind `login` (summary `{method: "SIGN IN", host, path, page, site, shown, sign_in_page, fields:
+[]}`): the chat shows it under the reply as **Save a login for SITE so PIP can sign in itself?**
+with **Save login…** and **Not now** (`decide_pip_computer_action` approve false); approving it
+any other way is refused (`save_login`). **Save login…** opens a dialog of its own (site fixed
+from the card; from the Pip's page, a site box), reads its boxes once on Save and sends
+`save_pip_login` with the card's `action_id` and digest, then empties them; nothing of it goes
+in the view's state, a draft or the chat. The Pip's page shows **Logins** (`list_pip_logins`
+with its `pip_id`): each it may use with **All Pips** (`grant_pip_login` `"all"` or `[this
+Pip]`) and **Remove** (asks once), the ones for other Pips with **Let PIP use it**, and **Save a
+login…**. The computer tab shows a `login` action with **Not now** only. The host refuses all
+four before API 56 ("Update DGC to save logins for your Pips.") and keeps only the request's
+type while it waits for the answer.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

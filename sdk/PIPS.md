@@ -212,6 +212,15 @@ R = read, M = mutation. Optional fields are marked `?`.
 | `archive_pip`, `restore_pip` | M | `pip_id`, `expected_version`, `expected_lifecycle_revision`, `request_key`, `reason` |
 | `stop_pips` | M | none. Emergency stop: pauses every Pip and cancels queued and running work. |
 
+Saved logins (Pips API 56): `list_pip_logins` (R, `pip_id?`) answers `{logins: [{id, site, hosts, username,
+has_code, pips, source, created_at, last_used_at, usable?}]}`, never a password or a key; `save_pip_login` (M,
+`pip_id`, `username`, `password`, `totp?` (a base32 key or an `otpauth://totp/` link), `pips?` `"only"` | `"all"`,
+and `site`, or `action_id` + `expected_digest` of the Pip's `login` computer action), `remove_pip_login` (M,
+`login_id`) and `grant_pip_login` (M, `login_id`, `pips` `"all"` | a list of Pip ids). Both SDKs refuse them before
+API 56 and check a save's shape with errors that never repeat what it carries; the password and key go in that one
+request only (the SDKs keep no request log). DGC keeps them sealed on this computer and types them into the Pip's
+page itself (docs/PIPS.md, Saved logins).
+
 `model_choice` is `{"mode": "default"}` or `{"mode": "model", "model": "<id from list_pip_models>"}`, or, for a
 Personal Pip from Pips API 55, `{"mode": "subscription", "engine": "claude" | "codex"}`: the user's own Claude Code
 or Codex, held to DGC's Pip tools (docs/PIPS.md). Both SDKs refuse a subscription choice before API 55 and check its

@@ -924,10 +924,12 @@ without.
 - **What you submit is yours, right away.** With no Pip run using the computer, a submit within
   three seconds of your own click or key is sent, because you made it. Anything a page sends on
   its own, with nobody at the keyboard, waits for your approval like a Pip's.
-- **You sign in, not the Pip.** **Open browser** shows the Pip's screen. Click on it, type and go
-  to an address to sign in to the sites the Pip needs; it keeps those sign-ins in its own
-  profile. The Pip never sees your passwords. What you submit in the open browser is sent at
-  once, because you did it. While a run is using the computer, the view only watches.
+- **It signs in with a login you saved; it never sees it.** When a site needs a sign-in, the Pip asks its computer
+  to sign it in, and DGC types the login you saved for that site into the page, then the one-time code, and sends
+  it (see [Saved logins](#saved-logins)). With none saved, its chat asks you once to save one. You can also sign in
+  yourself: **Open browser** shows the Pip's screen. Click on it, type and go to an address to sign in to the sites
+  the Pip needs; it keeps those sign-ins in its own profile. What you submit in the open browser is sent at once,
+  because you did it. While a run is using the computer, the view only watches.
 - **Fenced in.** The browser reaches only public web addresses on ports 80 and 443. Your home
   network, this computer's own services and cloud metadata addresses are refused. A request
   that carries a payment card number waits for you every time: its review says it sends payment
@@ -939,6 +941,66 @@ without.
   once and cancels anything waiting, unsent. A computer with nothing waiting closes itself after 15 minutes idle.
   **Remove computer…** takes it away; the Pip's saved sign-ins stay in its folder (see
   [Privacy](#privacy-and-where-state-lives)) until you delete it.
+
+### Saved logins
+
+A Personal Pip with a computer can sign in by itself (Pips API 56), the way OpenMausBot's bots do: you save a
+site's login once, and DGC types it in whenever the Pip needs it. The Pip never sees the username, the password or
+the code; it is told only what was filled.
+
+- **Saving one is one click away.** When the Pip meets a sign-in page with no saved login, its chat shows **Save a
+  login for SITE so PIP can sign in itself?** with **Save login…** and **Not now**. **Save login…** opens a small
+  form: the username or email, the password, and, if the site uses an authenticator app, its key (the setup key the
+  site shows under "can't scan the code?", or an `otpauth://totp/` link). Save, and the Pip is told and signs in by
+  itself, the code included. **Not now** tells the Pip to ask you to sign in on its screen instead, and it doesn't ask
+  for that site again for a day. The same form is on the Pip's page, under **Logins**, with **Save a login…**.
+- **What you type there goes to DGC only.** It is never in the chat, its draft, the model's context, a run's
+  timeline or an export; the form keeps nothing once it is sent. A password you type into a Pip's chat anyway is
+  redacted like any credential DGC knows.
+- **One Pip, or all of them.** A login is for the Pip you saved it from unless you tick **Let all my Pips use it**.
+  Its page lists the logins it may use (site, username, "Fills its code too" when it has a key, and who may use it),
+  each with **All Pips** and **Remove**, and the ones saved for your other Pips, each with **Let PIP use it**. The
+  key itself is never shown back.
+- **How it signs in.** The Pip's `sign_in` step works on the page it has open, or on the sign-in page the login was
+  saved from. DGC finds the username, password and code boxes as a person would see them (visible, enabled inputs,
+  their type, `autocomplete`, names, labels), focuses each, and types the value as real keyboard input over the
+  browser's private DevTools pipe; no page script ever carries a value. It presses Enter, or the form's own sign-in
+  button, then reads what the page did: a code page next (it makes the code itself, from the key, at that moment),
+  the account page, or the site saying no. Up to three steps.
+- **That one submit is let through.** Every other submit a Pip's computer makes still waits for your Allow. The
+  sign-in form DGC filled is the exception: the request that carries a value it just typed, to the login's own
+  site, within seconds, once. A sign-in sent anywhere else (another site's single sign-on page) waits for you as
+  before, with the password hidden on its card.
+- **Where it fills.** On the site you saved it for (its registrable domain, so `www.` and `login.` of the same site
+  both count), on secure pages only: never over plain http to another computer.
+- **What the Pip hears.** "Signed in to SITE: DGC filled the username, the password and the one-time code", "No saved
+  login for SITE" (and the card), "The page asks for a one-time code, and the login saved for SITE has no
+  authenticator key", "The site did not accept the saved login" (the password is cleared from the page and nothing
+  is sent twice), or a robot check it leaves to you. Every answer its computer gives it is scrubbed of saved
+  secrets and of the code it just typed, as typed, URL-encoded or escaped.
+- **Masked everywhere it looks.** A box DGC typed a password or code into is marked, so every screenshot the Pip
+  sees blacks it out (even a box a site simply calls `code`) and its page read shows `(hidden)` for it. A run's
+  timeline pictures of a sign-in step are blacked out the same way. While a typed secret may still be on a page
+  (DGC filled it but couldn't send it), the steps that could copy it from there (drag, and the desktop's keys and
+  typing) wait, and DGC empties the boxes itself after a minute.
+- **Chrome keeps no passwords.** A Pip's browser has Chrome's own "Save password?" and its breach check turned off,
+  so a password lives in one place: DGC's sealed store.
+- **What it can't do (yet).** A sign-in form inside a frame, a code sent by text message or email, a security
+  question, or a robot check: the Pip says so and asks you to finish on its screen. 1Password isn't connected (see
+  below).
+
+Where and how they are kept: `logins/logins.sealed` in the `pips` folder, sealed under a 256-bit key of its own in
+`logins/logins.key` beside it (both readable only by you, the folder too). Python's standard library has no AES,
+so the seal is built from what it has: HMAC-SHA256 in counter mode as the keystream, and HMAC-SHA256 over the nonce
+and the ciphertext to authenticate it (encrypt-then-MAC), the two keys derived from the one in `logins.key`. A file
+that fails its check, or has no key beside it, opens as empty and is never half-read. Saved logins are not in the
+Pips database, so no export, shared Pip or run record holds them, and nothing copies or backs up that folder.
+**1Password** (a service account token) isn't offered yet: its official Python SDK (`onepassword-sdk` 0.4.1) is a
+compiled core of about 7 MB for each Python version and platform (manylinux 2.32 or later on Linux), still 0.x, which
+DGC would have to install for everyone, with a hash pinned per platform, for a feature most people won't use.
+
+On a Mac, a Pip's browser runs in its own VM and DGC reaches it the same way (the DevTools pipe over the VM's
+console), so saved logins work the same; this release was tested live on Linux only.
 
 **Eyes and a cursor.** A Pip whose model can see (its capabilities say so: deepseek-v4.1-flash:cloud, Qwen3.8, Qwen3-VL and
 others) uses its browser two ways, and picks: by the page's text (it reads the page and clicks
@@ -1188,7 +1250,9 @@ What leaves your computer is what you'd expect:
 A Pip's computer keeps its browser profile, with your sign-ins to the sites you used
 in it, in `computers/PIP_ID` in the same `pips` folder, readable only by you. Removing
 the computer leaves that folder; delete it to forget the sign-ins. Each run's
-screenshots are kept with the run's artifacts.
+screenshots are kept with the run's artifacts. Saved logins are sealed in `logins/`
+in the same folder (see [Saved logins](#saved-logins)); remove one on its Pip's page,
+under **Logins**, or delete that folder to forget them all.
 
 Each run gets its own private home, with no access to your MCP servers, hooks or
 credentials. The model key reaches the run only for its own model requests.
