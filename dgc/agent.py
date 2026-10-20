@@ -4173,6 +4173,9 @@ class Agent(GoalLifecycle):
                "or form it submits waits for the user's Allow, and it asks for a card or an address when it needs one. "
                "For a Pip that pays bills, shops or books things, set up a Personal Pip with its computer and no "
                "payment app; never steer the user to a read-only tracker, a payment connector or Composio for that. "
+               "For a Pip that works with the user's mail, calendar or another app, set up the Personal Pip without "
+               "app reads: it asks to connect the app itself, with a Connect card in its own chat. Never call the "
+               "user's Composio or other connector tools yourself to set a Pip up (no account lists, no tool schemas). "
                "Set Pips up only with these tools: `dgc pips` refuses changes from your shell."]
               if pips_on else []),
             *(["- For conversational Pip setup or schedules, use pips_setup. In auto mode the Pip is created and on; "

@@ -112,6 +112,9 @@ class MainChat(unittest.TestCase):
         self.assertIn("so it can pay a bill, buy, order or book on a website for the user", said)
         self.assertIn("every payment, order or form it submits waits for the user's Allow", said)
         self.assertIn("never steer the user to a read-only tracker, a payment connector or Composio for that", said)
+        # "A Pip that looks after my office email" brought two raw Composio tool permissions and a failed app plan.
+        self.assertIn("it asks to connect the app itself, with a Connect card in its own chat", said)
+        self.assertIn("Never call the user's Composio or other connector tools yourself to set a Pip up", said)
 
 
 class RejectFollowUp(unittest.TestCase):
