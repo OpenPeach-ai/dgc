@@ -915,12 +915,38 @@ DGC picks the model that sees from the ones you already have, the same kind firs
 for a `:cloud` Pip); it also has to use tools, so switching to it works. It asks once. Change the
 answer on its page under **Seeing**, which also offers **Switch to …**.
 
+**The whole desktop** (Linux). A Pip that can see uses its whole computer, like a person at a desk: it
+looks at the whole screen, clicks, drags, scrolls and types in any window, presses keys and shortcuts
+(ctrl+s, alt+tab), lists its windows, brings one to the front and opens its apps. Ask it to "design me
+my birthday shirts and order 20 in large" and it makes the design itself in the image editor (your
+words as big text, a shape or two), exports a PNG into its Files, uploads it to the shop, sets 20 in
+Large and fills in the checkout; then it asks you to type your card on its screen.
+
+- **Its apps.** Besides the browser, Files and Terminal, its dock has an **image editor** (LibreOffice
+  Draw), **Documents** (LibreOffice Writer) and a **PDF viewer** (Evince). Each opens in a box of its
+  own that sees only its Files. When this computer doesn't have LibreOffice or Evince, its computer tab
+  asks you once, in one line saying what and how big, to download them from your system's own package
+  servers into DGC's folder (about 83 MB on an Ubuntu desktop, nothing installed system-wide); **Not
+  now** and it doesn't ask again.
+- **What waits for your Allow, and what doesn't.** Its apps and its Terminal are online like a normal
+  computer's, through DGC: they reach public websites and never this computer or your network (nor
+  link-local or cloud metadata addresses). **They can send to a public website without an Allow card.**
+  Only the browser holds what it would submit, send, pay or order for your **Allow**; careful mode still
+  asks before the browser opens a new site, and a payment always asks.
+- **Still nothing secret.** In a picture of the whole screen DGC blacks out the browser's password and
+  card fields wherever its window is, any other browser window, and any window that asks for a
+  password. If it can't find the browser's window on the screen, the picture isn't sent. (A password a
+  desktop app draws as dots stays dots; DGC can't find those fields itself.)
+- **You watch, and it's yours when it stops.** Its cursor shows on its screen in the tab, every step is
+  in **What it saw…**, and while it works your keyboard and mouse wait, as before.
+
 **Its screen in an editor tab.** The computer button in a Pip's chat (or **Open its computer**
 in Settings) opens "NAME · Computer" as an editor tab.
 
 The tab is the Pip's real screen, like Grok's bots: a small Linux desktop on DGC's own wallpaper,
-with a dock at the bottom holding **Browser** (Google Chrome), **Files** (a file manager) and
-**Terminal**. It opens with nothing open. Click, type and move windows as on any computer. While a
+with a dock at the bottom holding **Browser** (Google Chrome), **Files** (a file manager),
+**Terminal**, and its image editor, **Documents** and PDF viewer when this computer has them. It opens
+with nothing open. Click, type and move windows as on any computer. While a
 Pip run is using it you watch, and your keyboard and mouse wait until it is done. The browser is the
 Pip's own: closing its window and clicking Browser in the dock brings it back.
 
@@ -963,7 +989,8 @@ cookies, so a site usually trusts it for a while afterwards.
   through DGC, the same way out as the browser (curl, pip, npm and git over https work), and
   never this computer or your local network. Under each command DGC lists the sites it reached,
   and anything it refused. It sees nothing but those Files and stops a command after 60 seconds.
-  The desktop's own Terminal app is online the same way.
+  The desktop's own Terminal app, and its apps, are online the same way. What they send doesn't
+  wait for an Allow card: only the browser holds submits.
 
 The Pip uses all three from its chat too, so you can watch it work while you talk to it. If it
 holds a submit there, the chat continues once you send it: the Pip reads what happened and
@@ -985,6 +1012,8 @@ that a computer starts in a few seconds. The VM has no network of its own: like 
 browser and the Terminal reach public websites only through DGC's egress proxy on your Mac, and
 nothing on your Mac or your network. Chrome runs with its own sandbox there. The VM gets 4 GB of
 memory and 4 CPUs, its Files are a folder on your Mac, and it is deleted when the computer closes.
+On a Mac a Pip doesn't use the whole desktop yet: its eyes and cursor work in the browser, and its
+image editor, Documents and PDF viewer are not on the Mac's computer.
 
 On Windows, a Pip's computer is the Linux one, in DGC inside WSL 2: it needs bubblewrap there
 (`sudo apt install bubblewrap`), and DGC sets the desktop and Chrome up as on Linux.

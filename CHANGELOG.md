@@ -8,6 +8,25 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 - **Keep Pips running works on a standard Ubuntu account.** Ubuntu's default umask (0002) made the installer leave every DGC file group-writable, and Keep Pips running then refused to start with "DGC service entry points must be trusted regular files". The installer now writes files only you can change, files writable only by your own group are accepted (as folders already were), and a group someone else is in is named with the one-line fix.
 
+- **Pips use the whole desktop (Pips API 54).** A Personal Pip's eyes and cursor worked on its browser's page only.
+  A Pip whose model can see now uses all of its computer's screen: it looks at the whole desktop, clicks, double and
+  right clicks, hovers, drags with real moves, scrolls and types in any window (any character, as its key), presses
+  keys and shortcuts (ctrl+s, alt+tab), lists its windows, brings one to the front and opens an app, with a file from
+  its Files. Its hands are its own connection to the desktop's VNC display, never your live view, which still marks
+  your input and holds it while the Pip works; its cursor shows on its screen in the computer tab and every step is in
+  What it saw…. A step on the browser's window still holds what it would submit for your Allow.
+- **Apps on a Pip's computer: an image editor, documents and a PDF viewer.** LibreOffice Draw, LibreOffice Writer and
+  Evince, on its dock and for the Pip to open; asked to design birthday shirts, it makes the design in the image
+  editor and uploads the PNG. Each app runs in a box of its own that sees only the computer's Files, online like the
+  Terminal through DGC's egress proxy (public websites, never this computer, your network or cloud metadata
+  addresses): an app, like the Terminal, can send to a public website without an Allow card; only the browser holds
+  submits. They come from this computer when it has them; when it doesn't, the computer tab asks once, in one line
+  saying what is downloaded and how big, to fetch them from the system's own package servers into DGC's folder (83 MB
+  on an Ubuntu 24.04 desktop), with no password.
+- **Nothing secret in a picture of the whole screen.** The browser's password, card, expiry, security-code and
+  one-time-code fields are blacked out where its window is on the screen; any other browser window, and any window
+  that asks for a password, are blacked out whole; a window in front stays as it is. If the browser's window can't be
+  found on the screen, no picture is sent.
 - **A Pip with a computer pays and orders when you ask, and you type the card.** "Pay these medical bills" got a
   perfect reading of three bills and then "I can't make payments"; birthday shirts got "I can't complete a purchase".
   A Personal Pip with a computer was still told it could never buy or pay. Now it fills in everything but the card

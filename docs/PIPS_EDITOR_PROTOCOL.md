@@ -232,6 +232,18 @@ every 700 ms; "What it saw…" draws each row's pointer, and a drag's path, over
 Personal Pip's page shows **Seeing** with the choice. A text-only Pip's card in its chat is an
 ordinary reply with `choices`; a tap sends the choice's words, and the backend recognises them.
 
+**The whole desktop** (API 54). A Pip whose model sees also acts on its whole screen (other windows,
+its apps); those steps reach the editor through the same fields: the live view's `pointer` is the API 53
+shape with its `kind` one of the same six and `screen_x`/`screen_y` set, and a timeline row stays
+`{frame, label, url, at}` plus `pointer` in that screenshot's pixels (the whole screen), so an older
+editor draws both. `get_pip_computer_apps {}` returns `{apps: {apps: [{key, name, program, available}],
+missing, state, line, bytes}}` (`key` `images` | `documents` | `pdf`; `state` `ready` | `measuring` |
+`offer` | `downloading` | `declined` | `unavailable`; `bytes` the download's size or null) and
+`set_pip_computer_apps {choice: "download" | "not_now"}` answers the offer and returns the same. The
+computer tab asks it with `get_pip_computer` and shows `line` once: in `offer` with **Download** and
+**Not now**, in `downloading` and `unavailable` as a plain line, otherwise nothing. Below API 54 the
+extension sends neither request.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

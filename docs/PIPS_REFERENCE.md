@@ -1122,6 +1122,67 @@ and Google's (`signed-by` a key checked against the pinned fingerprint
 an atomic `current` link. The desktop box mounts that root read-only at `/opt/desk`; the browser box
 mounts its `usr` there too when it runs the downloaded Chrome.
 
+**The whole desktop** (API 54, `pip_desktop_eyes`, `pip_apps`; Linux). A run whose model sees (`own`
+or `relay`, as in API 53) on a computer whose screen this machine shows (the computer pin's `desktop`)
+also gets: `desktop_look` (the whole screen), `desktop_click`, `desktop_double_click`,
+`desktop_right_click`, `desktop_hover`, `desktop_drag` (`x`, `y` to `to_x`, `to_y`, pressed, moved in
+16 steps, released), `desktop_scroll` (`dy`, `dx` in pixels, about 40 a wheel notch), `desktop_type`
+(`text`, at most 2,000 characters, into the window in front; any Unicode character types, as its X
+key symbol), `desktop_key` (`key`: a name or a shortcut such as `ctrl+s`, `alt+tab`, `Enter`, `F5`;
+with shift a letter is sent as its capital), `windows` (the open windows, front first: id, app, title,
+position, size; minimised ones listed apart), `focus_window` (`window`: its id; `_NET_ACTIVE_WINDOW` to
+the window manager) and `launch_app` (`app`: `images`, `documents`, `pdf`, `files`, `terminal` or
+`browser`, and for the first three an optional `path` in Files, walked like every Files path; with only
+a `path`, the app that opens its kind). Points are in the latest `desktop_look` picture, in the model's
+own scale (pixels, or 0-1000 for Qwen3 vision models, as in API 53). The hands are a VNC client
+(`pip_rfb`, RFB 3.8, Raw pixels) on the desktop's own Unix socket, a connection of its own: never the
+user's live view, whose input filter is unchanged. The windows are read from the desktop's X server
+(`pip_x11`) on `<runtime>/x11/X1` only, never `$DISPLAY`. Each step answers with a new picture (a red
+ring at the mouse after a step by position), is a timeline frame (the whole screen, blacked out the
+same way, at most 90 KB), and sets the live view's `pointer` with `screen_x`/`screen_y` (its `kind` is
+API 53's: `click_at`, `drag`... so an older editor draws it). A step on the browser's window (keys to
+it in front, the mouse over it) stamps the browser's `acted_at`, so a submit or upload it causes is
+held exactly as one from a browser step; a step on another app leaves the page's own background
+requests alone.
+
+*What the model never sees.* Before a desktop picture is encoded, DGC blacks out, window by window in
+stacking order (a window in front, with its frame, is put back as it was): on the browser's own tab
+every password, card number, expiry, security code and one-time code field (`secret_boxes`, as in API
+53), placed through its window: the X window of a Chrome or Chromium class whose geometry matches
+the window CDP reports for DGC's tab (`Browser.getWindowForTarget`, within 12 pixels), the page's
+origin at the bottom of it (`innerWidth`/`innerHeight` times `devicePixelRatio`); every other browser
+window, and the browser's window when another tab is showing in it, whole; and any window whose title
+asks for a secret (`Enter Password`, `Unlock Keyring`, `Authentication required`...; never a browser
+window). When DGC's tab is showing but its window can't be found on the screen, or the browser can't
+say where its fields are, no picture is sent. A password typed in a desktop app's own field (not a
+dialog) is drawn as dots by the app; DGC does not find such fields itself. The picture is a PNG made in
+DGC's process (stdlib), then a JPEG at most 1280x800 by the computer's own image tools (`photos`:
+Pillow, libvips, ImageMagick, ffmpeg or GdkPixbuf), or with none, by the Pip's browser in DGC's
+isolated world.
+
+*Its apps.* An image editor (LibreOffice Draw), a document editor (LibreOffice Writer) and a PDF viewer
+(Evince), on the dock after the Terminal (each writes its name to the control FIFO, and the Host opens
+it) and through `launch_app`. Each runs in a box of its own: `bwrap --unshare-all`, online only through
+the computer's egress proxy (its socket and an in-box relay on 127.0.0.1:8899 with `http(s)_proxy`, as
+the Terminal: public addresses on ports 80 and 443, never this computer, the local network, link-local or
+cloud metadata; no per-site asking, and what an app sends needs no Allow card: only the browser holds
+submits), `/usr` read-only, Files at `/home/pip/Files`, its settings in
+`computers/PIP_ID/home/.apps` at `/home/pip/.config` (LibreOffice seeded without its first-run screens,
+macros off), the desktop's X socket directory at `/tmp/.X11-unix`. The program runs from its own mount
+(`/opt/apps/libreoffice`, `/opt/apps/evince`): Ubuntu's AppArmor profiles for both attach by path and
+can't resolve a box's paths, which refused their X connection. Files and the Terminal are opened in the
+desktop box through a second FIFO (`launch`), which runs one of two fixed commands. They come from the
+system when it has them. Otherwise, on an apt system, `get_pip_computer_apps {}` (local) returns
+`{apps: {apps: [{key, name, program, available}], missing, state, line, bytes}}`: `state` is `ready`,
+`measuring` (the size is not known yet: the desktop setup's apt state works it out, `apt-get -s install
+--no-install-recommends` and each package's `Size`, recorded in `~/.dgc/desktop/ARCH/apps.json`),
+`offer` (`line` says what and how big, once), `downloading`, `declined` or `unavailable` (the system's
+own LibreOffice lacks a part: `line` names the packages to install). `set_pip_computer_apps {choice:
+"download" | "not_now"}` (local) answers it: a download joins the desktop's own (`pip_screen_setup`),
+unpacked into the same root, and DGC's Evince gets its schemas compiled and `EV_BACKENDS_DIR`. Measured
+for an Ubuntu 24.04 desktop without them: LibreOffice Draw and Writer with the GTK 3 plugin and Evince
+are 22 packages, 83 MB to download and 291 MB unpacked.
+
 **A computer's Files and Terminal** (API 43). Beside the browser, a computer has **Files**:
 `computers/PIP_ID/home/Files`, which the browser sees as `/home/pip/Files`; its downloads go to
 `Files/Downloads` (CDP `Browser.setDownloadBehavior`). The browser's profile beside it is never
@@ -1501,4 +1562,5 @@ Clients check it before using a newer control.
 | 50 | The `safe_source_v2` source rules (files DGC can't copy are left out and listed, `.dgcignore`, the project's ignore files for current files, a Pip's Excluded folders in `source_policy.exclude`, 256 MiB); `check_pip_source` and `get_pip_run_source`; new reviewer and Quill Pips start on `safe_source_v2` |
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
+| 54 | Pips use the whole desktop (`pip_desktop_eyes`, `pip_apps`): a run whose model sees gets `desktop_look`, `desktop_click`, `desktop_double_click`, `desktop_right_click`, `desktop_hover`, `desktop_drag`, `desktop_scroll`, `desktop_type`, `desktop_key`, `windows`, `focus_window` and `launch_app`, with secrets blacked out of the whole screen; an image editor, a document editor and a PDF viewer, each in its own box, online through the computer's egress proxy like the Terminal; `get_pip_computer_apps`, `set_pip_computer_apps` |
 | 52 | Photos and files in a Pip's chat through the backend's spool: `send_pip_message` takes `spooled_images` (8 MiB a photo, 32 MiB in all, up to 64; HEIC kept as JPEG) and `spooled_files` (a document 16 MiB, text 1 MiB, 32 MiB in all, up to 16), local only; `get_pip_message_image` takes `as_file` and answers with the kept file's `path`. A large photo goes to the model at 2,500 pixels |
