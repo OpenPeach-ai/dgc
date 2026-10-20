@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **markdown-it 15.0.3.** A security fix in the Markdown parser (GHSA-r7fv-28h4-cvq7: unmatched closing quotes with smart quotes took quadratic time).
 - **A Pip's computer has apps (Pips API 54).** Its dock adds an image editor, Documents and a PDF viewer when the
   computer has them; when it doesn't, the computer tab asks once, in one line saying what and how big, with
   **Download** and **Not now**. A Pip that can see uses the whole desktop, and you see its cursor there as before.
