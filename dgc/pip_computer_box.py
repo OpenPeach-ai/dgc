@@ -198,6 +198,8 @@ _CHROME_FLAGS = (
 # What pages are told about the network: online, an ordinary connection (see BoxedBrowser._guard).
 ONLINE = {"offline": False, "latency": 40, "downloadThroughput": 12_500_000, "uploadThroughput": 2_500_000,
           "connectionType": "ethernet"}
+# A step on a tab whose page is asking a question (confirm or prompt): nothing else runs there until it is answered.
+DIALOG_OPEN = "the page is asking a question (a dialog is open); answer it with dialog first"
 # A new window on the computer's screen opens here, as on Grok's bots.
 HOME_PAGE = "https://www.google.com/"
 
@@ -840,6 +842,24 @@ class BoxedBrowser(BrowserSession):
         # A saved login's one submit (pip_login_fill.LoginPass), while DGC signs the Pip in: let through, once.
         self.login_pass = None
         self.login_sent: list[str] = []
+        # What a step changed and what the page reported (pip_browser_steps): every note carries a number from one
+        # counter, so a step asks for what came after the number it started at (``since``).
+        self.seq = 0
+        self.notes: list[dict] = []                # failed requests, console and uncaught errors, alerts, opened tabs
+        self.downloads: dict[str, dict] = {}       # guid -> {name, state, received, total, seq}
+        self._requests: dict[tuple, tuple] = {}    # (session, requestId) -> (method, url, type)
+        self._inflight: dict[tuple, tuple] = {}    # (session, requestId) -> (type, when) until it finishes or fails
+        # During a run (Host.begin): a confirm or prompt waits for the Pip's answer (dialog) instead of being dismissed,
+        # and a file picker the page opens waits for upload. With no run, both are answered at once, as before.
+        self.hold_dialogs = False
+        self.dialog: dict | None = None            # {type, message, default, session, url}
+        self.chooser: dict | None = None           # a file picker the page opened: {backendNodeId, mode, session}
+        self._intercepting = False
+        self._choosing = False                     # set_files is answering a picker itself
+        self._tab_names: dict[str, str] = {}       # targetId -> t1, t2..., never reused while the browser runs
+        self._next_tab = 1
+        self._openers: dict[str, str] = {}         # targetId -> the tab that opened it
+        self._orphaned = ""                        # the tab in front, when it closed by itself
 
     # -- lifecycle -------------------------------------------------------------------------
 
@@ -877,20 +897,24 @@ class BoxedBrowser(BrowserSession):
         self._ws = _PageChannel(self._pipe, session)
         for domain in ("Page", "Runtime", "Log", "Network"):
             self.command(f"{domain}.enable")
-        if self.display_dir is not None:
-            # On a desktop, a profile that kept its sign-ins also remembers its last tabs; DGC's page is
-            # the one the Pip and the user share, so the browser starts with that tab alone.
-            try:
-                for info in self._browser_call("Target.getTargets").get("targetInfos", []):
-                    if info.get("type") == "page" and info.get("targetId") != target:
-                        self._browser_call("Target.closeTarget", {"targetId": info["targetId"]})
-            except (BrowserError, socket.timeout, OSError):
-                pass
-        # Downloads land in the computer's Files, which the Files app and the Terminal see.
+        # DGC's page is the one the Pip and the user share, so the browser starts with that tab alone: on a desktop a
+        # profile that kept its sign-ins also remembers its last tabs, and headless Chrome opens its own blank one.
         try:
-            self._browser_call("Browser.setDownloadBehavior", {"behavior": "allow", "downloadPath": "/home/pip/Files/Downloads"})
+            for info in self._browser_call("Target.getTargets").get("targetInfos", []):
+                if info.get("type") == "page" and info.get("targetId") != target:
+                    self._browser_call("Target.closeTarget", {"targetId": info["targetId"]})
         except (BrowserError, socket.timeout, OSError):
             pass
+        self._tab_name(target)
+        # Downloads land in the computer's Files, which the Files app and the Terminal see; their events say when.
+        try:
+            self._browser_call("Browser.setDownloadBehavior", {"behavior": "allow", "downloadPath": "/home/pip/Files/Downloads",
+                                                               "eventsEnabled": True})
+        except (BrowserError, socket.timeout, OSError):
+            pass
+        if self._intercepting:
+            self._intercepting = False
+            self.watch_choosers(True)
 
     def alive(self) -> bool:
         """Started, and its process still running (a window the user closed may have ended it)."""
@@ -934,6 +958,8 @@ class BoxedBrowser(BrowserSession):
 
     def _cleanup(self) -> None:
         self._ws = None
+        self.dialog = self.chooser = None          # they went with the pages
+        self._tab_names, self._next_tab = {}, 1   # a restarted browser's first tab is t1 again
         if self._box is not None:
             self._box.stop()
             self._box = None
@@ -954,19 +980,465 @@ class BoxedBrowser(BrowserSession):
                 self._kinds.setdefault(str(info.get("targetId", "")), str(info.get("type", "")))
                 self._parents.setdefault(str(info.get("targetId", "")), str(message.get("sessionId", "")))
                 if info.get("type") == "page":
-                    self._pages.add(str(info.get("targetId", "")))
+                    target = str(info.get("targetId", ""))
+                    self._pages.add(target)
+                    if info.get("openerId"):
+                        # A link with target=_blank or a popup: the step that caused it moves the Pip there (opened_since).
+                        self._openers[target] = str(info["openerId"])
+                        self._note("opened", "", target=target, opener=str(info["openerId"]))
                 self._guard(child)
                 self._fire("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}, child)
                 self._fire("Runtime.runIfWaitingForDebugger", {}, child)
+        elif method == "Target.detachedFromTarget":
+            gone = str(params.get("targetId") or self._session_target(params.get("sessionId")) or "")
+            if gone and self._attached.get(gone) == params.get("sessionId"):
+                for table in (self._attached, self._kinds, self._parents):
+                    table.pop(gone, None)
+                self._pages.discard(gone)
+                if self._ws is not None and params.get("sessionId") == getattr(self._ws, "session_id", None):
+                    self._orphaned = gone       # the tab in front closed itself: recover_tab moves on
+            if self.dialog is not None and self.dialog.get("session") == params.get("sessionId"):
+                self.dialog = None
         elif method == "Fetch.requestPaused":
             self._gate(params, message.get("sessionId", ""))
         elif method == "Input.dragIntercepted":
             self._drag_data = params.get("data")
         elif method == "Page.fileChooserOpened" and isinstance(params.get("backendNodeId"), int):
             self._chooser = params
+            if self._intercepting and not self._choosing:
+                self.chooser = {**params, "session": str(message.get("sessionId", ""))}
+                self._note("chooser", str(message.get("sessionId", "")))
         elif method == "Page.frameNavigated" and not (params.get("frame") or {}).get("parentId"):
             self.acted_at = 0.0          # a new page: its own requests are not the last action's effect
+            if self.chooser is not None and self.chooser.get("session") == message.get("sessionId"):
+                self.chooser = None
+        elif method == "Page.javascriptDialogOpening":
+            self._dialog_opened(params, str(message.get("sessionId", "")))
+            return                       # answered here (or held for the Pip), never by the plain session's rule
+        elif method == "Page.javascriptDialogClosed":
+            if self.dialog is not None and self.dialog.get("session") == message.get("sessionId"):
+                self.dialog = None       # the user answered it on the computer's screen
+            return
+        elif method in ("Browser.downloadWillBegin", "Browser.downloadProgress"):
+            self._download(method, params)
+        elif method in ("Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed",
+                        "Network.loadingFinished", "Log.entryAdded", "Runtime.consoleAPICalled", "Runtime.exceptionThrown"):
+            self._health(method, params, str(message.get("sessionId", "")))
         super()._observe(message)
+
+    # -- what a step changed, what the page reported --------------------------------------------
+
+    def _note(self, kind: str, session: str, **fields) -> None:
+        self.seq += 1
+        self.notes.append({"seq": self.seq, "kind": kind, "session": session, **fields})
+        del self.notes[:-200]
+
+    def since(self, mark: int, *, kinds=None, sessions=None) -> list[dict]:
+        """The notes after ``mark`` (a step's starting ``seq``), of these kinds, from these tabs' sessions."""
+        return [n for n in self.notes if n["seq"] > mark and (kinds is None or n["kind"] in kinds)
+                and (sessions is None or n["session"] in sessions or not n["session"])]
+
+    def downloads_since(self, mark: int) -> list[dict]:
+        return [d for d in self.downloads.values() if d["seq"] > mark]
+
+    _BENIGN_FAILURES = ("net::ERR_ABORTED", "net::ERR_BLOCKED_BY_CLIENT")    # a page left, a download, DGC's own gate
+
+    def busy(self, session: str | None = None) -> int:
+        """How many of the tab's own page loads and API calls are still waiting for an answer (not a long-lived
+        EventSource, nor one older than a minute)."""
+        session = getattr(self._ws, "session_id", None) if session is None else session
+        now = time.monotonic()
+        return sum(1 for (where, _), (kind, since) in list(self._inflight.items())
+                   if where == session and kind in ("Document", "XHR", "Fetch") and now - since < 60)
+
+    def _health(self, method: str, params: dict, session: str) -> None:
+        key = (session, str(params.get("requestId", "")))
+        if method in ("Network.loadingFinished", "Network.loadingFailed"):
+            self._inflight.pop(key, None)
+        if method == "Network.requestWillBeSent":
+            request = params.get("request") or {}
+            self._requests[key] = (str(request.get("method", "GET"))[:10], str(request.get("url", ""))[:2000],
+                                   str(params.get("type", "")))
+            self._inflight[key] = (str(params.get("type", "")), time.monotonic())
+            for table in (self._requests, self._inflight):
+                while len(table) > 400:
+                    table.pop(next(iter(table)))
+        elif method == "Network.responseReceived":
+            response = params.get("response") or {}
+            status = response.get("status")
+            if isinstance(status, (int, float)) and status >= 400:
+                verb, _, _ = self._requests.get((session, str(params.get("requestId", ""))), ("GET", "", ""))
+                self._note("request", session, method=verb, url=str(response.get("url", ""))[:2000],
+                           type=str(params.get("type", "")), status=int(status))
+        elif method == "Network.loadingFailed":
+            error = str(params.get("errorText", ""))
+            if params.get("canceled") or error in self._BENIGN_FAILURES or params.get("blockedReason"):
+                return
+            verb, url, kind = self._requests.get((session, str(params.get("requestId", ""))), ("GET", "", ""))
+            self._note("request", session, method=verb, url=url, type=str(params.get("type", "") or kind),
+                       status=f"failed ({error[:60]})")
+        elif method == "Log.entryAdded":
+            entry = params.get("entry") or {}
+            text = str(entry.get("text", ""))
+            # Chrome's own "Failed to load resource" line repeats a failed request, which is reported as one.
+            if entry.get("level") == "error" and not text.startswith("Failed to load resource"):
+                self._note("console", session, text=text[:300])
+        elif method == "Runtime.consoleAPICalled":
+            if params.get("type") in ("error", "assert"):
+                said = " ".join(str(a.get("value", a.get("description", ""))) for a in (params.get("args") or []))
+                self._note("console", session, text=said[:300])
+        elif method == "Runtime.exceptionThrown":
+            details = params.get("exceptionDetails") or {}
+            said = (details.get("exception") or {}).get("description") or details.get("text") or ""
+            self._note("error", session, text=str(said).split("\n", 1)[0][:300])
+
+    def _download(self, method: str, params: dict) -> None:
+        guid = str(params.get("guid", ""))
+        if method == "Browser.downloadWillBegin":
+            name = Path(str(params.get("suggestedFilename") or "download")).name or "download"
+            self.seq += 1
+            self.downloads[guid] = {"name": name[:200], "state": "inProgress", "received": 0, "total": 0, "seq": self.seq}
+            while len(self.downloads) > 20:
+                self.downloads.pop(next(iter(self.downloads)))
+            return
+        found = self.downloads.get(guid)
+        if found is None:
+            return
+        found["received"], found["total"] = int(params.get("receivedBytes") or 0), int(params.get("totalBytes") or 0)
+        state = str(params.get("state") or "")
+        if state in ("completed", "canceled") and found["state"] != state:
+            found["state"] = state
+            if state == "completed" and params.get("filePath"):
+                found["name"] = Path(str(params["filePath"])).name[:200] or found["name"]
+            self.seq += 1
+            found["seq"] = self.seq
+
+    # -- a page's dialogs ------------------------------------------------------------------------
+
+    def _dialog_opened(self, params: dict, session: str) -> None:
+        kind = str(params.get("type", "alert"))
+        if self.hold_dialogs and kind in ("confirm", "prompt"):
+            # Left open: the Pip reads it in the step's answer and answers it with its dialog step. What its OK then
+            # makes the page send is held like any submit.
+            self.dialog = {"type": kind, "message": str(params.get("message", ""))[:2000],
+                           "default": str(params.get("defaultPrompt", ""))[:500], "session": session,
+                           "url": str(params.get("url", ""))[:500]}
+            self._note("dialog", session)
+            return
+        # An alert, leaving the page (beforeunload), or no run: answered at once, on the tab it came from.
+        self._fire("Page.handleJavaScriptDialog", {"accept": kind == "beforeunload"}, session or None)
+        if kind == "alert" and self.hold_dialogs:
+            self._note("alert", session, text=str(params.get("message", ""))[:300])
+
+    def _session_call(self, session: str, method: str, params: dict | None = None, *, timeout: float = 10) -> dict:
+        """One command to a tab by its session (a dialog on a tab not in front); its reply comes back by id."""
+        self._next_id += 1
+        want = self._next_id
+        self._pipe.send({"id": want, "method": method, "params": params or {}, "sessionId": session})
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self._pipe.settimeout(max(0.05, deadline - time.monotonic()))
+            message = self._pipe.recv()
+            if message.get("id") == want:
+                if "error" in message:
+                    raise BrowserError(f"{method}: {message['error'].get('message', 'devtools error')}")
+                return message.get("result", {}) or {}
+            self._observe(message)
+        raise socket.timeout(f"{method} timed out")
+
+    def answer_dialog(self, accept: bool, text: str | None = None) -> dict:
+        """Answer the page's open confirm or prompt: OK (with a prompt's answer) or Cancel. Like a click, it starts
+        the window in which what the page sends next is the Pip's, so a submit it leads to is held."""
+        dialog = self.dialog
+        if dialog is None:
+            raise BrowserError("No dialog is open. status says whether one is.")
+        params = {"accept": bool(accept)}
+        if accept and dialog["type"] == "prompt" and text is not None:
+            params["promptText"] = str(text)[:2000]
+        self.acted_at = time.monotonic()
+        self._session_call(dialog["session"], "Page.handleJavaScriptDialog", params)
+        self.dialog = None
+        self.acted_at = time.monotonic()
+        return dialog
+
+    def dismiss_dialog(self) -> None:
+        """A run that ended with a dialog open: Cancel, so the page isn't left stuck for the user."""
+        if self.dialog is not None:
+            try:
+                self.answer_dialog(False)
+            except (BrowserError, socket.timeout, OSError):
+                self.dialog = None
+
+    def _blocked_by_dialog(self, method: str) -> bool:
+        """A tab with an open dialog answers nothing that runs in its page (a script, a screenshot, input) until it
+        is answered; the browser, its targets and the dialog itself still answer."""
+        dialog = self.dialog
+        return (dialog is not None and dialog.get("session") == getattr(self._ws, "session_id", None)
+                and not method.startswith(("Page.handleJavaScriptDialog", "Page.getNavigationHistory", "Target.", "Browser.")))
+
+    def command(self, method: str, params: dict | None = None, *, timeout: float = 30.0) -> dict:
+        """BrowserSession.command, for a page that may open a dialog: a command the dialog would block refuses at
+        once, and one that was running when it opened (the click that opened it) stops waiting for its reply."""
+        if self._blocked_by_dialog(method):
+            raise BrowserError(DIALOG_OPEN)
+        if self._ws is None:
+            raise BrowserError("the browser session is not running")
+        self._next_id += 1
+        message_id = self._next_id
+        self._ws.settimeout(timeout)
+        self._ws.send({"id": message_id, "method": method, "params": params or {}})
+        deadline = time.monotonic() + timeout
+        while True:
+            if time.monotonic() > deadline:
+                raise BrowserError(f"{method} timed out after {timeout:.0f}s")
+            message = self._ws.recv()
+            if message.get("id") == message_id:
+                if "error" in message:
+                    raise BrowserError(f"{method}: {message['error'].get('message', 'unknown devtools error')}")
+                return message.get("result", {}) or {}
+            self._observe(message)
+            if self._blocked_by_dialog(method):
+                return {}            # its reply comes once the dialog is answered, and is ignored then
+
+    # -- tabs --------------------------------------------------------------------------------------
+
+    def _tab_name(self, target: str) -> str:
+        if target not in self._tab_names:
+            self._tab_names[target] = f"t{self._next_tab}"
+            self._next_tab += 1
+        return self._tab_names[target]
+
+    def tab_list(self) -> list[dict]:
+        """This browser's tabs, oldest first: [{tab, target, title, url, current}]."""
+        self.start()
+        current = self.page_target()
+        tabs = []
+        for info in self._browser_call("Target.getTargets").get("targetInfos", []):
+            target, url = str(info.get("targetId", "")), str(info.get("url", ""))
+            if info.get("type") != "page" or target not in self._pages or url.startswith(("devtools://", "chrome://")):
+                continue
+            tabs.append({"tab": self._tab_name(target), "target": target, "title": str(info.get("title", ""))[:200],
+                         "url": url[:500], "current": target == current})
+        return sorted(tabs, key=lambda t: int(t["tab"][1:]))
+
+    def find_tab(self, name: str) -> dict:
+        wanted = str(name or "").strip().lower()
+        found = next((t for t in self.tab_list() if t["tab"] == wanted), None)
+        if found is None:
+            raise BrowserError(f"there is no tab {name or '(none given)'}; tabs lists them (t1, t2...)")
+        return found
+
+    def opened_since(self, mark: int) -> str | None:
+        """The newest tab the page in front opened after ``mark`` (a target=_blank link, a popup), if it is still open."""
+        current = self.page_target()
+        for note in reversed(self.since(mark, kinds=("opened",))):
+            if note["opener"] == current and note["target"] in self._pages:
+                return note["target"]
+        return None
+
+    def recover_tab(self) -> str:
+        """After the tab in front closed by itself (a sign-in popup that finished): the tab that opened it, or the
+        newest open one, is in front instead. Returns its name, or "" when nothing moved."""
+        if self._ws is not None and self._pipe is not None:
+            self._pump(0.05)                     # between steps nobody reads the pipe: its news is still waiting
+        gone, self._orphaned = self._orphaned, ""
+        if not gone or self._ws is None or getattr(self._ws, "session_id", None) in self._attached.values():
+            return ""
+        open_tabs = [t for t in self._pages if t in self._attached]
+        if not open_tabs:
+            return ""
+        back = self._openers.get(gone)
+        follow = back if back in open_tabs else max(open_tabs, key=lambda t: int(self._tab_name(t)[1:]))
+        self.switch_tab(follow, settle=2.0)
+        return self._tab_name(follow)
+
+    def switch_tab(self, target: str, *, settle: float = 8.0) -> None:
+        """Make a tab the one the Pip (and the user's view of the browser) uses, and wait for it to load."""
+        session = self._attached.get(target)
+        if not session or target not in self._pages:
+            raise BrowserError("that tab has closed; tabs lists the open ones")
+        self._ws = _PageChannel(self._pipe, session)
+        self._page = type(self._page)()
+        for domain in ("Page", "Runtime", "Log"):
+            self.command(f"{domain}.enable")
+        if self._intercepting:
+            try:
+                self.command("Page.setInterceptFileChooserDialog", {"enabled": True})
+            except BrowserError:
+                pass
+        try:
+            self._browser_call("Target.activateTarget", {"targetId": target})
+        except (BrowserError, socket.timeout):
+            pass
+        self._tab_name(target)
+        self.settle(settle)
+
+    def settle(self, seconds: float = 8.0) -> None:
+        """Wait (at most ``seconds``) for the tab in front to leave about:blank and finish loading: a tab a link just
+        opened starts blank, and its load event may have passed before DGC was listening to it."""
+        deadline = time.monotonic() + seconds
+        blank_until = time.monotonic() + min(3.0, seconds)
+        while time.monotonic() < deadline:
+            try:
+                here = json.loads(self.evaluate_json("JSON.stringify([location.href, document.readyState])") or "[]")
+            except (BrowserError, ValueError, TypeError):
+                here = []
+            if self.dialog is not None:
+                return
+            if len(here) == 2:
+                self.current_url = str(here[0])
+                if here[1] == "complete" and (here[0] != "about:blank" or time.monotonic() >= blank_until):
+                    break
+            self._pump(0.25)
+        quiet = time.monotonic() + 1.5
+        while time.monotonic() < min(quiet, deadline + 1.5):
+            self._pump(0.3)
+            if time.monotonic() - self._page.last_activity >= 0.6:
+                break
+
+    def open_tab(self, url: str) -> str:
+        """A new tab at ``url``, made the one in front. Returns its target id."""
+        self.start()
+        made = str(self._browser_call("Target.createTarget", {"url": "about:blank"}).get("targetId", ""))
+        deadline = time.monotonic() + 10
+        while made not in self._attached and time.monotonic() < deadline:
+            self._pipe.settimeout(max(0.05, deadline - time.monotonic()))
+            try:
+                self._observe(self._pipe.recv())
+            except socket.timeout:
+                break
+        if made not in self._attached:
+            raise BrowserError("the new tab did not open")
+        self.switch_tab(made, settle=2.0)
+        self.navigate(url)
+        return made
+
+    def close_tab(self, target: str) -> str | None:
+        """Close a tab; closing the one in front moves to the tab that opened it, or the newest other one. Returns the
+        tab now in front."""
+        tabs = self.tab_list()
+        if len(tabs) <= 1:
+            raise BrowserError("that is your only tab; open another page instead of closing it")
+        current = self.page_target()
+        self._browser_call("Target.closeTarget", {"targetId": target})
+        deadline = time.monotonic() + 3
+        while target in self._pages and time.monotonic() < deadline:
+            self._pipe.settimeout(0.2)
+            try:
+                self._observe(self._pipe.recv())
+            except socket.timeout:
+                continue
+        self._pages.discard(target)
+        if target != current:
+            return current
+        left = [t["target"] for t in tabs if t["target"] != target]
+        back = self._openers.get(target)
+        follow = back if back in left else left[-1]
+        self.switch_tab(follow, settle=2.0)
+        return follow
+
+    # -- a run's file pickers ------------------------------------------------------------------------
+
+    def watch_choosers(self, on: bool) -> None:
+        """During a run, a file picker the page opens waits for the Pip's upload (status says it is open); with no run
+        the page's own picker opens for the user, as before."""
+        if on == self._intercepting:
+            return
+        self._intercepting = on
+        if not on:
+            self.chooser = None
+        if self._ws is None:
+            return
+        try:
+            self.command("Page.setInterceptFileChooserDialog", {"enabled": on})
+        except BrowserError:
+            pass
+
+    # -- hands by ref --------------------------------------------------------------------------------
+
+    def hover_ref(self, ref: str) -> str:
+        self.start()
+        x, y, label = self._centre_of(ref)
+        self.hover_at(x, y)
+        self._pump(0.4)
+        return label
+
+    def drag_ref(self, ref: str, to: str) -> tuple[str, str]:
+        """Drag one element onto another, both by ref, as drag() does by position."""
+        self.start()
+        x1, y1, first = self._centre_of(ref)
+        raw = self.evaluate_json(
+            "(() => { const el = " + self._locator(to) + "; if (!el) return JSON.stringify({ok: false});"
+            " const r = el.getBoundingClientRect();"
+            " return JSON.stringify({ok: r.width > 0 && r.height > 0, x: r.left + r.width / 2, y: r.top + r.height / 2,"
+            "  shown: r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth,"
+            "  label: (el.innerText || el.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().slice(0, 80)}); })()")
+        try:
+            box = json.loads(raw) if isinstance(raw, str) else {}
+        except ValueError:
+            box = {}
+        if not box.get("ok"):
+            raise BrowserError(f"{to} is not on the page, or has no size. Take a fresh read: refs change whenever the page does.")
+        if not box.get("shown"):
+            raise BrowserError(f"{to} is off the screen while {ref} is on it; scroll so both show, then drag again")
+        self.drag(x1, y1, float(box["x"]), float(box["y"]))
+        self._pump(0.4)
+        return first, str(box.get("label", ""))
+
+    _CHECKED_JS = ("(() => { const el = %s; if (!el) return JSON.stringify({ok: false, missing: true});"
+                   " const type = (el.type || '').toLowerCase(), native = el.tagName === 'INPUT' && (type === 'checkbox' || type === 'radio');"
+                   " const aria = el.getAttribute('aria-checked') ?? el.getAttribute('aria-pressed');"
+                   " const label = ((el.labels && el.labels[0] && el.labels[0].innerText) || el.getAttribute('aria-label') || el.innerText"
+                   "  || el.name || '').replace(/\\s+/g, ' ').trim().slice(0, 80);"
+                   " return JSON.stringify({ok: native || aria !== null, on: native ? el.checked : aria === 'true',"
+                   "  radio: type === 'radio' || el.getAttribute('role') === 'radio', label: label, disabled: !!el.disabled}); })()")
+
+    def checked(self, ref: str) -> dict:
+        """Whether a checkbox, radio button or switch is on: {ok, on, radio, label, disabled}."""
+        raw = self.evaluate_json(self._CHECKED_JS % self._locator(ref))
+        try:
+            return json.loads(raw) if isinstance(raw, str) else {}
+        except ValueError:
+            return {}
+
+    def set_checked(self, ref: str, want: bool) -> tuple[str, bool]:
+        """Check or uncheck it by clicking it, as a person does (its page sees the click), and say whether it took:
+        (its label, whether it was already so)."""
+        self.start()
+        state = self.checked(ref)
+        if state.get("missing"):
+            raise BrowserError(f"{ref} is not on the page. Take a fresh read: refs change whenever the page does.")
+        if not state.get("ok"):
+            raise BrowserError(f"{ref} is not a checkbox, radio button or switch; use click for it")
+        if state.get("disabled"):
+            raise BrowserError(f"{ref} is disabled")
+        if bool(state.get("on")) == want:
+            return str(state.get("label", "")), True
+        if state.get("radio") and not want:
+            raise BrowserError("a radio button can't be unchecked; choose another option of the same question instead")
+        try:
+            self.click(ref)
+        except BrowserError as error:
+            if "has no size" not in str(error):
+                raise
+            # A styled box that hides its input: the page's own label or the input itself, clicked in the page.
+            self.acted_at = time.monotonic()
+            self.evaluate_json("(() => { const el = " + self._locator(ref) + "; (el.labels && el.labels[0] || el).click();"
+                               " return true; })()")
+        self._pump(0.3)
+        after = self.checked(ref)
+        if bool(after.get("on")) != want:
+            raise BrowserError(f"the page kept {ref} {'unchecked' if want else 'checked'}")
+        return str(state.get("label", "")), False
+
+    def forward(self) -> None:
+        self.evaluate_json("(() => { history.forward(); return true; })()")
+
+    def reload(self) -> str:
+        self.acted_at = time.monotonic()        # a page made by a submit is sent again: held like any submit
+        self._page = type(self._page)()
+        self.command("Page.reload", {})
+        return self._await_load()
 
     def acting(self) -> bool:
         """Whether the Pip or the user acted on this page in the last ACTION_SECONDS."""
@@ -1409,6 +1881,15 @@ class BoxedBrowser(BrowserSession):
         the button (by ref or by point) that opens the page's file chooser, which DGC answers itself.
         Choosing a file sends nothing: the page's own upload, when it makes one, is held like any write."""
         self.start()
+        pending = self.chooser
+        if pending is not None:
+            # The page already opened its file picker (a click before this step): answer that one.
+            self.chooser = None
+            files = list(paths)[:1] if pending.get("mode") == "selectSingle" else list(paths)
+            self._session_call(pending.get("session") or getattr(self._ws, "session_id", ""), "DOM.setFileInputFiles",
+                               {"files": files, "backendNodeId": pending["backendNodeId"]})
+            self.acted_at = time.monotonic()
+            return "chooser"
         if ref and point is None:
             element = self._locator(ref)
             kind = self.evaluate_json("(() => { const el = " + element + "; return el ? (el.tagName === 'INPUT'"
@@ -1424,6 +1905,7 @@ class BoxedBrowser(BrowserSession):
                 self.acted_at = time.monotonic()
                 return "input"
         self._chooser = None
+        self._choosing = True
         self.command("Page.setInterceptFileChooserDialog", {"enabled": True})
         try:
             if point is not None:
@@ -1436,10 +1918,12 @@ class BoxedBrowser(BrowserSession):
             chooser = self._chooser
         finally:
             self._chooser = None
-            try:
-                self.command("Page.setInterceptFileChooserDialog", {"enabled": False})
-            except BrowserError:
-                pass
+            self._choosing = False
+            if not self._intercepting:            # a run keeps catching pickers (watch_choosers)
+                try:
+                    self.command("Page.setInterceptFileChooserDialog", {"enabled": False})
+                except BrowserError:
+                    pass
         if chooser is None:
             raise BrowserError("that did not open a file chooser. Use the page's file field or its upload button.")
         if chooser.get("mode") == "selectSingle":

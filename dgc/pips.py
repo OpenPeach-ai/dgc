@@ -3082,7 +3082,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return 'error: your computer shows no desktop here; use the browser\'s steps.'
                 if (op == 'look' or desk) and mode not in ('own', 'relay'):
                     return self._cannot_see()
-                if (op in pip_computer.POINT_OPS or op in pip_computer.DESKTOP_POINT_OPS
+                # drag by ref (ref onto to) is a text step: no eyes, no points.
+                if ((op in pip_computer.POINT_OPS and not (op == 'drag' and args.get('ref'))) or op in pip_computer.DESKTOP_POINT_OPS
                         or (op == 'upload' and 'x' in args and not args.get('ref'))):
                     if mode not in ('own', 'relay'):
                         return 'error: you cannot act by position without seeing; use read and refs.'

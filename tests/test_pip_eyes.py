@@ -58,7 +58,8 @@ class ToolTests(unittest.TestCase):
         for op in ("look", "click_at", "double_click_at", "right_click_at", "drag", "scroll_at", "hover_at", "upload"):
             self.assertIn(op, enum("own"))
             self.assertIn(op, enum("relay"))
-        self.assertEqual([op for op in enum(None) if op in pip_computer.POINT_OPS], [])
+        # drag also works by ref (ref onto to), so a text-only Pip keeps it, with no points to give.
+        self.assertEqual([op for op in enum(None) if op in pip_computer.POINT_OPS], ["drag"])
         self.assertIn("look", enum(None), "a text-only Pip can still ask to look: that is how it says it can't see")
         self.assertIn("upload", enum(None), "a file field by ref needs no eyes")
         self.assertNotIn("x", pip_computer.schema(None)["function"]["parameters"]["properties"])

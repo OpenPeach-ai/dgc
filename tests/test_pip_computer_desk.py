@@ -182,7 +182,7 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(pip_computer.schema("own")["function"]["parameters"]["properties"]["op"]["enum"],
                          [op for op in pip_computer.OPS if op not in pip_computer.DESKTOP_OPS])
         self.assertEqual(pip_computer.schema()["function"]["parameters"]["properties"]["op"]["enum"],
-                         [op for op in pip_computer.OPS if op not in pip_computer.POINT_OPS + pip_computer.DESKTOP_OPS])
+                         [op for op in pip_computer.OPS if op == "drag" or op not in pip_computer.POINT_OPS + pip_computer.DESKTOP_OPS])
 
     def test_a_robot_check_stops_the_pip_and_waits_for_the_user_who_finishes_it(self):
         # The founder's Google search answered "unusual traffic"; like Grok's bots, a Pip never solves a
