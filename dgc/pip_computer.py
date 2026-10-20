@@ -252,7 +252,8 @@ DESKTOP_NOTICE = ("Your computer is a whole desktop, like a person's: the browse
                   "(/home/pip/Files). Like the Terminal, the apps reach public websites, never this computer or the "
                   "user's network. When the user asks you to design something (a "
                   "shirt, a card, a poster), make it yourself in the image editor: their words as big text, a shape or "
-                  "two in colour, then File > Export as a PNG into your Files, and upload that PNG where it is needed.")
+                  "two in colour. To save it as a PNG: File > Export..., type /home/pip/Files/NAME.png as the name and "
+                  "press Enter, then OK on PNG Options. Then upload that PNG where it is needed.")
 
 
 def validate_plan(plan):

@@ -55,7 +55,8 @@ APP_MEMORY = 2 * 1024 ** 3
 MAX_RUNNING = 6
 OFFER = "apps.json"
 # LibreOffice opens with none of its first-run screens: no tip of the day, no "what's new" or donation bars, no
-# crash reporter, no recovery dialog (a Pip's app that was stopped is not a crash to recover).
+# crash reporter, no recovery dialog (a Pip's app that was stopped is not a crash to recover), macros off, and its
+# Open, Save and Export dialogs start in the computer's Files (they opened in /tmp).
 LIBREOFFICE_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
 <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="ShowTipOfTheDay" oor:op="fuse"><value>false</value></prop></item>
@@ -69,6 +70,7 @@ LIBREOFFICE_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
 <item oor:path="/org.openoffice.Office.Common/Save/Document"><prop oor:name="WarnAlienFormat" oor:op="fuse"><value>false</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Paths/Paths/org.openoffice.Office.Paths:NamedPath['Work']"><prop oor:name="WritePath" oor:op="fuse"><value>file:///home/pip/Files</value></prop></item>
 </oor:items>
 """
 
