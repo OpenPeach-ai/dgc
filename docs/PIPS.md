@@ -897,6 +897,12 @@ without.
 
 - **Reading is free.** During a run the Pip opens, reads, scrolls and clicks through public
   websites on its own.
+- **It copes with how pages behave.** It waits for results a page is still loading, follows a link that opens a new
+  tab (and can go back to the first one), answers a page's own "Are you sure?" or question box, checks boxes, and
+  knows what it downloaded (into its Files, under **Downloads**). After each step it is told what changed on the page,
+  and any error the page's own site reported, so it doesn't guess. What a page's OK then sends still waits for you.
+- **Its report points to what it did.** Each step that changes something is numbered, and its picture in **What it
+  saw…** carries the same number, so "step 4" in its reply is one click away.
 - **It pays, orders and books when you ask; you type the card.** "Pay these medical bills" with photos of the
   bills: it finds each bill on its site and fills in everything but the card, asking once for what it can't find (a
   delivery address, a phone number). Card numbers, expiry dates and security codes are like passwords: a Pip never

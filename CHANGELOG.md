@@ -6,6 +6,23 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Pip's browser copes with slow pages, new tabs, a page's own questions and downloads.** A Pip lost track of a
+  link that opened a new tab, every "Are you sure?" a page asked was cancelled (so a download or a Remove behind one
+  never happened), it couldn't wait for results that arrive after a page loads, it wasn't told what it downloaded,
+  and Enter in a search box didn't search. Now a link that opens a tab moves the Pip there; a page's confirm or
+  prompt waits for the Pip to answer it, and what its OK then sends still waits for your Allow; it waits for what a
+  page is still loading; it checks boxes, hovers and drags by name, goes forward and reloads, lists and switches tabs,
+  and can ask where it is (its tab, an open question or file picker, its downloads in Files). Every step answers
+  with what it changed (Moved to…, Appeared…, Gone…, Opened a new tab…), so it needn't read the page again, and with
+  any request the page's own site failed and its errors, quoted as the page's words and never as instructions. Each
+  step is numbered, and its picture in **What it saw…** carries the same number, so its report can say "step 4".
+  Measured on the same errand at a made-up shop with deepseek-v4.1-flash:cloud, three runs each: before, one run in
+  three did all four parts (15 to 22 steps, 77 to 282 seconds, and two of them went round the browser with curl in
+  the Terminal); now two in three (10 to 17 steps, 45 to 113 seconds, no Terminal), nine in twelve over every run of
+  this change, and each miss was the shop's robot check reached before its price list. Holds, careful mode,
+  payments that always ask, the card rule and masking are unchanged, and a Pip still never runs a script of its own
+  in a page.
+
 - **A Pip signs in by itself with a login you saved (Pips API 56).** A Pip never saw or typed a password, so every
   sign-in, and every expired session, needed you on its screen. Now, when a Personal Pip meets a sign-in page with no
   saved login, its chat shows **Save a login for SITE so PIP can sign in itself?** with **Save login…** (the username,
