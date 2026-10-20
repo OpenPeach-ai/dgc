@@ -15,6 +15,7 @@ export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  get_pip_computer_apps: Record<string, never>;
   get_pip_eyes: { pip_id: string };
   list_pip_shared: { pip_id: string; kind: "links" | "media" | "files" };
   get_pip_computers: Record<string, never>;
@@ -102,6 +103,7 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  set_pip_computer_apps: { choice: "download" | "not_now" };
   set_pip_profile: { pip_id: string; changes: { title?: string; body?: string | null; color?: string | null; notify?: boolean } };
   update_pip_computers: Record<string, never>;
   reset_pip_computer: { pip_id: string };
@@ -199,6 +201,8 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   update_pip_computers: [],
   reset_pip_computer: ["pip_id"],
   list_pip_apps: [],
+  get_pip_computer_apps: [],
+  set_pip_computer_apps: ["choice"],
   get_pip_eyes: ["pip_id"],
   set_pip_eyes: ["choice", "pip_id"],
   list_pip_plugins: ["pip_id"],
@@ -626,6 +630,14 @@ for (const command of API53_READS) READS.add(command);
 for (const command of API53_MUTATIONS) MUTATIONS.add(command);
 const API53_FIELDS: Readonly<Record<string, readonly string[]>> = { list_pip_computer_frames: ["pointers"] };
 const EYES_CHOICES = new Set(["ask", "relay", "off"]);
+// API 54: Pips use the whole desktop. get_pip_computer_apps reads which of its apps (an image editor, a document editor,
+// a PDF viewer) this computer has and the one offer to download the ones it lacks; set_pip_computer_apps answers it
+// (choice download or not_now). Local only.
+const API54_READS = new Set(["get_pip_computer_apps"]);
+const API54_MUTATIONS = new Set(["set_pip_computer_apps"]);
+for (const command of API54_READS) READS.add(command);
+for (const command of API54_MUTATIONS) MUTATIONS.add(command);
+const APPS_CHOICES = new Set(["download", "not_now"]);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -714,7 +726,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -787,6 +799,7 @@ export class Pips {
       if (Object.hasOwn(values, "pointers") && typeof values.pointers !== "boolean") throw new DGCConfigError("pointers must be true or false");
     }
     if (command === "set_pip_eyes" && !EYES_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be ask, relay or off");
+    if (command === "set_pip_computer_apps" && !APPS_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be download or not_now");
     if (Object.keys(values).some((key) => !COMMAND_FIELDS[command].includes(key))) throw new DGCConfigError("Unknown or reserved Pip parameter");
     if (["list_pip_notes", "add_pip_note", "forget_pip_note"].includes(command) && Object.hasOwn(values, "shared")
       && (this.caps.pips_api_version as number) < 46)

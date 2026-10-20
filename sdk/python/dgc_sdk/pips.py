@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "get_pip_computer_apps",
     "get_pip_eyes",
     "list_pip_run_posts",
     "check_pip_source", "get_pip_run_source",
@@ -70,6 +71,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "set_pip_computer_apps",
     "set_pip_eyes",
     "mark_pip_news_seen",
     "set_pip_chat_options",
@@ -246,7 +248,17 @@ READ_COMMANDS |= API53_READS
 MUTATION_COMMANDS |= API53_MUTATIONS
 API53_FIELDS = {'list_pip_computer_frames': frozenset({'pointers'})}
 EYES_CHOICES = frozenset({'ask', 'relay', 'off'})
+# API 54: Pips use the whole desktop. get_pip_computer_apps reads which of its apps (an image editor, a document editor,
+# a PDF viewer) this computer has and the one offer to download the ones it lacks; set_pip_computer_apps answers it
+# (choice download or not_now). Local only.
+API54_READS = frozenset({'get_pip_computer_apps'})
+API54_MUTATIONS = frozenset({'set_pip_computer_apps'})
+READ_COMMANDS |= API54_READS
+MUTATION_COMMANDS |= API54_MUTATIONS
+APPS_CHOICES = frozenset({'download', 'not_now'})
 COMMAND_FIELDS = {
+    'get_pip_computer_apps': frozenset(),
+    'set_pip_computer_apps': frozenset({'choice'}),
     'get_pip_eyes': frozenset({'pip_id'}),
     'set_pip_eyes': frozenset({'pip_id', 'choice'}),
     'list_pip_run_posts': frozenset({'pip_id', 'before_id', 'limit'}),
@@ -536,7 +548,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API53_READS | API53_MUTATIONS:
+        if command in API54_READS | API54_MUTATIONS:
+            minimum = 54
+        elif command in API53_READS | API53_MUTATIONS:
             minimum = 53
         elif command in API51_READS:
             minimum = 51
@@ -639,6 +653,8 @@ class Pips:
                 raise DGCConfigError('pointers must be true or false')
         if command == 'set_pip_eyes' and values.get('choice') not in EYES_CHOICES:
             raise DGCConfigError('choice must be ask, relay or off')
+        if command == 'set_pip_computer_apps' and values.get('choice') not in APPS_CHOICES:
+            raise DGCConfigError('choice must be download or not_now')
         if (command in ('propose_pip_calendar_action','prepare_pip_calendar_draft')
                 and isinstance(values.get('event'),dict)
                 and {'attendees','repeat','send_invitations'}.intersection(values['event']) and version < 38):

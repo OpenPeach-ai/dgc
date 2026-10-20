@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pips API 54: `get_pip_computer_apps` (read) and `set_pip_computer_apps` (mutation, `choice` download or not_now), in
+  both SDKs; each is refused before API 54. Pips use the whole desktop.
 - Pips API 53: `get_pip_eyes` (read) and `set_pip_eyes` (mutation, `choice` ask, relay or off), `list_pip_computer_frames`'
   `pointers` and `use_pip_computer_view`'s op `pointer`, in both SDKs; each is refused before API 53.
 - Editor protocol: new command `steer_queued {request_ids}` (capability `steer_queued`).
