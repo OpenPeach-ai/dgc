@@ -183,7 +183,9 @@ or Codex, the Pip uses it too, with DGC's model and effort for it. The Pip's thi
 setting in its chat box becomes the CLI's effort.
 
 Its replies and its routines use your plan's usage, as your own chats in that app do; the
-picker says so once when you choose it. Nothing else changes: there are no new settings.
+picker says so once when you choose it. Nothing else changes: there are no new settings. From
+the CLI: `dgc pips models` lists them, and `dgc pips create --personal --subscription codex`
+(or `dgc pips propose PIP --subscription claude`) chooses one.
 
 The CLI is only the Pip's model. Its own tools are switched off, and the Pip's tools (its
 computer, its connected apps and drafts, its choices and cards, its routines and notes,

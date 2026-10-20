@@ -186,6 +186,24 @@ class Lockdown(unittest.TestCase):
         self.assertNotIn("CLAUDE_CONFIG_DIR", env, "only the engine's own config location")
 
 
+class ConsoleTests(unittest.TestCase):
+    """`dgc pips create|propose --subscription`, and `dgc pips models` naming what a Personal Pip may run on."""
+
+    def test_the_cli_asks_for_a_subscription_and_lists_them(self):
+        from dgc import pip_cli
+        request = pip_cli._request(pip_cli.parser().parse_args(
+            ["create", "Tees", "--goal", "Help", "--workspace", "ws_a", "--subscription", "codex"]))
+        self.assertEqual(request["model_choice"], {"mode": "subscription", "engine": "codex"})
+        request = pip_cli._request(pip_cli.parser().parse_args(
+            ["propose", "pip_a", "--expected-version", "2", "--subscription", "claude", "--reason", "Mine."]))
+        self.assertEqual(request["changes"]["model_choice"], {"mode": "subscription", "engine": "claude"})
+        said = pip_cli._format({"default_model": "", "models": [{"id": "qwen3.6:27b", "name": "qwen3.6:27b"}],
+                                "subscriptions": [{"engine": "codex", "name": "Codex"}],
+                                "default_engine": {"engine": "codex", "name": "Codex", "available": True}})
+        self.assertEqual(said.splitlines()[0], "DGC default: Codex (your subscription)")
+        self.assertIn("Your subscriptions, for Personal Pips: Codex (--subscription codex)", said)
+
+
 class ToolServerTests(unittest.TestCase):
     def test_only_this_runs_token_opens_its_tools_and_screens_come_back_as_images(self):
         import socket as _socket

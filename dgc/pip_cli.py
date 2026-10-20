@@ -216,7 +216,10 @@ def parser():
     create.add_argument("name"); create.add_argument("--goal", required=True)
     create.add_argument("--type", dest="pip_type", default="rook", help="Pip role from types; defaults to rook")
     create.add_argument("--reviewed-execution", action="store_true", help="acknowledge Patch/Pulse use review_required; grants no standing write/test permission")
-    create.add_argument("--model", help="explicit model ID from models; omitted inherits DGC default")
+    create_models = create.add_mutually_exclusive_group()
+    create_models.add_argument("--model", help="explicit model ID from models; omitted inherits DGC default")
+    create_models.add_argument("--subscription", choices=("claude", "codex"),
+                               help="a Personal Pip on your own Claude Code or Codex (its runs use that plan's usage)")
     create.add_argument("--source-ref", default="HEAD"); workspace(create)
     job(command("show", "show the complete job and pending proposals"))
     run = command("run", "queue a run for the live foreground supervisor")
@@ -302,6 +305,8 @@ def parser():
     job(propose); propose.add_argument("--expected-version", type=int, required=True)
     model_flags = propose.add_mutually_exclusive_group()
     model_flags.add_argument("--model"); model_flags.add_argument("--default-model", action="store_true")
+    model_flags.add_argument("--subscription", choices=("claude", "codex"),
+                             help="a Personal Pip on your own Claude Code or Codex (its runs use that plan's usage)")
     for flag in ("name", "goal", "source-ref", "reason"):
         propose.add_argument("--" + flag)
     propose.add_argument('--source-policy', choices=('committed_only', 'current_tree'),
@@ -725,6 +730,8 @@ def _request(args):
         request["idempotency_key"] = args.idempotency_key or identifier("request")
     if name == "create" and args.model:
         request["model_choice"] = {"mode": "model", "model": args.model}
+    if name == "create" and getattr(args, "subscription", None):
+        request["model_choice"] = {"mode": "subscription", "engine": args.subscription}
     if name in ("run", "send"):
         request["idempotency_key"] = args.idempotency_key or identifier("request")
         if name == 'send' and (args.context_size is not None or args.thinking is not None):
@@ -783,6 +790,8 @@ def _request(args):
         changes = {key: request.pop(key) for key in ("name", "goal", "source_ref") if key in request}
         if args.model or args.default_model:
             changes["model_choice"] = {"mode": "model", "model": args.model} if args.model else {"mode": "default"}
+        if getattr(args, "subscription", None):
+            changes["model_choice"] = {"mode": "subscription", "engine": args.subscription}
         if args.source_policy:
             # Without --exclude the mode alone is known here; main() completes a list change.
             changes['source_policy'] = _source_policy_from_args(args, args.source_policy)
@@ -1139,8 +1148,14 @@ def _format(value):
         return (f'Reply {value["run"]["status"]}: {value["run"]["id"]}\n'
                 + "Read it with: dgc pips messages " + value["message"]["pip_id"])
     if "models" in value and "default_model" in value:
-        lines = ["DGC default: " + str(value["default_model"])]
+        engine = value.get("default_engine") if isinstance(value.get("default_engine"), dict) else None
+        lines = ["DGC default: " + (str(engine.get("name")) + " (your subscription)" + (
+            "" if engine.get("available") else ": " + str(engine.get("reason", ""))) if engine else str(value["default_model"]))]
         lines.extend(item["id"] for item in value["models"])
+        if value.get("subscriptions"):
+            # API 55: what a Personal Pip may run on: --subscription claude | codex; its runs use that plan's usage.
+            lines.append("Your subscriptions, for Personal Pips: " + ", ".join(
+                f'{item["name"]} (--subscription {item["engine"]})' for item in value["subscriptions"]))
         if value.get("error"):
             lines.append(value["error"]["message"])
         if value.get("truncated"):
