@@ -17,7 +17,8 @@ the Pip's model and nothing more:
 * DGC never reads, copies or refreshes the CLI's login; the CLI uses its own (the main chat's contract,
   subscriptions.py).
 
-Kimi, Qwen Code and Copilot aren't offered: none can be held to DGC's tools alone from the command line.
+Kimi Code isn't offered (it always starts the user's own MCP servers); Qwen Code and Copilot CLI aren't either, as
+neither could be checked by trying here.
 """
 from __future__ import annotations
 
@@ -40,9 +41,11 @@ ENGINES = ("claude", "codex")
 EFFORTS = {"claude": ("low", "medium", "high", "xhigh", "max"),
            "codex": ("minimal", "low", "medium", "high", "xhigh")}
 NOT_FOR_PIPS = {
-    "qwen": "Qwen Code can't be held to DGC's tools alone, so Pips don't use it.",
-    "kimi": "Kimi Code can't switch off its own shell and file tools, so Pips don't use it.",
-    "copilot": "Copilot CLI can't be held to DGC's tools alone, so Pips don't use it.",
+    # Kimi Code 0.29.1 always loads ~/.kimi-code/mcp.json and approves every tool in prompt mode; Qwen Code 0.22.3
+    # (its sign-in removed) and Copilot CLI (not installed) couldn't be tried here, so neither is verified.
+    "kimi": "Kimi Code always starts your own MCP servers, so it can't be held to DGC's tools alone. Pips don't use it.",
+    "qwen": "Qwen Code isn't offered for Pips: DGC hasn't checked that it runs with only DGC's tools.",
+    "copilot": "Copilot CLI isn't offered for Pips: DGC hasn't checked that it runs with only DGC's tools.",
 }
 PROJECT_PIPS = ("Project Pips need a local or API model: their source checks run only in DGC's own loop. "
                 "Personal Pips can use your subscription.")

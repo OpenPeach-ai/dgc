@@ -61,7 +61,8 @@ class Choices(unittest.TestCase):
                              {"mode": "subscription", "engine": engine})
         with self.assertRaises(RegistryError) as kimi:
             validate_model_choice({"mode": "subscription", "engine": "kimi"})
-        self.assertEqual(str(kimi.exception), "Kimi Code can't switch off its own shell and file tools, so Pips don't use it.")
+        self.assertEqual(str(kimi.exception), "Kimi Code always starts your own MCP servers, so it can't be held to DGC's "
+                                              "tools alone. Pips don't use it.")
         for bad in ({"mode": "subscription"}, {"mode": "subscription", "engine": "codex", "model": "x"}):
             with self.assertRaises(RegistryError):
                 validate_model_choice(bad)

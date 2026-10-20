@@ -215,7 +215,8 @@ Codex 0.153.4):
   no skills, project docs, permission or environment notes, and a copy of its own model
   catalog (`codex debug models`) with each model's `apply_patch_tool_type` null,
   `shell_type` disabled, tool search, sub-agents and code mode off. Its model is offered
-  DGC's tools and Codex's MCP-resource readers, which reach only DGC's server.
+  DGC's tools, Codex's MCP-resource readers (they reach only DGC's server, which has no
+  resources) and `request_user_input`, which Codex offers only in plan mode.
   Codex still reads your global `~/.codex/AGENTS.md`, instructions only, with no tool to
   act on them.
 
@@ -225,8 +226,9 @@ no DGC key or token (only paths, locale, proxies and the CLI's own `CLAUDE_CONFI
 come from a socket in a private folder that only the token minted for that run opens. If
 the CLI ever reached for a tool of its own, DGC stops the turn and says so in one line.
 
-Not offered for Pips: **Kimi Code** (it can't switch off its own shell and file tools),
-**Qwen Code** and **Copilot CLI** (neither can be held to DGC's tools alone).
+Not offered for Pips: **Kimi Code** (it always starts your own MCP servers, from
+`~/.kimi-code/mcp.json`, and approves every tool in prompt mode), and **Qwen Code** and
+**Copilot CLI** (neither could be checked by trying here, so neither is offered).
 **Project Pips** (audits, Pulse, Quill, Patch) still need a local or API model: their
 source checks run only in DGC's own loop. Choosing a subscription for one is refused with
 that line.
