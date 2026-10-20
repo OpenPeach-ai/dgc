@@ -213,6 +213,10 @@ def wanted() -> list[str]:
     names = [DESKTOP_PACKAGES[role] for role, program in pip_screen.PROGRAMS.items() if not shutil.which(program)]
     if not any(_real_binary(path) for path in GOOGLE_CHROME):
         names.append(CHROME_PACKAGE)
+    # The image editor, document editor and PDF viewer, once the user said yes to downloading them (pip_apps).
+    from . import pip_apps
+    if pip_apps.consented():
+        names += [name for name in pip_apps.wanted_packages() if name not in names]
     return names
 
 
@@ -324,6 +328,7 @@ def _run(needs: list[str]) -> None:
         plan = _run_step(["apt-get", *options, "-s", "install", "--no-install-recommends", *needs],
                          "Working out what this computer needs")
         packages = {m.group(1): m.group(2) for m in re.finditer(r"^Inst (\S+) \(([^ )]+)", plan.stdout, re.M)}
+        _measure_apps(options, needs)
         before = manifest().get("packages") if current_root() is not None else None
         if packages == before or not packages and before is None:
             _finish(base, apt, packages, None)          # nothing new since the last check
@@ -369,6 +374,8 @@ def _run(needs: list[str]) -> None:
         root.mkdir(parents=True)
         for index, (name, deb) in enumerate(sorted(files.items()), 1):
             _run_step(["dpkg-deb", "-x", str(deb), str(root)], "Unpacking", done=index, total=len(files))
+        from . import pip_apps
+        pip_apps.after_unpack(root)
         chrome = root / "opt" / "google" / "chrome" / "chrome"
         if CHROME_PACKAGE in packages and not (chrome.is_file() and os.access(chrome, os.X_OK)):
             raise RuntimeError("Google Chrome did not unpack where the computer looks for it.")
@@ -378,6 +385,36 @@ def _run(needs: list[str]) -> None:
         _finish(base, apt, packages, version)
     finally:
         os.close(lock)
+
+
+def _measure_apps(options: list[str], needs: list[str]) -> None:
+    """What the apps this computer lacks would download, as apt works it out for this computer: the one number the
+    offer to download them says (pip_apps.offer). Only while they are wanted and not yet asked for."""
+    from . import pip_apps
+    wanted = [name for name in pip_apps.wanted_packages() if name not in needs]
+    if not wanted or pip_apps.consented():
+        return
+    pip_apps.note_measuring()
+    try:
+        plan = subprocess.run(["apt-get", *options, "-s", "install", "--no-install-recommends", *wanted],
+                              capture_output=True, text=True, timeout=STEP_TIMEOUT, stdin=subprocess.DEVNULL,
+                              env={**os.environ, "LC_ALL": "C", "DEBIAN_FRONTEND": "noninteractive"})
+    except (OSError, subprocess.SubprocessError):
+        return
+    if plan.returncode != 0:
+        return
+    found = {m.group(1): m.group(2) for m in re.finditer(r"^Inst (\S+) \(([^ )]+)", plan.stdout, re.M)}
+    total = 0
+    for name in found:
+        try:
+            shown = subprocess.run(["apt-cache", *options, "show", "--no-all-versions", name], capture_output=True,
+                                   text=True, timeout=60, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            return
+        size = re.search(r"^Size: (\d+)", shown.stdout, re.M)
+        total += int(size.group(1)) if size else 0
+    if found and total > 0:
+        pip_apps.record_measure(found, total)
 
 
 def _deb(debs: Path, name: str, version: str) -> Path | None:

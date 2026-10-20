@@ -255,7 +255,9 @@ def _ffmpeg(source: Path, target: Path, kind: str, side: int | None, quality: in
         argv += ["-vf", ",".join(filters)]
     argv += ["-frames:v", "1"]
     if kind == "jpeg":
-        argv += ["-q:v", "2"]
+        # ffmpeg's scale runs 2 (best) to 31. A photo (quality 90 and up) keeps 2; a picture of a Pip's screen asks for
+        # less (pip_desktop_eyes: 70 for the model, 40-55 for the run's timeline).
+        argv += ["-q:v", "2" if quality >= 90 else str(max(3, min(31, round((100 - quality) / 5))))]
     _run(argv + [str(target)], target.parent)
 
 

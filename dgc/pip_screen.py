@@ -101,18 +101,41 @@ def _write(path: Path, text: str, mode: int = 0o600) -> None:
     path.chmod(mode)
 
 
-def write_config(conf: Path, name: str) -> None:
-    """The dock, its three apps, the window manager's settings and the wallpaper."""
+# What the dock's Files and Terminal run, and what DGC's launch FIFO runs when the Pip opens them (launch_app).
+FILES_COMMAND = "pcmanfm /home/pip/Files"
+TERMINAL_COMMAND = ("sh -c 'cd /home/pip/Files && exec xterm -fa Monospace -fs 11 -bg \"#1d2430\" "
+                    "-fg \"#e6edf3\" -geometry 100x28 -title Terminal'")
+# The lines the dock (and only the dock) writes to DGC's control FIFO: the browser, and the apps that run in boxes
+# of their own (pip_apps), which DGC starts.
+CONTROL_LINES = frozenset({"browser", "images", "documents", "pdf"})
+
+
+def dock_icon(index: int, count: int) -> tuple[int, int]:
+    """The centre of the dock's icon at ``index`` of ``count`` on the screen (tint2rc below: 44 px icons 12 apart, the
+    bar padded 12 + 2 at each end, centred at the bottom)."""
+    size, gap, pad = 44, 12, 12 + 2
+    width = 2 * pad + count * size + (count - 1) * gap
+    left = (WIDTH - width) // 2 + pad
+    return left + index * (size + gap) + size // 2, HEIGHT - 42
+
+
+def write_config(conf: Path, name: str, apps_shown=()) -> None:
+    """The dock, its apps, the window manager's settings and the wallpaper. ``apps_shown``: the image editor,
+    document editor and PDF viewer this computer has (pip_apps), each on the dock after the Terminal."""
+    from . import pip_apps
     conf.mkdir(mode=0o700, parents=True, exist_ok=True)
     (conf / "apps").mkdir(mode=0o700, exist_ok=True)
-    for asset in ("browser.png", "files.png", "terminal.png", "wallpaper.jpg"):
+    for asset in ("browser.png", "files.png", "terminal.png", "wallpaper.jpg", "images.png", "documents.png", "pdf.png"):
         shutil.copyfile(ASSETS / asset, conf / asset)
     apps = {
         "browser": ("Browser", "sh -c 'echo browser > /run/dgc/sock/control'", "browser.png"),
-        "files": ("Files", "pcmanfm /home/pip/Files", "files.png"),
-        "terminal": ("Terminal", "sh -c 'cd /home/pip/Files && exec xterm -fa Monospace -fs 11 -bg \"#1d2430\" "
-                                 "-fg \"#e6edf3\" -geometry 100x28 -title Terminal'", "terminal.png"),
+        "files": ("Files", FILES_COMMAND, "files.png"),
+        "terminal": ("Terminal", TERMINAL_COMMAND, "terminal.png"),
     }
+    for key in apps_shown:
+        if key in pip_apps.APPS:
+            app = pip_apps.APPS[key]
+            apps[key] = (f"{app['name']} ({app['program']})", f"sh -c 'echo {key} > /run/dgc/sock/control'", app["icon"])
     for key, (label, command, icon) in apps.items():
         _write(conf / "apps" / f"{key}.desktop", "[Desktop Entry]\nType=Application\n"
                f"Name={label}\nExec={command}\nIcon=/run/dgc/conf/{icon}\n")
@@ -160,6 +183,15 @@ export DISPLAY={DISPLAY}
 "$DESK_FILES" --desktop --profile dgc > /run/dgc/log/wallpaper.log 2>&1 &
 "$DESK_DOCK" -c /run/dgc/conf/tint2rc > /run/dgc/log/dock.log 2>&1 &
 dock=$!
+# The Pip's launch_app for Files and the Terminal: DGC writes one word to this FIFO; nothing else is run.
+[ -p /run/dgc/sock/launch ] && ( while :; do
+    while read -r app; do
+      case "$app" in
+        files) {FILES_COMMAND} > /dev/null 2>&1 & ;;
+        terminal) {TERMINAL_COMMAND} > /dev/null 2>&1 & ;;
+      esac
+    done < /run/dgc/sock/launch
+  done ) &
 # The dock can draw before the wallpaper and window manager settle; a reload redraws it on top.
 sleep 2; kill -USR1 "$dock" 2>/dev/null
 wait
@@ -252,10 +284,11 @@ class Desktop:
                 stale.unlink()
             except OSError:
                 pass
-        write_config(self.runtime / "conf", self.name)
-        control = self.runtime / "sock" / "control"
-        if not control.exists():
-            os.mkfifo(control, 0o600)
+        from . import pip_apps
+        write_config(self.runtime / "conf", self.name, [key for key in pip_apps.APPS if pip_apps.find(key) is not None])
+        for fifo in ("control", "launch"):
+            if not (self.runtime / "sock" / fifo).exists():
+                os.mkfifo(self.runtime / "sock" / fifo, 0o600)
         if self.egress is not None:
             from .pip_computer_box import FORWARDER
             (self.runtime / "forward.py").write_text(FORWARDER)
@@ -286,8 +319,27 @@ class Desktop:
         self._control_thread = threading.Thread(target=self._listen, name="pip-desktop-control", daemon=True)
         self._control_thread.start()
 
+    def open_in_desktop(self, what: str) -> None:
+        """Open the desktop's own Files or Terminal (the Pip's launch_app): one word to the desktop's launch FIFO."""
+        if what not in ("files", "terminal"):
+            raise ValueError("the desktop opens files or terminal")
+        fd = -1
+        for _ in range(10):                  # the reader reopens the FIFO after each word: a moment between
+            try:
+                fd = os.open(self.runtime / "sock" / "launch", os.O_WRONLY | os.O_NONBLOCK)
+                break
+            except OSError:
+                time.sleep(0.1)
+        if fd < 0:
+            raise RegistryError("desktop_unavailable", "The computer's screen is not ready yet.")
+        try:
+            os.write(fd, what.encode("ascii") + b"\n")
+        finally:
+            os.close(fd)
+
     def _listen(self) -> None:
-        """The dock's Browser icon writes "browser" to the control FIFO; nothing else is accepted."""
+        """The dock writes "browser", or an app's name (images, documents, pdf), to the control FIFO; nothing else
+        is accepted."""
         control = self.runtime / "sock" / "control"
         while self.proc is not None and self.proc.poll() is None:
             try:
@@ -306,9 +358,10 @@ class Desktop:
                             buffer = (buffer + chunk)[-256:]
                             while b"\n" in buffer:
                                 line, buffer = buffer.split(b"\n", 1)
-                                if line.strip() == b"browser" and self.on_launch is not None:
+                                word = line.strip().decode("ascii", "replace")
+                                if word in CONTROL_LINES and self.on_launch is not None:
                                     try:
-                                        self.on_launch("browser")
+                                        self.on_launch(word)
                                     except Exception:      # noqa: BLE001 - a dock click never kills the desktop
                                         pass
                         else:

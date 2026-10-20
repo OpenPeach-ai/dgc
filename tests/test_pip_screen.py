@@ -509,8 +509,11 @@ class RealScreenTests(unittest.TestCase):
         with host.lock:
             host.browser.close()
         self.assertFalse(host.browser.alive())
+        from dgc import pip_apps
+        icons = 3 + sum(pip_apps.find(key) is not None for key in pip_apps.APPS)    # the apps this machine has join the dock
+        x, y = pip_screen.dock_icon(0, icons)
         for button in (0, 1, 0):
-            viewer.sendall(struct.pack(">BBHH", 5, button, 584, 758))
+            viewer.sendall(struct.pack(">BBHH", 5, button, x, y))
             time.sleep(0.15)
         deadline = time.monotonic() + 20
         while not host.browser.alive() and time.monotonic() < deadline:

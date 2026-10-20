@@ -177,9 +177,12 @@ class DeskTests(unittest.TestCase):
         self.assertIn("already waiting", pip_computer.Host._desk(host, "files", {}))
         self.assertIn("files", pip_computer.OPS)
         # A Pip whose model sees is offered every op; a text-only one everything but the position ops.
-        self.assertEqual(pip_computer.schema("own")["function"]["parameters"]["properties"]["op"]["enum"], list(pip_computer.OPS))
+        # The whole desktop's steps (API 54) come only with a desktop to use them on.
+        self.assertEqual(pip_computer.schema("own", desktop=True)["function"]["parameters"]["properties"]["op"]["enum"], list(pip_computer.OPS))
+        self.assertEqual(pip_computer.schema("own")["function"]["parameters"]["properties"]["op"]["enum"],
+                         [op for op in pip_computer.OPS if op not in pip_computer.DESKTOP_OPS])
         self.assertEqual(pip_computer.schema()["function"]["parameters"]["properties"]["op"]["enum"],
-                         [op for op in pip_computer.OPS if op not in pip_computer.POINT_OPS])
+                         [op for op in pip_computer.OPS if op not in pip_computer.POINT_OPS + pip_computer.DESKTOP_OPS])
 
     def test_a_robot_check_stops_the_pip_and_waits_for_the_user_who_finishes_it(self):
         # The founder's Google search answered "unusual traffic"; like Grok's bots, a Pip never solves a

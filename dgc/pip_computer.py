@@ -111,7 +111,11 @@ TEXT_OPS = ("open", "read", "click", "type", "press", "choose", "back", "files",
 # Eyes and a cursor (pip_eyes): a screenshot the model sees, and the mouse by position. Only a Pip whose
 # model can see (or that has a vision model look for it) is offered the position ops.
 POINT_OPS = ("click_at", "double_click_at", "right_click_at", "drag", "scroll_at", "hover_at")
-OPS = TEXT_OPS + ("look",) + POINT_OPS + ("upload",)
+# The whole desktop (pip_desktop_eyes): every window, the dock's apps, the mouse and keyboard anywhere. Offered
+# with the eyes, on a computer whose screen this machine can show.
+from .pip_desktop_eyes import DESKTOP_OPS, DESKTOP_POINT_OPS  # noqa: E402
+OPS = TEXT_OPS + ("look",) + POINT_OPS + ("upload",) + DESKTOP_OPS
+APP_KEYS = ("images", "documents", "pdf", "files", "terminal", "browser")
 # Files and the Terminal: no browser, so they never wait on (or hold) the browser.
 DESK_OPS = ("files", "open_file", "run")
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
@@ -119,12 +123,16 @@ VISUAL_SHARE = 0.15                  # this much of the screen on canvases: a pa
 UPLOADS = ".dgc-uploads"            # in the computer's home, beside Files: the Terminal never sees it
 
 
-def schema(eyes: str | None = None, convention: str = "pixels") -> dict:
+def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = False) -> dict:
     """The computer tool as this run's model is offered it. ``eyes``: "own" (its model sees: look returns
     a screenshot and the position ops act on it), "relay" (a vision model looks for it and names points),
     or None (text only: look explains it can't see). ``convention``: how its model names a point, "pixels"
-    of the screenshot or "thousandths" across it (pip_eyes.convention_for)."""
-    ops = list(TEXT_OPS) + ["look"] + (list(POINT_OPS) if eyes in ("own", "relay") else []) + ["upload"]
+    of the screenshot or "thousandths" across it (pip_eyes.convention_for). ``desktop``: its computer shows a whole
+    desktop here, so with eyes it also gets the desktop steps (pip_desktop_eyes)."""
+    sees = eyes in ("own", "relay")
+    whole = sees and desktop
+    ops = (list(TEXT_OPS) + ["look"] + (list(POINT_OPS) if sees else []) + ["upload"]
+           + (list(DESKTOP_OPS) if whole else []))
     where = ("x and y are on a 0-1000 scale across the latest screenshot: 0,0 is its top-left corner and "
              "1000,1000 its bottom-right, whatever its size in pixels" if convention == "thousandths" else
              "x and y are pixels in the latest screenshot, counted from its top-left corner (0,0); its size in "
@@ -145,6 +153,16 @@ def schema(eyes: str | None = None, convention: str = "pixels") -> dict:
     else:
         eyes_text = ("look is for when the page text is not enough (a picture, a canvas, a drag-and-drop editor): "
                      "it tells you whether you can see. ")
+    if whole:
+        eyes_text += ("The whole desktop (every window, not just the browser's page): desktop_look shows all of the "
+                      "screen; desktop_click, desktop_double_click, desktop_right_click, desktop_hover, desktop_drag "
+                      "(x,y to to_x,to_y) and desktop_scroll (dy at x,y) act anywhere on it, with points in the latest "
+                      "desktop_look picture (" + ("0-1000 across it" if convention == "thousandths" else "its pixels")
+                      + "); desktop_type types text into the window in front; desktop_key presses a key or shortcut "
+                      "(ctrl+s, alt+tab, Enter). windows lists the open windows; focus_window brings one to the front "
+                      "(window: its id). launch_app opens app: images (an image editor, LibreOffice Draw), documents "
+                      "(LibreOffice Writer), pdf (a PDF viewer), files, terminal or browser, with a file from your "
+                      "Files (path) if you like. Desktop apps reach public websites, as the Terminal does. ")
     return {"type": "function", "function": {
         "name": TOOL,
         "description": ("Use your own computer. Browser: open goes to a public https URL; read gives the current "
@@ -168,6 +186,8 @@ def schema(eyes: str | None = None, convention: str = "pixels") -> dict:
                                       **({"x": {"type": "number"}, "y": {"type": "number"},
                                           "to_x": {"type": "number"}, "to_y": {"type": "number"},
                                           "dy": {"type": "number"}} if eyes in ("own", "relay") else {}),
+                                      **({"dx": {"type": "number"}, "window": {"type": "string", "maxLength": 24},
+                                          "app": {"type": "string", "enum": list(APP_KEYS)}} if whole else {}),
                                       **({"question": {"type": "string", "maxLength": 1000}} if eyes == "relay" else {})}}}}
 
 
@@ -222,6 +242,17 @@ EYES_NOTICE = ("You can see your computer's screen: look shows it to you, and cl
 RELAY_NOTICE = ("You can't see images yourself; a model that can see is your eyes. look sends it your screen with your "
                 "question and it answers in words, naming the points of what you can click or drag. Ask it precise "
                 "questions, act at the points it gives, and look again to check before you say something is done.")
+# What a Pip whose computer shows a whole desktop is told (pip_desktop_eyes), after the eyes notice.
+DESKTOP_NOTICE = ("Your computer is a whole desktop, like a person's: the browser, Files, a Terminal, an image editor "
+                  "(LibreOffice Draw: text, shapes, colours; File > Export makes a PNG), a document editor (LibreOffice "
+                  "Writer) and a PDF viewer, on the dock at the bottom of the screen. Use the browser's own steps (read, "
+                  "click, look) for web pages, and the desktop steps for apps and anything outside the page: launch_app "
+                  "opens an app (with a file from your Files), desktop_look shows the whole screen, and desktop_click, "
+                  "desktop_type, desktop_key and the rest work in any window. Save what you make in your Files "
+                  "(/home/pip/Files). Like the Terminal, the apps reach public websites, never this computer or the "
+                  "user's network. When the user asks you to design something (a "
+                  "shirt, a card, a poster), make it yourself in the image editor: their words as big text, a shape or "
+                  "two in colour, then File > Export as a PNG into your Files, and upload that PNG where it is needed.")
 
 
 def validate_plan(plan):
@@ -288,6 +319,9 @@ class Host:
         self.last_used = time.monotonic()
         self.proxy = EgressProxy(socket_dir() / f"{pip_id[-12:]}-egress.sock", policy=policy)
         self.proxy.start()
+        from .pip_apps import Apps
+        self.apps = Apps(self.root / "home", self.root / "home" / "Files")
+        self.desk_shot = None            # (picture pixels per screen pixel, (screen width, height)) of the last desktop_look
         self._queued = []
         self.browser = BoxedBrowser(self.root / "home", self.proxy.path, chrome=find_chrome(),
                                     log_path=self.root / "browser.log", on_write=self._queued.append)
@@ -345,6 +379,7 @@ class Host:
             for request_id in list(self.browser.held):
                 self.browser.drop(request_id)
             self.browser.close()
+            self.apps.stop()
             if self.desktop is not None:
                 self.desktop.stop()
                 self.desktop = None
@@ -386,7 +421,11 @@ class Host:
             return True
 
     def _dock_launch(self, what: str) -> None:
-        """The dock's Browser icon: bring the browser back (a new window, or a restart if it closed)."""
+        """The dock's Browser icon: bring the browser back (a new window, or a restart if it closed). Its image
+        editor, Documents and PDF viewer: open the app in its own box."""
+        if what in ("images", "documents", "pdf"):
+            self.open_app(what)
+            return
         if what != "browser":
             return
         with self.lock:
@@ -400,6 +439,22 @@ class Host:
                 except Exception:              # noqa: BLE001 - a dock click never takes the computer down
                     self.browser.close()
                     self.browser.start()
+
+    def open_app(self, key: str, path=None) -> str:
+        """Open an app on this computer's screen: the image editor, Documents or the PDF viewer in a box of its own
+        (pip_apps), or the desktop's Files or Terminal. Returns what was opened, in a few words."""
+        from . import pip_apps
+        if key in ("files", "terminal"):
+            self.desktop.open_in_desktop(key)
+            return "the Terminal" if key == "terminal" else "Files"
+        if key == "browser":
+            self._dock_launch("browser")
+            return "the browser"
+        from .pip_computer_files import files_root
+        inside = pip_apps.inside_path(files_root(self.root), path) if path else None
+        program = self.apps.open(key, self.desktop.x11_dir, file=inside, launch=self._launch,
+                                 log=self.root / "apps.log", egress=self.proxy.path)
+        return program + (f" with Files/{inside[len('/home/pip/Files/'):]}" if inside else "")
 
     def _pump_loop(self) -> None:
         """With a desktop, nobody else reads the browser between runs: keep its gate answering."""
@@ -595,6 +650,8 @@ class Host:
                     stop = self._careful(op, args)
                     if stop:
                         return {"text": stop}
+                if op in DESKTOP_OPS:
+                    return self._desktop(op, args)
                 if op == "look":
                     return self._look()
                 if op in POINT_OPS:
@@ -809,12 +866,13 @@ class Host:
                                             "fields": [], "site": site, "shown": shown_host(parts.hostname or ""), "page": url[:500]})
                 return SITE_HELD_NAMED.format(site=site)
             return None
-        if op in ("type", "choose"):
-            text = str((args.get("text") if op == "type" else args.get("value")) or "")
+        if op in ("type", "choose", "desktop_type"):
+            # Typing on the desktop reaches the browser's window too: checked like typing into the page.
+            text = str((args.get("value") if op == "choose" else args.get("text")) or "")
             carried = self.taint.carried(text, self.said)
             if carried:
                 parts = urlsplit(page)
-                return self._careful_hold("text", {"method": "TYPE" if op == "type" else "CHOOSE", "host": parts.hostname or "",
+                return self._careful_hold("text", {"method": "CHOOSE" if op == "choose" else "TYPE", "host": parts.hostname or "",
                                                    "path": (parts.path or "/")[:300],
                                                    "fields": [{"name": "typed" if op == "type" else "chosen", "value": _preview(text)}]},
                                           text, carried)
@@ -883,6 +941,127 @@ class Host:
             return f"error: {str(error)[:500]}"
         except Exception as error:                         # noqa: BLE001 - never into the worker
             return f"error: the computer failed ({type(error).__name__})"
+
+    # -- the whole desktop ---------------------------------------------------------------------
+
+    def _desktop(self, op: str, args: dict) -> dict:
+        """One step on the whole desktop (pip_desktop_eyes): a look, the hands, the windows, an app."""
+        from . import pip_desktop_eyes as eyes
+        from . import pip_x11
+        from .pip_screen import HEIGHT, WIDTH
+        if not eyes.supported():
+            return {"text": "error: the whole desktop isn't available on this computer yet; use the browser's steps."}
+        if self.desktop is None or not self.desktop.running():
+            return {"text": "error: this computer can't show its desktop here; use the browser's steps."}
+        if op == "desktop_look":
+            return self._desk_look()
+        pointer, said = None, ""
+        try:
+            if op == "windows":
+                return {"text": eyes.shown_windows(eyes.windows(self.desktop))}
+            if op == "focus_window":
+                window = pip_x11.window_id(args.get("window"))
+                found = eyes.windows(self.desktop)
+                match = next((w for w in found if w["id"] == f"0x{window:x}"), None)
+                if match is None:
+                    raise ValueError(f"no window {args.get('window')} is open; list them with windows")
+                eyes.activate(self.desktop, window)
+                time.sleep(0.5)
+                said = f"Brought {match['title'] or match['app'] or 'that window'} to the front."
+            elif op == "launch_app":
+                app = str(args.get("app") or "")
+                path = args.get("path") or None
+                if not app and path:
+                    from .pip_apps import app_for
+                    app = app_for(str(path)) or ""
+                if app not in APP_KEYS:
+                    raise ValueError("say which app: images, documents, pdf, files, terminal or browser")
+                if path and app in ("files", "terminal", "browser"):
+                    raise ValueError("only images, documents and pdf open a file")
+                before = {w["id"] for w in eyes.windows(self.desktop)}
+                opened = self.open_app(app, path)
+                said = f"Opened {opened}."
+                if not eyes.wait_for_window(self.desktop, before):
+                    said += " Its window has not appeared yet; look again in a moment."
+            else:
+                scale, screen = self.desk_shot or (1.0, (WIDTH, HEIGHT))
+                found = eyes.windows(self.desktop)
+                # A step on the browser's window is the Pip's action there: a submit or upload it causes waits for the
+                # user's Allow, as one from a browser step does. A step elsewhere leaves the page's own background
+                # requests alone (marking every step held Google's telemetry while the Pip drew in another app).
+                on_browser = eyes.on_browser(found, op, args, scale)
+                if on_browser:
+                    self.browser.acted_at = time.monotonic()
+                said, pointer = eyes.act(self.desktop, op, args, scale, screen)
+                if pointer is not None:
+                    said = said[:-1] + f" ({eyes.window_at(found, pointer['x'], pointer['y'])})."
+                    self._show_desktop_pointer(pointer, screen)
+                if on_browser:
+                    self.browser.acted_at = time.monotonic()
+        except (eyes.DesktopError, ValueError, RegistryError) as error:
+            return {"text": f"error: {str(error)[:400]}"}
+        held = []
+        if self.browser.alive():
+            self.browser.pump(1.0)
+            held = self._record_held()
+        else:
+            time.sleep(0.6)
+        self._desk_frame(said[:200], pointer)
+        if held:
+            return {"text": self._held_text(held)}
+        note = _take_card_note(self)
+        if note:
+            return {"text": note}
+        return self._desk_look(said, pointer)
+
+    def _desk_look(self, said: str = "", pointer: dict | None = None) -> dict:
+        """The whole screen as the model sees it: secrets blacked out (pip_desktop_eyes.shot), the windows named."""
+        import base64
+        from . import pip_desktop_eyes as eyes
+        from .tools import _UNTRUSTED_PAGE
+        try:
+            shot = eyes.shot(self.desktop, self.browser, pointer=pointer)
+        except eyes.DesktopError as error:
+            return {"text": ((said + " ") if said else "") + f"DGC could not show you the screen this time ({str(error)[:300]})"}
+        self.desk_shot = (shot["scale"], shot["screen"])
+        front = next((w for w in reversed(shot["windows"]) if w["active"] and w["shown"]), None)
+        text = (f"{_UNTRUSTED_PAGE}\n" + ((said + "\n") if said else "")
+                + f"Your whole screen now ({shot['width']}x{shot['height']} pixels)"
+                + (f"; in front: {front['title'] or front['app']} ({front['id']})" if front else "") + ".")
+        if shot["masked"]:
+            text += " Password and payment-card fields, and windows DGC can't check, are blacked out; you never see them."
+        if pointer is not None:
+            text += " The red ring marks where the mouse is now (DGC drew it; it is not on the screen)."
+        others = [w for w in shot["windows"] if w["shown"] and w is not front]
+        if others:
+            text += "\nAlso open: " + "; ".join(f"{w['title'] or w['app']} ({w['id']})" for w in reversed(others[-8:]))
+        return {"text": text, "image": base64.b64encode(shot["data"]).decode("ascii"),
+                "width": shot["width"], "height": shot["height"]}
+
+    def _desk_frame(self, label: str, pointer: dict | None = None) -> str | None:
+        """The run's timeline: a picture of the whole screen (blacked out like the Pip's), and where it acted."""
+        from . import pip_desktop_eyes as eyes
+        if self.frames_dir is None or self.frames >= MAX_FRAMES_PER_RUN:
+            return None
+        made = eyes.frame(self.desktop, self.browser)
+        if made is None:
+            return None
+        data, scale = made
+        self.frames += 1
+        name = f"{self.frames:04d}.jpg"
+        (self.frames_dir / name).write_bytes(data)
+        row = {"frame": name, "label": label[:200], "url": "", "at": _now()}
+        if pointer:
+            row["pointer"] = {k: (round(v * scale, 1) if k in ("x", "y", "from_x", "from_y") else v) for k, v in pointer.items()}
+        with open(self.frames_dir / "index.jsonl", "a", encoding="utf-8") as index:
+            index.write(json.dumps(row) + "\n")
+        return name
+
+    def _show_desktop_pointer(self, pointer: dict, screen) -> None:
+        """The Pip's cursor in the user's live view of its screen (Pips API 53's pointer, in the screen's pixels)."""
+        self._pointer_seq += 1
+        self.pointer = {**pointer, "at": _now(), "seq": self._pointer_seq, "screen_x": pointer["x"],
+                        "screen_y": pointer["y"], "screen_width": screen[0], "screen_height": screen[1]}
 
     # -- decisions ---------------------------------------------------------------------------
 
@@ -1661,9 +1840,12 @@ def desktop_status(registry, pip_id: str, actor: str) -> dict:
     # newer Chrome once a day. The tab shows the progress (setup) and opens the screen when done.
     from .pip_computer_box import box_runs
     # Nothing is downloaded for a box this computer can't build (a stock Ubuntu: see capability()).
-    if pip_screen_setup.due() and (sys.platform == "darwin" or box_runs()[0]):
+    from . import pip_apps
+    measure = sys.platform != "darwin" and pip_apps.needs_measure()
+    if (pip_screen_setup.due() or measure) and (sys.platform == "darwin" or box_runs()[0]):
         needs = pip_screen_setup.wanted()
-        if needs or pip_screen_setup.current_root() is not None:
+        # Also when only the apps' download size is still unknown: the setup measures it (pip_apps.offer).
+        if needs or pip_screen_setup.current_root() is not None or measure:
             pip_screen_setup.start(needs=needs)
     shown = pip_screen.availability()
     setup = pip_screen_setup.status()

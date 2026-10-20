@@ -253,7 +253,13 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 53: a Pip's eyes and cursor (pip_eyes): get_pip_eyes and set_pip_eyes (how a Pip whose model reads text only
 # sees: ask, relay or off); list_pip_computer_frames takes `pointers` (each step that acted by position says where);
 # use_pip_computer_view takes op "pointer" (where the Pip last acted, no frame) and its frames carry `pointer`.
-PIPS_API_VERSION = 53
+# API 54: Pips use the whole desktop (pip_desktop_eyes, pip_apps). A run whose model sees gets the desktop's steps
+# (desktop_look and the mouse and keys anywhere, windows, focus_window, launch_app) and its apps (an image editor, a
+# document editor, a PDF viewer), each in a box of its own; get_pip_computer_apps and set_pip_computer_apps
+# (choice "download" | "not_now") read and answer the one offer to download the apps this computer lacks. The apps are
+# online like the Terminal, through the computer's egress proxy. Desktop steps reach the timeline and the live view as
+# API 53's pointers, in the screen's pixels.
+PIPS_API_VERSION = 54
 
 
 def _pips_platform_supported() -> bool:

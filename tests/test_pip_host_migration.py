@@ -102,7 +102,7 @@ class PipHostMigrationTests(unittest.TestCase):
         self.assertEqual(calls, ['open', 'peer', 'heartbeat', 'config', 'model'])
         ready = self.frames()[0]
         caps = ready['capabilities']
-        self.assertEqual(caps['pips_api_version'], 53)
+        self.assertEqual(caps['pips_api_version'], 54)
         self.assertTrue(caps['agent_control'] and caps['editor_state'])
         self.assertEqual(caps['chats']['default'], self.a.chat_id)
 

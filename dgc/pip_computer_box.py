@@ -93,10 +93,10 @@ _SECRET_BOXES_JS = r"""function () {
           ratio: window.devicePixelRatio || 1};
 }"""
 # The screenshot redrawn in an OffscreenCanvas (never on the page): fitted to its size, the boxes blacked out.
-_COMPOSE_JS = r"""async function (b64, boxes, width, height, perCss, quality, mark) {
+_COMPOSE_JS = r"""async function (b64, boxes, width, height, perCss, quality, mark, kind) {
   const bin = atob(b64), bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const picture = await createImageBitmap(new Blob([bytes], {type: 'image/jpeg'}));
+  const picture = await createImageBitmap(new Blob([bytes], {type: kind || 'image/jpeg'}));
   const canvas = new OffscreenCanvas(width, height), g = canvas.getContext('2d');
   g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
   g.drawImage(picture, 0, 0, width, height);
@@ -1325,6 +1325,45 @@ class BoxedBrowser(BrowserSession):
         except (BrowserError, socket.timeout, OSError):
             return ""
         return str(said or "")[:120]
+
+    def page_target(self) -> str | None:
+        """The target id of DGC's own tab (the one the Pip and the user share)."""
+        return self._session_target(getattr(self._ws, "session_id", None))
+
+    def desktop_secrets(self) -> dict:
+        """For a picture of the whole desktop (pip_desktop_eyes): every window this browser has, where it is, and on
+        DGC's own tab, whether it is the one showing and where its password and card fields are.
+
+        {"windows": [{"id", "left", "top", "width", "height", "state", "own"}], "visible": bool, "inner": [w, h],
+         "ratio": float, "boxes": [[x, y, w, h] in the page's CSS pixels]}. Raises BrowserError when it can't say."""
+        self.start()
+        own = self.page_target()
+        if not own:
+            raise BrowserError("the browser's own tab is not attached")
+        windows, seen = [], set()
+        for info in self._browser_call("Target.getTargets").get("targetInfos", []):
+            if info.get("type") != "page":
+                continue
+            try:
+                found = self._browser_call("Browser.getWindowForTarget", {"targetId": info["targetId"]})
+            except (BrowserError, KeyError):
+                continue                      # a tab closing as it was asked about
+            window, bounds = found.get("windowId"), found.get("bounds") or {}
+            if window in seen and info.get("targetId") != own:
+                continue
+            seen.add(window)
+            row = {"id": window, "left": float(bounds.get("left") or 0), "top": float(bounds.get("top") or 0),
+                   "width": float(bounds.get("width") or 0), "height": float(bounds.get("height") or 0),
+                   "state": str(bounds.get("windowState") or "normal"), "own": info.get("targetId") == own}
+            windows = [w for w in windows if w["id"] != window] + [row] if row["own"] else windows + [row]
+        state = self._in_world(self._isolated(), "function(){return [document.visibilityState, innerWidth, innerHeight,"
+                                                 " devicePixelRatio || 1];}")
+        if not isinstance(state, list) or len(state) != 4:
+            raise BrowserError("the browser's tab could not be measured")
+        visible = state[0] == "visible"
+        boxes = self.secret_boxes()["boxes"] if visible else []
+        return {"windows": windows, "visible": visible, "inner": [float(state[1]), float(state[2])],
+                "ratio": float(state[3] or 1), "boxes": boxes}
 
     def screen_offset(self) -> tuple[float, float] | None:
         """Where the page's top-left corner is on the computer's screen (a window on its desktop)."""

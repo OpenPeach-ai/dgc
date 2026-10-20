@@ -78,6 +78,7 @@ CONTROL_COMMANDS = frozenset({
     "check_pip_source", "get_pip_run_source",
     "list_pip_run_posts",
     "get_pip_eyes", "set_pip_eyes",
+    "get_pip_computer_apps", "set_pip_computer_apps",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -118,6 +119,7 @@ _COMMAND_ARGS = {
     "forget_pip_site": {"pip_id", "site"}, "get_pip_chat_context": {"pip_id", "context_size"},
     "set_pip_chat_options": {"pip_id", "chat_options"},
     "get_pip_eyes": {"pip_id"}, "set_pip_eyes": {"pip_id", "choice"},
+    "get_pip_computer_apps": set(), "set_pip_computer_apps": {"choice"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
     "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
@@ -2567,14 +2569,16 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     # A Pip with a computer uses it in its tasks and in its chat, where the user can watch it work.
     computer_pin = manifest.get('computer_socket') if personal and kind in ('personal_task', 'conversation') else None
     apps_pin = manifest.get('app_socket') if personal and kind in ('personal_task', 'conversation') else None
-    if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) != {'socket', 'token'}):
+    # 'desktop' (optional): its computer shows a whole desktop on this machine, so a Pip that sees gets its steps.
+    if computer_pin is not None and (not isinstance(computer_pin, dict) or set(computer_pin) - {'desktop'} != {'socket', 'token'}
+                                     or computer_pin.get('desktop', False) not in (True, False)):
         raise RegistryError('invalid_manifest', 'The computer connection is malformed.')
     # How it sees (pip_eyes): the user's choice for a model that reads text only, and the model that would look
     # for it. Whether its own model sees is checked against its own client, once, when the turn starts.
     from . import pip_eyes
     eyes_pin = (pip_eyes.validate_pin(manifest['computer_eyes'])
                 if personal and kind in ('personal_task', 'conversation') and 'computer_eyes' in manifest else None)
-    eyes = {'mode': None, 'convention': 'pixels', 'seen': {}, 'card': None, 'shot': None, 'needs': False}
+    eyes = {'mode': None, 'convention': 'pixels', 'seen': {}, 'card': None, 'shot': None, 'desk_shot': None, 'needs': False}
     # A Personal Pip's skills: instructions it may load, never tools or permissions.
     # A reviewed handoff stays the narrow task it was approved as: no skills there.
     pip_skills = (personal_skills(config) if personal and kind in ('personal_task', 'conversation') and 'handoff' not in manifest
@@ -2642,8 +2646,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             return super()._vision_route(probe=probe)
 
         def _eyes_points(self, op, args):
-            """The model's points as pixels of the screenshot it saw (pip_eyes.to_pixels)."""
-            keys = [('x', 'y')] + ([('to_x', 'to_y')] if op == 'drag' else [])
+            """The model's points as pixels of the screenshot it saw (pip_eyes.to_pixels): the browser's page for its
+            steps, the whole screen for the desktop's."""
+            desk = op in pip_computer.DESKTOP_POINT_OPS
+            shot_key = 'desk_shot' if desk else 'shot'
+            keys = [('x', 'y')] + ([('to_x', 'to_y')] if op in ('drag', 'desktop_drag') else [])
             points = []
             for kx, ky in keys:
                 x, y = args.get(kx), args.get(ky)
@@ -2651,12 +2658,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         or not isinstance(y, (int, float))):
                     raise ValueError(f'give {kx} and {ky} as numbers')
                 points.append((float(x), float(y)))
-            if eyes['shot'] is None:
+            if eyes.get(shot_key) is None:
                 # It acts before it looked this run: learn the screen's size first (the picture is not used).
-                first = pip_computer.worker_reply(computer_pin, 'look', {})
+                first = pip_computer.worker_reply(computer_pin, 'desktop_look' if desk else 'look', {})
                 if 'width' in first:
-                    eyes['shot'] = (first['width'], first['height'])
-            width, height = eyes['shot'] or (1280, 800)
+                    eyes[shot_key] = (first['width'], first['height'])
+            width, height = eyes.get(shot_key) or (1280, 800)
             mapped = pip_eyes.to_pixels(points, width, height, eyes['convention'], eyes['seen'])
             out = dict(args)
             for (kx, ky), (x, y) in zip(keys, mapped):
@@ -2699,7 +2706,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         if seen > keep:
                             content[index] = {'type': 'text', 'text': '(an earlier screen, no longer shown)'}
 
-        def _relay_look(self, reply, question):
+        def _relay_look(self, reply, question, what="the agent's browser screen"):
             """A model that can see looks at the screen for this one and answers in words, naming points."""
             import base64 as _b64
             route = self._vision_route(probe=False)
@@ -2713,7 +2720,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             asked += ('\nFor everything you mention that can be clicked, typed into or dragged (buttons, fields, links, icons, '
                       f'items on a canvas), give its centre as (x, y) {scale}. Say what you are unsure of.')
             uri = 'data:image/jpeg;base64,' + _b64.b64encode(reply['image']).decode('ascii')
-            ok, answer = vision_relay.look(self, route, [(uri, "the agent's browser screen")], asked)
+            ok, answer = vision_relay.look(self, route, [(uri, what)], asked)
             if not ok:
                 return reply['text'] + '\nThe model that sees for you could not look this time: ' + answer[:300]
             return (reply['text'] + f'\n{pip_eyes.short(route.model)} looked for you (you cannot see; this is its report, '
@@ -2722,7 +2729,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'])] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else [])
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else [])
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -2861,6 +2868,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         "You have no file, project, browser, command or external-action tools.",
                         "You cannot reach the user's own files or projects; your tools are your own computer's.") + '\n' + pip_computer.NOTICE
                     base_instructions += {'own': '\n' + pip_computer.EYES_NOTICE, 'relay': '\n' + pip_computer.RELAY_NOTICE}.get(self._pip_eyes(), '')
+                    if computer_pin.get('desktop') is True and self._pip_eyes() in ('own', 'relay'):
+                        base_instructions += '\n' + pip_computer.DESKTOP_NOTICE
             if specialist_pin is not None:
                 base_instructions = base_instructions.replace('network, delegate, load skills', 'network, load skills')
                 if self._pip_specialist_role:
@@ -3004,9 +3013,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 question = arguments.get('question')
                 args = {k: v for k, v in arguments.items() if k not in ('op', 'question')}
                 mode = self._pip_eyes()
-                if op == 'look' and mode not in ('own', 'relay'):
+                desk = op in pip_computer.DESKTOP_OPS
+                if desk and computer_pin.get('desktop') is not True:
+                    return 'error: your computer shows no desktop here; use the browser\'s steps.'
+                if (op == 'look' or desk) and mode not in ('own', 'relay'):
                     return self._cannot_see()
-                if op in pip_computer.POINT_OPS or (op == 'upload' and 'x' in args and not args.get('ref')):
+                if (op in pip_computer.POINT_OPS or op in pip_computer.DESKTOP_POINT_OPS
+                        or (op == 'upload' and 'x' in args and not args.get('ref'))):
                     if mode not in ('own', 'relay'):
                         return 'error: you cannot act by position without seeing; use read and refs.'
                     try:
@@ -3019,18 +3032,21 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     eyes['needs'] = True
                 if 'image' not in reply:
                     return reply['text']
-                eyes['shot'] = (reply['width'], reply['height'])
+                eyes['desk_shot' if desk else 'shot'] = (reply['width'], reply['height'])
                 if mode == 'relay':
-                    if op == 'look':
-                        return self._relay_look(reply, question)
-                    return reply['text'] + '\nLook to check what happened.'
+                    if op in ('look', 'desktop_look'):
+                        return self._relay_look(reply, question, "the agent's whole desktop screen" if desk else
+                                                "the agent's browser screen")
+                    return reply['text'] + ('\nLook at the desktop (desktop_look) to check what happened.' if desk
+                                            else '\nLook to check what happened.')
                 from .tools import _image_entry
                 where = ('0-1000 across it' if eyes['convention'] == 'thousandths' else
                          f"{reply['width']}x{reply['height']} pixels")
                 self._forget_old_screens()
                 self._deliver_images(call.id, 'computer', [_image_entry(
                     reply['image'], name='screen.jpg', source='browser',
-                    label=f"your computer's screen after {op} (points are {where})")])
+                    label=(f"your computer's screen (the whole desktop) after {op} (points are {where}, for the desktop steps)"
+                           if desk else f"your computer's screen after {op} (points are {where})"))])
                 return reply['text']
             if personal:
                 self.ui.tool_denied(call.name, {}, "Personal Pips have no model-callable tools.", call.id)
@@ -3839,7 +3855,12 @@ def _execute_run(registry, row, config):
             if careful and row['requested_by'] in pip_careful.UNATTENDED:
                 lane = pip_careful.Lane()         # nobody watching: its computer or the user's plugins, not both
                 computer_socket.lane = lane
-            manifest = {**manifest, 'computer_socket': computer_socket.pin()}
+            from . import pip_desktop_eyes, pip_screen
+            try:
+                whole = pip_desktop_eyes.supported() and pip_screen.availability()["available"] is True
+            except Exception:                       # noqa: BLE001 - no desktop: the browser's steps, as before
+                whole = False
+            manifest = {**manifest, 'computer_socket': {**computer_socket.pin(), 'desktop': whole}}
     app_socket = None
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # The Pip's own apps (connect_app, read_app): the controller holds the Composio connection;
@@ -4327,7 +4348,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -4558,6 +4579,14 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "Your Pips' apps are on this computer only.")
                 result = pip_app_links.apps_overview(registry)
+            elif command in ('get_pip_computer_apps', 'set_pip_computer_apps'):
+                # The image editor, document editor and PDF viewer on every Pip computer here (pip_apps): which this
+                # machine has, and the one offer to download the ones it lacks.
+                from . import pip_apps
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "A Pip computer's apps are on this computer only.")
+                result = {"apps": pip_apps.offer() if command == 'get_pip_computer_apps'
+                          else pip_apps.answer(request.get('choice'), actor)}
             elif command in ('get_pip_eyes', 'set_pip_eyes'):
                 # How a Personal Pip sees (pip_eyes): whether its model can, and when it can't, the user's choice.
                 from . import pip_eyes
