@@ -159,7 +159,7 @@ def schema(eyes: str | None = None, convention: str = "pixels", desktop: bool = 
                       "(x,y to to_x,to_y) and desktop_scroll (dy at x,y) act anywhere on it, with points in the latest "
                       "desktop_look picture (" + ("0-1000 across it" if convention == "thousandths" else "its pixels")
                       + "); desktop_type types text into the window in front; desktop_key presses a key or shortcut "
-                      "(ctrl+s, alt+tab, Enter). windows lists the open windows; focus_window brings one to the front "
+                      "(ctrl+s, alt+tab, Enter; several separated by spaces are pressed in turn). windows lists the open windows; focus_window brings one to the front "
                       "(window: its id). launch_app opens app: images (an image editor, LibreOffice Draw), documents "
                       "(LibreOffice Writer), pdf (a PDF viewer), files, terminal or browser, with a file from your "
                       "Files (path) if you like. Desktop apps reach public websites, as the Terminal does. ")
@@ -251,9 +251,14 @@ DESKTOP_NOTICE = ("Your computer is a whole desktop, like a person's: the browse
                   "desktop_type, desktop_key and the rest work in any window. Save what you make in your Files "
                   "(/home/pip/Files). Like the Terminal, the apps reach public websites, never this computer or the "
                   "user's network. When the user asks you to design something (a "
-                  "shirt, a card, a poster), make it yourself in the image editor: their words as big text, a shape or "
-                  "two in colour. To save it as a PNG: File > Export..., type /home/pip/Files/NAME.png as the name and "
-                  "press Enter, then OK on PNG Options. Then upload that PNG where it is needed.")
+                  "shirt, a card, a poster), the design is yours to make in the image editor, first, before you open any "
+                  "shop: launch_app images; press F2, click near the top of the page and type their words; press Escape, "
+                  "then make the text big with desktop_key \"ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] "
+                  "ctrl+] ctrl+] ctrl+] ctrl+]\" (each ctrl+] is one size up); add a shape or two: click the rectangle or "
+                  "ellipse in the left toolbar, then drag on the page (they come in colour). Save it as a PNG: File > "
+                  "Export..., type "
+                  "/home/pip/Files/NAME.png as the name, press Enter, then OK. Only then go to the shop and put that PNG "
+                  "on the product with upload (its upload button); a shop's own text tool is not your design.")
 
 
 def validate_plan(plan):

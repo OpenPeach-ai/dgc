@@ -85,6 +85,21 @@ def parse_keys(combo: str) -> list[int]:
     return out
 
 
+MAX_SEQUENCE = 30
+
+
+def parse_sequence(text: str) -> list[list[int]]:
+    """Keys or shortcuts separated by spaces, each as parse_keys reads it ("ctrl + s" is one shortcut)."""
+    import re
+    flat = re.sub(r"\s*\+\s*", "+", str(text or "").strip())
+    if len(flat) > 400:
+        raise ValueError("press at most 30 keys at a time")
+    words = flat.split() if " " in flat else [flat]
+    if len(words) > MAX_SEQUENCE:
+        raise ValueError(f"press at most {MAX_SEQUENCE} keys at a time")
+    return [parse_keys(word) for word in words] if words else [parse_keys("")]
+
+
 class Screen:
     """One connection to a desktop's VNC socket: its framebuffer, and the Pip's pointer and keys."""
 
@@ -230,16 +245,18 @@ class Screen:
         self.sock.sendall(struct.pack(">BBxxI", 4, 1 if down else 0, sym & 0xFFFFFFFF))
 
     def press(self, combo: str) -> None:
-        """A key or a shortcut: every key held in order, then let go in reverse."""
-        syms = parse_keys(combo)
-        try:
-            for sym in syms:
-                self.key(sym, True)
-                time.sleep(0.02)
-        finally:
-            for sym in reversed(syms):
-                self.key(sym, False)
-                time.sleep(0.01)
+        """A key or a shortcut: every key held in order, then let go in reverse. Several, separated by spaces
+        ("ctrl+] ctrl+] ctrl+]", "Down Down Enter"), are pressed one after another."""
+        for syms in parse_sequence(combo):
+            try:
+                for sym in syms:
+                    self.key(sym, True)
+                    time.sleep(0.02)
+            finally:
+                for sym in reversed(syms):
+                    self.key(sym, False)
+                    time.sleep(0.01)
+            time.sleep(0.05)
 
     def type_text(self, text: str) -> None:
         """Type into whatever has focus, a character at a time (Unicode too)."""
