@@ -174,6 +174,8 @@ class WordingTests(unittest.TestCase):
         # A subscription brain gets the same tool (Pips API 55's MCP computer).
         self.assertIn("dialog", pip_brain.mcp_tool(pip_computer.schema(None))["inputSchema"]["properties"]["op"]["enum"])
         self.assertIn("Recorded as step", pip_computer.NOTICE)
+        # In twelve measured runs no Pip named a step when told only to "name them"; it is shown how.
+        self.assertIn('"Weight: 340 g (step 4)"', pip_computer.NOTICE)
         self.assertIn("Page reported", pip_computer.NOTICE)
 
     def test_each_tab_numbers_its_refs_from_the_shared_snapshot(self):
@@ -183,8 +185,9 @@ class WordingTests(unittest.TestCase):
         self.assertEqual([browser.tab_of_ref(r) for r in ("e1", "e9999", "e10001", "e20005", "x1", "")], ["t1", "t1", "t2", "t3", "", ""])
 
     def test_the_tool_and_its_notice_stay_small(self):
-        # Every request of every Pip with a computer carries them: 2026-10-21 they grew from 3240 to 4511 characters
-        # (text-only tool and notice; about 300 tokens) for the new steps. Growing them further needs a reason.
+        # Every request of every Pip with a computer carries them: 2026-10-21 they grew from 3240 to 4596 characters
+        # (text-only tool and notice; measured +335 prompt tokens a request, against 4 to 10 fewer requests an errand)
+        # for the new steps. Growing them further needs a reason.
         size = len(json.dumps(pip_computer.schema(None))) + len(pip_computer.NOTICE)
         self.assertLessEqual(size, 4600, size)
 
