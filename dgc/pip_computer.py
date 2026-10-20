@@ -193,7 +193,8 @@ ERRANDS = ("Getting things done: when the user asks you to pay, buy, order or bo
            "work) and say what you chose. Go all the way to the site's final Pay, Order or Book button and press it: DGC holds "
            "it for the user's Allow and shows them exactly what it would pay or send (a payment every time), so going ahead is "
            "safe; never stop short to hand a form back to them. Fill in what you know or can read in what they sent. You can "
-           "type card details into a payment form; you just never see them on the screen. Do everything you can first, then "
+           "type card details into a payment form; you just never see them on the screen. Press Pay only once every field it "
+           "needs is filled: with no card yet, ask for it before you press Pay, never after. Do everything you can first, then "
            "ask only for what you still can't find or decide (a card, a delivery address, a phone number, a choice that is "
            "theirs): all of it in one short message that names each thing. Never ask for a password and never sign up for an "
            "account; if a site needs a sign-in, ask the user to sign in on your computer's screen. Never offer choices that "
@@ -616,9 +617,11 @@ class Host:
         kinds = {self._kind(action_id) for action_id in held}
         if kinds == {"site"}:
             return SITE_HELD
+        # "That hold isn't a card here, so I can't show it to you" -- above the card (three-asks test, 2026-10-20).
         return ("Held: this would change something on the website, so DGC paused it unsent. Unless the "
-                "user always allows this kind of submit here, it waits for their approval. Stop now and "
-                "tell the user what you submitted and why; a follow-up run continues once it is sent.")
+                "user always allows this kind of submit here, it waits for their approval: DGC shows it to them as a "
+                "card below your reply, with what it sends, Review… and Reject. It is there. Stop now and tell the user "
+                "in a sentence or two what you submitted and why; a follow-up run continues once they decide.")
 
     # -- eyes and a cursor ---------------------------------------------------------------------
 

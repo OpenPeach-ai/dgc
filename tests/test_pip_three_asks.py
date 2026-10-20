@@ -61,6 +61,7 @@ class Instructions(unittest.TestCase):
         self.assertIn("never answer with what you can't do", said)
         self.assertIn("choose a good site yourself", said)
         self.assertIn("You can type card details into a payment form", said)
+        self.assertIn("with no card yet, ask for it before you press Pay, never after", said)
         self.assertIn("all of it in one short message that names each thing", said)
         self.assertIn("you can still type into them by their ref", said, "its eyes don't see card fields; its hands can type them")
         _, seen = self.turn(["I can't pay it for you."], computer=False)
@@ -218,6 +219,11 @@ class RejectFollowUp(unittest.TestCase):
         self.assertNotIn("choices", reply("pending"), "the hold's own card is the one decision")
         self.assertEqual(reply("approved")["choices"], ["Allow the site, go ahead", "Hold off for now"],
                          "nothing waits (an Always allow sent it): its choices stay")
+
+    def test_a_held_submit_tells_the_pip_its_card_is_below(self):
+        host = types.SimpleNamespace(_kind=lambda action_id: "")
+        said = pip_computer.Host._held_text(host, ["compact_" + "a" * 32])
+        self.assertIn("DGC shows it to them as a card below your reply, with what it sends, Review… and Reject. It is there.", said)
 
     def test_a_held_site_is_named_to_the_pip(self):
         made = []
