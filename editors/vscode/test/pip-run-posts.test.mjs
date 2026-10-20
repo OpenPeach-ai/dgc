@@ -20,8 +20,9 @@ const windows=[];after(()=>windows.forEach(w=>w.close()));
 const PIP='pip_'+'a'.repeat(32),R1='run_'+'1'.repeat(32),R2='run_'+'2'.repeat(32),R3='run_'+'3'.repeat(32),CHAT='run_'+'9'.repeat(32);
 const ws={id:'ws',name:'toni-erp'};
 const iso=ms=>new Date(ms).toISOString();
-// Noon today, so the posts 1 to 5 hours "ago" stay on today's date at any hour the suite runs: from
-// Date.now() they fell on yesterday between midnight and 5 AM and read "Yesterday's audit".
+// Noon today, and the page's clock with it (setup), so the posts 1 to 5 hours "ago" stay on today's date and
+// the next run stays ahead at any hour: from Date.now() they read "Yesterday's audit" between midnight and 5 AM,
+// and with noon alone the 1 PM next run had passed by the afternoon.
 const NOW=(()=>{const d=new Date();d.setHours(12,0,0,0);return d.getTime();})(),HOUR=3600000;
 const pip=(extra={})=>({id:PIP,workspace_id:'ws',pip_type:'rook',name:'ERP daily audit',goal:'Look for bugs that lose data.',source_policy:{mode:'committed_only'},source_ref:'HEAD',status:'active',current_version:1,lifecycle_revision:0,policy:'read_only',trigger:'manual',proposals:[],report_chats:1,report_session:'chat-erp',latest_run:{id:R1,status:'succeeded'},...extra});
 const types=['core','scout','lens','patch','rook','pulse','lock','quill'].map((id,character_index)=>{const available=['scout','lens','rook','lock'].includes(id),name=id[0].toUpperCase()+id.slice(1);return{id,name,character_index,role:{core:'Main chat',scout:'Repository exploration',lens:'Repository research',patch:'Code changes',rook:'Code review',pulse:'Test execution',lock:'Security review',quill:'Documentation writing'}[id],description:available?'Inspect committed source with a focused read-only preset.':'This role is planned.',available,unavailable_reason:available?null:'This engine is not available yet.',default_name:name+' job',default_goal:available?'Inspect source for '+id+' findings.':'',engine:available?'source_audit':null};});
@@ -40,6 +41,8 @@ async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
 function setup({apiVersion=51,postsValue=[FOUND,FAILED,CLEAR],messages=[],state,pipValue=pip(),workspace=ws}={}){
   const dom=new JSDOM(view.exports.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
+  // The page's clock is the test's: "Today's" and "I'll run again at 1 PM" hold at any hour the suite runs.
+  w.Date.now=()=>NOW;
   const sent=[],answered=new Set(),asks=[];let persisted=state;
   w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.eval(markdownJs+'\nglobalThis.DgcMarkdown=DgcMarkdown;');w.eval(client);
   const controller=w.DgcPips.mount({root:w.document,postMessage:m=>sent.push(m),getState:()=>persisted,setState:v=>{persisted=v;},
