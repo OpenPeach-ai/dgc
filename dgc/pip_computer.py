@@ -257,9 +257,11 @@ DESKTOP_NOTICE = ("Your computer is a whole desktop, like a person's: the browse
                   "3. desktop_key \"ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+] ctrl+]\" "
                   "makes that text big. 4. Add a shape or two: click the rectangle or ellipse in the left toolbar, then "
                   "drag on the page; they come filled in colour, so leave the colours as they are. 5. Export it: "
-                  "desktop_key ctrl+shift+e, desktop_type /home/pip/Files/NAME.png, desktop_key Enter, then Enter again "
-                  "for PNG Options. 6. Check NAME.png is in your Files (files), then go to the shop and put that PNG on "
-                  "the product with upload (its upload button); a shop's own text tool is not your design.")
+                  "desktop_key ctrl+shift+e, desktop_type /home/pip/Files/NAME.png (just type it: the name picks PNG; "
+                  "leave the file type list alone), desktop_key Enter, then Enter again for PNG Options. 6. Check NAME.png "
+                  "is in your Files (files). At the shop, your PNG is the design: put it on the product with upload "
+                  "(path NAME.png, and the page's upload button or file field), and don't type the words again in the "
+                  "shop's own text tool.")
 
 
 def validate_plan(plan):

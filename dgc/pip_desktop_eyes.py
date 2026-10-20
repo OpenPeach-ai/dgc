@@ -412,18 +412,21 @@ def drawn(pixels: bytes, width: int, rect) -> bool:
 def wait_for_window(desktop, before: set, *, seconds: float = 30) -> bool:
     """After opening an app: wait for a new window, then for it to draw (an app's first start can take a while)."""
     deadline = time.monotonic() + seconds
+    appeared = None
     while time.monotonic() < deadline:
         time.sleep(0.4)
         fresh = [w for w in windows(desktop) if w["id"] not in before and w["shown"] and w["width"] > 40 and w["height"] > 40]
         if not fresh:
             continue
+        appeared = appeared or time.monotonic()
         width, height, pixels = grab(desktop)
         w = max(fresh, key=lambda f: f["width"] * f["height"])
         rect = (max(0, w["x"]), max(0, w["y"]), min(w["width"], width - max(0, w["x"])), min(w["height"], height - max(0, w["y"])))
-        if rect[2] > 8 and rect[3] > 8 and drawn(pixels, width, rect):
+        # Drawn, or there long enough to be a plain window (an empty PDF viewer is mostly one colour).
+        if rect[2] > 8 and rect[3] > 8 and drawn(pixels, width, rect) or time.monotonic() - appeared > 8:
             time.sleep(0.6)
             return True
-    return False
+    return appeared is not None
 
 
 def window_at(found: list[dict], x: float, y: float) -> str:

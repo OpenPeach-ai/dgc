@@ -1129,7 +1129,7 @@ also gets: `desktop_look` (the whole screen), `desktop_click`, `desktop_double_c
 16 steps, released), `desktop_scroll` (`dy`, `dx` in pixels, about 40 a wheel notch), `desktop_type`
 (`text`, at most 2,000 characters, into the window in front; any Unicode character types, as its X
 key symbol), `desktop_key` (`key`: a name or a shortcut such as `ctrl+s`, `alt+tab`, `Enter`, `F5`;
-with shift a letter is sent as its capital), `windows` (the open windows, front first: id, app, title,
+with shift a letter is sent as its capital; up to 30 separated by spaces are pressed in turn), `windows` (the open windows, front first: id, app, title,
 position, size; minimised ones listed apart), `focus_window` (`window`: its id; `_NET_ACTIVE_WINDOW` to
 the window manager) and `launch_app` (`app`: `images`, `documents`, `pdf`, `files`, `terminal` or
 `browser`, and for the first three an optional `path` in Files, walked like every Files path; with only
@@ -1168,7 +1168,8 @@ the Terminal: public addresses on ports 80 and 443, never this computer, the loc
 cloud metadata; no per-site asking, and what an app sends needs no Allow card: only the browser holds
 submits), `/usr` read-only, Files at `/home/pip/Files`, its settings in
 `computers/PIP_ID/home/.apps` at `/home/pip/.config` (LibreOffice seeded without its first-run screens,
-macros off), the desktop's X socket directory at `/tmp/.X11-unix`. The program runs from its own mount
+macros off, its dialogs starting in Files, and ctrl+shift+e for Export in Draw so a PNG is made with keys
+alone), the desktop's X socket directory at `/tmp/.X11-unix`. The program runs from its own mount
 (`/opt/apps/libreoffice`, `/opt/apps/evince`): Ubuntu's AppArmor profiles for both attach by path and
 can't resolve a box's paths, which refused their X connection. Files and the Terminal are opened in the
 desktop box through a second FIFO (`launch`), which runs one of two fixed commands. They come from the
