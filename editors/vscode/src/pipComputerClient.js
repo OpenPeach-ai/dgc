@@ -86,13 +86,22 @@ function windowMarkup(app,body){
  const sub=app==='browser'?(S.view?.ok?S.view.url:''):app==='files'?(S.files.path?['Files',...S.files.path.split('/')].join(' / '):''):'Online · public websites only · works in its Files';
  return `<section class="pc-window" aria-label="${APPS[app]}"><div class="pc-titlebar"><span class="pc-win-icon">${appIcon(app,16)}</span><strong>${APPS[app]}</strong><span class="pc-win-sub">${esc(sub)}</span><span class="pc-win-buttons"><button type="button" class="pc-win-button" data-minimize="${app}" aria-label="Minimise ${APPS[app]}" title="Minimise">–</button><button type="button" class="pc-win-button" data-close="${app}" aria-label="Close ${APPS[app]}" title="Close">×</button></span></div><div class="pc-window-body">${body}</div></section>`;
 }
+// What a held form sends, on the card itself: a payment's bill number and amount, an order's sizes. Hidden
+// fields (a card number) never show. A card that said only "Send a form to <site>" didn't say what it paid.
+function sendsMarkup(summary){
+ const shown=(Array.isArray(summary?.fields)?summary.fields:[]).filter(f=>f&&typeof f.value==='string'&&f.value.trim()&&f.value!=='•••')
+  .map(f=>`${f.name} ${f.value.replace(/\s+/g,' ').trim()}`);
+ if(!shown.length)return '';
+ const line=shown.join(' · ');
+ return `<span class="pc-sends">${esc(line.length>200?line.slice(0,199)+'…':line)}</span>`;
+}
 function waitingMarkup(){
  const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending');
  if(!waiting.length)return '';
  return `<section class="pc-waiting" aria-label="Waiting for you">${waiting.map(a=>{const words=carefulWords(a.summary,S.pip?.name||'The Pip');return words
    // Careful mode: a new site, or something it read from your apps; no Always allow for these.
    ?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span>${a.summary.kind==='text'&&typeof a.summary.text==='string'?`<pre class="pc-held-text">${esc(a.summary.text)}</pre>`:''}</div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
-   :`<article class="pc-hold"><div><strong>Send a form to ${esc(a.summary.host)}</strong><span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${a.summary.payment===true?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
+   :`<article class="pc-hold"><div><strong>${a.summary.payment===true?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${a.summary.payment===true?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
 }
 function browserMarkup(){
  const v=S.view;

@@ -115,6 +115,18 @@ test('what you type in the address bar stays while the screen refreshes; Escape,
  assert.equal(bar().value,'https://shop.example/','leaving the bar puts the page\'s address back');
 });
 
+test('a held payment says what it pays, and never a hidden card field',async()=>{
+ // Three-asks test (2026-10-20): "Send a form to pay.sunrisehospital…" didn't say which bill or how much.
+ const pay={...hold,summary:{...hold.summary,host:'pay.hospital.example',payment:true,fields:[{name:'billno',value:'SMH/OP/26/118734'},
+  {name:'amount',value:'5350.00'},{name:'card_number',value:'•••'}]}};
+ const x=setup({status:computer({pending:1,actions:[pay]})});await x.drain();
+ const card=x.d.querySelector('.pc-waiting').textContent;
+ assert.match(card,/Pay on pay.hospital.example/);
+ assert.match(card,/billno SMH\/OP\/26\/118734 · amount 5350.00/);
+ assert.doesNotMatch(card,/card_number/);
+ assert.equal(x.d.querySelector(`[data-always="${actionId}"]`),null,'a payment has no Always allow');
+});
+
 test('what the Pip would submit waits at the top with Send once, Always allow and Reject',async()=>{
  const x=setup({status:computer({pending:1,actions:[hold]})});await x.drain();
  assert.match(x.d.querySelector('.pc-waiting').textContent,/Send a form to shop.example/);

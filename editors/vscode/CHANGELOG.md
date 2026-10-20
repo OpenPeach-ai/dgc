@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A held payment says what it pays.** On a Pip's computer tab, a waiting payment reads "Pay on <site>" with what the
+  form sends (a bill number and an amount, an order's sizes); a hidden card field never shows. It said only "Send a
+  form to <site>".
 - **See where a Pip clicks.** With DGC CLI on Pips API 53, a Pip's computer tab shows its cursor (an arrow with its name) where it last clicked, dragged or scrolled, over its browser or on its full screen, while it works. "What it saw…" draws each step's cursor, and a drag's path, on its screenshot.
 - **Seeing, on a Personal Pip's page.** Its model sees its screen and your photos, or it can't: then the row says how it sees (it asks you, a model that can see looks for it, or not at all), changes it in one choice, and offers Switch to the model that can see.
 - **A payment never offers Always allow**, in the Pips view or the computer tab; it asks every time.

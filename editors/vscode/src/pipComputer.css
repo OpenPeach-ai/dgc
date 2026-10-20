@@ -24,7 +24,7 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-error{margin:8px 16px 0;color:var(--vscode-errorForeground,#f14c4c)}.pc-pane .pc-error{margin:0}
 .pc-notice{margin:8px 16px 0;color:var(--muted)}
 .pc-waiting{display:grid;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--accent) 8%,transparent)}
-.pc-hold{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.pc-hold div:first-child{display:grid;gap:2px;min-width:0}.pc-hold span{color:var(--muted);font-size:12px}
+.pc-hold{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.pc-hold div:first-child{display:grid;gap:2px;min-width:0}.pc-hold span{color:var(--muted);font-size:12px}.pc-hold .pc-sends{color:inherit;overflow-wrap:anywhere}
 .pc-actions{display:flex;gap:6px;flex-wrap:wrap}
 .pc-crumbs{display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden}.pc-crumb{color:var(--vscode-foreground);background:transparent;padding:3px 5px}
 .pc-add{cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:6px 12px}
