@@ -523,3 +523,7 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .computer-timeline-cursor .ct-path{stroke:#7c5cff;opacity:.85}
 .computer-timeline-cursor .ct-from{fill:#7c5cff;opacity:.85}
 .computer-timeline-cursor .ct-arrow{fill:#fff;stroke:#1d1d22;stroke-width:1.5;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+/* Saved logins (Pips API 56): the dialog that saves one, and the rows on a Pip's page. */
+.login-dialog{max-width:480px}.login-form label{margin:12px 0 0}.login-form label.login-all-row{display:flex;align-items:center;gap:8px;margin:14px 0 2px}
+.login-form input[type=checkbox],.login-all input{width:auto;margin:0;flex:none}.login-help{font-size:12px;margin:4px 0}.login-site{margin:6px 0 2px}
+.login-all{display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:var(--muted);white-space:nowrap}.login-row .note-confirm{flex-wrap:wrap}

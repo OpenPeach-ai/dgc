@@ -32,6 +32,9 @@ export function carefulMarkup(state, {esc, busy = false, error = '', pipName = '
 export function carefulWords(summary, pipName = 'The Pip') {
   if (summary?.kind === 'site') return [`Let ${pipName} visit ${summary.site || summary.host}?`,
     `It hasn’t opened ${summary.shown || summary.host} for you before. Allow adds the site for good, and it opens it.`, 'Allow this site'];
+  // Saved logins (API 56): it met a sign-in page and has no login for it. Saving one answers the card.
+  if (summary?.kind === 'login') return [`Save a login for ${summary.site || summary.host} so ${pipName} can sign in itself?`,
+    `${pipName} needs to sign in on ${summary.shown || summary.host}. DGC keeps the login sealed on this computer and types it in for ${pipName}, which never sees it.`, 'Save login…'];
   if (summary?.kind === 'text') return [`Let ${pipName} put this on ${summary.host || 'a page'}?`,
     'It read this from your apps (careful mode). Nothing has been typed or sent yet; Allow lets it do this once.', 'Allow once'];
   return null;

@@ -1289,6 +1289,23 @@ export function pipComputerApps(value){
  if(!value.missing.every(k=>['images','documents','pdf'].includes(k)))fail();
  return value;
 }
+// Saved logins (Pips API 56, list_pip_logins): where each one fills, its username, whether it has a code and which
+// Pips may use it. Never its password or its key: a reply that carries either is refused, not shown.
+const LOGIN_KEYS='created_at,has_code,hosts,id,last_used_at,pips,site,source,username';
+export function pipLogin(value,pip){
+ const fail=()=>{throw Error('The saved logins didn\'t load. Refresh to try again.');};
+ if(!record(value)||Object.keys(value).filter(k=>k!=='usable').sort().join()!==LOGIN_KEYS||!/^login_[0-9a-f]{32}$/.test(value.id)
+   ||typeof value.site!=='string'||!value.site||value.site.length>512||!Array.isArray(value.hosts)||!value.hosts.length||value.hosts.length>20
+   ||!value.hosts.every(h=>typeof h==='string'&&h&&h.length<=255)||typeof value.username!=='string'||value.username.length>512
+   ||typeof value.has_code!=='boolean'||!(value.pips==='all'||Array.isArray(value.pips)&&value.pips.length<=64&&value.pips.every(p=>typeof p==='string'&&/^pip_[0-9a-f]{32}$/.test(p)))
+   ||!['card','page','sdk'].includes(value.source)||typeof value.created_at!=='string'||!(value.last_used_at===null||typeof value.last_used_at==='string')
+   ||(pip!==undefined&&typeof value.usable!=='boolean'))fail();
+ return value;
+}
+export function pipLogins(value,pip){
+ if(!record(value)||Object.keys(value).join()!=='logins'||!Array.isArray(value.logins)||value.logins.length>200)throw Error('The saved logins didn\'t load. Refresh to try again.');
+ return value.logins.map(login=>pipLogin(login,pip));
+}
 // How a Personal Pip sees (Pips API 53, get_pip_eyes / set_pip_eyes): its model, whether that model can see, and when
 // it can't, the user's choice (ask, a model that sees looks for it, or not now) and the model that would look.
 export function pipEyes(value,pip){

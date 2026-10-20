@@ -19,6 +19,8 @@ import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForSe
 import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {carefulPage,carefulMarkup,carefulWords,sendsWords} from './pipCareful.js';
+import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
+import {pipLogins,pipLogin} from './pipsModel.js';
 import {cardNumber} from './pipCards.js';
 import {eyesMarkup,eyesNotice} from './pipEyes.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
@@ -906,7 +908,8 @@ function computerWaitingCards(){
   const s=a.summary||{},words=carefulWords(s,name),pay=s.payment===true;
   const title=words?words[0]:pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
   const line=words?words[1]:[sendsWords(s),pay?'It sends payment card details.':'','Nothing has been sent.'].filter(Boolean).join(' ');
-  const yes=words?`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`
+  const yes=s.kind==='login'?`<button type="button" class="primary" data-login-card="${esc(a.id)}"${off}>${esc(words[2])}</button>`
+   :words?`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`
    :`<button type="button" class="primary" data-computer-action="${esc(a.id)}"${off}>Review…</button>`;
   return `<div class="app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(title)}"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">!</span><div class="app-link-words"><strong>${esc(title)}</strong><small>${esc(line)}</small></div></div><div class="app-link-actions">${yes}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>${words?'Not now':'Reject'}</button></div></div>`;
  }).join('');
@@ -917,7 +920,7 @@ async function decideInChat(id,approve){
  try{
   const done=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve})).action,pip);
   if(token!==scope())return;if(done.id!==a.id||done.status!==(approve?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh to see it.');
-  S.notice=!approve?(careful?'Not now. It won’t do that.':'Rejected. Nothing was sent.'):'Allowed. It opens the site and carries on.';
+  S.notice=!approve?(a.summary?.kind==='login'?`Not now. ${S.pip?.name||'It'} won’t ask to save a login for ${a.summary.site||'that site'} again today.`:careful?'Not now. It won’t do that.':'Rejected. Nothing was sent.'):'Allowed. It opens the site and carries on.';
   computerState.value={...computerState.value,actions:computerState.value.actions.map(x=>x.id===a.id?done:x)};
  }catch(error){if(token===scope())setError(error);}
  finally{if(token===scope()){S.busy=false;render();void refreshComputer();}}
@@ -976,6 +979,7 @@ async function applyComputerGrant(review){
 }
 async function openComputerAction(id){
  const c=computerState.value,a=c?.actions.find(x=>x.id===id);if(!a||!usable())return;
+ if(a.summary?.kind==='login'){openLoginForm(a);return;}
  let image='';
  if(a.frame&&a.run_id){try{image=pipComputerFrame(await send('get_pip_computer_frame',{run_id:a.run_id,frame:a.frame}),a.run_id,a.frame).image;}catch{image='';}}
  const s=a.summary,rows=s.fields.map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join(''),words=carefulWords(s,S.pip?.name||'The Pip');
@@ -1776,6 +1780,63 @@ async function setEyes(choice){
 }
 // Careful mode (#9): its switch and the sites it may visit, on the page of a Pip with a computer.
 const carefulState={pip:'',value:null,error:'',busy:false,seq:0};let sitesAll=false;
+// Saved logins (Pips API 56): its page lists where each login it may use fills, and the dialog saves one. Nothing the
+// user types into the dialog is kept here: the boxes are read once on Save, sent to DGC's sealed store, and emptied.
+const loginsState={pip:'',value:null,error:'',busy:false,seq:0,confirm:''};
+async function loadLogins(){
+ if(S.apiVersion<56||!personalPip()||remoteHost||!S.pip?.computer_plan)return;
+ const token=scope(),pip=S.selected,sequence=++loginsState.seq;
+ try{const value=pipLogins(await send('list_pip_logins',{pip_id:pip}),pip);if(token!==scope()||sequence!==loginsState.seq||S.selected!==pip)return;
+  loginsState.pip=pip;loginsState.value=value;loginsState.error='';render();}
+ catch(error){if(token===scope()&&sequence===loginsState.seq){loginsState.error=errorText(error);render();}}
+}
+async function loginCall(type,fields,notice){
+ if(loginsState.busy||!usable()||!personalPip())return;const token=scope(),pip=S.selected;loginsState.busy=true;loginsState.error='';render();
+ try{await send(type,fields);if(token!==scope()||S.selected!==pip)return;loginsState.confirm='';S.notice=notice;}
+ catch(error){if(token===scope())loginsState.error=errorText(error);}
+ finally{loginsState.busy=false;if(token===scope()){render();void loadLogins();}}
+}
+function pipNames(){return Object.fromEntries((S.jobs||[]).map(j=>[j.id,j.name]));}
+function openLoginForm(action=null){
+ if(S.apiVersion<56||!usable()||!S.pip)return;
+ const s=action?.summary||{};
+ openReview({loginForm:true,title:action?`Save a login for ${s.site||s.host}`:'Save a login',
+  description:action?`So ${S.pip.name} can sign in to ${s.site||s.host} by itself.`:`So ${S.pip.name} can sign in to a site by itself.`,
+  loginAction:action?{id:action.id,digest:action.digest,site:s.site||s.host,shown:s.shown||s.host}:null,request:{}});
+}
+function renderLoginForm(r){
+ const root=$('review-root');
+ if(root.querySelector('#login-form')){
+  // Already open: never rebuild it (that would empty what the user is typing); say only what changed.
+  for(const box of root.querySelectorAll('#login-form input,#login-form button'))if(box.id!=='review-cancel')box.disabled=S.busy;
+  const said=root.querySelector('#login-error');if(said){said.textContent=r.error||'';said.hidden=!r.error;}
+  return;
+ }
+ const a=r.loginAction;
+ root.innerHTML=`<div class="overlay"><section class="dialog login-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${loginFormMarkup({esc,site:a?a.site:'',shown:a?a.shown:'',fixed:!!a,pipName:S.pip?.name||'It',busy:S.busy})}</section></div>`;
+ const said=root.querySelector('#login-error');if(said&&r.error){said.textContent=r.error;said.hidden=false;}
+ (a?$('loginUser'):$('loginSite'))?.focus({preventScroll:true});
+}
+async function saveLogin(){
+ const r=S.review;if(!r?.loginForm||S.busy||!usable())return;
+ const root=$('review-root'),fixed=!!r.loginAction,values=readLoginForm(root,fixed),problem=loginFormProblem(values,fixed);
+ if(problem){r.error=problem;renderLoginForm(r);return;}
+ const pip=S.pip,token=scope();
+ const request={pip_id:pip.id,username:values.username,password:values.password,pips:values.all?'all':'only',
+  ...(values.totp?{totp:values.totp}:{}),...(fixed?{action_id:r.loginAction.id,expected_digest:r.loginAction.digest}:{site:values.site})};
+ values.password='';values.totp='';
+ S.busy=true;r.error='';renderLoginForm(r);
+ try{
+  const result=await send('save_pip_login',request);
+  request.password='';if(request.totp)request.totp='';
+  if(token!==scope())return;
+  const saved=pipLogin(result?.login);
+  clearLoginForm(root);closeReview();
+  S.notice=fixed?`Saved. ${pip.name} signs in to ${saved.site} by itself now.`:`Saved. ${pip.name} can sign in to ${saved.site} by itself.`;
+  if(fixed){computerState.value=computerState.value?{...computerState.value,actions:computerState.value.actions.filter(x=>x.id!==r.loginAction.id)}:computerState.value;void refreshComputer();void loadMessages();}
+ }catch(error){request.password='';if(request.totp)request.totp='';if(token===scope()&&S.review===r){r.error=errorText(error);}}
+ finally{if(token===scope()){S.busy=false;if(S.review===r)renderLoginForm(r);render();void loadLogins();}}
+}
 async function loadCareful(){
  if(remoteHost||S.apiVersion<44||!personalPip()||!S.pip?.computer_plan||!usable())return;
  const token=scope(),pip=S.selected,sequence=++carefulState.seq;
@@ -2124,7 +2185,7 @@ function routinesSectionMarkup(){
 function openPipPage(view='info'){
  const p=S.pip;if(!p)return;
  S.pipPage=view;draft.pipPageName=p.name;draft.pipPageTitle=profile(p.profile).title;pageNameDirty=false;lookDirty=false;routineEditing='';routineError='';
- void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();noteConfirmAll=false;sitesAll=false;
+ void loadRoutines();void loadAppLinks();void loadPlugins();void loadNotes();void loadCareful();void loadEyes();void loadLogins();noteConfirmAll=false;sitesAll=false;loginsState.confirm='';
 }
 function putProfile(pipId,value){
  const p=profile(value);if(S.pip?.id===pipId)S.pip={...S.pip,profile:p};S.jobs=S.jobs.map(j=>j.id===pipId?{...j,profile:p}:j);
@@ -2169,7 +2230,7 @@ function pipPageMarkup(){
  const body=tab==='links'?linksMarkup(items,{esc,formatDate:shortDate,loading,error})
   :tab==='media'?mediaMarkup(items,{esc,imageSrc:messageImageSrc,loading,error})
   :tab==='files'?filesMarkup(items,mine?shared.desk:null,{esc,formatDate:shortDate,loading,error,hasComputer:computerState.pip===S.selected&&!!computerState.value?.granted})
-  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
+  :infoMarkup({esc,goal:p.goal,routines:routinesSectionMarkup(),notify:look.notify,busy:off,canShare:S.apiVersion>=41&&!remoteHost&&['scout','lens','rook','lock','quill'].includes(p.pip_type),pipName:p.name})+computerRowMarkup(p,off)+(S.apiVersion>=53&&!remoteHost&&personalPip()?eyesMarkup(eyesState.pip===p.id?eyesState.value:null,{esc,busy:off||eyesState.busy,error:eyesState.error,pipName:p.name}):'')+(S.apiVersion>=44&&!remoteHost&&p.computer_plan?carefulMarkup(carefulState.pip===p.id?carefulState.value:null,{esc,busy:off||carefulState.busy,error:carefulState.error,pipName:p.name,showAll:sitesAll}):'')+(S.apiVersion>=56&&!remoteHost&&p.computer_plan?loginsMarkup(loginsState.pip===p.id?loginsState.value:null,{esc,busy:off||loginsState.busy,error:loginsState.error,pipId:p.id,pipName:p.name,names:pipNames(),confirm:loginsState.confirm}):'')+(S.apiVersion>=44&&!remoteHost?notesMarkup(S.notesPip===p.id?S.notes:null,{esc,busy:off||notesBusy,error:S.notesError,pipName:p.name,adding:draft.noteAdd,confirmAll:noteConfirmAll}):'')+allowedMarkup()+(S.apiVersion>=44&&!remoteHost?pluginsPageMarkup(S.plugins,{esc,busy:off||!!pluginBusy,pipName:p.name}):'');
  return `<div class="pip-page">${head}${pageTabsMarkup(tab)}<div class="pip-page-body" data-page="${tab}">${body}</div></div>`;
 }
 // What it may do without asking (an Always allow you gave): only shown when there is one, and each
@@ -2481,12 +2542,13 @@ async function messageReviews(before=null){
  }catch(error){if(S.review===ticket){ticket.error=errorText(error);renderReview();}}
 }
 
-function closeReview() { if(computerViewTimer){clearInterval(computerViewTimer);computerViewTimer=null;} const wasOpen=!!S.review;S.review=null;$('review-root').innerHTML='';$('app').inert=false; if(wasOpen) render(); if(dialogReturn) { const target=dialogReturn.id?$(dialogReturn.id):[...document.querySelectorAll('button')].find(b=>Object.entries(dialogReturn.data).some(([k,v])=>b.dataset[k]===v)); target?.focus({preventScroll:true}); } }
+function closeReview() { if(computerViewTimer){clearInterval(computerViewTimer);computerViewTimer=null;} const wasOpen=!!S.review;S.review=null;clearLoginForm($('review-root'));$('review-root').innerHTML='';$('app').inert=false; if(wasOpen) render(); if(dialogReturn) { const target=dialogReturn.id?$(dialogReturn.id):[...document.querySelectorAll('button')].find(b=>Object.entries(dialogReturn.data).some(([k,v])=>b.dataset[k]===v)); target?.focus({preventScroll:true}); } }
 function openReview(review) { dialogReturn={id:document.activeElement?.id||'',data:{...document.activeElement?.dataset}}; S.review={...review,scope:scope(),request:JSON.parse(JSON.stringify(review.request)),error:''}; render(); renderReview(); }
 const reviewBlocked=r=>!!r.blocked || (r.setup&&(S.apiVersion<23||r.setup.pip_type==='pulse'&&S.apiVersion<27)) || (r.requiresCommitPaths&&S.apiVersion<22) || (r.requiresPulsePlan&&S.apiVersion<21) || (r.requiresQuillAutomation&&S.apiVersion<20) || (r.requiresSessionTurn&&S.apiVersion<18) || (r.commandOutcome&&S.apiVersion<17) || (r.requiresSpecialists&&S.apiVersion<15) || (r.requiresExecution&&S.executionCapability?.available!==true) || (r.expiresAt && Number.isFinite(Date.parse(r.expiresAt)) && Date.parse(r.expiresAt)<=Date.now());
 function renderReview() {
   const r=S.review;if(!r)return;
   $('app').inert=true;
+  if(r.loginForm){renderLoginForm(r);return;}
   $('review-root').innerHTML=`<div class="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.reasonRequired&&r.note?`<label>${esc(r.note)}<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${r.secondary?button(r.secondary.id,r.secondary.label,S.busy||!usable(),'secondary-action'):''}${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.always&&!r.readOnly&&S.apiVersion>=41?button('review-always','Always allow',S.busy||!usable()||reviewBlocked(r)):''}${r.readOnly?'':button('review-confirm',S.busy?'Applying…':r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
   if(r.connectorSummary)mountConnectorSummary($('connector-review-values'),r.connectorSummary);
   if(r.connectorForm){
@@ -2699,8 +2761,9 @@ document.addEventListener('input',updateDraft);
 document.addEventListener('paste',event=>{if(event.target?.id!=='chatText'||!canAttachImages())return;const files=[...(event.clipboardData?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
 document.addEventListener('dragover',event=>{if(canAttachImages()&&event.target?.closest?.('#chat-form')&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
 document.addEventListener('drop',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
+  if(event.target.id==='login-form'){event.preventDefault();void saveLogin();return;}
   if(event.target.id==='computer-go'){event.preventDefault();const url=$('computer-url').value.trim();if(url)void computerView('go',{url:/^https?:\/\//i.test(url)?url:'https://'+url});return;}
   if(event.target.id==='computer-type'){event.preventDefault();const input=$('computer-text'),text=input.value;if(text){input.value='';void computerView('type',{text});}return;}
   const id=event.target.id;if(!['note-add-form','create-form','revision-form','context-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','outcome-form','pip-statement-form','web-reads-form','notify-form','github-form','quick-schedule-form','pip-name-form','pip-instructions-form','routine-form'].includes(id))return;event.preventDefault();
@@ -2865,6 +2928,12 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipType){chooseType(target.dataset.pipType);return;}
   if(target.dataset.starter){openStarter(target.dataset.starter);return;}
   if(target.dataset.computerAction){void openComputerAction(target.dataset.computerAction);return;}
+  if(target.dataset.loginCard){const a=computerState.pip===S.selected?computerState.value?.actions?.find(x=>x.id===target.dataset.loginCard):null;if(a)openLoginForm(a);return;}
+  if(target.dataset.loginNew!==undefined){openLoginForm(null);return;}
+  if(target.dataset.loginAskRemove){loginsState.confirm=target.dataset.loginAskRemove;render();return;}
+  if(target.dataset.loginKeep!==undefined){loginsState.confirm='';render();return;}
+  if(target.dataset.loginRemove){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginRemove);void loginCall('remove_pip_login',{login_id:target.dataset.loginRemove},`Removed. No Pip signs in to ${l?.site||'that site'} with it now.`);return;}
+  if(target.dataset.loginShare){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginShare);if(l&&l.pips!=='all')void loginCall('grant_pip_login',{login_id:l.id,pips:[...l.pips,S.selected]},`${S.pip?.name||'It'} can use the login for ${l.site} now.`);return;}
   if(target.dataset.computerDecide){void decideInChat(target.dataset.computerDecide,target.dataset.approve==='1');return;}
   if(target.dataset.cardOpen){cardRefused='';if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();render();return;}
   if(target.dataset.cardDismiss){cardRefused='';render();return;}

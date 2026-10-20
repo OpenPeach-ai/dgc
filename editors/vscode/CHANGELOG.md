@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Save a login so a Pip signs in by itself (Pips API 56).** When a Pip meets a sign-in page it has no login for,
+  its chat shows **Save a login for SITE so PIP can sign in itself?** with **Save login…** and **Not now**. The form
+  takes the username, the password and an optional authenticator key, sends them to DGC once and keeps nothing: not
+  in the chat, its draft or the view's saved state. A Pip's page shows **Logins**: each login it may use, with **All
+  Pips** and **Remove**, and the ones saved for your other Pips with **Let PIP use it**. The host refuses all four
+  login requests to a CLI below API 56.
 - **follow-redirects 1.16.1** for the Open VSX publishing tool (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c: credential headers kept across a cross-origin redirect). It is a build tool, not part of the extension.
 - **markdown-it 15.0.3.** A security fix in the Markdown parser (GHSA-r7fv-28h4-cvq7: unmatched closing quotes with smart quotes took quadratic time).
 - **A Pip's computer has apps (Pips API 54).** Its dock adds an image editor, Documents and a PDF viewer when the
