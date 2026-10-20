@@ -127,8 +127,8 @@ class RejectFollowUp(unittest.TestCase):
         run = pip_chat.send(self.store, pip["id"], text, "k-" + os.urandom(3).hex(), "editor-user", self.cfg)["run"]
         self.assertEqual(self.store.claim_next()["id"], run["id"])
         self.store.finish(run["id"], result={"text": "Bill 1 of 3 is ready to pay: ₹5,350.00. It waits for your Allow below."})
-        summary = ({"method": "GET", "host": "pay.cityscanlabs.example", "path": "/", "fields": [], "site": "cityscanlabs.example",
-                    "shown": "pay.cityscanlabs.example", "kind": kind} if kind else
+        summary = ({"method": "GET", "host": "pay.cityscanlabs.example", "path": "/invoice", "fields": [], "site": "cityscanlabs.example",
+                    "shown": "pay.cityscanlabs.example", "kind": kind, "page": "https://pay.cityscanlabs.example/invoice"} if kind else
                    {"method": "POST", "host": "pay.sunrisehospital.example", "path": "/api/pay",
                     "fields": [{"name": "amount", "value": "5350.00"}], **({"payment": True} if payment else {})})
         action_id = "compact_" + os.urandom(16).hex()
@@ -239,12 +239,13 @@ class RejectFollowUp(unittest.TestCase):
         self.assertIn("tell the user in one sentence that you want to open printful.com", said)
         self.assertIn("DGC shows them an Allow card for printful.com below your reply: it is there", said)
 
-    def test_an_approved_submit_still_continues_as_before(self):
+    def test_an_allowed_site_sends_the_pip_back_to_the_page_it_wanted(self):
         pip, run, action_id, digest = self.held(kind="site")
         pip_computer.decide(self.registry, action_id, digest, True, "editor-user")
         pip_computer.tick(self.registry, self.cfg)
         [told] = self.follow_ups(pip)
-        self.assertIn("The user allowed you to visit cityscanlabs.example", told["text"])
+        self.assertIn("The user allowed you to visit cityscanlabs.example (open https://pay.cityscanlabs.example/invoice "
+                      "again, the page you wanted)", told["text"])
 
 
 if __name__ == "__main__":

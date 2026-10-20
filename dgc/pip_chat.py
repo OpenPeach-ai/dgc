@@ -651,7 +651,11 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
     key = COMPUTER_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
     if summary.get("kind") in ("site", "text"):
         # Careful mode held it before anything happened: the Pip does it now, once.
-        allowed = (f"you to visit {summary.get('site') or summary.get('host', 'that site')} (open it if it isn't open yet)" if summary["kind"] == "site"
+        # The page it wanted, not just the site: told "visit pip-test.example", a Pip opened that bare name instead of
+        # shop.teeforge.pip-test.example, and it didn't load (three-asks test, 2026-10-20).
+        page = str(summary.get("page") or "")
+        again = f"open {page[:300]} again, the page you wanted" if page.startswith(("https://", "http://")) else "open it if it isn't open yet"
+        allowed = (f"you to visit {summary.get('site') or summary.get('host', 'that site')} ({again})" if summary["kind"] == "site"
                    else f"you to put that on {summary.get('host') or 'the page'}: {(summary.get('fields') or [{}])[0].get('value', '')}")
         return send(store, pip_id, COMPUTER_ALLOWED.format(what=allowed[:400]), key, "local-computer", config, _intro=True)
     return send(store, pip_id, COMPUTER_DONE.format(what=what), key, "local-computer", config, _intro=True)
