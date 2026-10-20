@@ -170,6 +170,15 @@ def secret_values(config=None) -> tuple[str, ...]:
             add(value)
     except Exception:  # noqa: BLE001 -- redaction never fails because a module couldn't load
         pass
+    # A Pip's saved logins (pip_logins): their passwords and authenticator keys, from this profile's sealed file and
+    # from what this process saved or read, so one that turns up anywhere (a page echoing it, a message the user
+    # typed) is redacted like any other credential.
+    try:
+        from .pip_logins import known_values as login_values
+        for value in login_values():
+            add(value)
+    except Exception:  # noqa: BLE001 -- redaction never fails because a module couldn't load
+        pass
     for value in _environment_secret_values():
         add(value)
     return tuple(sorted(values, key=lambda item: (-len(item), item)))
