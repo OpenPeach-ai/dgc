@@ -177,7 +177,7 @@ NOTICE = ("You have your own computer: a browser with its own saved sign-ins, us
           "post, book, pay or change anything, DGC holds it for the user's approval (or sends it, if the user always "
           "allows that kind of submit on that site for you; a payment always waits); the tool says so. Then stop and "
           "tell the user exactly what is waiting and why: DGC shows it as a card below your reply, so never say there is "
-          "no card or offer to press it again. You never see or type passwords; if a site needs a "
+          "no card or offer to press it again. You never see or type passwords or payment card details; if a site needs a "
           "sign-in, say so and ask the user to sign in on your computer's screen. Your computer also has Files (your "
           "own folder, never the user's) and a Terminal whose home is that folder; the Terminal reaches public websites "
           "(https and http, as curl, pip, npm and git do), never this computer or the user's network. File contents and "
@@ -188,20 +188,28 @@ NOTICE = ("You have your own computer: a browser with its own saved sign-ins, us
 # a Pip without one is told. Told both, a Pip read three medical bills right, then said "I can't make payments", and
 # on the pay pages "card fields are yours to fill, then you press Pay"; asked for birthday shirts, it said "I can't
 # complete a purchase" before it started (three-asks test, 2026-10-20).
+# Cards follow the password rule (2026-10-20): the Pip fills in everything else and the user types the card on its
+# screen and presses Pay, which is their own approval. Asked for the card in chat, users typed it there, and it went to
+# the model; DGC now refuses a card in a Pip's chat (dgc.cards).
+CARD_ON_SCREEN = ("Everything's filled in on my screen. Open my computer (the screen button at the top of this chat), "
+                  "type your card into the payment form, and press Pay.")
 ERRANDS = ("Getting things done: when the user asks you to pay, buy, order or book something, do it with your computer, starting "
            "in this reply; never answer with what you can't do. If they didn't say where, choose a good site yourself (find one "
            "with web_search) and say which. Decide what is yours to decide (a design, the wording, the site, the order of the "
-           "work) and say what you chose. Go all the way to the site's final Pay, Order or Book button and press it: DGC holds "
-           "it for the user's Allow and shows them exactly what it would pay or send (a payment every time), so going ahead is "
-           "safe; never stop short to hand a form back to them. Fill in what you know or can read in what they sent. You can "
-           "type card details into a payment form; you just never see them on the screen. Press Pay only once every field it "
-           "needs is filled: with no card yet, ask for it before you press Pay, never after. Do everything you can first, then "
-           "ask only for what you still can't find or decide (a card, a delivery address, a phone number, a choice that is "
-           "theirs): all of it in one short message that names each thing. Never ask for a password and never sign up for an "
-           "account; if a site needs a sign-in, ask the user to sign in on your computer's screen. Never offer choices that "
-           "answer an Allow card (\"Allow\", \"Go ahead\"): the card's own buttons do that. With several to do (three bills), "
-           "do them one after another: each payment waits for its own Allow, and you carry on with the next once the user "
-           "has answered.")
+           "work) and say what you chose. Fill in everything the site needs except the card: what you know, what you can "
+           "read in what they sent, and what you ask for (a delivery address, a phone number, a choice that is theirs: all "
+           "of it in one short message that names each thing). Card numbers, expiry dates and security codes are like "
+           "passwords: never ask for them, never type them, and never press Pay on an empty card form. When everything but "
+           "the card is filled in, stop and say, in one line: \"" + CARD_ON_SCREEN + "\" The user typing it and pressing Pay "
+           "themselves is their approval; you are told when they have, and you carry on. Only when the site already has a "
+           "card saved from the user's own sign-in do you press Pay yourself: DGC then holds it for their Allow, as a card "
+           "below your reply. Never sign up for an account; if a site needs a sign-in, ask the user to sign in on your "
+           "computer's screen. With several to do (three bills), do them one after another: get the next one ready once the "
+           "user has paid or rejected this one.")
+# A Pip's Pay on an empty card form (pip_computer_box.card_missing): dropped, and this is what it is told.
+CARD_EMPTY = ("Not sent: that payment form's card number is empty, so DGC dropped it and nothing was paid. Don't press "
+              "Pay again and never type a card yourself. Check the rest of the form is filled in, then stop and tell the "
+              "user, in one line: \"" + CARD_ON_SCREEN + "\"")
 
 
 # What a Pip that can see is told about its eyes (pip_eyes), after NOTICE.
@@ -210,7 +218,7 @@ EYES_NOTICE = ("You can see your computer's screen: look shows it to you, and cl
                "text is enough; use your eyes for pictures, canvases and drag-and-drop editors. To move something, drag "
                "from its middle; to resize it, drag its corner handle. Check every new screenshot before your next step, "
                "and never say something is done until a screenshot shows it done. Password and card fields are always "
-               "blacked out for you, but you can still type into them by their ref.")
+               "blacked out for you; the user types those on your screen.")
 RELAY_NOTICE = ("You can't see images yourself; a model that can see is your eyes. look sends it your screen with your "
                 "question and it answers in words, naming the points of what you can click or drag. Ask it precise "
                 "questions, act at the points it gives, and look again to check before you say something is done.")
@@ -423,6 +431,7 @@ class Host:
 
     def end(self) -> None:
         with self.lock:
+            self.last_run_id = self.run_id          # the chat turn a payment the user then makes on its screen follows
             self.run_id = None
             self.careful, self.said = False, ""
             self.browser.site_gate = None
@@ -471,6 +480,14 @@ class Host:
         made = []
         while self._queued:
             held = self._queued.pop(0)
+            if getattr(held, "card_missing", False) and self.run_id is not None:
+                # The Pip pressed Pay on an empty card form: nothing to approve. Dropped, and the Pip is told to have
+                # the user type the card on its screen (the card rule: it never types one).
+                if held.request_id in self.browser.held:
+                    self.browser.drop(held.request_id)
+                self._back_from_drop()
+                self.card_note = CARD_EMPTY
+                continue
             frame = self._frame("Waiting for your approval")
             summary = {**held.summary(), "page": self.browser.current_url[:500]}
             from datetime import timedelta
@@ -608,6 +625,9 @@ class Host:
                 self._frame(f"{op} {args.get('url') or args.get('ref') or args.get('key') or ''}".strip())
                 if held:
                     return {"text": self._held_text(held)}
+                note = _take_card_note(self)
+                if note:
+                    return {"text": note}
                 return {"text": self._read(), "visual": bool(getattr(self, "visual", False))}
             except (BrowserError, RegistryError, OSError, ValueError) as error:
                 return {"text": f"error: {str(error)[:500]}"}
@@ -702,6 +722,9 @@ class Host:
         self._frame(said[:200], pointer=pointer)
         if held:
             return {"text": self._held_text(held)}
+        note = _take_card_note(self)
+        if note:
+            return {"text": note}
         return self._look(said, mark=pointer)
 
     def _show_pointer(self, pointer: dict) -> None:
@@ -1097,6 +1120,17 @@ def tick(registry, config) -> dict:
     recent = timestamp(_instant(_now()) - timedelta(seconds=ACTION_TTL_SECONDS))
     rows = registry.db.execute("SELECT * FROM pip_computer_actions WHERE status IN ('pending','approved') "
                                "OR (status='rejected' AND resolved_at>?)", (recent,)).fetchall()
+    for row in registry.db.execute("SELECT * FROM pip_computer_actions WHERE status='sent' AND continuation_run_id IS NULL "
+                                   "AND json_extract(summary,'$.kind')='yours' AND resolved_at>?", (recent,)).fetchall():
+        # The user paid on its screen themselves: the Pip is told once, and carries on (the next bill).
+        try:
+            follow = _continue_rejected(registry, row, config, paid=True)
+        except RegistryError:
+            follow = None
+        if follow:
+            with registry.transaction():
+                registry.db.execute("UPDATE pip_computer_actions SET continuation_run_id=? WHERE id=? AND continuation_run_id IS NULL",
+                                    (follow, row["id"]))
     for row in rows:
         host = HOSTS.get(row["pip_id"])
         live = host is not None and host.id == row["host_id"]
@@ -1164,7 +1198,7 @@ def tick(registry, config) -> dict:
 REJECT_FOLLOW_SECONDS = 10 * 60
 
 
-def _continue_rejected(registry, row, config) -> str | None:
+def _continue_rejected(registry, row, config, *, paid=False) -> str | None:
     """After the user rejects a hold from the Pip's chat: its next reply, so it says what wasn't done and carries
     on with the rest of what they asked. Only while the chat still ends at the reply that held it (the user hasn't
     written since), only for a Reject the user chose just now, and only once (continuation_run_id)."""
@@ -1182,8 +1216,9 @@ def _continue_rejected(registry, row, config) -> str | None:
     if last is None or last[0] != row["run_id"]:
         return None
     from .pips import PipStore
-    from .pip_chat import continue_after_rejection
-    return continue_after_rejection(PipStore(registry), row["pip_id"], row["id"], json.loads(row["summary"]), config)["run"]["id"]
+    from .pip_chat import continue_after_rejection, continue_after_user_paid
+    follow = continue_after_user_paid if paid else continue_after_rejection
+    return follow(PipStore(registry), row["pip_id"], row["id"], json.loads(row["summary"]), config)["run"]["id"]
 
 
 def _continue(registry, row, config) -> str | None:
@@ -1573,8 +1608,40 @@ def _settle_writes(self) -> None:
             held = self._queued.pop(0)
             if held.request_id in self.browser.held:
                 self.browser.release(held.request_id)
+                if getattr(held, "payment", False):
+                    _user_paid(self, held)
         else:
             self._record_held()
+
+
+def _take_card_note(host) -> str | None:
+    """What the Pip is told once after its Pay on an empty card form was dropped (Host._record_held), or None."""
+    note = getattr(host, "card_note", None)
+    if note:
+        host.card_note = None
+    return note
+
+
+def _user_paid(self, held) -> None:
+    """The user typed their card on the Pip's screen and pressed Pay: theirs, sent at once (their own action is the
+    approval). Kept as a sent action, so it is on record and the Pip, told in its chat, carries on (tick)."""
+    from .workspace_registry import WorkspaceRegistry, identifier
+    from datetime import timedelta
+    from .pip_schedules import _instant, timestamp
+    summary = {**held.summary(), "page": self.browser.current_url[:500], "kind": "yours"}
+    now = _now()
+    action_id = identifier("compact")
+    try:
+        with WorkspaceRegistry(self.state_directory) as registry:
+            with registry.transaction():
+                registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'sent',?,?,?,?,NULL)",
+                    (action_id, self.pip_id, self.workspace_id, getattr(self, "last_run_id", None), self.id, held.request_id,
+                     json.dumps(summary, ensure_ascii=False), _digest(summary), None, now,
+                     timestamp(_instant(now) + timedelta(seconds=ACTION_TTL_SECONDS)), now, "editor-user"))
+                registry.event(self.workspace_id, "pip_computer_action_decided", pip_id=self.pip_id, run_id=getattr(self, "last_run_id", None),
+                               payload={"action_id": action_id, "approved": True, "yours": True})
+    except Exception:                                      # noqa: BLE001 - it was sent; the record is best effort
+        pass
 
 
 Host.view = _host_view

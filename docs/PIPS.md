@@ -837,10 +837,18 @@ without.
 
 - **Reading is free.** During a run the Pip opens, reads, scrolls and clicks through public
   websites on its own.
-- **It pays, orders and books when you ask.** "Pay these medical bills" with photos of the bills: it finds each
-  bill on its site, fills in what the bills say, asks once for what it can't find (a card, a delivery address), and
-  presses Pay. You can give it the card in its chat or type it on its screen. Every payment, order and booking
-  waits for you as below, a payment every time.
+- **It pays, orders and books when you ask; you type the card.** "Pay these medical bills" with photos of the
+  bills: it finds each bill on its site and fills in everything but the card, asking once for what it can't find (a
+  delivery address, a phone number). Card numbers, expiry dates and security codes are like passwords: a Pip never
+  asks for them or types them. When the form is ready it says, in one line, "Everything's filled in on my screen.
+  Open my computer, type your card into the payment form, and press Pay." You type it on its screen and press Pay:
+  that is your approval, so it is sent at once, and the Pip is told and goes on (the next bill). A Pip that presses
+  Pay on an empty card form is stopped and told to hand over. Only when a site already has a card saved from your
+  own sign-in does the Pip press Pay itself, and then the payment waits for you as below, every time.
+- **Card numbers stay out of the chat.** A message with a card number (13 to 19 digits that pass the card check;
+  a bill, UHID, phone or account number doesn't count) is not sent: DGC keeps nothing of it and says, in one line,
+  to type it on the Pip's screen instead, with **Open its computer**. DGC's own chat warns once before sending one,
+  since whatever you send there goes to the model.
 - **Anything it would send waits for you.** When a page would submit a form or send any other
   data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
   **Waiting for you** in the Pip's **Job** tab, and the Pips bar above the chat says so at once. It also waits

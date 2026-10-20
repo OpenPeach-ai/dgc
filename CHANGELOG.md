@@ -6,11 +6,17 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
-- **A Pip with a computer pays and orders when you ask.** "Pay these medical bills" got a perfect reading of three
-  bills and then "I can't make payments"; birthday shirts got "I can't complete a purchase". A Personal Pip with a
-  computer was still told it could never buy or pay. Now it goes all the way to the site's Pay or Order button, which
-  DGC holds for your Allow (a payment every time), types the card you give it, and asks once, naming everything it
-  still needs (a card, an address). A Pip without a computer still says it can't.
+- **A Pip with a computer pays and orders when you ask, and you type the card.** "Pay these medical bills" got a
+  perfect reading of three bills and then "I can't make payments"; birthday shirts got "I can't complete a purchase".
+  A Personal Pip with a computer was still told it could never buy or pay. Now it fills in everything but the card
+  (asking once for what it lacks, such as an address) and says in one line to open its computer, type the card into
+  the payment form and press Pay. Your own Pay on its screen is your approval: sent at once, and the Pip is told and
+  goes on to the next bill. A Pip without a computer still says it can't.
+- **Card numbers stay out of a Pip's chat.** Cards follow the password rule: a message with a card number (13 to 19
+  digits passing the card check, spaces or dashes allowed; bill, UHID, phone and account numbers don't count) is
+  refused, in the editor before it is sent and in DGC (`card_in_chat`, the SDKs included): nothing of it is kept or
+  sent to a model, and one line says to type it on the Pip's screen, with **Open its computer**. A Pip never asks for
+  a card or types one; its Pay on an empty card form is dropped and it is told to hand over.
 - **The main chat makes a Pip that pays.** Asked for "a Pip that pays my bills for me", it offered a read-only Gmail
   bill tracker ("No payments are ever made") after asking to run Composio's connection tool. It now knows a Personal
   Pip's own computer pays, orders and books on websites with your Allow, and sets that up with no payment app. For a

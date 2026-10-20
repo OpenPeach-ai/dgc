@@ -724,6 +724,7 @@ class HeldWrite:
     held_at: float = 0.0
     payment: bool = False           # carries a payment card number: the review says so
     site: bool = False              # careful mode: a page on a site this Pip hasn't visited (pip_careful)
+    card_missing: bool = False      # a payment form sent with its card number empty (see card_missing)
 
     def summary(self) -> dict:
         parts = urlsplit(self.url)
@@ -761,6 +762,28 @@ def _fields(post_data: str, content_type: str) -> list[tuple[str, str]]:
     elif "x-www-form-urlencoded" in content_type or (text and "=" in text and "\n" not in text[:2000]):
         pairs = parse_qsl(text, keep_blank_values=True)
     return [(name, "•••" if SECRET_FIELD.search(name) else value) for name, value in pairs]
+
+
+# A form's card-number field: card_number, cardnumber, cc-number, ccnum, card[number], card_no, pan.
+CARD_NUMBER_FIELD = re.compile(r"card[\W_]*(?:no\b|num)|cc[\W_]*num|^pan$|\[number\]", re.I)
+
+
+def card_missing(post_data: str, content_type: str) -> bool:
+    """A payment form sent with its card-number field empty: pressing Pay before anyone typed the card. A Pip that did
+    it made a hold the user could only reject (three-asks test, 2026-10-20)."""
+    text = post_data or ""
+    if "json" in content_type:
+        try:
+            value = json.loads(text)
+        except ValueError:
+            return False
+        pairs = [(str(k), v if isinstance(v, str) else "x") for k, v in value.items()] if isinstance(value, dict) else []
+    elif "x-www-form-urlencoded" in content_type or (text and "=" in text and "\n" not in text[:2000]):
+        pairs = parse_qsl(text, keep_blank_values=True)
+    else:
+        return False
+    fields = [(name, value) for name, value in pairs if CARD_NUMBER_FIELD.search(name)]
+    return bool(fields) and all(not str(value).strip() for _, value in fields) and not carries_card_number(text)
 
 
 def carries_card_number(post_data: str) -> bool:
@@ -984,7 +1007,7 @@ class BoxedBrowser(BrowserSession):
         headers = {str(k).lower(): str(v) for k, v in (request.get("headers") or {}).items()}
         held = HeldWrite(request_id, session, verb, str(request.get("url", ""))[:2000],
                          _fields(post, headers.get("content-type", "")), len(post.encode("utf-8")), time.time(),
-                         payment=carries_card_number(post))
+                         payment=carries_card_number(post), card_missing=card_missing(post, headers.get("content-type", "")))
         self.held[request_id] = held
         if self.on_write is not None:
             self.on_write(held)

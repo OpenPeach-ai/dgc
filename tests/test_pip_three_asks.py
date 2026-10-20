@@ -60,10 +60,18 @@ class Instructions(unittest.TestCase):
         self.assertNotIn("You cannot book, buy, pay", said, "a Pip with a computer pays and orders, each held for the Allow")
         self.assertIn("never answer with what you can't do", said)
         self.assertIn("choose a good site yourself", said)
-        self.assertIn("You can type card details into a payment form", said)
-        self.assertIn("with no card yet, ask for it before you press Pay, never after", said)
         self.assertIn("all of it in one short message that names each thing", said)
-        self.assertIn("you can still type into them by their ref", said, "its eyes don't see card fields; its hands can type them")
+        # Cards follow the password rule (2026-10-20): the user types the card on its screen and presses Pay.
+        self.assertIn("Card numbers, expiry dates and security codes are like passwords: never ask for them, never type "
+                      "them, and never press Pay on an empty card form.", said)
+        self.assertIn(pip_computer.CARD_ON_SCREEN, said)
+        self.assertEqual(pip_computer.CARD_ON_SCREEN, "Everything's filled in on my screen. Open my computer (the screen "
+                         "button at the top of this chat), type your card into the payment form, and press Pay.")
+        self.assertIn("You never see or type passwords or payment card details", said)
+        self.assertIn("the user types those on your screen", said)
+        for old in ("You can type card details into a payment form", "ask for it before you press Pay",
+                    "you can still type into them by their ref"):
+            self.assertNotIn(old, said, "the old flow asked for the card in chat")
         # "I can't tell you a card is waiting below. Should I press Pay again?" -- above the held payment's card.
         self.assertIn("DGC shows it as a card below your reply, so never say there is no card or offer to press it again", said)
         self.assertNotIn("Never say a card is there unless", said)
@@ -99,6 +107,49 @@ class Instructions(unittest.TestCase):
     def test_catching_mail_is_a_routine_on_new_mail(self):
         said = pip_routines.schema()["function"]["description"]
         self.assertIn("use kind 'email' with a search for those mails, not a daily schedule", said)
+
+
+class CardsStayOutOfTheChat(unittest.TestCase):
+    """A card number typed in a Pip's chat was kept in its history and sent to a cloud model. DGC refuses it before
+    anything of the message is stored; bill, UHID, phone and account numbers still go through."""
+    def setUp(self):
+        fixtures.LocalPipsTests.setUp(self)
+
+    def test_card_numbers_and_the_numbers_on_a_bill(self):
+        from dgc.cards import card_number
+        for text, digits in (("Use my card 4242 4242 4242 4242, expiry 12/34, CVV 123", "4242424242424242"),
+                             ("5555-5555-5555-4444", "5555555555554444"), ("amex 378282246310005", "378282246310005"),
+                             ("card 5555-5555-5555-4444 12/34", "5555555555554444"),
+                             ("card 6011111111111117", "6011111111111117"), ("jcb 3530111333300000", "3530111333300000")):
+            self.assertEqual(card_number(text), digits, text)
+        for text in ("Bill No. SMH/OP/26/118734, UHID SMH0048213, ₹5,350.00", "Invoice CSD-INV-77391, patient ID CS-220914",
+                     "GSTIN 27AAKCS1234F1Z9", "call me on +91 98000 00000 or 020-4100 2200", "Aadhaar 2345 6789 0123",
+                     "HDFC account 50100123456789", "4242 4242 4242 4241", "order 1234567890123456",
+                     "PNR 4521 8833 90, ticket 0987654321098", "DL No. MH-PZ3-118204"):
+            self.assertIsNone(card_number(text), text)
+
+    def test_a_message_with_a_card_is_refused_and_nothing_is_kept(self):
+        pip = self.store.create(self.registry.personal()["id"], "Bill Payer", None, "editor-user", pip_type="lens",
+                                model_choice={"mode": "default"}, computer_plan={"schema_version": 1})
+        from dgc.workspace_registry import RegistryError
+        with self.assertRaises(RegistryError) as refused:
+            pip_chat.send(self.store, pip["id"], "Use my card 4242 4242 4242 4242, expiry 12/34, CVV 123", "k1",
+                          "editor-user", self.cfg)
+        self.assertEqual(refused.exception.code, "card_in_chat")
+        self.assertEqual(str(refused.exception), "Card numbers stay out of the chat. Type it on Bill Payer's screen instead: "
+                                                 "open its computer.")
+        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_chat_messages").fetchone()[0], 0, "not kept")
+        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_runs").fetchone()[0], 0, "never reaches a model")
+        # The SDKs' and editors' request goes through the same send: refused there too.
+        with patch("dgc.pips.WorkspaceRegistry", return_value=self.registry), patch.object(self.registry, "close"):
+            answer = pips.handle_control(self.cfg, {"type": "send_pip_message", "request_id": "r", "pip_id": pip["id"],
+                                                    "text": "card 5555-5555-5555-4444 12/34", "idempotency_key": "k2"},
+                                         "editor-user", start_worker=False)
+        self.assertFalse(answer["ok"])
+        self.assertEqual(answer["error"]["code"], "card_in_chat")
+        ok = pip_chat.send(self.store, pip["id"], "Bill SMH/OP/26/118734, UHID SMH0048213, call 98000 00000", "k3",
+                           "editor-user", self.cfg)
+        self.assertEqual(ok["message"]["text"], "Bill SMH/OP/26/118734, UHID SMH0048213, call 98000 00000")
 
 
 class MainChat(unittest.TestCase):
@@ -199,10 +250,10 @@ class RejectFollowUp(unittest.TestCase):
             return manifest["conversation"].get("images")
         self.assertEqual(carry_on(1), sent["conversation"]["images"], "the bills it was paying come with the turn after Allow")
         self.assertEqual(len(self.store.db.execute("SELECT * FROM pip_chat_images").fetchall()), 1, "kept once, not again")
-        answer = pip_chat.send(self.store, pip["id"], "Use my card 4242 4242 4242 4242, 12/34, 123", "k2", "editor-user", self.cfg)["run"]
+        answer = pip_chat.send(self.store, pip["id"], "The mobile on the bills is 98000 00000", "k2", "editor-user", self.cfg)["run"]
         answered = json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (answer["id"],)).fetchone()[0])
         self.assertEqual(answered["conversation"].get("images"), sent["conversation"]["images"],
-                         "the user's next message (the card it asked for) comes with the bills again")
+                         "the user's next message (an answer to what it asked) comes with the bills again")
         self.store.claim_next(); self.store.finish(answer["id"], result={"text": "Paying bill 1."})
         self.assertEqual(carry_on(3), sent["conversation"]["images"], "after the card, the turn after a Reject still sees them")
         later = pip_chat.send(self.store, pip["id"], "thanks, now just tell me the total", "k3", "editor-user", self.cfg)["run"]
@@ -249,6 +300,58 @@ class RejectFollowUp(unittest.TestCase):
         self.assertIn("Held: printful.com is new for this user", said)
         self.assertIn("tell the user in one sentence that you want to open printful.com", said)
         self.assertIn("DGC shows them an Allow card for printful.com below your reply: it is there", said)
+
+    def test_pay_on_an_empty_card_form_is_dropped_and_the_pip_is_told_to_hand_over(self):
+        from dgc.pip_computer_box import card_missing
+        form = "application/x-www-form-urlencoded"
+        self.assertTrue(card_missing("billno=SMH%2FOP%2F26%2F118734&amount=5350.00&card_number=&card_expiry=&card_cvv=", form))
+        self.assertTrue(card_missing("order=%7B%7D&email=a%40b.c&cardnumber=&exp=&cvc=", form))
+        self.assertFalse(card_missing("billno=1&card_number=4242+4242+4242+4242&card_cvv=123", form), "a card is in it")
+        self.assertFalse(card_missing("name=Ada&password=hunter2", form), "not a payment form")
+        pip = self.store.create(self.registry.personal()["id"], "Bill Payer", None, "editor-user", pip_type="lens",
+                                model_choice={"mode": "default"}, computer_plan={"schema_version": 1})
+        dropped, went_back = [], []
+        browser = types.SimpleNamespace(current_url="https://pay.example/pay", held={"req-1": object()},
+                                        drop=lambda ref: dropped.append(ref))
+        host = types.SimpleNamespace(state_directory=self.registry.directory, pip_id=pip["id"], workspace_id=pip["workspace_id"],
+                                     run_id="run_" + "e" * 32, id="host_1", waiting=[], frames_dir=None, frames=0, browser=browser,
+                                     _back_from_drop=lambda: went_back.append(True), _frame=lambda label: None)
+        host._queued = [types.SimpleNamespace(request_id="req-1", card_missing=True, summary=lambda: {})]
+        self.assertEqual(pip_computer.Host._record_held(host), [], "nothing to approve")
+        self.assertEqual((dropped, went_back), (["req-1"], [True]))
+        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_computer_actions").fetchone()[0], 0)
+        told = pip_computer._take_card_note(host)
+        self.assertIn("card number is empty, so DGC dropped it", told)
+        self.assertIn(pip_computer.CARD_ON_SCREEN, told)
+        self.assertIsNone(pip_computer._take_card_note(host), "told once")
+
+    def test_the_users_own_payment_on_its_screen_is_sent_and_the_pip_carries_on(self):
+        pip, run, _, _ = self.held(payment=True)
+        released = []
+        browser = types.SimpleNamespace(current_url="https://pay.example/pay", held={"req-9": object()},
+                                        release=lambda ref: released.append(ref))
+        summary = {"method": "POST", "host": "pay.sunrisehospital.example", "path": "/api/pay",
+                   "fields": [{"name": "amount", "value": "2045.00"}, {"name": "card_number", "value": "•••"}],
+                   "more_fields": 0, "body_bytes": 90, "payment": True}
+        host = types.SimpleNamespace(state_directory=self.registry.directory, pip_id=pip["id"], workspace_id=pip["workspace_id"],
+                                     run_id=None, last_run_id=run["id"], id="host_1", browser=browser,
+                                     user_input_at=__import__("time").monotonic(),
+                                     _record_held=lambda: self.fail("the user's own Pay is not held"))
+        host._queued = [types.SimpleNamespace(request_id="req-9", payment=True, summary=lambda: dict(summary))]
+        pip_computer._settle_writes(host)
+        self.assertEqual(released, ["req-9"], "typed and pressed by the user: sent, no second Allow")
+        [row] = self.registry.db.execute("SELECT * FROM pip_computer_actions WHERE status='sent'").fetchall()
+        self.assertEqual((json.loads(row["summary"])["kind"], row["resolved_by"]), ("yours", "editor-user"))
+        with self.registry.transaction():         # the earlier pending hold of this fixture is not part of this
+            self.registry.db.execute("UPDATE pip_computer_actions SET status='rejected',resolved_at=?,resolved_by='x' "
+                                     "WHERE status='pending'", (pip_computer._now(),))
+        pip_computer.tick(self.registry, self.cfg)
+        [told] = self.follow_ups(pip)
+        self.assertIn("The user typed their card on your screen and pressed Pay themselves, and DGC sent it: "
+                      "POST to pay.sunrisehospital.example/api/pay", told["text"])
+        self.store.cancel(told["run_id"], "local-console")
+        pip_computer.tick(self.registry, self.cfg)
+        self.assertEqual(len(self.follow_ups(pip)), 1, "told once")
 
     def test_an_allowed_site_sends_the_pip_back_to_the_page_it_wanted(self):
         pip, run, action_id, digest = self.held(kind="site")

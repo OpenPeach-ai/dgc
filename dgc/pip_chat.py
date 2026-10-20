@@ -612,6 +612,10 @@ COMPUTER_REJECTED = ("This message is from DGC, not the user. The user chose Rej
                      "holding, unsent: {what}. Don't do it again or look for another way to do it. A Reject is about that one "
                      "thing only: if they asked you for more than that (the next bill, another order), go on with the next one "
                      "now, without asking whether to; otherwise stop. Tell them in a short message what was not done.")
+COMPUTER_USER_PAID = ("This message is from DGC, not the user. The user typed their card on your screen and pressed Pay "
+                      "themselves, and DGC sent it: {what}. Read the page to see what happened and tell them in a short "
+                      "message. If they asked you for more (the next bill, another order), get the next one ready the same "
+                      "way now, without asking whether to.")
 COMPUTER_NOT_ALLOWED = ("This message is from DGC, not the user. The user didn't allow {what}, so you must not. Carry on with "
                         "anything else they asked that doesn't need it, and tell them in a short message what you couldn't do.")
 COMPUTER_ALLOWED = ("This message is from DGC, not the user. The user allowed {what}. Nothing was done yet: "
@@ -672,6 +676,13 @@ def continue_after_rejection(store, pip_id, action_id, summary, config):
     what = (("a payment: " if summary.get("payment") is True else "")
             + f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}")[:300]
     return send(store, pip_id, COMPUTER_REJECTED.format(what=what), key, "local-computer", config, _intro=True)
+
+
+def continue_after_user_paid(store, pip_id, action_id, summary, config):
+    """The chat's next turn once the user paid on the Pip's screen themselves (pip_computer._user_paid)."""
+    key = COMPUTER_KEY + "paid_" + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
+    what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
+    return send(store, pip_id, COMPUTER_USER_PAID.format(what=what), key, "local-computer", config, _intro=True)
 
 
 def continue_after_app(store, pip_id, link, config):
@@ -1157,6 +1168,12 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
     try:
         if not _intro and isinstance(key, str) and key.startswith(DGC_KEYS):
             raise RegistryError("invalid_request", "That message key is reserved for messages DGC writes.")
+        if not _intro:
+            # Cards follow the password rule: typed on the Pip's own screen, never kept in its chat or sent to a
+            # model. Refused before anything of the message is stored (its photos and files included).
+            from .cards import card_number, refusal
+            if card_number(text):
+                raise RegistryError("card_in_chat", refusal(store._job(pip_id)["name"]))
         if images is not None or spooled_images is not None:
             job = store._job(pip_id)
             given, spooled_images = spooled_images, None
