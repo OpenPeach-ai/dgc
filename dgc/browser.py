@@ -959,9 +959,13 @@ class BrowserSession:
                 f"{key!r} is not a supported key; use one of {', '.join(sorted(named))}")
         name, code, keycode = entry
         for event in ("keyDown", "keyUp"):
-            self.command("Input.dispatchKeyEvent", {
-                "type": event, "key": name, "code": code,
-                "windowsVirtualKeyCode": keycode, "nativeVirtualKeyCode": keycode})
+            params = {"type": event, "key": name, "code": code,
+                      "windowsVirtualKeyCode": keycode, "nativeVirtualKeyCode": keycode}
+            if event == "keyDown" and name == "Enter":
+                # Enter's character, as a keyboard sends it: without it no keypress follows, and a form's field
+                # never submits its form on Enter (a search box stayed where it was, 2026-10-21).
+                params.update(text="\r", unmodifiedText="\r")
+            self.command("Input.dispatchKeyEvent", params)
         self._pump(0.8)
         return name
 

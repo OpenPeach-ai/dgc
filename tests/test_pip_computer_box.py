@@ -191,6 +191,17 @@ class RealBoxTests(unittest.TestCase):
         self.assertTrue(self.wait_for(lambda: self.received), "released")
         self.assertEqual(self.received, [("/submit", "name=Ada&password=hunter2")], "the exact request, once")
 
+    def test_enter_in_a_field_submits_its_form_and_the_submit_waits(self):
+        # Enter carried no "\r", so no keypress followed and a field never submitted its form (a Pip's search box stayed
+        # where it was, 2026-10-21). Now it submits, and that submit is held like a click's.
+        self.assertEqual(self.browser.navigate(self.base + "/"), "loaded")
+        field = self.browser.evaluate_json("(() => { document.querySelector('[name=name]').setAttribute('data-dgc-ref','e904'); return 'e904'; })()")
+        self.browser.type_text(field, "Ada")
+        self.browser.press("Enter")
+        self.assertTrue(self.wait_for(lambda: self.held), "Enter submitted the form, and the submit waits")
+        self.assertEqual((self.held[0].method, self.held[0].summary()["path"]), ("POST", "/submit"))
+        self.assertEqual(self.received, [])
+
     def test_a_pages_own_traffic_goes_out_and_a_write_the_pip_causes_waits(self):
         # Every held POST became an approval with a screenshot: Google's results page alone made 18
         # ("Send a form to www.google.com"), from telemetry nobody clicked.
