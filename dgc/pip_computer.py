@@ -564,8 +564,8 @@ class Host:
         with self.lock:
             self.last_used = time.monotonic()
             if self.waiting:
-                return {"text": ("A change is already waiting for the user's approval. Stop now and tell the user what is "
-                                 "waiting; the next run continues after they decide.")}
+                return {"text": ("A change is already waiting for the user's approval, as a card below your reply. Stop now "
+                                 "and tell the user what is waiting; the next run continues after they decide.")}
             # Chrome runs as a window on the computer's screen whenever this machine can show one, as on
             # Grok's bots: headless Chrome names itself HeadlessChrome, and Google asked it for a robot check.
             if self.desktop is None or not self.desktop.running():
@@ -834,8 +834,8 @@ class Host:
         from . import pip_computer_files as desk
         self.last_used = time.monotonic()
         if self.waiting:
-            return ("A change is already waiting for the user's approval. Stop now and tell the user what is "
-                    "waiting; the next run continues after they decide.")
+            return ("A change is already waiting for the user's approval, as a card below your reply. Stop now "
+                    "and tell the user what is waiting; the next run continues after they decide.")
         try:
             files = desk.files_root(self.root)
             if op == "files":

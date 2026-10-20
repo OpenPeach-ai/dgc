@@ -837,13 +837,20 @@ without.
 
 - **Reading is free.** During a run the Pip opens, reads, scrolls and clicks through public
   websites on its own.
+- **It pays, orders and books when you ask.** "Pay these medical bills" with photos of the bills: it finds each
+  bill on its site, fills in what the bills say, asks once for what it can't find (a card, a delivery address), and
+  presses Pay. You can give it the card in its chat or type it on its screen. Every payment, order and booking
+  waits for you as below, a payment every time.
 - **Anything it would send waits for you.** When a page would submit a form or send any other
   data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
-  **Waiting for you** in the Pip's **Job** tab, and the Pips bar above the chat says so at once.
+  **Waiting for you** in the Pip's **Job** tab, and the Pips bar above the chat says so at once. It also waits
+  as a card under the Pip's reply in its chat: a new site with **Allow this site** and **Not now**; a form or a
+  payment with what it sends (a bill number and amount, never a card field), **Review…** and **Reject**.
   **Review…** shows a screenshot of the page, where the request would go and its form fields.
   Fields named like passwords, codes or card details are hidden in the review but are sent as
   entered. **Send once** sends exactly that request, once, and starts a follow-up run so the Pip
-  carries on from the result. **Reject** drops it. A held request expires after 24 hours. It is
+  carries on from the result. **Reject** drops it, and the Pip is told: it says what wasn't done and goes on with
+  the rest of what you asked (the next bill). A held request expires after 24 hours. It is
   also lost, unsent, if the computer stops or the runner restarts, because the browser is what
   holds it.
 - **What you submit is yours, right away.** With no Pip run using the computer, a submit within
