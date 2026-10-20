@@ -3463,9 +3463,9 @@
     }
     // After a turn ends there is no third state left: every block is either the answer or the
     // commentary around it. A bare `.text` was how a gate-round answer came to look finished.
-    for (const n of nodes) if (n !== answer) { n.classList.add("commentary"); commentaryCopy(n); }
+    for (const n of nodes) if (n !== answer) markCommentary(n);
     if (answer) {
-      answer.classList.remove("commentary");        // the stated id outranks any earlier guess
+      answer.classList.remove("commentary", "commentary-detail");   // the stated id outranks any earlier guess
       answer.querySelector(":scope > .commentary-actions")?.remove();
       const complete = reason === "completed";
       if (complete) answer.classList.add("final");   // unfinished prose is not a final answer
@@ -3789,14 +3789,33 @@
   // actions attach to one block per turn, the final answer, while every mid-turn line is
   // commentary. This gives commentary its own copy, revealed on hover and on keyboard focus --
   // the button stays in the DOM and is only faded, so it can still be reached with Tab.
+  // A mid-turn message is commentary. Most are one line ("Baseline is green. Starting change 1.").
+  // One the user should read in full -- a diagnosis, or a plan before substantial work, which the
+  // model is told it may write out with formatting and then keep working -- is laid out like an
+  // answer instead (.commentary-detail): room above and below it and its Copy under it, so it is not
+  // read as one more progress line between tool rows. The wire phase stays "commentary" (a new value
+  // breaks older SDKs); the shape is read here, from the rendered block.
+  const DETAIL_MIN_CHARS = 320;
+  function isDetailedCommentary(textEl) {
+    if (textEl.querySelector("h1, h2, h3, h4, h5, h6, ul, ol, pre, table, blockquote")) return true;
+    if (textEl.querySelectorAll(":scope > p").length >= 2) return true;
+    return String(textEl._markdown || textEl.textContent || "").trim().length >= DETAIL_MIN_CHARS;
+  }
+  function markCommentary(textEl) {
+    if (!textEl) return;
+    textEl.classList.add("commentary");
+    textEl.classList.toggle("commentary-detail", isDetailedCommentary(textEl));
+    commentaryCopy(textEl);
+  }
   function commentaryCopy(textEl) {
     if (!textEl || textEl.querySelector(":scope > .commentary-actions")) return;
     const actions = el("div", "commentary-actions");
     const button = el("button", "ract ract-copy",
                       `<span class="codicon codicon-copy" aria-hidden="true"></span>`);
     button.type = "button";
-    button.title = "Copy this line";
-    button.setAttribute("aria-label", "Copy this line");
+    const what = textEl.classList.contains("commentary-detail") ? "Copy this message" : "Copy this line";
+    button.title = what;
+    button.setAttribute("aria-label", what);
     actions.appendChild(button);
     button.onclick = (event) => {
       event.stopPropagation();          // a commentary block can sit inside a clickable card
@@ -6230,11 +6249,12 @@
       case "stream_end": {
         finishReasoning();
         const closed = turn?.textEl;
-        if (closed) {
-          if (ev.message_id) closed.dataset.messageId = String(ev.message_id);
-          if (ev.phase === "commentary") { closed.classList.add("commentary"); commentaryCopy(closed); }
-        }
+        if (closed && ev.message_id) closed.dataset.messageId = String(ev.message_id);
+        // Rendered first, then marked: the last render replaces the block's contents, which took the
+        // copy button with it when it was added before (it came back only when the turn ended), and
+        // whether a message is a detailed one is read off its rendered shape.
         breakText();
+        if (closed && ev.phase === "commentary") markCommentary(closed);
         break;
       }
       case "tool_call": {
@@ -8272,7 +8292,7 @@
   // chat's steering rows both come here, so a reload draws the turn the live one drew.
   function placeSteering(node) {
     flushText(); finishReasoning();
-    if (turn.textEl) { turn.textEl.classList.add("commentary"); commentaryCopy(turn.textEl); }
+    if (turn.textEl) markCommentary(turn.textEl);
     turn.textEl = null; turn._buf = ""; releaseToolGroup();
     // Part of the turn from here on: measured, pinned and skipped as the turn's block -- how a replayed
     // steering message has always been drawn. A settled block nested in another is laid out by neither

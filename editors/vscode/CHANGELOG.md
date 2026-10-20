@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A detailed message mid-turn reads like an answer.** When the model stops to write out something you should read in
+  full before it goes on, such as a diagnosis or its plan for a large change, that message now has the room an answer
+  has above and below it and uses the full width, instead of sitting 4px under a tool line like a one-line update. It
+  stays in the chat after the turn ends. A message counts as detailed when it has a heading, a list, code, a table or
+  a quote, two or more paragraphs, or more than about 320 characters; a one-line update is unchanged. A mid-turn line's
+  Copy is also there while the turn runs; the last render used to remove it until the turn ended.
 - **Card numbers stay out of the chat.** A card number typed in a Pip's chat is not sent and not kept (not even as a
   draft or in undo): one line says to type it on the Pip's screen, with **Open its computer**. DGC's own chat warns
   once ("whatever you send here goes to the model"); Enter again sends it as it is. Bill, UHID, phone and account
