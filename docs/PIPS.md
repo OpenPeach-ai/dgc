@@ -173,6 +173,62 @@ dgc pips setup show SETUP_ID
 dgc pips setup accept SETUP_ID --expected-digest DIGEST
 ```
 
+## Your own Claude Code or Codex (Personal Pips)
+
+A Personal Pip can think with the Claude Code or Codex you are already signed in to, on
+your own plan. Open its chat, choose the model under the chat box, and pick **Claude
+Code** or **Codex** under **Your subscriptions**. Only the ones installed and signed in on
+this computer are listed. **Same as DGC** follows DGC: when DGC's own default is Claude Code
+or Codex, the Pip uses it too, with DGC's model and effort for it. The Pip's thinking
+setting in its chat box becomes the CLI's effort.
+
+Its replies and its routines use your plan's usage, as your own chats in that app do; the
+picker says so once when you choose it. Nothing else changes: there are no new settings.
+
+The CLI is only the Pip's model. Its own tools are switched off, and the Pip's tools (its
+computer, its connected apps and drafts, its choices and cards, its routines and notes,
+web search) reach it from DGC for that one run. So every Pip rule still holds: its
+computer holds every submit and every payment for you, careful mode, the card rule (a
+Pip never types a card; one typed in its chat is refused), screenshot masking, Allow
+cards and routines work exactly as with a local model, and its chat and computer show
+the run the same way. DGC never reads, copies or refreshes the CLI's login; the CLI uses
+its own.
+
+How each CLI is held to DGC's tools (checked by trying, with Claude Code 2.1.266 and
+Codex 0.153.4):
+
+- **Claude Code** runs `claude -p --input-format stream-json --output-format stream-json
+  --tools "" --restricted --setting-sources project --strict-mcp-config --mcp-config
+  <run file> --allowedTools mcp__dgc --permission-mode dontAsk --disable-slash-commands
+  --no-session-persistence --no-chrome --system-prompt-file <run file>`, with
+  `CLAUDE_CODE_DISABLE_CLAUDE_MDS`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`,
+  `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS`, `CLAUDE_CODE_DISABLE_ATTACHMENTS`,
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` and `ENABLE_TOOL_SEARCH=false`. Its model is
+  offered exactly `mcp__dgc__*`: no Bash, Read, Edit, Write, WebFetch, WebSearch or Task,
+  none of your MCP servers, hooks, skills, plugins or CLAUDE.md.
+- **Codex** runs `codex exec --json --skip-git-repo-check --ephemeral
+  --ignore-user-config --ignore-rules --sandbox read-only` with `approval_policy="never"`,
+  `web_search="disabled"`, its shell, unified exec, view_image, apps, plugins,
+  sub-agents, image generation, browser and computer use, hooks and memories features off,
+  no skills, project docs, permission or environment notes, and a copy of its own model
+  catalog (`codex debug models`) with each model's `apply_patch_tool_type` null,
+  `shell_type` disabled, tool search, sub-agents and code mode off. Its model is offered
+  DGC's tools and Codex's MCP-resource readers, which reach only DGC's server.
+  Codex still reads your global `~/.codex/AGENTS.md`, instructions only, with no tool to
+  act on them.
+
+Each runs in the run's own private folder, never a project, with an environment that has
+no DGC key or token (only paths, locale, proxies and the CLI's own `CLAUDE_CONFIG_DIR` or
+`CODEX_HOME`), inside the run's process group, so stopping the run stops it. The Pip's tools
+come from a socket in a private folder that only the token minted for that run opens. If
+the CLI ever reached for a tool of its own, DGC stops the turn and says so in one line.
+
+Not offered for Pips: **Kimi Code** (it can't switch off its own shell and file tools),
+**Qwen Code** and **Copilot CLI** (neither can be held to DGC's tools alone).
+**Project Pips** (audits, Pulse, Quill, Patch) still need a local or API model: their
+source checks run only in DGC's own loop. Choosing a subscription for one is refused with
+that line.
+
 ## The runner
 
 A Pip's work runs in the **runner**, a local process separate from your chats.

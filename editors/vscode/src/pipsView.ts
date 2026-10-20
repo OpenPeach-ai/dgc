@@ -478,6 +478,8 @@ export class PipsEditor implements vscode.Disposable {
     if (request.type === 'propose_pip_personal_handoff' && this.apiVersion < 30) { fail('Update DGC to share results between Pips.'); return; }
     if (request.type === 'list_pip_accounts' && this.apiVersion < 29) { fail('Update DGC to choose an account.'); return; }
     if (request.type === 'revise_pip_setup' && this.apiVersion < 25) { fail('Update DGC to change the model on a new-Pip card.'); return; }
+    // API 55: a Personal Pip on the user's own Claude Code or Codex (model_choice mode "subscription").
+    if ([request.model_choice, request.changes?.model_choice].some(choice => choice?.mode === 'subscription') && this.apiVersion < 55) { fail('Update DGC to run a Pip on your own Claude Code or Codex.'); return; }
     if (request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'chat_options') && this.apiVersion < 24) { fail('Update DGC to change context and thinking.'); return; }
     if (request.type === 'send_pip_message' && Number(request.chat_options?.context_size) > 32768 && this.apiVersion < 25) { fail('Update DGC for a context window above 32K tokens.'); return; }
     if (['propose_pip_calendar_action','prepare_pip_calendar_draft'].includes(request.type) && request.event && ['attendees','repeat','send_invitations'].some(key => Object.prototype.hasOwnProperty.call(request.event,key)) && this.apiVersion < 38) { fail('Update DGC for calendar invitations and repeating events.'); return; }

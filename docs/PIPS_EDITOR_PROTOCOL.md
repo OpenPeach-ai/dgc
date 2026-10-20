@@ -244,6 +244,18 @@ computer tab asks it with `get_pip_computer` and shows `line` once: in `offer` w
 **Not now**, in `downloading` and `unavailable` as a plain line, otherwise nothing. Below API 54 the
 extension sends neither request.
 
+**Your own Claude Code or Codex** (API 55). A Personal Pip's `model_choice` may be `{mode:
+"subscription", engine: "claude" | "codex"}` in `create_pip`, `propose_pip_update` and
+`revise_pip_setup`, and "Same as DGC" follows DGC's subscription default. `list_pip_models`
+adds `subscriptions` `[{engine, name}]` (installed and signed in here) and, when DGC's
+default is a subscription, `default_engine` `{engine, name, available, reason?}`. The Pip's
+chat box model list shows them under **Your subscriptions** for a Personal Pip only, names
+the subscription beside **Same as DGC**, and says once, where one is chosen, "Its replies and
+routines use your NAME plan's usage." No event changes: the run streams the same
+`pip_run_progress` rows and its computer the same frames. The host refuses a subscription
+`model_choice` before sending to a CLI below API 55 ("Update DGC to run a Pip on your own
+Claude Code or Codex."); an older editor shows such a Pip's model as **Same as DGC**.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

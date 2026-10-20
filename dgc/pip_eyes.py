@@ -259,7 +259,11 @@ def pin(registry, row, manifest: dict, config) -> dict:
     own = saved(registry.db, row["pip_id"])
     model = str(manifest.get("model") or "")
     eyes = {"choice": own["choice"], "vision_model": None, "convention": convention_for(model)}
-    if model and sees(config, model) is False:
+    settings = manifest.get("model_settings")
+    if isinstance(settings, dict) and "brain" in settings:
+        # Its model is the user's Claude Code or Codex (pip_brain): it sees, in pixels; no endpoint to ask.
+        eyes["convention"] = "pixels"
+    elif model and sees(config, model) is False:
         vision = own["vision_model"] if own["choice"] == "relay" and own["vision_model"] else pick(config, model)
         if vision:
             eyes.update(vision_model=vision, vision_convention=convention_for(vision))

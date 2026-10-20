@@ -90,7 +90,7 @@ def current(store, source, target_id, config):
             or a['lifecycle_revision'] != source['lifecycle_revision']):
         raise h._error('The source job or lifecycle changed. Prepare a new handoff.', 'stale_source')
     root = store.registry.binding(b['workspace_id'])['canonical_root']
-    settings = _model_settings(config.clone_for_root(Path(root)), b['model_choice'])
+    settings = _model_settings(config.clone_for_root(Path(root)), b['model_choice'], personal=True)
     validate_pinned_connection(config, settings)
     return {'pip_id': b['id'], 'name': b['name'], 'job_version': b['current_version'],
             'lifecycle_revision': b['lifecycle_revision'], 'pip_type': b['pip_type'],

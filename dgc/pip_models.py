@@ -1,9 +1,13 @@
-"""Per-Pip model choices on the user's existing native model connection.
+"""Per-Pip model choices: the user's existing native model connection, or (API 55) their own subscription CLI.
 
 Choices never contain a provider, endpoint, credential or permission change. Discovery
 uses DGC's provider layer; these helpers bound accepted catalog data and public output.
 The provider layer owns HTTP timeouts/body parsing (its compatible/Ollama catalog paths
 do not currently impose a response-byte ceiling), so this is not an allocation limit.
+
+A subscription choice names only the engine (``{"mode": "subscription", "engine": "codex"}``); "Same as DGC"
+follows DGC's own subscription default when it has one. Either runs a Personal Pip's turns on that CLI with DGC's
+tools alone (pip_brain).
 """
 from __future__ import annotations
 
@@ -39,12 +43,21 @@ def validate_model_choice(value) -> dict:
         return {"mode": "default"}
     if value.get("mode") == "model" and set(value) == {"mode", "model"}:
         return {"mode": "model", "model": _model_id(value["model"])}
-    raise RegistryError("invalid_model_choice", "A Pip model choice accepts only mode and, for an explicit choice, model.")
+    if value.get("mode") == "subscription" and set(value) == {"mode", "engine"}:
+        from .pip_brain import ENGINES, NOT_FOR_PIPS
+        if value["engine"] not in ENGINES:
+            raise RegistryError("invalid_model_choice", NOT_FOR_PIPS.get(value["engine"], "Choose Claude Code or Codex."))
+        return {"mode": "subscription", "engine": value["engine"]}
+    raise RegistryError("invalid_model_choice", "A Pip model choice accepts only mode and, for an explicit choice, model or engine.")
+
+
+def is_subscription(config, choice) -> bool:
+    """Whether this choice runs on a subscription CLI: chosen for the Pip, or "Same as DGC" following one."""
+    return choice.get("mode") == "subscription" or (
+        choice.get("mode") == "default" and bool(str(config.get("subscription_engine", "") or "").strip()))
 
 
 def _connection(config):
-    if config.get("subscription_engine", ""):
-        raise RegistryError("unsupported_model", "Pips require the configured native local or API connection. Delegated subscription CLIs are unsupported.")
     base = config.get("base_url", "")
     mode = config.get("api_mode", "auto")
     if (not isinstance(base, str) or not 1 <= len(base) <= 2048
@@ -106,11 +119,21 @@ def _catalog(config) -> list[str]:
 
 
 def list_pip_models(config) -> dict:
-    """Return bounded genuine model IDs; discovery failure is never a fallback model."""
-    result = {"default_model": "", "models": [], "connection": "configured"}
+    """Return bounded genuine model IDs; discovery failure is never a fallback model.
+
+    API 55: ``subscriptions`` lists the CLIs a Personal Pip can run on here (installed, signed in, held to DGC's
+    tools), and ``default_engine`` says which one "Same as DGC" follows when DGC's default is a subscription."""
+    from . import pip_brain
+    result = {"default_model": "", "models": [], "connection": "configured", "subscriptions": pip_brain.offered()}
+    engine = str(config.get("subscription_engine", "") or "").strip().lower()
+    if engine:
+        reason = pip_brain.available(engine)
+        result["default_engine"] = {"engine": engine, "name": pip_brain.name(engine), "available": not reason,
+                                    **({"reason": reason} if reason else {})}
     try:
         _connection(config)
-        result["default_model"] = _safe_model_id(config.get("model", ""), secret_values(config))
+        if not engine:
+            result["default_model"] = _safe_model_id(config.get("model", ""), secret_values(config))
         catalog = _catalog(config)
         for model in catalog:
             row = {"id": model, "name": model}
@@ -128,8 +151,12 @@ def list_pip_models(config) -> dict:
 
 
 def resolve_model_choice(config, choice) -> str:
-    """Pin the current default, or require an explicit ID in the current genuine catalog."""
+    """Pin the current default, or require an explicit ID in the current genuine catalog. A subscription (chosen,
+    or DGC's default) must be one a Pip can run on here; it pins as its engine (pip_brain.label)."""
     choice = validate_model_choice(choice)
+    if is_subscription(config, choice):
+        from .pip_brain import label, route
+        return label(route(config, choice))
     _connection(config)
     if choice["mode"] == "default":
         return _safe_model_id(config.get("model", ""), secret_values(config))
@@ -145,6 +172,17 @@ def validate_pinned_connection(config, settings) -> None:
     Credential rotation on the same endpoint is allowed. Do not check the current
     default model or rediscover models here: execution uses the immutable run pin.
     """
+    if isinstance(settings, dict) and "brain" in settings:
+        # A subscription run: its CLI must still be here and signed in; DGC's own connection doesn't matter.
+        from .pip_brain import available, validate_route
+        try:
+            brain = validate_route(settings["brain"])
+        except RegistryError:
+            raise RegistryError("model_changed", "The run has no valid pinned model connection. Start a new run.") from None
+        reason = available(brain["engine"])
+        if reason:
+            raise RegistryError("model_changed", reason)
+        return
     current = _connection(config)
     if not isinstance(settings, dict):
         raise RegistryError("model_changed", "The run has no valid pinned model connection. Start a new run.")

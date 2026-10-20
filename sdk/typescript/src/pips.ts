@@ -154,7 +154,7 @@ export type PipMutationParams = {
   propose_pip_app_action: { source_run_id: string; server: string; connection_digest: string; account: string; schema_digest: string; message: { recipient_email: string; subject: string; body: string }; request_key: string };
   accept_pip_app_action: { action_id: string; expected_digest: string };
   reject_pip_app_action: { action_id: string; expected_digest: string };
-  revise_pip_setup: { setup_id: string; expected_digest: string; model_choice: { mode: "default" } | { mode: "model"; model: string } };
+  revise_pip_setup: { setup_id: string; expected_digest: string; model_choice: { mode: "default" } | { mode: "model"; model: string } | { mode: "subscription"; engine: "claude" | "codex" } };
   accept_pip_setup: { setup_id: string; expected_digest: string };
   reject_pip_setup: { setup_id: string; expected_digest: string };
   record_pip_statement: { pip_id: string; kind: "fact" | "preference"; title: string; statement: string; reason: string; expires_at: string | null; expected_anchor_digest: string; request_key: string; source_run_id?: string };
@@ -630,6 +630,8 @@ for (const command of API53_READS) READS.add(command);
 for (const command of API53_MUTATIONS) MUTATIONS.add(command);
 const API53_FIELDS: Readonly<Record<string, readonly string[]>> = { list_pip_computer_frames: ["pointers"] };
 const EYES_CHOICES = new Set(["ask", "relay", "off"]);
+// API 55: the subscription CLIs a Personal Pip can run on (pip_brain).
+const SUBSCRIPTION_ENGINES = new Set(["claude", "codex"]);
 // API 54: Pips use the whole desktop. get_pip_computer_apps reads which of its apps (an image editor, a document editor,
 // a PDF viewer) this computer has and the one offer to download the ones it lacks; set_pip_computer_apps answers it
 // (choice download or not_now). Local only.
@@ -797,6 +799,16 @@ export class Pips {
         throw new DGCUnsupportedError("Where a Pip acted by position (pointers, the view's pointer) requires a runtime advertising Pips API 53 or newer");
       }
       if (Object.hasOwn(values, "pointers") && typeof values.pointers !== "boolean") throw new DGCConfigError("pointers must be true or false");
+    }
+    const choices = [values.model_choice, (values.changes as Record<string, unknown> | undefined)?.model_choice] as unknown[];
+    const subscription = (choice: unknown): choice is Record<string, unknown> => !!choice && typeof choice === "object" && (choice as Record<string, unknown>).mode === "subscription";
+    if (choices.some(subscription)) {
+      if ((this.caps.pips_api_version as number) < 55) {
+        throw new DGCUnsupportedError("A Pip on your own Claude Code or Codex requires a runtime advertising Pips API 55 or newer");
+      }
+      if (choices.filter(subscription).some((choice) => Object.keys(choice).sort().join() !== "engine,mode" || !SUBSCRIPTION_ENGINES.has(choice.engine as string))) {
+        throw new DGCConfigError('A subscription model_choice is {mode: "subscription", engine: "claude" | "codex"}');
+      }
     }
     if (command === "set_pip_eyes" && !EYES_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be ask, relay or off");
     if (command === "set_pip_computer_apps" && !APPS_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be download or not_now");

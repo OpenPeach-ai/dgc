@@ -248,6 +248,8 @@ READ_COMMANDS |= API53_READS
 MUTATION_COMMANDS |= API53_MUTATIONS
 API53_FIELDS = {'list_pip_computer_frames': frozenset({'pointers'})}
 EYES_CHOICES = frozenset({'ask', 'relay', 'off'})
+# API 55: the subscription CLIs a Personal Pip can run on (pip_brain).
+SUBSCRIPTION_ENGINES = frozenset({'claude', 'codex'})
 # API 54: Pips use the whole desktop. get_pip_computer_apps reads which of its apps (an image editor, a document editor,
 # a PDF viewer) this computer has and the one offer to download the ones it lacks; set_pip_computer_apps answers it
 # (choice download or not_now). Local only.
@@ -651,6 +653,14 @@ class Pips:
                 raise DGCUnsupportedError("Where a Pip acted by position (pointers, the view's pointer) requires a runtime advertising Pips API 53 or newer")
             if 'pointers' in values and type(values['pointers']) is not bool:
                 raise DGCConfigError('pointers must be true or false')
+        choices = [values.get('model_choice'), values['changes'].get('model_choice') if isinstance(values.get('changes'), dict) else None]
+        if any(isinstance(choice, dict) and choice.get('mode') == 'subscription' for choice in choices):
+            # API 55: a Personal Pip on the user's own Claude Code or Codex, with DGC's Pip tools only.
+            if version < 55:
+                raise DGCUnsupportedError("A Pip on your own Claude Code or Codex requires a runtime advertising Pips API 55 or newer")
+            if any(isinstance(choice, dict) and choice.get('mode') == 'subscription'
+                   and (set(choice) != {'mode', 'engine'} or choice.get('engine') not in SUBSCRIPTION_ENGINES) for choice in choices):
+                raise DGCConfigError('A subscription model_choice is {"mode": "subscription", "engine": "claude" | "codex"}')
         if command == 'set_pip_eyes' and values.get('choice') not in EYES_CHOICES:
             raise DGCConfigError('choice must be ask, relay or off')
         if command == 'set_pip_computer_apps' and values.get('choice') not in APPS_CHOICES:

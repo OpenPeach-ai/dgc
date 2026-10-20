@@ -640,7 +640,7 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
         from .pips import _model_settings
         choice = saved_body['definition']['model_choice']
         model_preparation = {'choice': choice,
-                             'settings': _model_settings(config.clone_for_root(Path(saved_body['project_root'])), choice)}
+                             'settings': _model_settings(config.clone_for_root(Path(saved_body['project_root'])), choice, personal=personal)}
     cannot_run_here(saved_body['request'])   # warm the OS probe outside the writer lock: the result card says it
     planned_pip_id = saved_body['request'].get('pip_id') or identifier('pip')
     audit_preparation = None

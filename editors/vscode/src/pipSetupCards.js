@@ -1,7 +1,7 @@
 // Main-chat setup reviews. Tool output supplies an identity only: every actionable
 // card is loaded again from the local registry and approved by its exact digest.
 import '../media/pips/plush.js';
-import {pipSetup,pipSetupResolution,pipModels,modelChoice,scheduleLabel,commandLine} from './pipsModel.js';
+import {pipSetup,pipSetupResolution,pipModels,modelChoice,modelLabel,modelValue,subscriptionUsage,scheduleLabel,commandLine} from './pipsModel.js';
 import {appReadWords} from './pipsAppPicker.js';
 import {mountRunCards} from './pipRunCards.js';
 import {mountEmailCards} from './pipEmailCards.js';
@@ -56,7 +56,7 @@ export function mountSetupCards(options) {
   if(s.web_plan)out.push('Reads the web');
   if(s.verification_plan){const n=s.verification_plan.action.tests.length;out.push(`${n} fixed ${s.work_kind==='app_smoke_test'?(n===1?'check':'checks'):(n===1?'command':'commands')}`);}
   out.push(s.source_policy==='personal'?'Asks before sending':s.pip_type==='quill'?'Drafts docs':'Reads committed code');
-  out.push(s.model_choice?.mode==='model'?s.model_choice.model:'Your DGC model');
+  out.push(s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Your DGC model');
   return out;
  }
  const pendingTitle=s=>(s.pip_id?'Change Pip: ':'New Pip: ')+s.name;
@@ -68,7 +68,7 @@ export function mountSetupCards(options) {
   if(goal)body.append(node('p','pip-setup-goal',s.goal));          // the docked card shows it already
   const facts=node('dl','pip-setup-facts');detail(facts,s.source_policy==='personal'?'Scope':'Project',s.source_policy==='personal'?'Personal':s.project_root);if(s.event_trigger)detail(facts,'Runs',`After each new commit to ${s.source_ref}`);else detail(facts,'Schedule',s.schedule?scheduleLabel(s.schedule):'When you ask');
   if(s.next_run_at)detail(facts,'Next run',`${new Date(s.next_run_at).toLocaleString()} (your local time)`);
-  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal')detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:'Your DGC model');
+  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal')detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Your DGC model');
   if(s.verification_plan){detail(facts,'Runs','Set checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → status ${test.argv[2]}`:commandLine(test.argv)+' · in '+test.cwd);}
   if(s.app_plan)for(const words of appReadWords(s.app_plan))detail(facts,'Reads',words);
   if(s.web_plan)for(const read of s.web_plan.reads||[])detail(facts,read.kind==='page'?'Web page':'Web search',read.kind==='page'?read.url:read.query);
@@ -79,11 +79,15 @@ export function mountSetupCards(options) {
    const models=node('div','pip-setup-model');
    if(entry.models){
     const label=node('label','','Model for this Pip'),select=node('select');select.setAttribute('aria-label','Model for this Pip');
-    const current=s.model_choice||{mode:'default'}, choices=[{value:'',name:`Your DGC model${entry.models.default_model?' · '+entry.models.default_model:''}`}];
+    const current=s.model_choice||{mode:'default'}, following=entry.models.default_engine?.name||entry.models.default_model, choices=[{value:'',name:`Your DGC model${following?' · '+following:''}`}];
     for(const item of entry.models.models)choices.push({value:typeof item==='string'?item:item.id,name:typeof item==='string'?item:item.name||item.id});
     if(current.mode==='model'&&!choices.some(c=>c.value===current.model))choices.push({value:current.model,name:current.model});
-    for(const choice of choices){const o=node('option','',choice.name);o.value=choice.value;select.append(o);}select.value=entry.choice.mode==='model'?entry.choice.model:'';
-    select.onchange=()=>{entry.choice=select.value?{mode:'model',model:select.value}:{mode:'default'};repaint(entry);};label.append(select);models.append(label);
+    // API 55: a personal setup may run on the user's own Claude Code or Codex (pip_brain). "|" is never in a model ID.
+    const subs=api>=55&&s.source_policy==='personal'?entry.models.subscriptions||[]:[];
+    for(const sub of subs)choices.push({value:'subscription|'+sub.engine,name:sub.name+' · your subscription'});
+    for(const choice of choices){const o=node('option','',choice.name);o.value=choice.value;select.append(o);}select.value=entry.choice.mode==='model'?entry.choice.model:entry.choice.mode==='subscription'?'subscription|'+entry.choice.engine:'';
+    select.onchange=()=>{const v=select.value;entry.choice=v.startsWith('subscription|')?{mode:'subscription',engine:v.slice(13)}:v?{mode:'model',model:v}:{mode:'default'};repaint(entry);};label.append(select);models.append(label);
+    if(entry.choice.mode==='subscription')models.append(node('p','pip-setup-notice',subscriptionUsage(modelLabel(entry.choice))));
     if(JSON.stringify(entry.choice)!==JSON.stringify(current))models.append(button('Use this model',()=>revise(entry),'pip-setup-secondary'),node('p','pip-setup-notice','The card is saved again with this model. Nothing is created until you choose '+createLabel(s)+'.'));
    }else models.append(button('Choose model',()=>modelsFor(entry),'pip-setup-secondary'));
    body.append(models);
@@ -167,7 +171,7 @@ export function mountSetupCards(options) {
  async function revise(entry){
   const token=epoch,s=entry.setup;entry.busy=true;entry.error='';repaint(entry);
   try{
-   const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(entry.choice.mode==='default'?'default':'model:'+entry.choice.model,entry.models?.models||[])});if(token!==epoch)return;
+   const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(modelValue(entry.choice),entry.models?.models||[],api>=55&&s.source_policy==='personal'?entry.models?.subscriptions||[]:[])});if(token!==epoch)return;
    const next=pipSetup(value.setup,s.workspace_id);if(next.status!=='pending'||next.id===s.id)throw Error('This was changed or answered somewhere else. Refresh to see it.');
    remap(entry,next.id);entry.setup=next;entry.choice=next.model_choice||{mode:'default'};
   }catch(error){if(token===epoch)entry.error=error.message;}finally{if(token===epoch){entry.busy=false;repaint(entry);}}

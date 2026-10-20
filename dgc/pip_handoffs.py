@@ -121,6 +121,9 @@ def connection_digest(settings):
     """Pin the native connection without putting endpoint URLs or credentials in UI."""
     if not isinstance(settings, dict):
         raise _error("A handoff requires the configured native model connection.")
+    if isinstance(settings.get("brain"), dict):
+        # A Personal Pip on a subscription (pip_brain): its CLI is its connection.
+        return _digest({"subscription": _text(settings["brain"].get("engine"), "Subscription", 64)})
     base = _text(settings.get("base_url"), "Configured endpoint", 2048).rstrip("/")
     mode = _text(settings.get("api_mode"), "Configured API mode", 64)
     return _digest({"base_url": base, "api_mode": mode})

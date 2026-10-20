@@ -346,6 +346,9 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
     if selected_type.id == "core" and source_policy != {"mode": "personal"}:
         raise RegistryError("unavailable_pip_type", "Core is your Primary Pip, for personal work. Choose another character for project work.")
     choice = validate_model_choice(model_choice)
+    if choice["mode"] == "subscription" and source_policy != {"mode": "personal"}:
+        from .pip_brain import PROJECT_PIPS
+        raise RegistryError("unsupported_model", PROJECT_PIPS)
     schedule = validate_schedule(schedule)
     from .pip_event_triggers import validate_event_trigger
     event_trigger = validate_event_trigger(event_trigger)
@@ -501,11 +504,26 @@ def _output_budget(config) -> int:
     return min(1_000_000, max(256, value))
 
 
-def _model_settings(config, model_choice=None, *, _prepared=None):
-    from .pip_models import resolve_model_choice, validate_model_choice, validate_pinned_connection
-    if config.get("subscription_engine", ""):
-        raise RegistryError("unsupported_model", "Pips need a local or API model. They can’t use a model that runs through another app’s subscription.")
+def _model_settings(config, model_choice=None, *, _prepared=None, personal=False):
+    from .pip_models import is_subscription, resolve_model_choice, validate_model_choice, validate_pinned_connection
     choice = validate_model_choice(model_choice if model_choice is not None else {"mode": "default"})
+    if is_subscription(config, choice):
+        # API 55: a Personal Pip runs on the user's own Claude Code or Codex, with DGC's tools only (pip_brain).
+        # A project Pip's audit policy lives in DGC's own loop, so it still needs a local or API model.
+        from .pip_brain import PROJECT_PIPS, label, route
+        if not personal:
+            raise RegistryError("unsupported_model", PROJECT_PIPS)
+        brain = route(config, choice)
+        from .pip_chat_options import CONTEXT_MAX, CONTEXT_MIN, inherited_context
+        settings = {"model": label(brain), "brain": brain,
+                    "context_size": min(CONTEXT_MAX, max(CONTEXT_MIN, inherited_context(config))),
+                    "thinking": "off", "max_tokens": _output_budget(config), "max_turns": STEPS, "turn_budget_s": 0}
+        if _prepared is not None:
+            if (type(_prepared) is not dict or set(_prepared) != {'choice', 'settings'} or _prepared['choice'] != choice
+                    or _prepared['settings'] != settings):
+                raise RegistryError('conflict', 'The model settings changed after preparing this Pip setup. Review it again.')
+            validate_pinned_connection(config, settings)
+        return settings
     if _prepared is None:
         model = resolve_model_choice(config, choice)
     else:
@@ -1134,8 +1152,8 @@ class PipStore:
         frozen_config = config.clone_for_root(Path(binding["canonical_root"]))
         model = None
         if not standalone:
-            model = (_model_settings(frozen_config, pip["model_choice"], _prepared=_model_preparation)
-                     if _model_preparation is not None else _model_settings(frozen_config, pip["model_choice"]))
+            model = (_model_settings(frozen_config, pip["model_choice"], _prepared=_model_preparation, personal=personal)
+                     if _model_preparation is not None else _model_settings(frozen_config, pip["model_choice"], personal=personal))
             # The Pip's own context window and thinking, from its prompt box: a reply sent with them keeps them as
             # the Pip's, and everything it does on its own uses them too.
             from .pip_chat_options import apply as apply_chat_options, save as save_chat_options, saved as saved_chat_options
@@ -2544,6 +2562,15 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     allowed_tools = set() if personal else READ_TOOLS | WRITE_TOOLS if kind == "patch" else READ_TOOLS
     if specialist_pin is not None:
         allowed_tools |= {'task'}
+    # API 55: a Personal Pip's turn on the user's own Claude Code or Codex (pip_brain). Only its chat and its tasks;
+    # the CLI's own tools are off and these handlers answer every call it makes, so the rules below all still hold.
+    brain = brain_launch = None
+    if isinstance(manifest.get('model_settings'), dict) and 'brain' in manifest['model_settings']:
+        from . import pip_brain
+        brain = pip_brain.validate_route(manifest['model_settings']['brain'])
+        if not personal or kind not in ('conversation', 'personal_task') or specialist_pin is not None:
+            raise RegistryError('unsupported_model', pip_brain.PROJECT_PIPS)
+        brain_launch = pip_brain.launch_from_env(brain)
     conversation = pip_chat.validate_context(manifest.get("conversation")) if kind == "conversation" else None
     from . import pip_chat_setup, pip_routines
     chat_setup = pip_chat_setup.validate_pin(manifest)
@@ -2604,8 +2631,31 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if name in specialist_pin['grant']['roles']}
 
         def _new_client(self, *args, **kwargs):
+            if brain is not None:
+                from .pip_brain import BrainClient
+                return BrainClient(brain)        # the CLI is its model: DGC sends no request of its own
             client = super()._new_client(*args, **kwargs)
             return specialist_budget.wrap(client, self._pip_specialist_record) if specialist_budget is not None else client
+
+        def run_turn(self, user_text, **kwargs):
+            if brain is None:
+                return super().run_turn(user_text, **kwargs)
+            import base64 as _b64
+            from .pip_brain import Turn
+            photos = []
+            for uri in self._pending_images or ():
+                head, _, data = str(uri).partition(';base64,')
+                if head.startswith('data:image/') and data:
+                    photos.append((head[5:], _b64.b64decode(data)))
+            self._pending_images = None
+            self._last_turn_error = ''
+            return Turn(self, brain_launch, brain).run(user_text, images=photos)
+
+        def _deliver_images(self, call_id, name, entries, *, omitted=0):
+            if getattr(self, '_brain_images', None) is not None:
+                self._brain_images.extend(entries or ())   # they go back to the CLI as MCP image content
+                return
+            return super()._deliver_images(call_id, name, entries, omitted=omitted)
 
         def _effective_thinking(self, user_text):
             # Explicit composer Off stays Off even when a prompt says 'think'.
@@ -2620,6 +2670,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         def _pip_eyes(self):
             """How this run sees: "own" (its model sees), "relay" (a model that sees looks for it), "ask"
             (it can't, and the user hasn't chosen), "off" (the user chose not now), or "blind" (nothing can)."""
+            if eyes['mode'] is None and brain is not None:
+                # Claude Code and Codex see, and name points as pixels of the screenshot.
+                eyes['mode'], eyes['convention'] = 'own', 'pixels'
             if eyes['mode'] is None:
                 from . import vision as vision_relay
                 if vision_relay.has_vision(self.client, getattr(self, 'cancelled', None)):
@@ -3071,7 +3124,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return "PERMISSION DENIED: " + str(exc)
             return super()._handle_call(call, **kwargs)
 
-    if config.get("subscription_engine", ""):
+    if config.get("subscription_engine", "") and brain is None:
+        # A native turn never hands itself to a vendor CLI's own loop and tools. A Personal Pip's subscription run
+        # (brain, above) is not that: its turn runs here, on DGC's tools alone.
         raise RegistryError("unsupported_model", "Delegated vendor routes cannot execute this auditor policy.")
     from .permissions import session_policy
     policy = session_policy()
@@ -3512,7 +3567,8 @@ def _worker_main():
     config._persist = False
     settings = payload["manifest"]["model_settings"]
     for key, value in settings.items():
-        config.set(key, value, persist=False)
+        if key != "brain":                  # a subscription run's CLI (pip_brain), not a DGC setting
+            config.set(key, value, persist=False)
     for key, value in {
         "api_key": payload.get("api_key", ""), "mode": "default", "subscription_engine": "",
         "fallback_model": "", "fallback_base_url": "", "fallback_api_key": "",
@@ -3897,7 +3953,16 @@ def _execute_run(registry, row, config):
         from .pip_chat import file_paths
         manifest = {**manifest, 'conversation_file_paths': [
             str(path) for path in file_paths(registry.directory, row['pip_id'], conversation_pin['files'])]}
-    payload = {"snapshot": str(snapshot), "manifest": manifest, "api_key": frozen_config.get("api_key", "")}
+    brain_pin = manifest["model_settings"].get("brain") if isinstance(manifest.get("model_settings"), dict) else None
+    if brain_pin is not None:
+        # API 55: the user's own Claude Code or Codex is this run's model (pip_brain). The worker gets where the CLI
+        # is, the home its login lives in, an environment without DGC's secrets and the run's own folder to run in.
+        from . import pip_brain
+        if not personal or manifest.get("run_kind") not in ("conversation", "personal_task"):
+            raise RegistryError("unsupported_model", pip_brain.PROJECT_PIPS)
+        worker_env["DGC_PIP_BRAIN"] = _json(pip_brain.launch_pin(brain_pin, run_dir / "brain"))
+    payload = {"snapshot": str(snapshot), "manifest": manifest,
+               "api_key": "" if brain_pin is not None else frozen_config.get("api_key", "")}
     payload_bytes = _worker_payload(payload)
     if time.monotonic() >= deadline:
         raise RegistryError("timeout", "The run exceeded its five-minute budget before model execution.")

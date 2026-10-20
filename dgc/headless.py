@@ -259,7 +259,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # (choice "download" | "not_now") read and answer the one offer to download the apps this computer lacks. The apps are
 # online like the Terminal, through the computer's egress proxy. Desktop steps reach the timeline and the live view as
 # API 53's pointers, in the screen's pixels.
-PIPS_API_VERSION = 54
+# API 55: a Personal Pip can run on the user's own Claude Code or Codex (pip_brain), with DGC's Pip tools only, as an
+# MCP server DGC runs for that run. model_choice takes {"mode": "subscription", "engine": "claude" | "codex"}, and
+# "Same as DGC" follows DGC's subscription default; list_pip_models adds `subscriptions` [{engine, name}] and, when
+# DGC's default is a subscription, `default_engine` {engine, name, available, reason?}. Project Pips refuse it.
+PIPS_API_VERSION = 55
 
 
 def _pips_platform_supported() -> bool:

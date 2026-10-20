@@ -187,17 +187,31 @@ export function chatContinuity(value,pip,workspace){
  if(!record(value)||value.version!==1||value.pip_id!==pip||value.workspace_id!==workspace||!Number.isSafeInteger(value.checkpoint_id)||value.checkpoint_id<1||!Number.isSafeInteger(value.summarized_messages)||value.summarized_messages<0||value.summarized_messages%2||value.summarized_messages>20000||typeof value.summary!=='string'||new TextEncoder().encode(value.summary).length>8192||!['none','model','mechanical'].includes(value.strategy)||typeof value.notice!=='string'||typeof value.run_id!=='string'||!/^[a-f0-9]{64}$/.test(value.digest)||!record(value.provenance))throw Error('Conversation continuity is invalid or belongs to another Pip.');
  return value;
 }
+// API 55: a Personal Pip can run on the user's own Claude Code or Codex (pip_brain). `subscriptions` lists the ones
+// signed in here; `default_engine` is the one "Same as DGC" follows when DGC's default is a subscription.
+export const SUBSCRIPTION_NAMES={claude:'Claude Code',codex:'Codex'};
 export function pipModels(value) {
   if(!record(value)||typeof value.default_model!=='string'||!Array.isArray(value.models)||value.models.length>500||!value.models.every(m=>record(m)&&typeof m.id==='string'&&m.id&&typeof m.name==='string')||new Set(value.models.map(m=>m.id)).size!==value.models.length)throw new Error('Models didn’t load. You can still use the same model as DGC.');
-  return value;
+  const subscriptions=value.subscriptions===undefined?[]:value.subscriptions,engine=value.default_engine===undefined?null:value.default_engine;
+  if(!Array.isArray(subscriptions)||subscriptions.length>8||!subscriptions.every(s=>record(s)&&Object.hasOwn(SUBSCRIPTION_NAMES,s.engine)&&typeof s.name==='string'&&s.name)
+    ||engine!==null&&!(record(engine)&&typeof engine.engine==='string'&&typeof engine.name==='string'&&typeof engine.available==='boolean'&&(engine.reason===undefined||typeof engine.reason==='string')))throw new Error('Models didn’t load. You can still use the same model as DGC.');
+  return {...value,subscriptions,default_engine:engine};
 }
-export function modelChoice(value,models) {
+export function modelChoice(value,models,subscriptions=[]) {
   if(value==='default')return{mode:'default'};
+  if(typeof value==='string'&&value.startsWith('subscription:')){
+    const engine=value.slice(13);
+    if(!subscriptions.some(s=>s.engine===engine))throw new Error('Choose Same as DGC or a model from the list.');
+    return{mode:'subscription',engine};
+  }
   const id=typeof value==='string'&&value.startsWith('model:')?value.slice(6):'';
   if(!id||!models.some(m=>m.id===id))throw new Error('Choose Same as DGC or a model from the list.');
   return{mode:'model',model:id};
 }
-export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:'Same as DGC';
+export const modelValue=choice=>record(choice)&&choice.mode==='model'?'model:'+choice.model:record(choice)&&choice.mode==='subscription'?'subscription:'+choice.engine:'default';
+export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]:'Same as DGC';
+// Said once, where a subscription is chosen for a Pip: its scheduled runs use the user's own plan.
+export const subscriptionUsage=name=>`Its replies and routines use your ${name} plan’s usage.`;
 export function presentation(pip, runs, connected, runnerState) {
   if (!connected) return {state:'offline',label:'Disconnected'};
   if (pip?.status === 'archived') return {state:'offline',label:'Archived'};
@@ -1020,7 +1034,7 @@ export function pipSetup(value,workspace,id=null) {
  if(Object.hasOwn(value,'computer')&&(value.computer!==true||value.source_policy!=='personal'))fail();
  // A setup card's only trigger (Pips API 41): a review after each new commit, instead of a schedule.
  if(Object.hasOwn(value,'event_trigger')){const t=value.event_trigger;if(value.source_policy==='personal'||value.schedule!==null||value.pip_id!==null||!record(t)||Object.keys(t).sort().join()!=='events,minimum_minutes,missed_policy'||JSON.stringify(t.events)!=='["commit_changed"]'||!Number.isSafeInteger(t.minimum_minutes)||t.minimum_minutes<5||t.minimum_minutes>1440||t.missed_policy!=='coalesce_latest'||!['scout','lens','rook','lock','quill'].includes(value.pip_type))fail();}
- if(value.model_choice!==undefined){const m=value.model_choice;if(!record(m)||!(m.mode==='default'&&Object.keys(m).join()==='mode'||m.mode==='model'&&Object.keys(m).sort().join()==='mode,model'&&typeof m.model==='string'&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(m.model)&&!m.model.includes('://')))fail();}
+ if(value.model_choice!==undefined){const m=value.model_choice;if(!record(m)||!(m.mode==='default'&&Object.keys(m).join()==='mode'||m.mode==='model'&&Object.keys(m).sort().join()==='mode,model'&&typeof m.model==='string'&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(m.model)&&!m.model.includes('://')||m.mode==='subscription'&&value.source_policy==='personal'&&Object.keys(m).sort().join()==='engine,mode'&&Object.hasOwn(SUBSCRIPTION_NAMES,m.engine)))fail();}
  const existing=value.pip_id!==null;
  if(existing?!/^pip_[a-f0-9]{32}$/.test(value.pip_id)||!Number.isSafeInteger(value.expected_version)||value.expected_version<1||!Number.isSafeInteger(value.expected_lifecycle_revision)||value.expected_lifecycle_revision<0:value.expected_version!==null||value.expected_lifecycle_revision!==null)fail();
  const schedule=value.schedule;

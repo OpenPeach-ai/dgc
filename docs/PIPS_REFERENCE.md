@@ -91,10 +91,40 @@ they always run under OS confinement, bubblewrap on Linux and Seatbelt on macOS
 user.
 
 Model routes: a Pip uses DGC's configured native model connection, with API mode
-`auto`, `ollama`, `anthropic`, `chat_completions` or `responses`. Delegated subscription engines are
-refused. A run pins its model and endpoint when it is queued; if the endpoint or
-API mode changes before it starts, it fails with `model_changed`. Rotating the key
-for the same endpoint is fine.
+`auto`, `ollama`, `anthropic`, `chat_completions` or `responses`. A run pins its model and
+endpoint when it is queued; if the endpoint or API mode changes before it starts, it fails
+with `model_changed`. Rotating the key for the same endpoint is fine.
+
+A Personal Pip may instead run on the user's own Claude Code or Codex (Pips API 55,
+`dgc/pip_brain.py`): `model_choice` `{"mode": "subscription", "engine": "claude" |
+"codex"}`, or `{"mode": "default"}` when DGC's `subscription_engine` is one of them (then
+with DGC's `subscription_model` and `subscription_effort`; an explicit pick uses the CLI's
+own default model). The run pins `model_settings.brain` `{engine, model, effort}` and
+`model` (the engine, then `:model` when DGC chose one), and no endpoint. At its start the
+CLI must still be installed and signed in (the CLI's own login marker, by existence only,
+under `CLAUDE_CONFIG_DIR` or `CODEX_HOME` when set), or the run fails with `model_changed`
+and the reason. The controller hands the worker `DGC_PIP_BRAIN`: the CLI's path, the
+user's home, an environment of paths, locale and proxies only (no key or token, and the
+worker gets no `api_key`), and the run's own folder `runs/<run>/brain` (0700), where the
+CLI runs and which is emptied when its turn ends. The worker serves the run's Pip tools as
+MCP on a private socket (`pip_computer.socket_dir()`, 0600) that only the run's token opens;
+the CLI reaches it through `dgc/pip_brain_relay.py` (`python -I`). Each call is answered by
+the worker's own handlers, one at a time, in the order the CLI's stream reports them, and a
+screenshot comes back as MCP image content. `offer_choices` and the eyes card end the turn
+by stopping the CLI. The Pip's instructions replace the CLI's own system prompt: Claude Code
+gets them as `--system-prompt-file`, Codex as `model_instructions_file`; the conversation so
+far arrives as text with the turn on stdin, and the user's photos as image input. A CLI
+that reports a tool of its own is stopped, and the turn fails with one plain line. DGC
+sends no model request of its own in such a run; a chat brief uses its mechanical form.
+The engines and flags are in [PIPS.md](PIPS.md#your-own-claude-code-or-codex-personal-pips).
+Kimi Code, Qwen Code and Copilot CLI are refused for Pips with one line each. Project Pips
+refuse a subscription (`unsupported_model`: "Project Pips need a local or API model: their
+source checks run only in DGC's own loop. Personal Pips can use your subscription."), at
+creation for an explicit pick and at queue time when "Same as DGC" follows one.
+
+`list_pip_models` (API 55) adds `subscriptions` `[{engine, name}]`, the CLIs a Personal Pip
+can run on here, and, when DGC's default is a subscription, `default_engine` `{engine,
+name, available, reason?}`; `default_model` is then `""`.
 
 ### Source
 

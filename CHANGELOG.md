@@ -6,6 +6,18 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Personal Pip can run on your own Claude Code or Codex (Pips API 55).** A Pip on "Same as DGC" couldn't run
+  when DGC's default was a subscription, and a Pip couldn't be given one. Now a Personal Pip's chat box lists the
+  Claude Code and Codex you're signed in to under **Your subscriptions**, and "Same as DGC" follows DGC's subscription
+  default; the picker says once that its replies and routines use that plan's usage. The CLI is only its model: its
+  own shell, file, web and patch tools, your MCP servers, hooks, skills and CLAUDE.md are switched off with flags
+  checked against Claude Code 2.1.266 and Codex 0.153.4, and the Pip's own tools (its computer with screenshots as
+  images, apps, drafts, choices, routines, notes, web search) reach it from DGC as an MCP server for that run alone,
+  opened by a token minted for it. So holds, payment asks, careful mode, the card rule, masking and Allow cards are as
+  before. It runs in the run's own folder with no DGC secret in its environment, and stops with the run. Kimi Code,
+  Qwen Code and Copilot CLI aren't offered (none can be held to DGC's tools alone); project Pips keep their local or
+  API model, with one plain line saying why. Both SDKs refuse a subscription choice before API 55.
+
 - **Keep Pips running works on a standard Ubuntu account.** Ubuntu's default umask (0002) made the installer leave every DGC file group-writable, and Keep Pips running then refused to start with "DGC service entry points must be trusted regular files". The installer now writes files only you can change, files writable only by your own group are accepted (as folders already were), and a group someone else is in is named with the one-line fix.
 
 - **Pips use the whole desktop (Pips API 54).** A Personal Pip's eyes and cursor worked on its browser's page only.

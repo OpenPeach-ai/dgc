@@ -212,7 +212,11 @@ R = read, M = mutation. Optional fields are marked `?`.
 | `archive_pip`, `restore_pip` | M | `pip_id`, `expected_version`, `expected_lifecycle_revision`, `request_key`, `reason` |
 | `stop_pips` | M | none. Emergency stop: pauses every Pip and cancels queued and running work. |
 
-`model_choice` is `{"mode": "default"}` or `{"mode": "model", "model": "<id from list_pip_models>"}`.
+`model_choice` is `{"mode": "default"}` or `{"mode": "model", "model": "<id from list_pip_models>"}`, or, for a
+Personal Pip from Pips API 55, `{"mode": "subscription", "engine": "claude" | "codex"}`: the user's own Claude Code
+or Codex, held to DGC's Pip tools (docs/PIPS.md). Both SDKs refuse a subscription choice before API 55 and check its
+shape; `list_pip_models` then also returns `subscriptions` `[{engine, name}]` and, when DGC's default is a
+subscription, `default_engine` `{engine, name, available, reason?}`. A project Pip refuses it.
 Archiving keeps all history and refuses while a run or review is unfinished;
 restoring leaves the Pip paused. An exact retry with the same `request_key`
 returns the original receipt without applying it again.

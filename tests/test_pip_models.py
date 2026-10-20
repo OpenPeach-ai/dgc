@@ -54,11 +54,14 @@ class PipModelsTests(unittest.TestCase):
 
     def test_catalog_uses_configured_native_connection_and_real_ids(self):
         before = copy.deepcopy(self.config)
-        with patch.object(models, "LLMClient") as factory:
+        with patch.object(models, "LLMClient") as factory, \
+                patch("dgc.pip_brain.offered", return_value=[{"engine": "codex", "name": "Codex"}]):
             factory.return_value.list_models.return_value = ["other", "fixture-main", "other"]
             result = models.list_pip_models(self.config)
+        # API 55: the subscriptions a Personal Pip can run on sit beside the connection's models.
         self.assertEqual({"default_model": "fixture-main", "models": [{"id": "fixture-main", "name": "fixture-main"},
-                           {"id": "other", "name": "other"}], "connection": "configured"}, result)
+                           {"id": "other", "name": "other"}], "connection": "configured",
+                          "subscriptions": [{"engine": "codex", "name": "Codex"}]}, result)
         self.assertEqual(self.config["base_url"], factory.call_args.kwargs["base_url"])
         self.assertEqual(self.config["api_key"], factory.call_args.kwargs["api_key"])
         self.assertEqual(self.config["api_mode"], factory.call_args.kwargs["api_mode"])
@@ -131,12 +134,28 @@ class PipModelsTests(unittest.TestCase):
                 self.assertNotIn("secret", result["error"]["message"])
                 discover.assert_not_called()
 
-    def test_subscription_and_invalid_mode_are_refused(self):
-        for change in ({"subscription_engine": "codex"}, {"api_mode": "arbitrary"}, {"api_mode": []}):
+    def test_invalid_mode_is_refused(self):
+        for change in ({"api_mode": "arbitrary"}, {"api_mode": []}):
             with patch.object(models.LLMClient, "list_models") as discover:
                 config = {**self.config, **change}
                 self.assert_code("unsupported_model", models.resolve_model_choice, config, {"mode": "default"})
                 self.assertEqual("unsupported_model", models.list_pip_models(config)["error"]["code"])
+                discover.assert_not_called()
+
+    def test_a_subscription_default_resolves_to_its_cli_or_says_plainly_why_not(self):
+        # API 55 (pip_brain): "Same as DGC" follows DGC's subscription; before, every Pip on it was refused.
+        config = {**self.config, "subscription_engine": "codex"}
+        with patch("dgc.pip_brain.available", return_value="Codex isn't signed in on this computer. Run `codex login` once."), \
+                patch.object(models.LLMClient, "list_models") as discover:
+            self.assert_code("unsupported_model", models.resolve_model_choice, config, {"mode": "default"})
+            discover.assert_not_called()
+        with patch("dgc.pip_brain.available", return_value=""), patch.object(models.LLMClient, "list_models") as discover:
+            self.assertEqual("codex", models.resolve_model_choice(config, {"mode": "default"}))
+            discover.assert_not_called()
+        for engine in ("kimi", "qwen", "copilot"):
+            with patch.object(models.LLMClient, "list_models") as discover:
+                self.assert_code("unsupported_model", models.resolve_model_choice, {**config, "subscription_engine": engine},
+                                 {"mode": "default"})
                 discover.assert_not_called()
 
     def test_default_secret_shaped_model_is_never_exposed(self):
