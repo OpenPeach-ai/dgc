@@ -228,6 +228,7 @@ class RejectFollowUp(unittest.TestCase):
         self.assertEqual(made[0]["site"], "printful.com")
         self.assertIn("Held: printful.com is new for this user", said)
         self.assertIn("tell the user in one sentence that you want to open printful.com", said)
+        self.assertIn("DGC shows them an Allow card for printful.com below your reply: it is there", said)
 
     def test_an_approved_submit_still_continues_as_before(self):
         pip, run, action_id, digest = self.held(kind="site")

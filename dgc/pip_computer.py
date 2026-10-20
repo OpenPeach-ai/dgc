@@ -51,9 +51,12 @@ SITE_HELD = ("Held: that site is new for this user, so DGC asks them first (care
              "user in one sentence which site you want to open and why. Once they allow it, open it again and carry on.")
 # The same, naming the site the card below the reply asks about: a Pip whose first site was held went on to search,
 # then wrote about another site than the one on the card (three-asks test, 2026-10-20).
-SITE_HELD_NAMED = ("Held: {site} is new for this user, so DGC asks them first (careful mode), with a card below your reply "
-                   "that asks them to allow {site}. Stop now: open nothing else, and tell the user in one sentence that you "
-                   "want to open {site}, and why. Once they allow it, open it again and carry on.")
+# "There's no card to tap in this reply; say 'allow pip-test.example' here" -- under the very card it denied (three-asks
+# test, 2026-10-20): the card is DGC's, shown whatever the Pip says, so the Pip is told it is there.
+SITE_HELD_NAMED = ("Held: {site} is new for this user, so DGC asks them first (careful mode). DGC shows them an Allow card "
+                   "for {site} below your reply: it is there, and it is how they allow it. Stop now: open nothing else, and "
+                   "tell the user in one sentence that you want to open {site}, and why, and that they can allow it on the card "
+                   "below. Once they allow it, you are told, and you open it again and carry on.")
 
 
 def sends_words(summary, limit=200) -> str:
