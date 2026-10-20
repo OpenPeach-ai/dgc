@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **One Pip can no longer break the Pips list.** A Personal Pip the main chat made in Pulse's role with a daily routine made every Pips list fail with "Pulse schedules require a reviewed verification plan": reading Pips back checked it as a project Pulse, which creating it rightly did not.
+
 - **A Personal Pip can run on your own Claude Code or Codex (Pips API 55).** A Pip on "Same as DGC" couldn't run
   when DGC's default was a subscription, and a Pip couldn't be given one. Now a Personal Pip's chat box lists the
   Claude Code and Codex you're signed in to under **Your subscriptions**, and "Same as DGC" follows DGC's subscription

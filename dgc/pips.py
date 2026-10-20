@@ -301,6 +301,13 @@ def _pulse_request(value, actor, key):
 
 def _project_pulse_plan(job):
     from .pip_pulse_plans import validate_job, plan_digest
+    if job.get('source_policy') == {'mode': 'personal'}:
+        # As at creation: a Personal Pip never carries a project command plan. Checking it here as a project
+        # Pulse made one Personal Pip (the main chat made it with a daily schedule) fail every Pips list with
+        # "Pulse schedules require a reviewed verification plan".
+        job['verification_plan'] = None
+        job['verification_plan_digest'] = None
+        return
     plan = validate_job(pip_type=job['pip_type'], plan=job.get('verification_plan'),
         source_policy=job['source_policy'], schedule=job.get('schedule'), event_trigger=job.get('event_trigger'))
     job['verification_plan'] = plan
