@@ -15,8 +15,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   bill tracker ("No payments are ever made") after asking to run Composio's connection tool. It now knows a Personal
   Pip's own computer pays, orders and books on websites with your Allow, and sets that up with no payment app.
 - **Reject tells the Pip.** After you reject what its computer holds (a payment, an order, a new site), the Pip says in
-  its chat what wasn't done and goes on with the rest of what you asked (the second and third bill). Before, it went
-  quiet. Only once, only while the chat still ends at that reply, and only for a Reject in the last ten minutes.
+  its chat what wasn't done and goes on with the rest of what you asked (the second and third bill) without asking
+  whether to. Before, it went quiet. Only once, only while the chat still ends at that reply, and only for a Reject in the last ten minutes.
 - **The turn after an Allow still sees your photos.** When a Pip carries on after you allow a site or a submit, connect
   an app or finish a robot check, the photos your ask brought come with it again. It had said "I don't have the bill
   photos" right after you allowed the hospital's site.

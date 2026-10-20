@@ -18,7 +18,7 @@ import {appLinksPage,appLinkResult,shownAppLinks,appLinkMarkup,allowCardMarkup,c
 import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForServer,pluginCardMarkup,pluginActionMarkup,pluginsPageMarkup,pluginUsesPage,pluginUsesMarkup,argumentValues,editedArguments,PLUGIN_LEVELS} from './pipPlugins.js';
 import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
-import {carefulPage,carefulMarkup,carefulWords} from './pipCareful.js';
+import {carefulPage,carefulMarkup,carefulWords,sendsWords} from './pipCareful.js';
 import {eyesMarkup,eyesNotice} from './pipEyes.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
@@ -381,7 +381,7 @@ function chatMarkup(){
   const drawPost=p=>timed({created_at:p.posted_at})+postMarkup(p,{...context,face:pipAvatar(S.pip,p.outcome==='failed'?'failure':'idle',`post-${p.run_id}`,context.type),asked:askedRuns.has(p.run_id)});
   const messages=items.map(i=>i.message?drawMessage(i.message):i.post?drawPost(i.post):foldMarkup(i.fold,drawPost)).join('');
   const quietChat=!S.messages.length&&!items.length;
-  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${simple?'':typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${routineCards()}${needsYouCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${simple?'':typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -877,10 +877,40 @@ async function refreshComputer(){
  const pip=S.selected;if(S.apiVersion<43||!personalPip()||!usable()||computerState.loading)return;
  if(computerState.pip!==pip){void loadComputer();return;}
  if(!computerState.value?.granted)return;
- const token=scope(),before=JSON.stringify(computerState.value.needs_you||null);
+ // What it needs from you: a robot check, and what its computer holds (shown under its reply).
+ const needs=v=>JSON.stringify([v?.needs_you||null,(v?.actions||[]).filter(a=>a.status==='pending').map(a=>a.id)]);
+ const token=scope(),before=needs(computerState.value);
  try{const value=pipComputer((await send('get_pip_computer',{pip_id:pip})).computer,pip);if(token!==scope()||S.selected!==pip||computerState.pip!==pip)return;
-  computerState.value=value;if(JSON.stringify(value.needs_you||null)!==before)render();}
+  computerState.value=value;if(needs(value)!==before)render();}
  catch{/* the next look tries again */}
+}
+// What its computer holds, under its reply: the decision the computer tab offers, so a user who never opens that tab
+// still sees it. A reply that said "Starting with the hospital bill on its pay page" sat above nothing while "Let Bill
+// Payer visit…?" waited only in the tab (three-asks test, 2026-10-20). A site: Allow / Not now here; a form or a payment:
+// Review… (the screenshot and every field, then Send once) or Reject.
+function computerWaitingCards(){
+ const c=computerState.pip===S.selected?computerState.value:null;if(!c||S.apiVersion<43||remoteHost)return '';
+ const waiting=(Array.isArray(c.actions)?c.actions:[]).filter(a=>a.status==='pending').slice(0,3);if(!waiting.length)return '';
+ const name=S.pip?.name||'The Pip',off=S.busy||!usable()||archived()?' disabled':'';
+ return waiting.map(a=>{
+  const s=a.summary||{},words=carefulWords(s,name),pay=s.payment===true;
+  const title=words?words[0]:pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
+  const line=words?words[1]:[sendsWords(s),pay?'It sends payment card details.':'','Nothing has been sent.'].filter(Boolean).join(' ');
+  const yes=words?`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`
+   :`<button type="button" class="primary" data-computer-action="${esc(a.id)}"${off}>Review…</button>`;
+  return `<div class="app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(title)}"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">!</span><div class="app-link-words"><strong>${esc(title)}</strong><small>${esc(line)}</small></div></div><div class="app-link-actions">${yes}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>${words?'Not now':'Reject'}</button></div></div>`;
+ }).join('');
+}
+async function decideInChat(id,approve){
+ const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id):null;if(!a||S.busy||!usable())return;
+ const token=scope(),careful=Boolean(carefulWords(a.summary||{},''));S.busy=true;render();
+ try{
+  const done=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve})).action,pip);
+  if(token!==scope())return;if(done.id!==a.id||done.status!==(approve?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh to see it.');
+  S.notice=!approve?(careful?'Not now. It won’t do that.':'Rejected. Nothing was sent.'):'Allowed. It opens the site and carries on.';
+  computerState.value={...computerState.value,actions:computerState.value.actions.map(x=>x.id===a.id?done:x)};
+ }catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){S.busy=false;render();void refreshComputer();}}
 }
 // A site asked a person to prove they are not a robot: the Pip stopped; the user finishes it on its screen.
 function needsYouCard(){
@@ -2811,6 +2841,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.pipType){chooseType(target.dataset.pipType);return;}
   if(target.dataset.starter){openStarter(target.dataset.starter);return;}
   if(target.dataset.computerAction){void openComputerAction(target.dataset.computerAction);return;}
+  if(target.dataset.computerDecide){void decideInChat(target.dataset.computerDecide,target.dataset.approve==='1');return;}
   if(target.dataset.revokeGrant){revokeGrant(target.dataset.revokeGrant);return;}
   if(target.dataset.routineAdd){const id=target.dataset.routineAdd;void routineCall('decide_pip_routine',{routine_id:id,add:true},id,'Routine added. It runs on its own now.');return;}
   if(target.dataset.routineDecline){const id=target.dataset.routineDecline;void routineCall('decide_pip_routine',{routine_id:id,add:false},id,'');return;}

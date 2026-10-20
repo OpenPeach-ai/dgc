@@ -606,10 +606,12 @@ COMPUTER_DONE = ("This message is from DGC, not the user. The user approved what
                  "DGC sent it exactly as the page made it: {what}. Use your computer to read the page and see what "
                  "happened. Then tell the user in a short message, and carry on with what they asked if more is "
                  "needed. Do not repeat that change.")
+# A Reject is about that one thing. Told "carry on with the rest", a Pip paying three bills still stopped after the
+# first Reject with "say the word and I'll pick those up" (three-asks test, 2026-10-20): it goes on without asking.
 COMPUTER_REJECTED = ("This message is from DGC, not the user. The user chose Reject, so DGC dropped what your computer was "
-                     "holding, unsent: {what}. Don't do it again or look for another way to do it. If they asked you for more "
-                     "than that one thing (another bill, another order), carry on with the rest now; otherwise stop. Tell them "
-                     "in a short message what was not done.")
+                     "holding, unsent: {what}. Don't do it again or look for another way to do it. A Reject is about that one "
+                     "thing only: if they asked you for more than that (the next bill, another order), go on with the next one "
+                     "now, without asking whether to; otherwise stop. Tell them in a short message what was not done.")
 COMPUTER_NOT_ALLOWED = ("This message is from DGC, not the user. The user didn't allow {what}, so you must not. Carry on with "
                         "anything else they asked that doesn't need it, and tell them in a short message what you couldn't do.")
 COMPUTER_ALLOWED = ("This message is from DGC, not the user. The user allowed {what}. Nothing was done yet: "

@@ -146,7 +146,8 @@ class RejectFollowUp(unittest.TestCase):
         [told] = self.follow_ups(pip)
         self.assertIn("The user chose Reject, so DGC dropped what your computer was holding, unsent: a payment: "
                       "POST to pay.sunrisehospital.example/api/pay", told["text"])
-        self.assertIn("carry on with the rest now", told["text"])
+        self.assertIn("A Reject is about that one thing only", told["text"])
+        self.assertIn("go on with the next one now, without asking whether to", told["text"])
         [row] = [a for a in pip_computer.list_actions(self.registry, pip["id"]) if a["id"] == action_id]
         self.assertEqual((row["status"], row["continuation_run_id"]), ("rejected", told["run_id"]))
         self.store.cancel(told["run_id"], "local-console")

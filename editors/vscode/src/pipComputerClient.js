@@ -1,7 +1,7 @@
 // A Pip's computer in an editor tab: its Browser, Files and Terminal, like Grok's bots.
 // The tab talks to the extension host exactly as the Pips view does (pipsRequest/pipsReply), and
 // the host pins it to this one Pip and to the computer commands.
-import {carefulWords} from './pipCareful.js';
+import {carefulWords,sendsWords} from './pipCareful.js';
 import './pipComputer.css';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
@@ -86,15 +86,8 @@ function windowMarkup(app,body){
  const sub=app==='browser'?(S.view?.ok?S.view.url:''):app==='files'?(S.files.path?['Files',...S.files.path.split('/')].join(' / '):''):'Online · public websites only · works in its Files';
  return `<section class="pc-window" aria-label="${APPS[app]}"><div class="pc-titlebar"><span class="pc-win-icon">${appIcon(app,16)}</span><strong>${APPS[app]}</strong><span class="pc-win-sub">${esc(sub)}</span><span class="pc-win-buttons"><button type="button" class="pc-win-button" data-minimize="${app}" aria-label="Minimise ${APPS[app]}" title="Minimise">–</button><button type="button" class="pc-win-button" data-close="${app}" aria-label="Close ${APPS[app]}" title="Close">×</button></span></div><div class="pc-window-body">${body}</div></section>`;
 }
-// What a held form sends, on the card itself: a payment's bill number and amount, an order's sizes. Hidden
-// fields (a card number) never show. A card that said only "Send a form to <site>" didn't say what it paid.
-function sendsMarkup(summary){
- const shown=(Array.isArray(summary?.fields)?summary.fields:[]).filter(f=>f&&typeof f.value==='string'&&f.value.trim()&&f.value!=='•••')
-  .map(f=>`${f.name} ${f.value.replace(/\s+/g,' ').trim()}`);
- if(!shown.length)return '';
- const line=shown.join(' · ');
- return `<span class="pc-sends">${esc(line.length>200?line.slice(0,199)+'…':line)}</span>`;
-}
+// What a held form sends, on the card itself: a payment's bill number and amount, an order's sizes (never a hidden field).
+function sendsMarkup(summary){const line=sendsWords(summary);return line?`<span class="pc-sends">${esc(line)}</span>`:'';}
 function waitingMarkup(){
  const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending');
  if(!waiting.length)return '';

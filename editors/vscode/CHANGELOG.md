@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **What its computer holds shows in the Pip's chat.** A new site to allow (Allow this site / Not now) and a held form
+  or payment (what it pays, Review… / Reject) now wait under the Pip's reply, not only in its computer tab: a reply
+  said "Starting with the hospital bill on its pay page" while the Allow it needed sat in a tab the user hadn't opened.
+  A payment is never sent from the chat in one tap; Review… shows the page and every field first.
 - **A held payment says what it pays.** On a Pip's computer tab, a waiting payment reads "Pay on <site>" with what the
   form sends (a bill number and an amount, an order's sizes); a hidden card field never shows. It said only "Send a
   form to <site>".

@@ -36,3 +36,13 @@ export function carefulWords(summary, pipName = 'The Pip') {
     'It read this from your apps (careful mode). Nothing has been typed or sent yet; Allow lets it do this once.', 'Allow once'];
   return null;
 }
+
+/** What a held form sends, in a line: its shown fields ("billno SMH/OP/26/118734 · amount 5350.00"), hidden ones (a card
+ * number) left out. A card that said only "Send a form to <site>" didn't say what it paid (three-asks test, 2026-10-20). */
+export function sendsWords(summary, limit = 200) {
+  const shown = (Array.isArray(summary?.fields) ? summary.fields : [])
+    .filter(f => f && typeof f.value === 'string' && f.value.trim() && f.value !== '•••')
+    .map(f => `${f.name} ${f.value.replace(/\s+/g, ' ').trim()}`);
+  const line = shown.join(' · ');
+  return line.length > limit ? line.slice(0, limit - 1) + '…' : line;
+}

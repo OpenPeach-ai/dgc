@@ -231,6 +231,29 @@ test('a robot check on its computer is a "needs you" card: Open its computer, th
  assert.match(x.d.body.textContent,/Gmail is carrying on\./);
 });
 
+// Three-asks test (2026-10-20): "Starting with the hospital bill on its pay page" sat above nothing while the site's
+// Allow and the held payment waited only in the computer tab. They show under the reply too.
+test('what its computer holds shows in the chat: a site to allow, and a payment that says what it pays',async()=>{
+ const id=c=>'compact_'+c.repeat(32);
+ const site={id:id('a'),pip_id:PIP,workspace_id:PW,run_id:'run_'+'b'.repeat(32),summary:{kind:'site',site:'sunrisehospital.example',shown:'pay.sunrisehospital.example',method:'GET',host:'pay.sunrisehospital.example',path:'/',page:'https://pay.sunrisehospital.example/',fields:[],more_fields:0,body_bytes:0},digest:'d'.repeat(64),frame:null,status:'pending',created_at:'2026-10-20T10:00:00Z',expires_at:'2099-10-21T10:00:00Z',resolved_at:null,resolved_by:null,continuation_run_id:null};
+ const pay={...site,id:id('b'),summary:{method:'POST',host:'pay.sunrisehospital.example',path:'/api/pay',page:'https://pay.sunrisehospital.example/pay',payment:true,fields:[{name:'billno',value:'SMH/OP/26/118734'},{name:'amount',value:'5350.00'},{name:'card_number',value:'•••'}],more_fields:0,body_bytes:120}};
+ const computer={pip_id:PIP,granted:true,available:true,reason:'',pending:2,actions:[site,pay]};
+ const x=setup({links:[],computer});await openChat(x);
+ const cards=[...x.d.querySelectorAll('[data-computer-card]')];assert.equal(cards.length,2,'both wait under the reply');
+ assert.match(cards[0].textContent,/Let Gmail visit sunrisehospital\.example\?.*Allow this site.*Not now/);
+ assert.match(cards[1].textContent,/Pay on pay\.sunrisehospital\.example\?billno SMH\/OP\/26\/118734 · amount 5350\.00 It sends payment card details\. Nothing has been sent\..*Review….*Reject/);
+ assert.doesNotMatch(cards[1].textContent,/card_number/);
+ assert.equal(cards[1].querySelector('[data-approve="1"]'),null,'a payment is never sent from the chat in one tap: Review… shows it first');
+ x.click(`[data-computer-decide="${id('a')}"][data-approve="1"]`);
+ const allowed=x.requests('decide_pip_computer_action').at(-1);
+ assert.deepEqual(JSON.parse(JSON.stringify(allowed.request)),{type:'decide_pip_computer_action',action_id:id('a'),expected_digest:'d'.repeat(64),approve:true});
+ computer.actions=[{...site,status:'approved'},pay];x.answer(allowed,{action:{...site,status:'approved',resolved_at:'2026-10-20T10:01:00Z',resolved_by:'editor-user'}});await x.drain();
+ assert.match(x.d.body.textContent,/Allowed\. It opens the site and carries on\./);
+ assert.equal(x.d.querySelectorAll('[data-computer-card]').length,1,'the site card is gone');
+ x.click(`[data-computer-decide="${id('b')}"][data-approve="0"]`);
+ const rejected=x.requests('decide_pip_computer_action').at(-1);assert.equal(rejected.request.approve,false);assert.equal(rejected.request.action_id,id('b'));
+});
+
 // Editable drafts (#7): change the email or the event right on its card, then Send / Add what it shows.
 const typeIn=(x,id,v)=>{const el=x.d.getElementById(id);assert.ok(el,'Missing #'+id);el.value=v;el.dispatchEvent(new x.w.Event('input',{bubbles:true}));};
 async function answerGmail(x){
