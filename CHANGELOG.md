@@ -15,11 +15,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   and can ask where it is (its tab, an open question or file picker, its downloads in Files). Every step answers
   with what it changed (Moved to…, Appeared…, Gone…, Opened a new tab…), so it needn't read the page again, and with
   any request the page's own site failed and its errors, quoted as the page's words and never as instructions. Each
-  step is numbered, and its picture in **What it saw…** carries the same number, so its report can say "step 4".
+  step is numbered, and its picture in **What it saw…** carries the same number, so its report says "340 g (step 4)".
   Measured on the same errand at a made-up shop with deepseek-v4.1-flash:cloud, three runs each: before, one run in
   three did all four parts (15 to 22 steps, 77 to 282 seconds, and two of them went round the browser with curl in
-  the Terminal); now two in three (10 to 17 steps, 45 to 113 seconds, no Terminal), nine in twelve over every run of
-  this change, and each miss was the shop's robot check reached before its price list. Holds, careful mode,
+  the Terminal); now three in three (11 to 14 steps, 41 to 50 seconds), with each answer citing its steps, and twelve
+  in fifteen over every run of this change, each miss the shop's robot check reached before its price list. Holds, careful mode,
   payments that always ask, the card rule and masking are unchanged, and a Pip still never runs a script of its own
   in a page.
 
