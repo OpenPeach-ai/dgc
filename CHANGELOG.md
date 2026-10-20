@@ -15,8 +15,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   images, apps, drafts, choices, routines, notes, web search) reach it from DGC as an MCP server for that run alone,
   opened by a token minted for it. So holds, payment asks, careful mode, the card rule, masking and Allow cards are as
   before. It runs in the run's own folder with no DGC secret in its environment, and stops with the run. Kimi Code
-  isn't offered (it always starts your own MCP servers), nor are Qwen Code and Copilot CLI (not checked by trying); project Pips keep their local or
-  API model, with one plain line saying why. Both SDKs refuse a subscription choice before API 55.
+  isn't offered (it always starts your own MCP servers), nor are Qwen Code and Copilot CLI (not checked by trying);
+  project Pips keep their local or API model, with one plain line saying why. `dgc pips create --subscription codex`
+  and `dgc pips propose --subscription claude` choose one from the terminal. Both SDKs refuse a subscription choice
+  before API 55. A CLI that offers its choices before writing anything is asked once for its words first: Codex did,
+  and the chat got an empty reply.
 
 - **Keep Pips running works on a standard Ubuntu account.** Ubuntu's default umask (0002) made the installer leave every DGC file group-writable, and Keep Pips running then refused to start with "DGC service entry points must be trusted regular files". The installer now writes files only you can change, files writable only by your own group are accepted (as folders already were), and a group someone else is in is named with the one-line fix.
 

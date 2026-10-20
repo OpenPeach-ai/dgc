@@ -307,6 +307,17 @@ class Turns(unittest.TestCase):
             self.assertEqual(model["tool_mode"], "direct_only")
         self.assertEqual(result["usage"]["input_tokens"], 120)
 
+    def test_choices_offered_before_any_words_wait_for_the_words(self):
+        # Take 2 of the shirts ask (2026-10-20): Codex offered its choices first, and the chat got an empty reply.
+        result, seen, _ = self.turn("codex", [
+            {"call": "offer_choices", "args": {"choices": ["Bold", "Playful"]}},
+            {"say": "Which look do you want for the shirts?"},
+            {"call": "offer_choices", "args": {"choices": ["Bold", "Playful"]}}], computer=False)
+        self.assertTrue(seen["answers"][0]["error"])
+        self.assertIn("Write your message first", seen["answers"][0]["text"])
+        self.assertEqual(result["text"], "Which look do you want for the shirts?")
+        self.assertEqual(result["choices"], ["Bold", "Playful"])
+
     def test_a_claude_code_turn_keeps_the_pip_rules_an_address_it_guessed_is_refused(self):
         draft = {"recipient_email": "guess@nowhere.example", "subject": "Your shirts", "body": "Hi, here are the shirts."}
         result, seen, _ = self.turn("claude", [{"call": "draft_email", "args": draft},

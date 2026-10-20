@@ -481,6 +481,7 @@ class Turn:
         self.announced = []              # the CLI's own lines about calls on DGC's tools, not yet made
         self.calls = 0
         self.stray = ""                  # a tool of the CLI's own it tried to use
+        self.asked_for_words = False     # its choices came before any words, once
         self.end_at = None               # offer_choices and the eyes card end the turn
         self.errors = []
         self.usage = None
@@ -554,6 +555,12 @@ class Turn:
                 self.announced.remove(tool)
             if self.end_at is not None:
                 return {"text": "Your message is complete.", "error": False}
+            if tool == "offer_choices" and not "".join(self.said).strip() and not self.asked_for_words:
+                # Choices end the reply, so words must come first. Codex offered its choices before writing anything
+                # (a take of the shirts ask, 2026-10-20), and the chat got an empty reply: ask once for the words.
+                self.asked_for_words = True
+                return {"text": "Not shown yet. Write your message first: the question these choices answer, in one or "
+                                "two short sentences. Then call offer_choices again.", "error": True}
             self.calls += 1
             call_id = f"brain_{self.calls}"
             self._flush((call_id, tool, arguments))
