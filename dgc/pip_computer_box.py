@@ -538,6 +538,32 @@ def capability(home: Path | None = None) -> dict:
     return {"available": True, "reason": "", "chrome": str(chrome)}
 
 
+# Chrome's own offers to keep a card or an address are for a person at their own browser. On a Pip's
+# computer "Save card?" covered the page after every checkout, and saying yes would keep a card in the
+# Pip's profile. Off before each start; Chrome rewrites Preferences on exit and keeps what it doesn't own.
+_QUIET_AUTOFILL = {"credit_card_enabled": False, "profile_enabled": False}
+
+
+def quiet_profile(profile: Path) -> None:
+    """Turn off card and address saving in a Pip's browser profile. Never fails a start: a Preferences
+    file it can't read is left as it is, and a link in its place is never followed."""
+    path = profile / "Default" / "Preferences"
+    try:
+        if any(p.is_symlink() for p in (profile, path.parent, path)):
+            return
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(data, dict):
+            return
+        autofill = data.get("autofill") if isinstance(data.get("autofill"), dict) else {}
+        if all(autofill.get(k) is v for k, v in _QUIET_AUTOFILL.items()):
+            return
+        data["autofill"] = {**autofill, **_QUIET_AUTOFILL}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except (OSError, ValueError):
+        return
+
+
 @dataclass
 class Box:
     """One running box: bubblewrap around Chromium, with its devtools pipe."""
@@ -582,6 +608,7 @@ class Box:
     def start(self, log_path: Path) -> None:
         forwarder = self.home.parent / "forward.py"
         forwarder.write_text(FORWARDER)
+        quiet_profile(self.home / ".browser")
         command_read, command_write = os.pipe()          # browser reads commands on fd 3
         reply_read, reply_write = os.pipe()              # browser writes replies on fd 4
         env = {k: os.environ[k] for k in ("PATH", "LANG") if k in os.environ}

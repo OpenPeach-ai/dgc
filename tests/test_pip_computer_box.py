@@ -255,5 +255,54 @@ class RealBoxTests(unittest.TestCase):
         self.assertEqual(self.browser.evaluate_json("location.href"), "chrome-error://chromewebdata/")
 
 
+class QuietProfileTests(unittest.TestCase):
+    """Chrome's "Save card?" covered a Pip's screen after a checkout: card and address saving are off in its profile."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.profile = Path(self.tmp.name) / ".browser"
+        self.prefs = self.profile / "Default" / "Preferences"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def read(self):
+        import json
+        return json.loads(self.prefs.read_text(encoding="utf-8"))
+
+    def test_a_new_profile_starts_with_card_and_address_saving_off(self):
+        box.quiet_profile(self.profile)
+        self.assertEqual(self.read()["autofill"], {"credit_card_enabled": False, "profile_enabled": False})
+
+    def test_a_kept_profile_keeps_everything_else(self):
+        import json
+        self.prefs.parent.mkdir(parents=True)
+        self.prefs.write_text(json.dumps({"autofill": {"credit_card_enabled": True, "last_version_deduped": 9},
+                                          "browser": {"window_placement": {"left": 3}}}), encoding="utf-8")
+        box.quiet_profile(self.profile)
+        prefs = self.read()
+        self.assertEqual(prefs["autofill"], {"credit_card_enabled": False, "profile_enabled": False,
+                                             "last_version_deduped": 9})
+        self.assertEqual(prefs["browser"], {"window_placement": {"left": 3}})
+
+    def test_a_preferences_file_it_cannot_read_is_left_alone(self):
+        self.prefs.parent.mkdir(parents=True)
+        self.prefs.write_text("{not json", encoding="utf-8")
+        box.quiet_profile(self.profile)
+        self.assertEqual(self.prefs.read_text(encoding="utf-8"), "{not json")
+
+    def test_a_link_in_place_of_the_file_is_never_followed(self):
+        outside = Path(self.tmp.name) / "outside.json"
+        outside.write_text("{}", encoding="utf-8")
+        self.prefs.parent.mkdir(parents=True)
+        self.prefs.symlink_to(outside)
+        box.quiet_profile(self.profile)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "{}")
+
+    def test_every_start_quiets_the_profile(self):
+        import inspect
+        self.assertIn('quiet_profile(self.home / ".browser")', inspect.getsource(box.Box.start))
+
+
 if __name__ == "__main__":
     unittest.main()

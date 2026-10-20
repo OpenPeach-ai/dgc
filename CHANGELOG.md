@@ -6,6 +6,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Pip's lines while it works read as sentences.** Each line a Pip writes before a step on its computer now streams as its own paragraph; back to back they ran together ("on my computer.I'll select all").
+
+- **No "Save card?" on a Pip's computer.** Chrome's offers to keep a card or an address are off in a Pip's browser, so they no longer cover its screen after a checkout or keep a card in its profile.
+
 - **Steer a queued message into the running turn.** New editor command `steer_queued {request_ids}` (offered as `ready.capabilities.steer_queued`): the user's queued prompts move, in queue order, into the running turn as steering; each is announced as `prompt_accepted` "steered", and none moving is `command_rejected` "not_steerable" with the reason.
 
 - **Sign in with GitHub works out of the box.** DGC ships its registered GitHub app (OAuth App "DGC", device sign-in, no secret): the GitHub plugin page offers Sign in with GitHub — DGC shows a short code and opens github.com/login/device — beside the token field.

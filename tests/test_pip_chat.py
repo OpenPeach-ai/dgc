@@ -283,6 +283,19 @@ class PipChatTests(unittest.TestCase):
         self.assertEqual(one, tiny)
         self.assertEqual("".join(e["text"] for e in tiny if e["kind"] == "text_delta"), text)
 
+    def test_messages_between_tool_calls_stream_as_their_own_paragraphs(self):
+        # A Pip on its computer writes a line before each step; streamed back to back they read
+        # "on my computer.I'll select all". The saved reply already joins them with a blank line.
+        events = []
+        with patch.object(pips.time, "monotonic", lambda: 1000.0):
+            ui = pips._ConversationUI(events.append, self.cfg)
+            ui.on_text("I'll open the page on my computer."); ui.end_stream("commentary")
+            ui.end_stream("commentary")                       # a step with nothing to say adds nothing
+            ui.on_text("I'll select all"); ui.on_text(" and type the text."); ui.end_stream("commentary")
+            ui.on_text("Done."); ui.end_stream("answer")
+        streamed = "".join(e["text"] for e in events if e["kind"] == "text_delta")
+        self.assertEqual(streamed, "I'll open the page on my computer.\n\nI'll select all and type the text.\n\nDone.")
+
     def test_malformed_surrogate_request_is_safe_to_serialize_without_registry(self):
         for request in ({"type": "list_pip_models", "request_id": "\ud800"},
                         {"type": "\ud800", "request_id": "normal"},

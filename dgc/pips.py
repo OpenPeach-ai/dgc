@@ -2301,6 +2301,8 @@ class _ConversationUI(_WorkerUI):
         self.stream_pending = ""
         self.stream_at = time.monotonic()
         self.activity = None
+        self.wrote = False          # this message has streamed words
+        self.between = False        # a message with words ended: the next one starts a new paragraph
 
     # What the chat's working row says, as DGC's own: loading the model, thinking, writing, using a
     # tool. One event per change, never per chunk.
@@ -2343,10 +2345,20 @@ class _ConversationUI(_WorkerUI):
             self.emit({"kind": "text_delta", "text": chunk})
 
     def on_text(self, chunk):
-        self._stream(self.redactor.feed(chunk))
+        text = self.redactor.feed(chunk)
+        if self.between and text.strip():
+            # Each message before a tool call is a paragraph of its own, as in the saved reply ("\n\n".join):
+            # streamed back to back they read "on my computer.I'll select all".
+            text, self.between = "\n\n" + text.lstrip(), False
+        self.wrote = self.wrote or bool(text.strip())
+        self._stream(text)
 
     def end_stream(self, phase=""):
-        self._stream(self.redactor.flush(), flush=True)
+        tail = self.redactor.flush()
+        self.wrote = self.wrote or bool(tail.strip())
+        self._stream(tail, flush=True)
+        if self.wrote:
+            self.between, self.wrote = True, False
 
 
 # Skills a Personal Pip uses: the user's own and plugin skills, and the built-ins that fit everyday
