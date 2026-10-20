@@ -254,6 +254,30 @@ test('what its computer holds shows in the chat: a site to allow, and a payment 
  const rejected=x.requests('decide_pip_computer_action').at(-1);assert.equal(rejected.request.approve,false);assert.equal(rejected.request.action_id,id('b'));
 });
 
+// Cards follow the password rule (2026-10-20): a card number typed in a Pip's chat is never sent or kept; one line says
+// to type it on the Pip's screen, with the way there. DGC refuses it too (dgc/cards.py), for an SDK or a missed one.
+test('a card number in a Pip chat is refused before sending, with the way to its screen',async()=>{
+ const computer={pip_id:PIP,granted:true,available:true,reason:'',pending:0,actions:[]};
+ const x=setup({links:[],computer});await openChat(x);
+ const type=v=>{const box=x.d.getElementById('chatText');box.value=v;box.dispatchEvent(new x.w.Event('input',{bubbles:true}));};
+ type('Use my card 4242 4242 4242 4242, expiry 12/34, CVV 123');
+ x.d.getElementById('chat-form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await x.drain();
+ assert.equal(x.requests('send_pip_message').length,0,'never sent');
+ assert.equal(x.d.getElementById('chatText').value,'','and not left in the box');
+ const card=x.d.querySelector('[data-card-refused]');assert.ok(card,'one plain line says why');
+ assert.match(card.textContent,/Card numbers stay out of the chat\..*Type it on Gmail’s screen instead\. Nothing you typed was sent or kept\./);
+ x.click('[data-card-open]');
+ assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'pipsOpenComputer',pip:{id:PIP,name:'Gmail',pip_type:'scout'}});
+ assert.equal(x.d.querySelector('[data-card-refused]'),null);
+ type('Bill SMH/OP/26/118734, UHID SMH0048213, mobile 98000 00000');
+ x.d.getElementById('chat-form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await flush();
+ const sent=x.requests('send_pip_message').at(-1);assert.ok(sent,'the numbers on a bill are not a card');
+ // DGC refused one this editor let through: the same line, and the text is not put back in the box.
+ x.answer(sent,'Card numbers stay out of the chat. Type it on Gmail\'s screen instead: open its computer.',false);await x.drain();
+ assert.ok(x.d.querySelector('[data-card-refused]'));
+ assert.equal(x.d.getElementById('chatText').value,'');
+});
+
 // Editable drafts (#7): change the email or the event right on its card, then Send / Add what it shows.
 const typeIn=(x,id,v)=>{const el=x.d.getElementById(id);assert.ok(el,'Missing #'+id);el.value=v;el.dispatchEvent(new x.w.Event('input',{bubbles:true}));};
 async function answerGmail(x){

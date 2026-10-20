@@ -7023,6 +7023,35 @@
     return !name.includes("/");
   }
 
+  // card-number:start -- the same check as src/pipCards.js (a test keeps them alike). Whatever is sent here goes to
+  // the model, so a card number is warned about once; Enter again sends it as it is (a developer's test card).
+  function cardNumberIn(text) {
+    const luhn = (d) => { let t = 0, dbl = false; for (let i = d.length - 1; i >= 0; i--) { const n = Number(d[i]) * (dbl ? 2 : 1); t += n > 9 ? n - 9 : n; dbl = !dbl; } return t % 10 === 0; };
+    const network = (d) => {
+      const n = d.length, two = Number(d.slice(0, 2)), three = Number(d.slice(0, 3)), four = Number(d.slice(0, 4));
+      return (d[0] === "4" && [13, 16, 19].includes(n)) || ((two >= 51 && two <= 55 || four >= 2221 && four <= 2720) && n === 16)
+        || ([34, 37].includes(two) && n === 15) || (([36, 38, 39].includes(two) || three >= 300 && three <= 305) && n >= 14 && n <= 19)
+        || ((four === 6011 || two === 65 || three >= 644 && three <= 649) && n >= 16 && n <= 19)
+        || (([60, 81, 82].includes(two) || [353, 356, 508].includes(three)) && n === 16)
+        || (four >= 3528 && four <= 3589 && n >= 16 && n <= 19) || ((two >= 56 && two <= 58 || [62, 63, 67].includes(two)) && n >= 16 && n <= 19);
+    };
+    for (const match of String(text || "").slice(0, 100000).matchAll(/\d+(?:[ -]\d+)*/g)) {
+      const parts = match[0].split(/([ -])/), groups = parts.filter((_, i) => i % 2 === 0), seps = parts.filter((_, i) => i % 2 === 1);
+      for (let start = 0; start < Math.min(groups.length, 64); start++) {
+        let digits = ""; const used = new Set();
+        for (let end = start; end < groups.length; end++) {
+          if (end > start) used.add(seps[end - 1]);
+          digits += groups[end];
+          if (digits.length > 19 || used.size > 1) break;
+          if (digits.length >= 13 && network(digits) && luhn(digits)) return digits;
+        }
+      }
+    }
+    return null;
+  }
+  // card-number:end
+  let cardWarnedFor = null;
+
   function submit(delivery = nativeSteering ? "steer" : "queue") {
     if (composerLocked) return;
     // /agents opens the agent map, here in the panel: it needs no backend, so not even a reconnect waits.
@@ -7039,6 +7068,12 @@
       ? [typed, ...pastes.map((a) => a.pasted)].filter(Boolean).join("\n\n")
       : typed;
     if (!text && !attachments.length) return;
+    if (cardNumberIn(text) && cardWarnedFor !== text) {
+      cardWarnedFor = text;
+      sysLine("That looks like a payment card number. Whatever you send here goes to the model, so card numbers stay out of the chat. Remove it, or press Enter again to send it as it is.", true);
+      persistDraft(); return;
+    }
+    cardWarnedFor = null;
     const references = attachments.filter(a => a.pipReference);
     if (references.length && (!pipReferencesSupported || !text || references.some(a => !validPipReference(a.pipReference)))) {
       sysLine(!pipReferencesSupported ? "Update or reconnect DGC to send Pip references. Your draft is saved." : !text ? "Write a message to send with the Pip reference." : "Remove and select the invalid Pip reference again.", true); persistDraft(); return;

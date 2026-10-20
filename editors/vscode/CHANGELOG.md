@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Card numbers stay out of the chat.** A card number typed in a Pip's chat is not sent and not kept (not even as a
+  draft or in undo): one line says to type it on the Pip's screen, with **Open its computer**. DGC's own chat warns
+  once ("whatever you send here goes to the model"); Enter again sends it as it is. Bill, UHID, phone and account
+  numbers are not mistaken for cards.
 - **What its computer holds shows in the Pip's chat.** A new site to allow (Allow this site / Not now) and a held form
   or payment (what it pays, Review… / Reject) now wait under the Pip's reply, not only in its computer tab: a reply
   said "Starting with the hospital bill on its pay page" while the Allow it needed sat in a tab the user hadn't opened.
