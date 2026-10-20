@@ -5,7 +5,7 @@ import {carefulWords,sendsWords} from './pipCareful.js';
 import './pipComputer.css';
 import '../media/pips/plush.js';
 import RFB from '@novnc/novnc';
-import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer} from './pipsModel.js';
+import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComputerAction,pipComputerFiles,pipComputerFile,pipComputerTerminal,pipComputerTerminalEntry,pipComputerDesktop,pipComputerPointer,pipComputerApps} from './pipsModel.js';
 
 const vscode=acquireVsCodeApi();
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
@@ -22,7 +22,9 @@ const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],compu
  // The full screen, like Grok's bots: the CLI can stream it (screenCapable) and this machine has it (desktop.available).
  screenCapable:false,desktop:null,screen:{state:'off',reason:''},
  // Where the Pip last acted by position (Pips API 53): you see its cursor there while it works.
- pointer:null,pointerSeq:-1,pointerAt:0,pointerPulse:false,screenWatching:false};
+ pointer:null,pointerSeq:-1,pointerAt:0,pointerPulse:false,screenWatching:false,
+ // Its image editor, document editor and PDF viewer (Pips API 54): the one offer to download the ones this computer lacks.
+ apps:null,appsBusy:false};
 const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.generation}));
 const $=id=>document.getElementById(id);
 const send=(type,fields={})=>broker.request({type,...fields});
@@ -143,11 +145,32 @@ function overlayMarkup(){
  if(S.screen.state==='closed')return `<div class="pc-overlay-card"><p>${esc(S.screen.reason||'The screen closed.')}</p><button type="button" id="pc-reconnect">Open the screen again</button></div>`;
  return using()?`<p class="pc-overlay-badge">${name} is using its computer. You can watch; it is yours again when it stops.</p>`:'';
 }
+// Its image editor, document editor and PDF viewer (Pips API 54). When this computer lacks them, one line asks once to
+// download them (what and how big); declined, it never asks again. Nothing to show when they are all here.
+function appsMarkup(){
+ const a=S.apps;if(!a||S.apiVersion<54||!S.computer?.granted)return '';
+ const off=S.appsBusy?' disabled':'';
+ if(a.state==='offer')return `<div class="pc-notice pc-apps" role="group" aria-label="Apps for this computer"><span>${esc(a.line)}</span>`
+  +`<button type="button" data-apps="download"${off}>Download</button><button type="button" class="pc-quiet" data-apps="not_now"${off}>Not now</button></div>`;
+ if(a.state==='downloading'||a.state==='unavailable')return `<p class="pc-notice pc-apps" role="status">${esc(a.line)}</p>`;
+ return '';
+}
+async function loadApps(){
+ if(!S.pip||!S.connected||S.apiVersion<54||!S.computer?.granted)return;
+ try{const value=pipComputerApps((await send('get_pip_computer_apps')).apps);const changed=JSON.stringify(value)!==JSON.stringify(S.apps);S.apps=value;if(changed)render();}
+ catch{/* the next look tries again */}
+}
+async function answerApps(choice){
+ if(S.appsBusy)return;S.appsBusy=true;render();
+ try{S.apps=pipComputerApps((await send('set_pip_computer_apps',{choice})).apps);S.notice=choice==='download'?'Downloading. Its apps appear on its dock when they are ready.':'Not now. It won’t ask again.';}
+ catch(error){S.error=errorText(error);}
+ finally{S.appsBusy=false;render();}
+}
 function renderScreen(){
  const app=document.getElementById('app');
  if(!$('pc-live'))app.innerHTML=`<div id="pc-top"></div><div class="pc-desktop pc-live" id="pc-live"><div id="pc-vnc" class="pc-vnc" aria-label="${esc(S.pip?.name||'The Pip')}'s computer screen"></div><div id="pc-overlay" class="pc-overlay"></div>${cursorMarkup()}</div>`;
  cleanupFace?.();
- $('pc-top').innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${waitingMarkup()}`;
+ $('pc-top').innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${appsMarkup()}${waitingMarkup()}`;
  $('pc-overlay').innerHTML=overlayMarkup();
  cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-top'));
  placeCursor();
@@ -174,7 +197,7 @@ function render(){
  const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one with the computer button at the top of its chat.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
  cleanupFace?.();
- app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted?dockMarkup():''}</div>`;
+ app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${appsMarkup()}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted?dockMarkup():''}</div>`;
  cleanupFace=window.PipConcepts?.plush?.mount?.(app);
  if(focus&&$(focus)){$(focus).focus();if(caret!=null&&$(focus).setSelectionRange)try{$(focus).setSelectionRange(caret,caret);}catch{}}
  const log=$('pc-log');if(log)log.scrollTop=log.scrollHeight;
@@ -187,6 +210,7 @@ async function loadComputer(){
  try{S.computer=pipComputer((await send('get_pip_computer',{pip_id:S.pip.id})).computer,S.pip.id);S.error='';}
  catch(error){S.error=errorText(error);}
  render();
+ void loadApps();
 }
 async function loadDesktop(){
  if(!S.pip||!S.connected||S.apiVersion<43||!S.screenCapable)return;
@@ -271,7 +295,8 @@ function show(app){
 
 document.addEventListener('click',event=>{
  const t=event.target.closest('button,[data-crumb],img');if(!t)return;
- if(t.dataset.app)show(t.dataset.app);
+ if(t.dataset.apps)void answerApps(t.dataset.apps);
+ else if(t.dataset.app)show(t.dataset.app);
  else if(t.dataset.minimize){S.app='';render();schedule();vscode.setState({app:''});}
  else if(t.dataset.close){S.open=S.open.filter(a=>a!==t.dataset.close);S.app='';render();schedule();vscode.setState({app:''});}
  else if(t.id==='pc-reconnect'){S.screen={state:'off',reason:''};startScreen();}

@@ -1262,6 +1262,19 @@ export function pipComputerFrames(value,run){
   throw Error('This run\'s screenshots are invalid.');
  return value;
 }
+// The apps on a Pip computer's desktop (Pips API 54, get_pip_computer_apps / set_pip_computer_apps): which this machine
+// has, and the one offer to download the ones it lacks, in one line with its size.
+const APP_STATES=['ready','offer','downloading','declined','unavailable','measuring'];
+export function pipComputerApps(value){
+ const fail=()=>{throw Error('The computer\'s apps didn\'t load. Refresh to try again.');};
+ if(!record(value)||Object.keys(value).sort().join()!=='apps,bytes,line,missing,state'||!APP_STATES.includes(value.state)
+   ||typeof value.line!=='string'||value.line.length>600||!(value.bytes===null||Number.isSafeInteger(value.bytes)&&value.bytes>0)
+   ||!Array.isArray(value.apps)||value.apps.length>8||!Array.isArray(value.missing)||value.missing.length>8)fail();
+ for(const a of value.apps)if(!record(a)||Object.keys(a).sort().join()!=='available,key,name,program'||!['images','documents','pdf'].includes(a.key)
+   ||typeof a.name!=='string'||typeof a.program!=='string'||typeof a.available!=='boolean')fail();
+ if(!value.missing.every(k=>['images','documents','pdf'].includes(k)))fail();
+ return value;
+}
 // How a Personal Pip sees (Pips API 53, get_pip_eyes / set_pip_eyes): its model, whether that model can see, and when
 // it can't, the user's choice (ask, a model that sees looks for it, or not now) and the model that would look.
 export function pipEyes(value,pip){

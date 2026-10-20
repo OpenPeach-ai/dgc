@@ -98,3 +98,7 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-cursor.pulse::before{animation:pc-click .7s ease-out}
 @keyframes pc-click{from{opacity:1;transform:scale(.35)}to{opacity:0;transform:scale(1.7)}}
 @media (prefers-reduced-motion:reduce){.pc-cursor{transition:none}.pc-cursor.pulse::before{animation:none}}
+/* Its apps (Pips API 54): the one line that offers to download what this computer lacks. */
+.pc-apps{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pc-apps span{flex:1 1 320px}
+.pc-apps .pc-quiet{background:transparent;color:inherit;border:1px solid var(--line,rgba(127,127,127,.4))}

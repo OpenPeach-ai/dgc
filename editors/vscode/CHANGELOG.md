@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A Pip's computer has apps (Pips API 54).** Its dock adds an image editor, Documents and a PDF viewer when the
+  computer has them; when it doesn't, the computer tab asks once, in one line saying what and how big, with
+  **Download** and **Not now**. A Pip that can see uses the whole desktop, and you see its cursor there as before.
 - **A detailed message mid-turn reads like an answer.** When the model stops to write out something you should read in
   full before it goes on, such as a diagnosis or its plan for a large change, that message now has the room an answer
   has above and below it and uses the full width, instead of sitting 4px under a tool line like a one-line update. It
