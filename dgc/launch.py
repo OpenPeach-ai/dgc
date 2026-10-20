@@ -110,5 +110,12 @@ def main() -> int | None:
             _name_process()
     elif os.name == "posix":
         _hand_off()
+    if sys.argv[1:2] == ["serve"]:
+        # An editor reopening a session that kept running with no window: relay to it (dgc/serve_relay.py).
+        # Before the CLI loads, so a relay costs a few imports, not an agent.
+        from .serve_relay import run as relay
+        relayed = relay()
+        if relayed is not None:
+            return relayed
     from .cli import main as cli_main
     return cli_main()

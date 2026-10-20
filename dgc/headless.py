@@ -905,6 +905,16 @@ class _EditorLiveness:
             elif view == "closed":
                 self._view_closed_at = self._last
 
+    def attached(self) -> None:
+        """A window attached through the socket (dgc/serve_detach.py). It counts as just heard
+        from, and as on screen until its own heartbeats take over: an automatic attach from yet
+        another window must not take the session straight back from one that just took it."""
+        with self._lock:
+            now = time.monotonic()
+            self._last = now
+            self._last_renderer = now
+            self._view_closed_at = None
+
     def working(self) -> str:
         """Name the work that should keep this backend alive, or '' when there is none."""
         across_chats = getattr(self.backend, "keepalive_reason", None)   # a Host: any of its chats
@@ -2229,6 +2239,10 @@ class Backend:
                           # stop_background_shell and get_background_output (shell or monitor ids).
                           "background_tasks": {"version": 1},
                           "editor_liveness": True, "produced_files": True, "agent_steps": True,
+                          # A window that goes can leave this backend running (set_detach, detach,
+                          # dgc/serve_detach.py); `elsewhere` says a window already shows the session
+                          # this one asked to reattach to.
+                          **self._detach_capability(),
                           # The chat panel can say what is on screen, so a takeover stops being
                           # decided by whether a process is alive. Gated: an older CLI would answer
                           # a heartbeat with command_rejected every 20s.
@@ -2286,6 +2300,20 @@ class Backend:
             if isinstance(value, str) and value:
                 saved.append(provider)
         return {"version": 1, "providers": list(SEARCH_KEY_PROVIDERS), "saved": saved}
+
+    def _detach_capability(self) -> dict:
+        """ready.capabilities.detach: only a Host offers it, never an SDK session (isolated, or pinned
+        to one project), and only where the socket's peer can be checked (Linux, macOS)."""
+        from . import serve_detach, serve_relay
+        host = getattr(self, "_host", None)
+        board = getattr(host, "switchboard", None) if host is not None else None
+        if board is None or not serve_detach.offered():
+            return {}
+        offer = board.capability()
+        refused = serve_relay.refused()
+        if refused:
+            offer["elsewhere"] = refused
+        return {"detach": offer}
 
     def _chatdgc_capability(self) -> dict:
         """ready.capabilities.chatdgc: the Host answers chatdgc_* itself (dgc/chatdgc), so only a Host
@@ -2848,6 +2876,20 @@ class Backend:
         if not any(session and _peers.pending_release(session) is not None for session in asked):
             return False
         watch = getattr(self, "_editor_liveness", None)
+        board = getattr(host, "switchboard", None) if host is not None else None
+        if board is not None and board.windowless:
+            # No window to judge: the work decides. Standing down mid-work is exactly what lost the
+            # turn before a session could run without a window.
+            from .serve_detach import host_work
+            work = host_work(host)
+            if work.kind() != "none":
+                _peers.answer_release(granted=False, reason=(
+                    f"it is running without a window (pid {os.getpid()}: {work.reason()}); open it in "
+                    f"the editor, or run `dgc stop {os.getpid()}`"))
+                return False
+            _peers.answer_release(granted=True)
+            self._announce_peer("standing down")
+            return watch.stand_down() if watch is not None else True
         if watch is None:
             _peers.answer_release(granted=False, reason="this backend cannot tell whether its "
                                                         "editor is still there")
@@ -2874,6 +2916,20 @@ class Backend:
         _peers.answer_release(granted=True)
         self._announce_peer("standing down")
         return watch.stand_down()
+
+    def _announce_interrupted(self) -> None:
+        """After a resume's replay: a turn of this session that a backend with no window stopped.
+        Only to an editor that opted in to running without a window (the only kind that leaves one);
+        an SDK client never hears the event."""
+        host = getattr(self, "_host", None)
+        board = getattr(host, "switchboard", None) if host is not None else None
+        if board is None or not board.opted_in:
+            return
+        from .serve_detach import interrupted
+        found = interrupted(getattr(self.agent, "session_file", None))
+        if found:
+            self.em.emit("turn_interrupted", session_id=Path(self.agent.session_file).stem,
+                         cause=found["cause"], at=found["at"])
 
     def _image_spool(self) -> Path:
         """The directory this backend reads spooled images from, created on first use."""
@@ -3005,6 +3061,9 @@ class Backend:
                     self.agent.cancelled.clear()
 
                 self.agent._pending_images = images
+                if getattr(self.agent, "session_file", None) is not None:
+                    from .serve_detach import forget_interrupted
+                    forget_interrupted(self.agent.session_file)   # a new turn: nothing to continue
                 active_config = getattr(
                     self, "config", getattr(getattr(self, "agent", None), "config", None))
                 safe_context = redact_value(context, secret_values(active_config))
@@ -3038,9 +3097,15 @@ class Backend:
                 if agent_notice is not None:
                     wake_label = str(agent_notice.get("description") or agent_notice.get("id") or "agent")
                     shown_prompt = wake_label
+                turn_prompt = (notification.label if notification is not None
+                               else (wake_label if agent_notice is not None else shown_prompt))
+                live_turn = self._live_turn
+                if isinstance(live_turn, dict) and live_turn.get("id") == tid:
+                    # What a window that attaches mid-turn is told this turn is (session_live).
+                    live_turn.update(prompt=str(turn_prompt or "")[:4000], kind=turn_kind,
+                                     started_at=time.time())
                 self.em.emit("turn_start", turn_id=tid,
-                             prompt=(notification.label if notification is not None
-                                     else (wake_label if agent_notice is not None else shown_prompt)),
+                             prompt=turn_prompt,
                              kind=turn_kind,
                              **({"request_id": turn_request} if turn_request else {}))
                 if notification is not None:
@@ -6603,6 +6668,7 @@ class Backend:
                 # ended start again (once) and each says so.
                 self._bring_back_monitors(self.agent.restart_monitors)
                 self._await_previous_owner()
+                self._announce_interrupted()
                 # The prompt cache's clock, with whether it went cold while the chat was closed. Last:
                 # it is a new event, and an older SDK's resume drain stops at the first it does not know.
                 self._publish_cache_clock(current=True, resumed=True)
@@ -7960,6 +8026,9 @@ def _end_line(crash_log, line: str) -> None:
     nobody on that side reads.
     """
     _log_crash(crash_log, line)
+    from . import serve_detach
+    if serve_detach.STDERR_IS_LOG:
+        return                                 # the window went: stderr is serve.log itself now
     try:
         sys.stderr.write(f"[dgc serve] {line}\n")
         sys.stderr.flush()
@@ -8033,6 +8102,13 @@ class Host:
         self._finalizer_wait = ""
         self._chatdgc = None                 # ChatDGC's service, made on its first command
         self._voice = None                   # voice (dgc/voice), made on its first command
+        # Which connection holds the wire, and how long the process lives without one
+        # (dgc/serve_detach.py). serve() sets it; a Host built by a test has none.
+        self.switchboard = None
+        # The chat a command with no chat_id is for. The first chat, until a window attaches to
+        # another chat of this process and that one becomes its own.
+        self.wire_default = None
+        self.touched: dict[str, float] = {}  # chat id -> when a command for it last arrived
         self.default = self.add_chat(config)
 
     def add_chat(self, config: Config, chat_id: str = "") -> "Backend":
@@ -8235,6 +8311,70 @@ class Host:
         chat.open(request_id)
         self.announce_peers()
 
+    def chat_for_session(self, session_id: str) -> "Backend | None":
+        """The open chat on this saved session (its id, the file's stem), or None."""
+        if not session_id:
+            return None
+        with self._chats_lock:
+            chats = [chat for chat_id, chat in self.chats.items() if chat_id not in self._closing]
+        for chat in chats:
+            try:
+                path = getattr(chat.agent, "session_file", None)
+                if path is not None and Path(path).stem == session_id:
+                    return chat
+            except Exception:
+                continue
+        return None
+
+    def close_unclaimed(self, chat_id: str) -> None:
+        """Close a chat no window took back after an attach (dgc/serve_detach.py). Not the first
+        chat, nor the one the attached window holds."""
+        with self._chats_lock:
+            chat = self.chats.get(chat_id) if chat_id not in self._closing else None
+            if chat is None or chat is self.default or chat is self.wire_default:
+                return
+            self._closing.add(chat_id)
+        self._stop_queue(chat_id)
+        try:
+            chat.close(grace_s=0.0, process=False)
+        finally:
+            chat.em.emit("chat_closed", reason="closed")
+            with self._chats_lock:
+                self._retired_secrets.update(secret_values(getattr(chat, "config", None)))
+                self.chats.pop(chat_id, None)
+                self._closing.discard(chat_id)
+            self.announce_peers()
+
+    def _live_sessions(self, cmd: dict) -> None:
+        """list_live_sessions / stop_live_session: every DGC on this computer, for Settings ->
+        Running sessions. A stop runs on its own thread (it waits for the process to save)."""
+        from . import serve_detach
+        problem = command_error(cmd)
+        if problem:
+            return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
+        request_id = str(cmd.get("request_id") or "")[:128]
+
+        def answer(note: str = "") -> None:
+            items = serve_detach.live_processes(here=os.getpid())
+            self.em.emit("live_sessions", items=items, request_id=request_id,
+                         **({"message": note[:400]} if note else {}))
+
+        if cmd.get("type") == "list_live_sessions":
+            return answer()
+        pid, instance = cmd.get("pid"), str(cmd.get("instance") or "")
+        if pid == os.getpid():
+            return self._reject(cmd, "own_process", "this is this window's own backend; use Restart Backend")
+
+        def stop() -> None:
+            from . import peers
+            record = next((r for r in peers.others(here=False)
+                           if r.get("pid") == pid and str(r.get("instance") or "") == instance), None)
+            if record is None:
+                return answer("That session had already stopped.")
+            stopped, what = serve_detach.stop_process(record, reason="Settings -> Running sessions")
+            answer(("Stopped: " if stopped else "Not stopped: ") + what)
+        threading.Thread(target=stop, name="dgc-stop-live-session", daemon=True).start()
+
     def _close_chat(self, cmd: dict) -> None:
         chat_id = cmd.get("chat_id")
         with self._chats_lock:
@@ -8301,6 +8441,8 @@ class Host:
         if isinstance(kind, str) and kind.startswith(("chatdgc_", "memory_")):
             # The process's, never a session's: a chat is the same whatever folder is open.
             return self.chatdgc().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
+        if kind in ("list_live_sessions", "stop_live_session"):
+            return self._live_sessions(cmd)
         if isinstance(kind, str) and kind.startswith("voice_"):
             # The process's too: the same voice models in every folder (dgc/voice).
             problem = command_error(cmd)
@@ -8308,7 +8450,8 @@ class Host:
                 return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
             return self.voice().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
         if "chat_id" not in cmd:
-            return self._deliver(self.default, cmd)
+            target = self.wire_default if self.wire_default in self.chats.values() else self.default
+            return self._deliver(target, cmd)
         chat_id = cmd.get("chat_id")
         if not isinstance(chat_id, str) or not 0 < len(chat_id) <= _MAX_CHAT_ID_CHARS:
             # Unhashable, it raised past the router and the client's request timed out; too long,
@@ -8330,6 +8473,7 @@ class Host:
         20s for the turn it replaces, an MCP reload connects every server. A chat's commands keep
         their order; only answers and liveness (_UNQUEUED_COMMANDS) skip the line.
         """
+        self.touched[chat.chat_id] = time.monotonic()
         if not self.core.tag_chats or cmd.get("type") in _UNQUEUED_COMMANDS:
             return chat.dispatch(cmd)
         with self._chats_lock:
@@ -8385,17 +8529,21 @@ class Host:
                 root = str(getattr(getattr(chat, "config", None), "project_root", "") or "")
                 places.append({
                     "session": str(getattr(agent, "session_file", "") or ""),
+                    "name": str(getattr(agent, "session_name", "") or "")[:200],
                     "cwd": root, "project_root": root,
                     "git_common_dir": (agent._git_common_dir() if agent is not None
                                        and hasattr(agent, "_git_common_dir") else ""),
                     "status": "working" if _safe_busy(chat) else "idle"})
             first = places[0] if places else {}
+            board = self.switchboard
+            extra = board.note_fields() if board is not None else {}
+            extra["name"] = first.get("name", "")
             _peers.announce(kind="serve", takeover=True, session=first.get("session", ""),
                             cwd=first.get("cwd", ""), project_root=first.get("project_root", ""),
                             git_common_dir=first.get("git_common_dir", ""),
                             status="working" if any(p["status"] == "working" for p in places)
                             else "idle",
-                            sessions=places if len(places) > 1 else None)
+                            sessions=places if len(places) > 1 else None, extra=extra)
         except Exception:
             pass
 
@@ -8466,6 +8614,20 @@ class Host:
         return max(outcomes, key=_CLOSE_OUTCOMES.index, default="idle")
 
 
+def _stdin_closed_cause(parent_pid: int, pipe_watch) -> str:
+    """Why the editor's pipe ended, as the end line says it."""
+    if pipe_watch.gave_up:
+        return (f"the command pipe kept turning non-blocking ({pipe_watch.restores} restores); "
+                "stopped reading")
+    status, now_parent = _parent_status(parent_pid)
+    if status == "gone":
+        return (f"stdin closed: the parent ({parent_pid}) is gone — reparented to {now_parent}"
+                if now_parent != parent_pid else f"stdin closed: the parent ({parent_pid}) is gone")
+    if status == "alive":
+        return f"stdin closed while the parent ({parent_pid}) is still alive"
+    return f"stdin closed; this platform cannot confirm whether {parent_pid} is alive"
+
+
 def serve(config: Config) -> None:
     """Run the headless backend: emit `ready`, then loop over stdin commands until EOF/shutdown."""
     # FIRST, before the crash log and before Backend(): MCP servers and code intelligence start
@@ -8502,7 +8664,9 @@ def serve(config: Config) -> None:
     from . import termbg
     stop_handlers: dict = {}
     stopped_by: dict = {}
-    reading = {"stdin": True}
+    # in_read: the main thread is blocked reading the editor's pipe, which is the only place a wake
+    # may interrupt; anywhere else it is noted and acted on once the command in hand returns.
+    reading = {"stdin": True, "in_read": False, "wake": False}
 
     def _on_stop(signum) -> None:
         termbg.restore_stop_handlers(stop_handlers)   # a second signal kills us outright
@@ -8532,14 +8696,39 @@ def serve(config: Config) -> None:
     _wake_signal = getattr(signal, "SIGUSR1", None)
     if _wake_signal is not None and hasattr(signal, "pthread_kill"):
         def _on_wake(signum, frame) -> None:       # noqa: ARG001 -- the frame is the signal API's
-            if reading["stdin"]:
+            if not reading["stdin"]:
+                return
+            if reading["in_read"]:
                 raise _ReadEnded()
+            # In the middle of a command: ending it halfway (an approval half recorded, a rewind
+            # half written) is worse than ending a moment later, when it has returned.
+            reading["wake"] = True
         _reader_ident = threading.main_thread().ident
         try:
             signal.signal(_wake_signal, _on_wake)
             wake_reader = lambda: signal.pthread_kill(_reader_ident, _wake_signal)   # noqa: E731
         except (ValueError, OSError, RuntimeError):
             wake_reader = None                     # restricted context: the close is the fallback
+    # Which connection the wire belongs to, and how long this process lives without one. Until an
+    # editor sends set_detach it changes nothing: the pipe ending ends the process, as it always did.
+    from . import serve_detach
+    board = serve_detach.Switchboard(host, log=lambda text: _end_line(crash_log, text),
+                                     wake=wake_reader, new_session=True)
+    board.main_in_read = lambda: reading["in_read"]
+    host.switchboard = board
+    windowless_end = None
+
+    def _reading(lines):
+        while True:
+            reading["in_read"] = True
+            try:
+                item = next(lines)
+            except StopIteration:
+                return
+            finally:
+                reading["in_read"] = False
+            yield item
+
     try:
         # Inside the try on purpose: start() is where the first model metadata and context
         # estimates happen, and a parent that gives up during it must still reach the finally.
@@ -8549,7 +8738,9 @@ def serve(config: Config) -> None:
         host.command_failed = lambda cmd, exc: _log_crash(
             crash_log, f"command {cmd.get('type', '?')!r} failed", exc)
         liveness.start()
-        for line, frame_problem in _command_lines(command_stream, pipe_watch):
+        for line, frame_problem in _reading(_command_lines(command_stream, pipe_watch)):
+            if not board.is_current(board.stdio):
+                continue                       # this window moved or went: its words no longer count
             if frame_problem:
                 host.em.emit("error", message=frame_problem)
                 continue
@@ -8568,23 +8759,42 @@ def serve(config: Config) -> None:
             liveness.saw_command()
             last_command = str(cmd.get("type", "?"))[:64]   # a log line, not a payload channel
             try:
-                host.dispatch(cmd)
-            except _Shutdown:
+                with board.dispatch_lock:
+                    if not board.command(board.stdio, cmd):
+                        host.dispatch(cmd)
+            except (_Shutdown, serve_detach._ShutdownRequested):
                 shutdown_requested = True
+                board.close()                  # a window opening now must not attach to this one
                 break
+            except serve_detach._Detached:
+                break                          # the window said it is going; stop reading its pipe
             except Exception as e:             # one bad command must NOT kill the whole backend
                 import traceback
                 detail = str(e).strip() or e.__class__.__name__
                 host.em.emit("error", message=f"Command '{cmd.get('type', '?')}' failed — {detail}")
                 sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
                 _log_crash(crash_log, f"command {cmd.get('type', '?')!r} failed", e)
+            if reading["wake"]:
+                reading["wake"] = False
+                raise _ReadEnded()
+        if board.opted_in and not shutdown_requested:
+            # The window that started us is done with its pipe, and it asked for its work to go on.
+            # Until that work ends (or a rule in dgc/serve_detach.py says otherwise) the process runs
+            # with no window, and a new window can reattach. SIGTERM still lands it, via _on_stop.
+            if board.is_current(board.stdio):
+                board.go_windowless(board.stdio, _stdin_closed_cause(parent_pid, pipe_watch))
+            windowless_end = board.wait(liveness)
         reading["stdin"] = False               # past this point a signal has nothing to interrupt
     except _ReadEnded:
         # We ended our own read: the watchdog handed this session to a window that asked for it, or
         # gave up on a window that had stopped talking to us. From here on this is the same shutdown
         # a closed pipe gets -- the finally persists and releases -- so name the cause the same way.
         reading["stdin"] = False
-        end_cause = _liveness_end_cause(liveness)
+        if board.exit.is_set() and board.ending is not None:
+            windowless_end = board.ending          # a rule (or `dgc stop`) ended a moved window's process
+            end_cause = board.ending.cause
+        else:
+            end_cause = _liveness_end_cause(liveness)
         _end_line(crash_log, f"serve loop ended: {end_cause}; up {time.monotonic() - started_at:.0f}s, "
                              f"{commands} commands, last {last_command or 'none'!r}, turn running: "
                              + ("yes" if _safe_busy(host) else "no") + f", pipe: {pipe_watch.describe()}")
@@ -8604,7 +8814,10 @@ def serve(config: Config) -> None:
         _log_crash(crash_log, "serve loop raised", fatal)
         raise
     else:
-        if shutdown_requested:
+        if windowless_end is not None:
+            cause = windowless_end.cause
+            shutdown_requested = shutdown_requested or windowless_end.shutdown
+        elif shutdown_requested:
             cause = "the editor asked us to shut down"
         elif liveness is not None and liveness.abandoned:
             # Say what actually happened. "stdin closed" would be true and useless: we closed it.
@@ -8639,6 +8852,9 @@ def serve(config: Config) -> None:
         # 20s grace plus the joins inside close() overran the very window it was meant to fit.
         stood_down = bool(getattr(liveness, "stood_down", False))
         grace = 0.0 if shutdown_requested else STAND_DOWN_GRACE_S if stood_down else SHUTDOWN_GRACE_S
+        if windowless_end is not None:
+            grace = 0.0 if windowless_end.shutdown else windowless_end.grace
+        board.close()                          # no new window can attach to a process on its way out
         if grace > 0 and _safe_busy(host):
             # If the editor is still there it should hear this from us, not infer it from silence.
             try:
@@ -8647,7 +8863,14 @@ def serve(config: Config) -> None:
                     f"(up to {grace:.0f}s) and saving the session."))
             except Exception:
                 pass
+        # A turn cut off with no window attached had its end seen by nobody: say so beside its session,
+        # so the next window to open it offers Continue (dgc/serve_detach.py turn_interrupted).
+        cut_off = ([chat for chat in list(host.chats.values()) if _safe_busy(chat)]
+                   if board.windowless and board.opted_in else [])
         outcome = host.close(grace_s=grace)
+        for chat in cut_off:
+            serve_detach.record_interrupted(getattr(getattr(chat, "agent", None), "session_file", None),
+                                            end_cause)
         # Only now: for the whole grace window the process must keep the handler that makes a
         # second SIGTERM land cleanly instead of killing the turn we are busy saving.
         termbg.restore_stop_handlers(stop_handlers)

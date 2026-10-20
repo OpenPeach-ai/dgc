@@ -31,40 +31,64 @@ class Emitter:
         self._seq = itertools.count()
         self.tag_chats = False     # set once a client that opted in holds more than one chat
 
-    def emit(self, type: str, **fields) -> None:
-        with self._lock:
-            # Allocate the sequence under the same lock as the write. Multiple worker/provider
-            # threads can emit concurrently; allocating before the lock allowed seq=1 to reach the
-            # wire before seq=0 even though each individual write was atomic.
-            obj = {"type": type, "seq": next(self._seq)}
-            obj.update(fields)
+    def _frame(self, type: str, fields: dict) -> str:
+        """One validated, sanitized, bounded frame with the next seq. The caller holds the lock."""
+        # Allocate the sequence under the same lock as the write. Multiple worker/provider
+        # threads can emit concurrently; allocating before the lock allowed seq=1 to reach the
+        # wire before seq=0 even though each individual write was atomic.
+        obj = {"type": type, "seq": next(self._seq)}
+        obj.update(fields)
+        if self.validator:
+            problem = self.validator(obj)
+            if problem:
+                raise ValueError(f"invalid protocol event: {problem}")
+        if self.sanitizer:
+            obj = self.sanitizer(obj)
+            if not isinstance(obj, dict):
+                raise ValueError("protocol event sanitizer returned a non-object")
             if self.validator:
                 problem = self.validator(obj)
                 if problem:
-                    raise ValueError(f"invalid protocol event: {problem}")
-            if self.sanitizer:
-                obj = self.sanitizer(obj)
-                if not isinstance(obj, dict):
-                    raise ValueError("protocol event sanitizer returned a non-object")
-                if self.validator:
-                    problem = self.validator(obj)
-                    if problem:
-                        raise ValueError(f"sanitized protocol event is invalid: {problem}")
+                    raise ValueError(f"sanitized protocol event is invalid: {problem}")
+        line = json.dumps(obj, default=str, ensure_ascii=False, allow_nan=False)
+        # A frame larger than the protocol's own ceiling is not a frame the front-end will
+        # read: the editor treats it as a protocol violation and shuts the backend down, so an
+        # oversized event is a way for the backend to get itself killed. Nothing upstream can
+        # be trusted to have measured the WIRE size -- a screenshot capped at 4MB of PNG is
+        # about 5.6MB once base64 and JSON-escaped -- so the last writer checks, and sends a
+        # bounded replacement rather than something fatal.
+        if len(line.encode("utf-8")) > self.max_event_bytes:
+            obj = self._too_large(obj)
             line = json.dumps(obj, default=str, ensure_ascii=False, allow_nan=False)
-            # A frame larger than the protocol's own ceiling is not a frame the front-end will
-            # read: the editor treats it as a protocol violation and shuts the backend down, so an
-            # oversized event is a way for the backend to get itself killed. Nothing upstream can
-            # be trusted to have measured the WIRE size -- a screenshot capped at 4MB of PNG is
-            # about 5.6MB once base64 and JSON-escaped -- so the last writer checks, and sends a
-            # bounded replacement rather than something fatal.
-            if len(line.encode("utf-8")) > self.max_event_bytes:
-                obj = self._too_large(obj)
-                line = json.dumps(obj, default=str, ensure_ascii=False, allow_nan=False)
-            try:
-                self.fp.write(line + "\n")
-                self.fp.flush()
-            except (BrokenPipeError, ValueError):
-                pass  # the front-end went away — let the read loop notice on EOF
+        return line
+
+    @staticmethod
+    def _write(fp, line: str) -> None:
+        try:
+            fp.write(line + "\n")
+            fp.flush()
+        except (OSError, ValueError):
+            pass  # the front-end went away — let the read loop notice on EOF
+
+    def emit(self, type: str, **fields) -> None:
+        with self._lock:
+            self._write(self.fp, self._frame(type, fields))
+
+    def switch(self, fp, *, farewell: tuple | None = None, first=()) -> object:
+        """Point the wire at ``fp`` and return what it pointed at (dgc/serve_detach.py).
+
+        All under the write lock, so no other frame lands between the steps: ``farewell`` (type,
+        fields) is the last frame the old end gets, and ``first`` [(type, fields), ...] are the new
+        end's first frames -- an editor refuses anything before its ``ready``. One seq counter for
+        the life of the process: every frame lands on exactly one end, or on none."""
+        with self._lock:
+            old = self.fp
+            if farewell is not None:
+                self._write(old, self._frame(*farewell))
+            self.fp = fp
+            for type, fields in first:
+                self._write(fp, self._frame(type, fields))
+            return old
 
     # Correlation fields are what a blocked worker is waiting on. An event that carries one is a
     # question, not a notification: replacing it wholesale would leave the front-end with nothing

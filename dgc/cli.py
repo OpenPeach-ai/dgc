@@ -2530,6 +2530,8 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "export-training": "dgc export-training [--help]       export sessions as scrubbed fine-tuning JSONL",
     "chat": "dgc chat [QUESTION] [--resume ID] [--list [QUERY]] [--export ID [-o FILE]] [--model M] [--think L] [--search off|auto|on] [--temporary] [--file PATH] [--json]  ChatDGC in the terminal",
     "serve": "dgc serve                          headless JSON backend for editor front-ends (stdio)",
+    "ps": "dgc ps [--json]                    the DGC processes on this computer: windows, work, sessions",
+    "stop": "dgc stop PID|SESSION|--windowless [--force]  save and stop a DGC process (one running with no window)",
     "acp": "dgc acp                            Agent Client Protocol backend (JSON-RPC over stdio)",
     "protocol": "dgc protocol describe|validate     inspect or validate the editor/headless contract",
     "bug": "dgc bug                            where to report a bug or request a feature",
@@ -2669,6 +2671,12 @@ def main(argv: list[str] | None = None) -> int | None:
             # so this returns before the banner / update-check ever run.
             from .headless import serve
             serve(_serve_config()); return
+        if raw_argv[0] == "ps":
+            from .ps_cli import run_ps
+            return run_ps(raw_argv[1:])
+        if raw_argv[0] == "stop":
+            from .ps_cli import run_stop
+            return run_stop(raw_argv[1:])
         if raw_argv[0] == "acp":
             # Agent Client Protocol (JSON-RPC over stdio) for Zed/JetBrains/Neovim/Emacs.
             from .acp import serve as acp_serve

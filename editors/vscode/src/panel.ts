@@ -7,7 +7,7 @@ import * as fs from "fs";
 import { homedir } from "os";
 import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
-import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
+import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOVED_CAUSE, STOP_CAUSE } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
@@ -102,6 +102,9 @@ const VOICE_OFFER_MB = 229;
 interface InterruptedTurnMark {
   scope?: string; id?: string; turnId?: string; at?: number;
   endedAt?: number; exitedAt?: number; cause?: string;
+  /** The window went while the turn ran, and its backend kept it running with no window: whether it
+   *  was cut off is that backend's to say (turn_interrupted), not this mark's. */
+  detachedAt?: number;
 }
 interface UnassistedExit { at: number; cause: string; last: string }
 
@@ -371,6 +374,10 @@ const PER_CHAT_FIELDS = [
   // chats really can run different CLI builds: without these, a chat on an older CLI inherited the
   // newer one's capabilities and the panel offered it commands it rejects.
   "composerSelections", "skillManagement", "mcpContext", "mcpManagement", "goalInputs",
+  // A chat reattached to a backend that kept running with no window (dgc/serve_detach.py): its handshake
+  // repaints from that backend, and its folder grant waits for the running turn to end. A chat shown in
+  // another window is read-only here until "Open here".
+  "attachedLive", "rootsAfterLiveTurn", "sessionElsewhere",
 ] as const;
 
 /** Where the window's chats are (#3 Sessions home): the side bar's Sessions list, and a session per
@@ -526,6 +533,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   // mid-turn can be told a turn is running: its Stop, its clock and the turn a history snapshot
   // leaves open. Meaningful only while confirmedTurnActive.
   private liveTurn: { turnId: string; kind: string; prompt: string; startedAt: number; handoff: boolean } | undefined;
+  /** This chat's backend is a window reattached to a session that kept running (ready.capabilities.attached). */
+  private attachedLive = false;
+  /** The reattached turn was running, so the folder grant waits for it to end, then is sent. */
+  private rootsAfterLiveTurn = false;
+  /** This chat's session is shown in another window: "moved" (it was taken from here) or "elsewhere"
+   *  (it was already there). Read-only here until the user presses "Open here". */
+  private sessionElsewhere: { state: "moved" | "elsewhere"; pid?: number } | undefined;
+  /** How this provider's next backend asks to reattach: its first after a window opens is a restore. */
+  private attachMode: AttachMode = "restore";
   private workspaceRootsRevision = 0;
   private workspaceRootsDirty = true;
   private workspaceRootsInFlight: { revision: number; requestId?: string } | undefined;
@@ -1483,10 +1499,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private finishSessionHandshake(be: ChatBackend, adoptDraftFrom = ""): void {
     if (this.backend !== be) { return; }
+    const reattached = this.attachedLive;
+    this.attachedLive = false;
     this.sessionReady = true;
     this.setReadyContext(true);                                             // gates palette entries
     this.rememberSession();
-    this.post({ type: "session_ready", sessionId: this.currentSessionId, adoptDraftFrom });
+    if (reattached) {
+      // Exactly what a reloaded webview gets: ready, session_ready and the running turn in one go, then
+      // the backend's own snapshot, the decisions it waits on (same ids), and its agents, watchers and
+      // tasks. The events that arrive after the snapshot are the ones it does not hold.
+      this.repaintFromBackend();
+    } else {
+      this.post({ type: "session_ready", sessionId: this.currentSessionId, adoptDraftFrom });
+    }
+    if (this.sessionElsewhere) {
+      const shown = this.sessionElsewhere;
+      this.whenWebviewReady(() => this.post({ type: "session_elsewhere", ...shown }));
+    }
     this.surfaceUnsentPrompts();
     this.initializingBackend = undefined;
     this.nativeSettingsReady = false;
@@ -1512,7 +1541,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.settingsEditor) this.refreshEditorSettings();   // new backend, same page the user is on
     this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
     this.startPipsAttention();
-    void this.resumeInterruptedWork(be);
+    // A reattached chat's turn did not stop: it is still running, or it finished with no window.
+    if (!reattached) { void this.resumeInterruptedWork(be); }
   }
 
   private pipsAttentionTimer?: ReturnType<typeof setInterval>;
@@ -1600,6 +1630,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!mark) { return; }
     if (mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return; }
     await this.forgetInterruptedTurn();              // one offer per interruption, never a loop
+    // The window went while this turn ran and its backend kept it running. If that backend later
+    // stopped it, it says so itself (turn_interrupted); if it finished, there is nothing to continue.
+    if (mark.detachedAt && (this.lastReadyEvent?.capabilities as any)?.detach) { return; }
     // A turn that ended with an error and no backend death behind it failed on its own; the
     // user has already seen why. A turn with neither an end nor a recorded exit was cut off with
     // the extension host (a reload or crash), which is an interruption too.
@@ -2617,6 +2650,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!host) {
       this.processEpochs.set(be, this.processEpoch);
       this.logProcess(be as DgcBackend);
+      // The session this chat is about to restore may still be running in a backend whose window went:
+      // a CLI that kept it running relays this spawn to it (dgc/serve_relay.py), and an older one ignores it.
+      const session = /^[A-Za-z0-9_-]{1,128}$/.test(this.sessionRestoreCandidate) ? this.sessionRestoreCandidate : "";
+      if (session) { (be as DgcBackend).attach = { session, mode: this.attachMode }; }
+      this.attachMode = "auto";
     }
     slot.backend = be;
     const wired: Array<[string, (...args: any[]) => void]> = [];
@@ -2638,6 +2676,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (slot.id === this.activeSlotId) { this.post({ type: "stderr", line }); }
     });
     on("teardown", (cause: string) => {
+      if (cause.startsWith(MOVED_CAUSE)) {
+        // Another window took this session ("Open here" there). Nothing died: this chat goes read-only.
+        if (slot.id !== this.activeSlotId) { this.backgroundBackendLost(slot, "it is open in another window now"); return; }
+        if (this.backend === be) { this.retireBackend(); }
+        return;
+      }
       // restart() and dispose() own their own lifecycle. Any other teardown (a protocol failure, a
       // restore that timed out) retires this instance NOW: leaving it as this.backend let the next
       // send() start a child on it, whose own later death was then mislabelled and never recovered.
@@ -3090,6 +3134,36 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
+        const live = this.attachedChat(ev);
+        this.attachedLive = !!live;
+        this.rootsAfterLiveTurn = false;
+        if (live) {
+          // A window reattached to the session it was showing, which kept running with no window. The
+          // turn, its queue and the decisions it waits on are that backend's; the transcript is repainted
+          // from its snapshot once the handshake ends.
+          this.currentSessionSaved = true;
+          this.sessionElsewhere = undefined;
+          this.whenWebviewReady(() => this.post({ type: "session_elsewhere", state: "none" }));
+          if (live.turn) {
+            this.turnActive = this.confirmedTurnActive = true;
+            this.monitorTurnActive = live.turn.kind === "monitor";
+            const startedAt = Number(live.turn.started_at) > 0 ? Math.min(Date.now(), Number(live.turn.started_at) * 1000) : Date.now();
+            this.turnStartedAt = startedAt;
+            this.liveTurn = { turnId: String(live.turn.turn_id || ""), kind: String(live.turn.kind || "prompt"),
+                              prompt: String(live.turn.prompt || ""), startedAt, handoff: false };
+          } else {
+            this.liveTurn = undefined;
+            this.noteInterruptedTurn(undefined);   // it finished with no window: nothing to continue
+          }
+          this.openDecisions = new Set((live.waiting || []).map(String));
+          this.adoptLiveQueue(live);
+          this.backendNote(`[extension: reattached to dgc serve pid ${(ev.capabilities as any)?.attached?.pid ?? "?"}, `
+            + `which kept this session running${live.turn ? " (a turn is running)" : ""}]`);
+        } else {
+          const elsewhere = (ev.capabilities as any)?.detach?.elsewhere;
+          this.sessionElsewhere = elsewhere && elsewhere.session_id && elsewhere.session_id === this.sessionRestoreCandidate
+            ? { state: "elsewhere", pid: Number(elsewhere.pid) || undefined } : undefined;
+        }
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
         this.composerSelections = ev.capabilities?.composer_selections === true;
         this.skillManagement = ev.capabilities?.skill_management === true;
@@ -3120,7 +3194,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           }
         }
         this.postState();
-        if (this.backend) {
+        if (this.backend && live) {
+          // The backend already has this window's settings and folders: its last window sent them, and a
+          // turn may be using them. Only the folder grant is sent again, once nothing is running.
+          const backend = this.backend;
+          this.initializingBackend = backend;
+          this.nativeSettingsReady = true;
+          if (this.turnActive && !this.monitorTurnActive) {
+            this.workspaceRootsDirty = false;
+            this.rootsAfterLiveTurn = true;
+          } else {
+            this.syncWorkspaceRoots(backend, true);
+          }
+          this.maybeCompleteHandshake(backend);
+        } else if (this.backend) {
           const backend = this.backend;
           this.initializingBackend = backend;
           this.nativeSettingsReady = false;

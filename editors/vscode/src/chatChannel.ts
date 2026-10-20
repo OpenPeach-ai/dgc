@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { awaitResponse, ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
+import { awaitResponse, ChildExitInfo, DgcBackend, DgcEvent, teardownKeepsWork } from "./backend";
 import type { DgcCommand, DgcEventType } from "./protocol.generated";
 
 const RESERVED_EVENT_NAMES = new Set(["error", "event", "newListener", "removeListener"]);
@@ -199,7 +199,10 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
     this.emit("chat-log", chatId
       ? `[extension: closed chat ${chatId} in ${this.cwd} on dgc serve ${this.hostPid()} — ${cause}]`
       : `[extension: closed the chat in ${this.cwd} before it finished opening — ${cause}]`);
-    if (chatId) {
+    if (this.host.detach && teardownKeepsWork(cause)) {
+      // The window is going and the process keeps its work running with no window: this chat goes on
+      // with it, and a window that comes back finds it. Closing it here would end its turn.
+    } else if (chatId) {
       this.sendClose(chatId);
     } else {
       this.closeWhenOpened();
