@@ -787,9 +787,9 @@ class Host:
             return {"text": _after_step(self, op, before, label, notes), "visual": bool(getattr(self, "visual", False))}
         except (BrowserError, RegistryError, OSError, ValueError) as error:
             # A step that opened a dialog and then failed (a choice whose page asks to confirm): the question is the
-            # news, not the error it caused.
+            # news, not the error it caused. A ref read on another tab: which one, and how to get back.
             asking = _dialog_in_the_way(self, op)
-            return {"text": asking or f"error: {str(error)[:500]}"}
+            return {"text": asking or _ref_elsewhere(self, args) or f"error: {str(error)[:500]}"}
         except Exception as error:                     # noqa: BLE001 - never into the worker
             return {"text": f"error: the computer failed ({type(error).__name__})"}
 
@@ -2123,6 +2123,21 @@ def _asking(host) -> str:
 
 def _dialog_in_the_way(host, op: str) -> str:
     return "" if op in DIALOG_FREE_OPS else _asking(host)
+
+
+def _ref_elsewhere(host, args: dict) -> str:
+    """A step's ref was read on another tab's page (each tab's refs are its own): say so, rather than "not on the page"."""
+    browser = host.browser
+    tab_of, current = getattr(browser, "tab_of_ref", None), getattr(browser, "current_tab", None)
+    if tab_of is None or current is None:
+        return ""
+    here = current()
+    for key in ("ref", "to"):
+        there = tab_of(str(args.get(key) or ""))
+        if there and here and there != here:
+            return (f"error: {args.get(key)} is from tab {there}'s page, and you are on tab {here}. Use a ref from your "
+                    f"latest read of this tab, or go back first (op tabs, action switch, tab {there}).")
+    return ""
 
 
 def _tab_slip(op: str, args: dict) -> tuple[str, dict]:

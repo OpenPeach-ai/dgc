@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
-from .browser import MAX_FRAME_BYTES, BrowserError, BrowserSession, DEFAULT_VIEWPORT
+from .browser import _SNAPSHOT_JS, MAX_FRAME_BYTES, BrowserError, BrowserSession, DEFAULT_VIEWPORT
 
 BOX_PROXY_PORT = 8899                 # the in-box forwarder; only the browser inside sees it
 MAX_CONNECTIONS = 64
@@ -1207,6 +1207,34 @@ class BoxedBrowser(BrowserSession):
             self._tab_names[target] = f"t{self._next_tab}"
             self._next_tab += 1
         return self._tab_names[target]
+
+    # Each tab's refs are its own: tab tN's start after (N - 1) * REFS_PER_TAB (t1 keeps e1, e2...), so a ref read on
+    # another tab is never some element here. Measured 2026-10-21: a Pip back from a list of its tabs clicked e11 from
+    # the other tab's page, and the tab in front had an e11 of its own.
+    REFS_PER_TAB = 10000
+
+    def snapshot(self) -> dict:
+        self.start()
+        current = self.page_target()
+        offset = (int(self._tab_name(current)[1:]) - 1) * self.REFS_PER_TAB if current else 0
+        offset = offset if offset + self.REFS_PER_TAB < 1_000_000 else 0      # refs stay e + at most six digits
+        raw = self.evaluate_json(_SNAPSHOT_JS.replace("const ref = 'e' + counter;", f"const ref = 'e' + (counter + {offset});", 1))
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else {}
+        except ValueError as error:
+            raise BrowserError(f"could not read the page snapshot: {error}") from error
+        if not isinstance(data, dict):
+            raise BrowserError("the page snapshot came back in an unexpected shape")
+        return data
+
+    def tab_of_ref(self, ref: str) -> str:
+        """The tab whose page a ref was read on (t1, t2...), or "" when it isn't a ref."""
+        found = re.fullmatch(r"e(\d{1,6})", str(ref or ""))
+        return f"t{(int(found.group(1)) - 1) // self.REFS_PER_TAB + 1}" if found and int(found.group(1)) > 0 else ""
+
+    def current_tab(self) -> str:
+        current = self.page_target()
+        return self._tab_name(current) if current else ""
 
     def tab_list(self) -> list[dict]:
         """This browser's tabs, oldest first: [{tab, target, title, url, current}]."""

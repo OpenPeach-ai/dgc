@@ -176,6 +176,12 @@ class WordingTests(unittest.TestCase):
         self.assertIn("Recorded as step", pip_computer.NOTICE)
         self.assertIn("Page reported", pip_computer.NOTICE)
 
+    def test_each_tab_numbers_its_refs_from_the_shared_snapshot(self):
+        from dgc.browser import _SNAPSHOT_JS
+        self.assertIn("const ref = 'e' + counter;", _SNAPSHOT_JS, "BoxedBrowser.snapshot gives each tab its own refs from it")
+        browser = box.BoxedBrowser.__new__(box.BoxedBrowser)
+        self.assertEqual([browser.tab_of_ref(r) for r in ("e1", "e9999", "e10001", "e20005", "x1", "")], ["t1", "t1", "t2", "t3", "", ""])
+
     def test_the_tool_and_its_notice_stay_small(self):
         # Every request of every Pip with a computer carries them: 2026-10-21 they grew from 3240 to 4511 characters
         # (text-only tool and notice; about 300 tokens) for the new steps. Growing them further needs a reason.
@@ -221,8 +227,11 @@ class SturdierBrowserTests(unittest.TestCase):
         self.assertIn('Opened a new tab: "Spec sheet"', said)
         self.assertIn("Weight: 340 g", said, "the step shows the new tab's page")
         self.assertRegex(said, r"Recorded as step 2\.$")
+        self.assertIn('heading level=1 "Spec sheet" [e10001]', said, "each tab's refs are its own")
         listed = self.act("tabs")
         self.assertRegex(listed, r'Your tabs: t1 "Desk" \S+; t2 "Spec sheet" \S+/spec \(in front\)\.')
+        # A ref from the first tab's page, used on this one, says where it is from (it never clicks something here).
+        self.assertIn("error: e3 is from tab t1's page, and you are on tab t2.", self.act("click", ref=ref(page, "button", "Download report")))
         back = self.act("switch", tab="t1")       # a small model's slip for tabs with action switch
         self.assertIn("You are on tab t1 now.", back)
         self.assertIn("You are on tab t2 now.", self.act("action", action="switch", tab="t2"))
