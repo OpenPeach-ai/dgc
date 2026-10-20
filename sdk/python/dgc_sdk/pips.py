@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_pip_logins",
     "get_pip_computer_apps",
     "get_pip_eyes",
     "list_pip_run_posts",
@@ -71,6 +72,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "save_pip_login", "remove_pip_login", "grant_pip_login",
     "set_pip_computer_apps",
     "set_pip_eyes",
     "mark_pip_news_seen",
@@ -258,7 +260,19 @@ API54_MUTATIONS = frozenset({'set_pip_computer_apps'})
 READ_COMMANDS |= API54_READS
 MUTATION_COMMANDS |= API54_MUTATIONS
 APPS_CHOICES = frozenset({'download', 'not_now'})
+# API 56: saved logins. list_pip_logins reads where each saved login fills, its username, whether it has a code and
+# which Pips may use it (never a password or a key); save_pip_login keeps one (from a Pip's "login" computer action,
+# action_id + expected_digest, or for a site), remove_pip_login forgets one, grant_pip_login sets which Pips may use it.
+# A save carries the password and the authenticator key in that one request only: no SDK error repeats them.
+API56_READS = frozenset({'list_pip_logins'})
+API56_MUTATIONS = frozenset({'save_pip_login', 'remove_pip_login', 'grant_pip_login'})
+READ_COMMANDS |= API56_READS
+MUTATION_COMMANDS |= API56_MUTATIONS
 COMMAND_FIELDS = {
+    'list_pip_logins': frozenset({'pip_id'}),
+    'save_pip_login': frozenset({'pip_id', 'site', 'username', 'password', 'totp', 'pips', 'action_id', 'expected_digest'}),
+    'remove_pip_login': frozenset({'login_id'}),
+    'grant_pip_login': frozenset({'login_id', 'pips'}),
     'get_pip_computer_apps': frozenset(),
     'set_pip_computer_apps': frozenset({'choice'}),
     'get_pip_eyes': frozenset({'pip_id'}),
@@ -514,6 +528,25 @@ def _check_api52_fields(values: Mapping[str, Any]) -> None:
         raise DGCConfigError('as_file must be true or false')
 
 
+def _check_login_save(values: Mapping[str, Any]) -> None:
+    """save_pip_login's shape, said without ever repeating what it carries."""
+    for key in ('pip_id', 'username', 'password'):
+        if type(values.get(key)) is not str:
+            raise DGCConfigError('save_pip_login takes pip_id, username and password as strings')
+    if not values['password'] or len(values['password']) > 512 or len(values['username']) > 512:
+        raise DGCConfigError('The password is 1 to 512 characters and the username up to 512')
+    if ('action_id' in values) == ('site' in values):
+        raise DGCConfigError('save_pip_login takes site, or action_id with expected_digest (a "login" computer action)')
+    if 'action_id' in values and (type(values['action_id']) is not str or type(values.get('expected_digest')) is not str):
+        raise DGCConfigError('action_id and expected_digest are strings')
+    if 'site' in values and type(values['site']) is not str:
+        raise DGCConfigError('site is the site\'s address, as a string')
+    if 'totp' in values and type(values['totp']) is not str:
+        raise DGCConfigError('totp is a base32 key or an otpauth://totp/ link, as a string')
+    if 'pips' in values and values['pips'] not in ('only', 'all'):
+        raise DGCConfigError('pips is "only" (this Pip) or "all"')
+
+
 class Pips:
     """Controls for an already enabled Pips installation.
 
@@ -550,7 +583,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API54_READS | API54_MUTATIONS:
+        if command in API56_READS | API56_MUTATIONS:
+            minimum = 56
+        elif command in API54_READS | API54_MUTATIONS:
             minimum = 54
         elif command in API53_READS | API53_MUTATIONS:
             minimum = 53
@@ -665,6 +700,11 @@ class Pips:
             raise DGCConfigError('choice must be ask, relay or off')
         if command == 'set_pip_computer_apps' and values.get('choice') not in APPS_CHOICES:
             raise DGCConfigError('choice must be download or not_now')
+        if command == 'save_pip_login':
+            _check_login_save(values)
+        if command == 'grant_pip_login' and not (values.get('pips') == 'all' or (
+                type(values.get('pips')) is list and len(values['pips']) <= 64 and all(type(p) is str for p in values['pips']))):
+            raise DGCConfigError('pips is "all" or a list of Pip ids')
         if (command in ('propose_pip_calendar_action','prepare_pip_calendar_draft')
                 and isinstance(values.get('event'),dict)
                 and {'attendees','repeat','send_invitations'}.intersection(values['event']) and version < 38):

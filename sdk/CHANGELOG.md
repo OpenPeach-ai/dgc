@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Pips API 56: `list_pip_logins` (read), and `save_pip_login`, `remove_pip_login` and `grant_pip_login` (mutations), in
+  both SDKs; each is refused before API 56, and a save's shape is checked with errors that never repeat its password
+  or key. A Personal Pip's saved logins.
 - Pips API 54: `get_pip_computer_apps` (read) and `set_pip_computer_apps` (mutation, `choice` download or not_now), in
   both SDKs; each is refused before API 54. Pips use the whole desktop.
 - Pips API 53: `get_pip_eyes` (read) and `set_pip_eyes` (mutation, `choice` ask, relay or off), `list_pip_computer_frames`'

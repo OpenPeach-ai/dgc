@@ -15,6 +15,7 @@ export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  list_pip_logins: { pip_id?: string };
   get_pip_computer_apps: Record<string, never>;
   get_pip_eyes: { pip_id: string };
   list_pip_shared: { pip_id: string; kind: "links" | "media" | "files" };
@@ -103,6 +104,10 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  save_pip_login: { pip_id: string; username: string; password: string; totp?: string; pips?: "only" | "all" }
+    & ({ site: string } | { action_id: string; expected_digest: string });
+  remove_pip_login: { login_id: string };
+  grant_pip_login: { login_id: string; pips: "all" | string[] };
   set_pip_computer_apps: { choice: "download" | "not_now" };
   set_pip_profile: { pip_id: string; changes: { title?: string; body?: string | null; color?: string | null; notify?: boolean } };
   update_pip_computers: Record<string, never>;
@@ -195,6 +200,10 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  list_pip_logins: ["pip_id"],
+  save_pip_login: ["pip_id", "site", "username", "password", "totp", "pips", "action_id", "expected_digest"],
+  remove_pip_login: ["login_id"],
+  grant_pip_login: ["login_id", "pips"],
   set_pip_profile: ["pip_id", "changes"],
   list_pip_shared: ["pip_id", "kind"],
   get_pip_computers: [],
@@ -640,6 +649,30 @@ const API54_MUTATIONS = new Set(["set_pip_computer_apps"]);
 for (const command of API54_READS) READS.add(command);
 for (const command of API54_MUTATIONS) MUTATIONS.add(command);
 const APPS_CHOICES = new Set(["download", "not_now"]);
+// API 56: saved logins. list_pip_logins reads where each saved login fills, its username, whether it has a code and
+// which Pips may use it (never a password or a key); save_pip_login keeps one (from a Pip's "login" computer action,
+// action_id + expected_digest, or for a site), remove_pip_login forgets one, grant_pip_login sets which Pips may use it.
+// A save carries the password and the authenticator key in that one request only: no SDK error repeats them.
+const API56_READS = new Set(["list_pip_logins"]);
+const API56_MUTATIONS = new Set(["save_pip_login", "remove_pip_login", "grant_pip_login"]);
+for (const command of API56_READS) READS.add(command);
+for (const command of API56_MUTATIONS) MUTATIONS.add(command);
+function checkLoginSave(values: Record<string, unknown>): void {
+  for (const key of ["pip_id", "username", "password"]) {
+    if (typeof values[key] !== "string") throw new DGCConfigError("save_pip_login takes pip_id, username and password as strings");
+  }
+  const password = values.password as string, username = values.username as string;
+  if (!password || password.length > 512 || username.length > 512) throw new DGCConfigError("The password is 1 to 512 characters and the username up to 512");
+  if (Object.hasOwn(values, "action_id") === Object.hasOwn(values, "site")) {
+    throw new DGCConfigError("save_pip_login takes site, or action_id with expected_digest (a \"login\" computer action)");
+  }
+  if (Object.hasOwn(values, "action_id") && (typeof values.action_id !== "string" || typeof values.expected_digest !== "string")) {
+    throw new DGCConfigError("action_id and expected_digest are strings");
+  }
+  if (Object.hasOwn(values, "site") && typeof values.site !== "string") throw new DGCConfigError("site is the site's address, as a string");
+  if (Object.hasOwn(values, "totp") && typeof values.totp !== "string") throw new DGCConfigError("totp is a base32 key or an otpauth://totp/ link, as a string");
+  if (Object.hasOwn(values, "pips") && !["only", "all"].includes(values.pips as string)) throw new DGCConfigError("pips is \"only\" (this Pip) or \"all\"");
+}
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -728,7 +761,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -812,6 +845,10 @@ export class Pips {
     }
     if (command === "set_pip_eyes" && !EYES_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be ask, relay or off");
     if (command === "set_pip_computer_apps" && !APPS_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be download or not_now");
+    if (command === "save_pip_login") checkLoginSave(values);
+    if (command === "grant_pip_login" && !(values.pips === "all" || Array.isArray(values.pips) && values.pips.length <= 64 && values.pips.every((p) => typeof p === "string"))) {
+      throw new DGCConfigError("pips is \"all\" or a list of Pip ids");
+    }
     if (Object.keys(values).some((key) => !COMMAND_FIELDS[command].includes(key))) throw new DGCConfigError("Unknown or reserved Pip parameter");
     if (["list_pip_notes", "add_pip_note", "forget_pip_note"].includes(command) && Object.hasOwn(values, "shared")
       && (this.caps.pips_api_version as number) < 46)
