@@ -2583,6 +2583,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     if 'personal_history' in manifest else None)
 
     class ReadOnlyAuditor(Agent):
+        progress_updates = False        # a run shows no text, and a Pip chat's prompt asks for no updates
         # Reuse the existing Agent loop with a task-specific answer contract. The
         # interactive editor prompt requires prose/document tools and elevates project
         # memory, neither of which belongs in a source-evidence-only audit.

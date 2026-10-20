@@ -11700,7 +11700,10 @@ def test_benchmark_integrity():
         # two cadence bullets with three that name when to speak: before the first call, on a finding, a change of
         # approach, a blocker or the first edit, and at least every five or so calls. Measured: 6,886 (+83).
         # 6,910 keeps the same small headroom.
-        _PROBE_TOKEN_CEILING = 6910
+        # Round two (founder, 2026-10-20, from Codex's newest templates): the cadence is by time ("never leave the
+        # user more than about a minute without one"), a diagnosis or a plan may be written out in full mid-turn,
+        # and the final answer must stand on its own. Measured: 6,978 (+92). 7,000 keeps the same small headroom.
+        _PROBE_TOKEN_CEILING = 7000
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"

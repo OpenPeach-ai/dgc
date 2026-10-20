@@ -239,12 +239,22 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 
 - **Work tells you what it is about to do, and what it found, as it goes.** Before its first tool call the agent now
   says in one sentence what it will do, and while it works it adds a one-line update when it finds something that
-  matters, changes approach, hits a blocker or starts editing, and at least every five or so calls. One line covers a
-  batch of related calls; it does not narrate each call or repeat the plan, and the final answer is as before. The
-  old instruction asked for a line before every group of calls and was often skipped at the start: measured on five
+  matters, changes approach, hits a blocker or starts editing, and never leaves you more than about a minute without
+  one. One line covers a batch of related calls; it does not narrate each call or repeat the plan. The old
+  instruction asked for a line before every group of calls and was often skipped at the start: measured on five
   coding tasks with `deepseek-v4.1-flash:cloud` and `glm-5.3:cloud` (two runs each), the opening line went from 14
-  of 20 turns to 20 of 20, the longest run of model rounds with nothing to read fell (2.1 to 1.3 on average for
-  DeepSeek, 0.7 to 0.4 for GLM), and tool calls and success rates did not change.
+  of 20 turns to 20 of 20, and tool calls and success rates did not change.
+- **About a minute, by the clock.** A model cannot see a clock, so when a tool round ends a minute or more after the
+  last thing you read from the agent, DGC adds one line to that round's reminders ("It has been 75s since the user
+  last heard from you. Add a one-line update with your next tool call."), once per silence. A sub-agent and a Pip
+  never get it: nobody watches their text live. Measured on 48 turns, including eight with a 25-second test run after
+  every change: the longest a tool round ended into a silence went from 67.6s to 32.9s, so the note had nothing to
+  do (it would have fired once before the change, and fired zero times after). The long silences left are single
+  replies spent thinking (up to 149s on GLM), which a note between tool rounds cannot interrupt.
+- **A detailed message when it matters, and an answer that stands alone.** When you should read something in full
+  before the agent goes on, such as a diagnosis or its plan for a large change, it may write it out with formatting in
+  the message with its next tool call and keep working; other updates stay a sentence or two. The final answer must
+  stand on its own, since you may not have read the updates.
 - **Sub-agents no longer narrate.** Their text between tool calls was never shown, since only a sub-agent's final
   message comes back as its result, so they are told to skip updates and put what matters in that message.
 

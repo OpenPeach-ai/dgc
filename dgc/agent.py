@@ -38,7 +38,13 @@ from .skills import (discover_skills, matching_skill_names, explicit_skill_instr
 from .scheduler import acquire_cancellable, workspace_mutation_lock
 from .monitors import MonitorHub, Notification, NOTICE_CLOSE, NOTICE_OPEN, plural
 from .subagents import ENDED as ENDED_AGENT_STATES, SubagentRegistry
-from .presentation import PROGRESS_UPDATES, RESPONSE_GUIDANCE, SUBAGENT_UPDATES
+from .presentation import (PROGRESS_UPDATES, QUIET_NOTE_AFTER_S, RESPONSE_GUIDANCE, SUBAGENT_UPDATES,
+                           quiet_note)
+
+# The progress-update clock (Agent._heard / _quiet_note) is bound here, apart from `time`: a turn's
+# deadline is tested by replacing `dgc.agent.time` with a scripted clock, and a read of that clock for
+# this feature took the turn's starting value and moved its deadline (an endless test turn).
+_quiet_clock = time.monotonic
 from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clean_report, new_details, record_transition
 from .workflows import STREAM_RECOVERY_TEXT, notice_kind as _notice_kind
 
@@ -1891,6 +1897,35 @@ class Agent(GoalLifecycle):
         """Items still to be worked: pending or in progress. Blocked items are parked on purpose
         (the model said why), so they neither draw reminders nor count as unfinished work."""
         return [t for t in self.ctx.todos if t.get("status") in ("pending", "in_progress")]
+
+    # Whether the user watches this agent's text as it works, so the prompt's "about a minute" cadence
+    # gets a clock (_quiet_note). A Pip turns it off: its runs show no text, and a Pip chat's prompt
+    # has no progress-update rule. A sub-agent never gets the note either (its text is not shown).
+    progress_updates = True
+    _heard_at: float | None = None      # monotonic time the user last read model text in this turn
+    _quiet_noted = False                # the note already fired for the current silence
+
+    def _heard(self, now: float | None = None) -> None:
+        """The user just read something from the model (or sent the prompt): a new silence starts."""
+        self._heard_at = _quiet_clock() if now is None else now
+        self._quiet_noted = False
+
+    def _quiet_note(self, now: float | None = None) -> str:
+        """The reminder for a tool round that ends a minute or more after the user last read the model.
+
+        Open models cannot see a clock, so the prompt's "never leave the user more than about a minute
+        without an update" is backed here: once per silence, joined to the round's other reminders
+        (one ``<system-reminder>`` after the tool results, which `_dgc_round` already treats as DGC's,
+        not the user's). Never repeated within one silence, so a model that keeps working quietly is
+        not nagged; never for a sub-agent or a Pip, whose text nobody watches live.
+        """
+        if self.depth or not self.progress_updates or self._heard_at is None or self._quiet_noted:
+            return ""
+        gap = (_quiet_clock() if now is None else now) - self._heard_at
+        if gap < QUIET_NOTE_AFTER_S:
+            return ""
+        self._quiet_noted = True
+        return quiet_note(gap)
 
     # How many top-level turns a user's clear stays in force: the turn it landed in (or the next
     # one, when it landed while idle) plus the one after that.
@@ -6716,6 +6751,7 @@ class Agent(GoalLifecycle):
                   notification: Notification | None = None, pip_setup_notice: dict | None = None) -> bool:
         wake = source == "monitor"
         self._turn_reasoning_pending = []           # reasoning never carries across turns
+        self._heard()                               # the user's prompt (or the wake) starts the clock
         if self.depth == 0:
             # A new top-level turn: the approval and its "Execute the plan now" tool result are
             # behind us, so the hand-back contract applies from here on.
@@ -7248,6 +7284,8 @@ class Agent(GoalLifecycle):
                 # This round provably continues: prose beside a tool call is commentary, and the
                 # harness knows it here for certain instead of the panel guessing it later.
                 self.ui.end_stream("commentary")
+                if (result.content or "").strip():
+                    self._heard()                   # the user has just read an update
             elif not defer_completion and not (
                     (result.content or "").strip()
                     and result.finish_reason in _INCOMPLETE_FINISH_REASONS
@@ -8121,6 +8159,9 @@ class Agent(GoalLifecycle):
                     budget_nudged.add(70)
                     reminders.append("Time is running short — stop exploring and commit to a fix. Apply it "
                                      "(prefer one full write_file over many small edits) and verify it once.")
+            quiet = self._quiet_note()          # a minute or more since the user last read the model
+            if quiet:
+                reminders.append(quiet)
             if reminders:
                 note = "<system-reminder>\n" + "\n".join(reminders) + "\n</system-reminder>"
                 if self.messages and self.messages[-1]["role"] == "user":   # fold into <tool_results>
