@@ -50,7 +50,7 @@ from .agent import Agent
 from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
                        is_slash_command_text, resolve_command)
 from .config import persisted_mcp_args_safe, valid_remote_mcp_url
-from .config import SUBAGENT_WINDOWS, subagent_window_arg as _subagent_window_arg
+from .config import SEARCH_PROVIDERS, SUBAGENT_WINDOWS, subagent_window_arg as _subagent_window_arg
 from .config import subagent_window_text as _subagent_window_text
 from .monitors import plural
 from .reasoning import (display_text as reasoning_display_text, label_suffix as reasoning_label_suffix,
@@ -806,6 +806,12 @@ class TUI:
         "Files pane": [
             ("trash_mode", "/files deletes go to", "enum", ["dgc", "os"]),
         ],
+        # The one web search Work, ChatDGC and Pips share. The key is typed masked and never shown back.
+        "Web search": [
+            ("search_provider", "Provider", "enum", list(SEARCH_PROVIDERS)),
+            ("search_api_key", "API key (Brave, Tavily, Ollama)", "secret"),
+            ("search_url", "SearXNG address", "str"),
+        ],
         "Turns": [
             ("eta", "Show the turn ETA range", "bool"),
             ("notify", "Ping when a turn finishes", "enum", ["off", "on"]),
@@ -835,6 +841,8 @@ class TUI:
         v = self.config.get(key, "")
         if typ == "bool":
             return "on" if v else "off"
+        if typ == "secret":                     # whether one is saved, never the value
+            return "saved" if v else "(none)"
         return str(v) if v != "" else "(default)"
 
     def _open_settings_cat(self, cat: str) -> None:
@@ -855,6 +863,9 @@ class TUI:
             self._open_overlay(rows, on_pick=lambda r: self._apply_setting(cat, key, r["value"], typ),
                                title=key, footer="↑↓ move · Enter select · Esc back",
                                accent=True, back=lambda: self._open_settings_cat(cat))
+        elif typ == "secret":                   # masked; the saved value is never shown
+            self._ask_input(f"{key} (masked) · Enter saves it · blank removes the saved one ",
+                            lambda text: self._apply_setting(cat, key, text, typ), secret=True)
         else:                                   # str/int/float → free-text input
             cur = self.config.get(key, "")
             self._ask_input(f"{key} = {cur!r}  · type a new value (blank = default) ",
@@ -892,7 +903,10 @@ class TUI:
                 self.agent.autonomous_gate = str(val or "")   # cached on the agent — re-sync live
             elif key == "autonomous_max_turns":
                 self.agent.autonomous_max_turns = int(val or 30)
-        self._flash(f"{key} = {val}" if val not in ("",) else f"{key} reset to default")
+        if typ == "secret":
+            self._flash(f"{key} saved" if val else f"{key} removed")
+        else:
+            self._flash(f"{key} = {val}" if val not in ("",) else f"{key} reset to default")
         self._open_settings_cat(cat)            # back to the category page (values refreshed)
 
     def _close_overlay(self) -> None:

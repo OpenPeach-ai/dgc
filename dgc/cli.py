@@ -794,6 +794,15 @@ def render_help(console, project_root: Path | None = None) -> None:
         style=DIM))
 
 
+def _search_key_prompt(meta: dict) -> str:
+    """The masked prompt for a web search key. Ollama's is optional: Enter keeps none, and a signed-in Ollama on this
+    computer searches without one."""
+    if meta.get("optional_key"):
+        return ("  ollama.com API key (ollama.com → Settings → API keys), or Enter for none "
+                "if Ollama here is signed in › ")
+    return f"  API key for {meta['label']} › "
+
+
 class ClassicSlashCompleter(Completer):
     """Live classic-REPL completion derived from the shared command registry."""
 
@@ -1517,13 +1526,12 @@ class CLI:
             return
         meta = SEARCH_PROVIDERS[p]
         cfg.set("search_provider", p)
-        if meta["needs_key"]:
+        if meta["needs_key"] or meta.get("optional_key"):
             if len(args) > 1:
                 self.ui.error("API keys are not accepted inline — use the masked prompt, dgc setup, or DGC_SEARCH_API_KEY")
                 return
             from getpass import getpass
-            key = getpass(f"  API key for {meta['label']} › ").strip()
-            cfg.set("search_api_key", key)
+            cfg.set("search_api_key", getpass(_search_key_prompt(meta)).strip())
         if meta["needs_url"]:
             url = args[1] if len(args) > 1 else input(f"  base URL for {meta['label']} › ").strip()
             cfg.set("search_url", url)
@@ -2402,9 +2410,9 @@ def run_setup(config: Config) -> None:
     sk = skeys[si] if si is not None else "duckduckgo"
     config.set("search_provider", sk)
     meta = SEARCH_PROVIDERS[sk]
-    if meta["needs_key"]:
+    if meta["needs_key"] or meta.get("optional_key"):
         from getpass import getpass
-        config.set("search_api_key", getpass(f"  API key for {meta['label']} › ").strip())
+        config.set("search_api_key", getpass(_search_key_prompt(meta)).strip())
     if meta["needs_url"]:
         config.set("search_url", input(f"  base URL for {meta['label']} › ").strip())
     offer_voice(c)

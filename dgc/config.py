@@ -461,8 +461,8 @@ DEFAULTS: dict = {
     "mouse": "capture",                         # capture (wheel scrolls DGC, rows clickable) | off (terminal selection)
     "session_redaction": True,                  # strip credentials from durable transcript/plan history;
                                                 # exact file rewind snapshots stay private and unchanged
-    "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
-    "search_api_key": "",                       # for brave / tavily
+    "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng | ollama
+    "search_api_key": "",                       # for brave / tavily; ollama without a signed-in Ollama
     "search_url": "",                           # for searxng (self-hosted base URL)
     "browser_path": "",                         # explicit Chrome/Chromium; else CHROME_PATH, the
                                                 # Playwright cache, PATH, the usual locations, then
@@ -530,12 +530,15 @@ DEFAULTS: dict = {
                                                 #   Ollama already round-trip their own reasoning)
 }
 
-# Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL.
+# Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL. Ollama's key is
+# optional: a signed-in Ollama on this computer searches without one (dgc/search.py).
 SEARCH_PROVIDERS: dict[str, dict] = {
     "duckduckgo": {"label": "DuckDuckGo (keyless, default)",  "needs_key": False, "needs_url": False},
     "brave":      {"label": "Brave Search (API key)",         "needs_key": True,  "needs_url": False},
     "tavily":     {"label": "Tavily (API key)",               "needs_key": True,  "needs_url": False},
     "searxng":    {"label": "SearXNG (self-hosted base URL)", "needs_key": False, "needs_url": True},
+    "ollama":     {"label": "Ollama web search (your Ollama sign-in, or an ollama.com API key)",
+                   "needs_key": False, "needs_url": False, "optional_key": True},
 }
 
 # One-command connection presets — used by `dgc setup`, `/connect <name>`, and the docs.

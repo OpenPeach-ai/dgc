@@ -6,6 +6,18 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Ollama web search.** Web search has a fifth provider, Ollama (`/search ollama`, `dgc setup`, the TUI's
+  `/settings` → Web search, or `search_provider: ollama`). If Ollama on this computer is signed in (`ollama signin`,
+  Ollama 0.18 or later), it searches with that sign-in and needs no key: DGC asks the Ollama at `OLLAMA_HOST`
+  (default `http://127.0.0.1:11434`), and Ollama signs the request to ollama.com itself. Otherwise it uses an
+  ollama.com API key (ollama.com → Settings → API keys), kept in `~/.dgc/secrets.json` like a Brave or Tavily key
+  and never shown back. When it can't search, it says why and what to do: Ollama isn't running, is too old, isn't
+  signed in or has its cloud features off, and no key is saved; or ollama.com refused the key. A rate limit or a
+  server error fails as the other providers' do. Each result carries its page's text, and the start of it is the
+  snippet. Ollama has no image search, so a ChatDGC reply shows no pictures with it.
+- **The TUI's `/settings` has a Web search page**: the provider, the key (typed masked, never shown back; blank
+  removes it) and the SearXNG address.
+
 - **The benchmark is retired.** The harness-comparison benchmark, its scripts and its page on vibedgc.com are gone. The
   edit safety gate that lived beside it is still a release gate, now in `scripts/edit_micro.py`.
 - **A Pip speaks for its runs.** The extension now draws each run in a Pip's chat as the Pip saying it, in first-person

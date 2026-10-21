@@ -3407,6 +3407,17 @@ DuckDuckGo is the keyless default. `dgc setup` or `/search` picks another backen
 - `/search brave` · `/search tavily` — prompts for an API key (masked). The value lives in
   `~/.dgc/secrets.json` or `DGC_SEARCH_API_KEY`, never in `config.json`.
 - `/search searxng <url>` — a self-hosted instance. `search_url` in config is that base URL.
+- `/search ollama` — Ollama's web search. If Ollama on this computer is signed in (`ollama signin`,
+  Ollama 0.18 or later), it searches with that sign-in and needs no key: DGC asks the Ollama at
+  `OLLAMA_HOST` (default `http://127.0.0.1:11434`), which signs the request to ollama.com itself.
+  Otherwise paste an ollama.com API key at the masked prompt (ollama.com → Settings → API keys);
+  Enter leaves none. A saved key is used only when the local Ollama can't search (not running,
+  too old, not signed in, or its cloud features turned off). Results carry each page's text, and
+  DGC keeps the start of it as the snippet. Ollama has no image search.
+
+In the TUI, `/settings` → **Web search** sets the provider, the key (typed masked, never shown
+back; blank removes it) and the SearXNG address. The editor's **Settings → Web search** sets the
+same three.
 
 `search_timeout` bounds the request (1–60 seconds). Queries leave this machine for the chosen
 provider; treat that like any other web request.
@@ -3688,9 +3699,10 @@ when you want to override it.
 
 ## Web search
 
-- `search_provider` (default `duckduckgo`) — which backend answers the agent's web searches.
-  DuckDuckGo needs no key: it uses the bundled `ddgs` client, falling back to DGC's own HTML and
-  lite parsing.
+- `search_provider` (default `duckduckgo`) — which backend answers the agent's web searches:
+  `duckduckgo`, `brave`, `tavily`, `searxng` or `ollama`. DuckDuckGo needs no key: it uses the
+  bundled `ddgs` client, falling back to DGC's own HTML and lite parsing. Ollama needs no key when
+  Ollama on this computer is signed in; otherwise it uses `search_api_key` (an ollama.com API key).
 - `search_url` — a custom endpoint for a self-hosted search backend; empty uses the provider's own.
 - `search_api_key` lives in `secrets.json` (above). Web providers use bounded transport timeouts.
 

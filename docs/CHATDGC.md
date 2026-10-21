@@ -99,6 +99,9 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   - Brave and Tavily need a key, which is kept in `~/.dgc/secrets.json` (owner-only), where `dgc setup`
     keeps it too.
   - SearXNG is a server you run.
+  - Ollama searches with your Ollama sign-in when Ollama on this computer is signed in, and needs nothing
+    else; otherwise it takes an ollama.com API key (ollama.com → Settings → API keys), kept like the others.
+    It has no image search, so a reply shows no pictures with it.
 - **Model and thinking.** As in main DGC, one button by Send names the model (a small arc beside it shows how much
   it thinks) and opens a menu: the models, and a **dial** for thinking. Click a mark, drag round it, or step it with
   the arrow keys: Off ("answers right away"), Low, Medium, High ("thinks hard: slower, more careful") or Extra high.

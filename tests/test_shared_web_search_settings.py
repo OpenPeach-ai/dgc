@@ -56,6 +56,11 @@ class ValidationTests(unittest.TestCase):
         for key in ("search_provider", "search_url", "search_api_key"):
             self.assertIn(key, headless._LIVE_SAFE_CONFIG_KEYS, "read at each search: it can change mid-turn")
 
+    def test_ollama_is_one_settings_may_choose(self):
+        values, problem = self.check({"search_provider": "ollama", "search_api_key": KEY})
+        self.assertIsNone(problem)
+        self.assertEqual(values["search_provider"], "ollama")
+
     def test_what_is_refused(self):
         for bad in ({"search_url": "ftp://search.example.org"}, {"search_url": "search.example.org"},
                     {"search_url": "https://user:pw@search.example.org"}, {"search_url": "https://a b"},
@@ -120,6 +125,24 @@ class SettingsTests(unittest.TestCase):
         fresh = Config(project_root=self.host.default.config.project_root)
         self.assertEqual((fresh.get("search_provider"), fresh.get("search_api_key")), ("brave", KEY), "a new CLI sees it")
         self.assertEqual(pip_app_links._search_settings(fresh), ("brave", KEY, ""), "and so does a Pip's search")
+
+    def test_the_handshake_says_which_providers_settings_may_offer(self):
+        # Settings offers Ollama only to a CLI that lists it: an older one refuses the whole save on a provider it
+        # doesn't know. The list rides in ready.capabilities, an open object (a new field on `ready` would not).
+        ready = self.host.default._ready_payload()
+        self.assertEqual(ready["capabilities"]["search_providers"], list(config_module.SEARCH_PROVIDERS))
+        self.assertIn("ollama", ready["capabilities"]["search_providers"])
+        self.assertIsNone(ep.event_error({"type": "ready", "seq": 1, **ready}), "the handshake is still valid")
+        self.host.dispatch({"type": "set_config", "request_id": "o1",
+                            "values": {"search_provider": "ollama", "search_api_key": KEY}})
+        self.assertEqual([f for f in self.frames() if f["type"] == "command_rejected"], [])
+        self.assertEqual(json.loads((self.user / "secrets.json").read_text()).get("search_api_key"), KEY,
+                         "kept where Brave's and Tavily's are")
+        self.host.dispatch({"type": "get_config", "request_id": "o2", "fields": ["search_url", "search_api_key_set"]})
+        asked = self.last("config")
+        self.assertEqual((asked["search"], asked["search_api_key_set"]), ("ollama", True))
+        self.assertIsNone(ep.event_error(asked))
+        self.assertNotIn(KEY, self.wire.getvalue())
 
     def test_settings_hears_whether_a_key_is_saved_never_the_key(self):
         self.host.dispatch({"type": "set_config", "values": {"search_provider": "searxng",

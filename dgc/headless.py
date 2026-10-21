@@ -34,7 +34,7 @@ from .editor_context import _editor_context_json, _format_editor_context, _strip
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
-from .config import Config, mcp_url_has_credentials
+from .config import SEARCH_PROVIDERS, Config, mcp_url_has_credentials
 from .editor_protocol import (MAX_COMMAND_BYTES, MAX_EVENT_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
                               command_error, event_error)
 from .permissions import Rule, rule_for
@@ -378,7 +378,7 @@ _CONFIG_ENUMS = {
     "fallback_api_mode": frozenset({"", "auto", "ollama", "anthropic",
                                      "chat_completions", "responses"}),
     "provider_state": frozenset({"stateless", "server"}),
-    "search_provider": frozenset({"duckduckgo", "brave", "tavily", "searxng"}),
+    "search_provider": frozenset(SEARCH_PROVIDERS),
     "tool_profile": frozenset({"standard", "adaptive", "full"}),
     "chatdgc_personality": frozenset({"default", "concise", "warm", "candid", "nerdy"}),
     # ChatDGC's context window: a preset, clamped to the model's real limit (dgc/chatdgc/window.py).
@@ -2221,6 +2221,9 @@ class Backend:
                           "heic_images": True,
                           # context_breakdown is understood: what fills the window, part by part.
                           "context_breakdown": 1,
+                          # The web search providers set_config's search_provider takes (Settings -> Web search
+                          # offers only these): an older CLI refuses the whole save on one it doesn't know.
+                          "search_providers": list(SEARCH_PROVIDERS),
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
                           "session_policy": self._session_policy_capability(),
                           **self._chats_capability(), **self._chatdgc_capability()},
