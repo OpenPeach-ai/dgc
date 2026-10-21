@@ -14,7 +14,9 @@ export type PipResult = Record<string, PipJson>;
 export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "medium" | "high" | "xhigh" };
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
+export type PipLevel = "ask" | "approve" | "full";
 export type PipReadParams = {
+  get_pip_level: { pip_id: string };
   get_pip_working_notes: { pip_id: string };
   list_pip_daily_log: { pip_id: string; before?: string; limit?: number };
   list_pip_logins: { pip_id?: string };
@@ -106,6 +108,7 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  set_pip_level: { pip_id: string; level: PipLevel };
   set_pip_working_notes: { pip_id: string; text: string; expected_revision: string };
   save_pip_login: { pip_id: string; username: string; password: string; totp?: string; pips?: "only" | "all" }
     & ({ site: string } | { action_id: string; expected_digest: string });
@@ -203,6 +206,8 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  get_pip_level: ["pip_id"],
+  set_pip_level: ["pip_id", "level"],
   get_pip_working_notes: ["pip_id"],
   set_pip_working_notes: ["pip_id", "text", "expected_revision"],
   list_pip_daily_log: ["pip_id", "before", "limit"],
@@ -671,6 +676,14 @@ const API57_READS = new Set(["get_pip_working_notes", "list_pip_daily_log"]);
 const API57_MUTATIONS = new Set(["set_pip_working_notes"]);
 for (const command of API57_READS) READS.add(command);
 for (const command of API57_MUTATIONS) MUTATIONS.add(command);
+// API 58: how much a Personal Pip asks. get_pip_level reads its level (ask, approve or full), the three with their one
+// line each, and what its level let through on its own; set_pip_level sets it (ask is as before; approve: DGC approves
+// routine steps itself and asks for consequential ones; full: no asking except payments). Local only.
+const API58_READS = new Set(["get_pip_level"]);
+const API58_MUTATIONS = new Set(["set_pip_level"]);
+for (const command of API58_READS) READS.add(command);
+for (const command of API58_MUTATIONS) MUTATIONS.add(command);
+const PIP_LEVELS = new Set(["ask", "approve", "full"]);
 function checkLoginSave(values: Record<string, unknown>): void {
   for (const key of ["pip_id", "username", "password"]) {
     if (typeof values[key] !== "string") throw new DGCConfigError("save_pip_login takes pip_id, username and password as strings");
@@ -775,7 +788,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -860,6 +873,7 @@ export class Pips {
     if (command === "set_pip_eyes" && !EYES_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be ask, relay or off");
     if (command === "set_pip_computer_apps" && !APPS_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be download or not_now");
     if (command === "save_pip_login") checkLoginSave(values);
+    if (command === "set_pip_level" && !PIP_LEVELS.has(values.level as string)) throw new DGCConfigError("level must be ask, approve or full");
     if (command === "grant_pip_login" && !(values.pips === "all" || Array.isArray(values.pips) && values.pips.length <= 64 && values.pips.every((p) => typeof p === "string"))) {
       throw new DGCConfigError("pips is \"all\" or a list of Pip ids");
     }

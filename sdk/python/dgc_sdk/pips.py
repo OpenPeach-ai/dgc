@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "get_pip_level",
     "get_pip_working_notes", "list_pip_daily_log",
     "list_pip_logins",
     "get_pip_computer_apps",
@@ -73,6 +74,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "set_pip_level",
     "set_pip_working_notes",
     "save_pip_login", "remove_pip_login", "grant_pip_login",
     "set_pip_computer_apps",
@@ -278,7 +280,17 @@ API57_READS = frozenset({'get_pip_working_notes', 'list_pip_daily_log'})
 API57_MUTATIONS = frozenset({'set_pip_working_notes'})
 READ_COMMANDS |= API57_READS
 MUTATION_COMMANDS |= API57_MUTATIONS
+# API 58: how much a Personal Pip asks. get_pip_level reads its level (ask, approve or full), the three with their one
+# line each, and what its level let through on its own; set_pip_level sets it (ask is as before; approve: DGC approves
+# routine steps itself and asks for consequential ones; full: no asking except payments). Local only.
+API58_READS = frozenset({'get_pip_level'})
+API58_MUTATIONS = frozenset({'set_pip_level'})
+READ_COMMANDS |= API58_READS
+MUTATION_COMMANDS |= API58_MUTATIONS
+PIP_LEVELS = frozenset({'ask', 'approve', 'full'})
 COMMAND_FIELDS = {
+    'get_pip_level': frozenset({'pip_id'}),
+    'set_pip_level': frozenset({'pip_id', 'level'}),
     'get_pip_working_notes': frozenset({'pip_id'}),
     'set_pip_working_notes': frozenset({'pip_id', 'text', 'expected_revision'}),
     'list_pip_daily_log': frozenset({'pip_id', 'before', 'limit'}),
@@ -596,7 +608,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API57_READS | API57_MUTATIONS:
+        if command in API58_READS | API58_MUTATIONS:
+            minimum = 58
+        elif command in API57_READS | API57_MUTATIONS:
             minimum = 57
         elif command in API56_READS | API56_MUTATIONS:
             minimum = 56
@@ -717,6 +731,8 @@ class Pips:
             raise DGCConfigError('choice must be download or not_now')
         if command == 'save_pip_login':
             _check_login_save(values)
+        if command == 'set_pip_level' and values.get('level') not in PIP_LEVELS:
+            raise DGCConfigError('level must be ask, approve or full')
         if command == 'grant_pip_login' and not (values.get('pips') == 'all' or (
                 type(values.get('pips')) is list and len(values['pips']) <= 64 and all(type(p) is str for p in values['pips']))):
             raise DGCConfigError('pips is "all" or a list of Pip ids')
