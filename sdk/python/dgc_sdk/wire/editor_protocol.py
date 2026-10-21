@@ -399,6 +399,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "configured": _I(), "duration_ms": _I(), "message": _NS(False),
     },
     "handoff_started": {"request_id": _S()},
+    # The /learn draft, shown with Save, Edit and Cancel: `ok` false says why in `message`. `scope` is where Save
+    # would put it and `folder` that place.
+    "skill_draft": {"request_id": _S(), "ok": _B(), "name": _S(False), "description": _S(False),
+                    "markdown": _S(False), "scope": _S(False), "folder": _S(False), "message": _S(False)},
+    "skill_saved": {"request_id": _S(), "ok": _B(), "name": _S(False), "path": _S(False), "scope": _S(False),
+                    "message": _S(False)},
     "skill_package": {"request_id": _S(), "name": _S(), "path": _S(), "operation": _S(), "files": _I()},
     "mcp_context_catalog": {"request_id": _S(), "server": _S(), "kind": _S(), "items": _A(), "error": _S(False)},
     "mcp_context": {"request_id": _S(), "server": _S(), "kind": _S(), "identifier": _S(),
@@ -757,6 +763,13 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     },
     "list_hooks": {"request_id": _S()},
     "generate_handoff": {"request_id": _S(), "save": _B(False)},
+    # /learn (ready.capabilities.learn): draft a skill from this session, or (`pip_id`) from that Personal Pip's
+    # chat, about `request` when given. Answered by `skill_draft`; nothing is written. save_skill writes the shown,
+    # maybe edited, SKILL.md (`scope` project: this folder's .dgc/skills, only when trusted; user: ~/.dgc/skills),
+    # never over another skill, and journals it so Undo on the Memory page deletes it. Answered by `skill_saved`.
+    "learn_skill": {"request_id": _S(), "request": _S(False), "pip_id": _S(False)},
+    "save_skill": {"request_id": _S(), "markdown": _S(), "scope": _f("string", enum=("project", "user")),
+                   "pip_id": _S(False)},
     "set_think": {
         "level": _f("string", enum=("off", "low", "medium", "high", "xhigh", "max")),
         "request_id": _S(False),
@@ -1039,6 +1052,15 @@ COMMAND_FIELDS.update({
     "memory_forget": {"request_id": _S(), "id": _S()},
     "memory_clear": {"request_id": _S()},
     "memory_project": {"request_id": _S(), "folder": _S(), "remember": _B()},
+    # Memory that learns (ready.capabilities.memory.history): the history of every change (memory_*, a look back
+    # after a conversation, a skill /learn saved), newest first, answered by `memory_history`; once asked, it is
+    # sent again, unasked, after each change. memory_undo takes one change back (`id`: memj_…), answered by
+    # `memory_history` (with `error` when it can't) after an unasked `memory_state`.
+    "memory_history": {"request_id": _S(), "limit": _I(False)},
+    "memory_undo": {"request_id": _S(), "id": _S()},
+    # ready.capabilities.memory.learned: this screen shows the line a Work session's look back adds, so send it
+    # `memory_learned` (an editor that never sends this never gets one). Answered by `memory_state`.
+    "memory_watch": {"request_id": _S()},
     # The context window. Compact now (everything before the last exchange becomes the summary) and editing
     # the summary are answered by `chatdgc_compacted`; Continue in a new chat (a summary of this one goes with
     # it) by `chatdgc_opened` for the new chat. After every turn, and when a chat opens, `chatdgc_context` says
@@ -1126,6 +1148,13 @@ EVENT_FIELDS.update({
     # source: {surface, where}}), the projects from Work sessions ({folder, name, when, recent, remember}), and
     # `error` when the command that asked couldn't be done. Also sent, unasked, after a reply saved or forgot one.
     "memory_state": {"request_id": _S(False), "enabled": _B(), "facts": _A(), "projects": _A(), "error": _S(False)},
+    # The history: [{id, at, op: add | edit | forget | clear | learn | undo, by: you | review | tool, surface, where,
+    # text, before? (an edit's), kind?, until?, scope? and path? (a learned skill's), what? (what an undo undid),
+    # undone, undoable}], newest first.
+    "memory_history": {"request_id": _S(False), "entries": _A(), "error": _S(False)},
+    # A Work session's look back kept these ({id, text, kind?, until?}): the chat shows them once, as a quiet
+    # "Remembered: … · Forget" line. Only after memory_watch.
+    "memory_learned": {"facts": _A(), "surface": _S()},
     # Voice: the models ({id, role, name, summary, languages, licence, size, installed, in_use, installing}), whether
     # the engine is installed, and which model dictates and which reads aloud ("" for none).
     "voice_state": {"request_id": _S(False), "runtime": _O(), "models": _A(), "dictation": _S(), "read_aloud": _S()},

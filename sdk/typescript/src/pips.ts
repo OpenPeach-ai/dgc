@@ -15,6 +15,8 @@ export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  get_pip_working_notes: { pip_id: string };
+  list_pip_daily_log: { pip_id: string; before?: string; limit?: number };
   list_pip_logins: { pip_id?: string };
   get_pip_computer_apps: Record<string, never>;
   get_pip_eyes: { pip_id: string };
@@ -104,6 +106,7 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  set_pip_working_notes: { pip_id: string; text: string; expected_revision: string };
   save_pip_login: { pip_id: string; username: string; password: string; totp?: string; pips?: "only" | "all" }
     & ({ site: string } | { action_id: string; expected_digest: string });
   remove_pip_login: { login_id: string };
@@ -200,6 +203,9 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  get_pip_working_notes: ["pip_id"],
+  set_pip_working_notes: ["pip_id", "text", "expected_revision"],
+  list_pip_daily_log: ["pip_id", "before", "limit"],
   list_pip_logins: ["pip_id"],
   save_pip_login: ["pip_id", "site", "username", "password", "totp", "pips", "action_id", "expected_digest"],
   remove_pip_login: ["login_id"],
@@ -657,6 +663,14 @@ const API56_READS = new Set(["list_pip_logins"]);
 const API56_MUTATIONS = new Set(["save_pip_login", "remove_pip_login", "grant_pip_login"]);
 for (const command of API56_READS) READS.add(command);
 for (const command of API56_MUTATIONS) MUTATIONS.add(command);
+// API 57: memory that learns, for Pips. get_pip_working_notes reads a Personal Pip's own working notes (the lines it
+// keeps with its working_notes tool and starts every run with, within 60 lines or 6 KB); set_pip_working_notes is your
+// edit of them (text, one line a note, and the expected_revision you read). list_pip_daily_log reads what it did each
+// day (before, a YYYY-MM-DD, and limit, 1 to 14 days), written by DGC from its runs. Local only; never a secret.
+const API57_READS = new Set(["get_pip_working_notes", "list_pip_daily_log"]);
+const API57_MUTATIONS = new Set(["set_pip_working_notes"]);
+for (const command of API57_READS) READS.add(command);
+for (const command of API57_MUTATIONS) MUTATIONS.add(command);
 function checkLoginSave(values: Record<string, unknown>): void {
   for (const key of ["pip_id", "username", "password"]) {
     if (typeof values[key] !== "string") throw new DGCConfigError("save_pip_login takes pip_id, username and password as strings");
@@ -761,7 +775,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);

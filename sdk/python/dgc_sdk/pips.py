@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "get_pip_working_notes", "list_pip_daily_log",
     "list_pip_logins",
     "get_pip_computer_apps",
     "get_pip_eyes",
@@ -72,6 +73,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "set_pip_working_notes",
     "save_pip_login", "remove_pip_login", "grant_pip_login",
     "set_pip_computer_apps",
     "set_pip_eyes",
@@ -268,7 +270,18 @@ API56_READS = frozenset({'list_pip_logins'})
 API56_MUTATIONS = frozenset({'save_pip_login', 'remove_pip_login', 'grant_pip_login'})
 READ_COMMANDS |= API56_READS
 MUTATION_COMMANDS |= API56_MUTATIONS
+# API 57: memory that learns, for Pips. get_pip_working_notes reads a Personal Pip's own working notes (the lines it
+# keeps with its working_notes tool and starts every run with, within 60 lines or 6 KB); set_pip_working_notes is your
+# edit of them (text, one line a note, and the expected_revision you read). list_pip_daily_log reads what it did each
+# day (before, a YYYY-MM-DD, and limit, 1 to 14 days), written by DGC from its runs. Local only; never a secret.
+API57_READS = frozenset({'get_pip_working_notes', 'list_pip_daily_log'})
+API57_MUTATIONS = frozenset({'set_pip_working_notes'})
+READ_COMMANDS |= API57_READS
+MUTATION_COMMANDS |= API57_MUTATIONS
 COMMAND_FIELDS = {
+    'get_pip_working_notes': frozenset({'pip_id'}),
+    'set_pip_working_notes': frozenset({'pip_id', 'text', 'expected_revision'}),
+    'list_pip_daily_log': frozenset({'pip_id', 'before', 'limit'}),
     'list_pip_logins': frozenset({'pip_id'}),
     'save_pip_login': frozenset({'pip_id', 'site', 'username', 'password', 'totp', 'pips', 'action_id', 'expected_digest'}),
     'remove_pip_login': frozenset({'login_id'}),
@@ -583,7 +596,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API56_READS | API56_MUTATIONS:
+        if command in API57_READS | API57_MUTATIONS:
+            minimum = 57
+        elif command in API56_READS | API56_MUTATIONS:
             minimum = 56
         elif command in API54_READS | API54_MUTATIONS:
             minimum = 54

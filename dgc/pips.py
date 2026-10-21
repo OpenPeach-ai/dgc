@@ -74,6 +74,7 @@ CONTROL_COMMANDS = frozenset({
     "set_pip_chat_options",
     "list_pip_reply_stats", "get_pips_limit", "set_pips_limit", "list_pip_attention",
     "list_pip_notes", "add_pip_note", "forget_pip_note", "list_pip_sites", "set_pip_careful", "forget_pip_site",
+    "get_pip_working_notes", "set_pip_working_notes", "list_pip_daily_log",
     "set_plugin_permission",
     "check_pip_source", "get_pip_run_source",
     "list_pip_run_posts",
@@ -116,6 +117,9 @@ _COMMAND_ARGS = {
     "list_pip_plugins": {"pip_id"}, "allow_pip_plugin": {"pip_id", "grant_id"}, "decline_pip_plugin": {"pip_id", "grant_id"},
     "list_pip_plugin_uses": set(), "list_pip_attention": {"limit"}, "list_pip_notes": {"pip_id", "shared"}, "add_pip_note": {"pip_id", "text", "shared"},
     "forget_pip_note": {"pip_id", "note_id", "all", "shared"}, "list_pip_sites": {"pip_id"}, "set_pip_careful": {"pip_id", "on"},
+    # API 57: a Personal Pip's own working notes (pip_working_notes) and its daily log (pip_daily_log).
+    "get_pip_working_notes": {"pip_id"}, "set_pip_working_notes": {"pip_id", "text", "expected_revision"},
+    "list_pip_daily_log": {"pip_id", "before", "limit"},
     "set_plugin_permission": {"plugin", "level"},
     "forget_pip_site": {"pip_id", "site"}, "get_pip_chat_context": {"pip_id", "context_size"},
     "set_pip_chat_options": {"pip_id", "chat_options"},
@@ -1652,6 +1656,9 @@ class PipStore:
                 if status == "failed":
                     from .pip_run_posts import post as post_in_chat
                     post_in_chat(self.registry, row["id"])      # "Pips stopped before the run finished", in its chat
+                from . import pip_daily_log
+                pip_daily_log.after_run(self.registry.directory, self.db, {**dict(row), "manifest": json.loads(row["manifest"])},
+                                        status=status, error=error)
                 self.registry.event(row["workspace_id"], "pip_run_" + status, pip_id=row["pip_id"], run_id=row["id"], payload=error)
         return len(rows)
 
@@ -1684,6 +1691,11 @@ class PipStore:
             if run["status"] == "running" and not error and not isinstance(result, dict):
                 raise RegistryError("invalid_result", "A successful audit requires a structured result.")
             status = "cancelled" if run["status"] == "cancelling" else "failed" if error else "succeeded"
+            # Its working notes (pip_working_notes): changes the Pip made, applied by this supervisor alone.
+            notes_ops = None
+            if isinstance(result, dict) and "working_notes" in result:
+                result = dict(result)
+                notes_ops = result.pop("working_notes")
             raw_row = self._transition_row(run_id)
             pulse = self._pulse_terminal(raw_row, status, error, result)
             if status == "cancelled":
@@ -1742,9 +1754,43 @@ class PipStore:
                 # Its result, in its own chat: once, in this transaction (pip_run_posts).
                 from .pip_run_posts import post as post_in_chat
                 post_in_chat(self.registry, run_id)
+            if notes_ops and status == "succeeded" and run["manifest"].get("run_kind") in ("conversation", "personal_task"):
+                self._commit_working_notes(run, notes_ops)
             self.registry.event(run["workspace_id"], "pip_run_" + status, pip_id=run["pip_id"], run_id=run_id,
                                 payload={"status": status, "error": error})
+        # What it did today, a line a run, for the user to read on its page (pip_daily_log); never given to a run.
+        from . import pip_daily_log
+        pip_daily_log.after_run(self.registry.directory, self.db, run, status=status, result=result, error=error,
+                                secrets=self._saved_secrets())
         return self._transition_view(run_id)
+
+    def _saved_secrets(self):
+        """The credentials this process knows (its environment's): a line or a log never holds one."""
+        try:
+            from .redaction import secret_values
+            return secret_values(getattr(self, "config", None))
+        except Exception:                          # noqa: BLE001 -- the patterns in contains_secret still apply
+            return ()
+
+    def _commit_working_notes(self, run, ops):
+        """The changes a run made to its Pip's working notes, checked again (the worker isn't trusted): no secret,
+        nothing carried from what it read in the user's apps, within the budget."""
+        from . import pip_careful, pip_working_notes
+        from .pip_notes import user_turn
+        try:
+            ops = pip_working_notes.validate_ops(ops)
+        except RegistryError:
+            return
+        personal = self.db.execute("SELECT 1 FROM pips p JOIN workspaces w ON w.id=p.workspace_id WHERE p.id=? AND "
+                                   "w.kind='personal'", (run["pip_id"],)).fetchone()
+        if personal is None:
+            return
+        said = (user_turn(self.registry, run) or "") if run["manifest"].get("run_kind") == "conversation" else ""
+        try:
+            pip_working_notes.commit(self.registry.directory, run["pip_id"], ops, secrets=self._saved_secrets(),
+                                     taint=pip_careful.taint_for(self.registry.directory, run["pip_id"]), said=said)
+        except (RegistryError, OSError):
+            pass
 
 
 def _listed_error(raw):
@@ -2621,6 +2667,15 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     # A reviewed handoff stays the narrow task it was approved as: no skills there.
     pip_skills = (personal_skills(config) if personal and kind in ('personal_task', 'conversation') and 'handoff' not in manifest
                   else {})
+    # Its own working notes (pip_working_notes): read at the start, changed with its tool, saved by the supervisor.
+    working_notes = None
+    if 'working_notes' in manifest:
+        if not personal or kind not in ('personal_task', 'conversation') or 'handoff' in manifest:
+            raise RegistryError('invalid_notes', "A Pip's working notes belong only to its chat and its tasks.")
+        from . import pip_working_notes
+        from .redaction import secret_values as _notes_secrets
+        working_notes = pip_working_notes.Worker(pip_working_notes.validate_pin(manifest['working_notes']),
+                                                 _notes_secrets(config))
     task_history = (pip_chat_setup.validate_reference(manifest['personal_history'], manifest)
                     if 'personal_history' in manifest else None)
 
@@ -2793,7 +2848,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else [])
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else [])
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -3021,6 +3076,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 from .tools import skill_tool
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 return skill_tool(arguments, types.SimpleNamespace(skills=pip_skills))
+            if working_notes is not None and call.name == pip_working_notes.TOOL:
+                return working_notes.call(call.arguments if isinstance(call.arguments, dict) else {})
             if keeps_notes and call.name == pip_notes.TOOL:
                 if len(note_candidates) >= pip_notes.MAX_PER_REPLY:
                     return 'Not kept: a reply keeps at most three notes.'
@@ -3268,6 +3325,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     if about_you and conversation is None:
         from .shared_memory import NOTICE as about_notice
         prompt += "\n\n" + about_notice + "\n" + _json(about_you)
+    if working_notes is not None and conversation is None:
+        prompt += "\n\n" + pip_working_notes.NOTICE + "\n" + (_json(working_notes.lines) if working_notes.lines else "(none yet)")
     if conversation is not None:
         agent.messages[1:] = [dict(message) for message in conversation["history"]]
         reference = {
@@ -3289,6 +3348,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             reference["user_notes"] = user_notes
         if about_you:
             reference["about_you"] = about_you
+        if working_notes is not None:
+            reference["working_notes"] = working_notes.lines
         from .pip_memory_references import NOTICE as typed_memory_notice
         from .shared_memory import NOTICE as about_notice
         from .pip_notes import NOTICE as notes_notice
@@ -3299,6 +3360,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             + ("\n\n" + run_posts_notice if conversation.get("run_posts") else "")
             + ("\n\nuser_notes: " + notes_notice if user_notes else "")
             + ("\n\nabout_you: " + about_notice if about_you else "")
+            + ("\n\nworking_notes: " + pip_working_notes.NOTICE if working_notes is not None else "")
             + (_app_tools_note(apps_pin) if personal and apps_pin is not None else "")
             + ("\n\n" + left_out_told if left_out_told else "")
             + "\n\nCurrent user message:\n" + conversation["text"])
@@ -3405,7 +3467,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 job={key: reference[key] for key in ("approved_job", "pinned_source", "approved_job_version")},
                 memory=[("Pip memory", [working_memory, memory_notice] if working_memory is not None else None),
                         ("What it remembers", [user_notes, notes_notice] if user_notes else None),
-                        ("Your memory in DGC", [about_you, about_notice] if about_you else None)],
+                        ("Your memory in DGC", [about_you, about_notice] if about_you else None),
+                        ("Working notes", [working_notes.lines, pip_working_notes.NOTICE]
+                         if working_notes is not None and working_notes.lines else None)],
                 skills=skill_lines, skills_text=skills_note,
                 apps=_app_tools_note(apps_pin) if apps_pin is not None else "",
                 changing=[reference.get("conversation_continuation"), conversation["text"], files_note])
@@ -3506,6 +3570,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 result['routine_drafts'] = routine_candidates
             if note_candidates:
                 result['memory_notes'] = note_candidates
+            if working_notes is not None and working_notes.ops:
+                result['working_notes'] = working_notes.ops
             if context_measure is not None:
                 result['context'] = context_measure
             if 'continuity' in conversation:
@@ -3515,6 +3581,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     raise RegistryError('model_failed', 'The conversation was cancelled before its checkpoint completed.')
         elif kind == "personal_task":
             result = {"text": pip_chat.validate_text(final, reply=True), "external_actions": False}
+            if working_notes is not None and working_notes.ops:
+                result['working_notes'] = working_notes.ops
             # Drafts only: nothing ran. The runner runs one a grant covers after this result is saved.
             for field, candidate in (('message_draft', email_candidate), ('calendar_draft', calendar_candidate),
                                      ('connector_action_draft', connector_candidate)):
@@ -3886,6 +3954,9 @@ def _execute_run(registry, row, config):
             about_you = shared_memory.for_run(config, saved_secrets(config))
             if about_you:
                 manifest = {**manifest, "about_you": about_you}
+            # Its own working notes (pip_working_notes), which every run of it starts with.
+            from . import pip_working_notes
+            manifest = pip_working_notes.runtime(registry, row, manifest, saved_secrets(config))
             # How it sees (pip_eyes): the user's choice, and the model that would look for one that can't.
             from . import pip_eyes
             try:
@@ -4217,9 +4288,13 @@ def _run_claimed(registry, store, row, config, directory):
     with _THREAD_LOCK:
         _ACTIVE_RUNS.setdefault(str(directory), set()).add(row["id"])
     try:
+        from . import pip_memory_review
+        pip_memory_review.run_started(registry.directory, row["pip_id"])    # its chat isn't quiet any more
         result = _execute_run(registry, row, config)
         store.finish(row["id"], result=result)
         _run_granted_actions(registry, config, row["id"])
+        # The user's one memory: their words to this Pip, looked back over now or once its chat is quiet.
+        pip_memory_review.after_run(registry, config, row["id"])
     except Exception as exc:
         from .redaction import redact_text, secret_values
         store.finish(row["id"], error={"code": getattr(exc, "code", "run_failed"),
@@ -4398,6 +4473,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
         if command == "add_pip_note" and redact_value(request.get("text"), secret_values(config)) != request.get("text"):
             # Refuse, rather than keep a note with a hole where a password was.
             raise RegistryError("secret_note", "A note can't hold a password, key or code.")
+        if command == "set_pip_working_notes" and redact_value(request.get("text"), secret_values(config)) != request.get("text"):
+            raise RegistryError("secret_note", "A working note never holds a password, a code, a key or a card or "
+                                               "account number.")
         if command in ("propose_pip_handoff", "propose_pip_artifact_handoff") and redact_value(request.get("action"), secret_values(config)) != request.get("action"):
             raise RegistryError("invalid_handoff", "Do not put credentials in reviewed command arguments or write paths.")
         if command == 'propose_pip_update' and isinstance(request.get('changes'), dict) and 'verification_plan' in request['changes']:
@@ -4695,6 +4773,24 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     if not isinstance(request.get('site'), str) or not request['site'].strip():
                         raise RegistryError('invalid_request', 'Choose a site.')
                     result = pip_careful.forget_site(registry, pip_id, request['site'], actor)
+            elif command in ('get_pip_working_notes', 'set_pip_working_notes', 'list_pip_daily_log'):
+                # A Personal Pip's own working notes, and the log of what it did each day: on its page, this computer only.
+                from . import pip_daily_log, pip_working_notes
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "A Pip's notes and log are on this computer only.")
+                if registry.db.execute("SELECT 1 FROM pips p JOIN workspaces w ON w.id=p.workspace_id WHERE p.id=? "
+                                       "AND w.kind='personal'", (pip_id,)).fetchone() is None:
+                    raise RegistryError('not_found', 'Working notes and a daily log belong to a Personal Pip.')
+                if command == 'get_pip_working_notes':
+                    result = pip_working_notes.view(registry.directory, pip_id)
+                elif command == 'set_pip_working_notes':
+                    from .redaction import secret_values as saved_secrets
+                    result = pip_working_notes.set_text(registry.directory, pip_id, request.get('text'),
+                                                        request.get('expected_revision'), actor,
+                                                        secrets=saved_secrets(config))
+                else:
+                    result = pip_daily_log.days(registry.directory, pip_id, before=request.get('before'),
+                                                limit=request.get('limit', 7))
             elif command in ('list_pip_notes', 'add_pip_note', 'forget_pip_note'):
                 # What a Personal Pip remembers about you, from your chat: you see, add and forget each note.
                 from . import pip_notes

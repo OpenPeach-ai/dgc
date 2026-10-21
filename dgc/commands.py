@@ -154,6 +154,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 "settings", aliases=("config", "prefs", "preferences")),
     CommandSpec("handoff", "generate a complete continuation handoff", _TCE, "handoff",
                 aliases=("handover",)),
+    CommandSpec("learn", "turn what was just done into a reusable skill (you review it first)",
+                frozenset({"editor"}), "learn", True, usage="learn [WHAT]"),
     CommandSpec("export-training", "export this project's sessions as scrubbed fine-tuning JSONL",
                 _TC, usage="export-training [FILE]", aliases=("export-jsonl",)),
     CommandSpec("hooks", "inspect configured lifecycle hooks", _TCE, "hooks",

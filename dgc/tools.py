@@ -4611,7 +4611,8 @@ def forget_tool(args: dict, ctx) -> str:
     if (getattr(ctx, "config", None) or {}).get("memory", True) is False:
         return "Memory is off: nothing was deleted."
     try:
-        fact = SharedMemory().forget(str(args.get("id") or ""))
+        fact = SharedMemory().forget(str(args.get("id") or ""), by="tool", surface="work",
+                                     where=Path(str(getattr(ctx, "project_root", "") or "")).name)
     except NotRemembered as exc:
         return f"Not done: {exc}"
     return f"Forgotten: {fact['text']}"

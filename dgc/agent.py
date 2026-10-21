@@ -4124,7 +4124,7 @@ class Agent(GoalLifecycle):
             return ""
         try:
             from .shared_memory import MAX_PROMPT_FACTS_CHARS, NotRemembered, SharedMemory
-            facts = SharedMemory().facts()
+            facts = SharedMemory().live_facts()      # a fact whose day has passed isn't read
         except (NotRemembered, OSError):
             return ""
         lines, used = [], 0

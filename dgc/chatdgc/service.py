@@ -159,6 +159,14 @@ class ChatService:
         self._widget_screen = False                      # a screen that tells what a widget shows is here
         self._widget_reports: dict[str, dict] = {}       # widget id -> {event, report}, while a reply waits
         self._closing = False
+        # Memory that learns (dgc/memory_review.py): a chat is looked back over once it's quiet, or as a turn ends
+        # after enough new words. memory_history is sent unasked only to a screen that asked for it once.
+        from .. import memory_review
+        self._review_cancel = threading.Event()
+        self._reviews = memory_review.Reviews(self.engine.unreviewed_chars, self._review_now,
+                                              idle=memory_review.idle_seconds(config))
+        self._history_wanted = False
+        self.watching = False                            # a screen that shows a Work session's "Remembered" line
 
     # -- the router's door
 
@@ -184,7 +192,9 @@ class ChatService:
              "chatdgc_context_breakdown": self._breakdown,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
-             "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory}[kind](cmd)
+             "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory,
+             "memory_history": self._memory_history, "memory_undo": self._memory_undo,
+             "memory_watch": self._memory_watch}[kind](cmd)
         except (ChatEngineError, ChatStoreError) as exc:
             self._error(str(exc), request_id, conversation_id)
 
@@ -714,9 +724,86 @@ class ChatService:
         except NotRemembered as exc:
             error = str(exc)
         self._memory_state(cmd["request_id"], error)
+        if kind != "memory_list":
+            self._history_changed()
+
+    def _memory_history(self, cmd: dict) -> None:
+        """Settings -> Memory's history: every change, who made it and when, with Undo where it still can."""
+        self._history_wanted = True
+        self._send_history(cmd["request_id"], limit=cmd.get("limit"))
+
+    def _send_history(self, request_id: str | None = None, error: str | None = None, *, limit=None) -> None:
+        from ..shared_memory import NotRemembered
+        try:
+            entries = self.engine.memory.history(int(limit) if isinstance(limit, int) and limit > 0 else 50)
+        except NotRemembered as exc:
+            entries, error = [], error or str(exc)
+        fields = {"request_id": request_id} if request_id else {}
+        if error:
+            fields["error"] = error[:1000]
+        self.emit("memory_history", entries=entries, **fields)
+
+    def _history_changed(self) -> None:
+        if self._history_wanted:
+            self._send_history()
+
+    def _memory_undo(self, cmd: dict) -> None:
+        from ..shared_memory import NotRemembered
+        error = None
+        try:
+            self.engine.memory.undo(cmd["id"], by="you")
+            self.engine._projects_cache = (0.0, [])
+        except NotRemembered as exc:
+            error = str(exc)
+        self._memory_state()                       # the facts as they are now, for the page and every Forget
+        self._send_history(cmd["request_id"], error)
+
+    def _memory_watch(self, cmd: dict) -> None:
+        """This screen shows the "Remembered" line a Work session's look back adds: send it memory_learned."""
+        self.watching = True
+        self._memory_state(cmd["request_id"])
+
+    def learned(self) -> None:
+        """Something outside a ChatDGC reply (a Work session's look back) changed memory: refresh what's open."""
+        self._memory_state()
+        self._history_changed()
+
+    # -- memory that learns: a quiet chat is looked back over (memory_review.Reviews decides when)
+
+    def _review_now(self, conversation_id: str) -> None:
+        if self._closing:
+            return
+        with self._lock:
+            if conversation_id in self._turns:
+                return                                # it's answering: looked back over when this turn ends
+        found = self.engine.review_memory(conversation_id, self._review_cancel,
+                                          busy=lambda: conversation_id in self._turns)
+        if not found:
+            return
+        message = found.get("message")
+        if message is not None and message.get("id"):
+            try:
+                marked = self._marked(self.engine.open(conversation_id), [message])[0]
+                self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked))
+            except (ChatEngineError, ChatStoreError):
+                pass
+        self._memory_state()
+        self._history_changed()
+
+    def _review_after(self, conversation_id: str) -> None:
+        """A turn ended: look back now if the user said enough since the last time, else once the chat is quiet.
+        With memory off for this chat, what was said meanwhile is never looked back over."""
+        try:
+            chat = self.engine.open(conversation_id)
+        except (ChatEngineError, ChatStoreError):
+            return
+        if not self.engine._memory_on(chat):
+            self.engine.skip_review(conversation_id)
+            return
+        self._reviews.ended(conversation_id)
 
     def _memory_state(self, request_id: str | None = None, error: str | None = None) -> None:
-        from ..shared_memory import NotRemembered, work_projects
+        from ..shared_memory import NotRemembered, expired, work_projects
         memory = self.engine.memory
         try:
             facts, hidden = memory.facts(), memory.hidden_projects()
@@ -732,7 +819,9 @@ class ChatService:
         self.emit("memory_state", enabled=self.engine.config.get("memory", True) is not False, **fields,
                   facts=[{key: f.get(key) for key in ("id", "text", "created_at", "updated_at")}
                          | ({"edited": True} if f.get("edited") else {})
-                         | {"source": {k: (f.get("source") or {}).get(k, "") for k in ("surface", "where")}}
+                         | ({"kind": f["kind"]} if f.get("kind") else {})
+                         | ({"until": f["until"], "expired": expired(f)} if f.get("until") else {})
+                         | {"source": {k: (f.get("source") or {}).get(k, "") for k in ("surface", "where", "by")}}
                          for f in facts],
                   projects=[{"folder": p["folder"], "name": p["name"], "when": p["when"], "recent": p["recent"],
                              "remember": p["folder"] not in hidden} for p in projects])
@@ -753,6 +842,7 @@ class ChatService:
             if conversation_id in self._turns:
                 raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
             turn = self._turns[conversation_id] = {"cancel": cancel, "reply_id": None, "thread": None}
+        self._reviews.started(conversation_id)       # it isn't quiet any more
         turn["refresh"] = refresh
         thread = threading.Thread(target=self._turn, args=(conversation_id, request_id, cancel, run, turn),
                                   daemon=True, name=f"dgc-chatdgc-{conversation_id[5:13]}")
@@ -851,9 +941,11 @@ class ChatService:
             self._context(conversation_id)
             if reply.get("memory"):
                 self._memory_state()                  # Settings -> Memory, if it's open, shows what changed
+                self._history_changed()
             if reply.get("finish") == "stop":
                 self._name_later(conversation_id)
                 self._followups_later(conversation_id, reply["id"])
+            self._review_after(conversation_id)
         except (ChatEngineError, ChatStoreError) as exc:
             if stream["value"] is not None:
                 stream["value"].flush()
@@ -969,6 +1061,8 @@ class ChatService:
         with self._lock:
             self._closing = True
             turns = list(self._turns.values())
+        self._review_cancel.set()
+        self._reviews.close(min(grace_s, 2.0))
         for turn in turns:
             turn["cancel"].set()
         deadline = time.monotonic() + grace_s

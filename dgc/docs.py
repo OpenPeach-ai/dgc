@@ -1672,11 +1672,23 @@ normal question.
 ## What DGC remembers about you
 
 Separately from these files, DGC keeps one memory about you that ChatDGC, Work sessions and Pips
-share: short facts you told ChatDGC (it saves them as you talk, and says so under the reply) or
-added yourself, plus your projects, from your Work sessions. A Work session reads those facts
-under **# Memory**; it never writes them. See, change or delete everything in **Settings →
-Memory**, where one switch turns it off everywhere. A fact is kept only when you said it yourself,
-never a password, key or account number, and temporary chats are never remembered.
+share: short facts you told ChatDGC, a Work session or a Pip (each keeps what you state about
+yourself, or ask it to remember, and says so) or added yourself, plus your projects, from your
+Work sessions. A Work session reads those facts under **# Memory**. See, change or delete
+everything in **Settings → Memory**, where one switch turns it off everywhere. A fact is kept
+only when you said it yourself, never a password, key or account number, and temporary chats are
+never remembered.
+
+It also learns by itself: once a chat or a session has been quiet a couple of minutes, or a turn
+ends after you've written a paragraph or so, DGC looks back over what you said and keeps at most
+three preferences, facts, decisions or outcomes, by the same rules. The chat shows each once as
+**Remembered: … · Forget**. **Settings → Memory → History** lists every change, who made it and
+when, with **Undo**. Memory off means it never looks.
+
+**/learn** (or `/learn what`) turns what was just done into a skill: DGC drafts a SKILL.md from
+the session and shows it with **Save**, **Edit** and **Cancel**. Nothing is written until you
+save; it goes to the project's `.dgc/skills` when the folder is trusted, otherwise to
+`~/.dgc/skills`, and Undo in History deletes it again.
 
 ## What belongs in it
 

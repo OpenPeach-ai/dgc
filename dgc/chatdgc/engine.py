@@ -23,7 +23,7 @@ from . import plugins as chat_plugins
 from . import window as fit_window
 from . import research
 from .. import context_breakdown as breakdown
-from .. import shared_memory
+from .. import memory_review, shared_memory
 from .prompt import system_prompt
 from .research import NO_TOOLS
 from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_message_id, now,
@@ -1711,7 +1711,7 @@ class ChatEngine:
         if not self._memory_on(chat):
             return None
         try:
-            facts = self.memory.facts()
+            facts = self.memory.live_facts()        # a fact whose day has passed isn't read
         except shared_memory.NotRemembered:
             facts = []
         return shared_memory.prompt_block(facts, self._projects())
@@ -1810,7 +1810,7 @@ class ChatEngine:
         for fact_id in stale or []:
             # Outdated by what they just said (they moved, changed their diet): it goes, and the reply says so.
             try:
-                gone = self.memory.forget(fact_id)
+                gone = self.memory.forget(fact_id, by="tool", surface="chat", where=str(chat.get("title") or ""))
             except shared_memory.NotRemembered:
                 continue
             ops.append({"op": "forgot", "id": gone["id"], "text": gone["text"]})
@@ -1827,6 +1827,86 @@ class ChatEngine:
                 ops.append({"op": "saved", "id": fact["id"], "text": fact["text"]})
                 kept.append(fact["text"])
         return kept
+
+    # -- memory that learns (dgc/memory_review.py): a look back over the chat once it's quiet
+
+    def _unreviewed(self, chat: dict) -> tuple[list[dict], str]:
+        """The exchanges since the last look back: the user's own messages (not a card's answer, which the model
+        wrote for them) with the reply to each, and when the newest of them was sent."""
+        mark = str(chat.get("memory_reviewed") or "")
+        turns, newest = [], ""
+        messages = chat.get("messages") or []
+        for index, message in enumerate(messages):
+            if message.get("role") != "user" or message.get("answers") or str(message.get("created_at") or "") <= mark:
+                continue
+            text = str(message.get("text") or "")
+            reply = next((m for m in messages[index + 1:index + 2] if m.get("role") == "assistant"), None)
+            turns.append({"user": text, "assistant": str((reply or {}).get("text") or "")})
+            newest = max(newest, str(message.get("created_at") or ""))
+        return turns, newest
+
+    def unreviewed_chars(self, chat_id: str) -> int:
+        """How much the user wrote since the last look back (0 when memory is off for this chat)."""
+        try:
+            chat = self._chat(chat_id)
+        except (ChatEngineError, ChatStoreError):
+            return 0
+        if not self._memory_on(chat):
+            return 0
+        turns, _ = self._unreviewed(chat)
+        said = memory_review.said_in(turns)
+        return len(said) if memory_review.worth(said) else 0
+
+    def skip_review(self, chat_id: str) -> None:
+        """Memory is off for this chat now: what was said meanwhile is never looked back over, even once it's on."""
+        with self._card_lock:
+            try:
+                chat = self._chat(chat_id)
+            except (ChatEngineError, ChatStoreError):
+                return
+            if chat.get("temporary"):
+                return
+            _, newest = self._unreviewed(chat)
+            if newest:
+                chat["memory_reviewed"] = newest
+                self._save(chat)
+
+    def review_memory(self, chat_id: str, cancel=None, *, busy=None) -> dict | None:
+        """One look back over what the user said since the last one: at most a few facts kept, by the rules every
+        memory keeps (memory_review.keep), shown under the chat's latest reply as "Remembered: ... · Forget".
+        Returns {message, saved} when it kept something, else None."""
+        chat = self._chat(chat_id)
+        if not self._memory_on(chat):
+            return None
+        turns, newest = self._unreviewed(chat)
+        said = memory_review.said_in(turns)
+        if not turns or not memory_review.worth(said):
+            return None
+        try:
+            known = self.memory.facts()
+        except shared_memory.NotRemembered:
+            return None
+        try:
+            candidates = memory_review.ask(self.client(chat.get("model") or None), turns, known, cancel=cancel)
+        except Exception:                          # noqa: BLE001 -- nothing kept; it's tried again later
+            return None
+        if cancel is not None and cancel.is_set():
+            return None
+        with self._card_lock:
+            chat = self._chat(chat_id)
+            if not self._memory_on(chat):           # turned off while it looked
+                return None
+            if busy is not None and busy():
+                return None                         # a reply started meanwhile: looked back over after it instead
+            saved = memory_review.keep(self.memory, candidates, said=said, surface="chat",
+                                       where=str(chat.get("title") or ""))
+            chat["memory_reviewed"] = max(newest, str(chat.get("memory_reviewed") or ""))
+            message = next((m for m in reversed(chat["messages"]) if m.get("role") == "assistant"), None)
+            if saved and message is not None:
+                message["memory"] = [*(message.get("memory") or []),
+                                     *({"op": "saved", "id": f["id"], "text": f["text"], "by": "review"} for f in saved)]
+            self._save(chat)
+        return {"message": message, "saved": saved} if saved else None
 
     # -- interactive answers
 
@@ -2087,7 +2167,8 @@ class ChatEngine:
                     return "Already remembered."
                 ops.append({"op": "saved", "id": fact["id"], "text": fact["text"]})
                 return "Remembered. The reply shows it, and the user can forget it. Don't mention it unless asked."
-            fact = self.memory.forget(str(args.get("id") or ""))
+            fact = self.memory.forget(str(args.get("id") or ""), by="tool", surface="chat",
+                                      where=str(chat.get("title") or ""))
             ops.append({"op": "forgot", "id": fact["id"], "text": fact["text"]})
             return "Forgotten."
         except shared_memory.NotRemembered as exc:

@@ -262,7 +262,8 @@ class ServiceTests(unittest.TestCase):
                                  self.wire.of("memory_state")[-1])[1]
         state = ask("memory_add", text="Is vegetarian")
         self.assertEqual((state["enabled"], [f["text"] for f in state["facts"]], state["facts"][0]["source"]),
-                         (True, ["Is vegetarian"], {"surface": "settings", "where": ""}))
+                         (True, ["Is vegetarian"], {"surface": "settings", "where": "", "by": "you"}),
+                         "and who kept it (the history and the page say so)")
         fact = state["facts"][0]["id"]
         state = ask("memory_edit", id=fact, text="Is vegetarian, eats eggs")
         self.assertEqual((state["facts"][0]["text"], state["facts"][0]["edited"]), ("Is vegetarian, eats eggs", True))

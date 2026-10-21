@@ -285,7 +285,7 @@ def forget(registry, pip_id, note_id, actor, *, everything=False, shared: bool =
             raise RegistryError("not_found", "That memory is already gone.")
         for fact_id in (mine if everything else {note_id}):
             try:
-                shared_memory.SharedMemory().forget(fact_id)
+                shared_memory.SharedMemory().forget(fact_id, surface="pip")
             except shared_memory.NotRemembered:
                 pass                               # gone already: what it should be
         if not everything:

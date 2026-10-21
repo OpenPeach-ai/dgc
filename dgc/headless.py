@@ -269,7 +269,13 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # Personal Pip's computer has a sign_in step: DGC types the saved login (and its one-time code) into the page and lets
 # that one submit through; with none saved, its chat shows a computer action of kind "login" (Save login…, or Not now
 # with decide_pip_computer_action approve false).
-PIPS_API_VERSION = 56
+# API 57: memory that learns, for Pips. A Personal Pip keeps its own working notes (pip_working_notes) with a
+# working_notes tool (add, replace, strike a line; 60 lines or 6 KB; never a secret or what it read in your apps), loaded
+# into every run; get_pip_working_notes {pip_id} reads them ({lines, text, revision, max_lines, max_bytes, bytes,
+# updated_at}) and set_pip_working_notes {pip_id, text, expected_revision} is your edit. list_pip_daily_log {pip_id,
+# before?, limit?} reads what it did each day ({days: [{day, lines, more}], next_before}), written by DGC from its runs
+# and never given to a run. Its chat is looked back over for your one memory (pip_memory_review), as ChatDGC's is.
+PIPS_API_VERSION = 57
 
 
 def _pips_platform_supported() -> bool:
@@ -2189,6 +2195,9 @@ class Backend:
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
                           "troupe": 1,
+                          # /learn (dgc/skill_learn.py): learn_skill drafts a skill (skill_draft), save_skill writes
+                          # the shown one (skill_saved). Nothing is written before Save.
+                          "learn": {"version": 1},
                           "pips_enabled": self.config.get("pips_enabled", False) is True,
                           # Additive capability data keeps strict older SDK ready-event
                           # validators working. IDs are private registry references,
@@ -2223,7 +2232,9 @@ class Backend:
         # outline: chatdgc_outline is understood (every prompt of a chat, and the widgets its replies made).
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1},
-                "memory": {"version": 1}, "voice": {"version": 1}}
+                # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
+                # Work session's look back keeps something (dgc/memory_review.py).
+                "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}
 
     def _chats_capability(self) -> dict:
         """ready.capabilities.chats: offered only by a Host, and never when DGC_PROJECT_ROOT pins the
@@ -2346,6 +2357,194 @@ class Backend:
         if current is None:
             return value in ("", None)
         return str(current) == str(value)
+
+    # ---- memory that learns (dgc/memory_review.py) ---------------------------------------------------
+    # A Work session is looked back over once it's quiet, or as a prompt's turn ends after enough new words from
+    # the user. Only for a screen that shows what it keeps (memory_watch): a write nobody would see isn't made, so
+    # an SDK session or a closed panel never learns anything.
+
+    def _memory_reviews(self):
+        reviews = self.__dict__.get("_memory_review_state")
+        if reviews is None:
+            from . import memory_review
+            reviews = memory_review.Reviews(lambda _key: self._unreviewed_chars(), lambda _key: self._review_memory(),
+                                            idle=memory_review.idle_seconds(self.config))
+            reviews = self.__dict__.setdefault("_memory_review_state", reviews)
+            self.__dict__.setdefault("_memory_review_cancel", threading.Event())
+        return reviews
+
+    def _memory_watcher(self):
+        host = getattr(self, "_host", None)
+        service = getattr(host, "_chatdgc", None) if host is not None else None
+        return service if service is not None and getattr(service, "watching", False) else None
+
+    def _memory_turns(self) -> list:
+        return self.__dict__.setdefault("_memory_review_turns", [])
+
+    def _memory_turn_started(self) -> None:
+        reviews = self.__dict__.get("_memory_review_state")
+        if reviews is not None:
+            reviews.started("work")
+
+    def _memory_turn_ended(self, text: str) -> None:
+        """A prompt's turn ended: what the user typed in it, and what the model answered, wait for the look back."""
+        try:
+            from .agent import _typed_words
+            turns = self._memory_turns()
+            if self.config.get("memory", True) is False or self._memory_watcher() is None:
+                for turn in turns:
+                    turn["reviewed"] = True          # memory off: what's said now is never looked back over
+                return
+            typed = _typed_words(text)
+            if not typed:
+                return
+            reply = ""
+            for message in reversed(list(getattr(self.agent, "messages", None) or [])[-40:]):
+                if message.get("role") == "assistant" and isinstance(message.get("content"), str) \
+                        and message["content"].strip() and not message.get("tool_calls"):
+                    reply = message["content"]
+                    break
+            turns.append({"user": typed, "assistant": reply, "reviewed": False})
+            del turns[:-20]
+            self._memory_reviews().ended("work")
+        except Exception:                          # noqa: BLE001 -- a look back is never worth the turn
+            pass
+
+    def _unreviewed_chars(self) -> int:
+        from . import memory_review
+        said = memory_review.said_in([t for t in self._memory_turns() if not t.get("reviewed")])
+        return len(said) if memory_review.worth(said) else 0
+
+    def _review_memory(self) -> list:
+        """One look back over this session's exchanges since the last one; what it keeps shows as a quiet line."""
+        from . import memory_review, shared_memory
+        # A turn may start meanwhile: it adds its own exchange after these, looked back over next time.
+        turns = [t for t in self._memory_turns() if not t.get("reviewed")]
+        said = memory_review.said_in(turns)
+        if not turns or not memory_review.worth(said):
+            return []
+        if self.config.get("memory", True) is False or self._memory_watcher() is None:
+            for turn in turns:
+                turn["reviewed"] = True
+            return []
+        memory = shared_memory.SharedMemory()
+        try:
+            known = memory.facts()
+            client = memory_review.client_for(self.config)
+            candidates = memory_review.ask(client, turns, known, cancel=self.__dict__.get("_memory_review_cancel"))
+        except Exception:                          # noqa: BLE001 -- nothing kept; tried again after the next turn
+            return []
+        if self.config.get("memory", True) is False:
+            return []                               # turned off while it looked
+        saved = memory_review.keep(memory, candidates, said=said, surface="work",
+                                   where=Path(str(self.config.project_root)).name)
+        for turn in turns:
+            turn["reviewed"] = True
+        watcher = self._memory_watcher()
+        if saved and watcher is not None:
+            try:
+                self.em.emit("memory_learned", facts=memory_review.shown(saved), surface="work")
+                watcher.learned()
+            except Exception:                      # noqa: BLE001 -- kept; Settings -> Memory shows it
+                pass
+        return saved
+
+    def _stop_memory_reviews(self) -> None:
+        cancel = self.__dict__.get("_memory_review_cancel")
+        if cancel is not None:
+            cancel.set()
+        reviews = self.__dict__.get("_memory_review_state")
+        if reviews is not None:
+            reviews.close(1.0)
+
+    # ---- /learn (dgc/skill_learn.py): a skill from what was just done, shown before anything is written --------
+
+    def _learn_command(self, cmd: dict) -> None:
+        from . import skill_learn
+        t, request_id = cmd["type"], cmd["request_id"]
+        pip_id = cmd.get("pip_id") if isinstance(cmd.get("pip_id"), str) and cmd.get("pip_id") else ""
+        reply = "skill_draft" if t == "learn_skill" else "skill_saved"
+
+        def refuse(message: str) -> None:
+            self.em.emit(reply, request_id=request_id, ok=False, message=message[:1000])
+
+        if pip_id:
+            from .pip_access import MESSAGE, restricted
+            if restricted(self.config) or self.config.get("pips_enabled", False) is not True:
+                return refuse(MESSAGE if restricted(self.config) else "Pips are off.")
+        if t == "save_skill":
+            scope = cmd["scope"]
+            if scope == "project" and (pip_id or not self.workspace_trusted):
+                return refuse("This folder isn't trusted, so the skill can't go in its .dgc/skills. Save it to your "
+                              "own skills instead.")
+            try:
+                saved = skill_learn.save(cmd["markdown"], scope=scope, project_root=self.config.project_root,
+                                         secrets=secret_values(self.config), surface="pip" if pip_id else "work",
+                                         where=pip_id or Path(str(self.config.project_root)).name)
+            except (skill_learn.SkillError, OSError) as exc:
+                return refuse(str(exc) if isinstance(exc, skill_learn.SkillError) else "The skill couldn't be written.")
+            try:
+                if not self._busy():
+                    self.agent.reload_skills()
+            except Exception:                      # noqa: BLE001 -- the next turn reads it anyway
+                pass
+            self.em.emit("skill_saved", request_id=request_id, ok=True, name=saved["name"], path=saved["path"],
+                         scope=scope, message=f"Saved the skill {saved['name']}. Undo is on the Memory page.")
+            service = getattr(getattr(self, "_host", None), "_chatdgc", None)
+            if service is not None:
+                service.learned()
+            return
+        if not pip_id and self._busy():
+            return refuse("Wait for this turn to finish, then /learn.")
+        scope = "user" if pip_id or not self.workspace_trusted else "project"
+        request = str(cmd.get("request") or "")
+        snapshot = [dict(m) for m in list(getattr(self.agent, "messages", None) or [])[-200:] if isinstance(m, dict)]
+
+        def draft() -> None:
+            try:
+                folder = skill_learn.folder_for(scope, self.config.project_root)
+                secrets = secret_values(self.config)
+                if pip_id:
+                    source, client = self._pip_learn_source(pip_id, secrets)
+                else:
+                    source = skill_learn.session_source(snapshot, secrets=secrets)
+                    from . import memory_review
+                    client = memory_review.client_for(self.config, source="learn")
+                    client.read_timeout = 300
+                drafted = skill_learn.draft(client, source, request, secrets=secrets, folder=folder)
+                self.em.emit("skill_draft", request_id=request_id, ok=True, scope=scope, folder=str(folder),
+                             **skill_learn.as_wire(drafted))
+            except skill_learn.SkillError as exc:
+                refuse(str(exc))
+            except Exception as exc:               # noqa: BLE001 -- said in one line, never past the chat
+                refuse("DGC couldn't draft the skill: " + redact_value(" ".join(str(exc).split()),
+                                                                       secret_values(self.config))[:300])
+
+        threading.Thread(target=draft, name="dgc-learn", daemon=True).start()
+
+    def _pip_learn_source(self, pip_id: str, secrets):
+        """A Personal Pip's chat, as /learn reads it, and a client on its own model (DGC's when it runs on a
+        subscription CLI)."""
+        from . import memory_review, skill_learn
+        from .pip_chat import list_messages
+        from .pips import PipStore
+        from .workspace_registry import RegistryError, WorkspaceRegistry
+        with WorkspaceRegistry() as registry:
+            row = registry.db.execute("SELECT p.id FROM pips p JOIN workspaces w ON w.id=p.workspace_id "
+                                      "WHERE p.id=? AND w.kind='personal'", (pip_id,)).fetchone()
+            if row is None:
+                raise skill_learn.SkillError("/learn works in a Personal Pip's chat.")
+            store = PipStore(registry)
+            try:
+                page = list_messages(store, pip_id, limit=40)
+            except RegistryError as exc:
+                raise skill_learn.SkillError(str(exc)) from exc
+            choice = (store.get(pip_id) or {}).get("model_choice") or {}
+        messages = page.get("messages") if isinstance(page, dict) else []
+        model = choice.get("model") if isinstance(choice, dict) and choice.get("mode") == "model" else None
+        client = memory_review.client_for(self.config, model=model, source="learn")
+        client.read_timeout = 300
+        return skill_learn.pip_source(messages, secrets=secrets), client
 
     def _busy(self) -> bool:
         lock = self._turn_state_lock()
@@ -2694,6 +2893,7 @@ class Backend:
                             continue
                     self._running_turn_kind = turn_kind
                     self._running_pip_setup_text = text if turn_kind == "pip_setup" else None
+                    self._memory_turn_started()
                     self._wake_yield = False
                     self._turn_n += 1
                     tid = f"t{self._turn_n}"
@@ -2817,6 +3017,10 @@ class Backend:
                     # A wake turn is not goal work: its success must not reset the retry budget and
                     # its failure must not queue a goal resume.
                     self._maybe_auto_resume_goal(failed, cancelled)
+                # Only what the user typed is looked back over: never a wake-up, a monitor's turn, a Pip
+                # setup notice, a goal's own resume, or a turn on a subscription CLI (no model of DGC's).
+                if turn_kind == "prompt" and not engine_key and not failed:
+                    self._memory_turn_ended(text)
                 with self._turn_state_lock():
                     self._running_turn_kind = ""
                     self._running_pip_setup_text = None
@@ -3819,6 +4023,7 @@ class Backend:
         this session held. Returns a short word for the log: idle, landed, or cancelled.
         """
         self._stop_pip_report_watch()
+        self._stop_memory_reviews()
         # A tab can close while the host and its other chats keep running. Pending
         # local controls belong to this tab; never apply them after it has gone.
         with self.__dict__.setdefault("_pips_command_lock", threading.Lock()):
@@ -5675,6 +5880,9 @@ class Backend:
                              message="request_id must contain 1-128 characters")
                 return
             self._emit_hook_catalog(request_id)
+
+        elif t in ("learn_skill", "save_skill"):
+            self._learn_command(cmd)
 
         elif t == "generate_handoff":
             request_id = str(cmd.get("request_id") or "")
