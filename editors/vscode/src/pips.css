@@ -90,7 +90,20 @@
 @media(prefers-reduced-motion:reduce){.layout.overview .job,.type-card,.tabs button{transition:none}}
 .setup-inbox-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none;padding:8px 0;font-size:12px;font-weight:500}.setup-inbox-toggle::-webkit-details-marker{display:none}.setup-inbox-toggle>span{font-size:11px;font-weight:400;color:var(--vscode-textLink-foreground)}.setup-inbox details[open]>.section-head{margin-top:10px}.setup-inbox details[open]>.setup-inbox-toggle>span{visibility:hidden}
 
-.pip-scope-picker{display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:11px;color:var(--vscode-descriptionForeground)}.pip-scope-picker select{max-width:240px;font:inherit;background:var(--vscode-dropdown-background);color:var(--vscode-dropdown-foreground);border:1px solid var(--vscode-dropdown-border);border-radius:5px;padding:4px 7px}
+/* Personal | Project: the Sessions home's Chat | Work (main.css .home-tabs), the same box, type, colours and keys, so the
+   two pages read as one. main.css's tokens are spelled out with their fallbacks: this sheet also draws the Pips editor
+   tab, which has no main.css, and its :host gives --surface and --muted other values. In a wide view the pair keeps a
+   side bar's width rather than stretching across it. */
+.pips-tabs{display:flex;flex:none;gap:2px;padding:2px;margin:8px 8px 0;border:1px solid var(--vscode-panel-border,var(--vscode-widget-border,#303032));border-radius:8px;background:var(--vscode-editor-background,#202021)}
+.pips-tabs>.pips-tab{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:20px;margin:0;padding:0 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--vscode-descriptionForeground,#B2B2B6);font:600 12px/1 var(--vscode-font-family,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);white-space:nowrap;cursor:pointer}
+.pips-tabs>.pips-tab:hover{background:transparent;color:var(--vscode-foreground,#D7D7DA)}
+.pips-tabs>.pips-tab[aria-selected=true]{border-color:var(--vscode-input-border,var(--vscode-widget-border,#3A3A3D));background:var(--vscode-input-background,var(--vscode-dropdown-background,#29292B));color:var(--vscode-editor-foreground,var(--vscode-foreground,#F5F5F6))}
+.pips-tabs>.pips-tab:focus-visible{outline:1px solid var(--vscode-focusBorder,#7C5CFF);outline-offset:1px}
+@container(min-width:701px){.pips-tabs{width:100%;max-width:420px;align-self:flex-start}}
+@media(forced-colors:active){.pips-tabs{border-color:CanvasText;background:Canvas}.pips-tabs>.pips-tab{color:CanvasText}.pips-tabs>.pips-tab[aria-selected=true]{border-color:CanvasText;background:ButtonFace}}
+/* The project's bar is as tall as the Personal one above the tabs, so switching never moves them. */
+.extension-pips .embedded-header.scoped{padding:8px 12px 6px}
+.pips-tab-empty{padding:16px 14px}.pips-tab-empty p{margin:0;font-size:12px}
 
 .chat-setup-review{display:flex;align-items:center;gap:8px;margin:10px 0;padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:12px}.chat-setup-label{flex:1;min-width:0}.chat-setup-label small{display:inline;margin-left:8px;color:var(--vscode-descriptionForeground);font-size:11px}.chat-setup-review button{font-size:11px;padding:3px 7px}.chat-setup-review button:last-child{background:transparent;color:var(--vscode-descriptionForeground)}
 
@@ -188,8 +201,6 @@ aside>button:not(.job){margin:6px 6px 0 0}
 /* The runner's error is its own row under the bar. In the bar's row it took the room the title and
    the buttons needed ("Pi / ps", the founder's screenshot). */
 .simple-bar>.notice{flex:1 0 100%;margin:0;order:9}
-.simple-scope{margin:0}
-.simple-scope select{width:auto;padding:3px 8px;font-size:12px;border-radius:999px}
 .simple-note{margin:10px 14px 0}
 .simple-content{padding:16px 14px 28px;max-width:760px;margin:0 auto;width:100%;box-sizing:border-box}
 button.pill{border-radius:999px;padding:6px 16px}

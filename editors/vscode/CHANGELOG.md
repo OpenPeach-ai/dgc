@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Personal | Project tabs on the Pips page.** The dropdown that listed your Personal Pips and every project DGC
+  knows is two tabs now, the same as the Sessions home's **Chat | Work**: the same look, and the arrow keys, Home and
+  End move between them. **Project** is the folder open in this window and nothing else: another project's Pips are
+  never listed there, and one opened from a link says "NAME is another project's Pip. Open that project's folder to
+  see it." With no folder open, the Project tab says "Open a project folder to see its Pips." The tab you chose last
+  is the one the page opens on, in each window. A remote view, and a CLI without Personal Pips, have one workspace
+  and no tabs, as before.
+
 - **How much it asks, on a Personal Pip's page (Pips API 58).** A picker with **Ask**, **Approve for me** and **Full
   access**, the chosen level's one plain line under it ("Opens new sites, searches, adds to carts and saves drafts by
   itself. Asks before it orders, pays, sends to someone new, posts, deletes or changes an account."), said once more

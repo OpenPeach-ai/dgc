@@ -68,12 +68,14 @@ const measure = (p) => p.evaluate(() => {
   const lines = (n) => { if (!n) return 0; const range = document.createRange(); range.selectNodeContents(n);
     return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size; };
   const title = bar.querySelector("h1"), start = bar.querySelector("#start-runner"), controls = bar.querySelector("#runner-controls-toggle"),
-    picker = bar.querySelector(".simple-scope"), notice = bar.querySelector(".notice.error");
+    tabs = document.querySelector(".pips-tabs"), notice = bar.querySelector(".notice.error");
   const overlap = (a, b) => { const x = rect(a), y = rect(b); return !!(x && y) && x.left < y.right - 0.5 && y.left < x.right - 0.5 && x.top < y.bottom - 0.5 && y.top < x.bottom - 0.5; };
-  const controlsBottom = Math.max(...[title, start, controls, picker].filter(Boolean).map((n) => rect(n).bottom));
+  const controlsBottom = Math.max(...[title, start, controls].filter(Boolean).map((n) => rect(n).bottom));
   return {
     titleLines: lines(title.querySelector(".pips-wordmark") || title), startLines: lines(start), controlsLines: lines(controls),
-    overlaps: [[start, controls], [picker, start], [title, picker], [picker, controls]].filter(([a, b]) => overlap(a, b)).length,
+    // Personal | Project are their own row under the bar (and under its error), never in it.
+    overlaps: [[start, controls], [tabs, start], [title, tabs], [tabs, controls], [tabs, notice], [tabs, bar]].filter(([a, b]) => overlap(a, b)).length,
+    tabsBelow: !!tabs && rect(tabs).top >= rect(bar).bottom - 0.5,
     noticeBelow: notice ? rect(notice).top >= controlsBottom - 0.5 : null,
     noticeWidth: notice ? Math.round(rect(notice).width / rect(bar).width * 100) : null,
     sideways: document.documentElement.scrollWidth > innerWidth + 1,
@@ -90,6 +92,7 @@ for (const width of [753, 480, 320]) {
       assert.equal(m.startLines, 1, `"Start runner" stays on one line (${JSON.stringify(m)})`);
       assert.equal(m.controlsLines, 1);
       assert.equal(m.overlaps, 0, `no control covers another (${JSON.stringify(m)})`);
+      assert.equal(m.tabsBelow, true, `the tabs are under the bar (${JSON.stringify(m)})`);
       assert.equal(m.noticeBelow, true, `the error is its own row under the bar (${JSON.stringify(m)})`);
       assert.ok(m.noticeWidth >= 85, `and runs the bar's width (${m.noticeWidth}%)`);
       assert.equal(m.sideways, false);

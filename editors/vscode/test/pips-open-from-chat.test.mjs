@@ -51,7 +51,7 @@ test('a project Pip opened from a chat opens in its project, at the run, not "no
  assert.equal(x.d.querySelector(`[data-job="${AUDIT}"]`),null);
  const going=x.app.navigate({pip:AUDIT,section:'runs',run:RUN});await x.drain();await going;await x.drain();
  assert.doesNotMatch(x.text(),/not available in the selected workspace|Refresh the dashboard/);
- assert.equal(x.d.querySelector('#pip-workspace')?.value,W,'the Pips view is on the Pip\'s project now');
+ assert.equal(x.d.querySelector('#pips-tab-project')?.getAttribute('aria-selected'),'true','the Pips view is on the Pip\'s project now: its Project tab');
  assert.equal(x.d.querySelector(`[data-job="${AUDIT}"]`)?.getAttribute('aria-current'),'true','and the Pip is open');
  assert.match(x.text(),/ERP daily audit/);
  assert.ok(x.requests('get_pip_run').some(m=>m.request.run_id===RUN),'at the run it was opened for');

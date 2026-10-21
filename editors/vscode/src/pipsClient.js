@@ -105,7 +105,7 @@ function dictatedToPip(text,send){
   fitChatInput();
   if(send)void sendChat();
 }
-S.workspaces=[];S.showArchived=false;S.emailDrafts=[];S.emailDraftError="";S.calendarDrafts=[];S.calendarDraftError="";let emailDraftSeq=0,calendarDraftSeq=0;
+S.workspaces=[];S.currentWorkspaceId=null;S.folderOpen=true;S.projectEmpty=false;S.switching=false;S.showArchived=false;S.emailDrafts=[];S.emailDraftError="";S.calendarDrafts=[];S.calendarDraftError="";let emailDraftSeq=0,calendarDraftSeq=0;
 S.composerPanel='';S.chatControls=null;S.continuity=null;
 const chatPreferences=new Map();
 const chatActivities=new Map();
@@ -122,7 +122,7 @@ let postsSeq=0;
 // Ask DGC to fix, once per run: kept with the view, as the Work chat keeps the prompt in its transcript.
 const askedRuns=new Set(Array.isArray(savedView?.asked)?savedView.asked.filter(r=>typeof r==='string'&&/^run_[0-9a-f]{32}$/.test(r)).slice(-100):[]);
 S.sidebarPinned=savedView?.sidebar_pinned===true;
-function rememberView(){savedView={workspace_id:S.workspace?.id,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),asked:[...askedRuns].slice(-100)};options.setState?.(savedView);}
+function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),asked:[...askedRuns].slice(-100)};options.setState?.(savedView);}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
 let outcomeSessions=[],outcomeSessionsCursor='',outcomeSessionsMore=false,outcomeSessionsLoaded=false,outcomeSessionsLoading=false,outcomeSessionsError='',outcomeHistory=[],outcomeCursor=null,outcomeLoaded=false,outcomeLoading=false,outcomeError='',outcomeInspection=null,outcomeInspecting=false,outcomeSessionSeq=0,outcomeSeq=0,outcomeInspectSeq=0,outcomeReviewSeq=0,outcomeRetry=null;
 let notifications=null,notificationItems=[],notificationLoading=false,notificationError='',notificationSeq=0,notificationMark='';
@@ -1706,6 +1706,39 @@ function detailMarkup() {
 // settings, memory) stay one tap away in the chat's menu. Project Pips keep the full view.
 const SIMPLE_CHARACTERS=['core','scout','lens','patch','rook','pulse','lock','quill'];
 function simpleMode(){return S.apiVersion>=43&&!remoteHost&&S.workspace?.kind==='personal';}
+// Personal | Project (the founder, 2026-10-21): two tabs, as the Sessions home has Chat | Work, where a dropdown listed
+// every project DGC knows. Project is this window's folder and nothing else: another project's Pips are for that
+// project's DGC to look after ("the user might ask this project's DGC to fix another project's Pips"). No folder
+// open, the Project tab says so in one line. A remote view, and a CLI with no Personal Pips, have no tabs, as before.
+function personalSpace(){return S.workspaces.find(w=>w?.kind==='personal')||null;}
+function projectSpace(){return S.folderOpen&&S.currentWorkspaceId?S.workspaces.find(w=>w?.id===S.currentWorkspaceId&&w.kind!=='personal')||null:null;}
+function scopeTabs(){return !remoteHost&&!!personalSpace();}
+function scopeTab(){return S.projectEmpty||S.workspace?.kind!=='personal'?'project':'personal';}
+// The workspaces this view may open: with tabs, Personal and this folder's project; without, every one, as before.
+function openableSpaces(){return scopeTabs()?[personalSpace(),projectSpace()].filter(Boolean):S.workspaces;}
+function scopeTabsMarkup(){
+ if(!scopeTabs())return '';
+ const chosen=scopeTab(),project=projectSpace();
+ const tab=(key,label,title)=>`<button type="button" role="tab" id="pips-tab-${key}" class="pips-tab" data-pips-tab="${key}" aria-controls="pips-tabpanel" aria-selected="${chosen===key}"${chosen===key?'':' tabindex="-1"'} title="${esc(title)}">${label}</button>`;
+ return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or this project’s Pips">${tab('personal','Personal','Your Pips: the same in every folder')}${tab('project','Project',project?`${project.name}: this project’s Pips`:'Open a project folder to see its Pips')}</div>`;
+}
+// What the chosen tab shows is its panel (the list, or a Pip open in it).
+function scopePanelAttrs(){return scopeTabs()?` id="pips-tabpanel" role="tabpanel" aria-labelledby="pips-tab-${scopeTab()}"${S.switching?' aria-busy="true"':''}`:'';}
+function projectEmptyMarkup(){return `<div class="pips-tab-empty"${scopePanelAttrs()}><p class="muted">Open a project folder to see its Pips.</p></div>`;}
+/** Shows another workspace's Pips from the top: what the old dropdown did, and what opening a Pip elsewhere does. */
+function enterWorkspace(target){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;S.projectEmpty=false;S.switching=false;setupRows=[];setupError='';S.error='';rememberView();return refresh(true);}
+function chooseScopeTab(name,focus=false){
+ if(!scopeTabs()||!usable()||!S.workspace||S.busy)return;
+ const target=name==='project'?projectSpace():personalSpace();
+ if(!target){
+  // No folder open (or none DGC knows): the Project tab is chosen and says so. Personal stays loaded underneath.
+  if(!S.projectEmpty){S.projectEmpty=true;clearSelection();S.selected='';S.create=false;S.overview=true;S.error='';rememberView();render();}
+ }else if(target.id!==S.workspace.id){
+  const loading=enterWorkspace(target),epoch=S.epoch;S.switching=true;render();
+  void loading.finally(()=>{if(epoch===S.epoch&&S.switching){S.switching=false;render();}});
+ }else if(S.projectEmpty){S.projectEmpty=false;rememberView();render();}
+ if(focus)$(`pips-tab-${name}`)?.focus();
+}
 // "Today 9:47 AM", "Yesterday 6:02 PM", or "Mon 5 Oct, 9:47 AM", like a messaging app.
 function chatTime(at){
  const when=new Date(at),now=new Date(),day=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();
@@ -1927,7 +1960,7 @@ async function navigateAttention(value){
  if(typeof value.workspace==='string'&&value.workspace!==S.workspace?.id){
   const target=S.workspaces.find(w=>w.id===value.workspace&&w.kind==='personal');
   if(!target)throw Error('Your Personal Pips are unavailable here. Refresh the dashboard.');
-  S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;setupRows=[];setupError='';S.error='';rememberView();await refresh(true);
+  await enterWorkspace(target);
  }
  // The Sessions home's "N more need you · Show all": this home at Needs attention, open in full, your Pips under it.
  if(value.all===true){
@@ -2042,11 +2075,11 @@ function simplePipHeader(){
  return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span>${onChat?'':`<small>${esc(sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div></header>`;
 }
 function simpleMarkup(){
- const picker=S.workspaces.length>1?`<label class="simple-scope"><span class="sr-only">Pips in</span><select id="pip-workspace" aria-label="Which Pips"${S.busy?' disabled':''}>${S.workspaces.map(w=>`<option value="${esc(w.id)}"${w.id===S.workspace?.id?' selected':''}>${esc(w.kind==='personal'?'Your Pips':'Project · '+w.name)}</option>`).join('')}</select></label>`:'';
- const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${picker}${runnerMarkup()}</header>`;
+ const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup()}</header>${scopeTabsMarkup()}`;
  const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}`;
  if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
- if(!S.selected||S.overview||S.create)return `${bar}${notes}${setupRows.length?setupsMarkup():''}<div class="simple-content">${simpleHomeMarkup()}</div>`;
+ if(S.projectEmpty&&scopeTabs())return `${bar}${notes}${projectEmptyMarkup()}`;
+ if(!S.selected||S.overview||S.create)return `${bar}${notes}${setupRows.length?setupsMarkup():''}<div class="simple-content"${scopePanelAttrs()}>${S.switching?'':simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}<p role="status" class="muted simple-note">Loading…</p>`;
  return `${simplePipHeader()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }
@@ -2060,9 +2093,8 @@ function render() {
   shell.classList.toggle('sidebar-pinned',S.sidebarPinned);
   shell.classList.toggle('chat-open',!intro&&!S.create&&!S.overview&&!!S.pip&&S.tab==='chat');
   shell.classList.toggle('simple-pips',!intro&&simpleMode());
-  const scopePicker=!remoteHost&&S.workspaces.some(w=>w.kind==='personal')?`<label class="pip-scope-picker">Pips in <select id="pip-workspace" aria-label="Pip workspace"${S.busy?' disabled':''}>${S.workspaces.map(w=>`<option value="${esc(w.id)}"${w.id===S.workspace?.id?' selected':''}>${esc(w.kind==='personal'?'Personal · this computer':w.name)}</option>`).join('')}</select></label>`:'';
-  const header=scopePicker+(embedded?`<header class="embedded-header"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.kind==='personal'?'Personal':S.workspace?.name||'Current workspace')}</p></div></div>${runnerMarkup()}</header>`);
-  const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${!intro&&S.overview&&!S.create?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
+  const header=(embedded?`<header class="embedded-header${!intro&&scopeTabs()?' scoped':''}"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.kind==='personal'?'Personal':S.workspace?.name||'Current workspace')}</p></div></div>${runnerMarkup()}</header>`)+(intro?'':scopeTabsMarkup());
+  const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
   if(markup===lastMarkup) return;
   lastMarkup=markup;
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
@@ -2682,11 +2714,20 @@ async function refreshNow(includeContext=false) {
 }
 async function initialize() {
   const epoch=S.epoch;S.loading=true;render();
-  try {const [result,catalog]=await Promise.all([send('list_workspaces'),send('list_pip_types')]);if(epoch!==S.epoch)return;S.types=pipTypes(catalog);S.workspaces=result.workspaces||[];const personalHome=S.apiVersion>=43&&!remoteHost?result.workspaces?.find(w=>w.kind==='personal')?.id:null;const workspace=result.workspaces?.find(w=>w.id===(options.workspaceId||(savedView?.workspace_id&&result.workspaces.some(w=>w.id===savedView.workspace_id&&w.kind==='personal')?savedView.workspace_id:personalHome||result.current_workspace_id)));if(!workspace)throw new Error('DGC could not resolve the selected registered workspace.');S.workspace=workspace;S.loading=false;await refresh(true);if(epoch===S.epoch&&navigationPending){navigationPending=false;await navigateFromHost(options.navigation);}}
+  try {const [result,catalog]=await Promise.all([send('list_workspaces'),send('list_pip_types')]);if(epoch!==S.epoch)return;S.types=pipTypes(catalog);S.workspaces=result.workspaces||[];S.currentWorkspaceId=typeof result.current_workspace_id==='string'?result.current_workspace_id:null;S.projectEmpty=false;S.switching=false;const personalHome=S.apiVersion>=43&&!remoteHost?result.workspaces?.find(w=>w.kind==='personal')?.id:null;let workspace;
+   if(!options.workspaceId&&scopeTabs()){
+    // The tab chosen last in this window; else Personal (Pips API 43), else this folder's project. Only ever these two.
+    const personal=personalSpace(),project=projectSpace(),saved=record(savedView)?savedView:{};
+    const wantsProject=saved.scope_tab==='project'||!!project&&saved.workspace_id===project.id;
+    workspace=wantsProject?project||personal:saved.workspace_id===personal.id||personalHome?personal:project||personal;
+    S.projectEmpty=wantsProject&&!project;
+   }else workspace=result.workspaces?.find(w=>w.id===(options.workspaceId||(savedView?.workspace_id&&result.workspaces.some(w=>w.id===savedView.workspace_id&&w.kind==='personal')?savedView.workspace_id:personalHome||result.current_workspace_id)));
+   if(!workspace)throw new Error('DGC could not resolve the selected registered workspace.');S.workspace=workspace;S.loading=false;await refresh(true);if(epoch===S.epoch&&navigationPending){navigationPending=false;await navigateFromHost(options.navigation);}}
   catch(error){if(epoch===S.epoch){S.loading=false;setError(error);}}
 }
 async function navigateFromHost(value) {
   if(!record(value))return;
+  S.projectEmpty=false;   // whatever it opens is shown under its own tab
   if(value.attention===true||typeof value.setup==='string'){await navigateAttention(value);return;}
   if(['context','notifications'].includes(value.section)&&!value.pip){clearSelection();S.selected='';S.tab=value.section;S.overview=false;rememberView();render();if(S.tab==='notifications'){await loadNotifications();return;}if(S.apiVersion>=12){void loadOutcomeSessions();void loadOutcomes();if(value.reviewKind==='session_outcome'&&typeof value.review==='string'&&value.review)await openOutcome(value.review);}return;}
   if(typeof value.pip!=='string'||!value.pip)return;
@@ -2695,7 +2736,7 @@ async function navigateFromHost(value) {
     if((value.reviewKind==='connector_draft'?connectorDraft(answer.draft,value.pip,value.workspace):emailDraft(answer.draft,value.pip,value.workspace,value.reviewKind==='calendar_draft')).id!==value.review)throw Error('The saved email draft identity changed.');
     const target=S.workspaces.find(w=>w.id===value.workspace&&w.kind==='personal');
     if(!target)throw Error('The Personal workspace for this draft is unavailable.');
-    S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;setupRows=[];setupError='';S.error='';rememberView();await refresh(true);
+    await enterWorkspace(target);
   }
   if(!S.jobs.some(p=>p.id===value.pip)){
    // A Pip opened from elsewhere (a chat's run line, a notification, the Sessions home) may be past the pages read
@@ -2705,10 +2746,12 @@ async function navigateFromHost(value) {
    const found=(await send('get_pip',{pip_id:value.pip})).pip;
    if(!record(found)||found.id!==value.pip||typeof found.workspace_id!=='string')throw Error('That Pip isn’t on this computer any more. It may have been deleted.');
    if(found.workspace_id!==S.workspace.id){
-    let target=S.workspaces.find(w=>w.id===found.workspace_id);
-    if(!target){const listed=await send('list_workspaces');if(Array.isArray(listed?.workspaces))S.workspaces=listed.workspaces;target=S.workspaces.find(w=>w.id===found.workspace_id);}
-    if(!target)throw Error(`${typeof found.name==='string'&&found.name?found.name:'This Pip'} belongs to a project this Pips view can’t open.`);
-    S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;setupRows=[];setupError='';S.error='';rememberView();await refresh(true);
+    // Only Personal and this folder's project (the founder, 2026-10-21): another project's Pip is not opened here.
+    let target=openableSpaces().find(w=>w.id===found.workspace_id);
+    if(!target){const listed=await send('list_workspaces');if(Array.isArray(listed?.workspaces)){S.workspaces=listed.workspaces;if(typeof listed.current_workspace_id==='string')S.currentWorkspaceId=listed.current_workspace_id;}target=openableSpaces().find(w=>w.id===found.workspace_id);}
+    const name=typeof found.name==='string'&&found.name?found.name:'This Pip';
+    if(!target)throw Error(scopeTabs()?`${name} is another project’s Pip. Open that project’s folder to see it.`:`${name} belongs to a project this Pips view can’t open.`);
+    await enterWorkspace(target);
    }
    if(!S.jobs.some(p=>p.id===found.id))S.jobs=[...S.jobs,found];
   }
@@ -2832,7 +2875,7 @@ document.addEventListener('input',updateDraft);
 document.addEventListener('paste',event=>{if(event.target?.id!=='chatText'||!canAttachImages())return;const files=[...(event.clipboardData?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
 document.addEventListener('dragover',event=>{if(canAttachImages()&&event.target?.closest?.('#chat-form')&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
 document.addEventListener('drop',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
-document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value);return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value);return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   if(event.target.id==='login-form'){event.preventDefault();void saveLogin();return;}
   if(event.target.id==='computer-go'){event.preventDefault();const url=$('computer-url').value.trim();if(url)void computerView('go',{url:/^https?:\/\//i.test(url)?url:'https://'+url});return;}
@@ -2967,6 +3010,7 @@ document.addEventListener('click',event=>{
   const photo=event.target.closest?.('img[data-message-image]');
   if(photo&&S.apiVersion>=43&&!remoteHost){openMessageImage(photo.dataset.messageImage);return;}
   const target=event.target.closest('button');if(!target||target.disabled)return;
+  if(target.dataset.pipsTab){chooseScopeTab(target.dataset.pipsTab);return;}
   if(target.dataset.workingNotes){if(target.dataset.workingNotes==='edit'&&S.workingNotes){workingNotesEditing=true;draft.workingNotesText=S.workingNotes.lines.join('\n');render();$('workingNotesText')?.focus();}else if(target.dataset.workingNotes==='cancel'){workingNotesEditing=false;draft.workingNotesText='';S.workingNotesError='';render();void loadWorkingNotes();}return;}
   if(target.dataset.pipLearn){const l=S.learn,a=target.dataset.pipLearn;if(a==='save')void saveLearn();else if(a==='edit'&&l?.status==='draft'){if(l.editing)l.text=draft.pipLearnText;else draft.pipLearnText=l.text;l.editing=!l.editing;render();if(l.editing)$('pipLearnText')?.focus();}else if(a==='cancel'&&l){S.learn={pip:l.pip,status:'cancelled',name:l.name};render();}else if(a==='dismiss'){S.learn=null;render();$('chatText')?.focus();}return;}
   if(target.id==='chat-attach'){$('chat-attach-input')?.click();return;}
@@ -3376,6 +3420,9 @@ async function enable(){
   catch(error){if(epoch===S.epoch)setError(error);}finally{if(epoch===S.epoch){S.busy=false;render();}}
 }
 document.addEventListener('keydown',event=>{
+  // Personal | Project keys, as the Sessions home's tabs take them: an arrow goes to the other tab, Home and End to
+  // the first and the last, and the tab chosen takes the focus.
+  if(!S.review&&event.target.dataset?.pipsTab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();chooseScopeTab(event.key==='Home'?'personal':event.key==='End'?'project':scopeTab()==='personal'?'project':'personal',true);return;}
   if(!S.review&&event.target.id==='chatModelSearch'&&event.key==='Enter'){event.preventDefault();return;}
   if(!S.review&&S.composerPanel){if(event.key==='Escape'){event.preventDefault();const target=S.composerPanel==='context'?'chat-context-toggle':'chat-model';S.composerPanel='';render();$(target)?.focus();return;}if(['ArrowUp','ArrowDown'].includes(event.key)&&event.target.closest?.('.composer-model-options')){event.preventDefault();const items=[...document.querySelectorAll('[data-chat-model]:not(:disabled)')],at=items.indexOf(event.target);items[(at+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}}
   if(event.key==='Escape'&&voiceMode?.active){event.preventDefault();voiceMode.end();return;}
@@ -3406,7 +3453,7 @@ const stopMessages=options.onMessage(message=>{
   if(message.type==='pipsConnection'){
     if(message.generation !== undefined && message.generation === S.generation) return;
     S.generation=message.generation ?? null;
-    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.jobs=[];setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
+    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.projectEmpty=false;S.switching=false;S.currentWorkspaceId=null;S.folderOpen=message.folder!==false;S.jobs=[];setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
     render();if(usable())void initialize();
   }
 });

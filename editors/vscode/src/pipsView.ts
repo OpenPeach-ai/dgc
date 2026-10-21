@@ -140,7 +140,10 @@ export class PipsEditor implements vscode.Disposable {
   }
   offline(): void { if (!this.state.connected) return; this.generation++; this.pending.clear(); this.state.connected = false; this.publish(); }
   private publish(): void {
-    const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, ...this.state };
+    // Whether a folder is open in this window: with none, the Pips view's Project tab says to open one rather than show
+    // the Pips of wherever DGC happened to start. Left out where the editor doesn't say.
+    const folder = vscode.workspace ? (vscode.workspace.workspaceFolders?.length ?? 0) > 0 : undefined;
+    const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, ...(folder === undefined ? {} : { folder }), ...this.state };
     this.post(connection);
     for (const id of this.computers.keys()) this.post(connection, 'computer:' + id);
   }
