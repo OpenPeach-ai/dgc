@@ -915,8 +915,8 @@ without.
   a bill, UHID, phone or account number doesn't count) is not sent: DGC keeps nothing of it and says, in one line,
   to type it on the Pip's screen instead, with **Open its computer**. DGC's own chat warns once before sending one,
   since whatever you send there goes to the model.
-- **Anything it would send waits for you.** When a page would submit a form or send any other
-  data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
+- **Anything it would send waits for you** (at Ask; see [How much it asks](#how-much-it-asks)). When a page would
+  submit a form or send any other data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
   **Waiting for you** in the Pip's **Job** tab, and the Pips bar above the chat says so at once. It also waits
   as a card under the Pip's reply in its chat: a new site with **Allow this site** and **Not now**; a form or a
   payment with what it sends (a bill number and amount, never a card field), **Review…** and **Reject**.
@@ -947,6 +947,46 @@ without.
   once and cancels anything waiting, unsent. A computer with nothing waiting closes itself after 15 minutes idle.
   **Remove computer…** takes it away; the Pip's saved sign-ins stay in its folder (see
   [Privacy](#privacy-and-where-state-lives)) until you delete it.
+
+### How much it asks
+
+Each Personal Pip has a level, on its page under **How much it asks** (Pips API 58), the way OpenMausBot's bots do.
+Only you change it, on this computer. Every Pip starts at **Ask**, old and new, so nothing changes until you choose.
+
+| Level | What goes by itself | What still asks |
+|---|---|---|
+| **Ask** | Reading | A new site (careful mode), every submit and every send, as above |
+| **Approve for me** | A new site's first visit, a search, a filter or sort, adding to a cart, saving a draft, an upload of a file you sent it in its chat, an email to someone you named in its chat or already wrote to from it, a calendar event with no guests | Placing an order or checking out, any payment, sending to someone new, posting, deleting, changing an account's settings or password, anything the page calls pay, purchase, subscribe, transfer or book, and anything DGC can't place |
+| **Full access** | Every new site, submit and send, connected-app sends included | Any payment |
+
+- **One line says what each level means.** It shows under the picker, and once more when you choose a level.
+- **How DGC tells routine from consequential.** From the request itself and the page's own words, never the model's
+  say-so: the method and address it goes to, its field names (a card or bank field, an amount), and what the Pip
+  pressed (the button's words and accessible name, or the form's submit buttons, read in DGC's own isolated world of
+  the page). "Add to cart" is routine; "Place order", "Pay", "Use saved card" or a form with a card field is a
+  payment; "Post", "Send", "Delete" or a password field is consequential; a plain "Continue" DGC can't place, so it
+  asks at Approve for me. A page could mislabel its own button: that is why payments, card numbers and what it read
+  from your apps ask at every level.
+- **Payments always ask.** At every level: a request carrying a card number, a payment's words, or card and bank
+  fields (a saved card's token too). The card rule is the same: the Pip never types a card, and your own Pay on its
+  screen is your approval. A saved login is still sent only to its own site, and careful mode still asks before
+  anything it read from your apps goes onto a website.
+- **The safety floor.** At every level, a command in its Terminal (or typed on its desktop) that could wipe its Files,
+  like `rm -rf ~` or `find . -delete`, waits as a card: **Let PIP run this in its Terminal?** with **Allow once**,
+  which lets exactly that command run once. It never gets Always allow. Ordinary commands run as before.
+- **What it did on its own is one click away.** Each thing its level let through goes at once, in the same run, and
+  is kept: the step's picture in **What it saw…** says "Approved by its level: Approve for me · Added to cart on
+  shop.example", and its page lists the newest under **What it did on its own**, right under the picker, with **Ask
+  me again from now on**. A desktop notification says what it sent (an email, a submit at Full access). Its drafts
+  (an email, an event, a plugin's action) go after the reply, re-checked against the level when they run.
+- **Routines run at its level.** With nobody at the keyboard, what its level let through says so ("nobody at the
+  keyboard"). Careful mode still keeps a routine that can read your apps off its computer.
+- **Sites you gave it count as yours.** A site you wrote in its chat already never asked; now a site written out
+  (`https://…` or `www.…`) in a document you attach to your message counts too: a PDF's text, a Word, OpenDocument or
+  text file's, read by DGC itself. Photos don't count yet: DGC has no way of its own to read the text in a picture, so
+  the site on a photographed bill still asks once at Ask.
+- **Subscription brains and the whole desktop.** The same level applies to a Pip on your own Claude Code or Codex and
+  to the desktop's steps: only DGC's tools act, and they all go through the same gate.
 
 ### Working notes, a daily log, and /learn
 

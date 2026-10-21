@@ -947,6 +947,74 @@ run. Local-only
 commands: `list_pip_sites {pip_id}` → `{pip_id, careful, sites: [{site, at, by}]}`; `set_pip_careful
 {pip_id, on}` and `forget_pip_site {pip_id, site}` return the same.
 
+Sites the user gave count as named (Pips API 58): besides the user's own chat messages, a site written out
+(`https://…`, `http://…` or `www.…`) in a file attached to one of them (`pip_chat_files`; a PDF's text through
+`documents.extract_text`, a document's, or a text file's) is one of the Pip's sites. Each kept file is read once, by
+its digest (metadata `computer_file_sites:<sha256>`, the sites it names, at most 50). Photos are left out: DGC has no
+way of its own to read text in a picture (`photos` only converts and shrinks).
+
+**How much it asks** (`pip_levels`, Pips API 58, Personal Pips only): metadata `pip_level:<pip>` = `{level, at,
+by}`, `level` one of `ask` (the default, `pip_levels.DEFAULT`, for every Pip with none: as before), `approve` (Approve
+for me) or `full` (Full access). A Project Pip is always `ask`. At the start of a `conversation` or `personal_task` run
+the supervisor gives its `Host` the level and whether the run is unattended (`local-routine`, `local-scheduler`,
+`local-event-trigger`), and the worker gets `approval_level {level, unattended}` (when not `ask`) only to word its
+instructions; the worker never decides. In the run, each request the browser holds (from a browser step, a step by
+position, a desktop step or a subscription brain's call: all end in `Host._record_held`) goes through
+`pip_levels.decide_write` before it becomes a pending action:
+
+- a card number in it (`payment`) asks at every level; so does `classify`'s `payment` verdict: `pay`, `purchase`,
+  `buy`, `place order`, `order now`, `complete order`, `donate`, `transfer`, `subscribe`, `top up`, `recharge`,
+  `billing` in what was pressed or the address, or a card or bank field name (`card`, `cvv`, `expiry`, `iban`, `upi`,
+  `amount`, `payment method`, …);
+- `consequential` (`send`, `message`, `email`, `post`, `share`, `comment`, `review`, `delete`, `remove`, `cancel`,
+  `password`, `account`, `settings`, `profile`, `sign up`, `register`, `book`, `reserve`, `schedule`, `confirm`,
+  `checkout`, `order`, `upload`, …, or the `DELETE` method) asks at `approve`;
+- `routine` (a search field such as `q`; `search`, `filter`, `sort`, `add to cart`, `cart`, `quantity`, `draft`,
+  `wishlist`, `cookies`, `consent`, `load more`, `check delivery`, `size`, …; an upload of a file from `Files/From chat`
+  within five minutes) is let through at `approve`;
+- a GraphQL request (its address has `graphql`, or it has an `operationName` field) is judged by its operation, never
+  as a search by its `query` field: payment and consequential words in the operation's name as above, a `query` is
+  `routine`, and a `mutation` is `routine` only by its own name (`AddToCart`), else `unsure`;
+- `unsure` (none of these) asks at `approve`; `full` lets through everything but a payment.
+
+Words are matched whole on the lower-cased text, split at anything but letters and digits and at camelCase. "What was
+pressed" is the step's own target (the accessible name `click` returns, the option `choose` picked, the label
+`check` set, a confirm's message, `element_at` for a click by position); with none (Enter in a field, a desktop step),
+the submit buttons of the form the request goes to or the form holding focus, read in DGC's isolated world
+(`BoxedBrowser.form_cues`). No model is asked. A request a level lets through is released at once (the same run goes
+on; no continuation) and kept as a `pip_computer_actions` row already `sent`, `resolved_by: "pip-level:<level>"`,
+whose summary has `what` ("Added to cart on shop.example"), `level` and `unattended`; the step's timeline label adds
+"Approved by its level: Approve for me · Added to cart on shop.example" (and "· nobody at the keyboard"), the row's
+`frame` is the step's picture, and the Pip's answer says "DGC approved that by the user's level (…): …". A careful
+site hold becomes, at `approve` and `full`, such a row of `kind: "site"` (`request_ref` `level:<site>`) and the site
+joins the run's sites (not `computer_sites:<pip>`, which stays the user's). A pending hold at those levels carries
+`asks_because` (`payment`, `consequential` or `unsure`), and its card says why. `get_pip_computer` lists pending
+actions first. An event `pip_level_approved` is recorded for each.
+
+After a run (and its Always-allow grants), `pip_levels.dispatch_for_run` sends each pending draft of that run its
+level lets through, as actor `pip-level:<level>` (`pip_app_actions._acting` re-checks it with `pip_levels.check`
+against the Pip's level at that moment): at `full` every email, event and plugin or connector action except a payment
+plugin's and a tool named for money (`charge`, `refund`, `payout`, `transfer`, `order`, …); at `approve` an email to
+an address the user wrote in their own messages to this Pip or already sent to from it (an approved send), an event
+whose guests are all such addresses (or none), and a plugin action named like a draft or a read. An email or event
+goes through the Pip's own connected account (`pip_app_links.connected`, `pip_app_accounts.discover`, the adapter's
+`inspect`). One that can't stays a draft for the user (event `pip_level_skipped`).
+
+The safety floor (`pip_levels.floor`), at every level and with careful mode off too: a Terminal `run`, or
+`desktop_type` text, that could wipe its Files (a recursive `rm` of `/`, `/home`, `~`, `$HOME`, `.`, `..`, `*` or
+`Files` and their `/*`; `rm -f *`; `find` of such a root with `-delete` or `-exec rm`; `xargs rm -r`; `shred` of
+one; `rsync --delete` into one; `git clean -f` with `-d` or `-x`; a fork bomb; `mkfs`, `wipefs`, `dd of=/dev/…`), seen
+through `sudo`, `env`, `timeout`, `sh -c`, `$(…)` and backticks, is recorded with `summary.kind: "floor"` (`floor`:
+what it could do, the command as `text` and `text_digest`). Approving it allows exactly that command once, within
+30 minutes (metadata `pip_floor_allowed:<pip>`); `always_allow_pip_computer_action` refuses it
+(`asks_every_time`). Words used as data (`echo`, a quoted message, a comment) are never a command; a command the shell
+couldn't read runs as before (it fails there).
+
+Local-only commands: `get_pip_level {pip_id}` → `{pip_id, level, default, levels: [{level, name, says}], on_its_own:
+[{at, what, level, unattended, kind: site | computer | app}]}` (the newest 20, each line once); `set_pip_level {pip_id,
+level}` returns the same and records `pip_level_changed`. The desktop notification (`pip_action_grants.ran_on_their_own`)
+names app sends a level made and submits at `full`.
+
 A Personal task now pins `email_draft`, `calendar_draft`, `action_grants` (a summary) and, only
 when the Pip has a connector grant, a `connector_draft` snapshot; a handoff run pins none. Its
 worker may return `message_draft`, `calendar_draft` and `connector_action_draft`, which `finish`
@@ -1741,6 +1809,7 @@ Clients check it before using a newer control.
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
+| 58 | How much a Personal Pip asks (`pip_levels`): `get_pip_level`, `set_pip_level` (`ask`, `approve`, `full`); what a level lets through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a pending hold's `asks_because`; the safety floor's computer action of kind `floor`; sites written out in an attached document count as named by the user |
 | 57 | Memory that learns, for Pips: a Personal Pip's own working notes (`pip_working_notes`: the `working_notes` tool, `get_pip_working_notes`, `set_pip_working_notes`), its daily log (`pip_daily_log`: `list_pip_daily_log`), and its chat looked back over for the user's one memory (`pip_memory_review`) |
 | 54 | Pips use the whole desktop (`pip_desktop_eyes`, `pip_apps`): a run whose model sees gets `desktop_look`, `desktop_click`, `desktop_double_click`, `desktop_right_click`, `desktop_hover`, `desktop_drag`, `desktop_scroll`, `desktop_type`, `desktop_key`, `windows`, `focus_window` and `launch_app`, with secrets blacked out of the whole screen; an image editor, a document editor and a PDF viewer, each in its own box, online through the computer's egress proxy like the Terminal; `get_pip_computer_apps`, `set_pip_computer_apps` |
 | 52 | Photos and files in a Pip's chat through the backend's spool: `send_pip_message` takes `spooled_images` (8 MiB a photo, 32 MiB in all, up to 64; HEIC kept as JPEG) and `spooled_files` (a document 16 MiB, text 1 MiB, 32 MiB in all, up to 16), local only; `get_pip_message_image` takes `as_file` and answers with the kept file's `path`. A large photo goes to the model at 2,500 pixels |

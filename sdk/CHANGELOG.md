@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Pips API 58: `get_pip_level` (read) and `set_pip_level` (mutation; `level` is `ask`, `approve` or `full`), in both
+  SDKs; each is refused before API 58, and the level is checked before anything is sent. How much a Personal Pip asks.
+
 - Pips API 57: `get_pip_working_notes` and `list_pip_daily_log` (reads) and `set_pip_working_notes` (mutation), in
   both SDKs; each is refused before API 57. A Personal Pip's own working notes, and the log of what it did each day.
 - Editor protocol: commands `memory_history`, `memory_undo`, `memory_watch`, `learn_skill` and `save_skill`; events

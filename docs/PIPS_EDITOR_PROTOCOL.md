@@ -273,6 +273,22 @@ login…**. The computer tab shows a `login` action with **Not now** only. The h
 four before API 56 ("Update DGC to save logins for your Pips.") and keeps only the request's
 type while it waits for the answer.
 
+**How much it asks** (API 58). Two `pips_control` requests, both local: `get_pip_level {pip_id}` and
+`set_pip_level {pip_id, level: "ask" | "approve" | "full"}`, each answered with `{pip_id, level, default, levels:
+[{level, name, says}], on_its_own: [{at, what, level: "approve" | "full", unattended, kind: "site" | "computer" |
+"app"}]}`. No event and no event field changes. A Personal Pip's page shows **How much it asks**: a picker of the three
+`levels` by `name`, the chosen one's `says` under it, and, when `on_its_own` has any, **What it did on its own** (the
+newest five: `what`, when, the level's name, "nobody at the keyboard" for `unattended`) with **Ask me again from now
+on** (`set_pip_level` `ask`). Choosing a level shows its `name: says` once as the notice. A Pip computer's `actions`
+now include ones its level let through: `status: "sent"`, `resolved_by: "pip-level:approve" | "pip-level:full"`, and
+`summary.what`, `summary.level`, `summary.unattended`; the extension shows them only through `on_its_own` and the run's
+timeline, whose labels already name them. A pending action may carry `summary.asks_because` (`payment`,
+`consequential`, `unsure`): its card under the reply adds one line saying why the level still asks, and one of
+`payment` is titled **Pay on HOST?**. A pending action of kind `floor` (the safety floor: `summary.floor`, the command
+as `fields[0].value`) is shown as **Let PIP run this in its Terminal?** with **Allow once** and **Not now**. `get_pip_computer`
+lists pending actions first. The host refuses both requests before API 58 ("Update DGC to choose how much a Pip
+asks.") and an older CLI is asked for neither.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

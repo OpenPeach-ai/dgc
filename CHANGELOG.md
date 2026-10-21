@@ -6,6 +6,43 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **How much a Personal Pip asks: Ask, Approve for me or Full access (Pips API 58).** Each Personal Pip has a level
+  on its page, set by you only. Every Pip, old and new, starts at **Ask**: as before, nothing changes until you choose.
+  - **Approve for me**: DGC approves routine steps by itself and asks for consequential ones. Routine: a new site's
+    first visit, a search, filter or sort, adding to a cart, saving a draft, an upload of a file you sent it, an email
+    to someone you named or already wrote to, an event with no guests. Asked: an order or checkout, a payment, sending
+    to someone new, posting, deleting, account settings or passwords, anything the page calls pay, purchase,
+    subscribe, transfer or book, and anything DGC can't place. DGC decides from the request itself (method, address,
+    field names) and the words of what the Pip pressed (read in DGC's own world of the page), never the model's
+    say-so, and no model is asked.
+  - **Full access**: no asking for sites, submits or sends (your connected apps' too), except payments.
+  - **At every level, as before**: a payment asks (a card number, a payment's words or card and bank fields: a saved
+    card's token too), the Pip never types a card and your own Pay on its screen is your approval, a saved login goes
+    only to its own site, and careful mode asks before anything it read from your apps goes onto a website. New, also
+    at every level: the **safety floor**. A command in its Terminal (or typed on its desktop) that could wipe its Files,
+    like `rm -rf ~` or `find . -delete`, waits for **Allow once**, which lets exactly that command run once.
+  - **What it did on its own is one click away.** A step its level let through goes at once, in the same run (no
+    follow-up run), is kept on record, and its picture in **What it saw…** says so ("Approved by its level: Approve for
+    me · Added to cart on shop.example"). Its page lists the newest under **What it did on its own**, right under the
+    picker, with **Ask me again from now on**; a routine's are marked "nobody at the keyboard". Drafts go after the
+    reply, checked again against the level when they run; a desktop notification names what was sent.
+  - **Sites you gave it count as yours.** A site written out in a document you attach (a PDF's, a document's or a text
+    file's text, read by DGC itself) no longer asks, as one you type never did. Photos still do: DGC has no way of its
+    own to read their text.
+  - **A held form no longer stalls the Pip.** A page whose submit DGC holds answers no script, and each of the two
+    pictures DGC takes of a hold waited 30 s for it (and the run's end another 30 s): a hold now answers the Pip in
+    about 6 s instead of over a minute.
+  - Measured on deepseek-v4.1-flash:cloud with the three-asks test sites (fresh home each run, the test card typed
+    by the "user" on the Pip's screen): **"pay these medical bills"** with three photos took 1 Allow tap at Ask (the
+    site, printed on the photographed bill), 0 at Approve for me and 0 at Full access, with 3 card entries (your own
+    Pay) at each, in 368 s, 311 s and 384 s. **"Design me my birthday shirts and order 20 of them in large size"**
+    (the test shop's Add to cart now posts to the shop, as real shops do) took 2 Allow taps at Ask (the site and the
+    cart), 0 at Approve for me ("Added to cart" went by itself, in the same run) and 0 at Full access, with your
+    card typed once at each, in 557 s (with one retry after the model looped in the image editor), 138 s and 162 s.
+    A saved card's Pay on a test electricity site was held at Full access ("It looks like a payment, so it asks at
+    every level"), and nothing reached the site. At Ask, an invoice whose site you typed, and one whose site was in
+    an attached PDF, were each paid with 0 Allow taps.
+
 - **Memory that learns: DGC's one memory now keeps what you say over a conversation, shows every change, and turns
   what you just did into a skill.** It is still one memory, shared by ChatDGC, Work and your Pips, written only from
   your own words.

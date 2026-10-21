@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **How much it asks, on a Personal Pip's page (Pips API 58).** A picker with **Ask**, **Approve for me** and **Full
+  access**, the chosen level's one plain line under it ("Opens new sites, searches, adds to carts and saves drafts by
+  itself. Asks before it orders, pays, sends to someone new, posts, deletes or changes an account."), said once more
+  as the notice when you choose one. Once its level lets something through, **What it did on its own** lists the
+  newest five right under the picker (with "nobody at the keyboard" for a routine) and **Ask me again from now on**.
+  A card under a reply says why its level still asks ("It looks like a payment, so it asks at every level."), and the
+  safety floor's card reads **Let PIP run this in its Terminal?** with **Allow once**. The host refuses both requests
+  to an older CLI, which shows no picker.
+
 - **Memory that learns, on screen.** A Work session's chat shows what DGC kept from it, once, as a quiet
   **Remembered: … · Forget** line (the panel asks for it with `memory_watch`, only from a CLI that offers it).
   **/learn [what]** in Work and in a Personal Pip's chat shows the drafted skill with **Save**, **Edit** and
