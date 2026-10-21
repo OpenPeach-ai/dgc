@@ -424,6 +424,93 @@ test('Web search: Ollama, from a CLI that takes it, with its optional key saved 
   assert.equal(hint(),'A key is saved. Leave blank to keep it.','Brave keeps its own words');
 });
 
+test('Web search: from a CLI that keeps a key per provider, the field shows the chosen one\'s own and Remove clears just that one',()=>{
+  // One shared key went with every switch: a Brave key was sent to Tavily, or to ollama.com. Now each provider has
+  // its own, and the page shows the chosen provider's ("Saved" or empty, never the key) with Remove beside it.
+  const x=setup();
+  x.click('[data-nav=web]');
+  const offered=['duckduckgo','brave','tavily','searxng','ollama'];
+  const config=(keys,selected='brave')=>({...x.config,search:selected,search_url:'',search_api_key_set:keys[selected]===true,search_providers:offered,search_keys:keys});
+  x.message({type:'event',event:config({brave:true,tavily:false,ollama:false})});
+  const key=()=>x.d.querySelector('#search_api_key');
+  const remove=()=>x.d.querySelector('#search-key-remove');
+  const hint=()=>key().closest('.field').querySelector('.hint').textContent;
+  const pick=(p)=>{const s=x.d.querySelector('#search_provider');s.value=p;s.dispatchEvent(new x.w.Event('input',{bubbles:true}));s.dispatchEvent(new x.w.Event('change',{bubbles:true}));};
+  assert.equal(key().value,'','never the key');
+  assert.equal(key().placeholder,'Saved','Brave: its own key is saved');
+  assert.equal(remove().hidden,false);
+  assert.equal(remove().textContent,'Remove');
+  assert.equal(hint(),'A Brave key is saved. Leave blank to keep it.');
+  pick('ollama');
+  assert.equal(key().placeholder,'','Ollama: none of its own, so the field is empty');
+  assert.equal(remove().hidden,true,'nothing of Ollama\'s to remove');
+  assert.match(hint(),/^Optional\. Signed in to Ollama on this computer\?/);
+  pick('tavily');
+  assert.equal(key().placeholder,'');
+  assert.equal(hint(),'Tavily needs a key of its own.');
+  pick('brave');
+  assert.equal(key().placeholder,'Saved','Brave still shows saved');
+  remove().click();
+  assert.deepEqual(JSON.parse(JSON.stringify(x.sent.filter(m=>m.type==='removeSearchKey'))),[{type:'removeSearchKey',provider:'brave'}]);
+  assert.equal(x.sent.some(m=>m.type==='saveSettings'),false,'Remove is not a Save of the page');
+  assert.equal(remove().disabled,true);
+  assert.equal(remove().textContent,'Removing…');
+  // The extension answers with the config its set_config asked for, then how it went.
+  x.message({type:'event',event:config({brave:false,tavily:false,ollama:false})});
+  x.message({type:'searchKeyRemoved',provider:'brave',ok:true});
+  assert.equal(x.d.querySelector('#search_provider').value,'brave');
+  assert.equal(key().placeholder,'','removed');
+  assert.equal(remove().hidden,true);
+  assert.equal(hint(),'Brave needs a key of its own.');
+  assert.match(x.d.querySelector('#save-status').textContent,/Key removed/);
+});
+
+test('Web search: a key typed for one provider is never saved as another\'s',()=>{
+  const x=setup();
+  x.click('[data-nav=web]');
+  const offered=['duckduckgo','brave','tavily','searxng','ollama'];
+  x.message({type:'event',event:{...x.config,search:'tavily',search_url:'',search_api_key_set:false,search_providers:offered,search_keys:{brave:true,tavily:false,ollama:false}}});
+  const pick=(p)=>{const s=x.d.querySelector('#search_provider');s.value=p;s.dispatchEvent(new x.w.Event('input',{bubbles:true}));s.dispatchEvent(new x.w.Event('change',{bubbles:true}));};
+  x.input('#search_api_key','tvly-key-1');
+  pick('ollama');
+  assert.equal(x.d.querySelector('#search_api_key').value,'','cleared on the switch');
+  x.click('#save');
+  let saved=x.sent.filter(m=>m.type==='saveSettings').pop();
+  assert.equal(saved.values.search_provider,'ollama');
+  assert.equal(saved.values.search_api_key,'','nothing for Ollama: the Tavily key went nowhere');
+  x.message({type:'settingsSaved',ok:true});
+  pick('tavily');
+  x.input('#search_api_key','tvly-key-1');
+  x.click('#save');
+  saved=x.sent.filter(m=>m.type==='saveSettings').pop();
+  assert.deepEqual([saved.values.search_provider,saved.values.search_api_key],['tavily','tvly-key-1']);
+  // A failed Remove says so and leaves the key shown as saved.
+  x.message({type:'settingsSaved',ok:true});
+  pick('brave');
+  x.d.querySelector('#search-key-remove').click();
+  x.message({type:'searchKeyRemoved',provider:'brave',ok:false,message:'synthetic rejection'});
+  assert.equal(x.d.querySelector('#search_api_key').placeholder,'Saved');
+  assert.equal(x.d.querySelector('#search-key-remove').disabled,false);
+  assert.match(x.d.querySelector('#save-status').textContent,/synthetic rejection/);
+});
+
+test('Web search: an older CLI keeps its one key for every provider, shown as it always was, with no Remove',()=>{
+  const x=setup();
+  x.click('[data-nav=web]');
+  x.message({type:'event',event:{...x.config,search:'brave',search_url:'',search_api_key_set:true,search_providers:['duckduckgo','brave','tavily','searxng','ollama']}});
+  const hint=()=>x.d.querySelector('#search_api_key').closest('.field').querySelector('.hint').textContent;
+  const pick=(p)=>{const s=x.d.querySelector('#search_provider');s.value=p;s.dispatchEvent(new x.w.Event('input',{bubbles:true}));s.dispatchEvent(new x.w.Event('change',{bubbles:true}));};
+  assert.equal(x.d.querySelector('#search-key-remove'),null,'it can\'t remove a key from here');
+  assert.equal(x.d.querySelector('#search_api_key').placeholder,'');
+  assert.equal(hint(),'A key is saved. Leave blank to keep it.');
+  x.input('#search_api_key','typed-1');
+  pick('tavily');
+  assert.equal(hint(),'A key is saved. Leave blank to keep it.','its one key, for Tavily too');
+  assert.equal(x.d.querySelector('#search_api_key').value,'typed-1','as before');
+  pick('ollama');
+  assert.match(hint(),/^A key is saved, used when Ollama on this computer isn't signed in/);
+});
+
 test('ChatDGC: a personality and custom instructions, saved for every chat; hidden from a CLI that cannot take them',()=>{
   const x=setup();
   x.click('[data-nav=chatdgc]');

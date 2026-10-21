@@ -87,25 +87,51 @@ export function renderFields(section, main, config, providers, ui) {
         const provider = c.search_provider || "duckduckgo";
         // Ollama only from a CLI that takes it (ready.capabilities.search_providers): an older one refuses the whole save.
         const ollama = (c.search_providers || []).includes("ollama") || provider === "ollama";
+        // A CLI that keeps one key per provider says which of them have one (c.search_keys): the field shows the
+        // chosen provider's own, and Remove clears it. An older CLI keeps one key for all of them, shown as before.
+        const own = c.search_keys && typeof c.search_keys === "object" ? c.search_keys : null;
+        const keySaved = (p) => own ? own[p] === true : c.search_api_key_set === true;
+        const names = { brave: "Brave", tavily: "Tavily" };
         const keyHint = (p) => p === "ollama"
-            ? (c.search_api_key_set ? "A key is saved, used when Ollama on this computer isn't signed in. Leave blank to keep it."
+            ? (keySaved(p) ? (own ? "An ollama.com key is saved for Ollama, used when Ollama on this computer isn't signed in. Leave blank to keep it."
+                : "A key is saved, used when Ollama on this computer isn't signed in. Leave blank to keep it.")
                 : "Optional. Signed in to Ollama on this computer? Nothing to add. Otherwise a key from ollama.com → Settings → API keys.")
-            : (c.search_api_key_set ? "A key is saved. Leave blank to keep it." : "Brave and Tavily need one.");
+            : !own ? (c.search_api_key_set ? "A key is saved. Leave blank to keep it." : "Brave and Tavily need one.")
+            : keySaved(p) ? `A ${names[p] || ""} key is saved. Leave blank to keep it.` : `${names[p] || "It"} needs a key of its own.`;
+        const removing = own && c.search_key_removing;
+        const keyRow = own
+            ? '<div class="field search-key"><span><label class="name" for="search_api_key">API key</label><span class="hint">' + keyHint(provider) + '</span></span>'
+                + '<span class="search-key-control">' + inp("search_api_key", "", "password")
+                + '<button type="button" class="secondary" id="search-key-remove" title="Remove the key saved for this provider"' + (removing ? ' disabled' : '') + '>' + (removing ? 'Removing…' : 'Remove') + '</button></span></div>'
+            : field("API key", keyHint(provider), inp("search_api_key", "", "password"));
         const providers = [["duckduckgo", "DuckDuckGo (no key)"], ["brave", "Brave Search"], ["tavily", "Tavily"], ["searxng", "SearXNG (your server)"]].concat(ollama ? [["ollama", "Ollama (sign-in or key)"]] : []);
         main.innerHTML = '<h2>Web search</h2><p class="sub">One search for Work, ChatDGC and your Pips. DuckDuckGo needs nothing; ' + (ollama ? 'Ollama uses your Ollama sign-in or a key; ' : '') + 'Brave and Tavily need a key; SearXNG is a server you run.</p>'
             + (c.search_settable ? '' : '<p class="note" role="status">Update the DGC CLI to choose the web search here.</p>')
             + card("ChatDGC", field("Search in ChatDGC", "It looks things up whenever an answer depends on facts it could get wrong, and cites what it found. Off: ChatDGC never goes online.", bool("chatdgc_web", c.chatdgc_web !== false)))
             + card("Search", field("Provider", "", sel("search_provider", providers, provider))
-                + '<div data-search-for="brave tavily ollama">' + field("API key", keyHint(provider), inp("search_api_key", "", "password")) + '</div>'
+                + '<div data-search-for="brave tavily ollama">' + keyRow + '</div>'
                 + '<div data-search-for="searxng">' + field("Server address", "For example http://127.0.0.1:8888", inp("search_url", c.search_url || "", "url")) + '</div>')
             + '<button type="button" class="save" id="save" title="Save the web search for every workspace on this computer"' + (c.search_settable ? '' : ' disabled') + '>Save</button>';
         const pick = document.getElementById("search_provider");
+        const key = document.getElementById("search_api_key"), remove = document.getElementById("search-key-remove");
         const show = () => {
             main.querySelectorAll("[data-search-for]").forEach((row) => { row.hidden = !row.dataset.searchFor.split(" ").includes(pick.value); });
             const hint = main.querySelector('[data-search-for~="ollama"] .hint');
             if (hint) hint.textContent = keyHint(pick.value);
+            // The chosen provider's own key: "Saved" or empty, never the key; Remove only when there is one.
+            if (own && key) key.placeholder = keySaved(pick.value) ? "Saved" : "";
+            if (remove) remove.hidden = !keySaved(pick.value);
         };
-        if (pick) { pick.addEventListener("change", show); show(); }
+        let shownFor = pick ? pick.value : "";
+        if (pick) {
+            pick.addEventListener("change", () => {
+                // A key typed for one provider is never saved as another's.
+                if (own && key && pick.value !== shownFor) key.value = "";
+                shownFor = pick.value;
+                show();
+            });
+            show();
+        }
         if (!c.search_settable) main.querySelectorAll(".card input, .card select").forEach((el) => { el.disabled = true; });
     }
     function renderChatDGC(main) {

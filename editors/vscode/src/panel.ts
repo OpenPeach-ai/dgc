@@ -136,8 +136,19 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
 };
 // The web search providers this editor can offer in Settings; a CLI says which of them it takes.
 const SEARCH_PROVIDERS = ["duckduckgo", "brave", "tavily", "searxng", "ollama"];
+// The ones that take a key. A CLI with ready.capabilities.search_keys keeps one per provider (set_config
+// search_api_key_<provider>); an older one keeps one key for all of them.
+const SEARCH_KEY_PROVIDERS = ["brave", "tavily", "ollama"];
 
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
+
+/** ready.capabilities.search_keys -> which providers have a key of their own saved; undefined from an older CLI. */
+function searchKeysFromHandshake(offered: any): Map<string, boolean> | undefined {
+  if (!offered || typeof offered !== "object" || !Array.isArray(offered.providers)) { return undefined; }
+  const saved = Array.isArray(offered.saved) ? offered.saved : [];
+  const own = offered.providers.filter((p: unknown) => typeof p === "string" && SEARCH_KEY_PROVIDERS.includes(p));
+  return new Map(own.map((p: string) => [p, saved.includes(p)]));
+}
 
 type ManagedMcpServer = {
   connector?: string;
@@ -461,6 +472,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private settingsEditor?: vscode.WebviewPanel;
   /** The CLI takes the web search's address and key from Settings (its config said whether a key is saved). */
   private searchSettable = false;
+  /** Which web search providers have a key of their own saved, from a CLI that keeps one per provider
+   *  (ready.capabilities.search_keys), kept current from each config reply and each Remove. Undefined: an older CLI
+   *  keeps one key for all of them, and Settings shows that one as it always did. */
+  private searchKeysSaved?: Map<string, boolean>;
+  /** The handshake searchKeysSaved was read from: a new backend's handshake starts it again. */
+  private searchKeysFrom?: unknown;
   /** The CLI takes ChatDGC's custom instructions and personality from Settings. */
   private chatdgcSettable = false;
   /** The CLI takes the per-turn token cap from Settings (its config answered turn_token_budget). */
@@ -3184,6 +3201,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "config":
         if ("search_api_key_set" in ev) { this.searchSettable = true; }
+        // search_api_key_set is the selected provider's own key, from a CLI that keeps one per provider.
+        if (this.searchKeyState()?.has(String(ev.search || "")) && typeof ev.search_api_key_set === "boolean") {
+          this.searchKeyState()!.set(String(ev.search), ev.search_api_key_set);
+        }
         if ("chatdgc_personality" in ev) { this.chatdgcSettable = true; }
         if ("turn_token_budget" in ev) { this.budgetSettable = true; }
         this.routeState.nativeModel = String(ev.model || "");
@@ -3387,8 +3408,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const own = managed.get(item?.name)?.oauth;
         return own ? { ...item, oauth_client_id: own.clientId, oauth_port: own.port } : item;
       }) }
-        // Settings -> Web search offers the providers this CLI takes, from its handshake.
-        : ev.type === "config" ? { ...ev, search_providers: this.searchProviders() } : ev;
+        // Settings -> Web search offers the providers this CLI takes, from its handshake, and (from a CLI that keeps
+        // one key per provider) which of them have a key saved. Never a key itself.
+        : ev.type === "config" ? { ...ev, search_providers: this.searchProviders(),
+                                   ...(this.searchKeyState() ? { search_keys: Object.fromEntries(this.searchKeyState()!) } : {}) } : ev;
       this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -6123,6 +6146,34 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.refreshEditorSettings();
   }
 
+  /** Which web search providers have their own key saved (see searchKeysSaved), read again from each new handshake. */
+  private searchKeyState(): Map<string, boolean> | undefined {
+    if (this.searchKeysFrom !== this.lastReadyEvent) {
+      this.searchKeysFrom = this.lastReadyEvent;
+      this.searchKeysSaved = searchKeysFromHandshake((this.lastReadyEvent?.capabilities as any)?.search_keys);
+    }
+    return this.searchKeysSaved;
+  }
+
+  /** Settings -> Web search -> Remove: clear one provider's own key, at once and by its own name, on a CLI that keeps
+   *  one per provider (the page offers Remove only then). The page hears how it went. */
+  private async removeSearchKey(provider: string): Promise<void> {
+    const saved = this.searchKeyState();
+    const reply = (ok: boolean, message = "") =>
+      this.settingsEditor?.webview.postMessage({ type: "searchKeyRemoved", provider, ok, ...(message ? { message } : {}) });
+    if (!saved?.has(provider)) { reply(false, "Update the DGC CLI to remove a web search key here."); return; }
+    const before = saved.get(provider) === true;
+    saved.set(provider, false);            // the config reply this asks for then shows it gone
+    try {
+      await this.requestState(this.ensureBackend(), "search-key",
+                              { type: "set_config", values: { [`search_api_key_${provider}`]: "" } }, "config", 10000);
+      reply(true);
+    } catch (err: any) {
+      saved.set(provider, before);
+      reply(false, err?.message || "DGC could not remove the key.");
+    }
+  }
+
   /** The web search providers this CLI's set_config takes: ready.capabilities.search_providers (Ollama came with it),
    *  else the four every CLI that takes the search from Settings knows. One it doesn't know refuses the whole save. */
   private searchProviders(): string[] {
@@ -6221,6 +6272,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.showEditorSettings();
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {});
+    } else if (msg?.type === "removeSearchKey") {
+      await this.removeSearchKey(String(msg.provider || ""));
     } else if (msg?.type === "copy") {
       const text = String(msg.text || "");
       if (text.length <= 2048) await vscode.env.clipboard.writeText(text);
@@ -6622,8 +6675,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const taken = this.searchProviders().includes(provider);
         if (taken) { values.search_provider = provider; }
         if (typeof v.search_url === "string") { values.search_url = v.search_url.trim(); }
-        // A key goes with a provider this CLI takes: otherwise it would be kept as the key of the one it has.
-        if (taken && typeof v.search_api_key === "string" && v.search_api_key.trim()) { values.search_api_key = v.search_api_key.trim(); }
+        // A key goes with a provider this CLI takes: otherwise it would be kept as the key of the one it has. To a CLI
+        // that keeps one per provider it goes by that provider's own name, so it can never become another's.
+        if (taken && typeof v.search_api_key === "string" && v.search_api_key.trim()) {
+          const own = this.searchKeyState();
+          if (own?.has(provider)) { values[`search_api_key_${provider}`] = v.search_api_key.trim(); }
+          else if (!own) { values.search_api_key = v.search_api_key.trim(); }
+        }
         if (typeof v.chatdgc_web === "boolean") { values.chatdgc_web = v.chatdgc_web; }
       }
       if (this.chatdgcSettable) {

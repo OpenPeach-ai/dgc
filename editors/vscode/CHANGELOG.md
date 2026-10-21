@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Settings → Web search keeps a key for each provider, and can remove one.** With a DGC CLI that keeps one key per
+  provider, the key field shows the chosen provider's own: "Saved", or empty, never the key itself, so switching to
+  Ollama shows Ollama's, not the Brave key you saved. **Remove** beside it clears that provider's key at once, and only
+  that one. A key typed for one provider is cleared when you choose another, so it is never saved as another
+  provider's. With an older CLI the field works as before.
 - **Settings → Web search offers Ollama.** Pick **Ollama (sign-in or key)**: if Ollama on this computer is signed in,
   there is nothing to add; otherwise paste an ollama.com API key (ollama.com → Settings → API keys) in the key field,
   which saves it where Brave and Tavily keys go and never shows it back. It is offered only by a DGC CLI that has it;

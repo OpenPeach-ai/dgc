@@ -2814,6 +2814,89 @@ test("Ollama is saved as the web search only to a CLI whose handshake lists it, 
   assert.equal(JSON.stringify(posted).includes("ollama-key-1"), false, "the page never gets the key back");
 });
 
+test("to a CLI that keeps a key per provider, a key goes by its provider's own name and Remove clears only that one", async () => {
+  // One shared key went with every switch of provider: a Brave key was sent to Tavily or ollama.com.
+  const { provider, commands } = harness();
+  provider.searchSettable = true;
+  provider.lastReadyEvent = { capabilities: { search_providers: ["duckduckgo", "brave", "tavily", "searxng", "ollama"],
+    search_keys: { version: 1, providers: ["brave", "tavily", "ollama", "later"], saved: ["tavily"] } } };
+  await provider.saveSettings(settings({ search_provider: "brave", search_api_key: "  brave-key-1  ", search_url: "" }));
+  let values = commands.find((c) => c.type === "set_config").values;
+  assert.equal(values.search_provider, "brave");
+  assert.equal(values.search_api_key_brave, "brave-key-1", "Brave's own key");
+  assert.equal("search_api_key" in values, false, "never the one shared name");
+  assert.deepEqual(Object.keys(values).filter((k) => k.startsWith("search_api_key")), ["search_api_key_brave"]);
+  commands.length = 0;
+  await provider.saveSettings(settings({ search_provider: "searxng", search_api_key: "stray-1", search_url: "http://127.0.0.1:8888" }));
+  values = commands.find((c) => c.type === "set_config").values;
+  assert.deepEqual(Object.keys(values).filter((k) => k.startsWith("search_api_key")), [], "a provider that takes no key gets none");
+
+  // The page hears which providers have a key of their own with each config, never a key.
+  const posted = [];
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  const config = (extra) => provider.onEvent({ type: "config", seq: 9, model: "m", mode: "default", think: "off", base_url: "",
+                                               project_root: "/p", goal: {}, ...extra });
+  config({ search: "brave", search_api_key_set: true });
+  let forwarded = posted.filter((m) => m.type === "event" && m.event.type === "config").pop();
+  assert.deepEqual(forwarded.event.search_keys, { brave: true, tavily: true, ollama: false },
+    "from the handshake, and the selected provider's from its config");
+  assert.equal(JSON.stringify(posted).includes("brave-key-1"), false, "the page never gets a key back");
+
+  // Remove: Tavily's own key, at once, by its own name, though Brave is the one selected.
+  commands.length = 0;
+  await provider.onSettingsMessage({ type: "removeSearchKey", provider: "tavily" });
+  assert.deepEqual(commands.map((c) => [c.type, c.values]), [["set_config", { search_api_key_tavily: "" }]]);
+  assert.deepEqual(posted.at(-1), { type: "searchKeyRemoved", provider: "tavily", ok: true });
+  config({ search: "brave", search_api_key_set: true });
+  forwarded = posted.filter((m) => m.type === "event" && m.event.type === "config").pop();
+  assert.deepEqual(forwarded.event.search_keys, { brave: true, tavily: false, ollama: false });
+  commands.length = 0;
+  await provider.onSettingsMessage({ type: "removeSearchKey", provider: "searxng" });
+  assert.equal(commands.length, 0, "only a provider that keeps a key");
+  assert.equal(posted.at(-1).ok, false);
+
+  // A new backend's handshake is read again.
+  provider.lastReadyEvent = { capabilities: { search_keys: { version: 1, providers: ["brave", "tavily", "ollama"], saved: ["ollama"] } } };
+  config({ search: "duckduckgo", search_api_key_set: false });
+  forwarded = posted.filter((m) => m.type === "event" && m.event.type === "config").pop();
+  assert.deepEqual(forwarded.event.search_keys, { brave: false, tavily: false, ollama: true });
+});
+
+test("a Remove the CLI refuses leaves the key shown as saved and says why", async () => {
+  const { provider, commands } = harness({ rejectType: "set_config" });
+  provider.lastReadyEvent = { capabilities: { search_keys: { version: 1, providers: ["brave", "tavily", "ollama"], saved: ["brave"] } } };
+  const posted = [];
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  await provider.onSettingsMessage({ type: "removeSearchKey", provider: "brave" });
+  assert.deepEqual(commands.map((c) => c.values), [{ search_api_key_brave: "" }]);
+  assert.equal(posted.at(-1).ok, false);
+  assert.match(posted.at(-1).message, /synthetic set_config rejection/);
+  provider.onEvent({ type: "config", seq: 9, model: "m", mode: "default", think: "off", base_url: "", project_root: "/p", goal: {},
+                     search: "tavily", search_api_key_set: false });
+  const forwarded = posted.filter((m) => m.type === "event" && m.event.type === "config").pop();
+  assert.equal(forwarded.event.search_keys.brave, true, "still saved");
+});
+
+test("an older CLI keeps its one key: the editor saves it as before and offers no per-provider state or Remove", async () => {
+  const { provider, commands } = harness();
+  provider.searchSettable = true;
+  provider.lastReadyEvent = { capabilities: { search_providers: ["duckduckgo", "brave", "tavily", "searxng", "ollama"] } };
+  await provider.saveSettings(settings({ search_provider: "brave", search_api_key: "brave-key-1", search_url: "" }));
+  const values = commands.find((c) => c.type === "set_config").values;
+  assert.deepEqual([values.search_provider, values.search_api_key], ["brave", "brave-key-1"], "today's one key field");
+  assert.equal(Object.keys(values).some((k) => /^search_api_key_/.test(k)), false, "names an older CLI would refuse");
+  const posted = [];
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  provider.onEvent({ type: "config", seq: 9, model: "m", mode: "default", think: "off", base_url: "", project_root: "/p", goal: {},
+                     search: "brave", search_api_key_set: true });
+  const forwarded = posted.find((m) => m.type === "event" && m.event.type === "config");
+  assert.equal("search_keys" in forwarded.event, false);
+  commands.length = 0;
+  await provider.onSettingsMessage({ type: "removeSearchKey", provider: "brave" });
+  assert.equal(commands.length, 0, "nothing sent to a CLI that can't take it");
+  assert.equal(posted.at(-1).ok, false);
+});
+
 test("ChatDGC's instructions and personality are saved only to a CLI that takes them", async () => {
   const older = harness();
   await older.provider.saveSettings(settings({ chatdgc_about: "x", chatdgc_personality: "warm" }));

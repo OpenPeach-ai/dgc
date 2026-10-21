@@ -67,6 +67,9 @@ function applyConfig(ev) {
         draft.search_provider = ev.search || 'duckduckgo';
     draft.search_api_key_set = ev.search_api_key_set === true;
     draft.search_settable = 'search_api_key_set' in ev;
+    // From a CLI that keeps one key per provider: which of them have one saved (the extension adds it from its
+    // handshake and the config replies; never a key). Absent: an older CLI's one key for all of them.
+    draft.search_keys = ev.search_keys && typeof ev.search_keys === 'object' ? { ...ev.search_keys } : null;
     // The providers this CLI's set_config takes, which the extension adds from its handshake (not a protocol field).
     draft.search_providers = Array.isArray(ev.search_providers) ? ev.search_providers : [];
     draft.chatdgc_settable = 'chatdgc_personality' in ev;
@@ -182,6 +185,15 @@ function render() {
         if (input) { input.min = String(min); input.step = String(step); if (max) input.max = String(max); }
     }
     save.onclick = () => { if ([...main.querySelectorAll('input')].some(input => !input.reportValidity())) return; snapshot(); saving = true; save.disabled = true; save.textContent = 'Saving…'; send({ type: 'saveSettings', values: { ...draft } }); };
+    // Web search -> Remove: the chosen provider's own key, cleared at once (the rest of the page waits for Save).
+    const removeKey = $('search-key-remove');
+    if (removeKey) removeKey.onclick = () => {
+        snapshot();
+        const provider = $('search_provider')?.value || '';
+        draft.search_key_removing = provider;
+        removeKey.disabled = true; removeKey.textContent = 'Removing…';
+        send({ type: 'removeSearchKey', provider });
+    };
     main.querySelectorAll('input,select,textarea').forEach(el => el.addEventListener('input', () => { snapshot(); }));
     main.querySelectorAll('[data-setting]').forEach(b => b.onclick = () => { const on = b.getAttribute('aria-checked') !== 'true'; setDraft(b.dataset.setting, on); b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
     for (const [presetId, urlId] of [['provider', 'base_url'], ['subagent_provider', 'subagent_base_url']]) {
@@ -953,6 +965,13 @@ window.addEventListener('message', event => {
         if (msg.name === connectingPlugin && msg.error) updateConnection('error');
         if (['plugins', 'mcp'].includes(section))
             render();
+    }
+    else if (msg.type === 'searchKeyRemoved') {
+        // Settings -> Web search -> Remove: that provider's own key, cleared at once by its own name.
+        draft.search_key_removing = '';
+        if (msg.ok && draft.search_keys && msg.provider in draft.search_keys) draft.search_keys[msg.provider] = false;
+        saveStatus = msg.ok ? 'Key removed' : msg.message || 'The key was not removed.';
+        if (section === 'web' && !saving) { snapshot(); render(); }
     }
     else if (msg.type === 'settingsSaved') {
         saving = false;
