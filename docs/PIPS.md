@@ -1229,8 +1229,9 @@ one exception to "Pips keep their own computers", and only for the task you allo
 - **It asks with a card.** It says what it needs in its chat, and a card below its reply asks **Let PIP
   use your Chrome?** with the sites, as their address shows them (`shop.example.com`, or the whole
   address for one that isn't https, like `http://127.0.0.1:8123`), why, and **Allow once** and **Not
-  now**. There is no Always allow: the next time it needs your Chrome, it asks again. A newer ask
-  replaces a card you haven't answered, and an unanswered card stops asking after a day.
+  now**. There is no Always allow: the next time it needs your Chrome, it asks again, and a **Not now**
+  is about that one card. A newer ask replaces a card you haven't answered, and an unanswered card
+  stops asking after a day. A site you wrote with `http://` stays http on its card.
 - **Chrome asks too.** Choose **Allow once**, and Chrome itself asks **Allow remote debugging?**:
   choose Allow there as well. Once, in the Chrome you use (version 144 or later), open
   `chrome://inspect/#remote-debugging` and turn on "Allow remote debugging for this browser

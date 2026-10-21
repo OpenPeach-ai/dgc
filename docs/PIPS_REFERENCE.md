@@ -1637,7 +1637,8 @@ is reported with a short error.
 unreachable, created_at, expires_at, allowed_at?, decided_at?, decided_by?, use_run_id?, claimed_at?, started_at?,
 chrome?, ended?, ended_at?, sent?}` (no registry schema change; the newest 20 per Pip are kept). `sites` are origins as
 Chrome spells them (`permissions._canonical`: scheme, IDNA host without a trailing dot, port unless the default; a
-bare host is `https`; a backslash, user name, `%`-escape, space or control character is no site), 1 to 4; a site the
+bare host is `https`, unless the user wrote that host and port with `http://` (and never `https://`) in one of their own
+last 20 messages to the Pip; a backslash, user name, `%`-escape, space or control character is no site), 1 to 4; a site the
 user's own rules deny for Work's signed-in Chrome (`Browser(signed-in:…)`, `Browser(signed-in:*)`, a site or path deny)
 never reaches a card. `why` is one line of up to 200 characters, never a card number, redacted of saved secrets.
 
@@ -1651,7 +1652,8 @@ never reaches a card. `why` is one line of up to 200 characters, never a card nu
   borrow_id}` needs `requested`, checks `find_route` again (else `chrome_unreachable` with the reason; the card stays),
   sets `allowed` and queues the Pip's next turn under `pip_chat.BORROW_KEY + id` (`borrow_<id>`, a key only DGC writes:
   `send_pip_message` refuses it); a failed queue (the Pip busy) puts the card back. `decline_pip_borrow` sets
-  `declined` and queues a turn under `borrow_no_<id>` telling the Pip it may not. `stop_pip_borrow` sets an
+  `declined` and queues a turn under `borrow_no_<id>` telling the Pip it may not use it for that, and that the next
+  thing needing the user's Chrome is asked for anew. `stop_pip_borrow` sets an
   `allowed` or `in_use` card `returned` with `ended: "stop"`. There is no Always allow.
 - **Claiming.** As a `conversation` run starts, the runner reads its user message's request key; for `borrow_<id>`
   it moves that card from `allowed` to `in_use` with `use_run_id` (in one transaction, within 30 minutes of the
