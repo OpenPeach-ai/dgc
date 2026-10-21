@@ -3054,6 +3054,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.sessionRestoreSaved = saved?.saved !== false;
         }
         this.lastReadyEvent = ev;
+        // Memory that learns: this panel shows the line a Work session's look back adds ("Remembered: … · Forget"),
+        // so it asks for memory_learned. A backend that doesn't offer it never sends one.
+        if (Number((ev.capabilities as any)?.memory?.learned) >= 1) {
+          this.backend?.send({ type: "memory_watch", request_id: this.nextRequestId("memory-watch") });
+        }
         this.currentSessionId = String(ev.session_id || "");
         this.currentSessionName = String(ev.session_name || "");
         this.currentSessionSaved = false;           // a fresh backend's chat has no file yet
@@ -3373,7 +3378,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Voice: the page's own state and progress, and only its own errors (a chat's dictation reports its own).
     const settingsVoice = ["voice_state", "voice_progress"].includes(ev.type)
       || (ev.type === "voice_error" && String((ev as any).request_id || "").startsWith("settings-voice"));
-    if (this.settingsEditor && (settingsRejection || settingsVoice || ["config", "usage_report", "pip_usage_report", "mcp_servers", "memory_state"].includes(ev.type))) {
+    if (this.settingsEditor && (settingsRejection || settingsVoice || ["config", "usage_report", "pip_usage_report", "mcp_servers", "memory_state", "memory_history"].includes(ev.type))) {
       const managed = ev.type === "mcp_servers" ? new Map(this.managedMcpServers().map((m) => [m.name, m])) : null;
       // The form shows a server's own OAuth app (its public client id and port); never its secret.
       const event = managed && Array.isArray((ev as any).items) ? { ...ev, items: (ev as any).items.map((item: any) => {
@@ -4459,6 +4464,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be.send({ type: "add_memory", request_id: this.nextRequestId("memory-add"),
                   scope: msg.scope, text: String(msg.text || "") });
         break;
+      case "memoryForgetFact": {
+        // Forget on a "Remembered" line: the one memory every DGC surface shares.
+        const id = typeof msg.id === "string" && /^mem_[0-9a-f]{12}$/.test(msg.id) ? msg.id : "";
+        if (id) be.send({ type: "memory_forget", request_id: this.nextRequestId("memory-forget"), id });
+        break;
+      }
+      case "learnSave": {
+        // /learn's Save: the skill as shown (maybe edited) is written now, and not before.
+        const markdown = typeof msg.markdown === "string" ? msg.markdown.slice(0, 65536) : "";
+        const scope = msg.scope === "project" ? "project" : "user";
+        if (markdown.trim()) be.send({ type: "save_skill", request_id: String(msg.requestId || this.nextRequestId("learn-save")).slice(0, 128), markdown, scope });
+        break;
+      }
       case "listArtifacts":
         be.send(this.stateCommand("artifacts", { type: "list_artifacts" }));
         break;
@@ -5307,6 +5325,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (accepted) { this.turnActive = true; }
         break;
       }
+      case "learn": this.learn(""); break;
+    }
+  }
+
+  /** /learn [what]: a skill drafted from this session, shown with Save, Edit and Cancel; nothing is written yet. */
+  private learn(request: string): void {
+    if (!(Number((this.lastReadyEvent?.capabilities as any)?.learn?.version) >= 1)) {
+      this.post({ type: "event", event: { type: "error", message: "Update the DGC CLI to turn what you just did into a skill with /learn." } });
+      return;
+    }
+    const requestId = this.nextRequestId("learn");
+    if (this.ensureBackend().send({ type: "learn_skill", request_id: requestId, ...(request ? { request: request.slice(0, 1000) } : {}) })) {
+      this.post({ type: "learn_started", requestId, request });
     }
   }
 
@@ -5499,6 +5530,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // rejects it as an unknown command (built-in names are reserved, so a custom command cannot
     // fill the gap either). The palette entry worked the whole time.
     if (name === "branch" || name === "fork") { void this.branchChat(rest); return; }
+    if (name === "learn") { this.learn(rest); return; }
     // /artifact with an argument (`stop <id>`, `list`) is the backend's to interpret. The map
     // below keys on the command name alone, so every form of it opened the artifacts list.
     if (name === "artifact" && rest) { be.send({ type: "slash_command", text }); return; }
@@ -6232,7 +6264,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (cmd && !be.send({ ...cmd, request_id: this.nextRequestId("settings-voice") } as Parameters<DgcBackend["send"]>[0])) {
         say("DGC couldn't reach its backend. Try again.");
       }
-    } else if (["getMemory", "memoryAdd", "memoryEdit", "memoryForget", "memoryClear", "memoryProject", "memorySwitch"].includes(msg?.type)) {
+    } else if (["getMemory", "memoryAdd", "memoryEdit", "memoryForget", "memoryClear", "memoryProject", "memorySwitch",
+                "getMemoryHistory", "memoryUndo"].includes(msg?.type)) {
       // Settings -> Memory: one memory about the user, kept by the side bar's process (dgc/shared_memory.py).
       const say = (message: string) => this.settingsEditor?.webview.postMessage({ type: "memory_unavailable", message });
       if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.memory) {
@@ -6243,7 +6276,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const text = typeof msg.text === "string" ? msg.text.slice(0, 1000) : "";
       const id = typeof msg.id === "string" && /^mem_[0-9a-f]{12}$/.test(msg.id) ? msg.id : "";
       let cmd: { type: string } & Record<string, unknown> | null = null;
+      const history = Number((this.lastReadyEvent?.capabilities as any)?.memory?.history) >= 1;
       if (msg.type === "getMemory") cmd = { type: "memory_list" };
+      else if (msg.type === "getMemoryHistory") {
+        // An older CLI keeps no history: the page says so instead of asking.
+        if (!history) { this.settingsEditor?.webview.postMessage({ type: "memory_history_unavailable" }); return; }
+        cmd = { type: "memory_history" };
+      } else if (msg.type === "memoryUndo") {
+        const change = typeof msg.id === "string" && /^memj_[0-9a-f]{12}$/.test(msg.id) ? msg.id : "";
+        if (!history || !change) return;
+        cmd = { type: "memory_undo", id: change };
+      }
       else if (msg.type === "memoryAdd" && text.trim()) cmd = { type: "memory_add", text };
       else if (msg.type === "memoryEdit" && id && text.trim()) cmd = { type: "memory_edit", id, text };
       else if (msg.type === "memoryForget" && id) cmd = { type: "memory_forget", id };

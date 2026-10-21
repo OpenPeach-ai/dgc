@@ -135,6 +135,7 @@ function render() {
     }
     if (section === 'memory') {
         if (!memory.asked) { memory.asked = true; send({ type: 'getMemory' }); }
+        if (!memory.historyAsked) { memory.historyAsked = true; send({ type: 'getMemoryHistory' }); }
         renderMemory(main);
         return;
     }
@@ -234,15 +235,57 @@ function bindChips(main) {
 }
 const offered = row => row.install !== 'block' && row.license !== 'Proprietary';
 // ---- Memory: one memory about you, shared by ChatDGC, Work sessions and Pips (dgc/shared_memory.py)
-const memory = { asked: false, state: null, note: '', editing: '', confirming: false, busy: false };
+const memory = { asked: false, state: null, note: '', editing: '', confirming: false, busy: false,
+    history: null, historyAsked: false, historyNote: '', historyOff: false, undoing: '' };
 // Settings -> Voice: the models that dictate and read aloud, installed on this computer (dgc/voice). `progress` is each
 // model's latest voice_progress while it installs.
 const voice = { asked: false, state: null, note: '', progress: {}, busy: '' };
+const MEMORY_KINDS = { preference: 'Preference', fact: 'Fact', decision: 'Decision', outcome: 'Outcome' };
 function memoryFrom(fact) {
     const where = fact.source?.where ? ': ' + fact.source.where : '';
-    const from = { chat: 'From a chat' + where, settings: 'Added by you', work: 'From a Work session' + where, pip: 'From a Pip' + where }[fact.source?.surface] || 'Saved';
+    const learned = fact.source?.by === 'review';
+    const from = { chat: (learned ? 'Learned from a chat' : 'From a chat') + where, settings: 'Added by you',
+        work: (learned ? 'Learned from a Work session' : 'From a Work session') + where,
+        pip: (learned ? 'Learned from your chat with a Pip' : 'From a Pip') + where }[fact.source?.surface] || 'Saved';
     const day = String(fact.updated_at || fact.created_at || '').slice(0, 10);
-    return from + (day ? ' · ' + day : '') + (fact.edited ? ' · edited' : '');
+    const kind = MEMORY_KINDS[fact.kind] ? MEMORY_KINDS[fact.kind] + ' · ' : '';
+    const until = fact.until ? (fact.expired ? ` · ended ${fact.until}, no longer used` : ` · until ${fact.until}`) : '';
+    return kind + from + (day ? ' · ' + day : '') + (fact.edited ? ' · edited' : '') + until;
+}
+// The history of every change (memory_history): what, who, where and when, with Undo while it can still be taken back.
+const MEMORY_BY = { you: 'you', review: 'DGC, looking back over a conversation', tool: 'the remember tool' };
+const MEMORY_SURFACES = { chat: 'ChatDGC', work: 'Work', pip: 'a Pip', settings: 'Settings' };
+function memoryChange(e) {
+    const quote = `“${e.text}”`;
+    const what = {
+        add: e.by === 'review' ? `Learned ${quote}` : `Remembered ${quote}`,
+        edit: `Changed “${e.before || ''}” to ${quote}`,
+        forget: `Forgot ${quote}`, clear: `Deleted all (${e.text})`,
+        learn: `Saved the skill ${e.text}` + (e.scope === 'project' ? ' (this project)' : e.scope === 'user' ? ' (your skills)' : ''),
+        undo: `Undid: ${{ add: 'remembered', edit: 'changed', forget: 'forgot', clear: 'deleted all', learn: 'saved the skill' }[e.what] || 'a change'} ${quote}`,
+    }[e.op] || quote;
+    const by = e.op === 'undo' || e.op === 'clear' || e.op === 'learn' || e.op === 'edit' ? 'you' : (MEMORY_BY[e.by] || 'DGC');
+    const place = MEMORY_SURFACES[e.surface] ? ' in ' + MEMORY_SURFACES[e.surface] + (e.where ? ` (${e.where})` : '') : '';
+    const when = String(e.at || '').replace('T', ' ').slice(0, 16);
+    return { what, who: `By ${by}${place}${when ? ' · ' + when : ''}` };
+}
+function memoryHistoryHTML() {
+    if (memory.historyOff) return '';
+    const rows = memory.history;
+    let html = `<details class="memory-history"${memory.historyOpen ? ' open' : ''}><summary><h3 class="section">History${rows?.length ? ' · ' + rows.length : ''}</h3></summary>`
+        + '<p class="note">Every change to what DGC remembers, and every skill /learn saved: who made it and when. Undo takes one back.</p>';
+    if (memory.historyNote) html += `<p class="banner error" role="alert">${esc(memory.historyNote)}</p>`;
+    html += '<div class="card">';
+    if (!rows) html += '<p class="note" role="status">Reading the history…</p>';
+    else if (!rows.length) html += '<p class="empty">No changes yet.</p>';
+    for (const e of rows || []) {
+        const c = memoryChange(e);
+        html += `<div class="row memory-change${e.undone ? ' undone' : ''}"><div class="copy"><strong>${esc(c.what)}</strong>`
+            + `<span class="summary">${esc(c.who)}${e.undone ? ' · undone' : ''}</span></div>`
+            + (e.undoable ? `<div class="actions"><button type="button" class="secondary" data-memory-undo="${esc(e.id)}"${memory.undoing ? ' disabled' : ''} aria-label="Undo: ${esc(c.what)}">Undo</button></div>` : '')
+            + '</div>';
+    }
+    return html + '</div></details>';
 }
 function renderMemory(main) {
     const st = memory.state;
@@ -280,9 +323,10 @@ function renderMemory(main) {
             + switchHTML(p.remember, 'Remember ' + p.name, `data-memory-project="${esc(p.folder)}"`, memory.busy) + '</div>';
     }
     html += '</div>';
+    html += memoryHistoryHTML();
     if (facts.length) {
         html += memory.confirming
-            ? `<div class="banner" role="alertdialog" aria-label="Delete all memories"><p>Delete all ${facts.length} memories? This can't be undone.</p>`
+            ? `<div class="banner" role="alertdialog" aria-label="Delete all memories"><p>Delete all ${facts.length} memories?${memory.historyOff ? " This can't be undone." : ' Undo in History brings them back.'}</p>`
               + '<div class="actions"><button type="button" class="secondary memory-danger" data-memory-clear-yes>Delete all</button><button type="button" class="link" data-memory-clear-no>Cancel</button></div></div>'
             : '<div class="actions"><button type="button" class="secondary memory-danger" data-memory-clear title="Delete everything DGC remembers about you">Delete all memories</button></div>';
     }
@@ -307,6 +351,10 @@ function renderMemory(main) {
     main.querySelector('[data-memory-clear]')?.addEventListener('click', () => { memory.confirming = true; render(); main.querySelector('[data-memory-clear-no]')?.focus(); });
     main.querySelector('[data-memory-clear-no]')?.addEventListener('click', () => { memory.confirming = false; render(); });
     main.querySelector('[data-memory-clear-yes]')?.addEventListener('click', () => { memory.confirming = false; go({ type: 'memoryClear' }); });
+    main.querySelector('.memory-history')?.addEventListener('toggle', e => { memory.historyOpen = e.currentTarget.open; });
+    main.querySelectorAll('[data-memory-undo]').forEach(b => b.addEventListener('click', () => {
+        memory.undoing = b.dataset.memoryUndo; memory.historyNote = ''; send({ type: 'memoryUndo', id: b.dataset.memoryUndo }); render();
+    }));
 }
 const megabytes = (bytes) => `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 const VOICE_STAGES = { starting: 'Starting', runtime: 'Installing the voice engine', download: 'Downloading', verify: 'Checking', unpack: 'Unpacking', done: 'Finishing' };
@@ -926,6 +974,10 @@ window.addEventListener('message', event => {
         voice.busy = ''; voice.note = msg.message || 'DGC couldn\'t reach its voice models.';
         if (section === 'voice') render();
     }
+    else if (msg.type === 'memory_history_unavailable') {
+        memory.historyOff = true;
+        if (section === 'memory') render();
+    }
     else if (msg.type === 'memory_unavailable') {
         memory.busy = false; memory.note = msg.message || 'DGC couldn\'t reach what it remembers.';
         if (section === 'memory') render();
@@ -954,6 +1006,11 @@ window.addEventListener('message', event => {
             usage?.receive(ev);
         else if (ev.type === 'memory_state') {
             memory.state = ev; memory.busy = false; memory.note = ev.error || '';
+            if (section === 'memory') render();
+        }
+        else if (ev.type === 'memory_history') {
+            memory.history = Array.isArray(ev.entries) ? ev.entries : [];
+            if (ev.request_id && String(ev.request_id).startsWith('memory')) { memory.undoing = ''; memory.historyNote = ev.error || ''; }
             if (section === 'memory') render();
         }
         else if (ev.type === 'voice_state') {

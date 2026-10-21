@@ -415,8 +415,9 @@ test('ChatDGC: a personality and custom instructions, saved for every chat; hidd
 test('Memory: what DGC remembers, edited, deleted and added; projects switched; all deleted after you confirm', () => {
   const x = setup();
   x.click('[data-nav=memory]');
-  assert.equal(x.sent.at(-1).type, 'getMemory');
+  assert.deepEqual(x.sent.slice(-2).map((m) => m.type), ['getMemory', 'getMemoryHistory'], 'the facts, then their history');
   assert.match(x.d.body.textContent, /Reading what DGC remembers/);
+  x.message({ type: 'memory_history_unavailable' });          // an older CLI keeps no history: no Undo to offer
   const fact = (id, text, extra = {}) => ({ id, text, created_at: '2026-10-10T10:00:00Z', updated_at: '2026-10-10T10:00:00Z', source: { surface: 'chat', where: 'Dinner' }, ...extra });
   const state = { type: 'memory_state', enabled: true,
     facts: [fact('mem_aaaaaaaaaaaa', '<b>Is vegetarian</b>'), fact('mem_bbbbbbbbbbbb', 'Prefers metric units', { source: { surface: 'settings', where: '' }, edited: true })],

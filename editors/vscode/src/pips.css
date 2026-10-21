@@ -527,3 +527,16 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .login-dialog{max-width:480px}.login-form label{margin:12px 0 0}.login-form label.login-all-row{display:flex;align-items:center;gap:8px;margin:14px 0 2px}
 .login-form input[type=checkbox],.login-all input{width:auto;margin:0;flex:none}.login-help{font-size:12px;margin:4px 0}.login-site{margin:6px 0 2px}
 .login-all{display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:var(--muted);white-space:nowrap}.login-row .note-confirm{flex-wrap:wrap}
+/* Memory that learns (Pips API 57): its working notes, its daily log, and the /learn card in its chat. */
+.working-notes .note-all{padding:4px 14px 8px}
+.working-notes-edit{display:flex;flex-direction:column;gap:8px;padding:10px 14px}
+.working-notes-edit textarea{width:100%;box-sizing:border-box;font:12px/1.5 var(--vscode-editor-font-family,monospace);resize:vertical}
+.working-notes-edit .actions{display:flex;gap:8px}
+.daily-log-day{border-top:1px solid var(--pip-edge)}.daily-log-day:first-of-type{border-top:0}
+.daily-log-day>summary{padding:8px 14px;cursor:pointer;font-size:12px;color:var(--vscode-descriptionForeground)}
+.daily-log-day>.pip-page-list{margin:0;padding:0;list-style:none}.daily-log-day>p.muted{margin:0;padding:6px 14px;font-size:11px}
+.pip-learn-card{display:flex;flex-direction:column;gap:8px;margin:0 0 14px;padding:12px 14px;border:1px solid var(--pip-edge);border-radius:14px}
+.pip-learn-card h4{margin:0;font-size:13px}.pip-learn-card p{margin:0}
+.pip-learn-card .pip-learn-body{max-height:260px;overflow:auto;padding:8px;border-radius:8px;background:var(--vscode-textCodeBlock-background,rgba(127,127,127,.08))}
+.pip-learn-card textarea{width:100%;box-sizing:border-box;font:12px/1.5 var(--vscode-editor-font-family,monospace);resize:vertical}
+.pip-learn-card .actions{display:flex;gap:8px;flex-wrap:wrap}

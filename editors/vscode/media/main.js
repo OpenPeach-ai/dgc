@@ -5003,6 +5003,121 @@
     appendConversationContent(line);
   }
 
+  // ---- memory that learns (dgc/memory_review.py, dgc/skill_learn.py) ------------------------------
+  // What a look back over this session kept: one quiet line, with Forget (the one memory every surface shares).
+  function memoryLearnedLine(ev) {
+    const facts = (Array.isArray(ev.facts) ? ev.facts : [])
+      .filter((f) => f && /^mem_[0-9a-f]{12}$/.test(String(f.id || "")) && typeof f.text === "string").slice(0, 3);
+    if (!facts.length) return;
+    const box = el("div", "sys sys-marked memory-learned");
+    box.setAttribute("role", "note");
+    box.setAttribute("aria-label", "Remembered");
+    box.innerHTML = icon("bookmark");
+    const rows = el("span", "memory-learned-rows");
+    for (const fact of facts) {
+      const row = el("span", "memory-learned-row");
+      const words = el("span", "memory-learned-text", `Remembered: ${esc(fact.text)}`);
+      const forget = el("button", "link memory-learned-forget", "Forget");
+      forget.type = "button";
+      forget.setAttribute("aria-label", `Forget: ${fact.text}`);
+      forget.addEventListener("click", () => {
+        vscode.postMessage({ type: "memoryForgetFact", id: fact.id });
+        words.textContent = `Forgotten: ${fact.text}`;
+        forget.remove();
+      });
+      row.append(words, document.createTextNode(" · "), forget);
+      rows.append(row);
+    }
+    box.append(rows);
+    appendConversationContent(box);
+  }
+
+  // /learn: the draft skill, shown before anything is written, with Save, Edit and Cancel.
+  const learnCards = new Map();
+  function learnCard(requestId) {
+    let card = learnCards.get(requestId);
+    if (!card) {
+      card = el("div", "learn-card");
+      card.setAttribute("role", "group");
+      card.setAttribute("aria-label", "New skill");
+      learnCards.set(requestId, card);
+      appendConversationContent(card);
+    }
+    return card;
+  }
+  function learnPending(msg) {
+    const card = learnCard(String(msg.requestId || ""));
+    card.innerHTML = `<div class="learn-head">${icon("sparkle")}<span>Writing a skill from this session${msg.request ? `: ${esc(String(msg.request).slice(0, 120))}` : ""}…</span></div>`;
+  }
+  function skillBody(markdown) {
+    return String(markdown || "").replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+  }
+  function learnDraft(ev) {
+    const requestId = String(ev.request_id || "");
+    const card = learnCard(requestId);
+    if (!ev.ok) {
+      card.innerHTML = `<div class="learn-head">${icon("circle-alert")}<span>${esc(String(ev.message || "DGC couldn't write a skill this time."))}</span></div>`;
+      return;
+    }
+    const draft = { markdown: String(ev.markdown || ""), scope: ev.scope === "project" ? "project" : "user",
+                    name: String(ev.name || "skill"), editing: false };
+    const where = draft.scope === "project" ? "this project's skills (.dgc/skills)" : "your own skills (~/.dgc/skills)";
+    const render = () => {
+      card.innerHTML = `<div class="learn-head">${icon("sparkle")}<span><strong>New skill: ${esc(draft.name)}</strong></span></div>`
+        + `<p class="learn-description">${esc(String(ev.description || ""))}</p>`
+        + `<p class="learn-where">Save puts it in ${esc(where)}. Nothing is written until you save.</p>`;
+      if (draft.editing) {
+        const area = el("textarea", "learn-edit");
+        area.value = draft.markdown;
+        area.rows = 16;
+        area.setAttribute("aria-label", "The skill, in its SKILL.md form");
+        area.addEventListener("input", () => { draft.markdown = area.value; });
+        card.append(area);
+      } else {
+        const body = el("div", "learn-body md", md(skillBody(draft.markdown)));
+        card.append(body);
+      }
+      const actions = el("div", "learn-actions");
+      const save = el("button", "act primary", "Save");
+      const edit = el("button", "act", draft.editing ? "Done editing" : "Edit");
+      const cancel = el("button", "act", "Cancel");
+      for (const b of [save, edit, cancel]) b.type = "button";
+      save.addEventListener("click", () => {
+        for (const b of [save, edit, cancel]) b.disabled = true;
+        save.textContent = "Saving…";
+        vscode.postMessage({ type: "learnSave", requestId: requestId + "-save", markdown: draft.markdown, scope: draft.scope });
+        learnCards.set(requestId + "-save", card);
+      });
+      edit.addEventListener("click", () => { draft.editing = !draft.editing; render(); card.querySelector("textarea")?.focus(); });
+      cancel.addEventListener("click", () => {
+        card.innerHTML = `<div class="learn-head muted">${icon("circle-slash")}<span>Not saved: the skill ${esc(draft.name)} was discarded.</span></div>`;
+      });
+      actions.append(save, edit, cancel);
+      card.append(actions);
+    };
+    render();
+  }
+  function learnSaved(ev) {
+    const card = learnCards.get(String(ev.request_id || ""));
+    if (!card) { if (!ev.ok) sysLine(String(ev.message || "The skill wasn't saved."), true); return; }
+    if (ev.ok) {
+      card.innerHTML = `<div class="learn-head">${icon("circle-check")}<span>Saved the skill <strong>${esc(String(ev.name || ""))}</strong>. `
+        + `Ask for it by name, or it's used when a task fits. Undo is in Settings → Memory.</span></div>`;
+      const open = el("button", "link learn-memory", "Settings → Memory");
+      open.type = "button";
+      open.addEventListener("click", () => vscode.postMessage({ type: "openSettings", section: "memory" }));
+      card.append(open);
+      return;
+    }
+    const note = card.querySelector(".learn-error") || el("p", "learn-error");
+    note.setAttribute("role", "alert");
+    note.textContent = String(ev.message || "The skill wasn't saved.");
+    card.append(note);
+    card.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+    const save = [...card.querySelectorAll("button")].find((b) => b.textContent === "Saving…");
+    if (save) save.textContent = "Save";
+  }
+
   // ---- Codex-style composer rail: durable workspace changes and standing goal ----
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
   let workspaceChangeState = { ...changeState }, reviewScope = "chat";
@@ -6783,6 +6898,9 @@
         endTurn(ev.status === "completed" ? "completed" : "error"); setSending(false);
         break;
       }
+      case "memory_learned": memoryLearnedLine(ev); break;
+      case "skill_draft": learnDraft(ev); break;
+      case "skill_saved": learnSaved(ev); break;
       case "goal_changed": {
         const text = String(ev.goal || "");
         setGoalState({ ...ev.details, text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
@@ -8983,6 +9101,7 @@
     }
     else if (msg.type === "open_goal_review") openGoalReview();
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
+    else if (msg.type === "learn_started") learnPending(msg);
     else if (msg.type === "backend_exit") {
       releaseHeldEvents();
       requestEpoch += 1;
