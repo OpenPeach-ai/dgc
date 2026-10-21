@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Pips API 57: `get_pip_working_notes` and `list_pip_daily_log` (reads) and `set_pip_working_notes` (mutation), in
+  both SDKs; each is refused before API 57. A Personal Pip's own working notes, and the log of what it did each day.
+- Editor protocol: commands `memory_history`, `memory_undo`, `memory_watch`, `learn_skill` and `save_skill`; events
+  `memory_history`, `memory_learned`, `skill_draft` and `skill_saved` are in the vendored protocol and the TypeScript
+  SDK's known events, so neither SDK drops them. An SDK session never gets `memory_learned` (it never sends
+  `memory_watch`), and a Work session learns nothing without a screen that shows it.
+
 - Pips API 56: `list_pip_logins` (read), and `save_pip_login`, `remove_pip_login` and `grant_pip_login` (mutations), in
   both SDKs; each is refused before API 56, and a save's shape is checked with errors that never repeat its password
   or key. A Personal Pip's saved logins.

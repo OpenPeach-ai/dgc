@@ -948,6 +948,27 @@ without.
   **Remove computer…** takes it away; the Pip's saved sign-ins stay in its folder (see
   [Privacy](#privacy-and-where-state-lives)) until you delete it.
 
+### Working notes, a daily log, and /learn
+
+A Personal Pip learns its job as it goes (Pips API 57), the way OpenMausBot's bots keep a `MEMORY.md`:
+
+- **Its working notes.** It keeps short lines on how the job goes, like "The hospital portal asks for the UHID first"
+  or "Bills go to Arjun Mehta", with a small tool of its own (add a line, replace one, strike one), up to 60 lines or
+  6 KB. Every run of it, a chat reply or a routine, starts with them. They're its notes, not your memory: a line is
+  refused when it holds a password, a code, a card or account number, or what it read in your apps in the last day
+  (what an email or an event said). Its page shows them under **Working notes**; **Edit** changes them, one line a
+  note, and its next run starts with your version. They're in `working-notes/PIP_ID.md` in the `pips` folder.
+- **Its daily log.** DGC writes one line for each run: when, what it was (a chat, a routine by its title, a task) and
+  how it ended. Its page shows the last days under **Daily log**, today open. It's for you to read: no run of the Pip
+  is ever given it. It's in `daily-log/PIP_ID/` in the `pips` folder, a file a day, the last 30 days.
+- **Your memory, from its chat.** What you tell a Pip about yourself is looked back over the way a ChatDGC chat is,
+  once your messages add up or the chat goes quiet, and what's kept shows under its latest reply as **Remembered: …**
+  with **Forget**, in the one memory DGC keeps for you (Settings → Memory). Its own hellos, routines' turns and posts
+  are never looked at.
+- **/learn** in its chat (`/learn` or `/learn what`) turns what it just did into a skill and shows it with **Save**,
+  **Edit** and **Cancel**. Saved, it's one of your own skills (`~/.dgc/skills`), which every Pip and session can use.
+  Nothing is written until you save.
+
 ### Saved logins
 
 A Personal Pip with a computer can sign in by itself (Pips API 56), the way OpenMausBot's bots do: you save a

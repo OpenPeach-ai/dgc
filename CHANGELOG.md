@@ -6,6 +6,57 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Memory that learns: DGC's one memory now keeps what you say over a conversation, shows every change, and turns
+  what you just did into a skill.** It is still one memory, shared by ChatDGC, Work and your Pips, written only from
+  your own words.
+  - **A look back after a conversation.** Once a chat has been quiet two minutes (`memory_review_idle_s`), or a turn
+    ends after a paragraph or so of new words from you, DGC asks the conversation's own model once what is worth
+    remembering, and keeps at most three: preferences, facts about you, decisions and outcomes, each marked as such,
+    and a fact that ends on a known day (a trip, an appointment) stops being used the day after. Each must share most
+    of its words, and every address, link and long number, with what you typed in those turns: never a reply, a page,
+    a file in the editor, a tool's output, an email you pasted in quotes or a code block; never a secret; nothing
+    already kept, even in other words; never a request's own details ("write a toast for my brother, a chef"). It
+    shows once, quietly: under ChatDGC's latest reply, as a line in a Work session's chat (**Remembered: … ·
+    Forget**), and under a Pip's latest reply. Memory off means no look back at all, and what you said meanwhile is
+    never looked back over later; a temporary chat, a Pip's run post, a wake-up, a hello or a routine's turn is never
+    looked at. A Work session learns only while an editor that shows the line is open, so an SDK session never does.
+    Measured on deepseek-v4.1-flash:cloud over ten scripted conversations (four in ChatDGC, three in Work, three with a
+    Pip, each with a trap: a pasted phishing email, a package.json naming someone else, a test run naming a
+    maintainer, a toast's details, an email the Pip read, a long patient ID, DGC's own hello in between), three runs
+    on the final code: 13, 14 and 14 kept, every one a real preference, fact, decision or outcome of the user's, and
+    nothing from a page, a file, an email or a tool (0 leaks), each look back in 0.6 to 2 seconds. The first prompt
+    also kept a toast's "brother Rahul, a chef" (1 of 14); a fact only a request to write something says is now
+    dropped, as ChatDGC's check before a reply drops it.
+  - **History, with Undo** (Settings → Memory → History): every add, edit, forget and Delete all, and every skill
+    /learn saved, with who made it (you, DGC looking back, a remember tool), where and when; **Undo** puts it back (a
+    fact returns with its id, Delete all with everything it deleted, a learned skill is deleted unless you changed
+    it since). The journal is `~/.dgc/memory/journal.ndjson`, the latest 300 changes, readable only by you.
+  - **/learn [what]**, in Work and in a Personal Pip's chat, drafts a skill in DGC's format (a SKILL.md with a name, a
+    description and its steps) from the conversation, the commands and tools that worked included, and shows it with
+    **Save**, **Edit** and **Cancel**. Nothing is written until Save: Work saves to the project's `.dgc/skills` when
+    the folder is trusted, else `~/.dgc/skills`; a Pip's is a personal skill in `~/.dgc/skills`. It never takes
+    another skill's name, and a key the model echoed is redacted; Save refuses one that still looks like a password
+    or a card. Measured: a Work session that bumped, built and packaged the extension (with a LICENSE fix on the way)
+    became `release-the-vscode-extension` (steps, the LICENSE pitfall, a check), and a Pip chat that paid a hospital
+    bill became `pay-apollo-hospital-bill`, each drafted in under three seconds, saved, and found as a project and a
+    personal skill.
+  - **A Pip's own working notes (Pips API 57).** A Personal Pip keeps notes on how it does its job ("the hospital
+    portal asks for the UHID first", "bills go to Arjun Mehta") with a `working_notes` tool (add, replace or strike a
+    line; 60 lines or 6 KB), and every run of it, chat or routine, starts with them; Pips on your Claude Code or Codex
+    get the same tool. A line is refused if it holds a password, a code or a card or account number, or carries what
+    the Pip read from your apps in the last day (careful mode's record): notes keep how the job goes, never what an
+    email said. Its page shows them under **Working notes**, with **Edit**. Measured on deepseek-v4.1-flash:cloud: on
+    day 1 a Pip kept both lines from what you told it; on day 2 its run started with them and its steps entered the
+    UHID first and sent the receipt to Arjun Mehta.
+  - **A Pip's daily log (Pips API 57).** DGC writes a line for each run (when, what: a chat, a routine by its title, a
+    task, and how it ended), by day, for the last 30 days, and its page shows it under **Daily log**. No run is ever
+    given it.
+  - Protocol: `memory_history`, `memory_undo` and `memory_watch` (`ready.capabilities.memory.history` and `.learned`),
+    `learn_skill` and `save_skill` (`ready.capabilities.learn`); events `memory_history`, `memory_learned`,
+    `skill_draft` and `skill_saved`; a fact in `memory_state` may carry `kind`, `until`, `expired` and `source.by`.
+    Pips API 57: `get_pip_working_notes`, `set_pip_working_notes`, `list_pip_daily_log`. The Pips registry is unchanged
+    (the notes and the log are files beside it).
+
 - **A Pip's browser copes with slow pages, new tabs, a page's own questions and downloads.** A Pip lost track of a
   link that opened a new tab, every "Are you sure?" a page asked was cancelled (so a download or a Remove behind one
   never happened), it couldn't wait for results that arrive after a page loads, it wasn't told what it downloaded,

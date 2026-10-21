@@ -153,6 +153,27 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   delete all, or turn memory off everywhere. A fact is kept only when it's something you said yourself (a
   page or a file can't plant one), never a password, key or account number, and at most three a reply.
   Temporary chats neither read nor write it.
+  - **It learns by itself.** Once a chat has been quiet for two minutes, or a reply ends after you've written a
+    paragraph or so since the last look, DGC looks back over what you said, once, with the chat's own model. It
+    keeps at most three things: a preference ("you always pay bills by UPI"), a fact about you, a decision you made
+    or how something turned out, each marked as such, and a fact that ends on a known day (a trip, an appointment)
+    stops being used the day after. The same rules hold: only your own words, never the model's replies, a page,
+    a file or a pasted email, never a secret, nothing it already knows. What it keeps shows once under the
+    chat's latest reply, **Remembered: … · Forget**. With memory off it never looks, and what you said while it
+    was off is never looked back over later. Your Work sessions and your Pips' chats are looked back over the
+    same way; Work shows the same quiet line in its chat. The quiet time is `memory_review_idle_s` in
+    `~/.dgc/config.json` (120 seconds).
+  - **History, with Undo.** Settings → Memory lists every change under **History**: what was remembered, changed,
+    forgotten or deleted, and every skill **/learn** saved, with who did it (you, DGC looking back over a
+    conversation, or a remember tool), where and when. **Undo** takes one back: a fact comes back as it was, an
+    edit is put back, a learned fact or skill goes. The history keeps the latest 300 changes.
+- **/learn** (in a Work session, and in a Personal Pip's chat): `/learn` or `/learn what` turns what was just done
+  into a skill, in DGC's own format (a SKILL.md with a name, a description and the steps). DGC writes the draft from
+  the conversation with its own model and shows it in the chat with **Save**, **Edit** and **Cancel**. Nothing is
+  written, and nothing can run from it, until you save it. Work saves it to the project's `.dgc/skills` when the
+  folder is trusted, and to your own `~/.dgc/skills` otherwise; a Pip's goes to `~/.dgc/skills`, where every Pip
+  and session can use it. It never takes another skill's name and never holds a secret (a key the model echoed is
+  redacted, and Save refuses one that still looks like a password or a card number).
 - **Deep research.** Press **Deep research** in the box, then ask. ChatDGC first shows a research plan: a
   title, the steps it will take, and how deep it goes. It starts by itself after 15 seconds, or press **Start
   now**; **Edit** pauses it so you can change the steps, keep it to a few websites, or choose **How deep**:
@@ -415,6 +436,9 @@ ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
 | `memory_add` / `memory_edit` | `request_id`, `text` (and `id` to edit) | `memory_state` (`error` when it wasn't kept) |
 | `memory_forget` / `memory_clear` | `request_id` (and `id` to forget one) | `memory_state` |
 | `memory_project` | `request_id`, `folder`, `remember` | `memory_state` |
+| `memory_history` | `request_id`, `limit?` | `memory_history`; once asked, sent again unasked after every change (`ready.capabilities.memory.history`) |
+| `memory_undo` | `request_id`, `id` (a change's `memj_…`) | `memory_state`, then `memory_history` (`error` when it can't be undone) |
+| `memory_watch` | `request_id` | `memory_state`; from then on `memory_learned` for a Work session's look back (`ready.capabilities.memory.learned`) |
 | `chatdgc_answer` | `request_id`, `conversation_id`, `message_id` (the reply that asked), `question` (its index), `choice`, `model?`, `thinking?`, `search?` | a turn, whose message is the one the model wrote for the question |
 | `chatdgc_export` | `request_id`, `conversation_id`, `path` (absolute, chosen by the user), `format` (`markdown`, `json`, or `report` with `message_id`) | `chatdgc_exported` (`path`, `bytes`) |
 | `chatdgc_compact` | `request_id`, `conversation_id` | `chatdgc_compacted` (`summary`) |
@@ -457,9 +481,24 @@ A turn sends its events in this order:
 
 `memory_state` is the one memory DGC keeps about the user (offered as `ready.capabilities.memory`):
 `enabled` (the config's `memory`, settable with `set_config` and read through `get_config` `fields`),
-`facts` (`{id, text, created_at, updated_at, edited?, source: {surface, where}}`), and `projects` (`{folder,
-name, when, recent, remember}`). It's also sent, unasked, after a reply saved or forgot a fact; that reply
-carries `memory: [{op: "saved"|"forgot", id, text}]`.
+`facts` (`{id, text, created_at, updated_at, edited?, kind?, until?, expired?, source: {surface, where, by}}`:
+`kind` is `preference`, `fact`, `decision` or `outcome`, `until` the day it stops being true and `expired` true once
+that day has passed, `by` who kept it, `you`, `review` or `tool`), and `projects` (`{folder, name, when, recent,
+remember}`). It's also sent, unasked, after a reply saved or forgot a fact; that reply carries `memory: [{op:
+"saved"|"forgot", id, text, by?}]` (`by: "review"` when a look back over the chat kept it, which re-sends that reply as
+`chatdgc_message`).
+
+`memory_history` is the journal (`~/.dgc/memory/journal.ndjson`, bounded): `entries`, newest first, each `{id, at,
+op, by, surface, where, text, before? (an edit's), kind?, until?, scope? and path? (a learned skill's), what? (what an
+undo undid), undone, undoable}`, with `op` one of `add`, `edit`, `forget`, `clear`, `learn` and `undo`.
+`memory_learned` (`{facts: [{id, text, kind?, until?}], surface}`) carries what a Work session's look back kept, for
+its chat's quiet line; only a client that sent `memory_watch` gets one.
+
+/learn is a session's (`ready.capabilities.learn`): `learn_skill {request_id, request?, pip_id?}` answers with
+`skill_draft {request_id, ok, name, description, markdown, scope, folder}` (or `ok: false` and `message`) and writes
+nothing; `save_skill {request_id, markdown, scope: "project" | "user", pip_id?}` answers with `skill_saved
+{request_id, ok, name, path, scope}` or `ok: false` and `message`. With `pip_id` the draft is made from that
+Personal Pip's chat and saved to the user's own skills.
 
 Deep research reports its progress as `chatdgc_research` with the reply's `research` as it is: `status`
 (`planning`, `planned`, `running`, `writing`, `checking`, `done`, `stopped` or `failed`), `question`,

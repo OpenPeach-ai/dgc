@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Memory that learns, on screen.** A Work session's chat shows what DGC kept from it, once, as a quiet
+  **Remembered: … · Forget** line (the panel asks for it with `memory_watch`, only from a CLI that offers it).
+  **/learn [what]** in Work and in a Personal Pip's chat shows the drafted skill with **Save**, **Edit** and
+  **Cancel**, and nothing is written until Save; a Pip's /learn is never sent to the Pip as a message. Settings →
+  Memory says each fact's kind, where it was learned and the day it stops being used, and **History** lists every
+  change with who made it and when, with **Undo** (an older CLI shows no history, and Delete all still says it can't
+  be undone). A Personal Pip's page shows its **Working notes**, with **Edit**, and its **Daily log**, by day (Pips
+  API 57; the host refuses both to an older CLI).
+
 - **Save a login so a Pip signs in by itself (Pips API 56).** When a Pip meets a sign-in page it has no login for,
   its chat shows **Save a login for SITE so PIP can sign in itself?** with **Save login…** and **Not now**. The form
   takes the username, the password and an optional authenticator key, sends them to DGC once and keeps nothing: not

@@ -887,6 +887,36 @@ nothing. Local-only commands: `list_pip_notes {pip_id}` → `{pip_id, notes: [{i
 created_at}], max}`; `add_pip_note {pip_id, text}` (refused with `secret_note` when redaction would
 change it) and `forget_pip_note {pip_id, note_id | all: true}` return the same. Forget deletes the row.
 
+**Its own working notes** (`pip_working_notes`, Pips API 57, Personal Pips only): lines about doing its job ("The
+hospital portal asks for the UHID first", "Bills go to Arjun Mehta"), at most 60 lines, 6 KB and 300 characters a
+line, in `pips/working-notes/<pip>.md` (mode 0600). Every `conversation` and `personal_task` run (not a reviewed
+handoff) gets them from the supervisor as `working_notes` (`[line]`, redacted again) and has a `working_notes {op:
+add | replace | strike, line?, match?}` tool: `replace` and `strike` name the line by words from it (exactly one
+line must match). The worker applies a change to its own copy, so the Pip reads it back at once, and returns its
+changes as the result's `working_notes` (at most 12); the supervisor checks each again when the run is saved and
+applies it to the file, dropping it from the stored result. A line is refused when it holds a credential, words like
+`password is`, or 13 or more digits in a row (a card or account number), and, in the supervisor, when careful mode's
+record (`pip_careful.Taint`) shows it carries what the Pip read from the user's apps in the last day (an email's or
+an event's words) that the user didn't say. Subscription brains (API 55) get the same tool over MCP. Local-only
+commands: `get_pip_working_notes {pip_id}` → `{pip_id, lines, text, revision, max_lines, max_bytes, bytes,
+updated_at}`; `set_pip_working_notes {pip_id, text, expected_revision}` (one line a note; `conflict` when the Pip
+changed them since `revision`, `secret_note` when redaction would change the text) returns the same.
+
+**Its daily log** (`pip_daily_log`, Pips API 57): DGC writes one line for each finished run of a Personal Pip's chat
+reply, routine or task, in `pips/daily-log/<pip>/<YYYY-MM-DD>.md` (the computer's own days): the time, what it was
+(`Chat: you asked "…"`, `Routine "…"`, `Task`, `Chat (DGC carried on)`) and how it ended (the reply's first words,
+`Failed: …`, `Stopped`), redacted, at most 30 lines a day (the rest counted) and 30 days. No run is ever given it.
+`list_pip_daily_log {pip_id, before?: YYYY-MM-DD, limit?: 1..14}` → `{pip_id, days: [{day, lines, more}],
+next_before}`, newest first, local only.
+
+**Its chat, looked back over for your memory** (`pip_memory_review`): after a reply to the user's own message
+(requested locally, not a DGC-written key), once the user's words since the last look add up to a paragraph or so, or
+once the chat has been quiet two minutes, the supervisor asks the Pip's own model (DGC's model for a subscription
+Pip) once what to remember, and keeps at most three preferences, facts, decisions or outcomes in the user's one
+memory by its rules (`memory_review.keep`: from the user's words only, no secret, nothing known), tagged with the
+Pip and its latest reply's run, so that reply shows "Remembered" and its page lists them. Metadata
+`memory_reviewed:<pip>` keeps the last message looked back over; with memory off it moves on without looking.
+
 **Careful mode** (`pip_careful`, a Personal Pip with a computer; on unless metadata
 `computer_careful_off:<pip>` exists): during a run, the supervisor's `Host` checks each step before it
 runs. `open` to a site (registrable domain, from a built-in suffix list; a host under shared hosting such as
@@ -1711,5 +1741,6 @@ Clients check it before using a newer control.
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
+| 57 | Memory that learns, for Pips: a Personal Pip's own working notes (`pip_working_notes`: the `working_notes` tool, `get_pip_working_notes`, `set_pip_working_notes`), its daily log (`pip_daily_log`: `list_pip_daily_log`), and its chat looked back over for the user's one memory (`pip_memory_review`) |
 | 54 | Pips use the whole desktop (`pip_desktop_eyes`, `pip_apps`): a run whose model sees gets `desktop_look`, `desktop_click`, `desktop_double_click`, `desktop_right_click`, `desktop_hover`, `desktop_drag`, `desktop_scroll`, `desktop_type`, `desktop_key`, `windows`, `focus_window` and `launch_app`, with secrets blacked out of the whole screen; an image editor, a document editor and a PDF viewer, each in its own box, online through the computer's egress proxy like the Terminal; `get_pip_computer_apps`, `set_pip_computer_apps` |
 | 52 | Photos and files in a Pip's chat through the backend's spool: `send_pip_message` takes `spooled_images` (8 MiB a photo, 32 MiB in all, up to 64; HEIC kept as JPEG) and `spooled_files` (a document 16 MiB, text 1 MiB, 32 MiB in all, up to 16), local only; `get_pip_message_image` takes `as_file` and answers with the kept file's `path`. A large photo goes to the model at 2,500 pixels |
