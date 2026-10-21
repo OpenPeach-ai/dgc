@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Settings: Web search and ChatDGC have their own icons.** Both fell back to the Plugins icon, so three rows of the side menu looked alike. Web search is a globe; ChatDGC is a chat bubble with its three slashes.
 - **Personal | Project tabs on the Pips page.** The dropdown that listed your Personal Pips and every project DGC
   knows is two tabs now, the same as the Sessions home's **Chat | Work**: the same look, and the arrow keys, Home and
   End move between them. **Project** is the folder open in this window and nothing else: another project's Pips are
