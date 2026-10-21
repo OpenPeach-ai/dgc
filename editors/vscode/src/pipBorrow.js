@@ -71,7 +71,8 @@ export function borrowMarkup(card, { esc, busy = false, pipName = 'This Pip', re
     return `<p class="borrow-line" data-borrow-card="${id}" data-state="returned" role="status">${line}${sent}</p>`;
   }
   if (card.status === 'allowed' || card.status === 'in_use') {
-    const sub = card.status === 'allowed'
+    // Until Chrome itself lets DGC in (started_at), Chrome's own dialog is what waits for you.
+    const sub = card.status === 'allowed' || !card.started_at
       ? 'Allowed once. Chrome asks you too: choose Allow there.'
       : `In a tab of its own. It gives your Chrome back when it’s done, or after ${card.minutes} minutes.`;
     return `<div class="app-link borrow-card" data-borrow-card="${id}" data-state="${esc(card.status)}" role="group" aria-label="Using your Chrome">`

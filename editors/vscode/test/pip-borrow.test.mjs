@@ -106,6 +106,8 @@ test("while lent: Using your Chrome · site, with Stop, and the line it leaves w
   assert.equal(el.dataset.state, "in_use");
   assert.equal(el.querySelector("strong").textContent, "Using your Chrome · shop.example");
   assert.match(el.textContent, /In a tab of its own\. It gives your Chrome back when it’s done, or after 10 minutes\./);
+  const asking = borrow.borrowMarkup(card({ status: "in_use", allowed_at: ago(4) }), { esc: (s) => String(s), pipName: "Ava" });
+  assert.match(asking, /Chrome asks you too: choose Allow there\./, "until Chrome lets it in, Chrome's own dialog is what waits");
   x.click(`[data-borrow-stop="${BORROW}"]`); await flush();
   const stop = x.requests("stop_pip_borrow").at(-1);
   assert.deepEqual(JSON.parse(JSON.stringify(stop.request)), { type: "stop_pip_borrow", pip_id: PIP, borrow_id: BORROW });
