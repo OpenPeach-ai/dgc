@@ -82,6 +82,19 @@ def level(registry, pip_id) -> str:
     return value
 
 
+# A Personal Pip made from now on starts at Approve for me (founder, 2026-10-21): it removed every Allow tap in the
+# bills and shirts tests while orders, payments, new recipients, posts and deletes still ask. A Pip made before has no
+# saved level and stays at DEFAULT (Ask) until someone changes it.
+NEW_PIP = APPROVE
+
+
+def start(registry, pip_id) -> None:
+    """Save NEW_PIP for a Personal Pip a creation surface just made, inside the caller's transaction. Never replaces a
+    level someone chose."""
+    registry.db.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)",
+                        (KEY + pip_id, json.dumps({"level": NEW_PIP, "at": utc_now(), "by": "new-pip"})))
+
+
 def set_level(registry, pip_id, value, actor) -> dict:
     if actor not in LOCAL:
         raise RegistryError("local_only", "Only you change how much a Pip asks, on this computer.")

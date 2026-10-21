@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **New Personal Pips start at Approve for me.** Routine steps (a new site, a search, a cart, a draft) go through by themselves; orders, payments, sending to someone new, posting and deleting still ask, and payments ask at every level. A Pip made before keeps Ask until you change it on its page.
+
 - **How much a Personal Pip asks: Ask, Approve for me or Full access (Pips API 58).** Each Personal Pip has a level
   on its page, set by you only. Every Pip, old and new, starts at **Ask**: as before, nothing changes until you choose.
   - **Approve for me**: DGC approves routine steps by itself and asks for consequential ones. Routine: a new site's

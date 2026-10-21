@@ -706,6 +706,9 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
             version = request.get('expected_version', 0) + 1
             if 'pip_id' not in request:
                 registry.db.execute('INSERT INTO pips VALUES(?,?,?,?,?,?)', (pip_id, workspace_id, 'active', version, now, now))
+                if personal:
+                    from .pip_levels import start as start_level
+                    start_level(registry, pip_id)
             registry.db.execute('INSERT INTO pip_versions VALUES(?,?,?,?,?,?)', (pip_id, version, _json(body['definition']), actor, request['reason'], now))
             if 'pip_id' in request:
                 registry.db.execute("UPDATE pips SET current_version=?,status='active',updated_at=? WHERE id=? AND current_version=?",

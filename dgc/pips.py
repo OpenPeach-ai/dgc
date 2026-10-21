@@ -5108,6 +5108,10 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                                              request.get("source_ref", "HEAD"), request.get("pip_type", "rook"),
                                              request.get("model_choice", {"mode": "default"}),
                                              computer_plan=_new_computer(personal, request.get("computer")))}
+                if personal:
+                    from .pip_levels import start as start_level
+                    with registry.transaction():
+                        start_level(registry, result["pip"]["id"])
             elif command == "get_pip":
                 from .pip_profile import get as profile
                 from .pip_report_delivery import report_chats
