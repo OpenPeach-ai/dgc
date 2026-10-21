@@ -896,7 +896,8 @@ reported, and the run continues.
 ### A computer of its own (Linux and macOS)
 
 Every new Personal Pip gets its own computer: a web browser and a home folder in a sandbox,
-separate from your browser and your files. That holds wherever this machine can run one (Linux,
+separate from your browser and your files (unless you lend it your own Chrome for one task: see
+[Borrowing your own Chrome](#borrowing-your-own-chrome)). That holds wherever this machine can run one (Linux,
 and Macs with Apple silicon on macOS 26 or later). It starts the first time the Pip uses it and
 closes when it has been idle for 15 minutes. Remove it with **Remove computer…** in its **Job** tab,
 or `dgc pips computer remove PIP`. A Pip made before computers were
@@ -1218,6 +1219,50 @@ On Windows, a Pip's computer is the Linux one, in DGC inside WSL 2: it needs bub
 
 If something is missing, the **Job** tab says what.
 
+### Borrowing your own Chrome
+
+A Personal Pip works in its own computer, separate from your browser. For one task that needs a site
+you're already signed in to in your own Chrome (your bank, a hospital portal, an order history), it can
+ask to borrow your Chrome (Pips API 59). Only you can say yes, and you're asked every time. This is the
+one exception to "Pips keep their own computers", and only for the task you allow, once.
+
+- **It asks with a card.** It says what it needs in its chat, and a card below its reply asks **Let PIP
+  use your Chrome?** with the sites, as their address shows them (`shop.example.com`, or the whole
+  address for one that isn't https, like `http://127.0.0.1:8123`), why, and **Allow once** and **Not
+  now**. There is no Always allow: the next time it needs your Chrome, it asks again. A newer ask
+  replaces a card you haven't answered, and an unanswered card stops asking after a day.
+- **Chrome asks too.** Choose **Allow once**, and Chrome itself asks **Allow remote debugging?**:
+  choose Allow there as well. Once, in the Chrome you use (version 144 or later), open
+  `chrome://inspect/#remote-debugging` and turn on "Allow remote debugging for this browser
+  instance"; until then the card says how, and Allow once tells you if it still can't reach your
+  Chrome. Choose Cancel in Chrome's dialog and the Pip is told, and carries on without it.
+- **Its own tab, the card's sites only.** DGC opens a new window of its own in your Chrome, with one
+  tab, and the Pip works there. It never sees, reads or touches your other tabs. It can open only the
+  sites on the card (each one exactly: `http` and `https`, or another port, are other sites): a link, a
+  redirect or a page sending it anywhere else is stopped inside Chrome before anything goes there, and
+  the Pip is told. A tab its page opens is closed straight away. WebSockets are off in its tab.
+- **Nothing is sent unless its level says so.** Reading and moving around are free. What a page would
+  send (a form, a search that posts, a change in your account) goes only as the Pip's level allows (see
+  [How much it asks](#how-much-it-asks)): at **Ask** nothing is sent, at **Approve for me** only
+  routine steps such as a search or a filter, at **Full access** everything but a payment. A payment
+  never goes from your Chrome, at any level, and nothing goes to a site that isn't on the card. When
+  DGC doesn't send something, the Pip tells you what to do there yourself.
+- **It never sees a password or a card.** Password, card and code boxes read as hidden, a card number
+  written on a page is hidden from it, and it never types a password, a code or a card. It doesn't use
+  your saved logins there: you're signed in already, and if the site asks again, it asks you to sign
+  in yourself. Your own browser rules for Work's signed-in Chrome hold for Pips too: a site you denied
+  never reaches a card, and on a page with an ask rule the Pip reads but doesn't act. In careful mode,
+  what it read in your Chrome counts like what it read in your apps.
+- **It gives your Chrome back.** While it's lent, the chat shows **Using your Chrome · SITE** with
+  **Stop**. DGC closes the Pip's tab (and any tab that tab opened) and disconnects when the Pip says it's
+  done, when its reply ends, when you choose Stop, or after 10 minutes, and the chat says **Gave your
+  Chrome back** (and why, if it was Stop or the time).
+- **Only with you there.** A routine can ask, never borrow: its card waits for your Allow, and its
+  reply says so. Only the one reply your Allow starts gets your Chrome; nothing else of the Pip's, and
+  no other Pip, can use that Allow.
+- **On the computer where your Chrome runs.** The Pips runner has to be on the same computer as your
+  Chrome (in WSL, your Chrome on Windows counts). A remote window doesn't show these cards.
+
 ### Drafts and reviewed sends
 
 Ask a Personal Pip, in its own chat, to draft an email, a calendar event or a
@@ -1292,8 +1337,9 @@ else it would submit still waits for you.
   When the chat runs `dgc pips` in its own shell, the CLI only reads (and can make
   the emergency stop); anything that changes a Pip is refused there.
 - **Act outside their reviewed reads.** Project Pips read only their approved
-  source. Personal Pips see only the app and web reads you approved, and the public
-  websites their own computer opens.
+  source. Personal Pips see only the app and web reads you approved, the public
+  websites their own computer opens, and, for one task you allow once, the sites on
+  its card in your own Chrome.
 - **Send, create or call without you.** Every email, event and connector call is a
   single attempt you approved on its exact content, or one you chose to **Always
   allow** for that Pip, connection, account and tool. So is every form a Pip's computer

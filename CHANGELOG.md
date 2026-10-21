@@ -6,6 +6,23 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Personal Pip can borrow your own signed-in Chrome, with your consent each time (Pips API 59).** For one task
+  that needs a site you're already signed in to in your Chrome (your bank, a hospital portal, an order history), the
+  Pip asks with a card in its chat: **Let PIP use your Chrome?**, the sites and why, **Allow once** and **Not now**.
+  There is no Always allow: every borrow is a new card. After Allow once, Chrome itself asks "Allow remote
+  debugging?" (Cancel there and the Pip is told and carries on without it), and the one reply your Allow starts
+  works in a new window of DGC's own in your Chrome: it never sees, reads or touches your other tabs, and it can
+  open only the card's sites. A link, a redirect or a page sending it anywhere else is stopped inside Chrome before
+  anything goes there. What a page would send goes only as the Pip's level allows (at Ask nothing, at Approve for
+  me only routine steps, at Full access everything but a payment); a payment, and anything to a site not on the
+  card, never goes from your Chrome. Password, card and code boxes stay hidden from it, a card number on a page is
+  hidden, and it never types a password, a code or a card. Your browser rules for Work's signed-in Chrome hold for
+  Pips too. While it's lent, the chat shows **Using your Chrome · SITE** with **Stop**; DGC closes the Pip's tab and
+  disconnects when the Pip is done, when its reply ends, on Stop, or after 10 minutes, and the chat says **Gave your
+  Chrome back**. A routine can ask but never borrow: its card waits for you, and its reply says so. This is the one
+  exception to "Pips keep their own computers", for the task you allow. New requests `list_pip_borrows`,
+  `allow_pip_borrow`, `decline_pip_borrow` and `stop_pip_borrow` (local only).
+
 - **One `task` call can start several helpers at once.** Some models send one `task` call per reply even when
   they mean to run several in parallel, so their helpers ran one after another (a real Ultra session ran six
   investigations back to back). `task` now also takes `tasks`: a list of 2 to 8 helpers, each with its own

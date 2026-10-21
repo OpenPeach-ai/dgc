@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Lend a Personal Pip your own Chrome, once (Pips API 59).** When a Pip asks to borrow your signed-in Chrome, its
+  chat shows **Let PIP use your Chrome?** with the sites, why and the time limit, and **Allow once** or **Not now**
+  (both wait until its reply is done; there is no Always allow). If DGC can't reach your Chrome yet, the card says how
+  to turn on remote debugging. While it's lent: **Using your Chrome · SITE** with **Stop**. When it's over, one line:
+  **Gave your Chrome back** (and why, if you stopped it or the time ran out), or that it didn't use your Chrome because
+  you chose Cancel when Chrome asked. The host refuses the four requests to an older CLI, which shows no card.
+
 - **Settings → Web search keeps a key for each provider, and can remove one.** With a DGC CLI that keeps one key per
   provider, the key field shows the chosen provider's own: "Saved", or empty, never the key itself, so switching to
   Ollama shows Ollama's, not the Brave key you saved. **Remove** beside it clears that provider's key at once, and only

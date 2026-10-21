@@ -289,6 +289,19 @@ as `fields[0].value`) is shown as **Let PIP run this in its Terminal?** with **A
 lists pending actions first. The host refuses both requests before API 58 ("Update DGC to choose how much a Pip
 asks.") and an older CLI is asked for neither.
 
+**Borrowing your own Chrome** (API 59). Four `pips_control` requests, all local: `list_pip_borrows {pip_id}`
+(answered `{pip_id, minutes, borrows: [{id, pip_id, workspace_id, status, sites, origins, why, reachable,
+unreachable, unattended, minutes, chrome, ended, sent, created_at, expires_at, allowed_at, started_at, ended_at}]}`),
+and `allow_pip_borrow`, `decline_pip_borrow` and `stop_pip_borrow`, each `{pip_id, borrow_id}` and answered
+`{borrow: …}`. No event and no event field changes. A Personal Pip's chat shows, below its latest reply, a `requested`
+card as **Let PIP use your Chrome?** with `why`, the `sites` and the time limit, `unreachable` when its Chrome can't be
+reached, and **Allow once** and **Not now** (no Always allow; both wait while the Pip's reply is still being
+written); an `allowed` or `in_use` one as **Using your Chrome · SITE** with **Stop**; a `returned` one, until the user
+writes again, as one line: **Gave your Chrome back** (· you stopped it, · its N minutes ran out, · its tab closed), or
+PIP didn't use your Chrome (Cancel in Chrome, nobody answered) or couldn't reach it. While one is `allowed` or
+`in_use` the view asks again every 1.5 s. The host refuses all four before API 59 ("Update DGC to let a Pip borrow
+your Chrome.") and an older CLI is asked for none.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

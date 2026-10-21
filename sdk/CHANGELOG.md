@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Pips API 59: `list_pip_borrows` (read) and `allow_pip_borrow`, `decline_pip_borrow` and `stop_pip_borrow`
+  (mutations, each `{pip_id, borrow_id}`), in both SDKs; each is refused before API 59, and the card's id is checked
+  before anything is sent. A Personal Pip borrowing your own signed-in Chrome: its cards, Allow once, Not now and Stop.
+  There is no Always allow.
+
 - Pips API 58: `get_pip_level` (read) and `set_pip_level` (mutation; `level` is `ask`, `approve` or `full`), in both
   SDKs; each is refused before API 58, and the level is checked before anything is sent. How much a Personal Pip asks.
 

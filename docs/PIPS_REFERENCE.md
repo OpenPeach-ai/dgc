@@ -1632,6 +1632,71 @@ address), accepts text, JSON and XML up to
 1 MB, and keeps 8,000 characters per read. All reads share 90 seconds. A failed read
 is reported with a short error.
 
+**Borrowing the user's own Chrome** (`pip_borrow`, Pips API 59, Personal Pips only). A card is metadata
+`pip_borrow:<pip>:<id>` = `{id: pipborrow_HEX32, pip_id, workspace_id, run_id, sites, why, status, unattended,
+unreachable, created_at, expires_at, allowed_at?, decided_at?, decided_by?, use_run_id?, claimed_at?, started_at?,
+chrome?, ended?, ended_at?, sent?}` (no registry schema change; the newest 20 per Pip are kept). `sites` are origins as
+Chrome spells them (`permissions._canonical`: scheme, IDNA host without a trailing dot, port unless the default; a
+bare host is `https`; a backslash, user name, `%`-escape, space or control character is no site), 1 to 4; a site the
+user's own rules deny for Work's signed-in Chrome (`Browser(signed-in:…)`, `Browser(signed-in:*)`, a site or path deny)
+never reaches a card. `why` is one line of up to 200 characters, never a card number, redacted of saved secrets.
+
+- **Asking.** Every `conversation` run of a Personal Pip has `borrow_chrome {sites, why}` on its app socket. It writes
+  a `requested` card (expiring after a day; an older `requested` card of the Pip becomes `replaced`), notes whether
+  the user's Chrome is reachable now (`unreachable`: `browser_user.find_route`'s reason in the user's words, read from
+  DevToolsActivePort and a plain connection to its port, which Chrome asks nothing for), and tells the Pip a card is
+  below its reply. In an unattended run (`local-routine`, `local-scheduler`, `local-event-trigger`) the card is
+  `unattended` and the Pip is told it waits for the user.
+- **Answering** (all three local only, in the editor's `dgc serve` or the CLI). `allow_pip_borrow {pip_id,
+  borrow_id}` needs `requested`, checks `find_route` again (else `chrome_unreachable` with the reason; the card stays),
+  sets `allowed` and queues the Pip's next turn under `pip_chat.BORROW_KEY + id` (`borrow_<id>`, a key only DGC writes:
+  `send_pip_message` refuses it); a failed queue (the Pip busy) puts the card back. `decline_pip_borrow` sets
+  `declined` and queues a turn under `borrow_no_<id>` telling the Pip it may not. `stop_pip_borrow` sets an
+  `allowed` or `in_use` card `returned` with `ended: "stop"`. There is no Always allow.
+- **Claiming.** As a `conversation` run starts, the runner reads its user message's request key; for `borrow_<id>`
+  it moves that card from `allowed` to `in_use` with `use_run_id` (in one transaction, within 30 minutes of the
+  Allow); any other run, or a second claim, gets nothing (`{missed: "used" | "expired" | "stopped"}` is told to the
+  worker). Only that run's app socket pin has `borrow {id, sites, minutes}`, and only it offers `borrowed_chrome`.
+- **The tab.** The runner connects at once (`browser_user.find_route`, `wsl` relay on WSL; Chrome's own "Allow
+  remote debugging?" holds the upgrade; 403 is `chrome_no`, no answer in 90 s `no_answer`, nothing there
+  `unreachable`), creates a target `{url: "about:blank", newWindow: true}`, attaches to it (flatten), enables
+  Page, Runtime, Log and Network, then `Fetch.enable` on every request (`urlPattern: "*"`, request stage),
+  `Network.setBlockedURLs` for `ws://*` and `wss://*`, and `Target.setAutoAttach` (paused, flatten) so its frames from
+  other sites and its workers are gated the same way before they run. Only DGC's session and its children are read;
+  `Target.getTargets` is called only after its page opened a tab (`Page.windowOpen`), to close the tabs whose opener
+  chain leads to DGC's, and no field of any other tab is used. A link or form the Pip clicks that targets a new tab is
+  set to `_self` first.
+- **The gate**, for each paused request: the tab's own page (a `Document` in the top frame, each redirect hop) to an
+  origin not on the card, or one the user's rules deny, fails with `Aborted` (Chrome commits no error page; the tab
+  stays where it was); a read (`GET`, `HEAD`, `OPTIONS`) or telemetry continues; a page's own background request or an
+  inner frame's form, with no step of the Pip's in the last 5 s (`ACTION_SECONDS`; a new top-level page resets it),
+  continues; anything else is the Pip's: to an origin not on the card it fails, else `pip_levels.classify` and
+  `decide_write` decide with the Pip's level: a `payment` verdict (a card number, payment words or fields) fails at
+  every level, `None` (what its level asks about; everything at `ask`) fails, and what the level lets through
+  continues and is listed in the card's `sent`. The Pip is told each refusal in its step's answer.
+- **The tool.** `borrowed_chrome {op: open | read | find | wait | click | type | choose | press | back | done, url?, ref?,
+  text?, option?, key?, seconds?}`: ops in any case or spacing; only `open` carries an address, which must be on the
+  card and not denied; everything is read through `tools._browser_operation` with a guard that judges each read by
+  the address it read (the card's origins, the user's deny rules). `click`, `type`, `choose` and `press` are refused on
+  a page an ask or deny rule of the user's covers (`Browser(signed-in:…)` with `_page`). `type` refuses a card number,
+  a box that is a password, code or card field (by type, `autocomplete`, name, id, label or placeholder), and, in
+  careful mode, text carried from what the Pip read in the user's apps (what it read on the borrowed sites may go
+  back there). Every answer is redacted of saved secrets and saved logins, and a card number written on a page is
+  replaced by "•••• (a card number, hidden)"; what it read is added to careful mode's record for the Pip. An ordinary
+  error keeps the tab; a lost connection or tab ends the borrow (`lost`).
+- **Giving it back.** `done`, the run's end (`RunSocket.close`), the run no longer running, `stop_pip_borrow` (seen
+  within 0.5 s, a step in flight unwinding within a second) or `BORROW_SECONDS` (600) after it was lent: the runner
+  closes the tabs DGC's page opened, then DGC's tab (`Target.closeTarget`), drops the connection, and writes `returned`
+  with `ended` (`done`, `run_end`, `stop`, `timeout`, `chrome_no`, `no_answer`, `unreachable`, `lost`, `error`).
+  `list_pip_borrows` shows an `in_use` card whose run is over as `returned` (`run_end`), and an `allowed` card no run
+  claimed within 30 minutes, or a `requested` one past `expires_at`, as `expired`.
+
+`list_pip_borrows {pip_id}` answers `{pip_id, minutes, borrows: [{id, pip_id, workspace_id, status, sites (as shown),
+origins, why, reachable, unreachable, unattended, minutes, chrome, ended, sent, created_at, expires_at, allowed_at,
+started_at, ended_at}]}`, newest first; the other three answer `{borrow: …}` (and `decline_pip_borrow` may add
+`continue_error`). Events: `pip_borrow_requested`, `pip_borrow_allowed`, `pip_borrow_declined`, `pip_borrow_started`,
+`pip_borrow_stopped`, `pip_borrow_returned`.
+
 **Personal handoffs** share an exact excerpt (up to 12,000 bytes) of a completed
 Personal task result with a different Personal Pip, with a task of up to 4,000
 bytes. The target keeps its own app and web plans; no history, tools or grants are
@@ -1813,6 +1878,7 @@ Clients check it before using a newer control.
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
+| 59 | Borrowing the user's own signed-in Chrome (`pip_borrow`): `borrow_chrome` and `borrowed_chrome`; `list_pip_borrows`, `allow_pip_borrow` (Allow once), `decline_pip_borrow` (Not now), `stop_pip_borrow`, all local only; the reserved chat keys `borrow_` and `borrow_no_`; no Always allow |
 | 58 | How much a Personal Pip asks (`pip_levels`): `get_pip_level`, `set_pip_level` (`ask`, `approve`, `full`); what a level lets through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a pending hold's `asks_because`; the safety floor's computer action of kind `floor`; sites written out in an attached document count as named by the user |
 | 57 | Memory that learns, for Pips: a Personal Pip's own working notes (`pip_working_notes`: the `working_notes` tool, `get_pip_working_notes`, `set_pip_working_notes`), its daily log (`pip_daily_log`: `list_pip_daily_log`), and its chat looked back over for the user's one memory (`pip_memory_review`) |
 | 54 | Pips use the whole desktop (`pip_desktop_eyes`, `pip_apps`): a run whose model sees gets `desktop_look`, `desktop_click`, `desktop_double_click`, `desktop_right_click`, `desktop_hover`, `desktop_drag`, `desktop_scroll`, `desktop_type`, `desktop_key`, `windows`, `focus_window` and `launch_app`, with secrets blacked out of the whole screen; an image editor, a document editor and a PDF viewer, each in its own box, online through the computer's egress proxy like the Terminal; `get_pip_computer_apps`, `set_pip_computer_apps` |
