@@ -304,6 +304,10 @@ button.pill{border-radius:999px;padding:6px 16px}
 .app-link-note{margin:0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45}
 .app-link-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .app-link-actions button{min-height:28px;border-radius:999px;padding:4px 12px}
+/* Borrowing your own Chrome (API 59): the card, the line while lent, and the line it leaves when it gives it back. */
+.borrow-card[data-state=in_use],.borrow-card[data-state=allowed]{border-color:color-mix(in srgb,var(--pip-accent) 55%,var(--pip-edge))}
+.borrow-line{margin:8px 0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45;max-width:560px;overflow-wrap:anywhere}
+.borrow-unreachable{color:var(--vscode-foreground)}
 .app-list{list-style:none;margin:0 0 6px;padding:0;display:flex;flex-direction:column;gap:6px}
 .app-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
 .app-list small{color:var(--vscode-descriptionForeground);margin-left:6px}
