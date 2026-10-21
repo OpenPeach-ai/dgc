@@ -631,15 +631,19 @@ the Work chat card's report (`pip_report_delivery` builds both) plus:
 
 `list_pip_run_posts {pip_id, before_id?, limit?}` (a read, `limit` 1 to 50, default 20) returns
 `{pip_id, workspace_id, posts, next_before_id}`, oldest first, the newest page first; `before_id`
-is a post's `run_id`. The editor draws each post where it falls among the chat's messages, and
-History (the Runs tab) says what each run found from the same posts.
+is a post's `run_id`. The editor draws each post where it falls among the chat's messages, as the
+Pip speaking: first-person words made from the post's own fields (never a model's), the details one
+click away, and all-clear posts in a row (`clear`, or `checks_passed` with the same number of checks,
+no message between them) folded into one message. History (the Runs tab) says what each run found from
+the same posts.
 
 A post is not a chat message: it is not in `pip_chat_messages`, never queues a reply and never
 pairs with a user message. A conversation run's context carries the five newest posts as
 `run_posts` (each without the Pip's id and name, a Personal result's preview cut to 400
 characters), and the worker puts them in the reference data beside `last_report`, with a note
-that DGC wrote them, not the user. `get_pip` returns `report_session`: the newest chat the Pip
-reports to (attached, or set up there), where the editor's **Ask DGC to fix** sends its prompt.
+that the user saw each as a short message from the Pip and that DGC wrote them, not the user.
+`get_pip` returns `report_session`: the newest chat the Pip reports to (attached, or set up there),
+where the editor's **Ask DGC to fix** sends its prompt.
 
 ## Schedules and event triggers
 

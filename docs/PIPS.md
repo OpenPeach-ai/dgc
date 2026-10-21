@@ -456,37 +456,46 @@ commands are reviewed on the card.
 
 ## A Pip's runs in its own chat
 
-Each run a Pip finishes is posted in its own chat, as a short message from the Pip, the way
-Grok Bots and OpenAI Dots post a scheduled run in the bot's conversation. Reply to it there:
-"is the e-way one the same as last week?" The full list is the Pip's **History** tab (it was
-Runs; for a Personal Pip, Results).
+Each run a Pip finishes is posted in its own chat, as a message from the Pip: its face, its name and
+the time, then what happened in its own short words, the way Grok Bots and OpenAI Dots post a scheduled
+run in the bot's conversation. Reply to it there: "is the e-way one the same as last week?" The full
+list is the Pip's **History** tab (it was Runs; for a Personal Pip, Results).
 
-| Run | What its chat shows |
-| --- | --- |
-| A review with findings (Scout, Lens, Rook, Lock) | "Today's audit found 5 things, 2 of them high", the top three with severity, title and file:line, how many more are in the report, **Open full report** and **Ask DGC to fix** |
-| Pulse checks that failed | "Today's checks: 2 of 5 failed", the failed checks, the same two buttons |
-| A failed run | "Today's audit didn't finish." What stopped it in plain words, "Nothing in your project was changed", and when it runs next; **See what happened**, **Run again now** when it can, **Ask DGC to fix** |
-| A clean run | One quiet line between the messages: "✓ 12:58 PM · Audit: nothing found · Open" |
-| A Quill draft | "Today's draft is ready:" and its title |
-| A Personal Pip's scheduled task (Core and the others) | Its result, in its own words (the first 1,200 characters), and **Open full result** |
+| Run | What the Pip says | Under it |
+| --- | --- | --- |
+| A review with findings (Scout, Lens, Rook, Lock) | "I found 4 issues, 3 of them serious. The worst is in billing.py: the GST total skips cess on every invoice." | **Report · 4 findings ›** (opens the top three with severity, title and file:line, how many more, and **Open full report**) and **Ask DGC to fix** |
+| Pulse checks that failed | "1 of 2 checks failed: GET …/api/invoices → 200." | **Report · 1 of 2 failed ›** and **Ask DGC to fix** |
+| A run that didn't finish | "I couldn't finish this run. I ran out of time. Nothing in your project was changed. I'll try again tomorrow at 9:00 AM." | **See what happened**, **Run again now** when it can, **Ask DGC to fix** |
+| A clean run | "Both checks passed. Nothing for you to do." or "I didn't find any issues this run." | **Open run** |
+| A Quill draft | "I drafted “Release notes for 0.48”." and its summary | **Open draft** |
+| A Personal Pip's scheduled task (Core and the others) | Its result, in its own words, starting short with **Show all** | **Open result** |
+
+**Its words are the report's.** DGC writes the sentence from the run's saved result alone, so every
+number, file name and title the Pip says is in the report; no model writes it. A few wordings for each
+kind of run, chosen by the run, keep a week of nightly runs from reading the same, and a run always reads
+the same however often you open the chat. A routine's reply is the Pip's own message already: it says
+which routine it was, and a long one starts short with **Show all** too.
+
+**All-clear runs fold into one message.** Checks that passed, or reviews that found nothing, one after
+another with no message between them, are one message that updates itself: "Both checks passed again.
+Nothing for you to do." with **✓ Passed 12 times since Monday ›**, which opens to every time it ran, by
+day (each opens that run). A new pass updates that message where it is. A run that fails or finds
+something breaks the fold and says so in its own message, and a message from you starts a new one.
 
 **Open full report** opens that run under History, at its report. **Ask DGC to fix** sends
 the prompt the Work chat's report card sends, naming the run, to the chat the Pip reports to
 (the newest one it was set up in or attached to), in that chat's tab; a Pip that reports to no
 chat starts a new one. It is sent once: the button then reads "Asked DGC". The status under the
-Pip's name says what its last run found ("Today's audit: 5 findings") and goes to its post.
+Pip's name says what its last run found ("Today's audit: 5 findings") and goes to its message.
 
 **Once, even with the editor closed.** The post is written when the run finishes, by the
 runner, so a run that ends overnight is in the chat in the morning. Chat replies, Patch work
-and cancelled runs post nothing.
+and cancelled runs post nothing. A Pulse's own command-plan runs are their messages; they don't
+add a Test results card under the chat as well.
 
 **Not a message from you.** A post never starts a reply and is never sent to the Pip's model as
 something you said. When you next write to the Pip, its model reads its five latest posts as
-reference data, with the full report a tool call away.
-
-**Long chats.** Each run is one post. Runs nobody replied to that are more than a day old fold
-into one line, "12 earlier runs · 3 with findings", which opens in place; the newest of them and
-any run you replied to stay as they are.
+reference data, told that you saw them as its own messages, with the full report a tool call away.
 
 ## Reports reach the chat
 
