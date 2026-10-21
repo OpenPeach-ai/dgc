@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 import uuid
 from collections.abc import Mapping
 from typing import Any, Literal, TYPE_CHECKING
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_pip_borrows",
     "get_pip_level",
     "get_pip_working_notes", "list_pip_daily_log",
     "list_pip_logins",
@@ -74,6 +76,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
     "set_pip_level",
     "set_pip_working_notes",
     "save_pip_login", "remove_pip_login", "grant_pip_login",
@@ -288,7 +291,19 @@ API58_MUTATIONS = frozenset({'set_pip_level'})
 READ_COMMANDS |= API58_READS
 MUTATION_COMMANDS |= API58_MUTATIONS
 PIP_LEVELS = frozenset({'ask', 'approve', 'full'})
+# API 59: a Personal Pip may borrow your own signed-in Chrome, with your consent each time. list_pip_borrows reads its
+# cards (the sites, why, and how each went); allow_pip_borrow is Allow once (the one turn it starts may use your Chrome on
+# those sites), decline_pip_borrow is Not now, stop_pip_borrow takes it back now. There is no Always allow. Local only.
+API59_READS = frozenset({'list_pip_borrows'})
+API59_MUTATIONS = frozenset({'allow_pip_borrow', 'decline_pip_borrow', 'stop_pip_borrow'})
+READ_COMMANDS |= API59_READS
+MUTATION_COMMANDS |= API59_MUTATIONS
+BORROW_ID = re.compile(r"pipborrow_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
+    'list_pip_borrows': frozenset({'pip_id'}),
+    'allow_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
+    'decline_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
+    'stop_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
     'get_pip_level': frozenset({'pip_id'}),
     'set_pip_level': frozenset({'pip_id', 'level'}),
     'get_pip_working_notes': frozenset({'pip_id'}),
@@ -608,7 +623,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API58_READS | API58_MUTATIONS:
+        if command in API59_READS | API59_MUTATIONS:
+            minimum = 59
+        elif command in API58_READS | API58_MUTATIONS:
             minimum = 58
         elif command in API57_READS | API57_MUTATIONS:
             minimum = 57
@@ -733,6 +750,8 @@ class Pips:
             _check_login_save(values)
         if command == 'set_pip_level' and values.get('level') not in PIP_LEVELS:
             raise DGCConfigError('level must be ask, approve or full')
+        if command in API59_MUTATIONS and not (isinstance(values.get('borrow_id'), str) and BORROW_ID.fullmatch(values['borrow_id'])):
+            raise DGCConfigError('borrow_id is the card\'s id, pipborrow_ and 32 hex digits')
         if command == 'grant_pip_login' and not (values.get('pips') == 'all' or (
                 type(values.get('pips')) is list and len(values['pips']) <= 64 and all(type(p) is str for p in values['pips']))):
             raise DGCConfigError('pips is "all" or a list of Pip ids')
