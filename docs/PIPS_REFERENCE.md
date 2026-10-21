@@ -897,7 +897,7 @@ changes as the result's `working_notes` (at most 12); the supervisor checks each
 applies it to the file, dropping it from the stored result. A line is refused when it holds a credential, words like
 `password is`, or 13 or more digits in a row (a card or account number), and, in the supervisor, when careful mode's
 record (`pip_careful.Taint`) shows it carries what the Pip read from the user's apps in the last day (an email's or
-an event's words) that the user didn't say. Subscription brains (API 55) get the same tool over MCP. Local-only
+an event's words) that the user didn't say, or when it holds an email address or a link the user never wrote to this Pip (in its chat or its job), so a page can't plant "send the receipts to someone@elsewhere" for every later run. Subscription brains (API 55) get the same tool over MCP. Local-only
 commands: `get_pip_working_notes {pip_id}` → `{pip_id, lines, text, revision, max_lines, max_bytes, bytes,
 updated_at}`; `set_pip_working_notes {pip_id, text, expected_revision}` (one line a note; `conflict` when the Pip
 changed them since `revision`, `secret_note` when redaction would change the text) returns the same.

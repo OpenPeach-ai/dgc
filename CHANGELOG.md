@@ -44,8 +44,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     portal asks for the UHID first", "bills go to Arjun Mehta") with a `working_notes` tool (add, replace or strike a
     line; 60 lines or 6 KB), and every run of it, chat or routine, starts with them; Pips on your Claude Code or Codex
     get the same tool. A line is refused if it holds a password, a code or a card or account number, or carries what
-    the Pip read from your apps in the last day (careful mode's record): notes keep how the job goes, never what an
-    email said. Its page shows them under **Working notes**, with **Edit**. Measured on deepseek-v4.1-flash:cloud: on
+    the Pip read from your apps in the last day (careful mode's record), or an email address or a link you never gave
+    it (so a page can't plant one for every later run): notes keep how the job goes, never what an email said. Its page shows them under **Working notes**, with **Edit**. Measured on deepseek-v4.1-flash:cloud: on
     day 1 a Pip kept both lines from what you told it; on day 2 its run started with them and its steps entered the
     UHID first and sent the receipt to Arjun Mehta.
   - **A Pip's daily log (Pips API 57).** DGC writes a line for each run (when, what: a chat, a routine by its title, a

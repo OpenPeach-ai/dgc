@@ -2847,6 +2847,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .learn-card .learn-where { margin: 0; color: var(--faint); font-size: var(--t-xs); }
 .learn-card .learn-body { max-height: 260px; overflow: auto; padding: var(--sp-2); border-radius: 6px;
   background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.08)); }
+.learn-card .learn-body h1 { font-size: 1.15em; margin: 0 0 .4em; } .learn-card .learn-body h2 { font-size: 1.02em; margin: .8em 0 .3em; }
 .learn-card .learn-edit { width: 100%; box-sizing: border-box; font: var(--t-xs)/1.45 var(--mono, monospace); }
 .learn-card .learn-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .learn-card .learn-error { margin: 0; color: var(--vscode-errorForeground, #f14c4c); }

@@ -540,3 +540,4 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-learn-card .pip-learn-body{max-height:260px;overflow:auto;padding:8px;border-radius:8px;background:var(--vscode-textCodeBlock-background,rgba(127,127,127,.08))}
 .pip-learn-card textarea{width:100%;box-sizing:border-box;font:12px/1.5 var(--vscode-editor-font-family,monospace);resize:vertical}
 .pip-learn-card .actions{display:flex;gap:8px;flex-wrap:wrap}
+.pip-learn-card .pip-learn-body h1{font-size:14px;margin:0 0 6px}.pip-learn-card .pip-learn-body h2{font-size:13px;margin:10px 0 4px}

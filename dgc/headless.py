@@ -2410,6 +2410,18 @@ class Backend:
         except Exception:                          # noqa: BLE001 -- a look back is never worth the turn
             pass
 
+    def _memory_steered(self, text: str) -> None:
+        """What they sent while a turn ran: looked back over with that turn's exchange."""
+        try:
+            from .agent import _typed_words
+            typed = _typed_words(text)
+            if typed and self.config.get("memory", True) is not False and self._memory_watcher() is not None:
+                turns = self._memory_turns()
+                turns.append({"user": typed, "assistant": "", "reviewed": False})
+                del turns[:-20]
+        except Exception:                          # noqa: BLE001
+            pass
+
     def _unreviewed_chars(self) -> int:
         from . import memory_review
         said = memory_review.said_in([t for t in self._memory_turns() if not t.get("reviewed")])
@@ -2480,7 +2492,7 @@ class Backend:
             try:
                 saved = skill_learn.save(cmd["markdown"], scope=scope, project_root=self.config.project_root,
                                          secrets=secret_values(self.config), surface="pip" if pip_id else "work",
-                                         where=pip_id or Path(str(self.config.project_root)).name)
+                                         where=self._pip_name(pip_id) if pip_id else Path(str(self.config.project_root)).name)
             except (skill_learn.SkillError, OSError) as exc:
                 return refuse(str(exc) if isinstance(exc, skill_learn.SkillError) else "The skill couldn't be written.")
             try:
@@ -2521,6 +2533,19 @@ class Backend:
                                                                        secret_values(self.config))[:300])
 
         threading.Thread(target=draft, name="dgc-learn", daemon=True).start()
+
+    @staticmethod
+    def _pip_name(pip_id: str) -> str:
+        """A Pip's name, for the Memory page's history ("in a Pip (Ava)"); "" when it can't be read."""
+        try:
+            import json as _json
+            from .workspace_registry import WorkspaceRegistry
+            with WorkspaceRegistry() as registry:
+                row = registry.db.execute("SELECT v.definition FROM pips p JOIN pip_versions v ON v.pip_id=p.id AND "
+                                          "v.version=p.current_version WHERE p.id=?", (pip_id,)).fetchone()
+            return str((_json.loads(row["definition"]) if row else {}).get("name") or "")[:120]
+        except Exception:                          # noqa: BLE001
+            return ""
 
     def _pip_learn_source(self, pip_id: str, secrets):
         """A Personal Pip's chat, as /learn reads it, and a client on its own model (DGC's when it runs on a
@@ -2623,6 +2648,8 @@ class Backend:
                         # Publish acceptance before the worker can acknowledge consumption.
                         if kind != "pip_setup":
                             self.em.emit("prompt_accepted", request_id=identity, state="steered")
+                        if kind == "prompt":
+                            self._memory_steered(text)      # their words mid-turn are theirs too
                         return "steered", self._queued_prompt_count()
                     steers.pop(identity, None)
                 if kind == "pip_setup":

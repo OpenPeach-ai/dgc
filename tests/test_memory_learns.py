@@ -509,6 +509,14 @@ class WorkReviewTests(unittest.TestCase):
         self.assertEqual(self.world["reviews"], [])
         self.assertEqual(self.memory.facts(), [])
 
+    def test_what_they_send_mid_turn_is_looked_back_over_too(self):
+        self.backend._memory_steered("Also, I prefer tabs over spaces in every file I touch.")
+        self.assertEqual([t["user"] for t in self.backend._memory_turns()],
+                         ["Also, I prefer tabs over spaces in every file I touch."])
+        self.service.watching = False
+        self.backend._memory_steered("And I like short commit messages.")
+        self.assertEqual(len(self.backend._memory_turns()), 1, "no screen that shows it: nothing kept to look at")
+
     def test_learn_drafts_without_writing_and_save_writes_a_project_skill(self):
         self.world["skill"] = {"name": "pnpm-setup", "description": "Set a repo up to use pnpm.",
                                "body": "# pnpm setup\n\n## Steps\n1. `corepack enable`\n2. `pnpm import`"}

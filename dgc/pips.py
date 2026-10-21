@@ -1786,9 +1786,18 @@ class PipStore:
         if personal is None:
             return
         said = (user_turn(self.registry, run) or "") if run["manifest"].get("run_kind") == "conversation" else ""
+        # Every address the user ever wrote to this Pip (not a turn DGC wrote): the only ones a note may hold.
+        from .pip_chat import DGC_KEYS
+        from .pip_notes import LOCAL
+        own = "\n".join(str(row["text"] or "") for row in self.db.execute(
+            "SELECT m.text,m.request_key,r.requested_by FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
+            "WHERE m.pip_id=? AND m.role='user' ORDER BY m.seq DESC LIMIT 500", (run["pip_id"],))
+            if row["requested_by"] in LOCAL and not str(row["request_key"] or "").startswith(DGC_KEYS))
+        own += "\n" + "\n".join(str(v) for v in (run["manifest"].get("job") or {}).values() if isinstance(v, str))
         try:
             pip_working_notes.commit(self.registry.directory, run["pip_id"], ops, secrets=self._saved_secrets(),
-                                     taint=pip_careful.taint_for(self.registry.directory, run["pip_id"]), said=said)
+                                     taint=pip_careful.taint_for(self.registry.directory, run["pip_id"]), said=said,
+                                     own_words=own)
         except (RegistryError, OSError):
             pass
 

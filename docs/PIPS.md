@@ -955,8 +955,8 @@ A Personal Pip learns its job as it goes (Pips API 57), the way OpenMausBot's bo
 - **Its working notes.** It keeps short lines on how the job goes, like "The hospital portal asks for the UHID first"
   or "Bills go to Arjun Mehta", with a small tool of its own (add a line, replace one, strike one), up to 60 lines or
   6 KB. Every run of it, a chat reply or a routine, starts with them. They're its notes, not your memory: a line is
-  refused when it holds a password, a code, a card or account number, or what it read in your apps in the last day
-  (what an email or an event said). Its page shows them under **Working notes**; **Edit** changes them, one line a
+  refused when it holds a password, a code, a card or account number, what it read in your apps in the last day
+  (what an email or an event said), or an email address or a link you never gave it. Its page shows them under **Working notes**; **Edit** changes them, one line a
   note, and its next run starts with your version. They're in `working-notes/PIP_ID.md` in the `pips` folder.
 - **Its daily log.** DGC writes one line for each run: when, what it was (a chat, a routine by its title, a task) and
   how it ended. Its page shows the last days under **Daily log**, today open. It's for you to read: no run of the Pip
