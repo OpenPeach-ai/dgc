@@ -275,7 +275,7 @@ class OllamaSearchTests(unittest.TestCase):
 
         class Cfg:
             def get(self, key, default=None):
-                return {"search_provider": "ollama", "search_api_key": KEY}.get(key, default)
+                return {"search_provider": "ollama", "search_api_key_ollama": KEY}.get(key, default)
         self.assertIn(KEY, secret_values(Cfg()))
         self.assertNotIn(KEY, redact_text(f"Authorization: Bearer {KEY}", secret_values(Cfg())))
 
@@ -303,13 +303,13 @@ class SettingsSurfacesTests(unittest.TestCase):
         prompts = []
         with patch("getpass.getpass", side_effect=lambda prompt: prompts.append(prompt) or ""):
             cli.CLI._search_cmd(stub, "ollama")
-        self.assertEqual(stub.config.data, {"search_provider": "ollama", "search_api_key": ""},
+        self.assertEqual(stub.config.data, {"search_provider": "ollama"},
                          "Enter keeps no key: the signed-in Ollama here searches without one")
         self.assertIn("ollama.com → Settings → API keys", prompts[0])
         self.assertIn("Enter for none", prompts[0])
         with patch("getpass.getpass", return_value=f"  {KEY} "):
             cli.CLI._search_cmd(stub, "ollama")
-        self.assertEqual(stub.config.data["search_api_key"], KEY)
+        self.assertEqual(stub.config.data["search_api_key_ollama"], KEY, "Ollama's own key")
         self.assertFalse([m for m in said if KEY in m], "the key is never echoed")
         self.assertIn("Ollama web search", said[-1])
 
@@ -348,7 +348,7 @@ class SettingsSurfacesTests(unittest.TestCase):
         search_menu = [labels for title, labels in menus if title.startswith("Web search")]
         self.assertEqual(len(search_menu), 1)
         self.assertIn(SEARCH_PROVIDERS["ollama"]["label"], search_menu[0])
-        self.assertEqual((cfg.data["search_provider"], cfg.data["search_api_key"]), ("ollama", ""))
+        self.assertEqual((cfg.data["search_provider"], cfg.data.get("search_api_key_ollama", "")), ("ollama", ""))
         self.assertEqual(len(prompts), 1, "its optional key is asked for, masked")
         self.assertIn("Enter for none", prompts[0])
         self.assertEqual(cli._search_key_prompt(SEARCH_PROVIDERS["brave"]), "  API key for Brave Search (API key) › ",
@@ -361,22 +361,25 @@ class SettingsSurfacesTests(unittest.TestCase):
         self.assertIn("ollama", rows["search_provider"][3])
         self.assertEqual(rows["search_api_key"][2], "secret")
         flashes, asked = [], []
-        stub = types.SimpleNamespace(config=_Cfg(search_api_key=KEY), _CLIENT_KEYS=TUI._CLIENT_KEYS,
+        stub = types.SimpleNamespace(config=_Cfg(search_provider="ollama", search_api_key_ollama=KEY),
+                                     _SETTINGS=TUI._SETTINGS, _CLIENT_KEYS=TUI._CLIENT_KEYS,
                                      _flash=flashes.append, _open_settings_cat=lambda cat: None,
                                      _ask_input=lambda prompt, cb, secret=False: asked.append((prompt, cb, secret)))
         stub._apply_setting = lambda *a: TUI._apply_setting(stub, *a)
-        self.assertEqual(TUI._fmt_setting(stub, "search_api_key", "secret"), "saved")
-        TUI._edit_setting(stub, "Web search", "search_api_key", "secret", [])
+        shown = {row[0]: row for row in TUI._settings_rows(stub, "Web search")}
+        self.assertEqual(shown["search_api_key_ollama"][1], "API key for Ollama", "the selected provider's own key")
+        self.assertEqual(TUI._fmt_setting(stub, "search_api_key_ollama", "secret"), "saved")
+        TUI._edit_setting(stub, "Web search", "search_api_key_ollama", "secret", [])
         prompt, answer, secret = asked[-1]
         self.assertTrue(secret, "typed masked")
         self.assertNotIn(KEY, prompt, "the saved key is not shown back")
         answer("new-ollama-key-81c2")
-        self.assertEqual(stub.config.data["search_api_key"], "new-ollama-key-81c2")
-        self.assertEqual(flashes[-1], "search_api_key saved")
+        self.assertEqual(stub.config.data["search_api_key_ollama"], "new-ollama-key-81c2")
+        self.assertEqual(flashes[-1], "Ollama key saved")
         answer("")
-        self.assertEqual(stub.config.data["search_api_key"], "", "blank removes it")
-        self.assertEqual((flashes[-1], TUI._fmt_setting(stub, "search_api_key", "secret")),
-                         ("search_api_key removed", "(none)"))
+        self.assertEqual(stub.config.data["search_api_key_ollama"], "", "blank removes it")
+        self.assertEqual((flashes[-1], TUI._fmt_setting(stub, "search_api_key_ollama", "secret")),
+                         ("Ollama key removed", "(none)"))
         TUI._apply_setting(stub, "Web search", "search_provider", "ollama", "enum")
         self.assertEqual(stub.config.data["search_provider"], "ollama")
         self.assertFalse([f for f in flashes if "ollama-key" in f])

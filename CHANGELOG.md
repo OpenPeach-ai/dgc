@@ -21,6 +21,19 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   (`description` and `prompt`) works as before, and a call that has both forms, or neither, gets a plain error
   instead of an empty helper.
 
+- **Each web search provider keeps its own key.** Brave, Tavily and Ollama shared one saved key, and switching
+  provider kept it: a Brave key could be sent to Tavily, or to ollama.com when the Ollama on this computer couldn't
+  search. Now each has its own (`search_api_key_brave`, `search_api_key_tavily` and `search_api_key_ollama` in
+  `~/.dgc/secrets.json`, never in `config.json`), and a search sends only the key saved for the provider in use.
+  `/search <provider>`, `dgc setup` and the TUI's `/settings` → Web search read and write the selected provider's own
+  key; at `/search` and `dgc setup`, Enter keeps a saved key and `-` removes it. The key you had is moved the first
+  time this release starts: it becomes the key of the provider selected then. If DuckDuckGo or SearXNG was selected,
+  whose it was can't be told, so it is kept as `search_api_key_unassigned` and never sent anywhere; enter it again for
+  its provider. `DGC_SEARCH_API_KEY` is the key of the provider selected at start, for that launch only. For an editor,
+  `ready.capabilities.search_keys` lists the providers that keep their own key and which have one saved, and
+  `set_config` takes `search_api_key_brave`, `search_api_key_tavily` and `search_api_key_ollama` (`""` removes one).
+  `search_api_key` from an older editor is the key of the provider that save selects, and a provider that takes no
+  key keeps none.
 - **Ollama web search.** Web search has a fifth provider, Ollama (`/search ollama`, `dgc setup`, the TUI's
   `/settings` → Web search, or `search_provider: ollama`). If Ollama on this computer is signed in (`ollama signin`,
   Ollama 0.18 or later), it searches with that sign-in and needs no key: DGC asks the Ollama at `OLLAMA_HOST`

@@ -34,7 +34,8 @@ from .editor_context import _editor_context_json, _format_editor_context, _strip
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
-from .config import SEARCH_PROVIDERS, Config, mcp_url_has_credentials
+from .config import (SEARCH_KEY_PROVIDERS, SEARCH_KEYS, SEARCH_PROVIDERS, Config, mcp_url_has_credentials,
+                     search_key_name, search_settings)
 from .editor_protocol import (MAX_COMMAND_BYTES, MAX_EVENT_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
                               command_error, event_error)
 from .permissions import Rule, rule_for
@@ -203,6 +204,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
+    "search_api_key_brave", "search_api_key_tavily", "search_api_key_ollama",
     "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window", "memory", "chatdgc_web",
     "chatdgc_followups", "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes", "turn_token_budget",
@@ -364,10 +366,14 @@ _CONFIG_STRING_LIMITS = {
     "fallback_api_key": 16_384,
     "autonomous_gate": 512,
     "subscription_model": 256,
-    # The shared web search: a SearXNG address, or a Brave or Tavily key (kept in secrets.json, as
-    # `dgc setup` keeps it, because the CLI and the Pips runner read it there too).
+    # The shared web search: a SearXNG address, and each keyed provider's own key (kept in secrets.json, as
+    # `dgc setup` keeps it, because the CLI and the Pips runner read it there too; "" removes it).
+    # `search_api_key` (an older editor) is the key of the provider this save selects.
     "search_url": 4096,
     "search_api_key": 16_384,
+    "search_api_key_brave": 16_384,
+    "search_api_key_tavily": 16_384,
+    "search_api_key_ollama": 16_384,
     # ChatDGC's custom instructions: what it should know about you, and how it should answer.
     "chatdgc_about": 1500,
     "chatdgc_style": 1500,
@@ -2225,10 +2231,27 @@ class Backend:
                           # The web search providers set_config's search_provider takes (Settings -> Web search
                           # offers only these): an older CLI refuses the whole save on one it doesn't know.
                           "search_providers": list(SEARCH_PROVIDERS),
+                          # Each of these providers keeps its own key (set_config search_api_key_<provider>,
+                          # "" removes it), and which have one saved now; never a key itself.
+                          "search_keys": self._search_keys_capability(),
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
                           "session_policy": self._session_policy_capability(),
                           **self._chats_capability(), **self._chatdgc_capability()},
             **self._chat_fields())
+
+    def _search_keys_capability(self) -> dict:
+        """ready.capabilities.search_keys: the web search providers that keep a key of their own, and which of them
+        have one saved. The editor's Settings shows each one's state and offers Remove only when this is here; an
+        older CLI keeps one key for all of them."""
+        saved = []
+        for provider in SEARCH_KEY_PROVIDERS:
+            try:
+                value = self.config.get(SEARCH_KEYS[provider], "")
+            except Exception:                   # noqa: BLE001 -- a stub config in a test harness
+                value = ""
+            if isinstance(value, str) and value:
+                saved.append(provider)
+        return {"version": 1, "providers": list(SEARCH_KEY_PROVIDERS), "saved": saved}
 
     def _chatdgc_capability(self) -> dict:
         """ready.capabilities.chatdgc: the Host answers chatdgc_* itself (dgc/chatdgc), so only a Host
@@ -4270,7 +4293,8 @@ class Backend:
         if "search_url" in self._config_fields:
             extra["search_url"] = str(c.get("search_url", "") or "")
         if "search_api_key_set" in self._config_fields:
-            extra["search_api_key_set"] = bool(c.get("search_api_key", ""))
+            # Whether the SELECTED provider has its own key (ready.capabilities.search_keys says it of each).
+            extra["search_api_key_set"] = bool(search_settings(c)[1])
         if "subagent_context_size" in self._config_fields:
             try:
                 extra["subagent_context_size"] = max(0, int(c.get("subagent_context_size", 0) or 0))
@@ -6722,6 +6746,15 @@ class Backend:
                              **_request_fields(request_id))
                 return
             config_get = getattr(self.config, "get", None)
+            if "search_api_key" in values:
+                # An older editor's one key field: the key of the provider this save selects (else the one
+                # selected now), kept as that provider's own. A provider that takes no key keeps none.
+                shared = values.pop("search_api_key")
+                chosen = values.get("search_provider",
+                                    config_get("search_provider", "duckduckgo") if callable(config_get) else "")
+                slot = search_key_name(chosen)
+                if slot:
+                    values.setdefault(slot, shared)
             current_engine = (config_get("subscription_engine", "") if callable(config_get) else
                               getattr(self.config, "data", {}).get("subscription_engine", ""))
             selected_engine = str(values.get("subscription_engine", current_engine))

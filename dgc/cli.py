@@ -794,13 +794,38 @@ def render_help(console, project_root: Path | None = None) -> None:
         style=DIM))
 
 
-def _search_key_prompt(meta: dict) -> str:
-    """The masked prompt for a web search key. Ollama's is optional: Enter keeps none, and a signed-in Ollama on this
-    computer searches without one."""
+def _search_key_prompt(meta: dict, saved: bool = False) -> str:
+    """The masked prompt for a web search provider's own key. Ollama's is optional: Enter keeps none, and a signed-in
+    Ollama on this computer searches without one. With a key already saved for it, Enter keeps that key and a single
+    `-` removes it."""
+    if saved:
+        what = "ollama.com API key" if meta.get("optional_key") else f"API key for {meta['label']}"
+        return f"  {what}: one is saved (Enter keeps it, - removes it) › "
     if meta.get("optional_key"):
         return ("  ollama.com API key (ollama.com → Settings → API keys), or Enter for none "
                 "if Ollama here is signed in › ")
     return f"  API key for {meta['label']} › "
+
+
+def _ask_search_key(cfg, provider: str, meta: dict) -> str:
+    """Ask, masked, for `provider`'s own web search key and keep it as that provider's, never another's. Says what
+    happened: "saved", "kept", "removed" or "" (none typed, none saved)."""
+    from getpass import getpass
+    from .config import search_key_name
+    slot = search_key_name(provider)
+    if not slot:
+        return ""
+    saved = bool(cfg.get(slot, ""))
+    typed = getpass(_search_key_prompt(meta, saved=saved)).strip()
+    if saved and not typed:
+        return "kept"
+    if saved and typed == "-":
+        cfg.set(slot, "")
+        return "removed"
+    if not typed:
+        return ""
+    cfg.set(slot, typed)
+    return "saved"
 
 
 class ClassicSlashCompleter(Completer):
@@ -1517,8 +1542,11 @@ class CLI:
         cfg = self.config
         args = rest.split()
         if not args:
+            from .config import SEARCH_KEYS
+            keyed = [p for p, slot in SEARCH_KEYS.items() if cfg.get(slot, "")]
             self.ui.info(f"web search: {cfg.get('search_provider', 'duckduckgo')}  ·  "
-                         f"options: {', '.join(SEARCH_PROVIDERS)}")
+                         f"options: {', '.join(SEARCH_PROVIDERS)}"
+                         + (f"  ·  keys saved for: {', '.join(keyed)}" if keyed else ""))
             return
         p = args[0].lower()
         if p not in SEARCH_PROVIDERS:
@@ -1526,16 +1554,18 @@ class CLI:
             return
         meta = SEARCH_PROVIDERS[p]
         cfg.set("search_provider", p)
+        key_said = ""
         if meta["needs_key"] or meta.get("optional_key"):
             if len(args) > 1:
                 self.ui.error("API keys are not accepted inline — use the masked prompt, dgc setup, or DGC_SEARCH_API_KEY")
                 return
-            from getpass import getpass
-            cfg.set("search_api_key", getpass(_search_key_prompt(meta)).strip())
+            # This provider's own key: another provider's is never carried over to it.
+            key_said = {"saved": "  ·  key saved", "kept": "  ·  saved key kept",
+                        "removed": "  ·  key removed"}.get(_ask_search_key(cfg, p, meta), "")
         if meta["needs_url"]:
             url = args[1] if len(args) > 1 else input(f"  base URL for {meta['label']} › ").strip()
             cfg.set("search_url", url)
-        self.ui.info(f"web search → {meta['label']}")
+        self.ui.info(f"web search → {meta['label']}{key_said}")
 
     def _show_restored_todos(self) -> None:
         """Replay a resumed session's checklist, redacted like the transcript it came with."""
@@ -2411,8 +2441,7 @@ def run_setup(config: Config) -> None:
     config.set("search_provider", sk)
     meta = SEARCH_PROVIDERS[sk]
     if meta["needs_key"] or meta.get("optional_key"):
-        from getpass import getpass
-        config.set("search_api_key", getpass(_search_key_prompt(meta)).strip())
+        _ask_search_key(config, sk, meta)           # this provider's own key, never another's
     if meta["needs_url"]:
         config.set("search_url", input(f"  base URL for {meta['label']} › ").strip())
     offer_voice(c)

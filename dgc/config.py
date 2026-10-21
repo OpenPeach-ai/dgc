@@ -41,8 +41,45 @@ USER_SKILLS = USER_HOME / "skills"
 PORTABLE_USER_SKILLS = _user_home_root() / ".agents" / "skills"
 USER_AGENTS = USER_HOME / "agents"
 BUILTIN_SKILLS = Path(__file__).resolve().parent / "skills_builtin"  # skills shipped with dgc
-SECRET_KEYS = frozenset({"api_key", "search_api_key", "subagent_api_key", "fallback_api_key"})
-SECRET_ENV = {"api_key": "DGC_API_KEY", "search_api_key": "DGC_SEARCH_API_KEY",
+# Web search keys: each provider that takes one keeps its own. One shared `search_api_key` stayed when the provider
+# changed, so a Brave key was sent to Tavily, or to ollama.com as a Bearer token. A search sends only the key saved
+# for the provider in use.
+SEARCH_KEY_PROVIDERS = ("brave", "tavily", "ollama")
+SEARCH_KEYS = {provider: f"search_api_key_{provider}" for provider in SEARCH_KEY_PROVIDERS}
+# The one shared key older releases kept. It is never stored any more: load() moves it to the slot of the provider
+# selected then, and `search_api_key` stays only as a name for "the selected provider's own key" (get/set below,
+# set_config from an older editor).
+LEGACY_SEARCH_KEY = "search_api_key"
+# A shared key found while a provider that takes none (DuckDuckGo, SearXNG) was selected: whose it is can't be
+# told, so it is kept here, in secrets.json, and never sent anywhere.
+SEARCH_KEY_UNASSIGNED = "search_api_key_unassigned"
+_SEARCH_SECRET_KEYS = (*SEARCH_KEYS.values(), SEARCH_KEY_UNASSIGNED)
+
+
+# DGC_SEARCH_API_KEY belongs to the provider selected when this process first read it from this settings file.
+# `dgc serve` builds a Config for every chat it opens: one opened after a switch of provider must not hand the key
+# to the new provider. Keyed by (a hash of the key, the settings file); the value is that provider's slot, or "".
+_SEARCH_ENV_SLOTS: dict[tuple[str, str], str] = {}
+
+
+def search_key_name(provider) -> str:
+    """The secrets.json name of `provider`'s own web search key; "" for a provider that takes none."""
+    return SEARCH_KEYS.get(str(provider or "").strip().lower(), "")
+
+
+def search_settings(config) -> tuple[str, str, str]:
+    """(provider, the key saved for THAT provider, the SearXNG address), read together from one config, so a key is
+    never paired with another provider's search."""
+    provider = str(config.get("search_provider", "duckduckgo") or "duckduckgo")
+    slot = search_key_name(provider)
+    key = config.get(slot, "") if slot else ""
+    return provider, (key if isinstance(key, str) else ""), str(config.get("search_url", "") or "")
+
+
+SECRET_KEYS = frozenset({"api_key", "subagent_api_key", "fallback_api_key", LEGACY_SEARCH_KEY,
+                         *_SEARCH_SECRET_KEYS})
+# DGC_SEARCH_API_KEY is the key of the provider selected when DGC starts, and only that provider's (load()).
+SECRET_ENV = {"api_key": "DGC_API_KEY", LEGACY_SEARCH_KEY: "DGC_SEARCH_API_KEY",
               "subagent_api_key": "DGC_SUBAGENT_API_KEY",
               "fallback_api_key": "DGC_FALLBACK_API_KEY"}
 _PROVIDER_SECRET_KEYS = frozenset({"api_key", "subagent_api_key", "fallback_api_key"})
@@ -462,7 +499,11 @@ DEFAULTS: dict = {
     "session_redaction": True,                  # strip credentials from durable transcript/plan history;
                                                 # exact file rewind snapshots stay private and unchanged
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng | ollama
-    "search_api_key": "",                       # for brave / tavily; ollama without a signed-in Ollama
+    # Each provider's own key, kept in secrets.json (never here) and sent only to that provider. Ollama's is
+    # an ollama.com key, used only when the Ollama on this computer can't search.
+    "search_api_key_brave": "",
+    "search_api_key_tavily": "",
+    "search_api_key_ollama": "",
     "search_url": "",                           # for searxng (self-hosted base URL)
     "browser_path": "",                         # explicit Chrome/Chromium; else CHROME_PATH, the
                                                 # Playwright cache, PATH, the usual locations, then
@@ -1010,11 +1051,24 @@ class Config:
         accepted_secrets: dict[str, str] = {}
         accepted_provider_identity: dict[str, str] = {}
         credential_warnings: list[str] = []
-        search_secret = secrets.get("search_api_key")
-        if isinstance(search_secret, str):
-            accepted_secrets["search_api_key"] = search_secret
-        elif "search_api_key" in secrets:
-            migrated = True
+        for slot in _SEARCH_SECRET_KEYS:
+            value = secrets.get(slot)
+            if isinstance(value, str):
+                accepted_secrets[slot] = value
+            elif slot in secrets:
+                migrated = True
+        if LEGACY_SEARCH_KEY in secrets:
+            # The one key older releases shared between providers belongs to the provider selected when it
+            # was saved, which is the one selected now: it becomes that provider's own key. With a provider
+            # that takes none selected, whose it is can't be told, so it is kept aside and never sent.
+            migrated = True                     # and the shared name is never written back
+            legacy = secrets.get(LEGACY_SEARCH_KEY)
+            owner = search_key_name(self.data.get("search_provider"))
+            if isinstance(legacy, str) and legacy:
+                if owner and not accepted_secrets.get(owner):
+                    accepted_secrets[owner] = legacy
+                elif accepted_secrets.get(owner) != legacy and not accepted_secrets.get(SEARCH_KEY_UNASSIGNED):
+                    accepted_secrets[SEARCH_KEY_UNASSIGNED] = legacy
         for key in _PROVIDER_SECRET_KEYS:
             if key not in secrets:
                 continue
@@ -1055,6 +1109,15 @@ class Config:
             value = os.environ.get(env_name)
             if value is None:
                 value = _read_secret_file(os.environ.get(env_name + "_FILE"))
+            if value is not None and key == LEGACY_SEARCH_KEY:
+                # The selected provider's key, for this launch only, and never another provider's: switching
+                # provider later doesn't carry it along. A provider that takes no key gets none.
+                bound = (hashlib.sha256(value.encode("utf-8", "replace")).hexdigest(), str(USER_CONFIG))
+                slot = _SEARCH_ENV_SLOTS.setdefault(bound, search_key_name(self.data.get("search_provider")))
+                if slot:
+                    self.data[slot] = value
+                    self._env_secret_keys.add(slot)
+                continue
             if value is not None:
                 self.data[key] = value
                 self._env_secret_keys.add(key)
@@ -1342,10 +1405,11 @@ class Config:
         the normalized endpoint identity they were issued for, so either half of an interrupted
         two-file update fails closed on the next load.
         """
-        search_value = (self._stored_secrets.get("search_api_key", "")
-                        if "search_api_key" in self._env_secret_keys
-                        else self.data.get("search_api_key", ""))
-        own: dict = {"search_api_key": (search_value if isinstance(search_value, str) else "", "")}
+        own: dict = {}
+        for slot in _SEARCH_SECRET_KEYS:
+            search_value = (self._stored_secrets.get(slot, "") if slot in self._env_secret_keys
+                            else self.data.get(slot, ""))
+            own[slot] = (search_value if isinstance(search_value, str) else "", "")
         for key in _PROVIDER_SECRET_KEYS:
             if key in self._env_secret_keys:
                 value = self._stored_secrets.get(key, "")
@@ -1381,12 +1445,14 @@ class Config:
         disk_identity = disk.get("provider_identity") if isinstance(disk.get("provider_identity"), dict) else {}
         secrets: dict = {}
         stored_provider_identity: dict[str, str] = {}
-        for key in ("search_api_key", *sorted(_PROVIDER_SECRET_KEYS)):
+        for key in (*_SEARCH_SECRET_KEYS, *sorted(_PROVIDER_SECRET_KEYS)):
             if was is None or now[key] != was.get(key):
                 value, identity = now[key]
             else:
                 value = disk.get(key, "") if isinstance(disk.get(key, ""), str) else ""
                 identity = str(disk_identity.get(key, "") or "")
+            if key in _SEARCH_SECRET_KEYS and not value:
+                continue                        # a web search provider with no key has no entry at all
             secrets[key] = value
             if key in _PROVIDER_SECRET_KEYS and value and identity:
                 stored_provider_identity[key] = identity
@@ -1438,6 +1504,10 @@ class Config:
 
     def get(self, key: str, default=None):
         data = getattr(self, "data", {})
+        if key == LEGACY_SEARCH_KEY and isinstance(data, dict):
+            # The selected provider's own key, never another's (search_settings reads the pair together).
+            slot = search_key_name(data.get("search_provider"))
+            return data.get(slot, default) if slot else default
         bindings = getattr(self, "_provider_secret_identity", None)
         if key in _PROVIDER_SECRET_KEYS and bindings is not None:
             bound = bindings.get(key, "") if isinstance(bindings, dict) else ""
@@ -1450,6 +1520,16 @@ class Config:
         return key in getattr(self, "_explicit_keys", set())
 
     def set(self, key: str, value, *, persist: bool = True) -> None:
+        if key == LEGACY_SEARCH_KEY:
+            # The key of the provider selected now. A provider that takes none keeps none: stored anywhere,
+            # it would become some other provider's key.
+            key = search_key_name(self.data.get("search_provider"))
+            if not key:
+                return
+        if key in _SEARCH_SECRET_KEYS:
+            # Typed or removed here, the key is the user's own from now on: saved (or removed) in secrets.json,
+            # not a value DGC_SEARCH_API_KEY handed to this launch.
+            self._env_secret_keys.discard(key)
         # Provider credentials are endpoint-scoped. Reusing an old key after a host change can
         # disclose a cloud credential to an unrelated server, so invalidate both the live and
         # persisted value before saving the new route. A caller that owns the new key sets it next.

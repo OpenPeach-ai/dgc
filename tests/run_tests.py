@@ -10375,7 +10375,10 @@ def test_private_config():
               "api_key" not in public and "search_api_key" not in public
               and "fallback_api_key" not in public)
         check("config migration preserves secret values",
-              cfg.api_key == "cloud-secret" and private.get("search_api_key") == "search-secret"
+              # No provider was selected (DuckDuckGo takes no key), so the old shared search key is kept
+              # aside, never sent, rather than becoming some provider's.
+              cfg.api_key == "cloud-secret" and private.get("search_api_key_unassigned") == "search-secret"
+              and "search_api_key" not in private
               and cfg.get("fallback_api_key") == "fallback-secret"
               and private.get("fallback_api_key") == "fallback-secret")
         check("legacy default tool ceilings migrate to uninterrupted long turns",

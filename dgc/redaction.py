@@ -117,6 +117,20 @@ def _environment_secret_values() -> tuple[str, ...]:
     return _ENV_SECRET_CACHE
 
 
+_CONFIG_SECRET_FALLBACK = ("api_key", "search_api_key", "search_api_key_brave", "search_api_key_tavily",
+                           "search_api_key_ollama", "search_api_key_unassigned", "subagent_api_key",
+                           "fallback_api_key")
+
+
+def _config_secret_keys() -> tuple[str, ...]:
+    """config.SECRET_KEYS, imported late: this module imports nothing of DGC's at load."""
+    try:
+        from .config import SECRET_KEYS
+    except Exception:  # noqa: BLE001 -- redaction never fails because a module couldn't load
+        return _CONFIG_SECRET_FALLBACK
+    return tuple(sorted(SECRET_KEYS))
+
+
 def secret_values(config=None) -> tuple[str, ...]:
     """Return bounded live credentials known to DGC, longest first.
 
@@ -132,11 +146,17 @@ def secret_values(config=None) -> tuple[str, ...]:
             values.add(secret)
 
     if config is not None:
-        for key in ("api_key", "search_api_key", "subagent_api_key", "fallback_api_key"):
+        # Every credential name config.py keeps out of config.json: the model keys and each web search
+        # provider's own key (and one kept aside), read through get() and as stored, so a value get()
+        # won't hand out (another provider's key, a key bound to another endpoint) is still redacted.
+        data = getattr(config, "data", None)
+        for key in _config_secret_keys():
             try:
                 add(config.get(key, ""))
             except Exception:
                 pass
+            if isinstance(data, dict):
+                add(data.get(key, ""))
         for group_key in ("mcp_servers", "language_servers"):
             try:
                 group = config.get(group_key, {}) or {}

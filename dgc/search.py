@@ -4,7 +4,9 @@ DuckDuckGo (keyless, the default floor) · Brave · Tavily (API key) · SearXNG 
 Ollama (this computer's signed-in Ollama, else an ollama.com API key).
 DuckDuckGo is tried three ways: the bundled `ddgs` client, then DGC's own parse of the HTML
 endpoint, then the lite endpoint. The other providers are plain HTTP through `requests`. Configured in ~/.dgc/config.json via
-`search_provider` / `search_api_key` / `search_url`, set by `dgc setup` or the `/search` command.
+`search_provider` / `search_url`, with each keyed provider's own key in ~/.dgc/secrets.json (`search_api_key_brave`,
+`_tavily`, `_ollama`), set by `dgc setup`, the `/search` command or Settings. A search sends only the key saved for the
+provider in use.
 """
 from __future__ import annotations
 
@@ -15,10 +17,20 @@ import re
 import requests
 
 _UA = {"User-Agent": "Mozilla/5.0 (compatible; dgc/1.0)"}
+BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+BRAVE_IMAGES_URL = "https://api.search.brave.com/res/v1/images/search"
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
 
 class SearchError(Exception):
     pass
+
+
+# Each keyed provider has its own key (dgc/config.py SEARCH_KEYS): another provider's is never used.
+BRAVE_KEY_HELP = ("Brave needs an API key of its own, and none is saved for Brave. Paste one in Settings → Web search, "
+                  "or use `/search brave` (masked prompt) or `dgc setup`.")
+TAVILY_KEY_HELP = ("Tavily needs an API key of its own, and none is saved for Tavily. Paste one in Settings → Web "
+                   "search, or use `/search tavily` (masked prompt) or `dgc setup`.")
 
 
 def _fmt(results: list[tuple[str, str, str]], query: str) -> str:
@@ -143,9 +155,9 @@ def _ddg_html(query: str, n: int) -> list[tuple[str, str, str]]:
 
 def _brave(query: str, n: int, key: str) -> list[tuple[str, str, str]]:
     if not key:
-        raise SearchError("Brave needs an API key — use `/search brave` (masked prompt), `DGC_SEARCH_API_KEY`, or `dgc setup`.")
+        raise SearchError(BRAVE_KEY_HELP)
     r = requests.get(
-        "https://api.search.brave.com/res/v1/web/search",
+        BRAVE_SEARCH_URL,
         params={"q": query, "count": n},
         headers={"Accept": "application/json", "X-Subscription-Token": key, **_UA}, timeout=20,
     )
@@ -156,8 +168,8 @@ def _brave(query: str, n: int, key: str) -> list[tuple[str, str, str]]:
 
 def _tavily(query: str, n: int, key: str) -> list[tuple[str, str, str]]:
     if not key:
-        raise SearchError("Tavily needs an API key — use `/search tavily` (masked prompt), `DGC_SEARCH_API_KEY`, or `dgc setup`.")
-    r = requests.post("https://api.tavily.com/search",
+        raise SearchError(TAVILY_KEY_HELP)
+    r = requests.post(TAVILY_SEARCH_URL,
                       json={"api_key": key, "query": query, "max_results": n}, timeout=25)
     r.raise_for_status()
     return [(x.get("title", ""), x.get("url", ""), x.get("content", "")) for x in (r.json().get("results") or [])[:n]]
@@ -183,7 +195,7 @@ OLLAMA_MAX_BYTES = 8 * 1024 * 1024      # each result carries its whole page (on
 OLLAMA_SNIPPET_CHARS = 500
 OLLAMA_KEY_HELP = ("Run `ollama signin` on this computer, or create a key at ollama.com → Settings → API keys "
                    "(https://ollama.com/settings/keys) and paste it in Settings → Web search (or `/search ollama`, "
-                   "`dgc setup`, DGC_SEARCH_API_KEY).")
+                   "`dgc setup`).")
 
 
 class _NoLocalOllama(Exception):
@@ -291,7 +303,7 @@ def _ollama(query: str, n: int, key: str) -> list[tuple[str, str, str]]:
         except _NoLocalOllama as exc:
             why_not = str(exc)
     if not key:
-        raise SearchError(f"Ollama web search can't run: {why_not}, and no ollama.com API key is saved. "
+        raise SearchError(f"Ollama web search can't run: {why_not}, and no ollama.com API key is saved for it. "
                           + OLLAMA_KEY_HELP)
     status, payload, said = _ollama_post(OLLAMA_SEARCH_URL, body, {"Authorization": f"Bearer {key}"})
     if status == 401:
@@ -351,18 +363,32 @@ def shared_settings(config) -> tuple[str, str, str]:
     and address, read fresh from the files Settings and `dgc setup` write (a process started before a change has
     not seen it), else this process's config."""
     import json
-    from .config import USER_CONFIG, USER_SECRETS
-    found = {"search_provider": config.get("search_provider", "duckduckgo"), "search_url": config.get("search_url", ""),
-             "search_api_key": config.get("search_api_key", "")}
-    for path, names in ((USER_CONFIG, ("search_provider", "search_url")), (USER_SECRETS, ("search_api_key",))):
+    from .config import USER_CONFIG, USER_SECRETS, search_key_name
+
+    def read(path):
         try:
             raw = json.loads(path.read_text(encoding="utf-8")) if path.stat().st_size <= 2 * 1024 * 1024 else None
         except (OSError, ValueError):
-            continue
-        for name in names:
-            if isinstance(raw, dict) and isinstance(raw.get(name), str):
-                found[name] = raw[name]
-    return str(found["search_provider"] or "duckduckgo"), str(found["search_api_key"] or ""), str(found["search_url"] or "")
+            return {}
+        return raw if isinstance(raw, dict) else {}
+
+    found = {"search_provider": config.get("search_provider", "duckduckgo"), "search_url": config.get("search_url", "")}
+    settings = read(USER_CONFIG)
+    for name in found:
+        if isinstance(settings.get(name), str):
+            found[name] = settings[name]
+    provider = str(found["search_provider"] or "duckduckgo")
+    # Only the key saved for THIS provider, never another's (and never the old shared `search_api_key`): one handed
+    # to this launch by DGC_SEARCH_API_KEY first, else the one Settings saved, else this process's own.
+    slot = search_key_name(provider)
+    key = config.get(slot, "") if slot else ""
+    if slot and slot not in (getattr(config, "_env_secret_keys", None) or ()):
+        secrets = read(USER_SECRETS)
+        if isinstance(secrets.get(slot), str):
+            key = secrets[slot]
+        elif secrets and "search_api_key" not in secrets:
+            key = ""                            # the file says none is saved for it: removed since this process read it
+    return provider, str(key or ""), str(found["search_url"] or "")
 
 
 def _site(link: str) -> str:
@@ -406,8 +432,8 @@ def _ddgs_images(query: str, n: int) -> list[dict]:
 
 def _brave_images(query: str, n: int, key: str) -> list[dict]:
     if not key:
-        raise SearchError("Brave needs an API key — use `/search brave` (masked prompt), `DGC_SEARCH_API_KEY`, or `dgc setup`.")
-    r = requests.get("https://api.search.brave.com/res/v1/images/search",
+        raise SearchError(BRAVE_KEY_HELP)
+    r = requests.get(BRAVE_IMAGES_URL,
                      params={"q": query, "count": n, "safesearch": "strict"},
                      headers={"Accept": "application/json", "X-Subscription-Token": key, **_UA}, timeout=20)
     r.raise_for_status()
@@ -421,8 +447,8 @@ def _brave_images(query: str, n: int, key: str) -> list[dict]:
 
 def _tavily_images(query: str, n: int, key: str) -> list[dict]:
     if not key:
-        raise SearchError("Tavily needs an API key — use `/search tavily` (masked prompt), `DGC_SEARCH_API_KEY`, or `dgc setup`.")
-    r = requests.post("https://api.tavily.com/search", timeout=25,
+        raise SearchError(TAVILY_KEY_HELP)
+    r = requests.post(TAVILY_SEARCH_URL, timeout=25,
                       json={"api_key": key, "query": query, "max_results": 1, "include_images": True,
                             "include_image_descriptions": True})
     r.raise_for_status()

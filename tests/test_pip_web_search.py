@@ -57,7 +57,7 @@ class WebSearchTests(unittest.TestCase):
         home = Path(tempfile.mkdtemp())
         config, secrets = home / "config.json", home / "secrets.json"
         config.write_text(json.dumps({"search_provider": "brave"}))
-        secrets.write_text(json.dumps({"search_api_key": "brave-key-123"}))
+        secrets.write_text(json.dumps({"search_api_key_brave": "brave-key-123"}))      # Brave's own key
         with patch("dgc.config.USER_CONFIG", config), patch("dgc.config.USER_SECRETS", secrets), \
                 patch("dgc.search.search", return_value="1. x") as run:
             self.search(server, "running shoes")

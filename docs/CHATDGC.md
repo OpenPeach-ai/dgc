@@ -97,10 +97,13 @@ research, files, data and charts, the canvas, memory, plugins, dictation and mor
   **Settings → Web search**, shared with Work and your Pips:
   - DuckDuckGo needs nothing.
   - Brave and Tavily need a key, which is kept in `~/.dgc/secrets.json` (owner-only), where `dgc setup`
-    keeps it too.
+    keeps it too. Each provider has its own key: a search sends only the key of the provider in use, so
+    switching from Brave to Tavily never sends your Brave key to Tavily. The key field says whether the
+    chosen provider has one saved, and **Remove** clears that provider's key.
   - SearXNG is a server you run.
   - Ollama searches with your Ollama sign-in when Ollama on this computer is signed in, and needs nothing
-    else; otherwise it takes an ollama.com API key (ollama.com → Settings → API keys), kept like the others.
+    else; otherwise it takes an ollama.com API key (ollama.com → Settings → API keys), kept like the others, as
+    Ollama's own.
     It has no image search, so a reply shows no pictures with it.
 - **Model and thinking.** As in main DGC, one button by Send names the model (a small arc beside it shows how much
   it thinks) and opens a menu: the models, and a **dial** for thinking. Click a mark, drag round it, or step it with

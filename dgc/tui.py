@@ -50,7 +50,8 @@ from .agent import Agent
 from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
                        is_slash_command_text, resolve_command)
 from .config import persisted_mcp_args_safe, valid_remote_mcp_url
-from .config import SEARCH_PROVIDERS, SUBAGENT_WINDOWS, subagent_window_arg as _subagent_window_arg
+from .config import SEARCH_KEYS, SEARCH_PROVIDERS, SUBAGENT_WINDOWS, subagent_window_arg as _subagent_window_arg
+from .config import search_key_name as _search_key_name
 from .config import subagent_window_text as _subagent_window_text
 from .monitors import plural
 from .reasoning import (display_text as reasoning_display_text, label_suffix as reasoning_label_suffix,
@@ -427,6 +428,17 @@ def _active_prop(field: str):
         cur = getattr(tls, "session", None) if tls else None
         setattr(cur or s[self._active_idx], field, v)
     return property(get, set)
+
+
+_SEARCH_KEY_OWNERS = {"brave": "Brave", "tavily": "Tavily", "ollama": "Ollama"}
+
+
+def _search_key_owner(slot: str) -> str:
+    """Whose web search key `slot` (search_api_key_brave, ...) is, in words: "Brave"."""
+    for provider, name in SEARCH_KEYS.items():
+        if name == slot:
+            return _SEARCH_KEY_OWNERS.get(provider, provider)
+    return slot
 
 
 class TUI:
@@ -806,10 +818,11 @@ class TUI:
         "Files pane": [
             ("trash_mode", "/files deletes go to", "enum", ["dgc", "os"]),
         ],
-        # The one web search Work, ChatDGC and Pips share. The key is typed masked and never shown back.
+        # The one web search Work, ChatDGC and Pips share. The key row is the SELECTED provider's own key
+        # (_settings_rows): typed masked, never shown back, and never another provider's.
         "Web search": [
             ("search_provider", "Provider", "enum", list(SEARCH_PROVIDERS)),
-            ("search_api_key", "API key (Brave, Tavily, Ollama)", "secret"),
+            ("search_api_key", "API key", "secret"),
             ("search_url", "SearXNG address", "str"),
         ],
         "Turns": [
@@ -845,8 +858,22 @@ class TUI:
             return "saved" if v else "(none)"
         return str(v) if v != "" else "(default)"
 
+    def _settings_rows(self, cat: str) -> list:
+        """A category's rows. Web search's key row stands for the selected provider's own key."""
+        rows = []
+        for key, lbl, typ, *spec in self._SETTINGS.get(cat, []):
+            if key == "search_api_key":
+                provider = str(self.config.get("search_provider", "duckduckgo") or "duckduckgo")
+                slot = _search_key_name(provider)
+                if slot:
+                    key, lbl = slot, f"API key for {_search_key_owner(slot)}"
+                else:
+                    lbl = f"API key ({provider} takes none)"
+            rows.append((key, lbl, typ, *spec))
+        return rows
+
     def _open_settings_cat(self, cat: str) -> None:
-        items = self._SETTINGS.get(cat, [])
+        items = self._settings_rows(cat)
         rows = [{"label": lbl, "desc": self._fmt_setting(key, typ), "value": (key, typ, spec)}
                 for (key, lbl, typ, *spec) in items]
         self._open_overlay(rows, on_pick=lambda r: self._edit_setting(cat, *r["value"]),
@@ -863,8 +890,13 @@ class TUI:
             self._open_overlay(rows, on_pick=lambda r: self._apply_setting(cat, key, r["value"], typ),
                                title=key, footer="↑↓ move · Enter select · Esc back",
                                accent=True, back=lambda: self._open_settings_cat(cat))
+        elif typ == "secret" and key == "search_api_key":
+            # The selected provider takes no key: one typed here would only wait to be sent to another.
+            self._flash("this web search takes no key — pick Brave, Tavily or Ollama as the provider first")
+            self._open_settings_cat(cat)
         elif typ == "secret":                   # masked; the saved value is never shown
-            self._ask_input(f"{key} (masked) · Enter saves it · blank removes the saved one ",
+            what = f"{_search_key_owner(key)} key" if key in SEARCH_KEYS.values() else key
+            self._ask_input(f"{what} (masked) · Enter saves it · blank removes the saved one ",
                             lambda text: self._apply_setting(cat, key, text, typ), secret=True)
         else:                                   # str/int/float → free-text input
             cur = self.config.get(key, "")
@@ -904,7 +936,8 @@ class TUI:
             elif key == "autonomous_max_turns":
                 self.agent.autonomous_max_turns = int(val or 30)
         if typ == "secret":
-            self._flash(f"{key} saved" if val else f"{key} removed")
+            what = f"{_search_key_owner(key)} key" if key in SEARCH_KEYS.values() else key
+            self._flash(f"{what} saved" if val else f"{what} removed")
         else:
             self._flash(f"{key} = {val}" if val not in ("",) else f"{key} reset to default")
         self._open_settings_cat(cat)            # back to the category page (values refreshed)

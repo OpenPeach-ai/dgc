@@ -117,7 +117,8 @@ class SettingsTests(unittest.TestCase):
                             "values": {"search_provider": "brave", "search_api_key": KEY}})
         self.assertEqual([f for f in self.frames() if f["type"] == "command_rejected"], [])
         secrets = json.loads((self.user / "secrets.json").read_text())
-        self.assertEqual(secrets.get("search_api_key"), KEY, "in secrets.json, as `dgc setup` keeps it")
+        self.assertEqual(secrets.get("search_api_key_brave"), KEY, "in secrets.json, as Brave's own, as `dgc setup` keeps it")
+        self.assertNotIn("search_api_key", secrets, "never as one key for every provider")
         self.assertEqual(oct((self.user / "secrets.json").stat().st_mode & 0o777), "0o600")
         saved = json.loads((self.user / "config.json").read_text())
         self.assertEqual(saved.get("search_provider"), "brave")
@@ -136,8 +137,8 @@ class SettingsTests(unittest.TestCase):
         self.host.dispatch({"type": "set_config", "request_id": "o1",
                             "values": {"search_provider": "ollama", "search_api_key": KEY}})
         self.assertEqual([f for f in self.frames() if f["type"] == "command_rejected"], [])
-        self.assertEqual(json.loads((self.user / "secrets.json").read_text()).get("search_api_key"), KEY,
-                         "kept where Brave's and Tavily's are")
+        self.assertEqual(json.loads((self.user / "secrets.json").read_text()).get("search_api_key_ollama"), KEY,
+                         "kept where Brave's and Tavily's are, as Ollama's own")
         self.host.dispatch({"type": "get_config", "request_id": "o2", "fields": ["search_url", "search_api_key_set"]})
         asked = self.last("config")
         self.assertEqual((asked["search"], asked["search_api_key_set"]), ("ollama", True))
@@ -145,7 +146,7 @@ class SettingsTests(unittest.TestCase):
         self.assertNotIn(KEY, self.wire.getvalue())
 
     def test_settings_hears_whether_a_key_is_saved_never_the_key(self):
-        self.host.dispatch({"type": "set_config", "values": {"search_provider": "searxng",
+        self.host.dispatch({"type": "set_config", "values": {"search_provider": "brave",
                                                              "search_url": "http://127.0.0.1:8888", "search_api_key": KEY}})
         self.host.dispatch({"type": "get_config", "request_id": "c0"})
         plain = self.last("config")
@@ -153,7 +154,7 @@ class SettingsTests(unittest.TestCase):
         self.host.dispatch({"type": "get_config", "request_id": "c1", "fields": ["search_url", "search_api_key_set"]})
         asked = self.last("config")
         self.assertEqual((asked["search"], asked["search_url"], asked["search_api_key_set"]),
-                         ("searxng", "http://127.0.0.1:8888", True))
+                         ("brave", "http://127.0.0.1:8888", True))
         self.assertIsNone(ep.event_error(asked))
         self.assertNotIn(KEY, self.wire.getvalue(), "the key itself never crosses the wire")
         self.host.dispatch({"type": "set_config", "values": {"search_api_key": ""}})

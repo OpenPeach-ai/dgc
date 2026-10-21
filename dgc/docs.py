@@ -3405,20 +3405,36 @@ DuckDuckGo is the keyless default. `dgc setup` or `/search` picks another backen
 - `/search duckduckgo` — keyless, and tried three ways in order: the `ddgs` client DGC ships
   with, then DuckDuckGo's HTML endpoint, then its lite endpoint. The first one that returns
   results answers; only if all three come back empty do you see an error.
-- `/search brave` · `/search tavily` — prompts for an API key (masked). The value lives in
-  `~/.dgc/secrets.json` or `DGC_SEARCH_API_KEY`, never in `config.json`.
+- `/search brave` · `/search tavily` — prompts (masked) for that provider's own API key. With a
+  key already saved for it, Enter keeps that key and a single `-` removes it.
 - `/search searxng <url>` — a self-hosted instance. `search_url` in config is that base URL.
 - `/search ollama` — Ollama's web search. If Ollama on this computer is signed in (`ollama signin`,
   Ollama 0.18 or later), it searches with that sign-in and needs no key: DGC asks the Ollama at
   `OLLAMA_HOST` (default `http://127.0.0.1:11434`), which signs the request to ollama.com itself.
   Otherwise paste an ollama.com API key at the masked prompt (ollama.com → Settings → API keys);
-  Enter leaves none. A saved key is used only when the local Ollama can't search (not running,
+  Enter leaves none. It is Ollama's own key, and is used only when the local Ollama can't search (not running,
   too old, not signed in, or its cloud features turned off). Results carry each page's text, and
   DGC keeps the start of it as the snippet. Ollama has no image search.
 
-In the TUI, `/settings` → **Web search** sets the provider, the key (typed masked, never shown
-back; blank removes it) and the SearXNG address. The editor's **Settings → Web search** sets the
-same three.
+Brave, Tavily and Ollama each keep their own key, in `~/.dgc/secrets.json` (owner-only, never in
+`config.json`) as `search_api_key_brave`, `search_api_key_tavily` and `search_api_key_ollama`.
+A search sends only the key saved for the provider in use: switch from Brave to Tavily and your
+Brave key stays Brave's. Switch back and it is used again.
+
+In the TUI, `/settings` → **Web search** sets the provider, the selected provider's own key (typed
+masked, never shown back; blank removes it) and the SearXNG address. The editor's **Settings → Web
+search** sets the same: its key field says whether the chosen provider has a key saved ("Saved", or
+empty), and **Remove** clears that provider's key, and only that one.
+
+`DGC_SEARCH_API_KEY` is the key of the provider selected when DGC starts, for that launch only. It is
+never saved, never carried over when you switch provider, and not used at all when DuckDuckGo or
+SearXNG is selected at start.
+
+Older releases kept one key for Brave, Tavily and Ollama together. The first time this release
+starts, that key becomes the own key of the provider selected then. If DuckDuckGo or SearXNG was
+selected, DGC can't tell whose key it was, so it keeps it in `secrets.json` as
+`search_api_key_unassigned` and never sends it anywhere: enter the key again for its provider
+(`/search brave`, `/settings`, or Settings → Web search).
 
 `search_timeout` bounds the request (1–60 seconds). Queries leave this machine for the chosen
 provider; treat that like any other web request.
@@ -3652,9 +3668,11 @@ Useful keys:
 
 ## Credentials
 
-The `api_key`, `search_api_key`, `subagent_api_key`, and `fallback_api_key` values never live in
+The `api_key`, `subagent_api_key` and `fallback_api_key` values, and each web search provider's
+own key (`search_api_key_brave`, `search_api_key_tavily`, `search_api_key_ollama`), never live in
 `config.json`; they are written to `~/.dgc/secrets.json` with owner-only permissions, and each can
-be supplied by environment variable instead (`DGC_API_KEY`, `DGC_SEARCH_API_KEY`, …). On the
+be supplied by environment variable instead (`DGC_API_KEY`, `DGC_SEARCH_API_KEY` for the web search
+provider selected at start, …). On the
 command line, `--api-key-env NAME` reads a key from the environment **without persisting it at
 all**. `fallback_base_url` and `subagent_base_url` point the fallback and sub-agent at their own
 endpoints.
@@ -3707,9 +3725,12 @@ when you want to override it.
 - `search_provider` (default `duckduckgo`) — which backend answers the agent's web searches:
   `duckduckgo`, `brave`, `tavily`, `searxng` or `ollama`. DuckDuckGo needs no key: it uses the
   bundled `ddgs` client, falling back to DGC's own HTML and lite parsing. Ollama needs no key when
-  Ollama on this computer is signed in; otherwise it uses `search_api_key` (an ollama.com API key).
+  Ollama on this computer is signed in; otherwise it uses its own key (an ollama.com API key).
 - `search_url` — a custom endpoint for a self-hosted search backend; empty uses the provider's own.
-- `search_api_key` lives in `secrets.json` (above). Web providers use bounded transport timeouts.
+- `search_api_key_brave`, `search_api_key_tavily`, `search_api_key_ollama` — each provider's own
+  key, in `secrets.json` (above). A search sends only the key of the provider in use. A key an older
+  release shared between them is moved once (**Web search** above). Web providers use bounded
+  transport timeouts.
 
 ## Sandbox
 

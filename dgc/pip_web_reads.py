@@ -83,9 +83,10 @@ def _fetch_page(url: str) -> tuple[str, str]:
 
 
 def _search(query: str, config) -> str:
+    from .config import search_settings
     from .search import search
-    return search(query, provider=str(config.get("search_provider", "duckduckgo")),
-                  api_key=str(config.get("search_api_key", "")), url=str(config.get("search_url", "")))
+    provider, key, url = search_settings(config)          # the provider and its own key, never another's
+    return search(query, provider=provider, api_key=key, url=url)
 
 
 def _bounded(text: str, limit: int) -> str:

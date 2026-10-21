@@ -4442,12 +4442,11 @@ def web_fetch(args: dict, ctx) -> str:
 
 
 def web_search(args: dict, ctx) -> str:
+    from .config import search_settings
     from .search import search
-    cfg = ctx.config
-    return search(str(args.get("query", "")),
-                  provider=str(cfg.get("search_provider", "duckduckgo")),
-                  api_key=str(cfg.get("search_api_key", "")),
-                  url=str(cfg.get("search_url", "")))
+    # The provider and ITS own key, read together: never a key saved for another provider.
+    provider, key, url = search_settings(ctx.config)
+    return search(str(args.get("query", "")), provider=provider, api_key=key, url=url)
 
 
 def notes_tool(args: dict, ctx) -> str:
