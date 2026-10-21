@@ -6,6 +6,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **One `task` call can start several helpers at once.** Some models send one `task` call per reply even when
+  they mean to run several in parallel, so their helpers ran one after another (a real Ultra session ran six
+  investigations back to back). `task` now also takes `tasks`: a list of 2 to 8 helpers, each with its own
+  description, prompt and agent, which start together. Without `background`, the call returns when every helper
+  has ended, with each one's result under its own description, in the order listed, a failed one included. With
+  `background: true` it returns at once with every helper's id. They run up to `max_parallel_tasks` at a time
+  and the rest wait for a free slot; each has its own private checkout, and their changes land or are kept aside
+  exactly as several task calls in one reply would. Stopping the turn stops every helper the call is waiting
+  for; background helpers run on, as a single background task does, and stop from the agent map. Each helper
+  is listed, shown and reopened as a sub-agent of its own. Side by side needs auto mode and a Git
+  project; otherwise they run one after another and the result says why. A rule for one helper's description
+  (`deny: Task(deploy*)`) holds inside a list too. Ultra now tells the lead to fan out this way. The single form
+  (`description` and `prompt`) works as before, and a call that has both forms, or neither, gets a plain error
+  instead of an empty helper.
+
 - **Ollama web search.** Web search has a fifth provider, Ollama (`/search ollama`, `dgc setup`, the TUI's
   `/settings` → Web search, or `search_provider: ollama`). If Ollama on this computer is signed in (`ollama signin`,
   Ollama 0.18 or later), it searches with that sign-in and needs no key: DGC asks the Ollama at `OLLAMA_HOST`

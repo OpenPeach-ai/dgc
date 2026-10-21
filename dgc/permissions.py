@@ -572,6 +572,16 @@ class PermissionEngine:
 
     def decide(self, tool: str, args: dict) -> tuple[str, str]:
         """Return (allow|ask|deny, reason)."""
+        if tool == "task" and isinstance(args, dict) and isinstance(args.get("tasks"), list) and args["tasks"]:
+            # One call that starts several helpers is each of them: a rule written for one helper's
+            # description (deny Task(deploy*), ask Task(migrate*)) holds inside a batch exactly as it
+            # does for that helper alone. The strictest answer wins: one denied helper denies the call.
+            verdicts = [self.decide("task", item if isinstance(item, dict) else {}) for item in args["tasks"]]
+            for action in (DENY, ASK):
+                found = next((verdict for verdict in verdicts if verdict[0] == action), None)
+                if found:
+                    return found
+            return verdicts[0]
         external = self.external_paths(tool, args)
         ext_args = {"path": external[0]} if external else {}
         policy_tool, policy_args = _permission_subject(tool, args)

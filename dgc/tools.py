@@ -121,6 +121,11 @@ def _fn(name, description, properties, required):
         "parameters": {"type": "object", "properties": properties, "required": required}}}
 
 
+_TASK_AGENT_DESCRIPTION = ("explorer (read-only search and map), researcher (writes one findings file), "
+                           "critic (reviews named files or a change), worker (implements), or a custom "
+                           ".dgc/agents/<name>.md. Omit for worker.")
+
+
 TOOL_SCHEMAS = [
     *[_fn(name, description + " Use scope=personal for this profile's Personal Pips; omitted scope means this owning chat's project. Read the current definition first; "
           "supply its exact job version, lifecycle revision and a unique request key. Retry with the identical key/payload after uncertainty. "
@@ -548,28 +553,42 @@ TOOL_SCHEMAS = [
         {"path": {"type": "string", "description": "Directory or .html file to preview (relative to the project)"},
          "name": {"type": "string", "description": "A short label for the preview (e.g. 'weather dashboard')"}},
         ["path"]),
-    _fn("task", "Run a sub-task in a fresh sub-agent with its own context and tools: exploring code, "
-        "an independent chunk of work, or a review. It cannot see this conversation. In a Git "
-        "project it works in a private checkout, then integrates only its conflict-free delta; "
-        "conflicting or incomplete work is preserved without overwriting the caller. It starts "
-        "cold, so it saves time only beside other tasks: emit independent task calls in ONE "
-        "response (they run concurrently in auto mode) and put them LAST in that response -- "
-        "anything you want done first goes before them, and a call after them runs the whole batch "
-        "one child at a time; never batch tasks that depend on or edit the same files. The user "
-        "does not see its result: summarize it.",
-        {"description": {"type": "string", "description": "A short label for the sub-task"},
-         "prompt": {"type": "string", "description": "Self-contained brief: goal, project-relative "
-                    "paths, constraints, what is known, what to return"},
-         "agent": {"type": "string", "description": "explorer (read-only search and map), "
-                   "researcher (writes one findings file), critic (reviews named files or a "
-                   "change), worker (implements), or a custom .dgc/agents/<name>.md. Omit for worker."},
+    _fn("task", "Run helpers: sub-agents, each with a fresh context and its own tools, for exploring "
+        "code, an independent chunk of work, or a review. A helper cannot see this conversation. In a "
+        "Git project each works in a private checkout, then integrates only its conflict-free delta; "
+        "conflicting or incomplete work is preserved without overwriting the caller. A helper starts "
+        "cold, so it saves time only beside other helpers: to run several helpers at once, pass them "
+        "all in ONE call as `tasks` (2-8, each with its own description, prompt and agent). They "
+        "start together (in auto mode, in a Git project) and the call returns every result, in the "
+        "order you listed them. For one helper, pass description and prompt instead. Never put parts "
+        "that depend on each other or edit the same files in one batch. The user does not see the "
+        "results: summarize them.",
+        {"description": {"type": "string", "description": "One helper: a short label for its work. "
+                         "Omit when you pass tasks"},
+         "prompt": {"type": "string", "description": "One helper: a self-contained brief: goal, "
+                    "project-relative paths, constraints, what is known, what to return. Omit when "
+                    "you pass tasks"},
+         "agent": {"type": "string", "description": _TASK_AGENT_DESCRIPTION},
+         "tasks": {"type": "array", "minItems": 2, "maxItems": 8,
+                   "description": "Several helpers that start together, one item each: the way to "
+                                  "fan out. Instead of description and prompt",
+                   "items": {"type": "object", "additionalProperties": False,
+                             "properties": {
+                                 "description": {"type": "string",
+                                                 "description": "A short label for this helper's work"},
+                                 "prompt": {"type": "string",
+                                            "description": "Its self-contained brief, as for one helper"},
+                                 "agent": {"type": "string",
+                                           "description": "Which agent, as agent above; omit for worker"}},
+                             "required": ["description", "prompt"]}},
          "background": {"type": "boolean", "description": "True only when you will not use the "
                         "result this turn -- a parallel track. False when your next step needs the "
-                        "answer. In an interactive Ultra batch, an omitted value defaults to true "
-                        "so the lead stays available; set false explicitly only when the next model "
-                        "step needs that result. A single task still defaults false. A background "
-                        "child outlives the turn; the result says whether you are woken."}},
-        ["description", "prompt"]),
+                        "answer. With tasks it applies to every helper. In an interactive Ultra batch "
+                        "(tasks, or several task calls in one response), an omitted value defaults to "
+                        "true so the lead stays available; set false explicitly only when the next "
+                        "model step needs those results. A single task still defaults false. A "
+                        "background helper outlives the turn; the result says whether you are woken."}},
+        []),
 ]
 
 # A troupe (dgc/troupe.py): many sub-agents on one fixed work order, in the background. Offered by Agent._tool_schemas

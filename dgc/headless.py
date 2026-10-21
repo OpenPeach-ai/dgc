@@ -46,6 +46,7 @@ from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
 from .skills import discover_skills, normalize_skill_name, skill_catalog
 from .tools import TOOL_SCHEMAS
+from .subagents import task_batch_child_id, task_batch_items, task_batch_outputs
 from .ui import (activity_verb, arg_summary, edit_preview, split_diff,
                  tool_output_is_error)
 
@@ -4647,6 +4648,14 @@ class Backend:
                         calls[call_id] = name
                         if name == "propose_options":
                             asked[call_id] = saved
+                    if name == "task" and call_id:
+                        # One call that started several helpers: each one's spawn card, under the id
+                        # it ran under, as live (Agent._run_task_batch); results with the call's own.
+                        for place, helper in enumerate(task_batch_items(saved) or (), 1):
+                            items.append({"type": "tool_call", "name": "task",
+                                          "call_id": task_batch_child_id(call_id, place),
+                                          "args": _history_args(helper),
+                                          "summary": arg_summary("task", helper, self._display_root())})
             elif role == "tool":
                 call_id = str(m.get("tool_call_id") or "")
                 name = calls.pop(call_id, None)
@@ -4669,6 +4678,15 @@ class Backend:
                 # A step the session stopped under remains stopped, exactly as the reconnect drew
                 # it before Continue repaired the transcript. Repair text is for the model; replay
                 # must not turn an interrupted tool into a failed command with an expanded error.
+                if name == "task" and call_id:
+                    # A batch call's helpers, each with its own result, before the call's own.
+                    for place, helper_out in enumerate(task_batch_outputs(m) or (), 1):
+                        helper_out = helper_out[:4000]
+                        helper_is_diff, helper_diff = split_diff(helper_out)
+                        items.append({"type": "tool_result", "name": "task",
+                                      "call_id": task_batch_child_id(call_id, place),
+                                      "output": helper_out, "is_error": tool_output_is_error(helper_out),
+                                      "is_diff": helper_is_diff, "diff": helper_diff})
                 if not repaired and not denied_result:
                     items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
                                   "output": output, "is_error": tool_output_is_error(output),

@@ -3267,8 +3267,9 @@ exceeds the model's reported output limit or half the context window, so a 32K w
 `xhigh` (or leaves it if you already set that), tells delegated CLIs their strongest supported
 effort, and makes the main agent a lead: it locates each part of the request, gives every part
 that changes different files its own worker (or an explorer for an area to map) in one parallel
-batch — up to 8 at once under Ultra, or the `max_parallel_tasks` width if you set one (default 4
-outside Ultra, at most 8; concurrent in auto mode) — then
+batch — one `task` call that lists them all in `tasks`, up to 8 at once under Ultra, or the
+`max_parallel_tasks` width if you set one (default 4 outside Ultra, at most 8; concurrent in auto
+mode) — then
 integrates and runs the tests. A sub-agent starts cold, so it only saves time beside others: a
 single part, parts that share files or one investigation, and edits the lead already knows stay
 with the lead. Critic reviews a change when you ask for a review or when no test can check it.
@@ -3626,7 +3627,11 @@ Useful keys:
   changed managed checkouts are retained rather than force-removed.
 - `max_parallel_tasks` — bounded `task` fan-out (default 4, maximum 8; set 1 to disable). In a
   Git-backed full-auto turn, two or more independent `task` calls emitted together are snapshotted
-  from one parent baseline, run concurrently, and integrated in call order. Hooks, interactive
+  from one parent baseline, run concurrently, and integrated in call order. One `task` call can also
+  list 2-8 helpers in `tasks` (each with its own `description`, `prompt` and `agent`): they start
+  together the same way, past this width the rest wait for a free worker, and the call returns every
+  helper's result in the order listed (with `background: true`, at once with every helper's id;
+  background helpers past the width wait queued for a slot). Hooks, interactive
   permission modes and non-Git projects keep the normal serial path. A batch may mix tools: the
   task calls fan out when they are the LAST calls in the response, so a `todo`, an edit or a bash
   command beside them runs first, in order, and nothing is reordered past a running child. A task

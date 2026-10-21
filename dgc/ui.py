@@ -205,8 +205,26 @@ def _pip_call_summary(name: str, args: dict) -> str:
     return " · ".join(parts)
 
 
+def task_batch_summary(args) -> str:
+    """A batch `task` call's card in one line: "3 helpers · Map auth, Map billing, Map search".
+
+    "" for the single form, whose card is named by its description as it always was."""
+    from .subagents import task_batch_items
+    items = task_batch_items(args)
+    if items is None:
+        return ""
+    names = [" ".join(str(item.get("description") or "").split()) for item in items]
+    names = [name for name in names if name]
+    count = len(items)
+    head = f"{count} helper" + ("" if count == 1 else "s")
+    return f"{head} · {', '.join(names)}" if names else head
+
+
 def arg_summary(name: str, args: dict, root=None) -> str:
     """A one-line human summary of a tool call's primary argument."""
+    if name == "task" and isinstance(args, dict) and "tasks" in args:
+        value = task_batch_summary(args).replace("\n", " ")
+        return value[:120] + ("…" if len(value) > 120 else "")
     if name in ("pips_setup", "pips_propose") and isinstance(args, dict):
         # What allowing it does, in the user's words: the permission is the approval.
         value = _pip_call_summary(name, args).replace("\n", " ")

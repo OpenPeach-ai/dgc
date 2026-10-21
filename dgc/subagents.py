@@ -697,13 +697,51 @@ class SubagentRegistry:
             return snap
 
 
+# ---- one `task` call, several helpers -----------------------------------------------------------
+# The batch form of `task` (dgc/tools.py): one call whose `tasks` lists the helpers to start together.
+# Every helper is an ordinary child -- its own record, its own spawn card -- shown under a call id
+# made from the batch call's own: `<call id>#<place>`, counted from 1 in the order the call lists
+# them. The agent runs them under these ids, the transcript replays them under these ids, and a
+# rewind or a reopened chat pairs records with them the same way, so the three can never disagree.
+TASK_BATCH_MIN = 2
+TASK_BATCH_MAX = 8
+
+
+def task_batch_child_id(call_id, place: int) -> str:
+    """The call id the helper at ``place`` (1-based) of the batch call ``call_id`` is shown under."""
+    return f"{call_id}#{int(place)}"
+
+
+def task_batch_items(args) -> list[dict] | None:
+    """The helpers a batch `task` call lists, as written (at most TASK_BATCH_MAX), or None for the
+    single form. For display and restore only: what may RUN is decided by the agent's validation."""
+    if not isinstance(args, dict) or "tasks" not in args:
+        return None
+    raw = args.get("tasks")
+    if not isinstance(raw, list):
+        return []
+    return [item if isinstance(item, dict) else {} for item in raw[:TASK_BATCH_MAX]]
+
+
+def task_batch_outputs(message) -> list[str] | None:
+    """Each helper's own result, in the call's order, as a batch call's tool message keeps them."""
+    raw = message.get("_dgc_task_batch") if isinstance(message, dict) else None
+    if not isinstance(raw, list):
+        return None
+    return [str(item) if isinstance(item, str) else "" for item in raw[:TASK_BATCH_MAX]]
+
+
 # ---- restore from a saved transcript ------------------------------------------------------------
 _NOT_STARTED = ("Max sub-agent depth reached", "PERMISSION DENIED", "PERMISSION NEEDED",
                 "The user DENIED", "BLOCKED by a PreToolUse hook", "error:")
 
 
 def _task_calls(messages):
-    """Yield ``(message_index, call_index, call, arguments)`` for every assistant `task` call."""
+    """Yield ``(message_index, call_index, call, arguments)`` for every assistant `task` call.
+
+    A batch call yields one entry per helper it lists: ``call`` carries the helper's own call id
+    (task_batch_child_id) and ``_batch_of``, the batch call's id; ``call_index`` is ``"<i>.<place>"``.
+    """
     for index, message in enumerate(messages or []):
         if not isinstance(message, dict) or message.get("role") != "assistant":
             continue
@@ -720,7 +758,17 @@ def _task_calls(messages):
                     args = json.loads(raw)
                 except ValueError:
                     args = {}
-            yield index, call_index, call, (args if isinstance(args, dict) else {})
+            args = args if isinstance(args, dict) else {}
+            items = task_batch_items(args)
+            if items is None:
+                yield index, call_index, call, args
+                continue
+            call_id = str(call.get("id") or "")
+            if not call_id:
+                continue                    # nothing to pair its helpers with
+            for place, item in enumerate(items, 1):
+                yield (index, f"{call_index}.{place}",
+                       {"id": task_batch_child_id(call_id, place), "_batch_of": call_id}, item)
 
 
 def _result_text(content) -> str:
@@ -792,11 +840,19 @@ def _task_outcomes(messages, redact: Callable[[str], str] | None = None):
         elif role == "tool" and current is not None:
             call_id = str(message.get("tool_call_id") or "")
             results_after[current].setdefault(call_id, _result_text(message.get("content")))
+            for place, output in enumerate(task_batch_outputs(message) or (), 1):
+                results_after[current].setdefault(task_batch_child_id(call_id, place), output)
     for index, call_index, call, args in _task_calls(messages):
         call_id = str(call.get("id") or "")
         description = redact(str(args.get("description") or ""))
-        yield index, call_index, call, args, classify_result(
-            description, results_after.get(index, {}).get(call_id))
+        results = results_after.get(index, {})
+        batch = call.get("_batch_of")
+        if batch and call_id not in results and batch in results:
+            # The batch call answered, but not for this helper: none of them started (it was
+            # refused, or failed validation), so there is no agent to restore.
+            yield index, call_index, call, args, None
+            continue
+        yield index, call_index, call, args, classify_result(description, results.get(call_id))
 
 
 def restore_records(messages, session_key: str, *,

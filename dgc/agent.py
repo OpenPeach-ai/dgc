@@ -1488,6 +1488,82 @@ def _wants_background(arguments) -> bool:
     return bool(arguments.get("background")) if isinstance(arguments, dict) else False
 
 
+def _is_task_batch(arguments) -> bool:
+    """Is this `task` call the batch form: `tasks`, several helpers started by one call?
+
+    The key alone decides, so a malformed list is still answered as a batch (by _task_call_error)
+    and never runs as an empty single child."""
+    return isinstance(arguments, dict) and "tasks" in arguments
+
+
+def _repair_task_batches(calls) -> None:
+    """A `task` call whose `tasks` list came as a JSON string is repaired in place, before it is
+    recorded, so the transcript, the replay and the run all read the same list. Weak models send
+    nested arrays this way (multi_edit's `edits` has the same repair, tools._coerce_edits). A string
+    that is not a JSON list is left alone for _task_call_error to refuse in words."""
+    for call in calls or ():
+        arguments = getattr(call, "arguments", None)
+        if getattr(call, "name", "") != "task" or not isinstance(arguments, dict):
+            continue
+        raw = arguments.get("tasks")
+        if not isinstance(raw, str):
+            continue
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(parsed, list):
+            arguments["tasks"] = parsed
+
+
+def _task_call_error(arguments) -> str:
+    """Why this `task` call cannot run as written, or "" when it can. Said before anything asks.
+
+    Two forms, never both: one helper (`description` + `prompt`) or several (`tasks`, each item
+    with its own `description`, `prompt` and optional `agent`). `background` belongs to the call.
+    """
+    from .subagents import TASK_BATCH_MAX, TASK_BATCH_MIN
+    if not isinstance(arguments, dict):
+        return "error: task arguments must be an object."
+    if "_unparsed" in arguments:
+        return ("error: could not parse tool arguments as JSON: "
+                f"{str(arguments['_unparsed'])[:200]}")
+    prompt = str(arguments.get("prompt") or "").strip()
+    if "tasks" not in arguments:
+        if not prompt:
+            return ("error: task needs a prompt: pass description and prompt for one helper, or "
+                    "tasks (a list of {description, prompt}) to start several at once.")
+        return ""
+    # A top-level prompt is the other form. (A top-level description is only a label and is
+    # ignored; a top-level agent is the default for helpers that do not name their own.)
+    if prompt:
+        return ("error: pass either description and prompt (one helper) or tasks (several helpers), "
+                "not both: this call has a prompt beside tasks. Put every helper in tasks.")
+    if "agent" in arguments and not isinstance(arguments["agent"], str):
+        return "error: agent must be a string (an agent's name)."
+    items = arguments.get("tasks")
+    if not isinstance(items, list):
+        return "error: tasks must be a list of helpers, each {description, prompt, agent?}."
+    if len(items) < TASK_BATCH_MIN:
+        return (f"error: tasks needs at least {TASK_BATCH_MIN} helpers; for one helper pass "
+                "description and prompt instead of tasks.")
+    if len(items) > TASK_BATCH_MAX:
+        return (f"error: tasks takes at most {TASK_BATCH_MAX} helpers in one call; this one lists "
+                f"{len(items)}. Merge related parts, or start the rest in a later call.")
+    for place, item in enumerate(items, 1):
+        if not isinstance(item, dict):
+            return f"error: tasks[{place}] must be an object {{description, prompt, agent?}}."
+        if "background" in item:
+            return ("error: background applies to the whole call: set it once beside tasks, not "
+                    f"inside tasks[{place}].")
+        missing = [key for key in ("description", "prompt") if not str(item.get(key) or "").strip()]
+        if missing:
+            return f"error: tasks[{place}] needs {' and '.join(missing)}."
+        if "agent" in item and not isinstance(item["agent"], str):
+            return f"error: tasks[{place}].agent must be a string (an agent's name)."
+    return ""
+
+
 class _SubUI:
     """UI wrapper for a sub-agent.
 
@@ -3293,8 +3369,8 @@ class Agent(GoalLifecycle):
         if not self.config.get("ultra_mode", False):
             return lines + [
                 "Delegate when it clearly helps: a broad search across many files or areas "
-                "(explorer), independent chunks that can run in parallel (one task each, all in ONE "
-                "response), or an independent review (critic). Do small or tightly coupled work "
+                "(explorer), independent chunks that can run in parallel (all of them in ONE `task` "
+                "call, listed in `tasks`), or an independent review (critic). Do small or tightly coupled work "
                 f"yourself. {background} "
                 "After a researcher writes a design or plan file, spawn critic on that path before "
                 "implementing, unless the user asked you to skip review.",
@@ -3316,18 +3392,19 @@ class Agent(GoalLifecycle):
             "1. Locate: find the files and symbols each part touches. Do not edit yet.",
             "2. Split: when two or more parts change different files and none needs another's "
             "result (separate bugs or features, backend vs UI, a long test or deploy battery), "
-            "give each part its own `task` — worker to change code, explorer to "
-            f"map an area — all in ONE response (up to {worker_limit(self.config)} parallel "
-            "workers), naming its files and symbols. Put those calls LAST in the response: anything "
-            "you want done first goes before them and runs first, while a call placed after them "
-            "runs the whole batch one child at a time. The batch ends when its foreground parts do, "
-            "so every part goes in that batch or none does. In an interactive Ultra batch, omit "
-            "`background` to launch each independent part and return control to the lead at once; "
-            "set `background: false` only when the lead's next step needs every result. The lead "
-            "must read new user steering immediately, continue independent work, and call "
-            "`wait_tasks` before testing or answering when it needs those results. A background part "
+            "start them all with ONE `task` call that lists every part in `tasks` — worker to "
+            f"change code, explorer to map an area — (up to {worker_limit(self.config)} parallel "
+            "workers), naming each part's files and symbols. That one call is the fan-out: its "
+            "helpers start together, while one `task` call per response runs the parts one after "
+            "another. Put it LAST in the response: anything you want done first goes before it and "
+            "runs first. The batch ends when its foreground parts do, so every part goes in that "
+            "batch or none does. In an interactive Ultra batch, omit `background` to launch every "
+            "part and return control to the lead at once; set `background: false` only when the "
+            "lead's next step needs every result. The lead must read new user steering immediately, "
+            "continue independent work, and call `wait_tasks` before testing or answering when it "
+            "needs those results. A background part "
             + ("runs only until this one-shot run ends with the turn" if one_shot else "runs on after the turn")
-            + ", and starts after the foreground ones. Parts that share a file or one investigation "
+            + ". Parts that share a file or one investigation "
             "count as one part." + (f" {background}" if one_shot else ""),
             "3. Do it yourself when the turn has one part, when running code answers the question, "
             "or when you already know every exact edit: briefing a child costs more than the edit.",
@@ -6893,6 +6970,7 @@ class Agent(GoalLifecycle):
         todo_repair = 0             # bounded correction for a model printing tool args as prose
         options_repair = 0
         self._approval_records.clear()
+        self._task_batch_records = {}       # batch `task` calls: each helper's result, by call id
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
         goal_nudged = False         # standing-goal check fires at most once per turn before stopping
@@ -7303,6 +7381,7 @@ class Agent(GoalLifecycle):
             # independent children work. Normalize omitted flags before recording the assistant
             # message, so a restored turn describes what DGC actually ran. Explicit false stays
             # foreground for work whose result the lead needs immediately.
+            _repair_task_batches(result.tool_calls)
             self._normalize_ultra_task_batch(result.tool_calls)
             assistant: dict = {"role": "assistant",
                                "content": _assistant_content_with_thinking(
@@ -7951,9 +8030,13 @@ class Agent(GoalLifecycle):
                 approval = self._approval_records.pop(call.id, None)
                 decision = (self._decision_records.pop(call.id, None)
                             if call.name == "propose_options" else None)
+                # A batch `task` call: each helper's own result, for the transcript to replay under
+                # its own card (Backend._history) and a reopened chat to restore (subagents.py).
+                helpers = (self.__dict__.get("_task_batch_records") or {}).pop(call.id, None)
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out,
                                           **({"_dgc_decision": decision} if decision else {}),
+                                          **({"_dgc_task_batch": helpers} if helpers else {}),
                                           **({"_dgc_approval": approval} if approval else {})})
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
@@ -8606,6 +8689,12 @@ class Agent(GoalLifecycle):
             # The description and returned summary are model-controlled. Keep mutation/convergence
             # accounting on a private state bit set only by a successful structured integration.
             self._last_task_integrated = False
+            # A call that cannot run as written is answered before anything asks the user about it.
+            problem = _task_call_error(args)
+            if problem:
+                self.ui.tool_call(name, display_args, call_id)
+                self.ui.tool_result(name, problem, call_id)
+                return problem
 
         if name == "present_plan":
             if self.mode != "plan":
@@ -8898,6 +8987,8 @@ class Agent(GoalLifecycle):
                     if name == "task":
                         if self.depth >= self.max_subagent_depth():
                             out = self.depth_cap_refusal()
+                        elif _is_task_batch(args):
+                            out = self._run_task_batch(args, call_id)
                         else:
                             out = self._run_subagent(
                                 str(args.get("description", "")), str(args.get("prompt", "")),
@@ -9994,8 +10085,15 @@ class Agent(GoalLifecycle):
             f"Summary:\n{result}")
 
     def _run_subagent(self, description: str, prompt: str, agent_name: str = "",
-                      call_id: str | None = None, *, background: bool = False) -> str:
-        """Run the normal one-task path; parallel batches use the same execution/finalization core."""
+                      call_id: str | None = None, *, background: bool = False,
+                      queue_over_cap: bool = False, spawned: list | None = None) -> str:
+        """Run the normal one-task path; parallel batches use the same execution/finalization core.
+
+        ``queue_over_cap`` is a background helper of one batch `task` call (_run_task_batch): past
+        the background cap it is still detached, but waits queued until a running background child
+        ends (_wait_for_detached_slot), where a single call over the cap runs in the foreground.
+        ``spawned`` then receives ``(agent_id, queued)`` and the result is that child's one
+        sentence -- the batch says once how the results come back."""
         from .worktree import TaskWorkspace, repo_root
 
         self._last_task_integrated = False
@@ -10052,7 +10150,10 @@ class Agent(GoalLifecycle):
             self._finished_jobs = {}
         from .ultra import worker_limit
         cap = worker_limit(self.config)
-        detach = bool(background) and self.depth == 0 and len(jobs) < cap and not self.stopping
+        detach = (bool(background) and self.depth == 0 and not self.stopping
+                  and (len(jobs) < cap or queue_over_cap))
+        # Queued: every background slot is taken (by children running now, not ones waiting).
+        queued = detach and self._running_detached_count() >= cap
         # A foreground child has a stop of its own that the turn's Stop also sets (_ChildStop), so
         # the user can stop just this child and this turn carries on.
         own_cancel = threading.Event() if detach else _ChildStop(self.cancelled)
@@ -10066,8 +10167,8 @@ class Agent(GoalLifecycle):
             registry.start(id=sub_ui.agent_id, parent_id=getattr(self, "_subagent_id", None),
                            call_id=_wire_call_id(self.ui, call_id), description=description,
                            agent_type=agent_name if adef else "", depth=self.depth + 1,
-                           isolated=workspace is not None, parallel=False, queued=False,
-                           turn_hint=getattr(self.ui, "turn_id", ""),
+                           isolated=workspace is not None, parallel=bool(queue_over_cap),
+                           queued=queued, turn_hint=getattr(self.ui, "turn_id", ""),
                            background=detach)
         if self.depth == 0:
             from . import stopped_work            # a restart says which sub-agents it stopped
@@ -10084,12 +10185,49 @@ class Agent(GoalLifecycle):
                                               stopped_by_user=own_cancel.closed)
             self._last_task_integrated = outcome.integrated
             return outcome.output
+        if spawned is not None:
+            spawned.append((sub_ui.agent_id, queued))
         return self._spawn_detached_subagent(
-            description, prompt, agent_name, workspace, sub_ui, call_id, own_cancel)
+            description, prompt, agent_name, workspace, sub_ui, call_id, own_cancel,
+            queued=queued, brief=spawned is not None)
+
+    def _running_detached_count(self) -> int:
+        """Background children working now: listed, and not waiting queued for a slot."""
+        return sum(1 for job in list((getattr(self, "_detached_jobs", None) or {}).values())
+                   if not job.get("queued"))
+
+    def _detached_slots(self) -> threading.Condition:
+        """Signalled whenever a background child ends: what a queued one waits on."""
+        return self.__dict__.setdefault("_detached_slot_cond", threading.Condition())
+
+    def _wait_for_detached_slot(self, handle: dict, cancel: threading.Event) -> None:
+        """Hold a queued background child until a slot is free and it is first in line.
+
+        The background twin of the foreground batch's worker pool: at most `worker_limit` run at
+        once, the rest start in the order they were queued as running ones end. Stopped while
+        queued, it stops waiting at once and its run ends straight away as stopped
+        (_execute_prepared_subagent checks the token before anything runs).
+        """
+        from .ultra import worker_limit
+        slots = self._detached_slots()
+        with slots:
+            while not (cancel.is_set() or self.stopping):
+                jobs = list((getattr(self, "_detached_jobs", None) or {}).values())
+                running = sum(1 for job in jobs if not job.get("queued"))
+                line = min((job.get("queue_seq", 0) for job in jobs if job.get("queued")), default=None)
+                if running < worker_limit(self.config) and line == handle.get("queue_seq"):
+                    break
+                slots.wait(0.25)
+            handle["queued"] = False
 
     def _spawn_detached_subagent(self, description, prompt, agent_name, workspace, sub_ui, call_id,
-                                 own_cancel: threading.Event) -> str:
-        """Run the child on its own thread and cancel token; the parent turn may end."""
+                                 own_cancel: threading.Event, *, queued: bool = False,
+                                 brief: bool = False) -> str:
+        """Run the child on its own thread and cancel token; the parent turn may end.
+
+        ``queued``: every background slot is taken, so the thread first waits for one
+        (_wait_for_detached_slot). ``brief``: return only the sentence naming this child; a batch
+        `task` call says once, for all its helpers, how their results come back."""
         jobs = self._detached_jobs
         agent_id = sub_ui.agent_id
         # The frontend's own callback wins; without one, the hub's pending queue is what wakes the
@@ -10108,17 +10246,21 @@ class Agent(GoalLifecycle):
         # `job["cancel"]` is read by stop_detached and by tests, and a plain dict keeps those
         # working. The entry is popped when the child finalizes, which is what drops the Agent
         # reference -- do not copy it into _finished_jobs.
+        self._detached_seq = getattr(self, "_detached_seq", 0) + 1
         jobs[agent_id] = {"cancel": own_cancel, "description": description, "agent": None,
                          "parent_id": getattr(self, "_subagent_id", None),
                          "worktree": getattr(workspace, "path", None),
                          "branch": getattr(workspace, "branch", ""),
                          "base_commit": getattr(workspace, "base_commit", ""),
-                         "keeper": keeper, "started_at": time.time()}
+                         "keeper": keeper, "started_at": time.time(),
+                         "queued": bool(queued), "queue_seq": self._detached_seq}
         handle = jobs[agent_id]
 
         def work():
             outcome = _TaskOutcome(f"error: Sub-task '{description}' did not complete.")
             try:
+                if handle.get("queued"):
+                    self._wait_for_detached_slot(handle, own_cancel)
                 execution = self._execute_prepared_subagent(
                     description, prompt, agent_name, workspace, sub_ui, call_id,
                     cancel=own_cancel, handle=handle)
@@ -10141,6 +10283,9 @@ class Agent(GoalLifecycle):
                 # between would otherwise be told the task does not exist.
                 self._remember_finished(agent_id, description, outcome)
                 jobs.pop(agent_id, None)
+                slots = self._detached_slots()
+                with slots:
+                    slots.notify_all()          # a queued background child may start now
                 notify = getattr(self, "on_detached_ended", None)
                 # A child can outlive the chat that asked for it: `/new` and `/clear` signal it and
                 # move on. Its result belongs to that chat, so if the conversation has been replaced
@@ -10179,17 +10324,32 @@ class Agent(GoalLifecycle):
         # child that finished at once would sit between its pop and its ledger row, in neither map.
         waitable = self._supervision_exposed()
         threading.Thread(target=work, daemon=True, name=f"dgc-bg-{agent_id[-8:]}").start()
-        # Promise only the delivery that will actually happen, and never talk the model out of
-        # waiting. The editor backend's callback, or the terminal's wake, starts a turn; a frontend
-        # with neither folds the result into this turn between tool calls or into the user's next
-        # prompt (_drain_monitors); `dgc -p` ends with this turn and stops a child still running.
-        # In every one of them `wait_tasks` is how the model has the result NOW. This text predates
-        # that tool, and told a `dgc -p` model whose user had asked for the wait "do not wait for
-        # it: ... check on it later" -- in a run that has no later. The call is named only where it
-        # is offered (_supervision_exposed: a launching application's policy withholds it).
-        from .monitors import wake_settings
-        running = f"Sub-task '{description}' is running in the background (id {agent_id}). "
+        if queued:
+            running = (f"Sub-task '{description}' is queued in the background (id {agent_id}): it "
+                       "starts when a running background sub-task ends. ")
+        else:
+            running = f"Sub-task '{description}' is running in the background (id {agent_id}). "
+        if brief:
+            return running.strip()
         wait = f"call wait_tasks with id {agent_id}" if waitable else ""
+        return running + self._detached_delivery(wait, hub, notify_epoch)
+
+    def _detached_delivery(self, wait: str, hub, notify_epoch, *, many: bool = False) -> str:
+        """How a background child's result comes back, said to the model ("" never): ``wait`` is
+        the wait_tasks call to name ("" where that tool is not offered); ``many``, for several
+        children one batch call started.
+
+        Promise only the delivery that will actually happen, and never talk the model out of
+        waiting. The editor backend's callback, or the terminal's wake, starts a turn; a frontend
+        with neither folds the result into this turn between tool calls or into the user's next
+        prompt (_drain_monitors); `dgc -p` ends with this turn and stops a child still running.
+        In every one of them `wait_tasks` is how the model has the result NOW. This text predates
+        that tool, and told a `dgc -p` model whose user had asked for the wait "do not wait for
+        it: ... check on it later" -- in a run that has no later. The call is named only where it
+        is offered (_supervision_exposed: a launching application's policy withholds it).
+        """
+        from .monitors import wake_settings
+        it = "them" if many else "it"
         queued = hub is not None and notify_epoch is not None
         # `_monitor_delivery` is the predicate for "this frontend starts turns on its own": the TUI
         # and the editor backend set it, `dgc -p` and the classic REPL do not. Every Agent builds a
@@ -10198,28 +10358,34 @@ class Agent(GoalLifecycle):
         if callable(getattr(self, "on_detached_ended", None)) or (
                 queued and self._monitor_delivery() and wake_settings(self.config)[0]):
             # A wake is coming, so a wait only holds this turn open: offered for the user's sake.
-            return (running + "I will continue when it finishes."
-                    + (f" If the user asked you to wait for it, {wait} in this turn." if wait else ""))
+            return (("I will continue as they finish." if many else "I will continue when it finishes.")
+                    + (f" If the user asked you to wait for {it}, {wait} in this turn." if wait else ""))
         if self._non_interactive():
             # `dgc -p`: one turn, then the process exits, and _end_one_shot_children stops a child
             # still running. Never "next message": there is none.
-            ending = (running + "Nothing will wake this conversation when it finishes, and this "
-                      "one-shot run ends with this turn: a sub-task still running then is stopped "
-                      "before it finishes.")
+            ending = (("Nothing will wake this conversation when they finish" if many else
+                       "Nothing will wake this conversation when it finishes")
+                      + ", and this one-shot run ends with this turn: a sub-task still running then "
+                      "is stopped before it finishes.")
             if wait:
-                return (ending + " When you need its result or its changes, or the user asked you to "
-                        f"wait for it, {wait} before you answer; until then, carry on with other work.")
-            return ending + " Nothing in this session can wait for it, so do not report its outcome as known."
+                return (ending + (" When you need their results or their changes" if many else
+                                  " When you need its result or its changes")
+                        + f", or the user asked you to wait for {it}, {wait} before you answer; "
+                        "until then, carry on with other work.")
+            return ending + (f" Nothing in this session can wait for {it}, so do not report "
+                             + ("their outcomes" if many else "its outcome") + " as known.")
         if queued:
             # No wake, but whatever is pending reaches the model between tool calls of a turn still
             # running, or with the next prompt (_drain_monitors).
-            return (running + "Nothing will start a turn when it finishes: its result reaches me "
-                    "between tool calls if this turn is still running, otherwise with the user's "
+            return (("Nothing will start a turn when they finish: each result reaches me "
+                     if many else "Nothing will start a turn when it finishes: its result reaches me ")
+                    + "between tool calls if this turn is still running, otherwise with the user's "
                     "next message."
-                    + (f" If you need it sooner, or the user asked you to wait for it, {wait} in "
+                    + (f" If you need {it} sooner, or the user asked you to wait for {it}, {wait} in "
                        "this turn." if wait else ""))
-        return (running + "Nothing will deliver its result on its own."
-                + (f" When you need it, or the user asked you to wait for it, {wait} in this turn."
+        return (("Nothing will deliver their results on their own." if many else
+                 "Nothing will deliver its result on its own.")
+                + (f" When you need {it}, or the user asked you to wait for {it}, {wait} in this turn."
                    if wait else ""))
 
     # ---- supervising background children: parent -> child CONTROL -------------------------------
@@ -10758,6 +10924,121 @@ class Agent(GoalLifecycle):
             blocks.append("Still running: " + ", ".join(still) + ".")
         return "\n\n".join(blocks) + note
 
+    def _task_batch_helpers(self, args: dict, call_id: str | None) -> list[ToolCall]:
+        """A validated batch call's helpers as single `task` calls, each under its own call id."""
+        from .subagents import task_batch_child_id
+        default_agent = str(args.get("agent") or "")
+        helpers = []
+        for place, item in enumerate(args.get("tasks") or [], 1):
+            helper = {"description": str(item.get("description") or ""),
+                      "prompt": str(item.get("prompt") or "")}
+            agent_name = str(item.get("agent") or default_agent)
+            if agent_name:
+                helper["agent"] = agent_name
+            helpers.append(ToolCall(task_batch_child_id(call_id or "task", place), "task", helper))
+        return helpers
+
+    def _run_task_batch(self, args: dict, call_id: str | None) -> str:
+        """One `task` call that starts several helpers together: its `tasks` form.
+
+        Measured on a real session: a model that WROTE "six investigations in one batch" sent one
+        `task` call per reply, so the six ran strictly one after another, though DGC runs several
+        calls of one reply side by side -- that model batches other tools, never this one. A list
+        in ONE call needs no second call to be in the same reply.
+
+        Each helper is an ordinary child under its own call id (subagents.task_batch_child_id): its
+        own spawn card, agents-list record, checkout and integration, exactly as if the model had
+        sent it as a call of its own. Nothing here is a second scheduler:
+
+        - foreground, the helpers go through the batch path several calls of one reply take
+          (_parallel_task_outputs): one baseline, at most max_parallel_tasks at once with the rest
+          queued for a worker, integration in the listed order, an overlap retained rather than
+          overwritten. Where that path cannot run them side by side they run one after another
+          through the single-task path, and the result says why. The call returns when every
+          helper has ended, each outcome under its own description, failures included.
+        - background (lead only), each is detached as a single background task is, past the
+          background cap queued for a slot, and the call returns at once with every id.
+
+        Admission was the batch call's own (_handle_call): one approval, each helper decided by
+        its own description (permissions.py), one PreToolUse hook that sees every helper.
+        """
+        helpers = self._task_batch_helpers(args, call_id)
+        if _wants_background(args) and self.depth == 0 and not self.stopping:
+            return self._start_background_task_batch(helpers, call_id)
+        why_serial = self._parallel_task_refusal(helpers, batch=True)
+        outcomes = {} if why_serial else self._parallel_task_outputs(helpers, batch=True)
+        if not why_serial and not outcomes:
+            why_serial = "they could not be started side by side"
+        if why_serial:
+            for i, helper in enumerate(helpers):
+                fields = helper.arguments
+                self.ui.tool_call("task", self._safe_value(fields), helper.id)
+                self._last_task_integrated = False
+                out = self._run_subagent(fields["description"], fields["prompt"],
+                                         fields.get("agent", ""), helper.id)
+                outcome = _TaskOutcome(_clamp(self._safe_text(out)), self._last_task_integrated)
+                self.ui.tool_result("task", outcome.output, helper.id)
+                outcomes[i] = outcome
+        count = len(helpers)
+        width = min(self._task_pool_width(), count)
+        if why_serial:
+            head = f"These {count} helpers ran one after another, not at the same time: {why_serial}."
+        elif width < count:
+            head = (f"{count} helpers ran at the same time, at most {width} at once "
+                    f"(max_parallel_tasks): the other {count - width} started as slots freed.")
+        else:
+            head = f"All {count} helpers ran at the same time."
+        head += " Their results, in the order you listed them:"
+        # One helper alone gets the room a foreground `task` result gets; several share it, so the
+        # central ceiling never cuts the last helper's result in half (wait_tasks does the same).
+        share = max(1500, (_MAX_TOOL_OUT - 2000) // count)
+        blocks, kept = [head], []
+        for i, helper in enumerate(helpers):
+            outcome = outcomes.get(i) or _TaskOutcome("Sub-task failed without a result.")
+            text = self._safe_text(outcome.output).strip()
+            kept.append(text[:4000])
+            blocks.append(f"[{i + 1}] {helper.arguments['description']}\n" + _clamp(text, share))
+        self._last_task_integrated = any(outcome.integrated for outcome in outcomes.values())
+        self.__dict__.setdefault("_task_batch_records", {})[call_id] = kept
+        return "\n\n".join(blocks)
+
+    def _start_background_task_batch(self, helpers: list[ToolCall], call_id: str | None) -> str:
+        """A background batch: every helper detached now, past the cap queued for a slot."""
+        from .ultra import worker_limit
+        self._ensure_detached_state()
+        lines, ids, kept, waiting = [], [], [], 0
+        for helper in helpers:
+            fields = helper.arguments
+            self.ui.tool_call("task", self._safe_value(fields), helper.id)
+            spawned: list = []
+            out = self._safe_text(self._run_subagent(
+                fields["description"], fields["prompt"], fields.get("agent", ""), helper.id,
+                background=True, queue_over_cap=True, spawned=spawned))
+            self.ui.tool_result("task", out, helper.id)
+            kept.append(out[:4000])
+            if spawned:
+                agent_id, queued = spawned[0]
+                ids.append(agent_id)
+                waiting += 1 if queued else 0
+                lines.append(f"- {fields['description']}: id {agent_id}"
+                             + (", queued" if queued else ", running"))
+            else:                                   # it did not start, or ran in the foreground
+                lines.append(f"- {fields['description']}: {_clamp(out.strip(), 2000)}")
+        self.__dict__.setdefault("_task_batch_records", {})[call_id] = kept
+        if not ids:
+            return "None of these helpers started in the background:\n" + "\n".join(lines)
+        cap = worker_limit(self.config)
+        head = f"Started {len(ids)} helper{'s' if len(ids) != 1 else ''} in the background"
+        if waiting:
+            head += (f"; {len(ids) - waiting} run now and {waiting} "
+                     f"wait{'s' if waiting == 1 else ''} for a free slot (at most "
+                     f"{cap} background sub-tasks run at once), starting in this order as others end")
+        head += ":"
+        wait = (f"call wait_tasks with ids {', '.join(ids)}" if self._supervision_exposed() else "")
+        hub = getattr(self, "monitors", None)
+        tail = self._detached_delivery(wait, hub, getattr(hub, "epoch", None), many=len(ids) > 1)
+        return head + "\n" + "\n".join(lines) + "\n" + tail
+
     def _parallel_task_plan(self, calls: list[ToolCall]) -> list[int]:
         """The indices this batch may fan out: a task run that ENDS the batch, or [] for serial.
 
@@ -10776,11 +11057,16 @@ class Agent(GoalLifecycle):
         A `task` OUTSIDE the run keeps the whole batch serial. Fanning out the tail while a leading
         task integrates would give the siblings two different baselines, which is exactly what the
         `same_baseline` check downstream exists to refuse.
+
+        A batch-form call (`tasks`) is never part of a run: it fans out its own helpers on its own
+        baseline (_run_task_batch), so beside it everything is serial -- it counts as the task
+        outside the run.
         """
         if len(calls) < 2:
             return []
         start = len(calls)
-        while start and calls[start - 1].name in ("task", "todo"):
+        while (start and calls[start - 1].name in ("task", "todo")
+               and not _is_task_batch(calls[start - 1].arguments)):
             start -= 1
         run = list(range(start, len(calls)))
         if len([i for i in run if calls[i].name == "task"]) < 2:
@@ -10801,6 +11087,13 @@ class Agent(GoalLifecycle):
         if (self.depth != 0 or self._non_interactive()
                 or not self.config.get("ultra_mode", False)):
             return
+        for call in calls:
+            # One call that lists its helpers is a fan-out by construction: the same default as
+            # several calls in one response. A call that will be refused is left as written.
+            arguments = call.arguments
+            if (call.name == "task" and _is_task_batch(arguments) and not _task_call_error(arguments)
+                    and "background" not in arguments):
+                arguments["background"] = True
         run = self._parallel_task_plan(calls)
         task_indexes = [i for i in run if calls[i].name == "task"]
         if len(task_indexes) < 2:
@@ -10810,8 +11103,77 @@ class Agent(GoalLifecycle):
             if isinstance(arguments, dict) and "background" not in arguments:
                 arguments["background"] = True
 
+    def _task_pool_width(self) -> int:
+        """How many children the foreground batch pool runs at once: one read for the gate, the pool
+        and what a batch result says about it."""
+        from .ultra import worker_limit
+        # The same width the prompt promised and the background gate allows. Left inline, Ultra
+        # printed "up to 8 parallel workers" and then ran a 4-wide pool.
+        return worker_limit(self.config, on_error=1)   # unreadable: `limit < 2` keeps it serial
+
+    def _parallel_task_refusal(self, calls: list[ToolCall], prior_counts: dict | None = None, *,
+                               batch: bool = False) -> str:
+        """Why these task calls cannot run side by side, in words a result can carry, or "".
+
+        The one gate `_parallel_task_outputs` applies (it refuses to {} on any answer here, so the
+        serial path runs them exactly as before), named so that a batch `task` call can tell the
+        model why its helpers ran one after another. ``batch``: the calls are one admitted batch
+        call's helpers, so the per-call approval check is skipped (see _parallel_task_outputs).
+        """
+        from .worktree import repo_root
+        limit = self._task_pool_width()
+        # The same cap as everywhere else. This was a second hard-coded 3, written independently
+        # of the executor's: it is the only depth check on this path when `_offered_tool_names`
+        # was never recorded, and a divergent number there is a fan-out the gate did not authorise.
+        if len(calls) < 2:
+            return "there was only one"
+        if len(calls) > _MAX_PARALLEL_TASK_BATCH:
+            return f"more than {_MAX_PARALLEL_TASK_BATCH} were asked for at once"
+        if limit < 2:
+            return "max_parallel_tasks is 1, which runs one sub-agent at a time"
+        if self.depth >= self.max_subagent_depth():
+            return "this agent is at the sub-agent depth limit"
+        if self.mode != "auto":
+            # Each helper's own steps ask for approval outside auto mode; one at a time, the cards
+            # come in the order the helpers work instead of interleaved from several at once.
+            return f"helpers run side by side only in auto mode, and this chat is in {self.mode} mode"
+        if self.turn_budget_exceeded():   # serial path: one visible refusal per call
+            return "this turn's token budget is spent"
+        if self.config.get("hooks"):
+            return "hooks are configured, and they run in order"
+        if self.cancelled.is_set():
+            return "the turn was stopped"
+        if any(call.name != "task" or "_unparsed" in call.arguments for call in calls):
+            return "not every call was a task"
+        if repo_root(self.config.project_root) is None:
+            return ("this project is not a Git repository, so they could not have a checkout each "
+                    "and would have shared yours")
+
+        counts = dict(prior_counts or {})
+        for call in calls:
+            sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
+            counts[sig] = counts.get(sig, 0) + 1
+            if counts[sig] > _LOOP_SOFT:
+                return "the same task was repeated"
+        permission_rules = {action: [*(self.config.permissions.get(action, []) or []),
+                                     *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
+                            for action in ("allow", "ask", "deny")}
+        perms = PermissionEngine(self.mode, permission_rules, self.config.project_root)
+        allow = getattr(self, "_agent_tool_allowlist", None)
+        offered = getattr(self, "_offered_tool_names", None)
+        if any(perms.external_paths(call.name, call.arguments)
+               or (not batch and perms.decide(call.name, call.arguments)[0] != ALLOW)
+               # The same two checks the parallel READ helper makes. Without them a child bounded
+               # by `tools:` could fan two `task` calls into private worktrees and integrate their
+               # edits, with neither its allow-list nor the offered set consulted.
+               or (allow and call.name not in allow)
+               or (offered and call.name not in offered) for call in calls):
+            return "not every task was approved to run on its own"
+        return ""
+
     def _parallel_task_outputs(self, calls: list[ToolCall],
-                               prior_counts: dict | None = None) -> dict[int, _TaskOutcome]:
+                               prior_counts: dict | None = None, *,
+                               batch: bool = False) -> dict[int, _TaskOutcome]:
         """Run a task batch in private worktrees and preserve model-call result order.
 
         This path is intentionally narrower than normal delegation: every call is a task (or a
@@ -10820,8 +11182,13 @@ class Agent(GoalLifecycle):
         slots must be enabled. All worktrees are prepared under one source lease before any child
         starts, so siblings observe one exact baseline. Children run concurrently; their buffered UI
         traces replay atomically as they finish; integration remains deterministic and conflict-safe.
+
+        ``batch``: ``calls`` are the helpers of ONE batch `task` call (_run_task_batch), which
+        `_handle_call` has already admitted as a whole -- its permission (each helper decided by its
+        own description, permissions.py), PreToolUse hook, depth and budget. So the per-call
+        approval check is not made again here; every other condition is (_parallel_task_refusal).
         """
-        from .worktree import TaskWorkspace, repo_root
+        from .worktree import TaskWorkspace
 
         # `background: true` means "do not wait for me", and this path waits for everything: a
         # background call inside a batch was silently run in the foreground, whatever the model asked
@@ -10837,9 +11204,12 @@ class Agent(GoalLifecycle):
         # deferred call can never share one with a kept call, and `task` is not loop-exempt, so the
         # turn's own counter still sees every deferred call.
         from .ultra import worker_limit
+        if any(call.name == "task" and _is_task_batch(call.arguments) for call in calls):
+            return {}              # a batch-form call fans out its own helpers (_run_task_batch)
         tasks = [i for i, call in enumerate(calls) if call.name == "task"]
         deferred: set[int] = set()
-        if self.depth == 0 and not self.stopping and len(tasks) <= _MAX_PARALLEL_TASK_BATCH:
+        if (not batch and self.depth == 0 and not self.stopping
+                and len(tasks) <= _MAX_PARALLEL_TASK_BATCH):
             wants = [i for i in tasks if _wants_background(calls[i].arguments)
                      and "_unparsed" not in calls[i].arguments]
             # Only as many as the detach gate will really take: it re-checks `len(jobs) < cap` per
@@ -10862,40 +11232,8 @@ class Agent(GoalLifecycle):
             inner = self._parallel_task_outputs([calls[i] for i in slots], prior_counts)
             return {slots[j]: outcome for j, outcome in inner.items()}
 
-        from .ultra import worker_limit
-        # The same width the prompt promised and the background gate allows. Left inline, Ultra
-        # printed "up to 8 parallel workers" and then ran a 4-wide pool.
-        limit = worker_limit(self.config, on_error=1)   # unreadable: `limit < 2` keeps it serial
-        # The same cap as everywhere else. This was a second hard-coded 3, written independently
-        # of the executor's: it is the only depth check on this path when `_offered_tool_names`
-        # was never recorded, and a divergent number there is a fan-out the gate did not authorise.
-        if (len(calls) < 2 or len(calls) > _MAX_PARALLEL_TASK_BATCH or limit < 2
-                or self.depth >= self.max_subagent_depth() or self.mode != "auto"
-                or self.turn_budget_exceeded()   # serial path: one visible refusal per call
-                or self.config.get("hooks") or self.cancelled.is_set()
-                or any(call.name != "task" or "_unparsed" in call.arguments for call in calls)
-                or repo_root(self.config.project_root) is None):
-            return {}
-
-        counts = dict(prior_counts or {})
-        for call in calls:
-            sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
-            counts[sig] = counts.get(sig, 0) + 1
-            if counts[sig] > _LOOP_SOFT:
-                return {}
-        permission_rules = {action: [*(self.config.permissions.get(action, []) or []),
-                                     *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
-                            for action in ("allow", "ask", "deny")}
-        perms = PermissionEngine(self.mode, permission_rules, self.config.project_root)
-        allow = getattr(self, "_agent_tool_allowlist", None)
-        offered = getattr(self, "_offered_tool_names", None)
-        if any(perms.external_paths(call.name, call.arguments)
-               or perms.decide(call.name, call.arguments)[0] != ALLOW
-               # The same two checks the parallel READ helper makes. Without them a child bounded
-               # by `tools:` could fan two `task` calls into private worktrees and integrate their
-               # edits, with neither its allow-list nor the offered set consulted.
-               or (allow and call.name not in allow)
-               or (offered and call.name not in offered) for call in calls):
+        limit = self._task_pool_width()
+        if self._parallel_task_refusal(calls, prior_counts, batch=batch):
             return {}
 
         for call in calls:

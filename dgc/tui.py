@@ -9399,6 +9399,11 @@ class _ClickControl(FormattedTextControl):
 
 
 def _arg_summary(args: dict, name: str = "") -> str:
+    if name == "task" and isinstance(args, dict) and "tasks" in args:
+        # One call that starts several helpers: how many, and who (dgc/ui.py task_batch_summary).
+        from .ui import task_batch_summary
+        v = style_mod.terminal_safe_text(task_batch_summary(args)).replace("\n", " ")
+        return v[:100] + ("…" if len(v) > 100 else "")
     if name in ("message_task", "close_task") and isinstance(args, dict):
         # The agent, by what it was asked to do (the agent resolves it into `agent`), else its id.
         v = style_mod.terminal_safe_text(args.get("agent") or args.get("id") or "").replace("\n", " ")

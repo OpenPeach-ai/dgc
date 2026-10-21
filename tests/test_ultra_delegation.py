@@ -57,7 +57,9 @@ class UltraDelegationTests(unittest.TestCase):
                 "1. Locate: find the files and symbols each part touches",
                 "2. Split: when two or more parts change different files",
                 "explorer to map an area",
-                "all in ONE response",
+                # One call that lists the parts: a model that sends one call per reply still fans out.
+                "ONE `task` call that lists every part in `tasks`",
+                "one `task` call per response runs the parts one after another",
                 f"up to {workers} parallel workers",
                 # A lone blocking child was measured as pure overhead: all parts or none.
                 "every part goes in that batch or none does",
@@ -178,8 +180,9 @@ class UltraDelegationTests(unittest.TestCase):
         text = json.dumps(task)
         self.assertNotIn("large, independent chunks", text)
         for needle in ("exploring code", "a review", "cannot see this conversation",
-                       "saves time only beside other tasks",
-                       "ONE response", "never batch tasks that depend on or edit the same files",
+                       "saves time only beside other helpers",
+                       "to run several helpers at once, pass them all in ONE call as `tasks`",
+                       "Never put parts that depend on each other or edit the same files in one batch",
                        "explorer", "researcher", "critic", "worker"):
             self.assertIn(needle, text)
 
