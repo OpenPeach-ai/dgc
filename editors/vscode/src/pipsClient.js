@@ -904,14 +904,17 @@ async function refreshComputer(){
 // still sees it. A reply that said "Starting with the hospital bill on its pay page" sat above nothing while "Let Bill
 // Payer visit…?" waited only in the tab (three-asks test, 2026-10-20). A site: Allow / Not now here; a form or a payment:
 // Review… (the screenshot and every field, then Send once) or Reject.
+const LEVEL_ASKS={payment:'It looks like a payment, so it asks at every level.',consequential:'Its level asks before this.',unsure:'DGC can’t tell what this does, so it asks.'};
 function computerWaitingCards(){
  const c=computerState.pip===S.selected?computerState.value:null;if(!c||S.apiVersion<43||remoteHost)return '';
  const waiting=(Array.isArray(c.actions)?c.actions:[]).filter(a=>a.status==='pending').slice(0,3);if(!waiting.length)return '';
  const name=S.pip?.name||'The Pip',off=S.busy||!usable()||archived()?' disabled':'';
  return waiting.map(a=>{
   const s=a.summary||{},words=carefulWords(s,name),pay=s.payment===true;
-  const title=words?words[0]:pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
-  const line=words?words[1]:[sendsWords(s),pay?'It sends payment card details.':'','Nothing has been sent.'].filter(Boolean).join(' ');
+  // API 58: why its level still asks (a payment asks at every level; Approve for me asks before an order, a post...).
+  const because=LEVEL_ASKS[s.asks_because]||'';
+  const title=words?words[0]:pay||s.asks_because==='payment'?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
+  const line=words?words[1]:[sendsWords(s),pay?'It sends payment card details.':'',because,'Nothing has been sent.'].filter(Boolean).join(' ');
   const yes=s.kind==='login'?`<button type="button" class="primary" data-login-card="${esc(a.id)}"${off}>${esc(words[2])}</button>`
    :words?`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`
    :`<button type="button" class="primary" data-computer-action="${esc(a.id)}"${off}>Review…</button>`;

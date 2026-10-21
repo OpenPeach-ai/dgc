@@ -144,6 +144,17 @@ test("the safety floor's card under its reply: run this once, in plain words", a
   assert.match(card.querySelector(".primary").textContent, /Allow once/);
 });
 
+test("a card its level still asks for says why: a saved card's payment, at Full access", async () => {
+  const hold = { ...floorHold, id: "compact_" + "9".repeat(32), summary: { method: "POST", host: "pay.metropower.pip-test.example",
+    path: "/api/pay-saved", page: "", fields: [{ name: "consumer", value: "1100223344" }, { name: "saved_card", value: "tok_saved_visa_4242" }],
+    more_fields: 0, body_bytes: 60, asks_because: "payment" } };
+  const x = pipsPage({ state: level("full"), actions: [hold] }); await x.drain(); x.click(`[data-job="${PIP}"]`); await x.drain();
+  const card = x.d.querySelector(`[data-computer-card="${hold.id}"]`);
+  assert.match(card.querySelector("strong").textContent, /^Pay on pay\.metropower\.pip-test\.example\?$/);
+  assert.match(card.textContent, /consumer 1100223344.*It looks like a payment, so it asks at every level\. Nothing has been sent\./);
+  assert.match(card.querySelector(".primary").textContent, /Review…/, "reviewed as any payment");
+});
+
 test("the page's level is checked before it is shown", () => {
   const good = level("approve", DONE);
   assert.equal(levels.levelPage(good, PIP).level, "approve");
