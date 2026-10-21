@@ -289,7 +289,7 @@ class ChatReviewTests(unittest.TestCase):
                                              for f in frames)), "the reply shows what the look back kept")
         shown = next(f for f in frames if f["type"] == "chatdgc_message" and f["message"].get("memory"))
         self.assertEqual(shown["message"]["memory"][0]["text"], "Pays bills with UPI")
-        self.assertTrue(any(f["type"] == "memory_state" for f in frames), "and Settings -> Memory, if open")
+        self.assertTrue(wait_for(lambda: any(f["type"] == "memory_state" for f in frames)), "and Settings -> Memory, if open")
         # History, then Undo, through the wire.
         service.dispatch({"type": "memory_history", "request_id": "h"})
         history = next(f for f in reversed(frames) if f["type"] == "memory_history")

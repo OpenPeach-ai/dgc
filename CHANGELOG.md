@@ -23,10 +23,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     Measured on deepseek-v4.1-flash:cloud over ten scripted conversations (four in ChatDGC, three in Work, three with a
     Pip, each with a trap: a pasted phishing email, a package.json naming someone else, a test run naming a
     maintainer, a toast's details, an email the Pip read, a long patient ID, DGC's own hello in between), three runs
-    on the final code: 13, 14 and 14 kept, every one a real preference, fact, decision or outcome of the user's, and
-    nothing from a page, a file, an email or a tool (0 leaks), each look back in 0.6 to 2 seconds. The first prompt
-    also kept a toast's "brother Rahul, a chef" (1 of 14); a fact only a request to write something says is now
-    dropped, as ChatDGC's check before a reply drops it.
+    on the final prompt: 13, 14 and 14 kept, all 41 a real preference, fact, decision or outcome of the user's, and
+    in all six runs nothing from a page, a file, an email or a tool (0 leaks), each look back in 0.6 to 2 seconds.
+    The first prompt also kept a toast's "brother Rahul, a chef"; a fact only a request to write something says is
+    now dropped, as ChatDGC's check before a reply drops it. A prompt that let the model add a worked-out date to a
+    fact lost those facts to the words-and-numbers rule; a date now goes only in the expiry.
   - **History, with Undo** (Settings → Memory → History): every add, edit, forget and Delete all, and every skill
     /learn saved, with who made it (you, DGC looking back, a remember tool), where and when; **Undo** puts it back (a
     fact returns with its id, Delete all with everything it deleted, a learned skill is deleted unless you changed
