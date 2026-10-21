@@ -6,6 +6,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **The benchmark is retired.** The harness-comparison benchmark, its scripts and its page on vibedgc.com are gone. The
+  edit safety gate that lived beside it is still a release gate, now in `scripts/edit_micro.py`.
+
 - **A blocked task gets ticked once it's done.** Tasks marked blocked never drew a reminder, so after you said go and DGC did the work, the Tasks row still said "BLOCKED ON YOUR APPROVAL" for days. Now, after a turn that did work, the model sees its blocked tasks once and marks any it resolved as done; one still blocked stays so.
 
 - **New Personal Pips start at Approve for me.** Routine steps (a new site, a search, a cart, a draft) go through by themselves; orders, payments, sending to someone new, posting and deleting still ask, and payments ask at every level. A Pip made before keeps Ask until you change it on its page.

@@ -12,7 +12,7 @@ if [ "${DGC_ALLOW_DIRTY:-0}" != 1 ] && [ -n "$(git status --porcelain --untracke
   exit 1
 fi
 
-for script in scripts/*.sh bench/*.sh install.sh; do
+for script in scripts/*.sh install.sh; do
   [ -f "$script" ] || continue
   case "$script" in
     scripts/deploy-site.sh) continue ;;
@@ -50,7 +50,7 @@ for other in python3.10 python3.11 python3.12 python3.13; do
   "$other" -m compileall -q dgc tests/run_tests.py >/dev/null || {
     echo "dgc does not compile under $other ($(command -v "$other"))" >&2; exit 1; }
 done
-"$PYTHON" -m py_compile bench/*.py scripts/generate-sbom.py scripts/release_bundle.py
+"$PYTHON" -m py_compile scripts/edit_micro.py scripts/gen_edit_corpus.py scripts/generate-sbom.py scripts/release_bundle.py
 # A hung check must fail the release, not stall it. An unbounded stdin read once held a release
 # for hours with no output, because preflight runs with stdin inherited from whatever launched it.
 if command -v timeout >/dev/null 2>&1; then
@@ -174,14 +174,14 @@ PY
 # Edit-primitive safety gate — the release gate that guards against DGC silently corrupting a
 # user's code (WRONG must stay 0). The corpus contains upstream Exercism reference solutions, so it
 # stays ignored instead of redistributing that material without its per-exercise notices. When a
-# reviewed local corpus is absent, fetch the exact pinned benchmark commit and regenerate it.
-CORPUS=bench/edit_corpus/all.jsonl
+# reviewed local corpus is absent, fetch the exact pinned dataset commit and regenerate it.
+CORPUS=.edit-gate/all.jsonl
 CORPUS_SHA256=8d5a5f39088e5779921260a683bfca6fa4f4d1163c78e1c68fdb36cd7426eaac
 DATASET_COMMIT=7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f
 if [ ! -f "$CORPUS" ]; then
   EDIT_GATE_TMP=$(mktemp -d)
   DATASET="$EDIT_GATE_TMP/polyglot-benchmark"
-  echo "edit corpus absent — regenerating from pinned polyglot benchmark $DATASET_COMMIT…"
+  echo "edit corpus absent — regenerating from the pinned polyglot dataset $DATASET_COMMIT…"
   git init -q "$DATASET"
   git -C "$DATASET" remote add origin https://github.com/Aider-AI/polyglot-benchmark.git
   git -C "$DATASET" fetch -q --depth=1 origin "$DATASET_COMMIT"
@@ -191,7 +191,7 @@ if [ ! -f "$CORPUS" ]; then
     exit 1
   }
   CORPUS="$EDIT_GATE_TMP/all.jsonl"
-  DGC_EDIT_DATASET="$DATASET" "$PYTHON" bench/gen_edit_corpus.py > "$CORPUS"
+  DGC_EDIT_DATASET="$DATASET" "$PYTHON" scripts/gen_edit_corpus.py > "$CORPUS"
 fi
 "$PYTHON" - "$CORPUS" "$CORPUS_SHA256" <<'PY'
 import hashlib, pathlib, sys
@@ -204,7 +204,7 @@ digest = digest.hexdigest()
 if digest != expected:
     raise SystemExit(f"edit corpus digest mismatch: {digest}")
 PY
-"$PYTHON" bench/edit_micro.py "$CORPUS"
+"$PYTHON" scripts/edit_micro.py "$CORPUS"
 
 (
   cd editors/vscode

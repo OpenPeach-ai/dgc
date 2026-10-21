@@ -4,6 +4,7 @@ merged from its own checkout, and the editor's events checked against the protoc
 Agent._execute_prepared_subagent, the one seam every troupe agent goes through; the merge is the real one."""
 from __future__ import annotations
 
+import copy
 import io
 import json
 import os
@@ -17,7 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 PROJECT = Path(__file__).resolve().parents[1]
-for path in (PROJECT, PROJECT / "bench"):
+for path in (PROJECT,):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
@@ -29,7 +30,36 @@ if "dgc.config" not in sys.modules:
 from dgc import config as config_module, editor_protocol as ep, troupe, troupe_agent  # noqa: E402
 from dgc.agent import Agent  # noqa: E402
 from dgc.permissions import PermissionEngine  # noqa: E402
-import prompt_surface as PS  # noqa: E402
+from dgc.config import DEFAULTS, Config  # noqa: E402
+
+
+class _QuietUI:
+    # A `dgc -p --mode auto` run: nobody can answer a question, so the agent never offers one.
+    non_interactive = True
+
+    def __getattr__(self, _name):
+        return lambda *args, **kwargs: None
+
+
+def _isolated_config(root: Path) -> Config:
+    """A Config that never reads or writes the real ~/.dgc: an auto-mode native-Ollama profile."""
+    config = object.__new__(Config)
+    config.project_root = root
+    config.project_dir = root / ".dgc"
+    config._persist = False
+    config.data = copy.deepcopy(DEFAULTS)
+    config.data.update({
+        "base_url": "http://127.0.0.1:11434", "api_key": "placeholder", "model": "qwen3.8:27b-q4km",
+        "api_mode": "ollama", "mode": "auto", "thinking": "off", "suggest": False,
+        "logo_animation": False, "artifact_autostart": False, "background": "inherit",
+        "show_reasoning": False, "max_turns": 40, "context_size": 32_768, "turn_budget_s": 585,
+        "verify_before_done": True, "verify_command": "pytest -q", "request_timeout": 300,
+        "mcp_servers": {}, "hooks": {},
+    })
+    config._stored_secrets = {}
+    config._env_secret_keys = set()
+    config.permissions = {"allow": [], "ask": [], "deny": []}
+    return config
 
 
 def git(*args, cwd):
@@ -61,10 +91,10 @@ class AgentCase(unittest.TestCase):
             (root / "b.txt").write_text("two\n")
             git("add", "-A", cwd=root)
             git("commit", "-qm", "init", cwd=root)
-        config = PS._isolated_config(root)
+        config = _isolated_config(root)
         config.data.update(ultra_mode=ultra, mode=mode, base_url="https://ollama.com/v1",
                            model="deepseek-v4.1-flash:cloud")
-        agent = Agent(config, ui if ui is not None else PS._QuietUI())
+        agent = Agent(config, ui if ui is not None else _QuietUI())
         self.addCleanup(agent.mcp.stop_all)
         journal = Path(tempfile.mkdtemp(prefix="dgc-troupe-journal-"))
         patcher = patch.object(config_module, "USER_HOME", journal)
@@ -96,7 +126,7 @@ class ExposureTests(AgentCase):
             self.assertNotIn("troupe", self.names(self.make_agent(ultra=True)), "an SDK policy session can't name it")
 
     def test_one_shot_says_it_returns_its_results(self):
-        agent = self.make_agent(ultra=True)               # PS._QuietUI is non-interactive: a `dgc -p` run
+        agent = self.make_agent(ultra=True)               # _QuietUI is non-interactive: a `dgc -p` run
         tool = next(t for t in agent._tool_schemas() if t["function"]["name"] == "troupe")
         self.assertIn("returns its results when it ends", tool["function"]["description"])
         self.assertNotIn("this chat wakes", tool["function"]["description"])
