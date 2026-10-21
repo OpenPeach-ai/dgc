@@ -173,6 +173,7 @@ class ConsentEachTimeTests(Borrow):
         self.assertTrue(key.startswith(pip_chat.BORROW_NO_KEY))
         self.assertIn("chose Not now", text)
         self.assertIn("must not use it", text)
+        self.assertIn("A Not now is about that one card only", text, "the next thing that needs their Chrome asks anew")
         self.assertIsNone(pip_borrow.claim(self.registry, {"id": "run_none", "pip_id": self.pip["id"]}))
 
     def test_a_routine_asks_and_its_card_waits_for_a_person(self):
@@ -198,6 +199,14 @@ class ConsentEachTimeTests(Borrow):
         self.assertEqual(pip_borrow.shown("http://127.0.0.1:8123"), "http://127.0.0.1:8123", "not https: the whole origin")
         with self.assertRaises(RegistryError):
             self.card(sites=["https://me@shop.example/"])
+
+    def test_a_bare_host_is_https_unless_the_user_wrote_it_with_http(self):
+        self.assertEqual(self.card(sites=["127.0.0.1:8123"])["sites"], ["https://127.0.0.1:8123"])
+        pip_chat.send(self.store, self.pip["id"], "My orders are on http://127.0.0.1:8123/orders, I'm signed in there.",
+                      "orders-1", "editor-user", self.cfg)
+        self.assertEqual(self.card(sites=["127.0.0.1:8123"])["sites"], ["http://127.0.0.1:8123"], "the address as they wrote it")
+        self.assertEqual(self.card(sites=["https://127.0.0.1:8123"])["sites"], ["https://127.0.0.1:8123"], "a scheme given is kept")
+        self.assertEqual(self.card(sites=["127.0.0.1:9999"])["sites"], ["https://127.0.0.1:9999"], "another port is another site")
 
     def test_the_users_own_browser_rules_hold_for_a_pip(self):
         self.cfg.permissions = {"allow": [], "ask": [], "deny": ["Browser(signed-in:https://bank.example)"]}
@@ -326,6 +335,37 @@ class LentChromeTests(Borrow):
         self.assertEqual(fake.touched_users_tab(), [], "the user's own tab: never read, closed or attached to")
         self.assertIn(USERS_TAB, fake.targets)
         self.assertEqual(fake.dgc_tabs(), [])
+
+    def test_another_scheme_or_port_of_the_cards_host_is_another_site(self):
+        fake, session, _, _ = self.lent()
+        for other in ("http://shop.example/orders", "https://shop.example:8443/orders"):
+            self.assertIn("isn't on the card", session.use({"op": "open", "url": other}), other)
+        self.assertEqual([m for m, _, _ in fake.commands if m == "Page.navigate"], [], "nothing was asked of Chrome for them")
+        self.assertNotIn("isn't on the card", session.use({"op": "open", "url": "https://SHOP.example.:443/orders"}),
+                         "the card's site however its address is written")
+        self.assertEqual(len([m for m, _, _ in fake.commands if m == "Page.navigate"]), 1)
+
+    def test_a_read_is_judged_by_the_page_it_read(self):
+        fake, session, _, _ = self.lent()
+        session.use({"op": "open", "url": SHOP + "/orders"})
+        # The page moved by itself between DGC's look at the address and its read: what was read is what counts.
+        real = fake._evaluate
+        fake._evaluate = lambda target, expression: (json.dumps({"url": ELSEWHERE + "/steal", "title": "x",
+                                                                "lines": ['- heading "SECRET-ELSEWHERE" [e1]'], "truncated": False})
+                                                    if "MAX_NODES" in expression else real(target, expression))
+        for step in ({"op": "read"}, {"op": "find", "text": "SECRET"}, {"op": "wait", "text": "SECRET", "seconds": 1}):
+            said = session.use(step)
+            self.assertNotIn("SECRET-ELSEWHERE", said, step)
+            self.assertIn("isn't on the card", said, step)
+
+    def test_a_lost_connection_ends_the_borrow_and_nothing_reconnects(self):
+        fake, session, card, _ = self.lent()
+        session.use({"op": "open", "url": SHOP + "/orders"})
+        fake._conn.shutdown(__import__("socket").SHUT_RDWR)  # Chrome quit, or someone closed DGC's window
+        self.assertTrue(self.wait_for(lambda: session.ended == pip_borrow.LOST))
+        self.assertIn("Your tab in the user's Chrome closed", session.use({"op": "read"}))
+        self.assertTrue(self.wait_for(lambda: self.status(card)["ended"] == pip_borrow.LOST))
+        self.assertEqual(fake.asked, 1, "no second connection: the next time is a new card")
 
     def test_an_ordinary_error_keeps_the_tab(self):
         fake, session, _, _ = self.lent()

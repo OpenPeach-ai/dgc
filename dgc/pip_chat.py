@@ -638,9 +638,14 @@ BORROW_ALLOWED = ("This message is from DGC, not the user. The user chose Allow 
                   "(\"{why}\"): you may use their own signed-in Chrome in this reply, on {sites} only. Their Chrome asks them "
                   "once more as it connects. Use borrowed_chrome now: open the page you need, read what you need, then call "
                   "it with op done to give their Chrome back. Then tell them what you found, in a short message.")
+# A Not now is about that one card. Told only "you must not use it", a Pip asked for something else that needed the
+# user's Chrome a minute later answered "You turned that down a moment ago, so I'll leave it there" (borrow video,
+# 2026-10-21): the next ask is a new card, as every borrow is.
 BORROW_NOT_NOW = ("This message is from DGC, not the user. The user chose Not now on your card asking for their Chrome "
-                  "({sites}), so you must not use it for this, and don't ask for it again in this reply. Carry on with anything "
-                  "else they asked that doesn't need it, and tell them in a short message what you couldn't do without it.")
+                  "({sites}), so you must not use it for that, and don't ask for it again in this reply. A Not now is about "
+                  "that one card only: if they later ask you for something else that needs their Chrome, ask again with "
+                  "borrow_chrome. Carry on with anything else they asked that doesn't need it, and tell them in a short "
+                  "message what you couldn't do without it.")
 INTRO = ("This message is from DGC, not the user. The user has just created you in the Pips view and "
          "named you \"{name}\". That is your name: introduce yourself as {name}, never by your character's name. "
          "Write your first message to them. Say hello and who you are in one sentence. Guess from your name what they would like help with, then say what you can do for "

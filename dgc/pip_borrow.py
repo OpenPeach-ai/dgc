@@ -117,6 +117,38 @@ def site_origin(value) -> str:
     return origin
 
 
+def _written(registry, pip_id) -> set[str]:
+    """The http and https origins the user wrote out in their own recent messages to this Pip (never DGC's turns)."""
+    from .pip_chat import DGC_KEYS
+    from .permissions import _origin
+    out = set()
+    try:
+        rows = registry.db.execute("SELECT text, request_key FROM pip_chat_messages WHERE pip_id=? AND role='user' "
+                                   "ORDER BY seq DESC LIMIT 20", (pip_id,)).fetchall()
+    except Exception:                    # noqa: BLE001 -- no chat yet: nothing written
+        return out
+    for text, key in rows:
+        if str(key or "").startswith(DGC_KEYS):
+            continue
+        for url in re.findall(r"https?://[^\s<>\"'()]+", str(text or ""), re.IGNORECASE):
+            origin = _origin(url.rstrip(".,;:!?"))
+            if origin:
+                out.add(origin)
+    return out
+
+
+def card_origin(value, written=()) -> str:
+    """A site the Pip named, as an origin. A bare host is https, unless the user themselves wrote that host (and port)
+    with http:// and never with https:// (a shop on http://127.0.0.1:8123, a home device)."""
+    origin = site_origin(value)
+    text = str(value or "").strip()
+    if origin.startswith("https://") and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", text):
+        plain = "http://" + origin[len("https://"):]
+        if plain in written and origin not in written:
+            return plain
+    return origin
+
+
 def shown(origin: str) -> str:
     """A site as the card shows it: just the host for an https site on its usual port, else the whole origin (an http
     site, another port), so what is allowed is exactly what is read. Never decoded from punycode: what you see is the
@@ -273,8 +305,9 @@ def request(registry, config, pip_id, workspace_id, run_id, sites, why, *, unatt
     if not raw or len(raw) > MAX_SITES or not all(isinstance(s, str) for s in raw):
         raise RegistryError("invalid_borrow", f"Name 1 to {MAX_SITES} sites, such as shop.example.com.")
     origins, bad, refused = [], [], []
+    written = _written(registry, pip_id)
     for item in raw:
-        origin = site_origin(item)
+        origin = card_origin(item, written)
         if not origin:
             bad.append(str(item)[:80])
         elif denied(config, origin + "/"):
@@ -1039,7 +1072,9 @@ class Session:
 
     def ask(self, args: dict) -> str:
         if self.grant is not None and not self.ended:
-            wanted = {site_origin(s) for s in (args.get("sites") if isinstance(args.get("sites"), list) else [args.get("sites")])}
+            with WorkspaceRegistry(self.directory) as registry:
+                written = _written(registry, self.pip_id)
+            wanted = {card_origin(s, written) for s in (args.get("sites") if isinstance(args.get("sites"), list) else [args.get("sites")])}
             if wanted and wanted <= set(self.grant["sites"]):
                 return "You already have the user's Chrome for those sites in this reply: use borrowed_chrome."
         try:
@@ -1231,7 +1266,8 @@ ASK_SCHEMA = {"type": "function", "function": {"name": ASK, "description": (
     "use borrowed_chrome on those sites only. Never ask for their password or a code instead."),
     "parameters": {"type": "object", "properties": {
         "sites": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_SITES,
-                  "description": "The sites you need, as plain addresses (shop.example.com, or https://portal.example.org)."},
+                  "description": "The sites you need, as the user wrote them (https://portal.example.org, http://127.0.0.1:8123, "
+                                 "or shop.example.com)."},
         "why": {"type": "string", "description": "One short sentence the card shows: what you will do there."}},
         "required": ["sites", "why"], "additionalProperties": False}}}
 
@@ -1249,8 +1285,9 @@ USE_SCHEMA = {"type": "function", "function": {"name": USE, "description": (
 
 NOTICE = ("The user's own Chrome: when a task needs a site the user is signed in to in their own Chrome (their bank, a "
           "hospital portal, an order history) and your own tools can't reach their account, call borrow_chrome with the "
-          "site and why. That is what shows them the card; nothing is lent until they choose Allow once, and each time "
-          "is asked anew. Never ask for their password or a code in chat.")
+          "site, written as the user wrote it, and why. That is what shows them the card; nothing is lent until they choose "
+          "Allow once, and each time is asked anew: a Not now is about that one card, so when they ask you for something "
+          "else that needs their Chrome, ask again. Never ask for their password or a code in chat.")
 
 
 def use_notice(pin: dict) -> str:
