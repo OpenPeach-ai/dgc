@@ -12512,10 +12512,17 @@
   // the attachment chips; the footer (Stop, mode, model, context) stays. The recommended option is
   // preselected in a single-choice question: it is checked, holds the highlight and is the focus
   // target, so Enter, a click on it or Next takes it; Skip stays a separate, explicit control, and
-  // nothing is sent without a user action. A pick settles its question and moves on; the batch is
-  // posted once every question is answered or skipped. The answered state renders inside the
-  // step's tool card, identically live and on replay.
+  // nothing is sent without a user action. A pick settles its question and moves on. A single
+  // question is sent by its pick; a card of several is sent only by Submit, so the last answer stays
+  // on screen with the others to check (founder, 2026-10-21: "user should need to press submit button
+  // to send all answers, not auto send"). The answered state renders inside the step's tool card,
+  // identically live and on replay.
   const ASK_KEY_GUARD_MS = 400, ASK_CHOSEN_MS = 150, ASK_MAX_TEXT = 4096;
+  // Moving on to another question has to be seen (founder, 2026-10-21: "so quick, it gets hard for me to
+  // realise it has moved to the second question"). The pick holds a little longer, the next question
+  // streams in a word at a time and its options pop in one after another, and for a moment after the
+  // step a second click or a held key cannot answer the new question by landing where the last one was.
+  const ASK_STEP_MS = 400, ASK_STEP_GUARD_MS = 300, ASK_STREAM_MS = 260, ASK_POP_GAP_MS = 45;
   // The fit rule's last resorts: the options list keeps one label line, the question two lines.
   const ASK_LIST_MIN = 44, ASK_QUESTION_MIN = 40;
   let ask = null, askSerial = 0;
@@ -12624,7 +12631,7 @@
     }
   }
 
-  function renderAskCard(state) {
+  function renderAskCard(state, entering = false) {
     const { el, n, questions } = state;
     const i = state.index, q = questions[i], answer = state.answers[i], multi = !!q.multi_select;
     const draft = el.querySelector(".ask-field");
@@ -12645,7 +12652,6 @@
         + (desc ? `<span class="ask-desc" id="ask-d-${n}-${k}">${esc(desc)}</span>` : "") + `</span>`
         + `</button>`;
     }).join("");
-    const last = state.answers.filter((a, k) => k !== i && !a.settled).length === 0;
     const pager = questions.length > 1
       ? `<div class="ask-foot"><button type="button" class="ask-page" data-step="-1" aria-label="Previous question" title="Previous question (←)"${i === 0 ? " disabled" : ""}><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button>`
         + `<span class="ask-pg">Question ${i + 1} of ${questions.length}</span>`
@@ -12669,39 +12675,79 @@
     el.querySelectorAll(".ask-opt").forEach((row) => {
       row.addEventListener("click", (event) => {
         // A pointer click is never delayed; a synthetic or keyboard click waits out the arrival guard.
-        if (event.detail === 0 && !state.armed) return;
+        if ((event.detail === 0 && !state.armed) || state.entering) return;
         askChoose(state, Number(row.dataset.i));
       });
     });
     el.querySelector(".ask-x").addEventListener("click", (event) => { if (event.detail !== 0 || state.armed) askDismiss(state); });
     el.querySelector(".ask-act").addEventListener("click", (event) => {
-      if (event.detail === 0 && !state.armed) return;
+      if ((event.detail === 0 && !state.armed) || state.entering) return;
       askAction(state);
     });
     el.querySelector(".ask-skip").addEventListener("click", (event) => {
-      if (event.detail === 0 && !state.armed) return;
+      if ((event.detail === 0 && !state.armed) || state.entering) return;
       askSkip(state);
     });
     el.querySelectorAll(".ask-page").forEach((button) => button.addEventListener("click", () => askPage(state, Number(button.dataset.step))));
-    paintAskAction(state, last);
+    paintAskAction(state);
+    el.classList.remove("ask-enter");
+    if (entering) askEnter(state);
     fitAskCard();
   }
 
-  // The pill: Next or Continue (primary) once the question has a pick or words, which it takes; Skip
-  // while it has neither. With a pick, Skip is its own quieter button beside the pill. After a
-  // rejection, a question already settled resends as it is.
-  function paintAskAction(state, lastKnown) {
+  // The question arrives the way the model's own words do, a word at a time, and its options follow
+  // one after another. Only opacity and transform move, so the card's measured fit never changes.
+  function askEnter(state) {
+    const { el } = state;
+    if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const line = el.querySelector(".ask-q");
+    const parts = line.textContent.split(/(\s+)/).filter(Boolean);
+    const words = parts.filter((part) => !/^\s+$/.test(part)).length;
+    const gap = Math.min(28, Math.floor(ASK_STREAM_MS / Math.max(1, words)));
+    line.textContent = "";
+    let w = 0;
+    for (const part of parts) {
+      if (/^\s+$/.test(part)) { line.append(part); continue; }
+      const word = document.createElement("span");
+      word.className = "ask-w";
+      word.textContent = part;
+      word.style.animationDelay = `${w++ * gap}ms`;
+      line.append(word);
+    }
+    const start = Math.min(w * gap, 140);
+    askRows(state).forEach((row, k) => { row.style.animationDelay = `${start + k * ASK_POP_GAP_MS}ms`; });
+    el.classList.add("ask-enter");
+  }
+  // After a step, the new question's rows and buttons sit where the last ones were.
+  function askStepGuard(state) {
+    state.entering = true;
+    setTimeout(() => { state.entering = false; }, ASK_STEP_GUARD_MS);
+  }
+
+  // The pill: Next (primary) once the question has a pick or words while another is still open; Submit
+  // (Continue on a single question) when nothing else is open, which sends; Skip while the question has
+  // neither, which settles it without sending. With a pick, Skip is its own quieter button beside the
+  // pill. A question already settled with nothing in it (skipped, or after a rejection) submits as it is.
+  function askPill(state) {
+    const i = state.index, q = state.questions[i], answer = state.answers[i];
+    const has = !!answer.other.trim() || askPicked(q, answer).length > 0;
+    const others = state.answers.every((a, k) => k === i || a.settled);
+    return others && (has || answer.settled) ? "submit" : has ? "next" : "skip";
+  }
+  function paintAskAction(state) {
     if (!state.el.isConnected && state !== ask) return;
     const i = state.index, q = state.questions[i], answer = state.answers[i];
     const button = state.el.querySelector(".ask-act"), skip = state.el.querySelector(".ask-skip");
     if (!button) return;
     const has = !!answer.other.trim() || askPicked(q, answer).length > 0;
-    const last = lastKnown ?? state.answers.every((a, k) => k === i || a.settled);
-    const resend = !has && last && answer.settled;
-    button.textContent = has || resend ? (last ? "Continue" : "Next") : "Skip";
-    button.classList.toggle("primary", has || resend);
-    button.title = has || resend ? (last ? "Send your answers" : "Go to the next question") : "Skip this question";
+    const pill = askPill(state), several = state.questions.length > 1;
+    button.textContent = pill === "submit" ? (several ? "Submit" : "Continue") : pill === "next" ? "Next" : "Skip";
+    button.classList.toggle("primary", pill !== "skip");
+    button.title = pill === "submit" ? "Send your answers" : pill === "next" ? "Go to the next question" : "Skip this question";
     if (skip) skip.hidden = !has;
+    const pg = state.el.querySelector(".ask-pg");
+    if (pg) pg.textContent = `Question ${i + 1} of ${state.questions.length}`
+      + (state.answers.every((a) => a.settled) ? " \u00b7 all answered" : "");
     const field = state.el.querySelector(".ask-field");
     if (field && !field.value) askPlaceholder(field);      // Skip and the button just changed its width
   }
@@ -12768,6 +12814,10 @@
       if (key === "Tab" && !event.shiftKey) { event.preventDefault(); focusAskCard(); }
       return;                                   // keys typed at the card itself are not choices
     }
+    if (event.repeat && (key === "Enter" || key === " ") && !(target.classList?.contains("ask-field") && event.shiftKey)) {
+      event.preventDefault();
+      return;
+    }
     if (state.sending || state.busy) {
       if (["Enter", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(key) || /^[1-9]$/.test(key)) event.preventDefault();
       return;
@@ -12777,7 +12827,7 @@
     if (inField) {
       if (key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
-        if (!state.armed) return;
+        if (!state.armed || state.entering || event.repeat) return;
         // Enter does what the pill says when it is Next or Continue; skipping stays explicit.
         if (target.value.trim() || askPicked(q, state.answers[state.index]).length) askAction(state);
         return;
@@ -12802,12 +12852,12 @@
       event.preventDefault(); askPage(state, key === "ArrowLeft" ? -1 : 1);
     } else if (/^[1-9]$/.test(key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
-      if (!state.armed) return;
+      if (!state.armed || state.entering || event.repeat) return;
       const k = Number(key) - 1;
       if (k < count) { setAskHot(state, k); askChoose(state, k); }
     } else if ((key === "Enter" || key === " ") && onRow) {
       event.preventDefault();
-      if (!state.armed) return;
+      if (!state.armed || state.entering || event.repeat) return;
       if (key === "Enter" && (event.ctrlKey || event.metaKey)) {
         if (askPicked(q, state.answers[state.index]).length || state.answers[state.index].other.trim()) askAction(state);
         return;
@@ -12832,12 +12882,14 @@
     const field = state.el.querySelector(".ask-field"); if (field) { field.value = ""; growAskField(field); }
     paintAskChecks(state);
     paintAskAction(state);
+    askRows(state).forEach((row, x) => row.classList.toggle("picked", x === k));
+    const more = state.answers.some((a, x) => x !== i && !a.settled);
     state.busy = true;
     setTimeout(() => {
       if (state !== ask || state.retired) return;
       state.busy = false;
       askSettle(state);
-    }, ASK_CHOSEN_MS);
+    }, more ? ASK_STEP_MS : ASK_CHOSEN_MS);
   }
 
   // The pill settles the question with what it shows: the pick (the preselected recommendation
@@ -12847,9 +12899,10 @@
     const i = state.index, q = state.questions[i], answer = state.answers[i];
     const field = state.el.querySelector(".ask-field");
     answer.other = (field ? field.value : answer.other).slice(0, ASK_MAX_TEXT);
+    const submit = askPill(state) === "submit";
     answer.selected = [...askPicked(q, answer)];
     if (!answer.other.trim()) answer.other = "";
-    askSettle(state);
+    askSettle(state, submit);
   }
   // Skip clears this question's pick and words and settles it as skipped.
   function askSkip(state) {
@@ -12860,16 +12913,27 @@
     askSettle(state);
   }
 
-  // One question is answered or skipped: send the batch if nothing is left, else go to the next
-  // unsettled question (after this one, wrapping), never skipping one on the reader's behalf.
-  function askSettle(state) {
+  // One question is answered or skipped: go to the next unsettled question (after this one, wrapping),
+  // never skipping one on the reader's behalf. With nothing left, a single question sends; a card of
+  // several stays where it is with Submit focused, and only Submit sends.
+  function askSettle(state, submit = false) {
     const i = state.index;
     state.answers[i].settled = true;
     const open = state.answers.map((a, k) => (a.settled ? -1 : k)).filter((k) => k >= 0);
-    if (!open.length) { askPost(state, { answers: Object.fromEntries(state.questions.map((q, k) => [q.id, {
+    if (!open.length && (submit || state.questions.length === 1)) { askPost(state, { answers: Object.fromEntries(state.questions.map((q, k) => [q.id, {
       selected: [...askPicked(q, state.answers[k])], other: state.answers[k].other.trim() }])) }); return; }
+    if (!open.length) {
+      askRows(state).forEach((row) => row.classList.remove("picked"));
+      paintAskAction(state);
+      askStepGuard(state);
+      state.el.querySelector(".ask-act")?.focus({ preventScroll: true });
+      speak(`All ${state.questions.length} questions answered. Press Submit to send them.`);
+      return;
+    }
     state.index = open.find((k) => k > i) ?? open[0];
-    renderAskCard(state);
+    renderAskCard(state, true);
+    askStepGuard(state);
+    speak(`Question ${state.index + 1} of ${state.questions.length}: ${state.questions[state.index].question}`);
     focusAskCard();
   }
 
@@ -12878,7 +12942,7 @@
     const next = state.index + step;
     if (next < 0 || next >= state.questions.length) return;
     state.index = next;
-    renderAskCard(state);
+    renderAskCard(state, true);
     focusAskCard();
   }
 

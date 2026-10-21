@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **You can see the question card move on, and Submit sends your answers.** When DGC asks several questions at once,
+  a pick used to jump to the next question in 150 ms, too fast to notice. Now your pick stays marked for a moment,
+  then the next question streams in a word at a time and its options appear one after another. For a moment after the
+  card moves on, a second click in the same spot, or a held-down Enter or number key, can't answer the new question by
+  accident. Answering the last question no longer sends: the card stays put, reads "all answered" and focuses
+  **Submit**, so you can page back and check or change any answer first. A single question still sends on one click.
+  With reduced motion on, the next question simply appears.
 - **Settings: Web search and ChatDGC have their own icons.** Both fell back to the Plugins icon, so three rows of the side menu looked alike. Web search is a globe; ChatDGC is a chat bubble with its three slashes.
 - **Personal | Project tabs on the Pips page.** The dropdown that listed your Personal Pips and every project DGC
   knows is two tabs now, the same as the Sessions home's **Chat | Work**: the same look, and the arrow keys, Home and

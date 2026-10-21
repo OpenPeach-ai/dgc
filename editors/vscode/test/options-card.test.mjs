@@ -144,8 +144,13 @@ test("the recommended option is badged and preselected wherever it sits; labels 
   assert.equal(pill.card().querySelector(".ask-act").textContent, "Next");
   pill.click(pill.card().querySelector(".ask-act"));
   assert.equal(pill.card().querySelector(".ask-q").textContent, "Second?");
-  // Skip beside it clears the preselection and settles the question as skipped.
+  pill.advance(300);                           // the step guard: a second click in place answers nothing
+  // Skip beside it clears the preselection and settles the question as skipped; Submit sends.
+  assert.equal(pill.card().querySelector(".ask-act").textContent, "Submit", "the last open question's pill submits");
   pill.click(pill.card().querySelector(".ask-skip"));
+  assert.deepEqual(pill.responses(), [], "skipping the last question sends nothing by itself");
+  pill.advance(300);
+  pill.click(pill.card().querySelector(".ask-act"));
   assert.deepEqual(pill.responses(), [{ type: "options_response", id: "r1", answers: {
     q1: { selected: [0], other: "" }, q2: { selected: [], other: "" } } }]);
   // Words replace the pick in a single choice: the check clears while there is text and returns without it.
@@ -261,7 +266,7 @@ test("keyboard: digits, arrows into and out of the field, pages, Home/End, Escap
   assert.deepEqual(p.errors, []);
 });
 
-test("pointer: a pick shows for 150 ms, then advances; the batch is sent once every question is settled", () => {
+test("pointer: a pick shows for 400 ms when a question follows, then advances; Submit sends the batch once every question is settled", () => {
   const p = panel();
   p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
   const third = q("q3", "Third?", [opt("X"), opt("Y")]);
@@ -269,23 +274,108 @@ test("pointer: a pick shows for 150 ms, then advances; the batch is sent once ev
   p.click(p.rows()[0]);
   assert.equal(p.rows()[0].getAttribute("aria-checked"), "true", "the chosen state shows first");
   assert.equal(p.card().querySelector(".ask-q").textContent, STORAGE.question);
-  p.advance(149);
+  p.advance(399);
   assert.equal(p.card().querySelector(".ask-q").textContent, STORAGE.question);
   p.advance(1);
   assert.equal(p.card().querySelector(".ask-q").textContent, "Second?");
+  p.advance(300);
   // Out of order: page to the third, answer it, and the card jumps back to the unanswered second.
   p.click(p.card().querySelector('.ask-page[data-step="1"]'));
   assert.equal(p.card().querySelector(".ask-q").textContent, "Third?");
   p.click(p.rows()[1]);
-  p.advance(150);
+  p.advance(400);
   assert.equal(p.card().querySelector(".ask-q").textContent, "Second?");
+  p.advance(300);
   assert.deepEqual(p.responses(), []);
   assert.equal(p.card().querySelector(".ask-act").textContent, "Skip");
+  p.click(p.card().querySelector(".ask-act"));
+  assert.deepEqual(p.responses(), [], "Skip settles the last question; it does not send");
+  assert.equal(p.card().querySelector(".ask-q").textContent, "Second?", "the card stays where it is");
+  assert.equal(p.card().querySelector(".ask-act").textContent, "Submit");
+  assert.equal(p.card().querySelector(".ask-pg").textContent, "Question 2 of 3 \u00b7 all answered");
+  p.advance(300);
   p.click(p.card().querySelector(".ask-act"));
   assert.deepEqual(p.responses(), [{ type: "options_response", id: "r1", answers: {
     q1: { selected: [0], other: "" }, q2: { selected: [], other: "" }, q3: { selected: [1], other: "" } } }],
   "Skip settles with an empty selection");
   assert.deepEqual(p.errors, []);
+});
+
+// Founder, 2026-10-21: after a pick the card moved on "so quick, it gets hard for me to realise it has moved to the
+// second question".
+test("the step to the next question is seen: the pick holds, the question streams in, a second click answers nothing", () => {
+  const SYNC = q("q2", "Which machines should sync first?", [opt("Laptop"), opt("NAS"), opt("Both")]);
+  const p = panel();
+  p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(p, [STORAGE, SYNC]);
+  p.click(p.rows()[1]);
+  assert.ok(p.rows()[1].classList.contains("picked"), "the pick is marked while it holds");
+  assert.equal(p.card().classList.contains("ask-enter"), false, "the first question arrives without the step");
+  p.advance(400);
+  const card = p.card(), line = card.querySelector(".ask-q");
+  assert.equal(line.textContent, SYNC.question, "the streamed words keep the question's own text");
+  assert.ok(card.classList.contains("ask-enter"));
+  const words = [...line.querySelectorAll(".ask-w")];
+  const delays = (nodes) => nodes.map((node) => parseInt(node.style.animationDelay, 10));
+  assert.deepEqual(words.map((word) => word.textContent), ["Which", "machines", "should", "sync", "first?"]);
+  assert.deepEqual(delays(words), [0, 28, 56, 84, 112], "a word at a time");
+  assert.deepEqual(delays(p.rows()), [140, 185, 230], "then the options, one after another");
+  assert.equal(p.doc.getElementById("announcer").textContent, "Question 2 of 2: Which machines should sync first?");
+  // A second click where the first one landed, and Enter, answer nothing while the question arrives.
+  p.click(p.rows()[1]);
+  p.key(p.rows()[0], "Enter");
+  p.click(p.card().querySelector(".ask-act"));
+  p.advance(400);
+  assert.deepEqual(p.responses(), []);
+  assert.deepEqual(p.rows().map((row) => row.getAttribute("aria-checked")), ["false", "false", "false"]);
+  // A held key's repeats are never a choice, however late they come.
+  p.key(p.rows()[0], "Enter", { repeat: true });
+  p.key(p.rows()[0], "3", { repeat: true });
+  p.advance(400);
+  assert.deepEqual(p.responses(), [], "an auto-repeated key is not a choice");
+  // The last pick sends nothing (founder, 2026-10-21: "user should need to press submit button to send all
+  // answers, not auto send"): every answer stays to check, Submit takes focus, and only Submit sends.
+  p.click(p.rows()[2]);
+  p.advance(150);
+  assert.deepEqual(p.responses(), []);
+  assert.equal(p.card().querySelector(".ask-q").textContent, SYNC.question);
+  assert.deepEqual(p.rows().map((row) => row.getAttribute("aria-checked")), ["false", "false", "true"]);
+  assert.deepEqual(p.rows().map((row) => row.classList.contains("picked")), [false, false, false], "the hold's mark is gone");
+  const submit = p.card().querySelector(".ask-act");
+  assert.equal(submit.textContent, "Submit");
+  assert.ok(submit.classList.contains("primary"));
+  assert.equal(p.doc.activeElement, submit, "Submit takes focus");
+  assert.equal(p.card().querySelector(".ask-pg").textContent, "Question 2 of 2 \u00b7 all answered");
+  assert.equal(p.doc.getElementById("announcer").textContent, "All 2 questions answered. Press Submit to send them.");
+  // Change your mind first: back to question one, a new pick there still sends nothing.
+  p.click(p.card().querySelector('.ask-page[data-step="-1"]'));
+  p.advance(400);
+  p.click(p.rows()[0]);
+  p.advance(450);                              // the 150 ms hold, then the 300 ms guard on Submit
+  assert.deepEqual(p.responses(), []);
+  assert.equal(p.card().querySelector(".ask-q").textContent, STORAGE.question, "with nothing open the card does not move");
+  // A held Enter on Submit never sends; a press does.
+  p.key(p.card().querySelector(".ask-act"), "Enter", { repeat: true });
+  assert.deepEqual(p.responses(), []);
+  p.click(p.card().querySelector(".ask-act"));
+  assert.deepEqual(p.responses(), [{ type: "options_response", id: "r1", answers: {
+    q1: { selected: [0], other: "" }, q2: { selected: [2], other: "" } } }]);
+  // Reduced motion: the same hold and guard, and the question simply appears.
+  const still = panel();
+  still.dom.window.matchMedia = (query) => ({ matches: /reduce/.test(query), addEventListener() {}, removeEventListener() {} });
+  still.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(still, [STORAGE, SYNC]);
+  still.click(still.rows()[0]);
+  still.advance(399);
+  assert.equal(still.card().querySelector(".ask-q").textContent, STORAGE.question);
+  still.advance(1);
+  assert.equal(still.card().querySelector(".ask-q").textContent, SYNC.question);
+  assert.equal(still.card().classList.contains("ask-enter"), false);
+  assert.equal(still.card().querySelector(".ask-w"), null);
+  still.click(still.rows()[1]);
+  still.advance(200);
+  assert.deepEqual(still.responses(), []);
+  assert.deepEqual([...p.errors, ...still.errors], []);
 });
 
 test("free text, multi-select with a note, Enter submits", () => {
@@ -305,11 +395,12 @@ test("free text, multi-select with a note, Enter submits", () => {
   field.dispatchEvent(new p.dom.window.Event("input", { bubbles: true }));
   p.click(action());
   assert.equal(p.card().querySelector(".ask-q").textContent, "Where should the sync server run?");
+  p.advance(300);
   const second = p.card().querySelector(".ask-field");
   assert.equal(p.card().querySelector(".ask-act").textContent, "Skip");
   second.value = "On the NAS, not the laptop";
   second.dispatchEvent(new p.dom.window.Event("input", { bubbles: true }));
-  assert.equal(p.card().querySelector(".ask-act").textContent, "Continue", "text flips Skip to Continue on the last question");
+  assert.equal(p.card().querySelector(".ask-act").textContent, "Submit", "text flips Skip to Submit on the last question");
   p.key(second, "Enter", { shiftKey: true });
   assert.deepEqual(p.responses(), [], "Shift+Enter is a newline");
   p.key(second, "Enter");

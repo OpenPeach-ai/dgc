@@ -2389,7 +2389,7 @@ test("question tabs retain custom answers and submit exactly one complete respon
   const card = doc.querySelector('#cbox > .ask[data-request-id="form"]');
   assert.ok(card, "the question docks inside the composer");
   pointer(dom, card.querySelectorAll(".ask-opt")[0]);
-  advance(150);
+  advance(700);                                // the pick holds 400 ms, then the next question's 300 ms step guard
   assert.equal(posted.some((m) => m.type === "options_response"), false, "one answer of two sends nothing");
   assert.equal(card.querySelector(".ask-q").textContent, "Which accent?");
   const field = card.querySelector(".ask-field");
@@ -2401,7 +2401,7 @@ test("question tabs retain custom answers and submit exactly one complete respon
   assert.equal(card.querySelector(".ask-field").value, "Lavender <script>alert(1)</script>", "drafts are kept per question");
   assert.equal(card.querySelector("script"), null);
   const action = card.querySelector(".ask-act");
-  assert.equal(action.textContent, "Continue");
+  assert.equal(action.textContent, "Submit");
   pointer(dom, action); pointer(dom, action);
   const responses = posted.filter((m) => m.type === "options_response");
   assert.equal(responses.length, 1);

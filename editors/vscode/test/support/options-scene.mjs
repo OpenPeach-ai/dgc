@@ -125,8 +125,12 @@ export async function openScene(browser, { width, height, theme = "dark-modern",
     await page.evaluate(() => {
       document.querySelectorAll(".ask-opt")[1].dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
     });
-    await page.waitForTimeout(200);
-    await page.evaluate(() => {              // Skip the second question: the batch is sent
+    await page.waitForTimeout(750);          // the pick holds 400 ms, then the step guard's 300 ms
+    await page.evaluate(() => {              // Skip the second question, the last one: it waits for Submit
+      document.querySelector(".ask-act").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    });
+    await page.waitForTimeout(350);          // past the guard on the Submit pill
+    await page.evaluate(() => {              // Submit: the batch is sent
       document.querySelector(".ask-act").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
     });
     await send({ type: "command_rejected", command: "options_response", request_id: "r1", reason: "invalid_response",

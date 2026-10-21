@@ -2486,9 +2486,20 @@ body.ask-docked #tasks-panel { display: none; }
 .ask-sending { margin: var(--sp-1) var(--sp-2) 0; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); }
 .ask.sending .ask-opts, .ask.sending .ask-other, .ask.sending .ask-head, .ask.sending .ask-foot { opacity: .6; }
 .ask button:disabled { cursor: default; }
+/* The pick, held a moment before the card moves on, so it is seen to land. */
+.ask-opt.picked { border-color: color-mix(in srgb, var(--accent-fill) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-fill) 12%, transparent); }
 @media (prefers-reduced-motion: no-preference) {
   .ask-opt, .ask-act, .ask-x, .ask-page { transition: background-color .12s ease, border-color .12s ease; }
+  /* The next question: its words stream in, then its options pop in one after another (delays set by script). */
+  .ask.ask-enter .ask-w { animation: ask-word .18s ease-out both; }
+  .ask.ask-enter .ask-opt { animation: ask-pop .22s cubic-bezier(.2, .7, .3, 1) both; transform-origin: 50% 0; }
+  .ask.ask-enter .ask-pg { animation: ask-count .5s ease-out both; }
 }
+@keyframes ask-word { from { opacity: 0; } }
+/* Grown from its top edge, never moved down: a row nudged below its place overflowed the list and flashed its scrollbar. */
+@keyframes ask-pop { from { opacity: 0; transform: scale(.97); } }
+@keyframes ask-count { from { color: var(--text-strong); } }
 /* A short panel: the rail and "Workspace changes" step aside while a question is open, and below
    560px only the highlighted row keeps its description. */
 @media (max-height: 599px) {
