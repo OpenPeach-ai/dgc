@@ -363,7 +363,8 @@ class RejectFollowUp(unittest.TestCase):
         pip_computer.tick(self.registry, self.cfg)
         [told] = self.follow_ups(pip)
         self.assertIn("The user typed their card on your screen and pressed Pay themselves, and DGC sent it: "
-                      "POST to pay.sunrisehospital.example/api/pay", told["text"])
+                      "POST to pay.sunrisehospital.example/api/pay (amount 2045.00). That one is paid: never get it ready "
+                      "or pay it again.", told["text"], "which one it paid, never a card field")
         self.store.cancel(told["run_id"], "local-console")
         pip_computer.tick(self.registry, self.cfg)
         self.assertEqual(len(self.follow_ups(pip)), 1, "told once")

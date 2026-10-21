@@ -613,9 +613,9 @@ COMPUTER_REJECTED = ("This message is from DGC, not the user. The user chose Rej
                      "thing only: if they asked you for more than that (the next bill, another order), go on with the next one "
                      "now, without asking whether to; otherwise stop. Tell them in a short message what was not done.")
 COMPUTER_USER_PAID = ("This message is from DGC, not the user. The user typed their card on your screen and pressed Pay "
-                      "themselves, and DGC sent it: {what}. Read the page to see what happened and tell them in a short "
-                      "message. If they asked you for more (the next bill, another order), get the next one ready the same "
-                      "way now, without asking whether to.")
+                      "themselves, and DGC sent it: {what}. That one is paid: never get it ready or pay it again. Read the "
+                      "page to see what happened and tell them in a short message. If they asked you for more (the next "
+                      "bill, another order), get the next one ready the same way now, without asking whether to.")
 COMPUTER_NOT_ALLOWED = ("This message is from DGC, not the user. The user didn't allow {what}, so you must not. Carry on with "
                         "anything else they asked that doesn't need it, and tell them in a short message what you couldn't do.")
 COMPUTER_ALLOWED = ("This message is from DGC, not the user. The user allowed {what}. Nothing was done yet: "
@@ -704,7 +704,12 @@ def continue_after_rejection(store, pip_id, action_id, summary, config):
 def continue_after_user_paid(store, pip_id, action_id, summary, config):
     """The chat's next turn once the user paid on the Pip's screen themselves (pip_computer._user_paid)."""
     key = COMPUTER_KEY + "paid_" + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
-    what = f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
+    # Which one it paid, by what the form sent (never a card field): two bills on one site send to the same address, and
+    # told only the address, a Pip got the second bill ready again after the user paid it (pip-levels video, 2026-10-21).
+    from .pip_computer import sends_words
+    sent = sends_words(summary, 240)
+    what = (f"{summary.get('method', '')} to {summary.get('host', '')}{summary.get('path', '')}"[:300]
+            + (f" ({sent})" if sent else ""))
     return send(store, pip_id, COMPUTER_USER_PAID.format(what=what), key, "local-computer", config, _intro=True)
 
 
