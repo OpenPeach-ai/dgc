@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a FROZEN edit-primitive corpus for edit_micro.py (B1, Layer 1).
+"""Generate the FROZEN edit-primitive corpus for the edit safety gate (edit_micro.py).
 
 Each case is a realistic single edit taken from a polyglot reference solution:
 `content` = the real file, `old_string` = a verbatim window of it, `new_string`
@@ -14,16 +14,16 @@ gets it slightly wrong) while content/expected_after stay fixed — so a correct
   miss      — old_string is garbled beyond recognition → must return None
 
 Regenerate the ignored local fixture:
-  python3 gen_edit_corpus.py > edit_corpus/all.jsonl
+  python3 scripts/gen_edit_corpus.py > .edit-gate/all.jsonl
 """
 from __future__ import annotations
 import json, os, sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 # Release CI supplies a temporary checkout of the exact pinned upstream commit. Maintainers may
 # omit the variable and use the conventional ignored local checkout.
-DATA = Path(os.environ.get("DGC_EDIT_DATASET", REPO / "data" / "polyglot-benchmark")).resolve()
+DATA = Path(os.environ.get("DGC_EDIT_DATASET", ROOT / ".edit-gate" / "polyglot-benchmark")).resolve()
 LANGS = ["python", "go", "rust", "javascript", "cpp", "java"]
 
 CONF = {"'": "’", '"': "“", "-": "–"}     # ascii → curly/en-dash confusables

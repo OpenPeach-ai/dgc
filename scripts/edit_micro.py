@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""B1 Layer 1 — the deterministic edit-primitive micro-benchmark (no model).
+"""The edit safety gate: the deterministic edit-primitive check (no model).
 
 Runs a frozen corpus through dgc's `_apply_edit` and scores per perturbation:
   ok    — behaved correctly (applied→expected, or safely refused an ambiguous/miss)
@@ -12,7 +12,7 @@ tier to refuse the resulting ambiguity. These transformations are generated in m
 **WRONG must stay 0** as tiers are loosened — that's the release gate. Also prints
 which tier (`how`) won each apply, so a new tier shows up as e.g. "block anchor".
 
-Usage:  python3 edit_micro.py [corpus.jsonl]
+Usage:  python3 scripts/edit_micro.py [corpus.jsonl]
 """
 import json, sys
 from collections import defaultdict
@@ -78,7 +78,7 @@ def duplicate_target_gate(cases):
 
 def main():
     path = (Path(sys.argv[1]) if len(sys.argv) > 1
-            else Path(__file__).resolve().parent / "edit_corpus" / "all.jsonl")
+            else Path(__file__).resolve().parent.parent / ".edit-gate" / "all.jsonl")
     cases = [json.loads(l) for l in path.read_text().splitlines() if l and not l.startswith("#")]
     byp = defaultdict(lambda: {"n": 0, "ok": 0, "miss": 0, "WRONG": 0})
     tiers = defaultdict(int)
@@ -96,7 +96,7 @@ def main():
 
     order = ["none", "reindent", "trailing_ws", "confusable", "interior_line_changed",
              "elide", "drop_leading_blank", "duplicate", "garble"]
-    print(f"\n== edit-primitive micro-benchmark ({len(cases)} cases) ==")
+    print(f"\n== edit safety gate ({len(cases)} cases) ==")
     print(f"{'perturbation':22} {'n':>4} {'ok':>5} {'miss':>5} {'WRONG':>6}      ok%")
     tot = {"n": 0, "ok": 0, "miss": 0, "WRONG": 0}
     for k in order + [k for k in byp if k not in order]:

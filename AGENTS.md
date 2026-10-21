@@ -22,7 +22,6 @@ dgc/
   memory.py        DGC.md load/add
   skills.py        exact bounded SKILL.md discovery/parsing + adaptive prompt matching
 tests/run_tests.py security, protocol, unit and mock-server end-to-end checks
-bench/             reproducible same-model harness comparison and edit-quality tooling
 editors/vscode/    VS Code/Cursor client, webview and tests
 schemas/           generated reviewable wire schemas (regenerate, never hand-edit)
 install.sh         curl|bash installer (fetches a tarball, venvs, symlinks `dgc`)
