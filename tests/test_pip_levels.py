@@ -466,6 +466,10 @@ class RealBrowserTests(Store):
             with self.subTest(name=name):
                 self.assertTrue(self.press(host, name).startswith("Held:"), f"{name} is a payment: it asks at Full access")
         self.assertEqual([p for p, _ in self.received], ["/comments", "/step"])
+        held = {a["summary"]["path"]: a["summary"] for a in pip_computer.list_actions(self.registry, pip["id"]) if a["status"] == "pending"}
+        self.assertTrue(held["/pay"]["payment"], "a card number: its card says it sends card details")
+        self.assertEqual((held["/pay-saved"].get("payment"), held["/pay-saved"]["asks_because"]), (None, "payment"),
+                         "a saved card sends a token: its card says it looks like a payment")
         labels = [f["label"] for f in pip_computer.frames(self.registry.directory, queued["id"])]
         self.assertTrue(any("Approved by its level: Full access" in l and "nobody at the keyboard" in l for l in labels), labels)
 

@@ -646,6 +646,8 @@ class Host:
                 continue
             frame = self._frame("Waiting for your approval")
             summary = Host._held_summary(self, held)
+            if getattr(held, "asks_because", None):
+                summary["asks_because"] = held.asks_because      # payment, consequential or unsure (pip_levels)
             from datetime import timedelta
             from .pip_schedules import _instant, timestamp
             action_id = identifier("compact")
@@ -701,7 +703,7 @@ class Host:
             site = site_of(parts.hostname or "")
             return {"what": pip_levels.site_words(site), "site": site, "verdict": "routine"}
         if getattr(held, "payment", False):
-            return None
+            return None                                  # a card number: its card says so already
         upload = getattr(self, "upload_from_chat", None)
         upload_name = upload[0] if upload and time.monotonic() - upload[1] <= 300 else ""
         cues = {"method": held.method, "host": parts.hostname or "", "path": (parts.path or "/") + (("?" + parts.query) if parts.query else ""),
@@ -713,6 +715,8 @@ class Host:
         found = pip_levels.decide_write(level, cues)
         if found is not None and upload_name:
             self.upload_from_chat = None
+        if found is None:
+            held.asks_because = pip_levels.classify(cues)["verdict"]     # why its level still asks, for the card
         return found
 
     def _release_by_level(self, held, approval) -> None:
