@@ -10,7 +10,7 @@ import '../media/readaloud.js'; // window.DgcReadAloud: a reply read aloud, as m
 import '../media/voicemode.js'; // window.DgcVoiceMode: a spoken conversation, as ChatDGC has it
 import '../media/texthistory.js'; // window.DgcTextHistory: undo and redo for the chat box, as main DGC and ChatDGC have them
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
-import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,foldMarkup} from './pipRunPosts.js';
+import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle} from './pipRunPosts.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
@@ -121,6 +121,8 @@ let savedView=options.getState?.(),restoreView=true,navigationPending=!!options.
 let postsSeq=0;
 // Ask DGC to fix, once per run: kept with the view, as the Work chat keeps the prompt in its transcript.
 const askedRuns=new Set(Array.isArray(savedView?.asked)?savedView.asked.filter(r=>typeof r==='string'&&/^run_[0-9a-f]{32}$/.test(r)).slice(-100):[]);
+// Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
+const shownInFull=new Set();
 S.sidebarPinned=savedView?.sidebar_pinned===true;
 function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),asked:[...askedRuns].slice(-100)};options.setState?.(savedView);}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
@@ -343,7 +345,8 @@ function reviewChatModel(value){
 }
 function chatResultCards(){
   if(!executionPip(S.pip))return '';
-  return S.runs.filter(r=>r.pip_id===S.selected&&['patch','test'].includes(r.manifest?.run_kind)).slice(0,3).map(run=>{
+  // A Pulse's own command plan runs say what they found in its chat (pipRunPosts.js); a card for each said it twice.
+  return S.runs.filter(r=>r.pip_id===S.selected&&['patch','test'].includes(r.manifest?.run_kind)&&!(postsShown()&&r.execution_mode==='standalone_plan')).slice(0,3).map(run=>{
     let changedFiles=null,tests=null,error='';
     try{if(run.result?.execution){const pin=handoffPin(run.manifest.handoff,run,S.workspace.id),result=executionResult(run.result.execution,run.manifest.run_kind,pin.payload.action,pin.payload);changedFiles=result.changes.changed_files;tests=result.tests.length;}}
     catch(e){error=errorText(e);}
@@ -384,14 +387,20 @@ function chatMarkup(){
    ?(simple?`<div class="pip-working" role="status">${pipAvatar(S.pip,'working',`working-${S.pip.id}`,type||characterType(S.pip.pip_type))}${workingWords(sending)}</div>`
     :`<article class="pip-message assistant typing" aria-label="${esc(S.pip.name)} is writing"><span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></article>`):'';
   let last=null;
-  const timed=m=>{const at=Date.parse(m.created_at),mark=simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return mark;};
+  // A run's message has its own time beside the Pip's name: it moves the clock on without a mark of its own.
+  const timed=(m,mark=true)=>{const at=Date.parse(m.created_at),line=mark&&simple&&Number.isFinite(at)&&(last===null||at-last>30*60*1000)?`<p class="chat-time">${esc(chatTime(at))}</p>`:'';if(Number.isFinite(at))last=at;return line;};
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
-  const drawMessage=m=>timed(m)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt:S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null});
-  // Its runs, each a post where it falls among the messages (Pips API 51, pipRunPosts.js).
+  const drawMessage=m=>{
+    const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),routine=m.role==='assistant'&&prompt?.intro===true?postRoutineTitle(prompt.text):null;
+    return timed(m,!routine)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,...(routine?routineReply(m,routine,type):{})});
+  };
+  // Its runs, each a message from the Pip where it falls among the messages, all-clear runs in a row as one (Pips API
+  // 51, pipRunPosts.js).
   const items=postsShown()?timeline(shown,S.posts,{complete:!S.messageCursor}):shown.map(m=>({message:m}));
   const context=postsShown()?postContext():null;
-  const drawPost=p=>timed({created_at:p.posted_at})+postMarkup(p,{...context,face:pipAvatar(S.pip,p.outcome==='failed'?'failure':'idle',`post-${p.run_id}`,context.type),asked:askedRuns.has(p.run_id)});
-  const messages=items.map(i=>i.message?drawMessage(i.message):i.post?drawPost(i.post):foldMarkup(i.fold,drawPost)).join('');
+  const drawPost=i=>{const p=i.streak?i.streak.at(-1):i.post,first=i.streak?i.streak[0]:p;
+    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),asked:askedRuns.has(p.run_id),expanded:shownInFull.has(p.run_id)});};
+  const messages=items.map(i=>i.message?drawMessage(i.message):drawPost(i)).join('');
   const quietChat=!S.messages.length&&!items.length;
   return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${simple?'':typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
@@ -403,6 +412,13 @@ function postFor(runId){return S.posts.find(p=>p.run_id===runId)||null;}
 // Ask DGC to fix goes to a Work chat, which only the host can reach: the chat the Pip reports to, else a new one.
 function canAskDgc(){return typeof options.onAskDgc==='function'&&!remoteHost&&!personalPip();}
 function canRunNow(){return supportedSource()&&!executionPip(S.pip)&&S.runner?.online&&!S.runner.paused&&S.pip?.status==='active'&&!!pipType(S.pip,S.types)?.available&&!S.pip.active_run&&!S.runs.some(r=>active(r.status))&&!S.busy&&usable();}
+// A routine's reply (pip_routines) is the Pip's own message, said without being asked: like a run's, it says who and
+// which routine, and a long one starts short with Show all.
+function routineReply(m,title,type){
+  const cut=shortReply(m.text),look=type||characterType(S.pip.pip_type);
+  const head=`<div class="run-post-head"><span class="run-post-face" aria-hidden="true">${pipAvatar(S.pip,'idle',`routine-${m.id}`,look)}</span><strong class="run-post-name">${esc(S.pip.name)}</strong><span class="run-post-routine">${esc(title)}</span>${globalThis.DgcTime?.markup(Date.parse(m.created_at))||''}</div>`;
+  return {head,clip:cut.clipped?{text:cut.text,open:shownInFull.has(m.id),key:m.id}:null};
+}
 function postContext(){
   return {name:S.pip.name,type:pipType(S.pip,S.types)||characterType(S.pip.pip_type),personal:personalPip(),ask:canAskDgc(),canRun:canRunNow(),renderMarkdown:renderPipMarkdown};
 }
@@ -421,7 +437,7 @@ function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();rend
 // The status under its name: to its post in the chat, which says what it found.
 function jumpToPost(runId){
   S.tab='chat';S.overview=false;rememberView();render();
-  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`);if(!el)return false;el.closest('details')?.setAttribute('open','');el.scrollIntoView?.({block:'center'});el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
+  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-run="${runId}"]`);if(!el)return false;el.closest('details')?.setAttribute('open','');el.scrollIntoView?.({block:'center'});el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
   if(!go())void loadMessages().then(()=>{if(!go())openPostReport(runId);});
 }
 function askDgcAbout(runId){
@@ -3095,6 +3111,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.postOpen){openPostReport(target.dataset.postOpen);return;}
   if(target.dataset.postFix){askDgcAbout(target.dataset.postFix);return;}
   if(target.dataset.postRun){if(canRunNow())runNow();return;}
+  if(target.dataset.postMore){const key=target.dataset.postMore;if(!shownInFull.delete(key))shownInFull.add(key);render();return;}
   if(target.dataset.lastPost){jumpToPost(target.dataset.lastPost);return;}
   if(target.dataset.chatRun){S.tab='runs';S.overview=false;render();void loadRun(target.dataset.chatRun);return;}
   if(target.dataset.lastRun){S.tab='runs';S.overview=false;render();void loadRun(target.dataset.lastRun).then(()=>document.querySelector('section[aria-label="Run report"]')?.scrollIntoView?.({block:'start'}));return;}

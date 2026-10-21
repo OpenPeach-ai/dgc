@@ -79,41 +79,58 @@
 .msg-choice:disabled{opacity:.55;cursor:default}
 .msg-choice-key{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--pip-accent,#6D49E8);border:1px solid color-mix(in srgb,var(--pip-accent,#6D49E8) 45%,transparent)}
 
-/* A Pip's runs in its own chat (Pips API 51, pipRunPosts.js): a post from the Pip says what a run found, with
-   the top findings and two buttons; a failure in plain words; a clean run as one quiet line between messages. */
+/* A Pip's runs in its own chat (Pips API 51, pipRunPosts.js), as the Pip speaking: its face, name and the time over
+   the words, which look like its replies (a bubble in a Personal Pip's chat, a reply's text in a project's), and a
+   small attachment row under them: the report (one click opens the findings), Ask DGC to fix, or the times a fold of
+   all-clear runs ran. A routine's reply (pipsTranscript.js) wears the same head. */
 .run-post{--sev-high:var(--vscode-errorForeground,#f48771);--sev-med:var(--vscode-editorWarning-foreground,#cca700)}
 body.vscode-light .run-post{--sev-high:#c72e0f;--sev-med:#8a6100}
-.run-post .run-post-head{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;min-width:0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}
-.run-post .run-post-face{display:inline-flex;flex:none}
-.run-post .run-post-face .avatar{width:22px;height:22px}
-.run-post .run-post-name{color:var(--vscode-foreground);font-weight:600}
-.run-post .run-post-what{display:inline-flex;align-items:center;gap:5px;min-width:0}
-.run-post .run-post-icon{flex:none}
-.run-post[data-outcome=failed] .run-post-what{color:var(--sev-high)}
-.run-post .run-post-body>p{margin:0 0 6px}
-.run-post-findings{list-style:none;margin:6px 0 4px!important;padding:0!important;display:grid;gap:3px}
-.run-post-findings li{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;min-width:0;margin:0!important;font-size:12.5px;line-height:1.45}
+.run-post-head{display:flex;align-items:center;gap:6px;min-width:0;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}
+.run-post-face{display:inline-flex;flex:none}
+.run-post-face .avatar{width:22px;height:21px}
+.run-post-name{color:var(--vscode-foreground);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-post-routine{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-post-routine::before{content:"·";margin-right:6px}
+.pip-message .run-post-head .msg-time{padding:0;margin-left:auto;flex:none}
+.run-post .run-post-body>p{margin:0 0 6px}.run-post .run-post-body>p:last-of-type{margin-bottom:0}
+.run-post .run-post-body code{white-space:normal;overflow-wrap:anywhere}
+.run-post-show{display:block;margin-top:4px;padding:0;min-height:0;border:0;background:none;color:var(--vscode-textLink-foreground);font-size:12px}
+.pip-message .run-post-show{align-self:flex-start}
+.run-post-attach{display:flex;flex-wrap:wrap;align-items:flex-start;gap:6px;min-width:0;margin-top:2px}
+.run-post-attach>details{margin:0;min-width:0;max-width:100%}
+.run-post-attach>details[open]{flex-basis:100%}
+.run-post-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;min-height:24px;height:auto;padding:2px 10px;border:1px solid var(--pip-edge,var(--line));border-radius:12px;background:transparent;color:var(--vscode-foreground);font-size:12px;line-height:1.35;cursor:pointer;list-style:none;text-align:left}
+.run-post-chip>span{min-width:0;overflow-wrap:anywhere}
+.run-post-chip::-webkit-details-marker{display:none}
+.run-post-chip:hover{background:var(--pip-wash,var(--vscode-toolbar-hoverBackground))}
+.run-post-chip.quiet{border-color:transparent;padding:2px 4px;color:var(--vscode-descriptionForeground)}
+.run-post-chip.quiet:hover{color:var(--vscode-foreground)}
+.run-post-chip.asked,.run-post-chip:disabled{opacity:.7;cursor:default}
+.run-post-chip svg{flex:none}
+.run-post-chev{transition:transform .12s}
+details[open]>summary .run-post-chev{transform:rotate(90deg)}
+.run-post-attach summary.run-post-chip{color:var(--vscode-foreground)}
+.run-post-attach .ok{color:var(--vscode-testing-iconPassed,#73c991)}
+.run-post[data-outcome=failed] .run-post-chip:first-child svg,.run-post[data-outcome=checks_failed] .run-post-report>summary svg:first-child{color:var(--sev-high)}
+.run-post-report-body,.run-post-times-body{margin-top:6px;padding:8px 10px;border:1px solid var(--pip-edge,var(--line));border-radius:10px;font-size:12px}
+.run-post-report-body>button.link{padding:0;font-size:12px}
+.run-post-findings{list-style:none;margin:0 0 6px!important;padding:0!important;display:grid;gap:4px}
+.run-post-findings li{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;min-width:0;margin:0!important;font-size:12px;line-height:1.45}
 .run-post-findings .sev{flex:none;min-width:4.4em;font-weight:600;color:var(--vscode-descriptionForeground)}
 .run-post-findings .sev[data-sev=critical],.run-post-findings .sev[data-sev=high]{color:var(--sev-high)}
 .run-post-findings .sev[data-sev=medium]{color:var(--sev-med)}
 .run-post-findings .t{flex:1 1 14em;min-width:0;overflow-wrap:anywhere}
-.run-post-findings .w{flex:0 1 auto;min-width:0;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family,monospace);font-size:12px;overflow-wrap:anywhere}
-.run-post .run-post-more,.run-post .run-post-summary{color:var(--vscode-descriptionForeground);font-size:12px}
-.run-post-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.run-post-actions button{min-height:26px;padding:2px 10px;font-size:12px}
-.run-post-actions button.asked{opacity:.75}
-.run-post-quiet{display:flex;align-items:center;gap:8px;min-width:0;margin:0 0 12px;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.4}
-.run-post-quiet::before,.run-post-quiet::after{content:"";flex:1 1 12px;border-top:1px solid var(--vscode-panel-border,#ffffff20)}
-.run-post-quiet-line{flex:0 1 auto;display:inline-flex;align-items:center;flex-wrap:wrap;gap:0 6px;min-width:0}
-.run-post-quiet .ok{color:var(--vscode-testing-iconPassed,#73c991)}
-.run-post-quiet .msg-time{font-size:inherit;color:inherit}
-.run-post-quiet button.link{min-height:0;padding:0 2px;border:0;background:none;color:var(--vscode-textLink-foreground);font-size:12px}
-.run-posts-fold{margin:0 0 12px;color:var(--vscode-descriptionForeground);font-size:12px}
-.run-posts-fold>summary{cursor:pointer;padding:2px 0;list-style-position:inside}
-.run-posts-fold-body{margin-top:8px;padding-left:10px;border-left:2px solid var(--vscode-panel-border,#ffffff20)}
+.run-post-findings .w{flex:0 1 auto;min-width:0;color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family,monospace);font-size:11.5px;overflow-wrap:anywhere}
+.run-post-more{margin:0 0 4px;color:var(--vscode-descriptionForeground);font-size:12px}
+.run-post-day{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;padding:2px 0}
+.run-post-day-name{flex:0 0 5.6em;color:var(--vscode-descriptionForeground)}
+.run-post-day-times{display:flex;flex-wrap:wrap;gap:2px 4px;min-width:0;flex:1 1 12em}
+.run-post-time{min-height:0;padding:1px 6px;border:0;border-radius:8px;background:transparent;color:var(--vscode-textLink-foreground);font-size:12px;font-variant-numeric:tabular-nums}
+.run-post-time:hover{background:var(--pip-wash,var(--vscode-toolbar-hoverBackground))}
 .run-post-flash{animation:run-post-flash 1.6s ease-out}
 @keyframes run-post-flash{0%{background:color-mix(in srgb,var(--vscode-focusBorder,#7c5cff) 22%,transparent)}100%{background:transparent}}
-@media (prefers-reduced-motion:reduce){.run-post-flash{animation:none;outline:1px solid var(--vscode-focusBorder)}}
+@media (prefers-reduced-motion:reduce){.run-post-flash{animation:none;outline:1px solid var(--vscode-focusBorder)}.run-post-chev{transition:none}}
+@media(forced-colors:active){.run-post-chip{border:1px solid ButtonText}}
 .hist-row-out{font-weight:600}
 .hist-row-out[data-tone=bad]{color:var(--vscode-errorForeground,#f48771)}
 .hist-row-out[data-tone=clear]{font-weight:400;color:var(--vscode-descriptionForeground)}

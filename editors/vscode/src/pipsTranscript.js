@@ -29,7 +29,9 @@ export function replyParts(text) {
   return merged.length>8?[...merged.slice(0,7),merged.slice(7).join('\n\n')]:merged;
 }
 
-export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null}) {
+// `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
+// key}, a long one's start and its Show all.
+export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   // Every photo the message brought (no four-photo cap from Pips API 52); a click opens the original.
   const pictures=user&&Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,64).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" alt="Image ${Number(i.index)+1}" title="Open the photo"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
@@ -37,7 +39,9 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const files=user&&Array.isArray(m.files)&&m.files.length?`<div class="msg-files">${m.files.slice(0,16).map(f=>{const name=String(f.name||''),dot=name.lastIndexOf('.');return `<span class="msg-file" title="${esc(name)}"><span class="chat-file-ext" aria-hidden="true">${esc((dot>0?name.slice(dot+1):'txt').slice(0,4))}</span><span class="chat-file-name">${esc(name)}</span><span class="chat-file-size">${esc(size(Number(f.bytes)||0))}</span></span>`;}).join('')}</div>`:'';
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
-  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`}`:split?`<div class="answer split">${replyParts(m.text).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(m.text)}</div></div>`;
+  const said=!user&&clip&&!clip.open?clip.text:m.text;
+  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(said)}</div></div>`)
+    +(!user&&clip?`<button type="button" class="link run-post-show" data-post-more="${esc(clip.key)}" aria-expanded="${clip.open===true}">${clip.open?'Show less':'Show all'}</button>`:'');
   // The plugins it took an answer from, as ChatGPT names the apps it used ("Used [logo] Aave"): what it says came
   // from a plugin did, rather than from the model's memory. A logo not here yet shows a plug until the host sends it.
   const plugins=!user&&Array.isArray(m.plugins)?m.plugins.slice(0,8):[];
@@ -50,7 +54,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // When it was sent or written, at the message's own edge: after a prompt's buttons, before a reply's.
   const at=Date.parse(m.created_at),time=globalThis.DgcTime?.markup(at)||'';
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}" data-message="${esc(m.id)}"><span class="sr-only role">${esc(label)}</span>${activityRow}${body}${used}${offered}${status}<div class="response-actions">${user?'':time}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${!user&&stats?replyStats(stats):''}${user?time:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${body}${used}${offered}${status}<div class="response-actions">${user||head?'':time}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${!user&&stats?replyStats(stats):''}${user?time:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

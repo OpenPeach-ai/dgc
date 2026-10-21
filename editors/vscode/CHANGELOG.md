@@ -10,6 +10,24 @@
   **Submit**, so you can page back and check or change any answer first. A single question still sends on one click.
   With reduced motion on, the next question simply appears.
 - **Settings: Web search and ChatDGC have their own icons.** Both fell back to the Plugins icon, so three rows of the side menu looked alike. Web search is a globe; ChatDGC is a chat bubble with its three slashes.
+- **The Pip speaks: its runs read like a chat with it, not a log.** Each finished run is a message from the Pip in its
+  own chat (its face, name and the time) in short first-person words: "I found 4 issues, 3 of them serious. The worst
+  is in billing.py: the GST total skips cess on every invoice.", "1 of 2 checks failed: GET …/api/invoices → 200.",
+  "I couldn't finish this run. I ran out of time. Nothing in your project was changed. I'll try again tomorrow at
+  9:00 AM." The words are made from the run's report alone, so every number, file and title the Pip says is the
+  report's; a few wordings per kind of run keep a week of them from reading the same. The detail is a small
+  attachment under the message, one click away: **Report · 4 findings ›** opens the top findings and **Open full
+  report**; beside it **Ask DGC to fix** (as before), **See what happened** and **Run again now** for a run that
+  stopped, **Open run** for one that found nothing.
+  - **All-clear runs fold into one message that updates itself.** Checks that passed (or audits that found nothing)
+    one after another are ONE message, "Both checks passed again. Nothing for you to do.", with **✓ Passed 12 times
+    since Monday ›**, which opens to each time it ran, by day. A new pass updates that message where it is; a failure
+    or a run that found something breaks the fold and gets its own message, and a message from you starts a new one.
+    It replaces the quiet "✓ 9:29 PM · Checks: all 2 checks passed" lines and the day-old "N earlier runs" fold.
+  - **A Personal Pip's result and a routine's reply** are its own words, starting short with **Show all**; a routine's
+    reply says which routine it was.
+  - A Pulse's own command-plan runs no longer add a **Test results** card each under the chat: their messages say it.
+
 - **Personal | Project tabs on the Pips page.** The dropdown that listed your Personal Pips and every project DGC
   knows is two tabs now, the same as the Sessions home's **Chat | Work**: the same look, and the arrow keys, Home and
   End move between them. **Project** is the folder open in this window and nothing else: another project's Pips are
