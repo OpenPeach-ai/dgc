@@ -43,6 +43,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     every level"), and nothing reached the site. At Ask, an invoice whose site you typed, and one whose site was in
     an attached PDF, were each paid with 0 Allow taps.
 
+- **After your own Pay on a Pip's screen, it knows which bill it paid.** It was told only the address the form went
+  to, so with two bills on one site it got the second ready again after you paid it, and the test "user" paid it
+  twice. It is now told what the form sent (bill number and amount, never a card field), and that this one is paid.
+
 - **Memory that learns: DGC's one memory now keeps what you say over a conversation, shows every change, and turns
   what you just did into a skill.** It is still one memory, shared by ChatDGC, Work and your Pips, written only from
   your own words.
