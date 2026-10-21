@@ -35,6 +35,9 @@ export function carefulWords(summary, pipName = 'The Pip') {
   // Saved logins (API 56): it met a sign-in page and has no login for it. Saving one answers the card.
   if (summary?.kind === 'login') return [`Save a login for ${summary.site || summary.host} so ${pipName} can sign in itself?`,
     `${pipName} needs to sign in on ${summary.shown || summary.host}. DGC keeps the login sealed on this computer and types it in for ${pipName}, which never sees it.`, 'Save login…'];
+  // The safety floor (API 58): a Terminal command that could wipe its Files asks at every level.
+  if (summary?.kind === 'floor') return [`Let ${pipName} run this in its Terminal?`,
+    `This command ${summary.floor || 'could delete everything in its Files'}: ${(summary.fields?.[0]?.value || '').slice(0, 160)}. Nothing has run yet; Allow lets it run this once.`, 'Allow once'];
   if (summary?.kind === 'text') return [`Let ${pipName} put this on ${summary.host || 'a page'}?`,
     'It read this from your apps (careful mode). Nothing has been typed or sent yet; Allow lets it do this once.', 'Allow once'];
   return null;
