@@ -276,6 +276,16 @@ class ReplyPromptTests(unittest.TestCase):
                         "reference data, before the user's own words")
         self.assertIn("Current user message:\nIs the greeting one new?", prompt)
 
+    def test_the_model_is_told_the_user_saw_each_post_as_its_own_message(self):
+        # "The Pip speaks" (founder, 21 Oct): the chat shows each run as the Pip saying it ("I found 4 issues, 3 of
+        # them serious"). Asked "why did you say three were serious?", the Pip answers for it, not "DGC posted that".
+        self.setup_job()
+        self.audit()
+        conversation = self.send(text="Why did you say it was serious?")["run"]["manifest"]["conversation"]
+        self.assertEqual(len(conversation["run_posts"]), 1)
+        self.assertIn("The user sees each one in the chat as a short message from you", posts.NOTICE)
+        self.assertIn("the user did not say them", posts.NOTICE)
+
 
 class SDKGateTests(unittest.TestCase):
     """Both SDKs know list_pip_run_posts and refuse it before Pips API 51, without a request."""

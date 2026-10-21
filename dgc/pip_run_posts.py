@@ -15,13 +15,16 @@ or keeps both.
 
 What it says is the Work chat's card (``pip_report_delivery`` builds both): what kind of run, the
 outcome and counts, the top three findings with severity, title and file:line, or why it stopped, in
-words a person can act on, and when it runs next. A clean run is the same row; the editor draws it as
-one quiet line.
+words a person can act on, and when it runs next. A clean run is the same row. The editor draws each as
+the Pip speaking, in first-person words made from these fields alone ("I found 4 issues, 3 of them
+serious"), with the details one click away, and folds all-clear runs in a row into one message
+(editors/vscode/src/pipRunPosts.js).
 
 Not a chat turn. A post is not in ``pip_chat_messages``: it never starts a reply, never pairs with a
 user message and is never sent to the model as something the user said. The Pip's next reply reads the
-latest few as reference data (``recent``, the conversation's ``run_posts`` beside ``last_report``), so
-"is this the same as last week?" has an answer, and the full report is still a tool call away.
+latest few as reference data (``recent``, the conversation's ``run_posts`` beside ``last_report``), told
+that the user saw them as its own messages, so "is this the same as last week?" and "you said three were
+serious" have an answer, and the full report is still a tool call away.
 
 The editor reads posts with ``list_pip_run_posts`` (Pips API 51) and draws each where it falls among
 the chat's messages; History uses the same posts to say what each run found.
@@ -276,7 +279,8 @@ def validate_recent(value) -> list:
     return value
 
 
-NOTICE = ("run_posts: what your own runs posted in this chat, oldest first. DGC wrote them from each run's saved "
-          "result; the user did not say them. Each names its run_id. A post is a summary: read the full report before "
-          "you rely on a detail, and never say a later run fixed something unless its report shows it.")
+NOTICE = ("run_posts: what your own runs posted in this chat, oldest first. The user sees each one in the chat as a short "
+          "message from you, so speak of it as something you said. DGC wrote them from each run's saved result; the user "
+          "did not say them. Each names its run_id. A post is a summary: read the full report before you rely on a "
+          "detail, and never say a later run fixed something unless its report shows it.")
 
