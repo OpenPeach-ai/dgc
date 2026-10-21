@@ -137,6 +137,34 @@ def find(folders: list[tuple[str, Path]] | None = None) -> tuple[str, int, str]:
     return find_route(folders)[:3]
 
 
+# How a connection to the user's Chrome ended before DGC got in, for whoever asked (connection_error's `kind`).
+SAID_NO, UNANSWERED, NOT_RUNNING, FAILED = "said_no", "unanswered", "not_running", "failed"
+
+
+def connection_error(error: BaseException, name: str = "") -> BrowserError:
+    """What to tell the model when connecting to the user's Chrome failed, as a BrowserError whose ``kind`` says which:
+    the user chose Cancel in Chrome's dialog, nobody answered it, Chrome isn't there, or something else."""
+    name = name or "Chrome"
+    # Measured with Chrome 155 (2026-10-13): Chrome holds the connection until the user answers its "Allow remote
+    # debugging?" dialog; Cancel answers 403 Forbidden.
+    if "websocket upgrade" in str(error) and "403" in str(error):
+        said = BrowserError(f"The user said no in {name} (they chose Cancel when Chrome asked). Carry on without "
+                            "their Chrome; ask them first if this task really needs it.")
+        said.kind = SAID_NO
+    elif isinstance(error, (socket.timeout, TimeoutError)) or "timed out" in str(error):
+        said = BrowserError(f"Nobody answered {name}'s \"Allow remote debugging?\" in time. Ask the user whether "
+                            "they want DGC to use their Chrome, and to click Allow when Chrome asks.")
+        said.kind = UNANSWERED
+    elif isinstance(error, ConnectionRefusedError) or "closed the connection" in str(error):
+        said = BrowserError(f"{name} isn't running, or remote debugging was turned off. Ask the user to open Chrome, "
+                            "and if it was turned off: " + ENABLE)
+        said.kind = NOT_RUNNING
+    else:
+        said = BrowserError(f"DGC couldn't use the user's Chrome: {error}")
+        said.kind = FAILED
+    return said
+
+
 class UserChromeSession(BrowserSession):
     """One tab, in a window DGC opens in the user's running Chrome: the user's logins, their browser, DGC's tab."""
 
@@ -170,19 +198,7 @@ class UserChromeSession(BrowserSession):
                 self.command(f"{domain}.enable")
         except (BrowserError, OSError) as error:
             self._cleanup()
-            name = self.browser_name or "Chrome"
-            # Measured with Chrome 155 (2026-10-13): Chrome holds the connection until the user answers its "Allow remote
-            # debugging?" dialog; Cancel answers 403 Forbidden.
-            if "websocket upgrade" in str(error) and "403" in str(error):
-                raise BrowserError(f"The user said no in {name} (they chose Cancel when Chrome asked). Carry on without "
-                                   "their Chrome; ask them first if this task really needs it.") from None
-            if isinstance(error, (socket.timeout, TimeoutError)) or "timed out" in str(error):
-                raise BrowserError(f"Nobody answered {name}'s \"Allow remote debugging?\" in time. Ask the user whether "
-                                   "they want DGC to use their Chrome, and to click Allow when Chrome asks.") from None
-            if isinstance(error, ConnectionRefusedError) or "closed the connection" in str(error):
-                raise BrowserError(f"{name} isn't running, or remote debugging was turned off. Ask the user to open Chrome, "
-                                   "and if it was turned off: " + ENABLE) from None
-            raise BrowserError(f"DGC couldn't use the user's Chrome: {error}") from None
+            raise connection_error(error, self.browser_name) from None
 
     def _cleanup(self) -> None:
         """Close DGC's own tab and the connection. The user's browser, and every other tab in it, stay as they were."""

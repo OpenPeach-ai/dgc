@@ -82,6 +82,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_computer_apps", "set_pip_computer_apps",
     "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login",
     "get_pip_level", "set_pip_level",
+    "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -131,6 +132,9 @@ _COMMAND_ARGS = {
     "save_pip_login": {"pip_id", "site", "username", "password", "totp", "pips", "action_id", "expected_digest"},
     # How much a Personal Pip asks (pip_levels, API 58): ask, approve or full.
     "get_pip_level": {"pip_id"}, "set_pip_level": {"pip_id", "level"},
+    # Borrowing the user's own signed-in Chrome (pip_borrow, API 59): a card each time, Allow once, Not now, Stop.
+    "list_pip_borrows": {"pip_id"}, "allow_pip_borrow": {"pip_id", "borrow_id"}, "decline_pip_borrow": {"pip_id", "borrow_id"},
+    "stop_pip_borrow": {"pip_id", "borrow_id"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
     "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
@@ -2691,6 +2695,16 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     task_history = (pip_chat_setup.validate_reference(manifest['personal_history'], manifest)
                     if 'personal_history' in manifest else None)
 
+    from . import pip_borrow
+    lent = (apps_pin or {}).get('borrow') if personal and conversation is not None else None
+    lent = lent if isinstance(lent, dict) else None
+
+    def _borrow_schemas():
+        """Borrowing the user's own Chrome (pip_borrow): any chat reply may ask; only the reply it was lent to uses it."""
+        if not personal or conversation is None or apps_pin is None:
+            return []
+        return [pip_borrow.ASK_SCHEMA] + ([pip_borrow.USE_SCHEMA] if lent is not None and lent.get('id') else [])
+
     class ReadOnlyAuditor(Agent):
         progress_updates = False        # a run shows no text, and a Pip chat's prompt asks for no updates
         # Reuse the existing Agent loop with a task-specific answer contract. The
@@ -2860,7 +2874,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else [])
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -2935,6 +2949,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if personal and manifest.get('computer_paused') is True:
                     from .pip_careful import PAUSED_NOTE
                     base_instructions += '\n' + PAUSED_NOTE
+                if apps_pin is not None and conversation is not None:
+                    # Borrowing the user's own Chrome (pip_borrow): how to ask, and, in the reply it was lent to, how to use it.
+                    base_instructions += '\n' + pip_borrow.NOTICE
+                    if lent is not None and lent.get('id'):
+                        base_instructions += '\n' + pip_borrow.use_notice(lent)
+                    elif lent is not None and lent.get('missed'):
+                        base_instructions += '\n' + pip_borrow.missed_notice(lent)
                 if apps_pin is not None:
                     composio = apps_pin.get('composio')
                     base_instructions += ("\nThe user's apps: they connect to you through the user's Composio"
@@ -3129,6 +3150,14 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 arguments = call.arguments if isinstance(call.arguments, dict) else {}
                 said = pip_app_links.worker_call(apps_pin, call.name, arguments)
                 if isinstance(said, str) and "below your reply" in said and not said.startswith("error"):
+                    cards_shown.append(call.name)
+                return said
+            if personal and apps_pin is not None and conversation is not None and call.name in pip_borrow.TOOLS:
+                arguments = call.arguments if isinstance(call.arguments, dict) else {}
+                if call.name == pip_borrow.USE and not (lent is not None and lent.get('id')):
+                    return pip_borrow.not_lent((lent or {}).get('missed', ''))
+                said = pip_app_links.worker_call(apps_pin, call.name, arguments, timeout=240)
+                if call.name == pip_borrow.ASK and "below your reply" in said and not said.startswith("error"):
                     cards_shown.append(call.name)
                 return said
             if personal and apps_pin is not None and apps_pin.get('plugins') and call.name in pip_plugins.TOOLS:
@@ -4042,6 +4071,15 @@ def _execute_run(registry, row, config):
             app_socket.said = str(manifest['conversation'].get('text') or '')
         if taint is not None:
             app_socket.on_read = taint.add                     # what it reads from apps, for careful mode
+        if manifest.get('run_kind') == 'conversation':
+            # Borrowing the user's own Chrome (pip_borrow): any chat reply may ask with a card; only the turn the user's
+            # Allow once started has it, claimed for this run alone, and it is given back when the run ends (close).
+            from . import pip_borrow, pip_careful, pip_levels
+            app_socket.borrow = pip_borrow.Session(
+                registry.directory, config, row['pip_id'], row['workspace_id'], row['id'],
+                unattended=row['requested_by'] in UNATTENDED, grant=pip_borrow.claim(registry, row),
+                level=pip_levels.level(registry, row['pip_id']), careful=pip_careful.is_on(registry, row['pip_id']),
+                taint=taint, said=app_socket.said)
         manifest = {**manifest, 'app_socket': app_socket.pin()}
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # How much it asks (pip_levels): the worker is only told, for the Pip's words; the supervisor decides.
@@ -4546,7 +4584,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -4804,6 +4842,23 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError('local_only', "How much a Pip asks is set on this computer only.")
                 result = (pip_levels.listing(registry, pip_id) if command == 'get_pip_level'
                           else pip_levels.set_level(registry, pip_id, request.get('level'), actor))
+            elif command in ('list_pip_borrows', 'allow_pip_borrow', 'decline_pip_borrow', 'stop_pip_borrow'):
+                # Borrowing the user's own signed-in Chrome (pip_borrow): the Pip asks with a card each time; only the
+                # user, on this computer, allows it once, says Not now, or takes it back with Stop.
+                from . import pip_borrow
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', 'Only you lend your Chrome to a Pip, on this computer.')
+                pip = store._job(pip_id)
+                if pip['source_policy'] != {'mode': 'personal'}:
+                    raise RegistryError('invalid_request', 'Only a Personal Pip can borrow your Chrome.')
+                if command == 'list_pip_borrows':
+                    result = pip_borrow.listing(registry, pip_id)
+                elif command == 'allow_pip_borrow':
+                    result = pip_borrow.allow(store, config, request.get('borrow_id'), pip_id, actor)
+                elif command == 'decline_pip_borrow':
+                    result = pip_borrow.decline(store, config, request.get('borrow_id'), pip_id, actor)
+                else:
+                    result = pip_borrow.stop(store, request.get('borrow_id'), pip_id, actor)
             elif command in ('list_pip_sites', 'set_pip_careful', 'forget_pip_site'):
                 # Careful mode (pip_careful): its switch, and the sites the Pip may visit without asking.
                 from . import pip_careful

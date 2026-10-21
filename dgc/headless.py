@@ -287,7 +287,17 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # from your apps hold at every level; so does the safety floor: a Terminal command that could wipe its Files is a
 # computer action of kind "floor" (Allow lets exactly that command run once). Sites in documents you attach count as
 # named by you.
-PIPS_API_VERSION = 58
+# API 59: a Personal Pip may borrow your own signed-in Chrome, with your consent each time (pip_borrow). Its chat reply
+# asks with a card (borrow_chrome: the sites, as origins, and why); list_pip_borrows {pip_id} reads them ({pip_id, minutes,
+# borrows: [{id, pip_id, workspace_id, status, sites, origins, why, reachable, unreachable, unattended, minutes, chrome,
+# ended, sent, created_at, expires_at, allowed_at, started_at, ended_at}]}, status requested | allowed | declined |
+# replaced | in_use | returned | expired). allow_pip_borrow {pip_id, borrow_id} is Allow once (it checks the Chrome on
+# this computer allows remote debugging, then starts the one turn that may use it), decline_pip_borrow is Not now, and
+# stop_pip_borrow takes it back now; all three are local only. There is no Always allow. While lent, DGC works in one tab
+# of its own in that Chrome (Chrome asks the user too), on the card's sites only, and closes it when the Pip says done,
+# when its reply ends, on Stop, or after `minutes`; `ended` says which (done, run_end, stop, timeout, chrome_no,
+# no_answer, unreachable, lost, error).
+PIPS_API_VERSION = 59
 
 
 def _pips_platform_supported() -> bool:

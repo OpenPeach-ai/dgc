@@ -227,6 +227,13 @@ class _WebSocket:
         authority, _, path = url[len("ws://"):].partition("/")
         host, _, port = authority.partition(":")
         self._sock = sock if sock is not None else socket.create_connection((host, int(port or 80)), timeout=timeout)
+        try:
+            self._handshake(authority, path, timeout)
+        except BaseException:
+            self.close()                  # a refused upgrade (the user chose Cancel in Chrome) leaves no socket open
+            raise
+
+    def _handshake(self, authority: str, path: str, timeout: float) -> None:
         self._sock.settimeout(timeout)
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         request = (

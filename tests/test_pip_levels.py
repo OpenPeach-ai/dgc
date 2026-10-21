@@ -59,7 +59,7 @@ class Store(unittest.TestCase):
 class LevelSettingTests(Store):
     def test_pips_api_58_offers_the_level_and_it_starts_at_ask_for_every_pip(self):
         from dgc.headless import PIPS_API_VERSION
-        self.assertEqual(PIPS_API_VERSION, 58)
+        self.assertGreaterEqual(PIPS_API_VERSION, 58)
         self.assertEqual(levels.DEFAULT, levels.ASK, "no silent change: a Pip nobody chose for asks as before")
         pip = self.personal()
         got = self.control("get_pip_level", pip_id=pip["id"])

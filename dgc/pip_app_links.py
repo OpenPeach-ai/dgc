@@ -408,6 +408,7 @@ class RunSocket:
         self.taint, self.said = None, ""   # careful mode: what it read from apps, and the user's own words this turn
         from .pip_plugins import Session
         self.plugins = Session(directory, config, pip_id, workspace_id, run_id, unattended=unattended)
+        self.borrow = None           # borrowing the user's own Chrome (pip_borrow.Session): asking, and the one turn lent it
         self._stopped = threading.Event()
         threading.Thread(target=self._serve, name="pip-apps-run", daemon=True).start()
 
@@ -418,8 +419,12 @@ class RunSocket:
                 plugins = self.plugins.pin(registry)
             except Exception:
                 plugins = []                      # a broken plugin list never stops the Pip's apps
-        return {"socket": str(self.path), "token": self.token, "apps": now, "plugins": plugins,
-                "composio": composio_server(self.config) is not None}
+        pin = {"socket": str(self.path), "token": self.token, "apps": now, "plugins": plugins,
+               "composio": composio_server(self.config) is not None}
+        lent = self.borrow.pin() if self.borrow is not None else None
+        if lent is not None:
+            pin["borrow"] = lent
+        return pin
 
     def _read(self, text) -> None:
         if self.on_read is not None and isinstance(text, str):
@@ -430,6 +435,14 @@ class RunSocket:
 
     def call(self, op: str, args: dict):
         from .pip_plugins import TOOLS as PLUGIN_TOOLS
+        from .pip_borrow import TOOLS as BORROW_TOOLS
+        if op in BORROW_TOOLS:
+            if self.borrow is None:
+                return "error: borrowing the user's Chrome isn't available in this run."
+            try:
+                return self.borrow.call(op, args)
+            except Exception as exc:              # never hang the Pip: say so
+                return f"error: that did not work ({type(exc).__name__})."
         try:
             with WorkspaceRegistry(self.directory) as registry:
                 if op in PLUGIN_TOOLS:
@@ -504,7 +517,9 @@ class RunSocket:
                         self.calls += 1
                         op = str(message.get("op", ""))
                         from .pip_plugins import TOOLS as PLUGIN_TOOLS
-                        answer = self.call(op, message.get("args") or {}) if op in TOOLS + PLUGIN_TOOLS else "error: unknown app operation"
+                        from .pip_borrow import TOOLS as BORROW_TOOLS
+                        answer = (self.call(op, message.get("args") or {}) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS
+                                  else "error: unknown app operation")
                         reply = answer if isinstance(answer, dict) else {"text": answer}
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
                 except (OSError, ValueError):
@@ -512,6 +527,11 @@ class RunSocket:
 
     def close(self) -> None:
         self._stopped.set()
+        if self.borrow is not None:
+            try:
+                self.borrow.close()          # the run is over: the user's Chrome is given back now
+            except Exception:                # noqa: BLE001
+                pass
         self.plugins.close()
         try:
             self.server.close()

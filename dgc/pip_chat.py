@@ -577,9 +577,14 @@ CHECK_KEY = "check_"
 ROUTINE_KEY = "routine_"          # a routine's turn (pip_routines): the Pip does it and replies here
 # After the user allows a plugin the Pip asked for (pip_plugins), DGC asks it to carry on, under this key.
 PLUGINS_KEY = "plugins_"
-DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY)
+# After the user answers a card asking to borrow their own Chrome (pip_borrow, Pips API 59): Allow once starts the one
+# turn that may use it, under BORROW_KEY + the card's id (the runner claims the card for that turn alone); Not now starts
+# one that may not, under BORROW_NO_KEY. No message the user or an SDK sends can take either key.
+BORROW_KEY = "borrow_"
+BORROW_NO_KEY = BORROW_KEY + "no_"
+DGC_KEYS = (INTRO_KEY, COMPUTER_KEY, APPS_KEY, CHECK_KEY, ROUTINE_KEY, PLUGINS_KEY, BORROW_KEY)
 # The turns DGC writes so the Pip carries on with what the user asked: they see the photos of that ask again.
-FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY)
+FOLLOW_UP_KEYS = (COMPUTER_KEY, APPS_KEY, CHECK_KEY, PLUGINS_KEY, BORROW_KEY)
 CHECK_DONE = ("This message is from DGC, not the user. The user says they finished {host}'s check on your computer's "
               "screen. Read the page again and carry on with what they asked. If the site still asks for a check, "
               "stop and tell them in one sentence.")
@@ -629,6 +634,13 @@ COMPUTER_LOGIN_SAVED = ("This message is from DGC, not the user. The user saved 
 COMPUTER_LOGIN_NOT_NOW = ("This message is from DGC, not the user. The user chose Not now: they won't save a login for {site} "
                           "now. Don't ask again. If you still need to sign in there, tell them in one sentence that they can "
                           "sign in on your screen (Open its computer); carry on with anything else they asked.")
+BORROW_ALLOWED = ("This message is from DGC, not the user. The user chose Allow once on your card asking for their Chrome "
+                  "(\"{why}\"): you may use their own signed-in Chrome in this reply, on {sites} only. Their Chrome asks them "
+                  "once more as it connects. Use borrowed_chrome now: open the page you need, read what you need, then call "
+                  "it with op done to give their Chrome back. Then tell them what you found, in a short message.")
+BORROW_NOT_NOW = ("This message is from DGC, not the user. The user chose Not now on your card asking for their Chrome "
+                  "({sites}), so you must not use it for this, and don't ask for it again in this reply. Carry on with anything "
+                  "else they asked that doesn't need it, and tell them in a short message what you couldn't do without it.")
 INTRO = ("This message is from DGC, not the user. The user has just created you in the Pips view and "
          "named you \"{name}\". That is your name: introduce yourself as {name}, never by your character's name. "
          "Write your first message to them. Say hello and who you are in one sentence. Guess from your name what they would like help with, then say what you can do for "
@@ -732,6 +744,24 @@ def continue_after_plugin_action(store, pip_id, action_id, plugin, tool, config,
     plugin, tool = str(plugin)[:80], str(tool)[:160]
     outcome = (PLUGIN_DONE if confirmed and answered else PLUGIN_ERROR if answered else PLUGIN_UNKNOWN).format(plugin=plugin)
     text = PLUGIN_RAN.format(tool=tool, plugin=plugin, outcome=outcome)
+    return send(store, pip_id, text, key, "local-apps", config, _intro=True)
+
+
+def continue_after_borrow(store, pip_id, card, config):
+    """The chat's next turn once the user chose Allow once on a borrow card (pip_borrow): the one turn that may use
+    their Chrome, on the card's sites (the runner claims the card for it as it starts)."""
+    from .pip_borrow import shown
+    key = BORROW_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
+    text = BORROW_ALLOWED.format(why=str(card.get("why") or "")[:200].replace('"', "'"),
+                                 sites=", ".join(shown(o) for o in card.get("sites") or [])[:400])
+    return send(store, pip_id, text, key, "local-apps", config, _intro=True)
+
+
+def continue_after_borrow_declined(store, pip_id, card, config):
+    """The chat's next turn once the user chose Not now on a borrow card: the Pip says what it couldn't do."""
+    from .pip_borrow import shown
+    key = BORROW_NO_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(card["id"]))[:100]
+    text = BORROW_NOT_NOW.format(sites=", ".join(shown(o) for o in card.get("sites") or [])[:400])
     return send(store, pip_id, text, key, "local-apps", config, _intro=True)
 
 
