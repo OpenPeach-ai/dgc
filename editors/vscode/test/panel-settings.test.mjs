@@ -2786,6 +2786,34 @@ test("the web search is saved only to a CLI that can take it, and a blank key ke
   assert.equal("search_provider" in commands.find((c) => c.type === "set_config").values, false, "only the four it knows");
 });
 
+test("Ollama is saved as the web search only to a CLI whose handshake lists it, its key by the same path", async () => {
+  const { provider, commands, secretValues } = harness();
+  provider.searchSettable = true;
+  await provider.saveSettings(settings({ search_provider: "ollama", search_api_key: "ollama-key-1", search_url: "" }));
+  let values = commands.find((c) => c.type === "set_config").values;
+  assert.equal("search_provider" in values, false, "an older CLI refuses the whole save on a provider it doesn't know");
+  assert.equal("search_api_key" in values, false, "nor is its key kept as the key of the provider that CLI has");
+  commands.length = 0;
+  provider.lastReadyEvent = { capabilities: { search_providers: ["duckduckgo", "brave", "tavily", "searxng", "ollama", "later"] } };
+  await provider.saveSettings(settings({ search_provider: "ollama", search_api_key: "  ollama-key-1  ", search_url: "" }));
+  values = commands.find((c) => c.type === "set_config").values;
+  assert.deepEqual([values.search_provider, values.search_api_key], ["ollama", "ollama-key-1"]);
+  assert.equal([...secretValues.keys()].some((k) => /search|ollama/i.test(k)), false,
+    "kept by the CLI in its own secrets.json, as Brave's and Tavily's are, not in the editor's SecretStorage");
+  commands.length = 0;
+  await provider.saveSettings(settings({ search_provider: "later", search_api_key: "" }));
+  assert.equal("search_provider" in commands.find((c) => c.type === "set_config").values, false,
+    "only providers this editor knows how to offer");
+  // The settings page hears which ones the CLI takes with its config, from the handshake.
+  const posted = [];
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  provider.onEvent({ type: "config", seq: 9, model: "m", mode: "default", think: "off", base_url: "", project_root: "/p",
+                     goal: {}, search: "ollama", search_api_key_set: true });
+  const forwarded = posted.find((m) => m.type === "event" && m.event.type === "config");
+  assert.deepEqual(forwarded.event.search_providers, ["duckduckgo", "brave", "tavily", "searxng", "ollama"]);
+  assert.equal(JSON.stringify(posted).includes("ollama-key-1"), false, "the page never gets the key back");
+});
+
 test("ChatDGC's instructions and personality are saved only to a CLI that takes them", async () => {
   const older = harness();
   await older.provider.saveSettings(settings({ chatdgc_about: "x", chatdgc_personality: "warm" }));

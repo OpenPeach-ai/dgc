@@ -134,6 +134,8 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
   together: { url: "https://api.together.xyz/v1", needsKey: true, label: "Together AI" },
   mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral" },
 };
+// The web search providers this editor can offer in Settings; a CLI says which of them it takes.
+const SEARCH_PROVIDERS = ["duckduckgo", "brave", "tavily", "searxng", "ollama"];
 
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
 
@@ -3384,7 +3386,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const event = managed && Array.isArray((ev as any).items) ? { ...ev, items: (ev as any).items.map((item: any) => {
         const own = managed.get(item?.name)?.oauth;
         return own ? { ...item, oauth_client_id: own.clientId, oauth_port: own.port } : item;
-      }) } : ev;
+      }) }
+        // Settings -> Web search offers the providers this CLI takes, from its handshake.
+        : ev.type === "config" ? { ...ev, search_providers: this.searchProviders() } : ev;
       this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -6119,6 +6123,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.refreshEditorSettings();
   }
 
+  /** The web search providers this CLI's set_config takes: ready.capabilities.search_providers (Ollama came with it),
+   *  else the four every CLI that takes the search from Settings knows. One it doesn't know refuses the whole save. */
+  private searchProviders(): string[] {
+    const offered = (this.lastReadyEvent?.capabilities as any)?.search_providers;
+    return Array.isArray(offered) ? offered.filter((p: unknown) => typeof p === "string" && SEARCH_PROVIDERS.includes(p))
+      : ["duckduckgo", "brave", "tavily", "searxng"];
+  }
+
   /** What a NEW backend owes the tab, and nothing else. Deliberately without the `show` post:
    *  `settingsSelection` is written only when the user opens settings, so re-posting it on a
    *  handshake -- Restart Backend, crash recovery, or opening a second chat, none of which the
@@ -6607,9 +6619,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // the saved one; the key is saved by the CLI in its own secrets.json, where its Pips read it.
       if (this.searchSettable) {
         const provider = String(v.search_provider || "");
-        if (["duckduckgo", "brave", "tavily", "searxng"].includes(provider)) { values.search_provider = provider; }
+        const taken = this.searchProviders().includes(provider);
+        if (taken) { values.search_provider = provider; }
         if (typeof v.search_url === "string") { values.search_url = v.search_url.trim(); }
-        if (typeof v.search_api_key === "string" && v.search_api_key.trim()) { values.search_api_key = v.search_api_key.trim(); }
+        // A key goes with a provider this CLI takes: otherwise it would be kept as the key of the one it has.
+        if (taken && typeof v.search_api_key === "string" && v.search_api_key.trim()) { values.search_api_key = v.search_api_key.trim(); }
         if (typeof v.chatdgc_web === "boolean") { values.chatdgc_web = v.chatdgc_web; }
       }
       if (this.chatdgcSettable) {

@@ -67,6 +67,8 @@ function applyConfig(ev) {
         draft.search_provider = ev.search || 'duckduckgo';
     draft.search_api_key_set = ev.search_api_key_set === true;
     draft.search_settable = 'search_api_key_set' in ev;
+    // The providers this CLI's set_config takes, which the extension adds from its handshake (not a protocol field).
+    draft.search_providers = Array.isArray(ev.search_providers) ? ev.search_providers : [];
     draft.chatdgc_settable = 'chatdgc_personality' in ev;
     draft.budget_settable = 'turn_token_budget' in ev;
     if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section) && !saving)

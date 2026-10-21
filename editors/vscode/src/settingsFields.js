@@ -85,16 +85,26 @@ export function renderFields(section, main, config, providers, ui) {
     function renderWeb(main) {
         const c = config;
         const provider = c.search_provider || "duckduckgo";
-        const keyHint = c.search_api_key_set ? "A key is saved. Leave blank to keep it." : "Brave and Tavily need one.";
-        main.innerHTML = '<h2>Web search</h2><p class="sub">One search for Work, ChatDGC and your Pips. DuckDuckGo needs nothing; Brave and Tavily need a key; SearXNG is a server you run.</p>'
+        // Ollama only from a CLI that takes it (ready.capabilities.search_providers): an older one refuses the whole save.
+        const ollama = (c.search_providers || []).includes("ollama") || provider === "ollama";
+        const keyHint = (p) => p === "ollama"
+            ? (c.search_api_key_set ? "A key is saved, used when Ollama on this computer isn't signed in. Leave blank to keep it."
+                : "Optional. Signed in to Ollama on this computer? Nothing to add. Otherwise a key from ollama.com → Settings → API keys.")
+            : (c.search_api_key_set ? "A key is saved. Leave blank to keep it." : "Brave and Tavily need one.");
+        const providers = [["duckduckgo", "DuckDuckGo (no key)"], ["brave", "Brave Search"], ["tavily", "Tavily"], ["searxng", "SearXNG (your server)"]].concat(ollama ? [["ollama", "Ollama (sign-in or key)"]] : []);
+        main.innerHTML = '<h2>Web search</h2><p class="sub">One search for Work, ChatDGC and your Pips. DuckDuckGo needs nothing; ' + (ollama ? 'Ollama uses your Ollama sign-in or a key; ' : '') + 'Brave and Tavily need a key; SearXNG is a server you run.</p>'
             + (c.search_settable ? '' : '<p class="note" role="status">Update the DGC CLI to choose the web search here.</p>')
             + card("ChatDGC", field("Search in ChatDGC", "It looks things up whenever an answer depends on facts it could get wrong, and cites what it found. Off: ChatDGC never goes online.", bool("chatdgc_web", c.chatdgc_web !== false)))
-            + card("Search", field("Provider", "", sel("search_provider", [["duckduckgo", "DuckDuckGo (no key)"], ["brave", "Brave Search"], ["tavily", "Tavily"], ["searxng", "SearXNG (your server)"]], provider))
-                + '<div data-search-for="brave tavily">' + field("API key", keyHint, inp("search_api_key", "", "password")) + '</div>'
+            + card("Search", field("Provider", "", sel("search_provider", providers, provider))
+                + '<div data-search-for="brave tavily ollama">' + field("API key", keyHint(provider), inp("search_api_key", "", "password")) + '</div>'
                 + '<div data-search-for="searxng">' + field("Server address", "For example http://127.0.0.1:8888", inp("search_url", c.search_url || "", "url")) + '</div>')
             + '<button type="button" class="save" id="save" title="Save the web search for every workspace on this computer"' + (c.search_settable ? '' : ' disabled') + '>Save</button>';
         const pick = document.getElementById("search_provider");
-        const show = () => main.querySelectorAll("[data-search-for]").forEach((row) => { row.hidden = !row.dataset.searchFor.split(" ").includes(pick.value); });
+        const show = () => {
+            main.querySelectorAll("[data-search-for]").forEach((row) => { row.hidden = !row.dataset.searchFor.split(" ").includes(pick.value); });
+            const hint = main.querySelector('[data-search-for~="ollama"] .hint');
+            if (hint) hint.textContent = keyHint(pick.value);
+        };
         if (pick) { pick.addEventListener("change", show); show(); }
         if (!c.search_settable) main.querySelectorAll(".card input, .card select").forEach((el) => { el.disabled = true; });
     }

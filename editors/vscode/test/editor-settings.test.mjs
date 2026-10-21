@@ -388,6 +388,42 @@ test('Web search: the one search Work, ChatDGC and Pips share, set here; its key
   assert.equal(x.d.querySelector('#search_provider').value,'brave');
 });
 
+test('Web search: Ollama, from a CLI that takes it, with its optional key saved like the others',()=>{
+  const x=setup();
+  x.click('[data-nav=web]');
+  const options=()=>[...x.d.querySelectorAll('#search_provider option')].map(o=>o.value);
+  const shown=()=>[...x.d.querySelectorAll('[data-search-for]')].filter(r=>!r.hidden).map(r=>r.querySelector('input').id);
+  const hint=()=>x.d.querySelector('#search_api_key').closest('.field').querySelector('.hint').textContent;
+  // A CLI whose handshake doesn't list it would refuse the whole save on it.
+  x.message({type:'event',event:{...x.config,search:'duckduckgo',search_url:'',search_api_key_set:false}});
+  assert.deepEqual(options(),['duckduckgo','brave','tavily','searxng'],'not offered to an older CLI');
+  assert.doesNotMatch(x.d.querySelector('#page').textContent,/Ollama/);
+  const offered=['duckduckgo','brave','tavily','searxng','ollama'];
+  x.message({type:'event',event:{...x.config,search:'duckduckgo',search_url:'',search_api_key_set:false,search_providers:offered}});
+  assert.deepEqual(options(),offered);
+  assert.equal(x.d.querySelector('#search_provider option[value=ollama]').textContent,'Ollama (sign-in or key)');
+  assert.match(x.d.querySelector('#page .sub').textContent,/Ollama uses your Ollama sign-in or a key/);
+  const pick=x.d.querySelector('#search_provider');
+  pick.value='ollama';pick.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.deepEqual(shown(),['search_api_key'],'Ollama: its key field');
+  assert.match(hint(),/^Optional\. Signed in to Ollama on this computer\? Nothing to add\./);
+  assert.match(hint(),/ollama\.com → Settings → API keys/,'where to get one');
+  assert.equal(x.d.querySelector('#search_api_key').type,'password');
+  x.input('#search_api_key','ollama-key-123');
+  x.click('#save');
+  const saved=x.sent.filter(m=>m.type==='saveSettings').pop();
+  assert.equal(saved.values.search_provider,'ollama');
+  assert.equal(saved.values.search_api_key,'ollama-key-123','the same field and path as a Brave or Tavily key');
+  x.message({type:'settingsSaved',ok:true});
+  x.message({type:'event',event:{...x.config,search:'ollama',search_url:'',search_api_key_set:true,search_providers:offered}});
+  assert.equal(x.d.querySelector('#search_provider').value,'ollama');
+  assert.equal(x.d.querySelector('#search_api_key').value,'','a saved key is never painted back');
+  assert.match(hint(),/A key is saved, used when Ollama on this computer isn't signed in/);
+  const repainted=x.d.querySelector('#search_provider');
+  repainted.value='brave';repainted.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(hint(),'A key is saved. Leave blank to keep it.','Brave keeps its own words');
+});
+
 test('ChatDGC: a personality and custom instructions, saved for every chat; hidden from a CLI that cannot take them',()=>{
   const x=setup();
   x.click('[data-nav=chatdgc]');

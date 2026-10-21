@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Settings → Web search offers Ollama.** Pick **Ollama (sign-in or key)**: if Ollama on this computer is signed in,
+  there is nothing to add; otherwise paste an ollama.com API key (ollama.com → Settings → API keys) in the key field,
+  which saves it where Brave and Tavily keys go and never shows it back. It is offered only by a DGC CLI that has it;
+  an older CLI would refuse the whole save.
 - **You can see the question card move on, and Submit sends your answers.** When DGC asks several questions at once,
   a pick used to jump to the next question in 150 ms, too fast to notice. Now your pick stays marked for a moment,
   then the next question streams in a word at a time and its options appear one after another. For a moment after the
