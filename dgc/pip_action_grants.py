@@ -220,22 +220,25 @@ def pending_count(registry, now) -> int:
 
 
 def ran_on_their_own(registry, limit=20) -> list:
-    """The newest actions Pips ran on an Always-allow grant: [(action_id, sentence)], newest first."""
+    """The newest actions Pips ran on an Always-allow grant, or sent as their level allows (pip_levels: an app send at
+    any level, a submit at Full access): [(action_id, sentence)], newest first."""
     rows = registry.db.execute(
-        "SELECT a.id,a.status,a.payload,v.definition FROM pip_app_actions a JOIN pips p ON p.id=a.pip_id "
+        "SELECT a.id,a.status,a.payload,v.definition,a.resolved_by FROM pip_app_actions a JOIN pips p ON p.id=a.pip_id "
         "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
-        "WHERE a.resolved_by LIKE 'pip-grant:%' AND a.status IN ('succeeded','unknown') "
+        "WHERE (a.resolved_by LIKE 'pip-grant:%' OR a.resolved_by LIKE 'pip-level:%') AND a.status IN ('succeeded','unknown') "
         "ORDER BY a.resolved_at DESC LIMIT ?", (limit,)).fetchall()
     said = []
     try:
-        rows = list(rows) + [(r[0], "succeeded", json.dumps({"kind": "computer_submit", "summary": json.loads(r[1])}), r[2])
+        rows = list(rows) + [(r[0], "succeeded", json.dumps({"kind": "computer_submit", "summary": json.loads(r[1])}), r[2], r[3])
             for r in registry.db.execute(
-                "SELECT a.id,a.summary,v.definition FROM pip_computer_actions a JOIN pips p ON p.id=a.pip_id "
+                "SELECT a.id,a.summary,v.definition,a.resolved_by FROM pip_computer_actions a JOIN pips p ON p.id=a.pip_id "
                 "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
-                "WHERE a.resolved_by LIKE 'pip-grant:%' AND a.status='sent' ORDER BY a.resolved_at DESC LIMIT ?", (limit,)).fetchall()]
+                "WHERE (a.resolved_by LIKE 'pip-grant:%' OR (a.resolved_by='pip-level:full' "
+                "AND COALESCE(json_extract(a.summary,'$.kind'),'')<>'site')) AND a.status='sent' "
+                "ORDER BY a.resolved_at DESC LIMIT ?", (limit,)).fetchall()]
     except Exception:
         pass                                  # a registry without computers
-    for action_id, status, payload, definition in rows:
+    for action_id, status, payload, definition, resolved_by in rows:
         try:
             p, name = json.loads(payload), json.loads(definition).get("name") or "A Pip"
         except ValueError:
@@ -248,7 +251,9 @@ def ran_on_their_own(registry, limit=20) -> list:
             what = f"added \u201c{p['event'].get('summary', '')}\u201d to your calendar"
         else:
             what = f"ran {p.get('call', {}).get('tool', '')} with {p.get('server', '')}"
-        said.append((action_id, f"{name} {what}" + (" (not confirmed)" if status == "unknown" else "") + ", as you always allow."))
+        how = (", as its level allows (" + {"approve": "Approve for me", "full": "Full access"}.get(resolved_by.split(":", 1)[1], "") + ")."
+               if str(resolved_by).startswith("pip-level:") else ", as you always allow.")
+        said.append((action_id, f"{name} {what}" + (" (not confirmed)" if status == "unknown" else "") + how))
     return said
 
 

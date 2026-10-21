@@ -850,10 +850,11 @@ class BrowserSession:
                 return "loaded"
         return "loaded (network still busy)"
 
-    def evaluate_json(self, expression: str):
+    def evaluate_json(self, expression: str, *, timeout: float | None = None):
         """Run a FIXED first-party expression.  Never reachable with model-supplied source."""
         result = self.command("Runtime.evaluate", {
-            "expression": expression, "returnByValue": True, "awaitPromise": True})
+            "expression": expression, "returnByValue": True, "awaitPromise": True},
+            **({"timeout": timeout} if timeout is not None else {}))
         if result.get("exceptionDetails"):
             detail = result["exceptionDetails"].get("text", "evaluation failed")
             raise BrowserError(f"page evaluation failed: {detail}")

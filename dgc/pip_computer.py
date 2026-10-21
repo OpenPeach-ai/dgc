@@ -21,6 +21,11 @@ Safety rules that hold for every computer:
 - A Pip that can see (pip_eyes) never sees a password or a payment-card field: they are blacked out
   in every screenshot before it is sent to the model. Clicking by position holds a submit exactly as
   clicking a ref does.
+- How much it asks (pip_levels, Pips API 58): at Approve for me a routine submit (a search, adding to a cart, a draft)
+  and a new site's first visit go through at once; at Full access every submit but a payment does. Each is kept as a
+  computer action already sent by ``pip-level:<level>`` and named in the step's timeline row. A payment, careful
+  mode's check of what it read from the user's apps, and the safety floor (a Terminal command that could wipe its
+  Files) ask at every level.
 - Saved logins (pip_logins, Pips API 56): ``sign_in`` has DGC type a login the user saved into the page
   (pip_login_fill) and send that one sign-in; the Pip hears what was filled, never a value. With no saved login,
   its chat shows the user a card to save one. Every answer the computer gives the Pip is scrubbed of saved
@@ -50,7 +55,12 @@ ACTION_TTL_SECONDS = 24 * 3600
 IDLE_SECONDS = 15 * 60
 USER_WRITE_SECONDS = 3.0             # a submit this soon after the user's own input is theirs
 CAREFUL_REF = "careful:"               # a careful-mode hold (pip_careful): nothing paused in the browser
-CAREFUL_KINDS = ("site", "text")
+CAREFUL_KINDS = ("site", "text", "floor")
+LEVEL_REF = "level:"                   # a step its level approved before anything was paused (pip_levels)
+# The safety floor (pip_levels.floor): a Terminal command that could wipe its Files waits at every level.
+FLOOR_HELD = ("Held: that command {what}, so DGC asks the user first, whatever their level. DGC shows them an Allow card "
+              "below your reply. Stop now and tell the user in one sentence what you wanted to run and why. If they allow "
+              "it, run exactly the same command again.")
 SITE_HELD = ("Held: that site is new for this user, so DGC asks them first (careful mode). Stop now and tell the "
              "user in one sentence which site you want to open and why. Once they allow it, open it again and carry on.")
 # The same, naming the site the card below the reply asks about: a Pip whose first site was held went on to search,
@@ -76,6 +86,7 @@ def _preview(text, limit=200) -> str:
     flat = " ".join(str(text or "").split())
     return flat if len(flat) <= limit else flat[:limit - 1] + "…"
 MAX_FRAMES_PER_RUN = 200
+PAGE_SAID_SECONDS = 2.0
 MAX_FRAME_BYTES = 90 * 1024          # base64 still fits a 128 KiB Pips reply
 MAX_VIEW_FRAME_BYTES = 700 * 1024    # the live screen: one reply, well inside the 4 MiB frame
 MAX_TEXT = 12000
@@ -393,6 +404,11 @@ class Host:
         from .pip_careful import taint_for
         self.taint = taint_for(state_directory, pip_id)
         self.careful, self.said, self.sites = False, "", set()
+        # How much it asks (pip_levels, Pips API 58): the run's level, whether anybody is watching, what the last step
+        # pressed (its words, for routine or not), a file from the user's chat it just put in a page, and what its level
+        # approved in this step (timeline rows still to picture, lines for the Pip).
+        self.level, self.unattended, self.target, self.upload_from_chat = "ask", False, "", None
+        self._level_pending = []
         # Saved logins (pip_logins): every answer to the Pip is scrubbed of saved secrets and of what sign_in typed,
         # and a page a typed secret may still be on holds the steps that could copy it (secret_hold).
         from . import pip_logins
@@ -526,12 +542,16 @@ class Host:
 
     # -- a run's session ---------------------------------------------------------------------
 
-    def begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=()) -> None:
+    def begin(self, run_id: str, frames_dir: Path, *, careful: bool = False, said: str = "", sites=(),
+              level: str = "ask", unattended: bool = False) -> None:
+        from .pip_levels import LEVELS
         with self.lock:
             self.run_id, self.frames_dir, self.frames, self.waiting = run_id, Path(frames_dir), 0, []
             self.shot = None
             self.frames_dir.mkdir(parents=True, exist_ok=True)
             self.careful, self.said, self.sites = bool(careful), str(said or ""), set(sites)
+            self.level = level if level in LEVELS else "ask"
+            self.unattended, self.target, self.upload_from_chat, self._level_pending = bool(unattended), "", None, []
             self.browser.site_gate = self._site_ok if self.careful else None
             # The run's steps are numbered for its report and its timeline ("Recorded as step 3"); what changed is told
             # against the page the Pip last saw (seen); a page's confirm or prompt and its file picker wait for the Pip.
@@ -548,6 +568,7 @@ class Host:
             self.last_run_id = self.run_id          # the chat turn a payment the user then makes on its screen follows
             self.run_id = None
             self.careful, self.said = False, ""
+            self.level, self.unattended, self._level_pending = "ask", False, []
             self.browser.site_gate = None
             # A question the page asked that the Pip left unanswered is cancelled, so the user's page isn't stuck.
             self.browser.hold_dialogs = False
@@ -618,15 +639,13 @@ class Host:
                 self._back_from_drop()
                 self.card_note = CARD_EMPTY
                 continue
+            approval = Host._level_approves(self, held)
+            if approval is not None:
+                # Its level lets this through (pip_levels): sent now, kept on record, and the run goes on.
+                Host._release_by_level(self, held, approval)
+                continue
             frame = self._frame("Waiting for your approval")
-            summary = {**held.summary(), "page": self.browser.current_url[:500]}
-            scrub = getattr(getattr(self, "secrets", None), "scrub", None)
-            if scrub is not None:
-                # A sign-in sent somewhere its login doesn't cover (another site) is held like any submit: its card
-                # never shows a saved password, even in a field whose name doesn't say so.
-                summary["fields"] = [{**f, "value": "\u2022\u2022\u2022" if scrub(f["value"]) != f["value"] else f["value"]}
-                                     for f in summary["fields"]]
-                summary["page"] = scrub(summary["page"])
+            summary = Host._held_summary(self, held)
             from datetime import timedelta
             from .pip_schedules import _instant, timestamp
             action_id = identifier("compact")
@@ -653,6 +672,101 @@ class Host:
             made.append(action_id)
             self.waiting.append(action_id)
         return made
+
+    def _held_summary(self, held) -> dict:
+        summary = {**held.summary(), "page": self.browser.current_url[:500]}
+        scrub = getattr(getattr(self, "secrets", None), "scrub", None)
+        if scrub is not None:
+            # A sign-in sent somewhere its login doesn't cover (another site) is held like any submit: its card
+            # never shows a saved password, even in a field whose name doesn't say so.
+            summary["fields"] = [{**f, "value": "\u2022\u2022\u2022" if scrub(f["value"]) != f["value"] else f["value"]}
+                                 for f in summary["fields"]]
+            summary["page"] = scrub(summary["page"])
+        return summary
+
+    # -- how much it asks (pip_levels, Pips API 58) --------------------------------------------
+
+    def _level_approves(self, held) -> dict | None:
+        """What its level lets through of one held request, or None (it waits for the user as at Ask). Only in a run,
+        only the Pip's own steps; a payment never."""
+        from . import pip_levels
+        level = getattr(self, "level", "ask")
+        if self.run_id is None or level not in (pip_levels.APPROVE, pip_levels.FULL):
+            return None
+        if held.request_id not in self.browser.held:
+            return None
+        parts = urlsplit(held.url)
+        if getattr(held, "site", False):
+            from .pip_careful import site_of
+            site = site_of(parts.hostname or "")
+            return {"what": pip_levels.site_words(site), "site": site, "verdict": "routine"}
+        if getattr(held, "payment", False):
+            return None
+        upload = getattr(self, "upload_from_chat", None)
+        upload_name = upload[0] if upload and time.monotonic() - upload[1] <= 300 else ""
+        cues = {"method": held.method, "host": parts.hostname or "", "path": (parts.path or "/") + (("?" + parts.query) if parts.query else ""),
+                "fields": [name for name, _ in held.fields], "payment": False, "target": getattr(self, "target", "") or "",
+                "upload": upload_name}
+        if not cues["target"]:
+            form_cues = getattr(self.browser, "form_cues", None)
+            cues["buttons"] = (form_cues(held.url) or {}).get("buttons", []) if form_cues else []
+        found = pip_levels.decide_write(level, cues)
+        if found is not None and upload_name:
+            self.upload_from_chat = None
+        return found
+
+    def _release_by_level(self, held, approval) -> None:
+        if approval.get("site"):
+            self.sites.add(approval["site"])
+        summary = Host._held_summary(self, held)
+        if approval.get("site"):
+            summary.update(kind="site", site=approval["site"])
+        self.browser.release(held.request_id)
+        self.browser.pump(1.5)
+        Host._level_record(self, summary, approval["what"], held.request_id)
+
+    def _level_record(self, summary, what, ref) -> str:
+        """Keep one thing its level approved: a computer action already sent by ``pip-level:<level>``, its words for
+        the step's timeline row once the step is done (_stepped), and the line its step's answer adds."""
+        from datetime import timedelta
+        from . import pip_levels
+        from .pip_schedules import _instant, timestamp
+        from .workspace_registry import WorkspaceRegistry, identifier
+        level, unattended = self.level, bool(getattr(self, "unattended", False))
+        summary = {"more_fields": 0, "body_bytes": 0, "fields": [], "page": self.browser.current_url[:500], **summary,
+                   "what": what[:200], "level": level, "unattended": unattended}
+        action_id, now = identifier("compact"), _now()
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                with registry.transaction():
+                    registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'sent',?,?,?,?,NULL)",
+                        (action_id, self.pip_id, self.workspace_id, self.run_id, self.id, str(ref)[:200],
+                         json.dumps(summary, ensure_ascii=False), _digest(summary), None, now,
+                         timestamp(_instant(now) + timedelta(seconds=ACTION_TTL_SECONDS)), now, "pip-level:" + level))
+                    registry.event(self.workspace_id, "pip_level_approved", pip_id=self.pip_id, run_id=self.run_id,
+                                   payload={"action_id": action_id, "level": level, "host": summary.get("host", ""),
+                                            "kind": summary.get("kind") or "submit", "unattended": unattended})
+        except Exception:                                  # noqa: BLE001 - it went through; the record is best effort
+            pass
+        self._level_pending.append((action_id, pip_levels.timeline_label(level, what, unattended), pip_levels.told(level, what)))
+        return action_id
+
+    def _level_take(self) -> list:
+        """What its level approved since the last step: [(action_id, timeline words, the Pip's line)]."""
+        pending, self._level_pending = list(getattr(self, "_level_pending", []) or []), []
+        return pending
+
+    def _level_frame(self, approved, frame) -> None:
+        """The step's picture is the record's too."""
+        from .workspace_registry import WorkspaceRegistry
+        if not approved or not frame:
+            return
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry, registry.transaction():
+                for action_id, _, _ in approved:
+                    registry.db.execute("UPDATE pip_computer_actions SET frame=? WHERE id=? AND frame IS NULL", (frame, action_id))
+        except Exception:                                  # noqa: BLE001 - the row stands without its picture
+            pass
 
     def _read(self) -> str:
         from .tools import _UNTRUSTED_PAGE
@@ -813,9 +927,14 @@ class Host:
     # -- eyes and a cursor ---------------------------------------------------------------------
 
     def _page_said(self) -> tuple[str, str]:
+        from .browser import BrowserError
         try:
-            url, title = json.loads(self.browser.evaluate_json("JSON.stringify([location.href, document.title])"))
-        except (TypeError, ValueError):
+            # A page whose form submit is held answers no script until it is decided: 30 s for each picture of a held
+            # form, twice a hold (measured 2026-10-21). A short wait, then the address the browser last knew.
+            expression = "JSON.stringify([location.href, document.title])"
+            url, title = json.loads(self.browser.evaluate_json(expression, timeout=PAGE_SAID_SECONDS)
+                                    if getattr(self.browser, "held", None) else self.browser.evaluate_json(expression))
+        except (TypeError, ValueError, BrowserError):
             return self.browser.current_url, ""
         self.browser.current_url = str(url or self.browser.current_url)
         return str(url)[:500], " ".join(str(title).split())[:200]
@@ -863,6 +982,7 @@ class Host:
         before = _step_start(self)
         x, y = self._css_point(args.get("x"), args.get("y"), shot)
         what = self.browser.element_at(x, y)
+        self.target = str(what or "") if op in ("click_at", "double_click_at") else ""
         shown = f"{args.get('x'):g}, {args.get('y'):g}"
         pointer = {"kind": op, "x": round(x, 1), "y": round(y, 1)}
         if op == "drag":
@@ -891,12 +1011,14 @@ class Host:
         if asking:
             self._mark = getattr(self.browser, "seq", 0)
             return {"text": asking.replace("\n", "\n" + said + " ", 1)}
-        step = _step_frame(self, said[:190], pointer=pointer)
+        step, approved = _stepped(self, said[:190], pointer=pointer)
         if held:
-            return {"text": self._held_text(held) + _recorded(step)}
+            return {"text": "\n".join([*approved, self._held_text(held)]) + _recorded(step)}
         note = _take_card_note(self)
         if note:
             return {"text": note + _recorded(step)}
+        if approved:
+            said = said + " " + " ".join(approved)
         looked = self._look(said, mark=None if opened else pointer)
         # What changed beyond the picture: a tab it opened, a download, an alert; and what the page reported, a robot
         # check included (a read stops the Pip at one; a picture alone didn't say).
@@ -951,17 +1073,19 @@ class Host:
         with os.fdopen(fd, "wb") as handle:
             handle.write(raw)
         before = _step_start(self)
+        # A file the user sent in its chat (Files/From chat): sending it where they asked is routine at Approve for me.
+        self.upload_from_chat = (parts[-1][:120], time.monotonic()) if parts[0] == "From chat" else None
         self.browser.set_files([f"/home/pip/{UPLOADS}/{token}/{parts[-1]}"], ref=ref, point=point)
         if point is not None:
             self._show_pointer({"kind": "click_at", "x": round(point[0], 1), "y": round(point[1], 1)})
         self.browser.pump(1.5)
         held = self._record_held()
-        step = _step_frame(self, f"Chose Files/{'/'.join(parts)} for the page")
+        step, approved = _stepped(self, f"Chose Files/{'/'.join(parts)} for the page")
         if held:
-            return self._held_text(held) + _recorded(step)
+            return "\n".join([*approved, self._held_text(held)]) + _recorded(step)
         return (f"Put Files/{'/'.join(parts)} in the page's file field. Choosing a file sends nothing; when the page "
-                "uploads it, that waits for the user's approval like any submit.\n"
-                + _answer(self, before, self._read(), op="upload") + _recorded(step))
+                "uploads it, that waits for the user's approval like any submit, unless their level lets it through.\n"
+                + _answer(self, before, self._read(), notes=approved, op="upload") + _recorded(step))
 
     def _kind(self, action_id) -> str:
         from .workspace_registry import WorkspaceRegistry
@@ -986,6 +1110,14 @@ class Host:
                                                    "fields": [{"name": "address", "value": _preview(url)}]}, url, carried)
             site = site_of(parts.hostname or "")
             if not allowed(parts.hostname or "", self.sites):
+                if getattr(self, "level", "ask") in ("approve", "full"):
+                    # Its level: a new site's first visit is routine (pip_levels). Kept on record, and it opens.
+                    from .pip_levels import site_words
+                    self.sites.add(site)
+                    Host._level_record(self, {"method": "GET", "host": parts.hostname or "", "path": (parts.path or "/")[:300],
+                                              "fields": [], "kind": "site", "site": site, "shown": shown_host(parts.hostname or ""),
+                                              "page": url[:500]}, site_words(site), LEVEL_REF + site)
+                    return None
                 self._careful_hold("site", {"method": "GET", "host": parts.hostname or "", "path": (parts.path or "/")[:300],
                                             "fields": [], "site": site, "shown": shown_host(parts.hostname or ""), "page": url[:500]})
                 return SITE_HELD_NAMED.format(site=site)
@@ -1032,6 +1164,8 @@ class Host:
         self.waiting.append(action_id)
         if kind == "site":
             return SITE_HELD
+        if kind == "floor":
+            return FLOOR_HELD.format(what=str(summary.get("floor") or "could delete everything in its Files").replace("its ", "your "))
         return ("Held: that would carry something you read from the user's apps onto "
                 + (summary["host"] or "a page") + ", so DGC asks them first (careful mode). Stop now and tell the user in one "
                 "sentence what you wanted to put there and why. Once they allow it, do it again and carry on.")
@@ -1052,6 +1186,10 @@ class Host:
                 return f"Files/{listing['path']}:\n" + ("\n".join(rows) if rows else "(empty)")
             if op == "open_file":
                 return desk.read_for_pip(files, args.get("path"))
+            if getattr(self, "run_id", None) is not None:
+                held = Host._floor(self, str(args.get("command") or ""))
+                if held:
+                    return held
             careful = getattr(self, "careful", False) and self.run_id is not None
             if careful:
                 command = str(args.get("command") or "")
@@ -1068,6 +1206,24 @@ class Host:
         except Exception as error:                         # noqa: BLE001 - never into the worker
             return f"error: the computer failed ({type(error).__name__})"
 
+    def _floor(self, command: str) -> str | None:
+        """The safety floor (pip_levels.floor), at every level: a command that could wipe its Files waits for the
+        user's Allow, which lets exactly that command run once."""
+        from . import pip_levels
+        from .pip_careful import _digest as text_digest
+        found = pip_levels.floor(command)
+        if not found:
+            return None
+        from .workspace_registry import WorkspaceRegistry
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                if pip_levels.take_floor(registry, self.pip_id, text_digest(command)):
+                    return None
+        except (OSError, RegistryError, sqlite3.Error):
+            pass
+        return self._careful_hold("floor", {"method": "RUN", "host": "Terminal", "path": "/",
+                                            "fields": [{"name": "command", "value": _preview(command)}], "floor": found}, command)
+
     # -- the whole desktop ---------------------------------------------------------------------
 
     def _desktop(self, op: str, args: dict) -> dict:
@@ -1081,6 +1237,10 @@ class Host:
             return {"text": "error: this computer can't show its desktop here; use the browser's steps."}
         if op == "desktop_look":
             return self._desk_look()
+        if op == "desktop_type" and getattr(self, "run_id", None) is not None:
+            held = Host._floor(self, str(args.get("text") or ""))     # typed into its Terminal's window, it would run
+            if held:
+                return {"text": held}
         pointer, said = None, ""
         try:
             if op == "windows":
@@ -1133,9 +1293,14 @@ class Host:
         else:
             time.sleep(0.6)
         number = (getattr(self, "step", 0) or 0) + 1
-        step = number if self._desk_frame(f"Step {number} \u00b7 {said}"[:200], pointer) else None
+        approved = Host._level_take(self) if hasattr(self, "_level_pending") else []
+        words = " ".join(said.split())[:60] + "".join(" \u00b7 " + w for _, w, _ in approved) if approved else said
+        step = number if self._desk_frame(f"Step {number} \u00b7 {words}"[:200], pointer) else None
         if step:
             self.step = step
+            Host._level_frame(self, approved, f"{self.frames:04d}.jpg")
+        if approved:
+            said = said + " " + " ".join(line for _, _, line in approved)
         if held:
             return {"text": self._held_text(held) + _recorded(step)}
         note = _take_card_note(self)
@@ -1403,6 +1568,8 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
         raise RegistryError("save_login", "Save the login on its card (Save login…), or choose Not now.")
     if kind == "text":
         raise RegistryError("asks_every_time", "Carrying what it read from your apps onto a website asks every time.")
+    if kind == "floor":
+        raise RegistryError("asks_every_time", "A command that could delete everything in its Files asks every time.")
     with registry.transaction():
         _decide(registry, action_id, expected_digest, True, actor)
         grant = add_computer_grant(registry, action_id, actor)
@@ -1484,6 +1651,9 @@ def tick(registry, config) -> dict:
         if careful and summary.get("kind") == "text" and row["status"] == "approved" and summary.get("text_digest"):
             from .pip_careful import taint_for
             taint_for(registry.directory, row["pip_id"]).allow_digest(summary["text_digest"])
+        if careful and summary.get("kind") == "floor" and row["status"] == "approved" and summary.get("text_digest"):
+            from .pip_levels import allow_floor
+            allow_floor(registry, row["pip_id"], summary["text_digest"])      # that exact command, once
         if summary.get("kind") == "site" and row["status"] == "approved" and outcome in ("sent", "lost"):
             # Allowed for good, also when the page it held is gone: the Pip opens it again.
             from .pip_careful import add_site
@@ -1611,9 +1781,13 @@ def status(registry, pip_id: str) -> dict:
     pending = registry.db.execute("SELECT count(*) FROM pip_computer_actions WHERE pip_id=? AND status='pending'",
                                   (pip_id,)).fetchone()[0]
     waiting = needs_you(registry, pip_id)
+    # What waits for the user first: a run of things its level approved (pip_levels) never pushes a card out.
+    waiting_rows = [projection(r) for r in registry.db.execute(
+        "SELECT * FROM pip_computer_actions WHERE pip_id=? AND status='pending' ORDER BY created_at DESC LIMIT 5", (pip_id,))]
+    others = [a for a in list_actions(registry, pip_id, limit=5) if a["status"] != "pending"]
     return {"pip_id": pip_id, "granted": job.get("computer_plan") is not None,
             "available": machine["available"], "reason": machine["reason"], "pending": pending,
-            "actions": list_actions(registry, pip_id, limit=5),
+            "actions": (waiting_rows + others)[:5],
             **({"needs_you": {"host": waiting["host"], "at": waiting.get("at", "")}} if waiting else {})}
 
 
@@ -2172,6 +2346,7 @@ def _recover_tab(host) -> str:
 
 def _step_start(host) -> dict:
     browser = host.browser
+    host.target = ""                     # what this step presses, in the page's words (pip_levels.classify)
     return {"seen": getattr(host, "seen", None), "seq": getattr(browser, "seq", 0),
             "session": getattr(getattr(browser, "_ws", None), "session_id", None)}
 
@@ -2190,6 +2365,18 @@ def _step_frame(host, label: str, **kwargs) -> int | None:
         host.step = number
         return number
     return None
+
+
+def _stepped(host, label: str, **kwargs) -> tuple[int | None, list[str]]:
+    """The step's picture (_step_frame), its label saying what its level approved in it ("Step 3 · Clicked “Add to
+    cart” · Approved by its level: Approve for me · Added to cart on shop.example"), and the lines the Pip is told."""
+    approved = Host._level_take(host) if hasattr(host, "_level_pending") else []
+    if approved:
+        label = " ".join(str(label).split())[:60] + "".join(" \u00b7 " + words for _, words, _ in approved)
+    step = _step_frame(host, label, **kwargs)
+    if step and approved:
+        Host._level_frame(host, approved, f"{host.frames:04d}.jpg")
+    return step, [line for _, _, line in approved]
 
 
 def _recorded(step: int | None) -> str:
@@ -2308,7 +2495,9 @@ def _do_step(host, op: str, args: dict) -> tuple[str, list]:
         browser.navigate(url)
         return f"Opened {url[:150]}", []
     if op == "click":
-        return f"Clicked {named(browser.click(ref), ref)}", []
+        pressed = browser.click(ref)
+        host.target = str(pressed or "")
+        return f"Clicked {named(pressed, ref)}", []
     if op == "type":
         text, submit = str(args.get("text", "")), args.get("submit") is True
         if ref:
@@ -2325,7 +2514,9 @@ def _do_step(host, op: str, args: dict) -> tuple[str, list]:
         browser.press(key)
         return f"Pressed {key[:32]}", []
     if op == "choose":
-        return f"Chose {quoted(browser.select_option(ref, str(args.get('value', ''))), 60)}", []
+        chosen = browser.select_option(ref, str(args.get('value', '')))
+        host.target = str(chosen or "")
+        return f"Chose {quoted(chosen, 60)}", []
     if op == "back":
         browser.evaluate_json("(() => { history.back(); return true; })()")
         return "Went back", []
@@ -2337,6 +2528,7 @@ def _do_step(host, op: str, args: dict) -> tuple[str, list]:
         return "Reloaded the page", []
     if op in ("check", "uncheck"):
         label, already = browser.set_checked(ref, op == "check")
+        host.target = str(label or "")
         return (f"{'Checked' if op == 'check' else 'Unchecked'} {named(label, ref)}",
                 [f"It was already {'checked' if op == 'check' else 'unchecked'}."] if already else [])
     if op == "hover":
@@ -2353,6 +2545,7 @@ def _do_step(host, op: str, args: dict) -> tuple[str, list]:
             raise ValueError("say accept: true (OK) or false (Cancel)")
         text = args.get("text")
         asked = browser.answer_dialog(accept, None if text is None else str(text))
+        host.target = str(asked.get("message") or "") if accept else ""     # "Delete this item?" says what OK does
         return f"Answered the page's {asked['type']}: {'OK' if accept else 'Cancel'}", []
     if op == "tabs":
         action = args.get("action")
@@ -2387,12 +2580,13 @@ def _after_step(host, op: str, before: dict, label: str, notes) -> str:
         # A confirm or prompt: nothing on that page answers (or can be pictured) until the Pip answers it.
         host._mark = getattr(browser, "seq", 0)
         return asking
-    step = _step_frame(host, label)
+    step, approved = _stepped(host, label)
     if held:
-        return host._held_text(held) + _recorded(step)
+        return "\n".join([*approved, host._held_text(held)]) + _recorded(step)
     note = _take_card_note(host)
     if note:
         return note + _recorded(step)
+    notes = [*approved, *notes]
     from .browser import BrowserError
     try:
         read = host._read()

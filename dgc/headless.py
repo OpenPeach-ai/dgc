@@ -275,7 +275,16 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # updated_at}) and set_pip_working_notes {pip_id, text, expected_revision} is your edit. list_pip_daily_log {pip_id,
 # before?, limit?} reads what it did each day ({days: [{day, lines, more}], next_before}), written by DGC from its runs
 # and never given to a run. Its chat is looked back over for your one memory (pip_memory_review), as ChatDGC's is.
-PIPS_API_VERSION = 57
+# API 58: how much a Personal Pip asks (pip_levels). get_pip_level {pip_id} reads it ({pip_id, level, default, levels:
+# [{level, name, says}], on_its_own: [{at, what, level, unattended, kind}]}) and set_pip_level {pip_id, level} sets it
+# (local only): "ask" (the default, as before), "approve" (Approve for me: DGC approves routine steps itself and asks for
+# consequential ones) or "full" (Full access: no asking for sites, submits or app sends, except payments). What a level
+# approved is a computer action already "sent" by "pip-level:<level>" (its summary has `what`, `level`, `unattended`)
+# or an app action resolved by it. A payment, the card rule, saved-login scoping and careful mode's check of what it read
+# from your apps hold at every level; so does the safety floor: a Terminal command that could wipe its Files is a
+# computer action of kind "floor" (Allow lets exactly that command run once). Sites in documents you attach count as
+# named by you.
+PIPS_API_VERSION = 58
 
 
 def _pips_platform_supported() -> bool:

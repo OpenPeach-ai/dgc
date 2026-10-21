@@ -4,8 +4,10 @@ out to a website (OpenAI's "safe URL" and Google's agent rules, for Pips).
 On by default for every Pip with a computer; only you turn it off, on its page. While it is on:
 
 - **New sites ask.** The first time the Pip's browser goes to a site (its registrable domain, like
-  ``amazon.in``), its chat shows "Let Ava visit amazon.in?". Sites you named in your own messages, the
-  computer's home page, and sites you opened on its screen yourself never ask. Allow adds the site for good.
+  ``amazon.in``), its chat shows "Let Ava visit amazon.in?". Sites you named in your own messages or wrote out in a
+  document you attached to one (Pips API 58: its text read by DGC, never the model), the computer's home page, and
+  sites you opened on its screen yourself never ask. Allow adds the site for good. At Approve for me and Full access
+  (pip_levels) a new site's first visit is routine: it opens, and is kept on record.
 - **What it read from your apps is yours to send.** Text the Pip types into a page, an option it picks, an
   address it opens and a Terminal command are checked against what it read from your apps (emails, events,
   plugin answers) in the last day. Carrying any of it out is held for your Allow, like a form it submits.
@@ -184,9 +186,64 @@ def user_sites(registry, pip_id) -> set[str]:
     return found
 
 
+# A site in a document you attached (Pips API 58): its address, written out (https://… or www.…), in text DGC itself
+# read from the file. A bare "bill.pdf" or "J.Smith" in a document is not a site.
+DOC_URL = re.compile(r"(?:https?://|(?<![a-z0-9.-])www\.)((?:[a-z0-9-]+\.)+[a-z]{2,24})(?=[/:?#\s)\]>,.;!'\"]|$)", re.I)
+FILE_SITES = "computer_file_sites:"     # metadata: the sites one kept file names, by its digest: each file read once
+MAX_FILE_SITES = 50
+
+
+def file_sites(registry, pip_id) -> set[str]:
+    """Sites named in the documents you attached to your own messages to this Pip: read by DGC from the kept file
+    (a PDF's text, a document's, a text file), never the model's say-so. Photos are left out: DGC has no way of its own
+    to read the text in a picture (dgc.photos only converts and shrinks them)."""
+    from contextlib import nullcontext
+    from .pip_chat import DGC_KEYS, file_directory, read_file
+    found = set()
+    try:
+        rows = registry.db.execute(
+            "SELECT f.name,f.sha256,m.request_key FROM pip_chat_files f JOIN pip_chat_messages m ON m.id=f.message_id "
+            "WHERE m.pip_id=? AND m.role='user' ORDER BY m.seq DESC, f.idx LIMIT 60", (pip_id,)).fetchall()
+    except Exception:                       # noqa: BLE001 - a registry from before files
+        return found
+    for row in rows:
+        if str(row["request_key"] or "").startswith(DGC_KEYS):
+            continue
+        key = FILE_SITES + row["sha256"]
+        cached = registry.db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
+        if cached is not None:
+            try:
+                found |= {str(x) for x in json.loads(cached["value"]) if isinstance(x, str)}
+            except ValueError:
+                pass
+            continue
+        try:
+            raw = read_file(file_directory(registry.directory, pip_id) / row["sha256"], {"sha256": row["sha256"]})
+            text = _file_text(raw, row["name"])
+        except Exception:                   # noqa: BLE001 - a file DGC can't read names no site
+            text = ""
+        sites = sorted({site_of(m.group(1).lower()) for m in DOC_URL.finditer(text)})[:MAX_FILE_SITES]
+        try:
+            with nullcontext() if registry.db.in_transaction else registry.transaction():
+                registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (key, json.dumps(sites)))
+        except Exception:                   # noqa: BLE001 - read again next time
+            pass
+        found |= set(sites)
+    return found
+
+
+def _file_text(raw: bytes, name: str) -> str:
+    from .pip_chat import TEXT_FILE_EXTENSIONS
+    if Path(str(name)).suffix.lower() in TEXT_FILE_EXTENSIONS:
+        return raw[:2_000_000].decode("utf-8", "replace")
+    from . import documents
+    return documents.extract_text(raw, str(name), max_chars=200_000).text
+
+
 def known(registry, pip_id) -> set[str]:
-    """The sites the Pip may visit: the ones you allowed and the ones you named (see `allowed` for the home page)."""
-    return {s["site"] for s in _sites(registry, pip_id)} | user_sites(registry, pip_id)
+    """The sites the Pip may visit: the ones you allowed, the ones you named in your messages, and the ones in the
+    documents you attached to them (see `allowed` for the home page)."""
+    return {s["site"] for s in _sites(registry, pip_id)} | user_sites(registry, pip_id) | file_sites(registry, pip_id)
 
 
 # --------------------------------------------------------------------------- what it read from your apps

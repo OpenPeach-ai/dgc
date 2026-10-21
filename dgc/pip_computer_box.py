@@ -121,6 +121,34 @@ _COMPOSE_JS = r"""async function (b64, boxes, width, height, perCss, quality, ma
   return {data: btoa(text), width: width, height: height};
 }"""
 # What is at a point, in a few words: its role and its name, never what a field holds.
+# The words a form gives its own submit buttons (Pips API 58, pip_levels): of the form a held request goes to, and of
+# the form holding what has focus (Enter in its field sends it). Read in DGC's own isolated world, never a value typed.
+_FORM_CUES_JS = r"""function (want) {
+  const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const label = (el) => clean([el.innerText || el.value || '', el.getAttribute('aria-label') || '', el.getAttribute('title') || ''].join(' '));
+  let target = null;
+  try { target = new URL(want, location.href); } catch (e) { target = null; }
+  const forms = [];
+  for (const f of document.forms) {
+    try {
+      const a = new URL(f.getAttribute('action') || location.href, location.href);
+      if (target && a.origin === target.origin && a.pathname === target.pathname) forms.push(f);
+    } catch (e) { /* a form without a readable action */ }
+  }
+  const active = document.activeElement;
+  const own = active && (active.form || (active.closest && active.closest('form')));
+  if (own && !forms.includes(own)) forms.unshift(own);
+  const buttons = [];
+  for (const f of forms.slice(0, 3)) {
+    for (const b of f.querySelectorAll('button, input[type=submit], input[type=image]')) {
+      const type = (b.getAttribute('type') || 'submit').toLowerCase();
+      if (type === 'submit' || type === 'image') buttons.push(label(b));
+    }
+  }
+  return {buttons: buttons.filter(Boolean).slice(0, 6), title: clean(document.title)};
+}"""
+
+
 _ELEMENT_AT_JS = r"""function (x, y) {
   let doc = document, el = document.elementFromPoint(x, y), ox = 0, oy = 0;
   for (let depth = 0; el && /^(IFRAME|FRAME)$/.test(el.tagName) && depth < 4; depth++) {
@@ -1378,7 +1406,9 @@ class BoxedBrowser(BrowserSession):
         if self._ws is None:
             return
         try:
-            self.command("Page.setInterceptFileChooserDialog", {"enabled": on})
+            # Short: a page whose form submit is held answers nothing until it is decided, and a run ending on a hold
+            # waited 30 s here (measured 2026-10-21).
+            self.command("Page.setInterceptFileChooserDialog", {"enabled": on}, timeout=5.0)
         except BrowserError:
             pass
 
@@ -1851,6 +1881,18 @@ class BoxedBrowser(BrowserSession):
         except (BrowserError, socket.timeout, OSError):
             return ""
         return str(said or "")[:120]
+
+    def form_cues(self, url: str) -> dict:
+        """The submit buttons' words of the form a held request goes to (pip_levels.classify), or {} when the page
+        won't say. Never what a field holds."""
+        try:
+            said = self._in_world(self._isolated(), _FORM_CUES_JS, str(url or "")[:2000], timeout=5)
+        except (BrowserError, socket.timeout, OSError):
+            return {}
+        if not isinstance(said, dict):
+            return {}
+        buttons = [str(b)[:80] for b in said.get("buttons") or [] if isinstance(b, str)][:6]
+        return {"buttons": buttons, "title": str(said.get("title") or "")[:120]}
 
     def page_target(self) -> str | None:
         """The target id of DGC's own tab (the one the Pip and the user share)."""

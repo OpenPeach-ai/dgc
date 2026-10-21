@@ -667,6 +667,11 @@ def continue_after_computer(store, pip_id, action_id, summary, config):
                  else "Open its sign-in page if it isn't open. ")
         text = COMPUTER_LOGIN_SAVED.format(site=str(summary.get("site") or summary.get("host") or "the site")[:255], where=where)
         return send(store, pip_id, text, key, "local-computer", config, _intro=True)
+    if summary.get("kind") == "floor":
+        # The safety floor held a Terminal command (pip_levels.floor): the Pip runs exactly that, once.
+        command = str((summary.get("fields") or [{}])[0].get("value", ""))[:300]
+        return send(store, pip_id, COMPUTER_ALLOWED.format(what=f"you to run that command in your Terminal once: {command}"),
+                    key, "local-computer", config, _intro=True)
     if summary.get("kind") in ("site", "text"):
         # Careful mode held it before anything happened: the Pip does it now, once.
         # The page it wanted, not just the site: told "visit pip-test.example", a Pip opened that bare name instead of
@@ -686,8 +691,9 @@ def continue_after_rejection(store, pip_id, action_id, summary, config):
     if summary.get("kind") == "login":
         text = COMPUTER_LOGIN_NOT_NOW.format(site=str(summary.get("site") or summary.get("host") or "that site")[:255])
         return send(store, pip_id, text, key, "local-computer", config, _intro=True)
-    if summary.get("kind") in ("site", "text"):
+    if summary.get("kind") in ("site", "text", "floor"):
         what = (f"you to visit {summary.get('site') or summary.get('host', 'that site')}" if summary["kind"] == "site"
+                else "you to run that command in your Terminal" if summary["kind"] == "floor"
                 else f"you to put that on {summary.get('host') or 'the page'}")
         return send(store, pip_id, COMPUTER_NOT_ALLOWED.format(what=what[:400]), key, "local-computer", config, _intro=True)
     what = (("a payment: " if summary.get("payment") is True else "")

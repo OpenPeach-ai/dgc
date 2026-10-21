@@ -54,14 +54,22 @@ def _actor(actor):
 
 
 def _acting(actor, store=None, payload=None):
-    """The user, or a Pip's Always-allow grant covering exactly this action (pip_action_grants).
-    Only the runner acts as a grant; every control request is the user's (handle_control)."""
+    """The user, a Pip's Always-allow grant covering exactly this action (pip_action_grants), or its level
+    (pip_levels). Only the runner acts as a grant or a level; every control request is the user's (handle_control)."""
     if isinstance(actor, str) and actor.startswith('pip-grant:'):
         from .pip_action_grants import ACTOR, check
         if not ACTOR.fullmatch(actor):
             raise RegistryError('local_only','External action reviews are available only in the local CLI and extension.')
         if payload is not None:
             check(store, actor, payload)
+        return
+    if isinstance(actor, str) and actor.startswith('pip-level:'):
+        # Its level (pip_levels, API 58): the runner sends what the Pip's level lets through, re-checked here.
+        from .pip_levels import ACTOR as LEVEL_ACTOR, check as level_check
+        if not LEVEL_ACTOR.fullmatch(actor):
+            raise RegistryError('local_only','External action reviews are available only in the local CLI and extension.')
+        if payload is not None:
+            level_check(store, actor, payload)
         return
     _actor(actor)
 

@@ -81,6 +81,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_eyes", "set_pip_eyes",
     "get_pip_computer_apps", "set_pip_computer_apps",
     "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login",
+    "get_pip_level", "set_pip_level",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -128,6 +129,8 @@ _COMMAND_ARGS = {
     # Saved logins (pip_logins, API 56): a save carries the password and the authenticator key; nothing answers with them.
     "list_pip_logins": {"pip_id"}, "remove_pip_login": {"login_id"}, "grant_pip_login": {"login_id", "pips"},
     "save_pip_login": {"pip_id", "site", "username", "password", "totp", "pips", "action_id", "expected_digest"},
+    # How much a Personal Pip asks (pip_levels, API 58): ask, approve or full.
+    "get_pip_level": {"pip_id"}, "set_pip_level": {"pip_id", "level"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
     "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
@@ -2998,6 +3001,15 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     base_instructions += {'own': '\n' + pip_computer.EYES_NOTICE, 'relay': '\n' + pip_computer.RELAY_NOTICE}.get(self._pip_eyes(), '')
                     if computer_pin.get('desktop') is True and self._pip_eyes() in ('own', 'relay'):
                         base_instructions += '\n' + pip_computer.DESKTOP_NOTICE
+                level_pin = manifest.get('approval_level') if personal else None
+                if isinstance(level_pin, dict):
+                    # How much it asks (pip_levels): told so it doesn't stop at what DGC lets through itself.
+                    from . import pip_levels
+                    said_level = pip_levels.instructions(
+                        level_pin.get('level'), unattended=level_pin.get('unattended') is True,
+                        drafting=bool(email_drafting or calendar_drafting or (connector_context is not None and connector_context.get('connections'))))
+                    if said_level:
+                        base_instructions += '\n' + said_level
             if specialist_pin is not None:
                 base_instructions = base_instructions.replace('network, delegate, load skills', 'network, load skills')
                 if self._pip_specialist_role:
@@ -3997,8 +4009,11 @@ def _execute_run(registry, row, config):
             conversation_pin = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
             # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
             said = str(conversation_pin.get('text') or '') if manifest.get('user_turn') is True else ''
+            from . import pip_levels
             computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said,
-                                sites=pip_careful.known(registry, row['pip_id']) if careful else ())
+                                sites=pip_careful.known(registry, row['pip_id']) if careful else (),
+                                level=pip_levels.level(registry, row['pip_id']),
+                                unattended=row['requested_by'] in pip_careful.UNATTENDED)
             computer_socket = pip_computer.RunSocket(computer_host, row['id'])
             if careful and row['requested_by'] in pip_careful.UNATTENDED:
                 lane = pip_careful.Lane()         # nobody watching: its computer or the user's plugins, not both
@@ -4028,6 +4043,13 @@ def _execute_run(registry, row, config):
         if taint is not None:
             app_socket.on_read = taint.add                     # what it reads from apps, for careful mode
         manifest = {**manifest, 'app_socket': app_socket.pin()}
+    if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
+        # How much it asks (pip_levels): the worker is only told, for the Pip's words; the supervisor decides.
+        from . import pip_levels
+        from .pip_careful import UNATTENDED
+        chosen = pip_levels.level(registry, row['pip_id'])
+        if chosen != pip_levels.ASK:
+            manifest = {**manifest, 'approval_level': {'level': chosen, 'unattended': row['requested_by'] in UNATTENDED}}
     conversation_pin = manifest.get('conversation')
     if personal and isinstance(conversation_pin, dict) and conversation_pin.get('images'):
         # Images never fit the worker's input: it gets their kept paths and re-checks each by digest.
@@ -4230,10 +4252,16 @@ def _execute_run(registry, row, config):
 
 
 def _run_granted_actions(registry, config, run_id):
-    """Actions the finished run drafted that the user always allowed for its Pip. Never raises."""
+    """Actions the finished run drafted that the user always allowed for its Pip, then the ones its level lets
+    through (pip_levels). Never raises."""
     try:
         from .pip_action_grants import dispatch_for_run
         dispatch_for_run(registry, config, run_id)
+    except Exception:
+        pass
+    try:
+        from . import pip_levels
+        pip_levels.dispatch_for_run(registry, config, run_id)
     except Exception:
         pass
 
@@ -4769,6 +4797,13 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError('local_only', "How a Pip sees is set on this computer only.")
                 result = {"eyes": pip_eyes.status(store, pip_id, config) if command == 'get_pip_eyes'
                           else pip_eyes.set_choice(store, pip_id, request.get('choice'), actor, config)}
+            elif command in ('get_pip_level', 'set_pip_level'):
+                # How much a Personal Pip asks (pip_levels): Ask, Approve for me or Full access, and what its level did.
+                from . import pip_levels
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "How much a Pip asks is set on this computer only.")
+                result = (pip_levels.listing(registry, pip_id) if command == 'get_pip_level'
+                          else pip_levels.set_level(registry, pip_id, request.get('level'), actor))
             elif command in ('list_pip_sites', 'set_pip_careful', 'forget_pip_site'):
                 # Careful mode (pip_careful): its switch, and the sites the Pip may visit without asking.
                 from . import pip_careful
