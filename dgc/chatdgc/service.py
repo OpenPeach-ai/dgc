@@ -945,7 +945,7 @@ class ChatService:
             if reply.get("finish") == "stop":
                 self._name_later(conversation_id)
                 self._followups_later(conversation_id, reply["id"])
-            self._review_after(conversation_id)
+            turn["look_back"] = True
         except (ChatEngineError, ChatStoreError) as exc:
             if stream["value"] is not None:
                 stream["value"].flush()
@@ -962,6 +962,9 @@ class ChatService:
             if turn.get("reply_id"):
                 self.emit("chatdgc_turn", conversation_id=conversation_id, state="ended",
                           reply_id=turn["reply_id"], request_id=request_id)
+            if turn.get("look_back"):
+                # After the turn has ended on the wire: what decides when to look back never holds a reply up.
+                self._review_after(conversation_id)
 
     def _name_later(self, conversation_id: str) -> None:
         """A chat's name from its first exchange, off the turn's thread: the reply has already ended. close()
