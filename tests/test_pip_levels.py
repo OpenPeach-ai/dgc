@@ -135,6 +135,18 @@ class ClassifyTests(unittest.TestCase):
             with self.subTest(cues=cues):
                 self.assertEqual(self.verdict(**cues), expected)
 
+    def test_a_graphql_request_is_judged_by_its_operation_not_by_its_query_field(self):
+        base = {"method": "POST", "host": "shop.example", "path": "/graphql", "fields": ["operationName", "variables", "query"], "target": ""}
+        def verdict(operation, query):
+            return levels.classify({**base, "values": {"operationName": operation, "query": query}})["verdict"]
+        self.assertEqual(verdict("ProductSearch", "query ProductSearch($q: String) { products(q: $q) { id } }"), "routine")
+        self.assertEqual(verdict("AddToCart", "mutation AddToCart($id: ID!) { addToCart(id: $id) { id } }"), "routine")
+        self.assertEqual(verdict("PlaceOrder", "mutation PlaceOrder { placeOrder { id } }"), "payment")
+        self.assertEqual(verdict("DeleteAddress", "mutation DeleteAddress { deleteAddress { id } }"), "consequential")
+        self.assertEqual(verdict("UpdateThing", "mutation UpdateThing { update { id } }"), "unsure",
+                         "a field named query is not a search when it carries a mutation")
+        self.assertEqual(verdict("", "mutation { x }"), "unsure")
+
     def test_a_level_lets_through_only_what_it_promises(self):
         cart = {"method": "POST", "host": "shop.example", "path": "/api/cart", "fields": ["item"], "target": "Add to cart"}
         post = {"method": "POST", "host": "x.example", "path": "/comments", "fields": ["body"], "target": "Post"}

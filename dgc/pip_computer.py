@@ -708,7 +708,9 @@ class Host:
         upload_name = upload[0] if upload and time.monotonic() - upload[1] <= 300 else ""
         cues = {"method": held.method, "host": parts.hostname or "", "path": (parts.path or "/") + (("?" + parts.query) if parts.query else ""),
                 "fields": [name for name, _ in held.fields], "payment": False, "target": getattr(self, "target", "") or "",
-                "upload": upload_name}
+                "upload": upload_name,
+                # A GraphQL request says what it does in two of its values: its operation's name and its query's first word.
+                "values": {name: str(value)[:300] for name, value in held.fields if name in ("operationName", "query")}}
         if not cues["target"]:
             form_cues = getattr(self.browser, "form_cues", None)
             cues["buttons"] = (form_cues(held.url) or {}).get("buttons", []) if form_cues else []

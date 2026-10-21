@@ -249,6 +249,9 @@ def classify(cues) -> dict:
         return {"verdict": "consequential", "what": _said_what(target, host, method, cues.get("path")), "why": hit.strip()}
     if upload:
         return {"verdict": "routine", "what": f"Uploaded {upload} to {host}", "why": "your file"}
+    graphql = _graphql(cues)
+    if graphql is not None:
+        return graphql
     if any(f.strip().lower() in ("q", "query", "search", "s", "keyword", "keywords", "term") for f in fields):
         return {"verdict": "routine", "what": f"Searched on {host}", "why": "search field"}
     for pattern, verb in ROUTINE:
@@ -256,6 +259,32 @@ def classify(cues) -> dict:
         if hit:
             return {"verdict": "routine", "what": f"{verb} on {host}", "why": hit.strip()}
     return {"verdict": "unsure", "what": _said_what(target, host, method, cues.get("path")), "why": ""}
+
+
+def _graphql(cues) -> dict | None:
+    """A GraphQL request carries everything in one field named query: what it does is its operation (a query reads, a
+    mutation changes) and the operation's name ("AddToCart", "PlaceOrder"). None when it isn't one. A payment or a
+    consequential word anywhere was already caught; a mutation is routine only by its own name."""
+    names = {str(f).strip().lower() for f in cues.get("fields") or []}
+    values = cues.get("values") or {}
+    if "graphql" not in str(cues.get("path") or "").lower() and "operationname" not in names:
+        return None
+    host = str(cues.get("host") or "")
+    operation = str(values.get("operationName") or values.get("operationname") or "")
+    text = str(values.get("query") or "").lstrip()
+    said = words(operation)
+    if _find(PAYMENT, said):
+        return {"verdict": "payment", "what": f"A payment on {host}", "why": "graphql " + operation[:40]}
+    if _find(CONSEQUENTIAL, said):
+        return {"verdict": "consequential", "what": f"Sent {operation[:40]} to {host}", "why": "graphql " + operation[:40]}
+    if text.startswith("mutation"):
+        for pattern, verb in ROUTINE:
+            if _find(pattern, said):
+                return {"verdict": "routine", "what": f"{verb} on {host}", "why": "graphql " + operation[:40]}
+        return {"verdict": "unsure", "what": f"Sent {operation[:40] or 'a change'} to {host}", "why": "graphql mutation"}
+    if text.startswith(("query", "{")) and "mutation" not in text[:200]:
+        return {"verdict": "routine", "what": f"Looked something up on {host}", "why": "graphql query"}
+    return {"verdict": "unsure", "what": f"Sent a request to {host}", "why": "graphql"}
 
 
 def _said_what(target, host, method, path) -> str:
