@@ -6889,6 +6889,7 @@ class Agent(GoalLifecycle):
         unverified_edit_nudged = False
         todo_nudged = False         # so the "make a todo list" nudge fires at most once
         todo_gate = 0               # times we've refused to end the turn with open todos
+        blocked_noted = False       # the model was shown its blocked todos once this turn
         todo_repair = 0             # bounded correction for a model printing tool args as prose
         options_repair = 0
         self._approval_records.clear()
@@ -7518,6 +7519,25 @@ class Agent(GoalLifecycle):
                             "completion withheld — open todos still require action")
                     next_request_reason = "todo_gate"
                     self._activity("continuing", "Finishing open todos")
+                    continue
+                # A row parked as `blocked` never drew a reminder, so once the user unblocked it and the turn
+                # did the work, nothing asked for it to be ticked: a session on .111 deployed what its list
+                # still called "BLOCKED ON YOUR APPROVAL", and the Tasks row said so for days after. Once a
+                # turn, after real work, the model is shown its blocked rows and settles any it resolved.
+                blocked = [t for t in self.ctx.todos if isinstance(t, dict) and t.get("status") == "blocked"]
+                if blocked and not blocked_noted and did_tools and not wake and not self._troupe_will_wake():
+                    blocked_noted = True
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\nYour checklist still marks these as blocked: "
+                        + "; ".join(t["content"] for t in blocked[:8]) + ". If this turn resolved any of them "
+                        "(you did the work, or the user's message unblocked it), mark it done with the `todo` "
+                        "tool now. Leave any that are still blocked as they are.\n</system-reminder>"})
+                    if defer_completion:
+                        withhold_final(
+                            "[Completion withheld by DGC: blocked todos were checked before the turn ended.]",
+                            "completion withheld — blocked todos were checked")
+                    next_request_reason = "todo_gate"           # the same gate, for parked rows
+                    self._activity("continuing", "Checking blocked todos")
                     continue
                 if not (result.content or "").strip():
                     if not summary_nudged:

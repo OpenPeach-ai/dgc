@@ -182,6 +182,33 @@ class TodoLifecycleTests(unittest.TestCase):
         self.assertIn("Before the next step", str(calls[1]))
         self.assertEqual(self.agent.todos[0]["status"], "done")
 
+    def test_blocked_rows_are_shown_once_after_a_turn_that_did_work_so_an_unblocked_one_gets_ticked(self):
+        # .111, 2026-10-21: the list said "BLOCKED ON YOUR APPROVAL: deploy …"; the user said go, the model deployed
+        # (99 commands, no `todo` call) and the Tasks row kept saying blocked for days.
+        self.update([{"content": "Tests pass", "status": "done"},
+                     {"content": "BLOCKED ON YOUR APPROVAL: deploy the backend", "status": "blocked"}])
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("deploy", "bash", {"command": "echo deployed"})]),
+            ChatResult(content="Deployed and verified."),
+            ChatResult(tool_calls=[ToolCall("tick", "todo", {"todos": [
+                {"content": "Tests pass", "status": "done"},
+                {"content": "BLOCKED ON YOUR APPROVAL: deploy the backend", "status": "done"}]})]),
+            ChatResult(content="Deployed and verified."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Go ahead and deploy."))
+        shown = [m for m in self.agent.messages if "still marks these as blocked" in str(m.get("content", ""))]
+        self.assertEqual(len(shown), 1, "once a turn")
+        self.assertIn("BLOCKED ON YOUR APPROVAL: deploy the backend", shown[0]["content"])
+        self.assertEqual([t["status"] for t in self.agent.todos], ["done", "done"])
+
+    def test_blocked_rows_draw_nothing_in_a_turn_that_did_no_work(self):
+        self.update([{"content": "Owner decision: the default", "status": "blocked"}])
+        chat, calls = self.script(ChatResult(content="It still needs your decision on the default."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("What's left?"))
+        self.assertEqual(len(calls), 1, "a question answered without work is not held up")
+        self.assertEqual(self.agent.todos[0]["status"], "blocked")
+
     def test_a_turn_waiting_on_a_running_troupe_may_stop_with_its_checklist_open(self):
         rows = [{"content": "Report the troupe's findings", "status": "pending"}]
         chat, calls = self.script(
@@ -649,7 +676,10 @@ class TodoLifecycleTests(unittest.TestCase):
             ChatResult(content="Done."))
         with patch.object(self.agent.client, "chat", side_effect=chat):
             self.assertTrue(self.agent.run_turn("Write the file"))
-        self.assertEqual(len(calls), 2)
+        # A turn that did work shows its blocked rows once (it may have resolved one: the .111 deploy), and a row
+        # still blocked stays so: never the "open todos" reminder, never a notice.
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(sum("still marks these as blocked" in str(m.get("content", "")) for m in self.agent.messages), 1)
         self.assertEqual(self.reminders(), 0)
         self.assertFalse(any("Still pending" in str(m.get("content", "")) for m in self.agent.messages))
         self.assertEqual(self.ui.notices(), [])
