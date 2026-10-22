@@ -429,12 +429,28 @@ class QueueAndLifecycleTests(FixScene):
             self.start(backend, run)
             wait_for(lambda: (row := self.last(run)) and row["state"] == "running", what="the fix to run")
             work = serve_detach.chat_work(backend)
-            self.assertIn("a background sub-agent is working", work.progressing,
+            self.assertIn("a Pip fix is working", work.progressing,
                           "a reload's windowless backend keeps running while the fix works")
             self.assertFalse(backend._busy(), "and no turn holds the chat")
             release.set()
             self.ended(run)
         self.assertEqual(serve_detach.chat_work(backend).progressing, [])
+
+    def test_a_fix_still_getting_ready_is_already_work(self):
+        # Before its sub-agent exists (the copy made ready, dependencies installing) a fix is work too: a window
+        # reloaded then must not leave a backend that thinks nothing is running.
+        from dgc import pip_fix, serve_detach
+        backend = self.make()
+        project = pip_fix.FixProject(backend.agent.config.project_root)
+        mine = {"fix_id": "fix_" + "a" * 32, "session_id": backend._pip_fix_session(), "run_id": "r1", "state": "preparing",
+                "created_at": 1.0, "owner": {"pid": os.getpid(), "token": pip_fix._TOKEN}}
+        project.put(mine)
+        self.assertIn("a Pip fix is working", serve_detach.chat_work(backend).progressing)
+        project.put({**mine, "state": "done"})
+        self.assertNotIn("a Pip fix is working", serve_detach.chat_work(backend).progressing)
+        # another process's fix in this project is that process's work, not this backend's
+        project.put({**mine, "fix_id": "fix_" + "b" * 32, "state": "running", "owner": {"pid": os.getpid(), "token": "other"}})
+        self.assertNotIn("a Pip fix is working", serve_detach.chat_work(backend).progressing)
 
     def test_stop_while_queued_ends_it_with_nothing_changed(self):
         backend = self.make()

@@ -189,6 +189,18 @@ def chat_work(chat) -> Work:
             work.progressing.append("a sub-agent's work is being applied")
     except Exception:
         work.progressing.append("sub-agent state is unreadable")
+    try:
+        # A Pip fix this process runs for this chat is work from the moment it is queued: while its copy is
+        # made ready and its dependencies install, no sub-agent exists yet to say so.
+        from . import pip_fix
+        session_of = getattr(chat, "_pip_fix_session", None)
+        session_id = session_of() if callable(session_of) else ""
+        if session_id and any(row.get("state") in pip_fix.ACTIVE
+                              and (row.get("owner") or {}).get("token") == pip_fix._TOKEN
+                              for row in pip_fix.for_session(agent.config.project_root, session_id)):
+            work.progressing.append("a Pip fix is working")
+    except Exception:
+        work.progressing.append("Pip fix state is unreadable")
     reader = getattr(chat, "_package_reader", None)
     if isinstance(reader, threading.Thread) and reader.is_alive():
         work.progressing.append("a plugin is being installed")
