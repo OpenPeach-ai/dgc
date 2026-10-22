@@ -109,7 +109,8 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     panel.onDidDispose(() => {
       if (this.tabs.get(key) !== tab) return;
       this.tabs.delete(key);
-      provider.dispose();
+      // Closed by the user (not a reload or a closed window): a turn still running is asked about.
+      provider.dispose(!this.closing);
       if (!this.closing) provider.forgetTab();     // closed by the user: its state goes with it
       this.changedCurrent();
       this.changed();

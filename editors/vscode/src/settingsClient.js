@@ -24,9 +24,9 @@ import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const paths = { voice: 'M10 2a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a5 5 0 0 0 10 0 M10 15v3 M7 18h6', web: 'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15z M3 10.5h15 M10.5 3c-2.2 2.1-3.2 4.6-3.2 7.5s1 5.4 3.2 7.5 M10.5 3c2.2 2.1 3.2 4.6 3.2 7.5s-1 5.4-3.2 7.5', chatdgc: 'M5 4h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9.5L6 17v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M7.6 11.4l1.3-4.3 M10 11.4l1.3-4.3 M12.4 11.4l1.3-4.3', memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13' };
+const paths = { voice: 'M10 2a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a5 5 0 0 0 10 0 M10 15v3 M7 18h6', web: 'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15z M3 10.5h15 M10.5 3c-2.2 2.1-3.2 4.6-3.2 7.5s1 5.4 3.2 7.5 M10.5 3c2.2 2.1 3.2 4.6 3.2 7.5s-1 5.4-3.2 7.5', chatdgc: 'M5 4h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9.5L6 17v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M7.6 11.4l1.3-4.3 M10 11.4l1.3-4.3 M12.4 11.4l1.3-4.3', memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13', running: 'M3 5h9v8H3z M15 9h3v8H8v-2 M6 9l2 2 3-3' };
 const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${paths[name] || paths.plugins}"/></svg>`;
-const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
+const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
 let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
 let mcpError = "";
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
@@ -108,7 +108,7 @@ function snapshot() {
 }
 // A failure belongs to the visit it happened in: leaving the section drops the banner, and the
 // `mcp_servers` reply that every arrival at this page asks for repaints a live one.
-function navTo(next, nextRange) { snapshot(); directory = false; section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; mcpError = ''; if (nextRange)
+function navTo(next, nextRange) { snapshot(); if (next === 'running') running.asked = false; directory = false; section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; mcpError = ''; if (nextRange)
     range = nextRange; render(); $('main').scrollTop = 0; }
 // Catalog acknowledgements replace rows. Keep keyboard focus on the same control.
 let rememberedFocus = null;
@@ -149,6 +149,11 @@ function render() {
     if (section === 'voice') {
         if (!voice.asked) { voice.asked = true; send({ type: 'getVoice' }); }
         renderVoice(main);
+        return;
+    }
+    if (section === 'running') {
+        if (!running.asked) { running.asked = true; send({ type: 'listRunning' }); }
+        renderRunning(main);
         return;
     }
     if (section === 'usage') {
@@ -302,6 +307,55 @@ function memoryHistoryHTML() {
             + '</div>';
     }
     return html + '</div></details>';
+}
+// Settings -> Running sessions: each session a DGC backend keeps running with no window (a reload, a closed
+// window, a tab closed with Keep running), how long, what it is doing, with Open and Stop. Read fresh each
+// visit and every 30 seconds while the page is open.
+const running = { asked: false, items: null, note: '', unsupported: false, stopping: new Set(), timer: 0 };
+function windowlessFor(seconds) {
+    const s = Math.max(0, Math.floor(Number(seconds) || 0));
+    if (s < 90) return 'less than 2 minutes';
+    const m = Math.round(s / 60);
+    if (m < 90) return m + ' minutes';
+    const h = Math.floor(m / 60), rest = m % 60;
+    return h + (h === 1 ? ' hour' : ' hours') + (rest ? ' ' + rest + ' min' : '');
+}
+function renderRunning(main) {
+    clearTimeout(running.timer);
+    running.timer = setTimeout(() => { if (section === 'running') send({ type: 'listRunning' }); }, 30000);
+    let html = '<h2>Running sessions</h2><p class="sub">A session keeps working when its window goes: a reload, a closed window, '
+        + 'or a tab you closed with Keep running. Open it again and it picks up where it is. With no window it stops '
+        + 'by itself, saved: 2 minutes after its work finishes, after 1 hour waiting on your answer, and after 12 hours at most.</p>';
+    if (running.note) html += `<div class="banner" role="status"><p>${esc(running.note)}</p></div>`;
+    if (running.unsupported) {
+        main.innerHTML = html + '<p class="note">This DGC CLI ends a session when its window goes. Update it to keep work running through a reload.</p>';
+        return;
+    }
+    if (!running.items) {
+        main.innerHTML = html + '<p class="note" role="status">Asking DGC what is running…</p>';
+        return;
+    }
+    html += '<div class="card running-sessions">';
+    if (!running.items.length) html += '<p class="empty">Nothing is running without a window.</p>';
+    for (const r of running.items) {
+        const key = r.pid + ':' + r.session;
+        const title = r.name || r.session;
+        const what = r.working ? (r.work || 'working') : 'idle; it stops by itself soon';
+        html += `<div class="row"><div class="copy"><strong>${esc(title)}</strong>`
+            + `<span class="summary">${esc(r.cwd)} · no window for ${esc(windowlessFor(r.windowless_s))}</span>`
+            + `<span class="description">${esc(what)}${r.version ? ' · DGC ' + esc(r.version) : ''}</span></div>`
+            + `<div class="actions"><button type="button" class="secondary" data-running-open="${esc(r.session)}" data-running-name="${esc(r.name)}" title="Open it in a tab here">Open</button>`
+            + `<button type="button" class="secondary" data-running-stop="${esc(key)}" data-pid="${esc(r.pid)}" data-instance="${esc(r.instance)}"`
+            + `${running.stopping.has(key) ? ' disabled' : ''} title="Save it and stop" aria-label="Stop: ${esc(title)}">${running.stopping.has(key) ? 'Stopping…' : 'Stop'}</button></div></div>`;
+    }
+    html += '</div><p class="note">In a terminal, <code>dgc ps</code> lists every DGC on this computer and <code>dgc stop</code> stops one.</p>';
+    main.innerHTML = html;
+    main.querySelectorAll('[data-running-open]').forEach(b => b.onclick = () => send({ type: 'openRunning', session: b.dataset.runningOpen, name: b.dataset.runningName || '' }));
+    main.querySelectorAll('[data-running-stop]').forEach(b => b.onclick = () => {
+        running.stopping.add(b.dataset.runningStop); running.note = '';
+        send({ type: 'stopRunning', pid: Number(b.dataset.pid), instance: b.dataset.instance });
+        renderRunning(main);
+    });
 }
 function renderMemory(main) {
     const st = memory.state;
@@ -992,6 +1046,17 @@ window.addEventListener('message', event => {
             if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section))
                 render();
         }
+    }
+    else if (msg.type === 'running') {
+        if (msg.pending) { setTimeout(() => { if (section === 'running') send({ type: 'listRunning' }); }, 1500); return; }
+        running.unsupported = msg.unsupported === true;
+        if (Array.isArray(msg.items)) {
+            running.items = msg.items;
+            const live = new Set(msg.items.map(r => r.pid + ':' + r.session));
+            for (const key of [...running.stopping]) if (!live.has(key)) running.stopping.delete(key);
+        }
+        if (typeof msg.message === 'string' && msg.message) { running.note = msg.message; running.stopping.clear(); }
+        if (section === 'running') render();
     }
     else if (msg.type === 'voice_unavailable') {
         voice.busy = ''; voice.note = msg.message || 'DGC couldn\'t reach its voice models.';

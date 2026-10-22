@@ -8401,7 +8401,7 @@ class Host:
                            if r.get("pid") == pid and str(r.get("instance") or "") == instance), None)
             if record is None:
                 return answer("That session had already stopped.")
-            stopped, what = serve_detach.stop_process(record, reason="Settings -> Running sessions")
+            stopped, what = serve_detach.stop_process(record, reason="Settings › Running sessions")
             answer(("Stopped: " if stopped else "Not stopped: ") + what)
         threading.Thread(target=stop, name="dgc-stop-live-session", daemon=True).start()
 

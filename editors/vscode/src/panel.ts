@@ -539,7 +539,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private rootsAfterLiveTurn = false;
   /** This chat's session is shown in another window: "moved" (it was taken from here) or "elsewhere"
    *  (it was already there). Read-only here until the user presses "Open here". */
-  private sessionElsewhere: { state: "moved" | "elsewhere"; pid?: number } | undefined;
+  private sessionElsewhere: { state: "moved" | "elsewhere"; pid?: number; reason?: string } | undefined;
   /** How this provider's next backend asks to reattach: its first after a window opens is a restore. */
   private attachMode: AttachMode = "restore";
   private workspaceRootsRevision = 0;
@@ -868,9 +868,33 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     if (request !== this.sessionsRequest) { return; }
     this.postSessionItems(items, error);
+    // Which of them a backend is still running with no window: the list marks them, and the marks
+    // follow the work while there is any (live_sessions -> liveSessionsArrived repaints the list).
+    this.requestLiveSessions();
+  }
+
+  /** The list as last shown, so the running marks can be repainted without asking for it again. */
+  private lastSessionItems: any[] | undefined;
+  private lastSessionError = "";
+  private liveSessionsTimer?: ReturnType<typeof setTimeout>;
+
+  /** Sessions a backend is running with no window, by id: what it is doing. */
+  private windowlessSessions(): Map<string, string> {
+    const found = new Map<string, string>();
+    for (const row of this.runningRows(this.liveSessionRows)) { found.set(row.session, row.work || ""); }
+    return found;
   }
 
   private postSessionItems(items: any[], error = ""): void {
+    this.lastSessionItems = items;
+    this.lastSessionError = error;
+    const windowless = this.windowlessSessions();
+    if (this.liveSessionsTimer) { clearTimeout(this.liveSessionsTimer); this.liveSessionsTimer = undefined; }
+    if (windowless.size && this.home) {
+      // While anything runs with no window, look again now and then: its mark goes when its work ends.
+      this.liveSessionsTimer = setTimeout(() => { this.liveSessionsTimer = undefined; this.requestLiveSessions(); }, 30_000);
+      (this.liveSessionsTimer as any).unref?.();
+    }
     const open = this.places?.openSessions() ?? new Set<string>();
     const paging = this.lastReadyEvent?.capabilities?.session_paging === true;
     // One more than shown was asked for: its presence is what says there are more.
@@ -880,6 +904,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const id = path.basename(String(item?.path || "")).replace(/\.json$/i, "");
       return { id, path: String(item?.path || ""), name: String(item?.name || ""), preview: String(item?.preview || ""),
                when: String(item?.when || ""), count: Number(item?.count) || 0, open: open.has(id),
+               ...(windowless.has(id) && !open.has(id) ? { windowless: windowless.get(id) || "working" } : {}),
                ...(typeof item?.match === "string" && item.match ? { match: item.match.slice(0, 300) } : {}) };
     }).filter((item) => /^[A-Za-z0-9_-]{1,128}$/.test(item.id)) });
   }
@@ -998,6 +1023,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // The transcript on screen belongs to the chat we just left. Clear it before a single event of
     // the incoming chat's can land in it, then rebuild from that backend's own snapshot.
     this.post({ type: "chat_switched", slotId: incoming.id, label: incoming.label });
+    this.post({ type: "session_elsewhere", ...(this.sessionElsewhere || { state: "none" }) });
     const held = incoming.pendingReady;
     incoming.pendingReady = undefined;
     if (held && this.backend) {
@@ -1275,6 +1301,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "event", event: { ...this.lastReadyEvent, session_id: this.currentSessionId,
         session_name: this.currentSessionName } });
     }
+    if (this.sessionElsewhere) { this.post({ type: "session_elsewhere", ...this.sessionElsewhere }); }
     if (this.sessionReady) {
       this.post({ type: "session_ready", sessionId: this.currentSessionId });
       if (be && this.lastReadyEvent?.capabilities?.history_snapshot) {
@@ -1630,9 +1657,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!mark) { return; }
     if (mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return; }
     await this.forgetInterruptedTurn();              // one offer per interruption, never a loop
-    // The window went while this turn ran and its backend kept it running. If that backend later
-    // stopped it, it says so itself (turn_interrupted); if it finished, there is nothing to continue.
-    if (mark.detachedAt && (this.lastReadyEvent?.capabilities as any)?.detach) { return; }
+    // The turn ran on a backend that keeps working when its window goes, and the window went (no exit was
+    // seen). If that backend later stopped it, it says so itself (turn_interrupted); if it finished, there
+    // is nothing to continue. A backend this window saw die is an interruption as before.
+    if (mark.detachedAt && !mark.exitedAt && (this.lastReadyEvent?.capabilities as any)?.detach) { return; }
     // A turn that ended with an error and no backend death behind it failed on its own; the
     // user has already seen why. A turn with neither an end nor a recorded exit was cut off with
     // the extension host (a reload or crash), which is an interruption too.
@@ -1643,6 +1671,79 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.backendNote(`[extension: offering to continue the interrupted turn${mark.cause ? ` — ${mark.cause}` : ""}]`);
     this.whenWebviewReady(() => this.post({ type: "continue_offer", cause: String(mark.cause || ""),
                                             sessionId: this.currentSessionId }));
+  }
+
+  /** A backend that kept this session running with no window stopped its turn there (an hour waiting on
+   *  an answer, the 12-hour limit, `dgc stop`, an update): the next window to open it offers Continue,
+   *  once. The question it was waiting on is in the replayed transcript above it. */
+  private offerTurnStoppedWithoutWindow(ev: DgcEvent): void {
+    if (String((ev as any).session_id || "") !== this.currentSessionId) { return; }
+    if (this.lastReadyEvent?.capabilities?.resume_turn !== true) { return; }
+    const cause = String((ev as any).cause || "").slice(0, 300);
+    this.backendNote(`[extension: offering to continue a turn stopped while no window was open${cause ? ` — ${cause}` : ""}]`);
+    this.whenWebviewReady(() => this.post({ type: "continue_offer", cause, sessionId: this.currentSessionId,
+                                            windowless: true }));
+  }
+
+  /** This chat's session is shown in another window now ("Open here" there), or this window went quiet
+   *  for so long that its backend let it go: nothing stopped. The transcript stays, read-only, with Open
+   *  here; the backend this chat had is released, not stopped. */
+  private sessionMoved(reason: string): void {
+    this.sessionElsewhere = { state: "moved", reason: reason.slice(0, 64) };
+    this.noteInterruptedTurn(undefined);                // the turn goes on where the session is now
+    this.backendNote(`[extension: this session is open in another window now (${reason || "opened elsewhere"}); `
+      + "this one shows it read-only]");
+    const shown = this.sessionElsewhere;
+    this.whenWebviewReady(() => this.post({ type: "session_elsewhere", ...shown }));
+  }
+
+  /** "Open here": take this chat's session from the window that shows it, or from the backend that kept
+   *  it running. That window keeps its transcript, read-only, with an Open here of its own, and the work
+   *  never stops: this window reattaches to the process that has it. */
+  openSessionHere(): void {
+    const id = this.currentSessionId || this.sessionRestoreCandidate;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    this.backendNote(`[extension: Open here — taking session ${id} into this window]`);
+    this.sessionElsewhere = undefined;
+    this.sessionRestoreCandidate = id;
+    this.sessionRestoreSaved = true;
+    this.sessionRestoreSuppressed = true;
+    this.attachMode = "steal";
+    this.restart("Open here");
+  }
+
+  /** The DGC processes on this computer (list_live_sessions / stop_live_session): Settings -> Running
+   *  sessions, and the Sessions list's "Running, no window". */
+  private liveSessionsArrived(ev: DgcEvent): void {
+    const items = Array.isArray((ev as any).items) ? (ev as any).items : [];
+    this.liveSessionRows = items;
+    const message = typeof (ev as any).message === "string" ? (ev as any).message : "";
+    this.settingsEditor?.webview.postMessage({ type: "running", items: this.runningRows(items), message });
+    if (this.home && this.lastSessionItems) { this.postSessionItems(this.lastSessionItems, this.lastSessionError); }
+  }
+
+  /** What Settings -> Running sessions lists: each session a backend is running with no window. */
+  private runningRows(items: any[]): any[] {
+    const rows: any[] = [];
+    for (const row of items) {
+      if (!row || row.kind !== "serve" || row.attached !== false || !row.detachable) { continue; }
+      for (const session of Array.isArray(row.sessions) ? row.sessions : []) {
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(String(session?.session_id || ""))) { continue; }
+        rows.push({ pid: row.pid, instance: String(row.instance || ""), version: String(row.version || ""),
+                    session: session.session_id, name: String(session.name || ""), cwd: String(session.cwd || ""),
+                    working: session.status === "working", work: String(row.work || ""),
+                    windowless_s: Number(row.windowless_s) || 0 });
+      }
+    }
+    return rows;
+  }
+
+  /** Ask this window's backend for the DGC processes on this computer. Only a CLI that can run a session
+   *  with no window answers list_live_sessions. */
+  private requestLiveSessions(): void {
+    const be = this.backend;
+    if (!be?.ready || !this.processOf(be)?.detachOffer) { return; }
+    be.send({ type: "list_live_sessions", request_id: this.nextRequestId("live-sessions") } as any);
   }
 
   /** Continue the interrupted turn: the backend writes the instruction, the user clicked a button. */
@@ -2932,6 +3033,34 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.persistQueuedPrompts();
   }
 
+  /** The other chats a reattached process kept running (ready.capabilities.attached), each back in a
+   *  background chat of its own on that process, its session and folder as they were. The process closes
+   *  a kept chat no window takes back once it is idle, so each is claimed at once (OpenedChat.adopt). */
+  private adoptKeptChats(host: DgcBackend): void {
+    const own = host.chats?.default;
+    const taken = new Set(this.slots.map((slot) => (slot.backend as OpenedChat | undefined)?.chatId).filter(Boolean));
+    for (const chat of host.attached?.chats || []) {
+      const chatId = String(chat?.chat_id || ""), session = String(chat?.session_id || "");
+      if (!chatId || chatId === own || taken.has(chatId) || !host.attachedOpened.has(chatId)) { continue; }
+      if (this.slots.length >= maxLiveChats()) { break; }
+      const cwd = String(chat.cwd || "") || this.cwd();
+      const saved: Record<string, unknown> = {};
+      for (const field of PER_CHAT_FIELDS) { saved[field] = this.cloneChatValue(this.pristineChatState[field]); }
+      Object.assign(saved, { sessionRestoreCandidate: session, sessionRestoreSaved: true, sessionRestoreSuppressed: true,
+                             currentSessionId: session, currentSessionSaved: true,
+                             turnActive: !!chat.turn, confirmedTurnActive: !!chat.turn });
+      const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: session.slice(-6) || "Chat", busy: !!chat.turn,
+                               needsYou: Array.isArray(chat.waiting) && chat.waiting.length > 0, unread: 0, saved,
+                               ...(cwd !== this.cwd() ? { cwd } : {}) };
+      this.slots.push(slot);
+      const be = new OpenedChat(host, cwd, this.nextRequestId("adopt-chat"), chatId);
+      this.wireSlotBackend(slot, be, host);
+      saved.backend = be;
+      be.start();
+    }
+    this.postChatSlots();
+  }
+
   /** The last word from any backend on the DGC processes of this computer (live_sessions). */
   private liveSessionRows: any[] = [];
 
@@ -3157,6 +3286,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     if (this.pipsEditor?.event(ev)) return;
     if (["pips_result", "pips_status"].includes(ev.type)) return;
+    // A session that keeps running with no window (dgc/serve_detach.py): the panel's own business.
+    if (ev.type === "session_live") return;          // ready.capabilities.attached has already said it
+    if (ev.type === "session_moved") { this.sessionMoved(String((ev as any).reason || "")); return; }
+    if (ev.type === "turn_interrupted") { this.offerTurnStoppedWithoutWindow(ev); return; }
+    if (ev.type === "live_sessions") { this.liveSessionsArrived(ev); return; }
     // The request handlers project summaries and open text documents. Raw roots and file bodies
     // are owner-facing host data, not chat events or model inputs for the webview.
     if (ev.type === "chat_changes" || ev.type === "chat_change" || ev.type === "workspace_changes" || ev.type === "workspace_change"
@@ -3220,6 +3354,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           }
           this.openDecisions = new Set((live.waiting || []).map(String));
           this.adoptLiveQueue(live);
+          // The process this window started kept other chats running too (a tab's second chat): each
+          // comes back as a chat of its own here, in the background, as it was.
+          if (this.backend instanceof DgcBackend) { this.adoptKeptChats(this.backend); }
           this.backendNote(`[extension: reattached to dgc serve pid ${(ev.capabilities as any)?.attached?.pid ?? "?"}, `
             + `which kept this session running${live.turn ? " (a turn is running)" : ""}]`);
         } else {
@@ -3457,8 +3594,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // continuation of one, is offered a Continue after a backend death. A monitor turn is
         // DGC's own and simply wakes again on the next event.
         if (ev.kind !== "resume" && ev.kind !== "monitor" && this.currentSessionId) {
+          // On a backend that keeps its work running when the window goes, a reload does not cut this turn
+          // off: that backend says so itself if it ever stops it (turn_interrupted).
+          const keeps = !!this.processOf(this.backend)?.detach;
           this.noteInterruptedTurn({ scope: this.draftScope(), id: this.currentSessionId,
-                                     turnId: String(ev.turn_id || ""), at: Date.now() });
+                                     turnId: String(ev.turn_id || ""), at: Date.now(),
+                                     ...(keeps ? { detachedAt: Date.now() } : {}) });
         }
         this.postChatSlots();                        // this chat's chip shows it is working now
         if (ev.kind === "prompt" || !ev.kind) { this.retitle(String(ev.prompt || "").replace(/📷/g, " ")); }
@@ -3525,6 +3666,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // the turn ends "error" first and the process exits after, and that turn WAS interrupted.
         if (ev.reason === "error") { this.noteInterruptedTurn({ endedAt: Date.now() }); }
         else { this.noteInterruptedTurn(undefined); }
+        // A reattached turn ran on the folders its last window granted; this window's go now.
+        if (this.rootsAfterLiveTurn) { this.rootsAfterLiveTurn = false; this.workspaceRootsDirty = true; }
         this.syncWorkspaceRoots();
         // Nobody asked for a monitor turn, so nobody is waiting to hear that it finished.
         if (monitorTurn) { this.turnStartedAt = 0; }
@@ -4459,6 +4602,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "resumeTurn":
         this.continueInterruptedTurn();
+        break;
+      case "openSessionHere":
+        this.openSessionHere();
         break;
       case "clear_todos":
         // The backend empties the list at once, even while a turn runs, and answers with an empty
@@ -6442,6 +6588,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.saveSettings(msg.values || {});
     } else if (msg?.type === "removeSearchKey") {
       await this.removeSearchKey(String(msg.provider || ""));
+    } else if (msg?.type === "listRunning") {
+      // Settings -> Running sessions: what runs with no window, from a CLI that can keep it running.
+      if (!be.ready) { this.settingsEditor?.webview.postMessage({ type: "running", pending: true }); }
+      else if (!this.processOf(be)?.detachOffer) { this.settingsEditor?.webview.postMessage({ type: "running", unsupported: true }); }
+      else { this.requestLiveSessions(); }
+    } else if (msg?.type === "stopRunning") {
+      const pid = Number(msg.pid), instance = String(msg.instance || "");
+      if (be.ready && this.processOf(be)?.detachOffer && Number.isSafeInteger(pid) && pid > 0 && /^[a-f0-9]{1,64}$/.test(instance)) {
+        be.send({ type: "stop_live_session", pid, instance, request_id: this.nextRequestId("stop-live") } as any);
+      }
+    } else if (msg?.type === "openRunning") {
+      const id = String(msg.session || "");
+      if (this.places && /^[A-Za-z0-9_-]{1,128}$/.test(id)) { this.places.open(id, String(msg.name || "")); }
     } else if (msg?.type === "copy") {
       const text = String(msg.text || "");
       if (text.length <= 2048) await vscode.env.clipboard.writeText(text);
@@ -7394,7 +7553,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  dispose(): void {
+  /** `closedByUser`: the user closed this session's tab (not a reload or a closed window). A turn still
+   *  running is then asked about once (keep it running in the background, or stop it), unless the
+   *  answer was remembered; anything else in the tab stops, as closing a tab always did. */
+  dispose(closedByUser = false): void {
+    if (this.liveSessionsTimer) { clearTimeout(this.liveSessionsTimer); this.liveSessionsTimer = undefined; }
     if (this.pipsAttentionTimer) { clearInterval(this.pipsAttentionTimer); this.pipsAttentionTimer = undefined; }
     // A tab's box lets go of a recording it started; the side bar's dictation goes with the window.
     if (this.voiceOffer) clearTimeout(this.voiceOffer);
@@ -7421,8 +7584,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (parked) { all.add(parked); }
     }
     const opened = [...all].filter((be) => (be as OpenedChat).host !== undefined);
+    // A tab the user closed: its turn, if one runs on a backend that can carry on with no window, waits
+    // for the user's answer (askAboutClosedTab); everything else stops as it always did. A reload or a
+    // closed window leaves every backend that can keep its work running with no window doing so.
+    const asked = closedByUser && this.tab && this.confirmedTurnActive && this.backend instanceof DgcBackend
+      && this.backend.detach ? this.backend : undefined;
+    const cause = closedByUser && this.tab ? `${STOP_CAUSE}its tab was closed` : PANEL_DISPOSED_CAUSE;
     for (const be of [...opened, ...[...all].filter((be) => !opened.includes(be)), ...this.releasedHosts]) {
-      try { be.dispose(PANEL_DISPOSED_CAUSE); } catch { /* already gone */ }
+      if (be === asked) { continue; }
+      try { be.dispose(cause); } catch { /* already gone */ }
+    }
+    if (asked) {
+      for (const [name, handler] of this.backendListeners.get(asked) || []) { asked.off(name, handler); }
+      void DgcViewProvider.askAboutClosedTab(asked, (this.currentSessionName || this.chatLabel()).slice(0, 80));
     }
     if (this.sessionsTimer) { clearTimeout(this.sessionsTimer); this.sessionsTimer = undefined; }
     if (this.tab) {
@@ -7433,6 +7607,67 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.sb.dispose();
     // Last: the backend's exit line arrives after this and still reaches backend.log.
     try { this.backendLog.dispose(); } catch { /* already gone */ }
+  }
+
+  /** Q3 (founder, 19 Oct 2026): a session's tab closed while it works is asked about once, "keep it
+   *  running in the background, or stop it", and the answer is remembered if ticked
+   *  (dgc.closingAWorkingTab). Until it is answered the work goes on; dismissed, it keeps running, where
+   *  Settings -> Running sessions and the Sessions list show it, with Stop. */
+  private static async askAboutClosedTab(be: DgcBackend, name: string): Promise<void> {
+    const setting = String(vscode.workspace.getConfiguration("dgc").get<string>("closingAWorkingTab", "ask") || "ask");
+    let keep = setting !== "stop";
+    if (setting === "ask") {
+      const answer = await DgcViewProvider.askKeepRunning(name);
+      keep = answer.keep;
+      if (answer.remember) {
+        try {
+          await vscode.workspace.getConfiguration("dgc").update("closingAWorkingTab", keep ? "keepRunning" : "stop",
+            vscode.ConfigurationTarget.Global);
+        } catch { /* the choice still applies this time */ }
+      }
+    }
+    try { be.dispose(keep ? PANEL_DISPOSED_CAUSE : `${STOP_CAUSE}its tab was closed`); } catch { /* already gone */ }
+  }
+
+  /** The one question: a quick pick with Keep running, Stop, and a Remember my choice tick. */
+  private static askKeepRunning(name: string): Promise<{ keep: boolean; remember: boolean }> {
+    return new Promise((resolve) => {
+      type Item = vscode.QuickPickItem & { id: string };
+      const pick = vscode.window.createQuickPick<Item>();
+      let remember = false;
+      let done = false;
+      const items = (): Item[] => [
+        { id: "keep", label: "$(play) Keep it running in the background",
+          detail: "It carries on with no window. Open it again from Sessions; Settings › Running sessions can stop it." },
+        { id: "stop", label: "$(debug-stop) Stop it", detail: "Its turn stops now, and the session is saved." },
+        { id: "remember", label: `${remember ? "$(pass-filled)" : "$(circle-large-outline)"} Remember my choice`,
+          alwaysShow: true },
+      ];
+      const finish = (keep: boolean) => {
+        if (done) { return; }
+        done = true;
+        pick.hide();
+        pick.dispose();
+        resolve({ keep, remember });
+      };
+      pick.title = `“${name}” was still working when you closed its tab`;
+      pick.placeholder = "Keep it running, or stop it?";
+      pick.ignoreFocusOut = true;
+      pick.items = items();
+      pick.onDidAccept(() => {
+        const chosen = pick.selectedItems[0];
+        if (!chosen) { return; }
+        if (chosen.id === "remember") {
+          remember = !remember;
+          pick.items = items();
+          pick.activeItems = [pick.items[2]];
+          return;
+        }
+        finish(chosen.id === "keep");
+      });
+      pick.onDidHide(() => finish(true));           // dismissed: it keeps running, where Settings shows it
+      pick.show();
+    });
   }
 
   // ---- html ----------------------------------------------------------------
@@ -7636,6 +7871,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <button type="button" id="paste-keep" class="rail-text-action" title="Send the text exactly as pasted">Keep</button>
     </section>
   </div>
+  <div id="elsewhere-bar" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="elsewhere-text" class="elsewhere-text"></span><button type="button" id="elsewhere-open" class="act primary" title="Carry on with this session in this window; the other window shows it read-only">Open here</button></div>
   <div id="cbox" data-mode="default">
     <div id="attachments" aria-label="Attached context"></div>
     <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><div id="input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></div></div>

@@ -620,7 +620,7 @@ class Switchboard:
         reason = str(hello.get("reason") or "dgc stop")[:200]
         session_socket.send_line(sock, {"type": "stopping", "pid": os.getpid()})
         self.log(f"stop asked over the socket: {reason}")
-        self.request_exit(f"stopped by {reason}", self.shutdown_grace)
+        self.request_exit(f"{reason} stopped it", self.shutdown_grace)
 
     def refusal(self, hello: dict) -> tuple[str, dict]:
         """Why an attach is refused ("" when it is not), and what to say with it."""
@@ -822,7 +822,7 @@ class Switchboard:
             return self._check_silent_window()
         elapsed = now - since
         if elapsed >= self.max_windowless_s:
-            rule = f"no window for {_duration(elapsed)}, the most a session runs without one"
+            rule = f"it ran {_duration(elapsed)} with no window open, the most a session may"
             self.log(f"windowless exit: the {_duration(self.max_windowless_s)} limit for a session with no "
                      f"window, after {_duration(elapsed)}; work: {host_work(self.host).reason() or 'none'}")
             self.request_exit(rule, self.shutdown_grace)
@@ -840,8 +840,8 @@ class Switchboard:
                 self.log(f"windowless exit: waited {_duration(now - self._waiting_since)} for an answer, "
                          f"after {_duration(elapsed)} with no window")
                 # No grace: the turn stops at the question, and the chat's Continue picks it up.
-                self.request_exit(f"an answer was waited for {_duration(now - self._waiting_since)} "
-                                  "with no window", 0.0)
+                self.request_exit(f"it waited {_duration(now - self._waiting_since)} for your answer "
+                                  "with no window open", 0.0)
                 return "waiting"
             return ""
         self._waiting_since = None

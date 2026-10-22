@@ -96,7 +96,7 @@ def run_stop(argv: list[str]) -> int:
         return 0 if args.windowless else 1
     failed = 0
     for record in chosen:
-        stopped, what = stop_process(record, reason="dgc stop", force=args.force)
+        stopped, what = stop_process(record, reason="`dgc stop`", force=args.force)
         print(f"pid {record.get('pid')}: {'stopped' if stopped else 'not stopped'} -- {what}")
         failed += 0 if stopped else 1
     return 1 if failed else 0

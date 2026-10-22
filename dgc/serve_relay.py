@@ -163,7 +163,7 @@ def _stop_older(holder: dict, session_id: str, version: str) -> int | None:
     other = holder.get("version") or "an older DGC"
     _note(f"DGC {other} (pid {pid}) is still running this session; saving and stopping it to open "
           f"it in DGC {version}")
-    stopped, what = stop_process(holder, reason=f"DGC {version} opening this session", wait_s=30.0,
+    stopped, what = stop_process(holder, reason=f"DGC {version}, opening this session,", wait_s=30.0,
                                  unless_on_screen=True)
     if stopped:
         _note(f"DGC {other} (pid {pid}) was still running this session; {what}. Opening it in DGC {version}.")
