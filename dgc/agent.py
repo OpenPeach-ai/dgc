@@ -631,15 +631,17 @@ def recommended_window(config, client, model: str, *, probe: bool = True) -> int
     free window); for any other model -- a cloud API, or an Ollama ``:cloud`` model reached through a
     local Ollama -- a moderate start: the family's known window, at least CLOUD_START_WINDOW, capped by
     the maximum the provider reports (Ollama /api/show, Anthropic's Models API); the family's window
-    alone when nothing is reported. ``probe`` lets the client fetch the
-    model's metadata (bounded, cached); without it only what is already cached counts.
+    alone when nothing is reported. A server that sizes the window itself when it starts (vLLM,
+    SGLang, llama.cpp) has already set aside the memory for it: its window is the one to use.
+    ``probe`` lets the client fetch the model's metadata (bounded, cached); without it only what is
+    already cached counts.
     """
     from .config import context_for_model, remembered_context_size
     from .model_watch import is_local_endpoint, is_ollama_cloud_model
     remembered = remembered_context_size(config, model)
     if remembered:
         return remembered
-    limit = 0
+    limit = served = 0
     if client is not None and str(getattr(client, "model", "") or "") == str(model):
         if probe:
             prepare = getattr(client, "prepare_model", None)
@@ -655,12 +657,19 @@ def recommended_window(config, client, model: str, *, probe: bool = True) -> int
             limit = int(window() or 0) if callable(window) else 0
         except (TypeError, ValueError):
             limit = 0
+        server = getattr(client, "server_window", None)
+        try:
+            served = int((server() or {}).get("window") or 0) if callable(server) else 0
+        except (AttributeError, TypeError, ValueError):
+            served = 0
     base_url = str(getattr(client, "base_url", "") or getattr(config, "base_url", "") or "")
     family = str(getattr(client, "family", "") or "")
     table = context_for_model(model)
     # A Claude Messages model never runs on this machine, even behind a proxy on localhost.
     hosted = str(getattr(client, "api_mode", "") or "") == "anthropic" or is_ollama_cloud_model(model)
     if is_local_endpoint(base_url, family) and not hosted:
+        if served:
+            return served
         if table:
             return min(table, limit) if limit else table
         return None

@@ -3,6 +3,8 @@
 * Anthropic Messages: ``POST /v1/messages`` (server-sent events), ``GET /v1/models/<id>``.
 * Ollama native: ``POST /api/chat`` (NDJSON), ``POST /api/show``, ``GET /api/ps``.
 * OpenAI-compatible Chat Completions: ``POST /v1/chat/completions`` (server-sent events).
+* A vLLM / SGLang / llama.cpp server's own word on its window: ``GET /v1/models`` (``served_models``)
+  and llama.cpp's ``GET /props`` (``llamacpp_props``).
 
 Every chat request body is kept, in order, so a test can compare what two consecutive requests
 began with. Replies come from a script: ``script(kind, body, index) -> Reply``.
@@ -40,6 +42,9 @@ class FakeProviders:
         self.show_context = 0                            # /api/show context_length (0: none)
         self.show_capabilities = ["completion", "tools"]
         self.anthropic_max_input = 0                     # /v1/models/<id> max_input_tokens (0: 404)
+        self.served_models = None                        # GET /v1/models `data` entries (None: 404)
+        self.llamacpp_props = None                       # GET /props body (None: 404)
+        self.gets: list[str] = []                        # every GET path, in order
         self.lock = threading.Lock()
         owner = self
 
@@ -57,7 +62,14 @@ class FakeProviders:
                 self.wfile.write(raw)
 
             def do_GET(self):
-                if self.path.endswith("/api/ps"):
+                with owner.lock:
+                    owner.gets.append(self.path)
+                if self.path.endswith("/models") and owner.served_models is not None:
+                    self._send(200, "application/json", json.dumps(
+                        {"object": "list", "data": owner.served_models}).encode())
+                elif self.path.endswith("/props") and owner.llamacpp_props is not None:
+                    self._send(200, "application/json", json.dumps(owner.llamacpp_props).encode())
+                elif self.path.endswith("/api/ps"):
                     self._send(200, "application/json", json.dumps({"models": owner.ps_models}).encode())
                 elif "/models/" in self.path and owner.anthropic_max_input:
                     model = self.path.rsplit("/", 1)[-1]

@@ -40,6 +40,12 @@ _MAX_MODEL_INFO_FIELDS = 4_096
 _MAX_MODEL_METADATA_CACHE_ENTRIES = 256
 _MODEL_METADATA_FAILURE_TTL_S = 30
 _MODEL_METADATA_TOTAL_S = 4.0
+# vLLM (--max-model-len), SGLang (--context-length) and llama.cpp (-c) size the context window when they
+# start, and say so in their model list. Asked again after a minute at most, so a restart with another
+# size shows by the next turn.
+_SERVER_WINDOW_TTL_S = 60
+_MAX_SERVED_MODELS = 512
+_SERVER_NAME_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,31}")
 _MAX_OLLAMA_JSON_BYTES = 8 * 1024 * 1024
 _MAX_OLLAMA_STREAM_BYTES = 8 * 1024 * 1024
 _MAX_OLLAMA_TOOL_CALLS = 4_096
@@ -814,6 +820,17 @@ def overflow_limit(text: str) -> int:
         if 512 <= value <= 16_777_216:
             return value
     return 0
+
+
+# The server, and the start-up option, that sizes a server's window (LLMClient.server_window).
+SERVER_WINDOW_OPTIONS = {"vllm": ("vLLM", "--max-model-len"), "sglang": ("SGLang", "--context-length"),
+                         "llamacpp": ("llama-server", "-c")}
+
+
+def server_window_hint(server: str) -> str:
+    """How to change the window a server was started with: "restart vLLM with --max-model-len"."""
+    name, option = SERVER_WINDOW_OPTIONS.get(str(server or "").strip().lower(), ("", ""))
+    return f"restart {name} with {option}" if name else "restart the server with a larger context"
 
 
 # Windows learned from overflow refusals, per endpoint+model, kept on disk so the next session (and
@@ -1847,20 +1864,159 @@ class LLMClient:
             "capabilities": sorted(set(supported)),
         }
 
+    @staticmethod
+    def _served_model_entry(value, model: str):
+        """The ``/v1/models`` entry for ``model``: by its id or an alias, else the one model listed.
+
+        llama.cpp answers whatever name a request carries with the one model it loaded, so a single
+        entry is that model; vLLM refuses a name it does not serve, so its single entry is harmless.
+        """
+        data = value.get("data") if isinstance(value, dict) else None
+        if not isinstance(data, list):
+            return None
+        entries = [entry for entry in data[:_MAX_SERVED_MODELS] if isinstance(entry, dict)]
+        wanted = str(model or "")
+        for entry in entries:
+            aliases = entry.get("aliases")
+            names = [entry.get("id")] + (list(aliases[:64]) if isinstance(aliases, list) else [])
+            if wanted and any(isinstance(name, str) and name == wanted for name in names):
+                return entry
+        return entries[0] if len(entries) == 1 else None
+
+    @staticmethod
+    def _server_window_metadata(entry) -> dict:
+        """The window a server was started with, from its ``/v1/models`` entry, or {} when it names none.
+
+        vLLM and SGLang list ``max_model_len``; llama.cpp lists ``meta.n_ctx`` (one slot's window) and
+        ``meta.n_ctx_train`` (what the model was trained for).
+        """
+        if not isinstance(entry, dict):
+            return {}
+        owner = str(entry.get("owned_by") or "").strip().lower()
+        meta = entry.get("meta")
+        meta = meta if isinstance(meta, dict) else {}
+        server = owner if _SERVER_NAME_RE.fullmatch(owner) else ""
+        window = _bounded_model_tokens(entry.get("max_model_len"))
+        if window:
+            server = server or "vllm"
+        else:
+            window = _bounded_model_tokens(meta.get("n_ctx"))
+            server = "llamacpp" if window else server
+        if not window:
+            return {}
+        found = {"source": "server_models", "context_length": window, "server_window": window,
+                 "server": server}
+        trained = _bounded_model_tokens(meta.get("n_ctx_train"))
+        if trained:
+            found["trained_context"] = trained
+        return found
+
+    @staticmethod
+    def _llamacpp_props_metadata(value, trained: int = 0) -> dict:
+        """llama-server's ``/props``: ``default_generation_settings.n_ctx`` is one slot's window."""
+        settings = value.get("default_generation_settings") if isinstance(value, dict) else None
+        window = _bounded_model_tokens(settings.get("n_ctx")) if isinstance(settings, dict) else 0
+        if not window:
+            return {}
+        found = {"source": "llamacpp_props", "context_length": window, "server_window": window,
+                 "server": "llamacpp"}
+        if trained:
+            found["trained_context"] = trained
+        return found
+
+    def _server_sizes_window(self) -> bool:
+        """vLLM, SGLang and llama.cpp size the window when they start: DGC reads it there, never sets it.
+
+        By family (their ports and names), and any other OpenAI-compatible server on this computer or
+        network, since vLLM on a port of its own answers the same way.
+        """
+        if self.api_mode in ("ollama", "anthropic"):
+            return False
+        if self.family in ("vllm", "llamacpp"):
+            return True
+        return self.family == "compat" and is_local_endpoint(self.base_url, self.family)
+
+    def _prepare_server_window(self, cancel=None) -> dict:
+        """Read the window the server was started with (bounded, cached; advisory, never blocks a chat)."""
+        deadline = time.monotonic() + _MODEL_METADATA_TOTAL_S
+        failure_ttl = min(self.capability_cache_ttl_s, _MODEL_METADATA_FAILURE_TTL_S)
+        metadata: dict = {}
+        answered = False
+        try:
+            response = requests.get(f"{self.base_url}/models", headers=self._headers(),
+                                    stream=True, timeout=(2, 2))
+            entry = None
+            if response.status_code == 200:
+                value = _bounded_json_response(response, _MAX_MODEL_METADATA_BYTES,
+                                               "Served model list", deadline=deadline)
+                answered = True
+                entry = self._served_model_entry(value, self.model)
+                metadata = self._server_window_metadata(entry)
+            else:
+                _close_response(response)
+            owner = str((entry or {}).get("owned_by") or "").strip().lower()
+            if (not metadata and (owner == "llamacpp" or self.family == "llamacpp")
+                    and time.monotonic() < deadline and not (cancel is not None and cancel.is_set())):
+                # An older llama-server lists its model without the window; /props has it.
+                meta = (entry or {}).get("meta")
+                trained = _bounded_model_tokens(meta.get("n_ctx_train")) if isinstance(meta, dict) else 0
+                response = requests.get(f"{self._ollama_root}/props", headers=self._headers(),
+                                        stream=True, timeout=(2, 2))
+                if response.status_code == 200:
+                    value = _bounded_json_response(response, _MAX_MODEL_METADATA_BYTES,
+                                                   "llama.cpp server properties", deadline=deadline)
+                    answered = True
+                    metadata = self._llamacpp_props_metadata(value, trained)
+                else:
+                    _close_response(response)
+        except (LLMError, requests.RequestException, ValueError, TypeError):
+            metadata = {}
+        if cancel is not None and cancel.is_set():
+            return {}
+        if metadata:
+            self._cache_model_metadata(metadata, min(self.capability_cache_ttl_s, _SERVER_WINDOW_TTL_S))
+        elif answered:
+            # The server answered and names no window (LM Studio, a proxy): DGC sizes it, as before.
+            self._cache_model_metadata({"source": "server_models"})
+        else:
+            self._cache_model_metadata({}, failure_ttl)
+        return dict(metadata)
+
+    def server_window(self) -> dict:
+        """The window the server itself was started with, as last read (no network), or {}.
+
+        ``{"window": tokens, "server": "vllm" | "sglang" | "llamacpp" | …, "trained": tokens?}``; empty
+        when DGC sizes the window (Ollama, Anthropic, a cloud API) or the server has not said.
+        """
+        _, metadata = self._cached_model_metadata()
+        window = _bounded_model_tokens(metadata.get("server_window"))
+        if not window:
+            return {}
+        found = {"window": window, "server": str(metadata.get("server") or "")[:32]}
+        trained = _bounded_model_tokens(metadata.get("trained_context"))
+        if trained:
+            found["trained"] = trained
+        return found
+
     def prepare_model(self, *, force: bool = False, cancel=None) -> dict:
         """Discover selected native-provider model metadata once per bounded cache generation.
 
         Discovery is advisory and never prevents a chat when an older/proxied endpoint lacks its
         model-info route. Ollama's valid capabilities array is authoritative unless explicitly
         overridden; Anthropic metadata supplies limits and diagnostics without guessing features.
+        A vLLM, SGLang or llama.cpp server (or another OpenAI-compatible one nearby) is asked for the
+        window it was started with (see _prepare_server_window); it sizes no capability.
         """
-        if self.api_mode not in ("ollama", "anthropic") or not self.model:
+        server = self._server_sizes_window()
+        if (self.api_mode not in ("ollama", "anthropic") and not server) or not self.model:
             return {}
         if cancel is not None and cancel.is_set():
             return {}
         cached, metadata = self._cached_model_metadata()
         if cached and not force:
             return metadata
+        if server:
+            return self._prepare_server_window(cancel)
         deadline = time.monotonic() + _MODEL_METADATA_TOTAL_S
         try:
             if self.api_mode == "ollama":
@@ -1918,7 +2074,8 @@ class LLMClient:
         """Clamp a requested operating window to the model's maximum without expanding it.
 
         The maximum is the smaller of what the provider reports (Ollama /api/show, Anthropic's
-        Models API) and what an overflow refusal from this endpoint+model taught DGC.
+        Models API) and what an overflow refusal from this endpoint+model taught DGC; for a server
+        that sizes the window itself (vLLM, SGLang, llama.cpp), the window it says it was started with.
         """
         requested = _bounded_model_tokens(
             self.context_size if configured is None else configured)
@@ -1926,7 +2083,14 @@ class LLMClient:
         return min(requested, limit) if requested and limit else (requested or limit)
 
     def window_limit(self) -> int:
-        """This model's maximum as DGC knows it: reported, learned from a refusal, or 0 (unknown)."""
+        """This model's maximum as DGC knows it: reported, learned from a refusal, or 0 (unknown).
+
+        A server's own word about the window it runs with is current: it beats a limit an earlier
+        refusal taught, which a restart with a larger window (``-c``, ``--max-model-len``) outdates.
+        """
+        served = self.server_window().get("window", 0)
+        if served:
+            return served
         reported = self.model_context_limit()
         learned = learned_context_limit(self.base_url, self.model)
         known = [value for value in (reported, learned) if value]
@@ -1937,6 +2101,10 @@ class LLMClient:
         limit = overflow_limit(body)
         if limit:
             remember_context_limit(self.base_url, self.model, limit)
+            if self.server_window().get("window", limit) != limit:
+                # The server was restarted with another window: read it again before the next request.
+                with self._model_metadata_lock:
+                    self._model_metadata_cache.pop(self._model_metadata_key(), None)
         return ContextOverflowError("context window exceeded: " + str(body)[:200], limit=limit)
 
     def model_output_limit(self) -> int:
