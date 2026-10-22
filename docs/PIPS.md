@@ -961,7 +961,8 @@ without.
 ### How much it asks
 
 Each Personal Pip has a level, on its page under **How much it asks** (Pips API 58), the way OpenMausBot's bots do.
-Only you change it, on this computer. Every Pip starts at **Ask**, old and new, so nothing changes until you choose.
+Only you change it, on this computer. A new Personal Pip starts at **Approve for me**; a Pip made before levels keeps
+**Ask** until you change it.
 
 | Level | What goes by itself | What still asks |
 |---|---|---|

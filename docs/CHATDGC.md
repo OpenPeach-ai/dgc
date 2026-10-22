@@ -5,7 +5,7 @@ the folder you have open, so every window lists the same chats. It runs on its o
 own store, separate from Work (the coding sessions) and from Pips.
 
 Everything described below is in ChatDGC today: chats and projects, web search with cited sources, deep
-research, files, data and charts, the canvas, memory, plugins, dictation and more. Read aloud comes next.
+research, files, data and charts, the canvas, memory, plugins, dictation, read aloud, voice mode and more.
 
 ## Using it
 
