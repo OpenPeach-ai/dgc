@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A finished turn folds its work into "Worked for 43s".** Once a turn has its answer, the one-line updates
+  between tool calls, the tool rows, thinking and finished sub-agents fold into the turn's **Worked for** row, which
+  moves to the top of the turn, so a turn reads as your prompt, one line and the answer. Click the row (or press
+  Enter) to see the work again in place, under it; it folds again once your next prompt has its answer. A detailed
+  message (a diagnosis, a plan), a message you sent mid-turn, question and approval cards, notices, a Pip's report,
+  a sub-agent still working and the answer with its **Edited N files** card stay on screen. A stopped or failed turn
+  does not fold, and a reload, a reattached session or a resumed chat draws the same fold as the live turn.
+
 - **Ask DGC to fix, in the background.** On a Pip report's card, **Ask DGC to fix** (or **Fix**) no longer sends a
   message: DGC fixes the report in the background, in a copy of the project, and you keep chatting. The card becomes
   the fix's status, on a line of its own under its two: "Getting the fix copy ready", "Fixing · Running npm test",

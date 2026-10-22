@@ -6,6 +6,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **The final answer is told why it must stand alone.** The Work prompt now says the one-line updates and tool calls
+  may fold away once the answer arrives (the editor folds them into its "Worked for" row), so the answer has to carry
+  everything you need from them.
+
 - **Ask DGC to fix runs in the background.** On a Pip report's card it starts a helper in the chat's own session,
   with no turn and no message from you, so the chat stays free while it works (`start_pip_fix`). It reads the whole
   report (every finding with its evidence), fixes what is real in a copy of the project and runs the project's tests
