@@ -200,6 +200,9 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 Unconsumed terminal follow-ups remain queued after interruption; a new prompt continues the queue.
 In the editor, Enter steers and **Alt+Enter** or **Queue** submits a later turn. Unapplied steering
 can be restored to the draft. Subscription CLI mode changes apply to the next launched turn.
+A queued message ("you · queued") has **Steer now**: it goes into the running turn the way Enter
+does, and the model reads it at its next step instead of after the turn. **Steer all**, beside
+"N queued", sends every one. A turn that can't take it says so, and the message stays queued.
 
 In the editor, from five prompts a **prompt rail** sits in the transcript's right margin: a tick per
 prompt, the one you're reading bright. Hover it for every prompt with its time and click one to go
@@ -2476,7 +2479,9 @@ CLI; the extension updates through your editor.
   text it stands for. Two pills of the same skill are two selections. Anything the pill does not
   already show sits in the attachment row underneath, and a pill you delete takes its attachment
   with it.
-- Paste an image to attach it for a vision model. Drag files in from the explorer. See
+- Paste an image to attach it for a vision model. Its chip shows the image's file name, cut to fit,
+  with its type, size and dimensions on hover; a screenshot copied straight to the clipboard has no
+  name of its own and reads like "PNG · 1920×1080". Drag files in from the explorer. See
   **Pasted text** for a tall paste, a pasted link, and characters you cannot see.
 - Tool calls collect into one folded group with a summary in its header. It opens by itself the
   first time something in it fails, and once you fold it by hand it stays folded — a later failure
@@ -2538,6 +2543,21 @@ DGC ends an answer with what it changed and what you can do about it.
 - **Run again** re-sends the same prompt without disturbing whatever you were half-way through
   typing; **edit and resend** puts the prompt back in the composer instead.
 
+## Around the Work chat
+
+- **The prompt rail.** From five prompts, a tick per prompt in the transcript's right margin; hover
+  it for every prompt with its time, or press **Alt+↑ / Alt+↓**. See **Keyboard shortcuts**.
+- **The context meter**, in the row under the message box, says how full the window is. For vLLM, SGLang and
+  llama.cpp it reads **Set by the server: 32K**, with how to change it there; see **Connect your
+  model**.
+- **The prompt cache's clock** after the meter: the minutes left while Anthropic or a local Ollama
+  keeps this conversation cached (**4m**), or the clock alone once the cache has gone. See **Token
+  usage**.
+- **Remembered: … · Forget** shows once when DGC keeps something from the session; `/learn` drafts a
+  skill you **Save**, **Edit** or **Cancel**. See **Memory**.
+- **Pip reports** arrive as cards, and **Ask DGC to fix** fixes one in the background while you keep
+  chatting, with a **Pip fixes** chip on the chip line. See **Pips**.
+
 ## Approving work
 
 When DGC needs permission, the card shows what will actually happen — the command, or the diff
@@ -2557,8 +2577,10 @@ covers the terminal, classic prompt, ACP, full-auto, and who cannot be asked. In
   starts checked and highlighted, so **Enter**, a click on it or **Next** takes it. Nothing is sent
   until you act.
 - Every option has a one-line description of what choosing it means. **Something else…** lets you
-  write your own answer, and **Skip** leaves a question unanswered. With several questions, each
-  answer moves on to the next and they are sent together at the end.
+  write your own answer, and **Skip** leaves a question unanswered. With several questions, your
+  pick stays marked for a moment and the next question streams in; the last answer doesn't send:
+  the card reads "all answered" and focuses **Submit**, so you can page back and change any answer
+  first. A single question still sends on one click.
 - **×** or **Esc** (with the text field empty) closes the question without answering. DGC does not
   choose for you: it tells the model you closed it, ends the turn, and pauses a standing goal that was
   waiting on the answer. Tool calls the model made after the question in the same step do not run.
@@ -2579,11 +2601,14 @@ numbered list instead.
 
 ## Settings
 
-The gear opens seven pages: **General** (permission mode, thinking, context size, tool profile),
-**Models** (a local host, a provider, or your own subscription CLI), **Agents** (the model and
-host that sub-agents and the fallback route use), **Token usage** (what this machine counted),
-**Security** (sandbox confinement and plan-mode limits), **Plugins** (installed packages, the apps
-they reach, and the directory) and **MCP servers**. Everything is a row: what it is on the left,
+The gear opens twelve pages: **General** (permission mode, thinking, context size, tool profile),
+**Models** (a local host, a provider, or your own subscription CLI; for Anthropic, **Cache
+lifetime**, and for a local Ollama, **Keep the model loaded**), **Agents** (the model and host that
+sub-agents and the fallback route use), **Web search**, **ChatDGC**, **Memory** (what DGC
+remembers, with its **History** and **Undo**), **Voice**, **Running sessions** (sessions working
+with no window), **Token usage** (what this machine counted), **Security** (sandbox confinement and
+plan-mode limits), **Plugins** (installed packages, the apps they reach, and the directory) and
+**MCP servers**. Everything is a row: what it is on the left,
 the control on the right, the explanation beneath. Skills, lifecycle hooks, permission rules,
 project memory and these docs each open as their own panel from the command menu.
 See **Plugins, apps and MCP**.
@@ -2689,19 +2714,25 @@ schedule, a commit trigger or a routine. Up to four Pips work at once, with no d
   message that updates itself. Reply to it there.
 - **Reports reach your chat.** A project reviewer's finished run appears as a card in the chat it
   reports to: what it found and the worst of it, with **Open report**. A card never starts a turn.
-  **Ask DGC to fix** fixes it in the background, in a copy of the project kept for fixes, while you
-  keep chatting: the card shows what it is doing (**Watch**, **Stop**) and asks there if it needs
-  you; then what it changed and whether the tests ran in the copy, with **Review** and **Undo**.
+  **Ask DGC to fix** starts a helper in the chat's session without starting a turn, so you keep
+  chatting. It works in one copy of the project DGC keeps for fixes, with the project's own install,
+  and runs the tests there when it can. The card is its live status (**Watch**, **Stop**, and a
+  question it needs asked right on the card); then what it changed and whether the tests ran in the
+  copy, with **Review** and **Undo**. A file you changed on the same lines meanwhile is held back. A
+  **Pip fixes** chip on the chip line above the message box lists the fixes while they work.
 - **Routines.** A Personal Pip does things on its own at a time, on a new email that matches a
   search, or before a calendar event. It suggests one as a card; nothing runs until you add it.
 - **Live data.** A Pulse can keep an eye on live data instead of running tests: a short list of exact
   read-only command lines you approve (a `SELECT` through a read-only database account, `df -h .`,
   `curl -s http://127.0.0.1:8000/health`). DGC runs only those lines, in a read-only box in your
   project folder, and its model sums up what they printed; every number in the summary comes from the
-  output. A line that writes is refused, nothing it runs can change anything, and a run that needs you
-  reaches your chat as a card with **Ask DGC to fix**. Ask the main chat to set one up, or choose
-  **Read-only commands on live data** in a Pulse's Plan & schedule. `dgc readonly-db guide` shows how
-  to make the read-only database account.
+  output. The box reaches only the local addresses the lines name and the project's read-only
+  database. A line with an obvious write is refused when you approve the list and again before a
+  run, and changing the list is a reviewed change. The summary posts in the Pip's chat and reaches
+  your Work chat as a report: "all clear", or "needs you" with **Ask DGC to fix**. Ask the main chat
+  to set one up, or choose **Read-only commands on live data** in a Pulse's Plan & schedule. Use a
+  read-only database account: `dgc readonly-db guide` shows how to make one. It needs Linux with
+  bubblewrap (on Windows, DGC inside WSL 2); elsewhere the Pip says why its commands can't run.
 
 ## A Personal Pip's computer
 
@@ -2739,7 +2770,8 @@ a Mac it works in its browser.
 
 Linux and macOS, and Windows with DGC inside WSL 2: there, Windows starts the runner when you sign
 in, notifications are Windows' own, and your signed-in Chrome is the one on Windows. Patch and Pulse
-commands run under bubblewrap on Linux and Seatbelt on macOS, which DGC tells you is weaker. Pause one
+commands run under bubblewrap on Linux and Seatbelt on macOS, which DGC tells you is weaker; a live-data
+Pip's commands run only under bubblewrap, so not on a Mac. Pause one
 Pip, or stop them all with `dgc pips stop`. From your own program, the SDK's `session.pips` manages
 the Pips of your profile; see **SDK**.
 """.strip()),
