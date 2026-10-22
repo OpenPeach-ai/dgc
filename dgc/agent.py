@@ -7518,6 +7518,19 @@ class Agent(GoalLifecycle):
                         "completion withheld — context overflowed before verification")
                 else:
                     self.ui.end_stream()
+                reader = getattr(self.client, "server_window", None)
+                try:
+                    served = reader() if callable(reader) else {}
+                except Exception:                  # noqa: BLE001 -- the plain message still stands
+                    served = {}
+                if isinstance(served, dict) and served.get("window"):
+                    # vLLM, SGLang, llama.cpp: the window is the server's, so lowering context_size can't
+                    # help; a larger one where the server starts can.
+                    from .llm import server_window_hint
+                    return self._fail_turn(
+                        f"this server's window, {int(served['window']):,} tokens, is too small for this "
+                        f"conversation even after compaction — {server_window_hint(served.get('server'))} "
+                        "for a larger one (32K or more leaves room to work), or start a new session (Ctrl+N)")
                 return self._fail_turn(
                     "context window exceeded even after compaction — start a new session "
                     "(Ctrl+N) or lower context_size")

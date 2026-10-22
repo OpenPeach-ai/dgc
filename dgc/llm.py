@@ -42,7 +42,7 @@ _MODEL_METADATA_FAILURE_TTL_S = 30
 _MODEL_METADATA_TOTAL_S = 4.0
 # vLLM (--max-model-len), SGLang (--context-length) and llama.cpp (-c) size the context window when they
 # start, and say so in their model list. Asked again after a minute at most, so a restart with another
-# size shows by the next turn.
+# size shows within a minute (at once when a refusal names another size).
 _SERVER_WINDOW_TTL_S = 60
 _MAX_SERVED_MODELS = 512
 _SERVER_NAME_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,31}")

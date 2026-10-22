@@ -79,6 +79,9 @@ class IsolatedHome(unittest.TestCase):
         (self.root / ".git").mkdir(parents=True)
         self.server = FakeProviders()
         self.addCleanup(self.server.close)
+        # The metadata cache is the process's, keyed by address: a port a closed fixture freed comes back.
+        with LLMClient._model_metadata_lock:
+            LLMClient._model_metadata_cache.clear()
 
     def client(self, model="qwen2.5-0.5b", path="/v1", **options) -> LLMClient:
         return LLMClient(self.server.url + path, "sk-local", model, **options)
@@ -178,7 +181,7 @@ class Advisory(IsolatedHome):
     def test_a_server_that_is_down_costs_nothing_and_blocks_nothing(self):
         url = self.server.url
         self.server.close()
-        client = LLMClient(url + "/v1", "sk-local", "qwen2.5-0.5b", context_size=32_768)
+        client = LLMClient(url + "/v1", "sk-local", "qwen-down", context_size=32_768)
         started = time.monotonic()
         self.assertEqual(client.prepare_model(), {})
         self.assertLess(time.monotonic() - started, 3.0)
@@ -199,7 +202,7 @@ class Advisory(IsolatedHome):
         self.assertEqual(self.model_gets(), ["/v1/models"])
         expiry = client._model_metadata_cache[client._model_metadata_key()][0]
         self.assertLessEqual(expiry - time.monotonic(), 60.5,
-                             "a restart with another window shows by the next turn")
+                             "a restart with another window shows within a minute")
 
     def test_cloud_apis_ollama_and_anthropic_are_not_asked(self):
         def no_network(*args, **kwargs):
@@ -251,6 +254,21 @@ class TheWindowDGCUses(IsolatedHome):
         self.assertTrue(agent.run_turn("hello"), agent._last_turn_error)
         self.assertEqual(agent.context_size(), 8192)
         self.assertEqual(self.model_gets()[0], "/v1/models", "read before the first request")
+
+    def test_a_server_window_too_small_for_dgc_says_where_to_change_it(self):
+        # Seen on vLLM 0.9.2 with --max-model-len 8192: DGC's instructions and tools alone take ~7.8K tokens.
+        self.server.served_models = [VLLM_ENTRY]
+        self.server.script = lambda kind, body, index: Reply(status=400, error=json.dumps({
+            "object": "error", "type": "BadRequestError", "code": 400, "message": (
+                "This model's maximum context length is 8192 tokens. However, you requested 9050 tokens "
+                "(9030 in the messages, 20 in the completion).")}))
+        cfg = self.config(model="qwen2.5-0.5b", base_url=self.server.url + "/v1", mode="auto")
+        agent = self.agent(cfg)
+        self.assertFalse(agent.run_turn("hello"))
+        self.assertEqual(agent._last_turn_error, (
+            "this server's window, 8,192 tokens, is too small for this conversation even after compaction — "
+            "restart vLLM with --max-model-len for a larger one (32K or more leaves room to work), or start a "
+            "new session (Ctrl+N)"), "lowering context_size can't help: the window is the server's")
 
     def test_an_unset_window_is_the_server_s_whole_window(self):
         # The name table says 32K for qwen; the server set aside 128K.

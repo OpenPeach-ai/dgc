@@ -12,7 +12,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   compacted at a quarter of what the server holds. DGC now reads the window from the server itself (vLLM and SGLang
   list `max_model_len`, llama.cpp `n_ctx`; an older `llama-server` says it in `/props`) and uses it from the first
   turn. A model you have not chosen a window for gets the server's whole window; a window set above it can't apply;
-  a smaller one of your own only makes DGC compact sooner. A restart with another size is seen by the next turn, and
+  a smaller one of your own only makes DGC compact sooner. A restart with another size is seen within a minute, and
   the server's own word beats a limit an earlier refusal taught. Any other OpenAI-compatible server on this computer
   or network is asked the same way, so vLLM on a port of its own is found too. The question is bounded and never
   holds up a chat; a server that doesn't answer leaves the window to DGC, as before. `/context` says "set by the

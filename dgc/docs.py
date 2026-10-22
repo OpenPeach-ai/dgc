@@ -3343,7 +3343,7 @@ it from the first turn: the context meter reads **Set by the server: 32K** with 
 it there, and `/context` says the same. A model you have not chosen a window for gets the
 server's whole window; a window set above it can't apply, and a smaller one of your own only
 makes DGC compact sooner (Settings → General → Context size). Restart the server with another
-size and DGC sees it by the next turn. Prompt caching on these servers is the server's own
+size and DGC sees it within a minute. Prompt caching on these servers is the server's own
 (vLLM's prefix cache, llama.cpp's prompt cache) and works by itself: every request starts the
 way the last one did. Thinking is switched with `/think`, as for any model. Any other
 OpenAI-compatible server on this computer or network is asked the same way, so vLLM on a port
