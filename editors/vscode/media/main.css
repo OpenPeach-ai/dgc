@@ -887,6 +887,9 @@ body.vscode-light, body.vscode-high-contrast-light {
 .thinking.done.work-toggle { align-self: flex-start; color: var(--muted); cursor: pointer; border-radius: var(--r-sm); }
 .thinking.work-toggle::after { content: "›"; color: var(--faint); }
 .msg.dgc:not(.work-folded) > .thinking.work-toggle::after { content: "⌄"; }
+/* Open, it heads the work under it: a little room, as a tool group's line has. A prompt sent mid-turn
+   right under it keeps the prompt's own spacing (`.msg.dgc > :not(.role):has(+ .msg.user)`). */
+.msg.dgc:not(.work-folded) > .thinking.work-toggle:not(:has(+ .msg.user)) { margin-bottom: var(--sp-1); }
 .thinking.done.work-toggle:hover { color: var(--text); }
 .thinking.work-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 /* What stays is spaced by what is drawn beside it, never by a hidden step (main.js paintWorkFold):

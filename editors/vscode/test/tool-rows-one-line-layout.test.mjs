@@ -45,7 +45,7 @@ const STRETCH_SOURCE = `() => {
   const parts = [];
   while (next && !next.matches(".text, .answer, .thinking")) { parts.push(next); next = next.nextElementSibling; }
   return { span: next.getBoundingClientRect().top - first.getBoundingClientRect().bottom,
-    parts: parts.filter((node) => node.checkVisibility()).map((node) => node.className.replace(/ work-step\b/, "")) };
+    parts: parts.filter((node) => node.checkVisibility()).map((node) => node.className.replace(" work-step", "")) };
 }`;
 
 for (const width of [460, 900]) {

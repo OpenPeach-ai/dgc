@@ -118,6 +118,11 @@ for (const theme of Object.keys(MINIMUM)) {
       if (skipOrFail(t)) return;
       const page = await openAgentLines(browser, { width, theme, events: linesScene() });
       try {
+        // The scene's turn has answered, so its finished agents' lines fold into its "Worked for" row
+        // (work-fold.test.mjs); the ones still working stay. Every line is measured, opened.
+        assert.ok(await page.evaluate(() => [...document.querySelectorAll("#log .agent-line")].some((line) => !line.checkVisibility())),
+          "premise: the finished agents' lines are folded");
+        await page.click("#log .msg.dgc.work-folded > .work-toggle");
         const m = await page.evaluate(measure, CONTRAST_SOURCE);
         assert.deepEqual(m.lines.map((line) => line.text), LINES_EXPECTED);
         assert.ok(m.overflow <= 0, `no horizontal overflow (${m.overflow}px)`);
