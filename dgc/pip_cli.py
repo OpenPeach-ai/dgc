@@ -333,6 +333,11 @@ def parser():
     github.add_argument("--github-checks", action="store_true", help="read CI checks for the commit each run reviews")
     github.add_argument("--github-failed-runs", type=int, nargs="?", const=10, metavar="N", help="read up to N recent failed workflow runs")
     github.add_argument("--no-github-reads", action="store_true", help="propose removing all GitHub reads")
+    live = propose.add_mutually_exclusive_group()
+    live.add_argument("--live-command", action="append", default=None, metavar="LINE",
+                      help="Pulse live data: an exact read-only command line DGC runs each time, in a read-only box "
+                           "(repeat; the complete list, up to six). A line that writes is refused.")
+    live.add_argument("--no-live-data", action="store_true", help="Pulse: propose removing its live-data commands")
     plan = command("verification-plan", "propose exact Pulse commands for separate review; no model, network or source writes")
     job(plan); plan.add_argument("--expected-version", type=int, required=True)
     payload = plan.add_mutually_exclusive_group(required=True)
@@ -827,8 +832,14 @@ def _request(args):
             if not repository:
                 raise RegistryError("invalid_request", "This project has no GitHub origin. Name the repository with --github-repo OWNER/NAME.")
             changes["github_plan"] = validate_github_plan({"schema_version": 1, "repository": repository, "reads": github_reads})
+        if args.no_live_data:
+            changes["live_plan"] = None
+        elif args.live_command:
+            # The complete reviewed list replaces the current one; a line that writes is refused here.
+            from .pip_live_data import validate as validate_live_plan
+            changes["live_plan"] = validate_live_plan({"schema_version": 1, "commands": list(args.live_command)})
         if not changes and not _wants_source_rules(args):
-            raise RegistryError("invalid_request", "Provide --name, --goal, --source-ref, --source-rules, --exclude, web reads or GitHub reads for the proposed change.")
+            raise RegistryError("invalid_request", "Provide --name, --goal, --source-ref, --source-rules, --exclude, web reads, GitHub reads or live-data commands for the proposed change.")
         request["changes"] = changes
         if args.reason:
             request["reason"] = args.reason
@@ -1172,6 +1183,10 @@ def _format(value):
             from .pip_github_reads import label as github_label
             github = [f'GitHub reads from {github["repository"]} before each run (read-only, with your GitHub login):',
                       *("  " + github_label(read) for read in github["reads"])]
+        live = item["definition"].get("live_plan")
+        if live:
+            github = [*(github or ()), "Live data: DGC runs exactly these read-only commands each time, in a read-only box:",
+                      *("  " + line for line in live["commands"])]
         return "\n".join(["Saved for review; no change is active.", json.dumps(item["definition"], ensure_ascii=False, indent=2),
                           *(github or ()),
                           "Reason: " + item["reason"], "Review expires: " + item.get("expires_at", "Not recorded"),
@@ -1298,6 +1313,21 @@ def _format(value):
             return "\n".join(lines)
         if isinstance(report, dict) and manifest.get("run_kind", "audit") in ("conversation", "personal_task"):
             return "\n".join(lines + ["", report.get("text", "")])
+        if manifest.get("run_kind") == "live":
+            # A live-data Pip's run: its summary, then each approved command and what it printed.
+            live = report.get("live") if isinstance(report, dict) else None
+            if not isinstance(live, dict):
+                return "\n".join(lines + ["No output recorded yet. Its commands may not have run."])
+            lines += ["", live["summary"] + ("" if live["summary_by"] == "model" else " (DGC's words)"),
+                      *("Note: " + note for note in live.get("notes") or ())]
+            for entry in live["commands"]:
+                state = "ran" if entry["status"] == "ok" else entry["status"].replace("_", " ")
+                lines += [f'\n$ {entry["command"]}', f"({state}" + (f", exit code {entry['exit_code']}" if entry.get("exit_code") is not None else "") + ")",
+                          entry.get("output") or "(no output)"]
+                if entry.get("note"):
+                    lines.append(entry["note"])
+            lines.append("\nRead-only commands from this Pip's approved list; nothing was changed.")
+            return "\n".join(lines)
         if manifest.get("run_kind") == "draft":
             lines.append("Quill documentation draft; not applied to the workspace.")
             if isinstance(report, dict) and isinstance(report.get("draft"), dict):

@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS pip_report_deliveries(
 CREATE INDEX IF NOT EXISTS pip_report_deliveries_pip ON pip_report_deliveries(session_id,pip_id,finished_at);
 """
 KEY = "_dgc_pip_reports"           # on a transcript message: the cards that arrived after it
-OUTCOMES = ("findings", "clear", "failed", "checks_failed", "checks_passed")
+OUTCOMES = ("findings", "clear", "failed", "checks_failed", "checks_passed", "live_clear", "live_attention")
 SEVERITIES = ("critical", "high", "medium", "low")
 MAX_AGE = timedelta(days=7)         # an older run is history, not news
 MAX_CANDIDATES = 200
@@ -228,11 +228,12 @@ def _candidate(registry, row, pip) -> dict | None:
     except (ValueError, RecursionError):
         manifest = {}
     kind = manifest.get("run_kind", "audit") if isinstance(manifest, dict) else None
-    if kind not in ("audit", "test"):
+    if kind not in ("audit", "test", "live"):
         return None
     if registry.db.execute("SELECT 1 FROM pip_chat_messages WHERE run_id=? LIMIT 1", (row["id"],)).fetchone():
         return None                                     # a reply in the Pip's own chat, not a report
-    report = {"run_id": row["id"], "pip_id": row["pip_id"], **pip, "kind": "checks" if kind == "test" else "audit",
+    report = {"run_id": row["id"], "pip_id": row["pip_id"], **pip,
+              "kind": {"test": "checks", "live": "live"}.get(kind, "audit"),
               "finished_at": row["finished_at"], "earlier": 0}
     if row["status"] == "failed":
         try:
@@ -251,6 +252,14 @@ def _candidate(registry, row, pip) -> dict | None:
         if pulse is None:
             return None                                 # a handoff's test run, or evidence that no longer reads
         outcome, signature, fields = pulse
+    elif kind == "live":
+        # A live-data Pip (pip_live_data): its summary, grounded in what its approved commands printed.
+        from . import pip_live_data
+        try:
+            live = pip_live_data.validate_record((json.loads(row["result"]) if row["result"] else {}).get("live"))
+        except (RegistryError, ValueError, TypeError, AttributeError, RecursionError):
+            return None
+        outcome, signature, fields = pip_live_data.outcome(live), pip_live_data.signature(live), pip_live_data.report_fields(live)
     else:
         try:
             result = json.loads(row["result"]) if row["result"] else {}
@@ -520,6 +529,9 @@ def summary_line(report: dict) -> str:
         return f"Pip '{name}' finished: all {checks.get('total', 0)} checks passed"
     if outcome == "checks_failed":
         return f"Pip '{name}' finished: {checks.get('failed', 0)} of {checks.get('total', 0)} checks failed"
+    if outcome in ("live_clear", "live_attention"):
+        return (f"Pip '{name}' " + ("needs you" if outcome == "live_attention" else "finished") + ": "
+                + _text(report.get("summary"), 200))
     total = report.get("total", 0)
     counts = report.get("counts") if isinstance(report.get("counts"), dict) else {}
     worst = [f"{counts[s]} {s}" for s in SEVERITIES if isinstance(counts.get(s), int) and counts[s]]

@@ -194,7 +194,8 @@ def adapt(store, pip_id, expected_version, changes, reason, *, origin_session_id
         # Every reviewed grant is carried over; an automatic rename must never drop one.
         checked = _definition(**merged, pip_type=job["pip_type"], event_trigger=job.get("event_trigger"), source_policy=job.get('source_policy', 'committed_only'),
                               app_plan=job.get("app_plan"), web_plan=job.get("web_plan"),
-                              github_plan=job.get("github_plan"), computer_plan=job.get("computer_plan"))
+                              github_plan=job.get("github_plan"), computer_plan=job.get("computer_plan"),
+                              live_plan=job.get("live_plan"))
         if not any(checked[key] != job[key] for key in changes):
             raise RegistryError("no_change", "The requested metadata already matches the job. No new version was created.")
         now, next_version = store.registry.clock(), expected_version + 1

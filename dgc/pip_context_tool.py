@@ -47,7 +47,7 @@ def _run_kind(registry, run_id):
     except (ValueError, RecursionError) as exc:
         raise RegistryError("invalid_run", "Run identity metadata is invalid.") from exc
     kind = value.get("run_kind", "audit") if isinstance(value, dict) else None
-    if kind not in ("audit", "conversation", "patch", "test", "draft", "personal_task"):
+    if kind not in ("audit", "conversation", "patch", "test", "draft", "personal_task", "live"):
         raise RegistryError("invalid_run", "The run has an unsupported kind.")
     return kind
 
@@ -227,6 +227,7 @@ def read(args, ctx):
             if definition.get('app_plan') is not None:base['pip']['app_plan']=definition['app_plan']
             if definition.get('web_plan') is not None:base['pip']['web_plan']=definition['web_plan']
             if definition.get('github_plan') is not None:base['pip']['github_plan']=definition['github_plan']
+            if definition.get('live_plan') is not None:base['pip']['live_plan']=definition['live_plan']
             if definition.get('computer_plan') is not None:base['pip']['computer_plan']=definition['computer_plan']
             base['pip'].update(_schedule_projection(registry, args['pip_id'], definition))
             if base['pip']['source_policy']['mode'] == 'current_tree':
@@ -267,6 +268,24 @@ def read(args, ctx):
             if row is None:
                 raise RegistryError("not_found", "Run not found in this workspace.")
             manifest = json.loads(row["manifest"])
+            if manifest.get("run_kind") == "live":
+                # A live-data Pip's run: what its approved read-only commands printed, and its summary.
+                from .pip_live_data import NOTICE as live_notice, validate_record
+                from .pip_sources import from_record
+                base["run"] = {key: row[key] for key in ("id", "pip_id", "status", "created_at", "finished_at")}
+                base["run"].update(run_kind="live", job_version=manifest["job_version"], **from_record(manifest),
+                                   model=manifest["model"], error=json.loads(row["error"]) if row["error"] else None)
+                base["live_notice"] = live_notice
+                if row["status"] == "succeeded" and row["result"]:
+                    live = validate_record(json.loads(row["result"]).get("live"))
+                    base.update(summary=live["summary"], summary_by=live["summary_by"], attention=live["attention"],
+                                notes=live["notes"], total_commands=len(live["commands"]),
+                                commands=live["commands"][offset:offset + limit],
+                                next_offset=offset + limit if offset + limit < len(live["commands"]) else None)
+                    while len(base["commands"]) > 1 and _size(base, ctx) > MAX_OUTPUT_BYTES:
+                        base["commands"].pop()
+                        base["next_offset"] = offset + len(base["commands"])
+                return _encode(base, ctx)
             if manifest.get("run_kind", "audit") != "audit":
                 raise RegistryError("not_a_report", "Conversation replies, drafts and execution outcomes are not source audit reports. Use the corresponding Pip view or the execution read action.")
             report = json.loads(row["result"]) if row["result"] else {}

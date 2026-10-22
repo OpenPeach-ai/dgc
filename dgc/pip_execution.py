@@ -156,6 +156,9 @@ def run_here_notice(job) -> str | None:
         return None
     if job.get("source_policy") in ({"mode": "personal"}, "personal"):
         return None
+    if job.get("live_plan") is not None:
+        from .pip_live_data import run_here_notice as live_notice      # its read-only box, not the test sandbox
+        return live_notice(job)
     plan = job.get("verification_plan")
     if job["pip_type"] == "pulse" and isinstance(plan, dict) and isinstance(plan.get("action"), dict) \
             and not sandbox_required(plan["action"]):

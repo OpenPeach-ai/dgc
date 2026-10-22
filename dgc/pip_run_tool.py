@@ -117,8 +117,10 @@ def validate_enqueue(registry, pin, pip, actor, key):
         raise RegistryError("invalid_run", "The queue request does not match its owning chat and Pip.")
     if pip["current_version"] != pin["expected_version"]:
         raise RegistryError("conflict", "The Pip's job changed. Inspect its current definition before requesting another run.")
-    if pin.get("scope") != "personal" and pip["pip_type"] not in READ_ONLY_ROLES:
-        raise RegistryError("review_required", "This tool starts only read-only auditors and Quill drafts. Patch and Pulse need their separate reviewed handoff.")
+    live = pip["pip_type"] == "pulse" and pip.get("live_plan") is not None       # its approved read-only commands
+    if pin.get("scope") != "personal" and pip["pip_type"] not in READ_ONLY_ROLES and not live:
+        raise RegistryError("review_required", "This tool starts only read-only auditors, Quill drafts and live-data Pulses. "
+                            "Patch and other Pulses need their separate reviewed handoff.")
 
 
 def validate_retry(row, pin):
@@ -159,8 +161,9 @@ def validate_manifest(manifest):
             or manifest.get("workspace_id") != pin["workspace_id"] or manifest.get("pip_id") != pin["pip_id"]
             or manifest.get("job_version") != pin["expected_version"] or manifest.get("policy") != "read_only"
             or not isinstance(job, dict) or not isinstance(job.get("pip_type"), str)
-            or job["pip_type"] not in (READ_ONLY_ROLES | {"patch", "pulse"} if personal else READ_ONLY_ROLES)
-            or manifest.get("run_kind") not in (("personal_task",) if personal else ("audit", "draft"))
+            or job["pip_type"] not in (READ_ONLY_ROLES | {"patch", "pulse"} if personal else READ_ONLY_ROLES | {"pulse"})
+            or manifest.get("run_kind") not in (("personal_task",) if personal else
+                                                ("live",) if job["pip_type"] == "pulse" else ("audit", "draft"))
             or any(key in manifest for key in ("handoff", "conversation", "schedule", "event_trigger"))):
         raise RegistryError("invalid_run", "The main-chat request does not match this read-only run.")
 

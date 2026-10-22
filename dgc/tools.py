@@ -230,6 +230,14 @@ TOOL_SCHEMAS = [
         "Pulse command_verification uses network=false, exact argv/cwd and no installs. For app_smoke_test use "
         "network=loopback_http_v1 and tests=[{argv:[dgc-http-check,http://127.0.0.1:PORT/path,200],cwd:.}]. "
         "Confirm the actual local URLs. This only checks status, not browser rendering or authenticated journeys. "
+        "For live data (watch a database, a health endpoint, disk space: numbers that change) use pip_type=pulse, "
+        "work_kind=live_data and live_plan={schema_version:1, commands:[...]}: 1-6 exact read-only command lines DGC "
+        "runs in the project folder in a read-only box (it reaches only localhost:PORT addresses the lines name, and "
+        "the project's read-only database as $DGC_READONLY_DATABASE_URL), then the Pip's model summarizes what they "
+        "print. Nothing it runs may change anything: DGC refuses a line with a write (rm, >, INSERT/UPDATE/DELETE, "
+        "curl -X POST, ...), and never use a superuser or a password in a line; recommend a read-only database account "
+        "(dgc readonly-db guide). For SQLite use sqlite3 -readonly FILE \"SELECT ...\". Read what the project has first "
+        "(its database, its ports) and confirm the exact lines with the user. "
         "For an existing Pip read its definition first and provide all three identity/version fields. "
         "When the request is clear, set it up with sensible defaults instead of asking, then say what you chose and that it "
         "can be changed; ask first only when the job or its scope is unclear. Defaults: the schedule the user named; when they "
@@ -245,9 +253,15 @@ TOOL_SCHEMAS = [
          "app_plan": {"type":"object", "description":"Optional exact read grant obtained from inspected app tools, with connection/schema digests and connected account IDs. Never invent these values."},
          "web_plan": {"type":"object", "description":"Personal only, optional: {schema_version:1, reads:[{kind:'page', url:'https://...'} | {kind:'search', query:'...'}]}, 1-4 reads the user named. DGC reads exactly these before each run; the Pip cannot browse elsewhere."},
          "computer": {"type": "boolean", "description": "Personal only, optional: a new Personal Pip gets its own computer (a browser, a Terminal and files, separate from the user's) by default wherever this machine can run one; false makes it without one, only when the user asks for that. For an existing Pip, true gives it one. It cannot see the user's own files or accounts. Anything it would submit waits for the user's OK."},
-         "work_kind": {"type": "string", "enum": ["personal_task", "source_review", "documentation_draft", "command_verification", "app_smoke_test"]},
+         "work_kind": {"type": "string", "enum": ["personal_task", "source_review", "documentation_draft", "command_verification", "app_smoke_test", "live_data"]},
+         "live_plan": {"type": "object", "additionalProperties": False,
+             "description": "Pulse live_data only: the exact read-only command lines DGC runs each time, as the user approves them. Changing them later is a reviewed job change.",
+             "properties": {"schema_version": {"type": "integer", "enum": [1]},
+                            "commands": {"type": "array", "minItems": 1, "maxItems": 6,
+                                         "items": {"type": "string", "minLength": 1, "maxLength": 1000}}},
+             "required": ["schema_version", "commands"]},
          "verification_plan": {"type": "object", "additionalProperties": False,
-             "description": "Required for Pulse only. Exact human-reviewed commands or reserved local HTTP probes. No model runs during verification. Limits are fixed by DGC; omit limits to use defaults.",
+             "description": "Required for a Pulse that runs tests or page checks (not live_data). Exact human-reviewed commands or reserved local HTTP probes. No model runs during verification. Limits are fixed by DGC; omit limits to use defaults.",
              "properties": {"schema_version": {"type": "integer", "enum": [1]},
                  "action": {"type": "object", "additionalProperties": False,
                      "properties": {"kind": {"type": "string", "enum": ["test"]},

@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS pip_run_posts(
  posted_at TEXT NOT NULL, post TEXT NOT NULL CHECK(length(CAST(post AS BLOB))<=8192));
 CREATE INDEX IF NOT EXISTS pip_run_posts_chat ON pip_run_posts(pip_id,posted_at,run_id);
 """
-KINDS = ("audit", "checks", "draft", "result")
+KINDS = ("audit", "checks", "draft", "result", "live")
 OUTCOMES = (*delivery.OUTCOMES, "draft", "result")
 TRIGGERS = ("schedule", "event", "you", "chat", "handoff")
 PREVIEW_CHARS = 1200       # a Personal Pip's result as its chat shows it; Open full result has the rest
@@ -135,7 +135,7 @@ def _build(registry, run_id: str) -> tuple[dict | None, str | None]:
     pip = delivery._pip(db, row["pip_id"])
     if pip is None:
         return None, None
-    if kind == "audit" or kind == "test" and "pulse_verification" in manifest:
+    if kind in ("audit", "live") or kind == "test" and "pulse_verification" in manifest:
         candidate = delivery._candidate(registry, row, pip)
         if candidate is None:
             return None, None
@@ -263,7 +263,8 @@ def recent(store, pip_id: str) -> list[dict]:
         if value is None:
             continue
         item = {k: value[k] for k in ("run_id", "posted_at", "kind", "outcome", "trigger", "text", "total", "counts",
-                                      "findings", "checks", "failed_checks", "reason", "title", "next_run_at")
+                                      "findings", "checks", "failed_checks", "reason", "title", "next_run_at",
+                                      "summary", "summary_by", "commands", "failed_commands")
                 if k in value}
         if isinstance(value.get("preview"), str):
             item["preview"] = value["preview"][:RECENT_PREVIEW]
