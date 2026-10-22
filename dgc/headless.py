@@ -2444,9 +2444,16 @@ class Backend:
         except Exception:
             return
 
+        # A vLLM, SGLang or llama.cpp server is asked for its window only once an editor wants it
+        # (server_window): an SDK or a Pip's controller makes no request before its first turn.
+        wanted = bool(getattr(self, "_server_window_wanted", False))
+
         def run() -> None:
             try:
-                prepare()
+                try:
+                    prepare(server_window=wanted)
+                except TypeError:            # a client without the keyword (an older stand-in)
+                    prepare()
                 after = state()
             except Exception:
                 return
@@ -6908,8 +6915,11 @@ class Backend:
             self._emit_retained_tasks(request_id)
         elif t == "server_window":
             # From now on this client hears when it changes too (another model, a server restarted).
+            # The answer is what is known now; the server is asked in the background, and a window
+            # it reports arrives as the next server_window.
             self._server_window_wanted = True
             self._emit_server_window(request_id, force=True)
+            self._publish_model_capabilities()
         elif t == "context_breakdown":
             # What fills the window, part by part, scaled to what the meter shows (its estimate).
             try:

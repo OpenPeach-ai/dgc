@@ -2031,7 +2031,7 @@ class LLMClient:
             self._model_metadata_cache.pop(key, None)
             self._server_windows.pop(key, None)
 
-    def prepare_model(self, *, force: bool = False, cancel=None) -> dict:
+    def prepare_model(self, *, force: bool = False, cancel=None, server_window: bool = True) -> dict:
         """Discover selected native-provider model metadata once per bounded cache generation.
 
         Discovery is advisory and never prevents a chat when an older/proxied endpoint lacks its
@@ -2039,9 +2039,13 @@ class LLMClient:
         overridden; Anthropic metadata supplies limits and diagnostics without guessing features.
         A vLLM, SGLang or llama.cpp server (or another OpenAI-compatible one nearby) is asked for the
         window it was started with (see _prepare_server_window); it sizes no capability.
+        ``server_window=False`` leaves that server alone: a backend nobody has asked for the window
+        (an SDK or a Pip's controller at start-up) makes no request before its first turn.
         """
         server = self._server_sizes_window()
         if (self.api_mode not in ("ollama", "anthropic") and not server) or not self.model:
+            return {}
+        if server and not server_window:
             return {}
         if cancel is not None and cancel.is_set():
             return {}

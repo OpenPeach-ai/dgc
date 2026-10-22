@@ -20,6 +20,7 @@ import os
 import sys
 import tempfile
 import time
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -413,6 +414,32 @@ class TheEditorIsTold(IsolatedHome):
         host.dispatch({"type": "set_config", "request_id": "s2", "values": {"context_size": 16_384}})
         self.assertEqual(len(self.frames("server_window")), 2, "nothing changed: nothing said again")
         self.assertEqual(self.frames("context")[-1]["size"], 16_384, "below it, your own window decides")
+
+    def settle(self):
+        for thread in [t for t in threading.enumerate() if t.name == "dgc-model-capabilities"]:
+            thread.join(10)
+
+    def test_a_backend_nobody_asked_makes_no_request_at_start(self):
+        # An SDK or a Pip's controller starting a backend: no request to the model server before its
+        # first turn (the SDK's nested-controller test forbids any network at all).
+        self.server.served_models = [VLLM_ENTRY]
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        host.default._publish_model_capabilities()
+        self.settle()
+        self.assertEqual(self.model_gets(), [], "the server was asked though nobody wanted its window")
+
+    def test_an_editor_asking_reads_the_server_in_the_background(self):
+        self.server.served_models = [VLLM_ENTRY]
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        host.default._publish_model_capabilities()
+        self.settle()
+        host.dispatch({"type": "server_window", "request_id": "w1"})
+        self.settle()
+        told = self.frames("server_window")
+        self.assertEqual([(f.get("request_id"), f["window"]) for f in told], [("w1", 0), (None, 8192)],
+                         "answered at once with what was known, then the server's window when it said it")
+        self.assertTrue(self.model_gets())
+        self.assertEqual(self.frames("context")[-1]["size"], 8192)
 
     def test_a_subscription_cli_running_the_turns_is_not_the_server_s_window(self):
         self.server.served_models = [VLLM_ENTRY]
