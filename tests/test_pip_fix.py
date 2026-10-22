@@ -414,6 +414,23 @@ class QueueAndLifecycleTests(FixScene):
             self.ended(run2)
         self.assertEqual(running, ["slow", "quick"])
 
+    def test_a_running_fix_is_work_that_keeps_a_windowless_backend_alive(self):
+        from dgc import serve_detach
+        backend = self.make()
+        run = self.report(backend)
+        release = threading.Event()
+        with patch.object(LLMClient, "chat", Script([("Fix what Pip", lambda m, r, c: (release.wait(10),
+                                                                                    ChatResult(content="ok"))[1])])):
+            self.start(backend, run)
+            wait_for(lambda: (row := self.last(run)) and row["state"] == "running", what="the fix to run")
+            work = serve_detach.chat_work(backend)
+            self.assertIn("a background sub-agent is working", work.progressing,
+                          "a reload's windowless backend keeps running while the fix works")
+            self.assertFalse(backend._busy(), "and no turn holds the chat")
+            release.set()
+            self.ended(run)
+        self.assertEqual(serve_detach.chat_work(backend).progressing, [])
+
     def test_stop_while_queued_ends_it_with_nothing_changed(self):
         backend = self.make()
         run1 = self.report(backend, "Slow one")

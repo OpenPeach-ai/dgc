@@ -49,6 +49,7 @@ TESTS = ("passed", "failed", "not_run")
 FIX_ID = re.compile(r"fix_[0-9a-f]{32}\Z")
 RUN_ID = re.compile(r"run_[0-9a-f]{32}\Z")
 KEEP_UNUSED_S = 14 * 24 * 3600          # a copy nobody used for 14 days is removed
+STALE_S = 12 * 3600                     # a fix another process has not touched for this long is gone (pid reuse)
 MAX_RECORDS = 40                        # fixes kept per project, newest first
 MAX_FILES_SHOWN = 50                    # files a record lists
 MAX_REMEMBERED = 16                     # ignored files a project's copy gets
@@ -225,6 +226,7 @@ class FixProject:
         return _settled(row) if row else None
 
     def put(self, record: dict) -> dict:
+        record = {**record, "updated_at": _now()}
         with _STORE_GUARD:
             records = self._records()
             records[record["fix_id"]] = record
@@ -244,7 +246,10 @@ def _settled(row: dict) -> dict:
     if row.get("state") not in ACTIVE:
         return dict(row)
     owner = row.get("owner") or {}
-    if owner.get("token") == _TOKEN or (owner.get("pid") != os.getpid() and _alive(owner.get("pid"))):
+    if owner.get("token") == _TOKEN:
+        return dict(row)
+    fresh = time.time() - float(row.get("updated_at") or row.get("created_at") or 0) < STALE_S
+    if owner.get("pid") != os.getpid() and _alive(owner.get("pid")) and fresh:
         return dict(row)
     out = dict(row)
     applying = out.get("state") == "applying"
@@ -800,10 +805,12 @@ def queue_ahead(key: str, fix_id: str) -> str | None:
 
 def wait_turn(key: str, fix_id: str, cancel: threading.Event, on_wait) -> object | None:
     """Wait until this fix is first in this process's line and holds the project's lock (another
-    DGC's fix of the same project holds it too). Returns the held lock, or None when stopped."""
+    DGC's fix of the same project holds it too). Returns the held lock, or None when stopped.
+    `on_wait(name)` is told what it waits for: the Pip whose fix is ahead here, or None for a fix
+    another DGC is running in this project."""
     from .scheduler import named_process_lock
     lock = named_process_lock("pip-fix", key)
-    said = None
+    said = False
     while not cancel.is_set():
         ahead = queue_ahead(key, fix_id)
         if ahead is None and lock.acquire(timeout=0.25):
@@ -811,8 +818,8 @@ def wait_turn(key: str, fix_id: str, cancel: threading.Event, on_wait) -> object
                 lock.release()
                 return None
             return lock
-        waiting = ahead if ahead is not None else ""
-        if waiting != said:
+        waiting = ahead or None
+        if said is False or waiting != said:
             said = waiting
             on_wait(waiting)
         if ahead is not None:
@@ -1103,8 +1110,9 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
         held_lock = None
         outcome_text = ""
         try:
-            held_lock = wait_turn(project.key, fix_id, cancel,
-                                  lambda ahead: update(state="queued", queued_behind=ahead or "another fix"))
+            held_lock = wait_turn(project.key, fix_id, cancel, lambda ahead: update(
+                state="queued", queued_behind=ahead,
+                step=None if ahead else "Waiting for another fix of this project to finish"))
             if held_lock is None:
                 end_record("stopped")
                 update(state="stopped", queued_behind=None, ended_at=_now(),
@@ -1173,6 +1181,8 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
             def prepare_child(sub) -> None:
                 sub._fix_copy = {"project_root": str(project.project_root), "copy_root": str(workspace.project_root),
                                  "fix_id": fix_id}
+                # Its own ledger: no turn asked for it, so no turn's token cap pays for it.
+                sub._budget_turn = -1 - int(fix_id[4:16], 16)
                 sub._fix_notes = notes
                 sub._refresh_system()
 

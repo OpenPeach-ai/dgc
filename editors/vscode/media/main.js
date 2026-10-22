@@ -9134,7 +9134,8 @@
     const { files } = pipFixCounts(fix);
     const held = Array.isArray(fix.held) ? fix.held.length : 0;
     switch (fix.state) {
-      case "queued": return fix.queued_behind ? `Waiting · starts after the fix for ${fix.queued_behind}` : "Waiting to start";
+      case "queued": return fix.queued_behind ? `Waiting · starts after the fix for ${fix.queued_behind}`
+        : String(fix.step || "Waiting to start");
       case "preparing": return agent?.state === "waiting" ? "Needs you" : String(fix.step || "Getting the fix copy ready");
       case "running": {
         if (agent?.state === "waiting") return "Needs you";
