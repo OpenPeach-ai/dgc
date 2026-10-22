@@ -214,6 +214,8 @@ test("a long session opened on its latest pages: every prompt from its outline, 
     assert.equal(await card.locator(".prompt-rail-row").count(), 27);
     assert.equal(await card.locator(".prompt-rail-more").count(), 0);
     assert.deepEqual((await card.locator(".prompt-rail-text").allInnerTexts()).slice(0, 3), ["Set up the repo", "Add the parser", PROMPT(6)]);
+    assert.equal(await card.locator(".prompt-rail-day").first().innerText().then((d) => d.toLowerCase()), "before the summary",
+                 "the archived ones, which kept no time, under a heading of their own");
     // To prompt 8, on a page not drawn yet: the pages before what's shown are drawn first, then the view goes there.
     await card.locator(".prompt-rail-row").nth(4).click();
     await s.page.waitForTimeout(500);

@@ -11,7 +11,8 @@
 //   scroller   the element the transcript scrolls in
 //   visible()  whether a chat is on screen at all (no rail over a welcome page or another view)
 //   prompts()  every prompt, oldest first: {id, text, at (ms since 1970, or NaN), loaded (on screen),
-//              widgets?: [{title, removed?}]}; ids are stable while the prompt is in the chat
+//              widgets?: [{title, removed?}], heading? (said above it in the card instead of its day)};
+//              ids are stable while the prompt is in the chat
 //   top(p)     where a loaded prompt's own place is now (a client y), or null
 //   landing()  where a prompt gone to lands (a client y): Alt+Up from below it goes to its own prompt first
 //   go(p, then) bring prompt p on screen (loading the pages before it if it needs to), then call then()
@@ -140,7 +141,7 @@
       }
       let day = null;
       list.forEach((p, i) => {
-        const at = p.at, d = dayOf(at);
+        const at = p.at, d = p.heading || dayOf(at);
         if (d && d !== day) { day = d; rows.append(el("div", "prompt-rail-day", d)); }
         const row = el("button", `prompt-rail-row${i === current ? " now" : ""}`);
         row.type = "button"; row.dataset.i = String(i);

@@ -2832,11 +2832,12 @@
   let railSerial = 0, railSeeking = null;
   const railTurnIds = new WeakMap();  // a prompt row -> its turn's id ("h3", "t2") or its place in the archive ("a1")
   const railIds = new WeakMap();      // a prompt row -> the rail's own id for one with neither
+  const RAIL_ARCHIVED = "Before the summary";   // the card's heading over prompts compaction folded away (no times kept)
   // Each turn's prompt row, in the order the transcript shows them: the archived ones, the saved ones, this window's.
   const railHeads = () => [...log.querySelectorAll(":scope > .turn > .msg.user.turn-head, :scope > .history-pages > .turn > .msg.user.turn-head")];
   function railHeadText(head) {
     const bubble = head.querySelector(":scope > .bubble");
-    const words = (bubble?.querySelector(":scope > .prompt-text")?.textContent || "").replace(/\s+/g, " ").trim();
+    const words = (bubble?.querySelector(":scope > .prompt-text")?.textContent || "").slice(0, 2000).replace(/\s+/g, " ").trim();
     if (words) return words.slice(0, 160);
     const chips = [...(bubble?.querySelectorAll(":scope > .prompt-atts .prompt-att") || [])]
       .map((chip) => chip.textContent.replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -2857,12 +2858,14 @@
       if (!id || seen.has(id)) { id = railIds.get(head) || `p${++railSerial}`; railIds.set(head, id); }
       seen.add(id);
       const time = head.querySelector(":scope > .msg-time");
-      shown.push({ id, text: railHeadText(head), at: time ? Date.parse(time.dateTime) : NaN, loaded: true, node: head });
+      shown.push({ id, text: railHeadText(head), at: time ? Date.parse(time.dateTime) : NaN, loaded: true, node: head,
+                   ...(head.classList.contains("archived") ? { heading: RAIL_ARCHIVED } : {}) });
     }
     // The ones before what's on screen, from the outline: those this window can reach (an archived one, or one in the
     // snapshot it holds; a long session's snapshot leaves its oldest turns out).
     const before = (told || []).filter((p) => !seen.has(p.id) && (p.archived || railHeld.has(p.id)))
-      .map((p) => ({ id: p.id, text: p.text, at: typeof p.at === "number" ? p.at * 1000 : NaN, loaded: false }));
+      .map((p) => ({ id: p.id, text: p.text, at: typeof p.at === "number" ? p.at * 1000 : NaN, loaded: false,
+                     ...(p.archived ? { heading: RAIL_ARCHIVED } : {}) }));
     return [...before, ...shown];
   }
   const railOlder = () => log.querySelector(":scope > .history-pages > .history-older");
