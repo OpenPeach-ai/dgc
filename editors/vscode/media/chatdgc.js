@@ -2081,221 +2081,30 @@
     });
   }
 
-  // ---- the prompt rail (ChatGPT's "table of contents", the founder approved 2026-10-18): from five prompts, a short
-  // tick per prompt in the transcript's right margin, centred, the one being read bright. Hovering it (or Tab to it)
-  // opens a card of every prompt with its time under day headings, and the widget a reply made; a click goes there and
-  // outlines it. Alt+Up and Alt+Down step between prompts. Ticks close up to 4px apart for a long chat, then show a
-  // window around where you are. It lists every prompt even when only the latest pages are on screen (the outline), and
-  // going to one not on screen loads the pages before it first: ChatGPT's rail broke exactly there.
-  const RAIL_FROM = 5;
-  const rail = el("button", "cd-rail");
-  rail.type = "button"; rail.id = "cd-rail"; rail.hidden = true;
-  rail.setAttribute("aria-haspopup", "dialog"); rail.setAttribute("aria-expanded", "false");
-  rail.setAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown");
-  const ticks = el("span", "cd-rail-ticks");
-  ticks.setAttribute("aria-hidden", "true");
-  rail.append(ticks);
-  const railCard = el("div", "cd-rail-card");
-  railCard.id = "cd-rail-card"; railCard.hidden = true;
-  railCard.setAttribute("role", "dialog"); railCard.setAttribute("aria-label", "Prompts in this chat");
-  document.body.append(rail, railCard);
-  let railPrompts = [], railKey = "", railCurrent = -1, railTimer = 0;
+  // ---- the prompt rail (ChatGPT's "table of contents", media/promptrail.js, the same as the Work chat's): every prompt
+  // from the outline, even those on pages not on screen; going to one of those loads the pages before it first.
   const promptNode = (id) => log.querySelector(`.cd-msg.cd-user[data-id="${CSS.escape(id)}"]`);
-  /** The prompts, from the outline; the ticks drawn again only when they change (a reply streaming doesn't). */
-  function railChrome() {
-    const show = state.opened && !!state.conversation && !document.body.classList.contains("cd-blank")
-      && !document.body.classList.contains("cd-on-project");
-    railPrompts = show ? outlineNow() : [];
-    const key = railPrompts.map((p) => `${p.id}:${p.loaded ? 1 : 0}:${p.widgets.map((w) => w.title + (w.removed ? "-" : "")).join("|")}`).join(",");
-    rail.hidden = railPrompts.length < RAIL_FROM;
-    if (rail.hidden) { closeRail(false); railKey = ""; return; }
-    if (key !== railKey) {
-      railKey = key; railCurrent = -1;
-      ticks.replaceChildren(...railPrompts.map(() => el("span", "cd-tick")));
-      rail.setAttribute("aria-label", `Prompts in this chat: ${railPrompts.length}. Alt+Up and Alt+Down go to the one before or after`);
-      if (!railCard.hidden) fillRail();
-    }
-    railTrack();
-  }
-  /** Which prompt is being read: the last one whose bubble is above a line a third of the way down the view. */
-  function railTrack() {
-    if (rail.hidden) return;
-    const box = scroller.getBoundingClientRect(), line = box.top + box.height / 3;
-    let now = -1, firstLoaded = -1;
-    railPrompts.forEach((p, i) => {
-      if (!p.loaded) return;
-      if (firstLoaded < 0) firstLoaded = i;
+  const promptRail = window.DgcPromptRail?.create({
+    id: "cd-rail", scroller, input,
+    visible: () => state.opened && !!state.conversation && !document.body.classList.contains("cd-blank")
+      && !document.body.classList.contains("cd-on-project"),
+    prompts: () => outlineNow().map((p) => ({ ...p, at: Date.parse(p.created_at) })),
+    top: (p) => promptNode(p.id)?.getBoundingClientRect().top ?? null,
+    landing: () => { const box = scroller.getBoundingClientRect(); return box.top + box.height * 0.04; },
+    go: (p, then) => reach(p.id, then),
+    show: (p) => {
       const node = promptNode(p.id);
-      if (node && node.getBoundingClientRect().top <= line) now = i;
-    });
-    if (now < 0) now = firstLoaded > 0 ? firstLoaded - 1 : 0;      // reading a reply to a prompt on an earlier page
-    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) {
-      // At the end: the last prompt in view, though it never reached the line.
-      for (let i = railPrompts.length - 1; i > now; i--) {
-        const node = railPrompts[i].loaded && promptNode(railPrompts[i].id);
-        if (node && node.getBoundingClientRect().top < box.bottom) { now = i; break; }
-      }
-    }
-    if (now !== railCurrent) {
-      railCurrent = now;
-      [...ticks.children].forEach((t, i) => t.classList.toggle("now", i === now));
-      for (const row of railCard.querySelectorAll(".cd-rail-row")) row.classList.toggle("now", Number(row.dataset.i) === now);
-    }
-    placeRail();
-  }
-  function placeRail() {
-    const box = scroller.getBoundingClientRect(), n = railPrompts.length;
-    const most = Math.max(60, box.height * 0.5);
-    const pitch = Math.max(4, Math.min(10, most / Math.max(1, n)));        // 10px apart, closing up to 4px; then a window
-    const full = n * pitch, shown = Math.min(full, most);
-    ticks.style.setProperty("--pitch", `${pitch}px`);
-    ticks.style.height = `${shown}px`;
-    ticks.classList.toggle("windowed", full > most);
-    ticks.scrollTop = Math.max(0, railCurrent * pitch - shown / 2);
-    const gutter = scroller.offsetWidth - scroller.clientWidth;           // its scrollbar: the rail stays left of it
-    rail.style.right = `${Math.max(0, window.innerWidth - box.right + gutter + 2)}px`;
-    rail.style.top = `${Math.round(box.top + box.height / 2 - (shown + 16) / 2)}px`;
-    if (!railCard.hidden) placeRailCard();
-  }
-  function placeRailCard() {
-    const r = rail.getBoundingClientRect(), box = scroller.getBoundingClientRect();
-    railCard.style.right = `${Math.max(8, window.innerWidth - r.right + 2)}px`;
-    railCard.style.width = `${Math.min(340, window.innerWidth - 48)}px`;
-    railCard.style.maxHeight = `${Math.max(120, Math.min(520, box.height - 16))}px`;
-    const height = railCard.offsetHeight, mid = r.top + r.height / 2;
-    railCard.style.top = `${Math.round(Math.max(box.top + 8, Math.min(box.bottom - height - 8, mid - height / 2)))}px`;
-  }
-  const clock = (at) => (Number.isFinite(at) ? new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "");
-  function dayOf(at) {
-    if (!Number.isFinite(at)) return "";
-    const d = new Date(at), now = new Date();
-    const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5);
-    if (days === 0) return "Today";
-    if (days === 1) return "Yesterday";
-    if (days > 1 && days < 7) return d.toLocaleDateString(undefined, { weekday: "long" });
-    return d.toLocaleDateString(undefined, { day: "numeric", month: "long", ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
-  }
-  function fillRail() {
-    const head = el("div", "cd-rail-head");
-    const keys = el("span", "cd-rail-keys");
-    keys.append(el("kbd", "", "Alt"), "+", el("kbd", "", "↑"), " ", el("kbd", "", "↓"), " step");
-    head.append(el("span", "", `${railPrompts.length} prompts`), keys);
-    const list = el("div", "cd-rail-list");
-    if (state.earlier > 0 && !railPrompts.some((p) => !p.loaded)) {
-      // A CLI with no outline: the prompts before what's on screen can't be listed until they're loaded.
-      const more = el("button", "cd-rail-more", "Earlier messages aren't listed yet: load them");
-      more.type = "button";
-      more.addEventListener("click", () => { closeRail(false); $("cd-earlier").click(); });
-      list.append(more);
-    }
-    let day = null;
-    railPrompts.forEach((p, i) => {
-      const at = Date.parse(p.created_at), d = dayOf(at);
-      if (d && d !== day) { day = d; list.append(el("div", "cd-rail-day", d)); }
-      const row = el("button", `cd-rail-row${i === railCurrent ? " now" : ""}`);
-      row.type = "button"; row.dataset.i = String(i);
-      row.title = p.text;
-      row.append(el("span", "cd-rail-text", p.text || "(empty)"));
-      const made = p.widgets.filter((w) => !w.removed);
-      if (made.length) {
-        const mark = el("span", "cd-rail-widget");
-        mark.append(icon("play-circle"), el("span", "", made[0].title + (made.length > 1 ? ` +${made.length - 1}` : "")));
-        row.append(mark);
-      }
-      row.append(el("span", "cd-rail-time", clock(at)));
-      row.setAttribute("aria-label", `${p.text || "Prompt"}${made.length ? `, made ${made.map((w) => w.title).join(", ")}` : ""}${at ? `, ${dayOf(at)} ${clock(at)}` : ""}`);
-      if (i === railCurrent) row.setAttribute("aria-current", "true");
-      row.addEventListener("click", () => { closeRail(false); goToPrompt(i); });
-      list.append(row);
-    });
-    railCard.replaceChildren(head, list);
-  }
-  function openRail() {
-    clearTimeout(railTimer);
-    if (!railCard.hidden || rail.hidden) return;
-    fillRail();
-    railCard.hidden = false;
-    rail.setAttribute("aria-expanded", "true");
-    placeRailCard();
-    const now = railCard.querySelector(".cd-rail-row.now"), list = railCard.querySelector(".cd-rail-list");
-    if (now && list) list.scrollTop = now.offsetTop - list.clientHeight / 2 + now.offsetHeight / 2;
-  }
-  function closeRail(focusRail) {
-    clearTimeout(railTimer);
-    if (railCard.hidden) return;
-    railCard.hidden = true;
-    rail.setAttribute("aria-expanded", "false");
-    if (focusRail && !rail.hidden) { railQuiet = true; rail.focus(); railQuiet = false; }     // back on the rail, closed
-  }
-  let railQuiet = false;
-  const railRows = () => [...railCard.querySelectorAll(".cd-rail-row, .cd-rail-more")];
-  function focusRow(at) {
-    const rows = railRows();
-    if (!rows.length) return;
-    rows[Math.max(0, Math.min(rows.length - 1, at))].focus();
-  }
-  const leaveSoon = () => { clearTimeout(railTimer); railTimer = setTimeout(() => { if (!railCard.contains(document.activeElement) && document.activeElement !== rail) closeRail(false); }, 180); };
-  rail.addEventListener("mouseenter", openRail);
-  rail.addEventListener("mouseleave", leaveSoon);
-  railCard.addEventListener("mouseenter", () => clearTimeout(railTimer));
-  railCard.addEventListener("mouseleave", leaveSoon);
-  rail.addEventListener("focus", () => { if (!railQuiet && rail.matches(":focus-visible")) openRail(); });
-  rail.addEventListener("click", () => { openRail(); focusRow(railRows().findIndex((r) => r.classList.contains("now"))); });
-  document.addEventListener("click", (e) => { if (!railCard.hidden && !e.composedPath().some((n) => n === railCard || n === rail)) closeRail(false); });
-  rail.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault(); openRail();
-      focusRow(railRows().findIndex((r) => r.classList.contains("now")));
-    } else if (e.key === "Escape" && !railCard.hidden) { e.preventDefault(); e.stopPropagation(); closeRail(true); }
-  });
-  rail.addEventListener("blur", leaveSoon);
-  railCard.addEventListener("focusout", (e) => { if (!railCard.contains(e.relatedTarget) && e.relatedTarget !== rail) leaveSoon(); });
-  railCard.addEventListener("keydown", (e) => {
-    const rows = railRows(), at = rows.indexOf(document.activeElement);
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); focusRow(at + (e.key === "ArrowDown" ? 1 : -1)); }
-    else if (e.key === "Home" || e.key === "End") { e.preventDefault(); focusRow(e.key === "Home" ? 0 : rows.length - 1); }
-    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeRail(true); }
-  });
-  /** To prompt i: loaded first if it's on an earlier page, then near the top of the view, outlined for a moment. */
-  let railAim = { i: -1, until: 0 };          // where a jump is going: a quick second Alt+Up steps on from there
-  function goToPrompt(i) {
-    const p = railPrompts[i];
-    if (!p) return;
-    railAim = { i, until: performance.now() + 600 };
-    reach(p.id, () => {
-      railAim = { i, until: performance.now() + 600 };
-      const node = promptNode(p.id);
-      if (!node) return;
+      if (!node) return false;
       glide(node, 0.04);
       flash(node.querySelector(".cd-bubble") || node);
-      announce(`Prompt ${i + 1} of ${railPrompts.length}: ${p.text}`);
-    });
-  }
-  /** Alt+Up: the prompt above what you're reading (its own, when you're down in its reply); Alt+Down: the next. */
-  function stepPrompt(down) {
-    if (rail.hidden || !railPrompts.length) return false;
-    const from = performance.now() < railAim.until ? railAim.i : railCurrent;
-    let to;
-    if (down) to = from + 1;
-    else {
-      const node = railPrompts[from]?.loaded && promptNode(railPrompts[from].id);
-      const box = scroller.getBoundingClientRect();
-      to = node && node.getBoundingClientRect().top < box.top + box.height * 0.04 - 8 ? from : from - 1;
-    }
-    to = Math.max(0, Math.min(railPrompts.length - 1, to));
-    goToPrompt(to);
-    return true;
-  }
-  let railFrame = 0;
-  scroller.addEventListener("scroll", () => { if (!railFrame) railFrame = requestAnimationFrame(() => { railFrame = 0; railTrack(); }); }, { passive: true });
-  window.addEventListener("resize", () => { if (!rail.hidden) placeRail(); });
-  document.addEventListener("keydown", (e) => {
-    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
-    // Everywhere but a field of a card or an edit being typed in (the message box itself takes them too).
-    const t = e.target;
-    if (t instanceof HTMLElement && t !== input && t.closest("input, textarea, select, [contenteditable='true']")) return;
-    if (stepPrompt(e.key === "ArrowDown")) { e.preventDefault(); e.stopPropagation(); }
-  }, true);
+      return true;
+    },
+    // A CLI with no outline: the prompts before what's on screen can't be listed until they're loaded.
+    more: (list) => (state.earlier > 0 && !list.some((p) => !p.loaded)
+      ? { label: "Earlier messages aren't listed yet: load them", run: () => $("cd-earlier").click() } : null),
+    announce: (text) => announce(text),
+  });
+  const railChrome = () => promptRail?.refresh();
 
   function render() {
     const nodes = state.messages.map(messageNode);

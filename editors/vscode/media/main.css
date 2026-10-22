@@ -1931,6 +1931,59 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.tu
 @media (forced-colors: active) { #log .turn > .msg.user.turn-head::before { bottom: calc(-1 * var(--sp-1)); -webkit-mask-image: none; mask-image: none; } #log .turn > .msg.user.turn-head > .bubble { outline: 1px solid CanvasText; outline-offset: -1px; } }
 /* ---- end 0.47 pinned prompt -------------------------------------------------------------------- */
 
+/* ---- the prompt rail ------------------------------------------------------------------------- */
+/* The prompt rail (media/promptrail.js), ChatDGC's and the Work chat's: a short tick per prompt in the transcript's
+   right margin, centred, the one being read bright (near white on a dark theme, near black on a light one); its card
+   lists them. At side-bar width the ticks are shorter. */
+.prompt-rail { --tick: 16px; position: fixed; z-index: 30; display: block; padding: 8px 4px 8px 10px; border: 0; border-radius: var(--r-sm);
+  background: transparent; cursor: pointer; }
+.prompt-rail[hidden] { display: none; }
+.prompt-rail:focus { outline: none; }
+.prompt-rail:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 0; }
+.prompt-rail-ticks { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--pitch, 10px) - 2px); overflow: hidden; }
+.prompt-tick { flex: none; width: var(--tick); height: 2px; border-radius: 1px; background: var(--faint); opacity: .55; transition: opacity .12s, background .12s; }
+.prompt-tick.now { background: var(--text-strong); opacity: 1; }
+.prompt-rail:hover .prompt-tick:not(.now), .prompt-rail[aria-expanded="true"] .prompt-tick:not(.now) { opacity: .85; }
+.prompt-rail-ticks.windowed { -webkit-mask-image: linear-gradient(transparent, #000 14px, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(transparent, #000 14px, #000 calc(100% - 14px), transparent); }
+@media (max-width: 560px) { .prompt-rail { --tick: 10px; padding: 8px 2px 8px 6px; } }
+@media (prefers-reduced-motion: reduce) { .prompt-tick { transition: none; } }
+.prompt-rail-card { position: fixed; z-index: 31; display: flex; flex-direction: column; overflow: hidden; background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: 0 14px 40px -10px rgba(0, 0, 0, .75); }
+.prompt-rail-card[hidden] { display: none; }
+body.vscode-light .prompt-rail-card { box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .28); }
+.prompt-rail-head { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border); color: var(--muted); font: var(--w-med) var(--t-xs)/1.3 var(--sans); }
+.prompt-rail-keys { white-space: nowrap; }
+.prompt-rail-keys kbd { padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--code); color: var(--muted); font: var(--w-reg) 10px/1.5 var(--mono); }
+.prompt-rail-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px; scrollbar-width: thin; }
+.prompt-rail-day { padding: 8px 8px 2px; color: var(--faint); font: var(--w-med) 10px/1.2 var(--sans); text-transform: uppercase; letter-spacing: .04em; }
+.prompt-rail-row, .prompt-rail-more { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 3px 8px; border: 0;
+  border-radius: var(--r-sm); background: transparent; color: var(--text); text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.35 var(--sans); }
+.prompt-rail-more { color: var(--link); font-size: var(--t-xs); }
+.prompt-rail-row:hover, .prompt-rail-row:focus-visible, .prompt-rail-more:hover { background: var(--surface2); }
+.prompt-rail-row:focus-visible, .prompt-rail-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.prompt-rail-row.now { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.prompt-rail-row.now:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.prompt-rail-row.now .prompt-rail-text { color: var(--text-strong); font-weight: var(--w-med); }
+.prompt-rail-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-rail-widget { flex: 0 1 auto; min-width: 0; max-width: 45%; display: inline-flex; align-items: center; gap: 4px; color: var(--accent-text, var(--link));
+  font: var(--w-reg) var(--t-xs)/1 var(--sans); }
+.prompt-rail-widget span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-rail-widget .codicon { font-size: 12px; }
+.prompt-rail-time { flex: none; min-width: 52px; text-align: right; color: var(--faint); font: var(--w-reg) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .prompt-rail-time { min-width: 0; } }
+@media (forced-colors: active) { .prompt-tick { background: CanvasText; opacity: .5; } .prompt-tick.now { background: Highlight; opacity: 1; } .prompt-rail-card { border-color: CanvasText; } }
+/* The Work chat's rail: its transcript has no margin beside it, so the rail sits in #log's 16px padding with the
+   short ticks, under the message box's menus (20) and the panels that cover the chat (30). */
+#prompt-rail { --tick: 10px; z-index: 15; padding: 8px 2px; }
+#prompt-rail-card { z-index: 16; }
+/* A prompt gone to from the rail: its bubble outlined for a moment. */
+.prompt-flash { animation: prompt-flash 1.4s ease-out 1; }
+@keyframes prompt-flash { 0%, 35% { outline: 2px solid var(--accent); outline-offset: 2px; } 100% { outline: 2px solid transparent; outline-offset: 6px; } }
+@media (prefers-reduced-motion: reduce) { .prompt-flash { animation: none; outline: 2px solid var(--accent); outline-offset: 2px; } }
+/* ---- end the prompt rail --------------------------------------------------------------------- */
+
 /* ==================================================================================================
    0.40.0 lane sections. Each lane adds rules only inside its own section, including its own
    @media (forced-colors: active) and @media (max-width: 360px) blocks; the shared blocks above

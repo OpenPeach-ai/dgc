@@ -3164,7 +3164,7 @@ const railChat = (count, { widgetsAt = [0, 7] } = {}) => {
   return { P, messages };
 };
 const railState = (page) => page.evaluate(() => {
-  const ticks = [...document.querySelectorAll("#cd-rail .cd-tick")];
+  const ticks = [...document.querySelectorAll("#cd-rail .prompt-tick")];
   return { shown: !document.getElementById("cd-rail").hidden, ticks: ticks.length, now: ticks.findIndex((t) => t.classList.contains("now")) };
 });
 // The card opens over the rail, as ChatGPT's does: the pointer goes there (a locator's hover waits for the rail to be on
@@ -3193,32 +3193,32 @@ test("the prompt rail: from five prompts, a tick each and the one being read bri
     const [r, scroll, bubble] = [await rail.boundingBox(), await s.page.locator("#cd-scroll").boundingBox(), await s.page.locator(".cd-bubble").first().boundingBox()];
     assert.ok(Math.abs(r.y + r.height / 2 - (scroll.y + scroll.height / 2)) <= 2, "centred");
     assert.ok(r.x > bubble.x + bubble.width && r.x + r.width <= scroll.x + scroll.width, "in the margin, right of the bubbles");
-    const tick = await s.page.locator(".cd-tick").first().boundingBox();
+    const tick = await s.page.locator(".prompt-tick").first().boundingBox();
     assert.deepEqual([tick.width, tick.height], [16, 2]);
     // The one being read is bright.
     await s.page.evaluate((id) => { const sc = document.getElementById("cd-scroll"), n = document.querySelector(`.cd-msg[data-id="${id}"]`);
       sc.scrollTop += n.getBoundingClientRect().top - sc.getBoundingClientRect().top - 20; }, P(18));
     await s.page.waitForTimeout(300);
     assert.equal((await railState(s.page)).now, 9);
-    const colours = await s.page.evaluate(() => [...document.querySelectorAll(".cd-tick")].slice(8, 10).map((t) => getComputedStyle(t).opacity));
+    const colours = await s.page.evaluate(() => [...document.querySelectorAll(".prompt-tick")].slice(8, 10).map((t) => getComputedStyle(t).opacity));
     assert.deepEqual(colours, ["0.55", "1"]);
     // Hover: every prompt, with its time, under day headings; the widget a reply made; the one being read marked.
     await hoverRail(s.page);
     const card = s.page.locator("#cd-rail-card");
     await card.waitFor({ state: "visible" });
     assert.equal(await rail.getAttribute("aria-expanded"), "true");
-    assert.match(await card.locator(".cd-rail-head").innerText(), /^23 prompts/);
-    assert.equal(await card.locator(".cd-rail-row").count(), 23);
-    assert.ok((await card.locator(".cd-rail-day").count()) >= 2, "day headings");
-    assert.deepEqual(await card.locator(".cd-rail-widget").allInnerTexts(), ["EMI calculator", "Widget 7"]);
-    const now = card.locator(".cd-rail-row.now");
+    assert.match(await card.locator(".prompt-rail-head").innerText(), /^23 prompts/);
+    assert.equal(await card.locator(".prompt-rail-row").count(), 23);
+    assert.ok((await card.locator(".prompt-rail-day").count()) >= 2, "day headings");
+    assert.deepEqual(await card.locator(".prompt-rail-widget").allInnerTexts(), ["EMI calculator", "Widget 7"]);
+    const now = card.locator(".prompt-rail-row.now");
     assert.equal(await now.getAttribute("data-i"), "9");
     assert.equal(await now.getAttribute("aria-current"), "true");
-    assert.match(await card.locator(".cd-rail-row").nth(9).locator(".cd-rail-time").innerText(), /^\d{1,2}:\d{2}/);
+    assert.match(await card.locator(".prompt-rail-row").nth(9).locator(".prompt-rail-time").innerText(), /^\d{1,2}:\d{2}/);
     const c = await card.boundingBox();
     assert.ok(c.x + c.width <= 900 && c.y >= scroll.y && c.y + c.height <= scroll.y + scroll.height, "inside the transcript");
     // A click: the card closes, the view eases to that prompt, near the top, outlined for a moment.
-    await card.locator(".cd-rail-row").nth(2).click();
+    await card.locator(".prompt-rail-row").nth(2).click();
     assert.equal(await card.isHidden(), true);
     await s.page.waitForTimeout(450);
     const top = await promptTop(s.page, P(4));
@@ -3264,7 +3264,7 @@ test("the prompt rail on a long chat opened on its latest pages: every prompt li
     await s.frame();
     assert.deepEqual(await railState(s.page).then((r) => [r.shown, r.ticks]), [true, 5], "what's on screen, until the outline comes");
     await hoverRail(s.page);
-    assert.match(await s.page.locator("#cd-rail-card .cd-rail-more").innerText(), /Earlier messages aren't listed yet/);
+    assert.match(await s.page.locator("#cd-rail-card .prompt-rail-more").innerText(), /Earlier messages aren't listed yet/);
     await s.page.mouse.move(100, 100);
     await s.page.waitForTimeout(250);
     const outline = [];
@@ -3279,10 +3279,10 @@ test("the prompt rail on a long chat opened on its latest pages: every prompt li
     assert.equal((await railState(s.page)).now, 24);
     await hoverRail(s.page);
     const card = s.page.locator("#cd-rail-card");
-    assert.equal(await card.locator(".cd-rail-row").count(), 25);
-    assert.equal(await card.locator(".cd-rail-more").count(), 0);
-    assert.deepEqual(await card.locator(".cd-rail-widget").allInnerTexts(), ["EMI calculator", "Widget 7"], "the widgets of replies not on screen too");
-    await card.locator(".cd-rail-row").nth(3).click();
+    assert.equal(await card.locator(".prompt-rail-row").count(), 25);
+    assert.equal(await card.locator(".prompt-rail-more").count(), 0);
+    assert.deepEqual(await card.locator(".prompt-rail-widget").allInnerTexts(), ["EMI calculator", "Widget 7"], "the widgets of replies not on screen too");
+    await card.locator(".prompt-rail-row").nth(3).click();
     assert.deepEqual((await s.posted("earlier")).map((m) => m.before), [P(40)], "the page before what's shown");
     await s.send({ type: "earlier", messages: messages.slice(20, 40), earlier: 20 });
     assert.deepEqual((await s.posted("earlier")).map((m) => m.before), [P(40), P(20)], "not there yet: the next");
@@ -3305,7 +3305,7 @@ test("the prompt rail for a very long chat closes its ticks up and shows a windo
       await s.send({ type: "opened", conversation: conversation(), messages, earlier: 0, busy: false });
       await s.frame();
       const look = await s.page.evaluate(() => {
-        const ticks = document.querySelector(".cd-rail-ticks"), all = [...ticks.children], sc = document.getElementById("cd-scroll");
+        const ticks = document.querySelector(".prompt-rail-ticks"), all = [...ticks.children], sc = document.getElementById("cd-scroll");
         return { windowed: ticks.classList.contains("windowed"), height: ticks.getBoundingClientRect().height, half: sc.clientHeight / 2,
                  pitch: all[1].getBoundingClientRect().top - all[0].getBoundingClientRect().top, width: all[0].getBoundingClientRect().width,
                  nowShown: (() => { const n = ticks.querySelector(".now").getBoundingClientRect(), b = ticks.getBoundingClientRect(); return n.top >= b.top && n.bottom <= b.bottom; })() };
