@@ -556,3 +556,8 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-learn-card textarea{width:100%;box-sizing:border-box;font:12px/1.5 var(--vscode-editor-font-family,monospace);resize:vertical}
 .pip-learn-card .actions{display:flex;gap:8px;flex-wrap:wrap}
 .pip-learn-card .pip-learn-body h1{font-size:14px;margin:0 0 6px}.pip-learn-card .pip-learn-body h2{font-size:13px;margin:10px 0 4px}
+/* A live-data Pip (Pips API 60): what a Pulse runs, its approved read-only commands, and a run's output. */
+.check-field input[type=radio]{width:16px;height:16px;flex:none;margin:0}.form fieldset.pulse-mode{margin:0 0 12px}
+.live-commands{font-family:var(--vscode-editor-font-family,monospace);font-size:12px;line-height:1.55;white-space:pre;overflow-x:auto}
+.live-command-list{margin:8px 0;padding-left:22px}.live-command-list pre{margin:4px 0}.live-reach{margin:8px 0 0}
+.live-command h3{margin:0 0 4px}.live-command .live-command-line{margin:4px 0 6px;font-weight:600}.live-summary{font-size:14px}

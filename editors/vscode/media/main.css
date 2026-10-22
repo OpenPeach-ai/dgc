@@ -2856,6 +2856,8 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report.quiet .pip-report-when { margin-left: 0; }
 .pip-report-detail { margin: var(--sp-1) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--mono);
   overflow-wrap: anywhere; }
+/* A live-data Pip's summary (Pips API 60) is a sentence, not a saved error: the chat's text, not code. */
+.pip-report-detail.pip-report-summary { color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 .pip-report-findings { display: grid; gap: 2px; margin: var(--sp-2) 0 0; padding: 0; list-style: none; }
 .pip-report-findings li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0;
   font: var(--w-reg) var(--t-xs)/1.5 var(--sans); color: var(--text); }

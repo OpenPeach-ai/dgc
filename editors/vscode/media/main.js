@@ -8866,7 +8866,9 @@
   // {role: "pip_report"} marker -- one renderer for both, so a reload draws what was drawn live.
   // Ask DGC to fix sends one message naming the run (see askDgcToFix); nothing else here starts a turn.
   const PIP_REPORT_TYPES = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"];
-  const PIP_REPORT_OUTCOMES = ["findings", "clear", "failed", "checks_failed", "checks_passed"];
+  // live_clear and live_attention (Pips API 60): a live-data Pip's run, its summary grounded in its commands' output.
+  const PIP_REPORT_OUTCOMES = ["findings", "clear", "failed", "checks_failed", "checks_passed", "live_clear", "live_attention"];
+  const PIP_REPORT_KINDS = ["audit", "checks", "live"];
   const PIP_REPORT_SEVERITIES = ["critical", "high", "medium", "low"];
   const pipReportPlural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   function validPipReport(r) {
@@ -8887,6 +8889,11 @@
       return total === 1 ? "finished · the check passed" : `finished · all ${total} checks passed`;
     }
     if (r.outcome === "checks_failed") return `finished · ${n(r.checks?.failed)} of ${pipReportPlural(n(r.checks?.total), "check")} failed`;
+    if (r.outcome === "live_clear") return "finished · all clear";
+    if (r.outcome === "live_attention") {
+      const failed = n(r.commands?.failed);
+      return failed ? `needs you · ${failed} of ${pipReportPlural(n(r.commands?.total), "command")} didn’t run` : "needs you";
+    }
     const counts = PIP_REPORT_SEVERITIES.filter((s) => n(r.counts?.[s])).map((s) => `${n(r.counts[s])} ${s}`);
     return `finished · ${pipReportPlural(n(r.total), "finding")}${counts.length ? ` (${counts.join(", ")})` : ""}`;
   }
@@ -8894,12 +8901,17 @@
   // itself, and keeps live systems the user's call.
   function pipReportPrompt(r) {
     const name = `Pip “${r.name}”`;
-    const read = r.kind === "checks" ? "execution" : "report";
+    const read = r.kind === "checks" ? "execution" : "report";   // a live-data run reads as a report too
     const how = `Read it with pips_context (action "${read}", run_id "${r.run_id}")`;
     if (r.outcome === "failed") {
       return `${name} failed (run ${r.run_id}): ${String(r.reason || "it stopped with an error.")}\n`
         + `${how}, find out what stopped it and help me fix that, so its next run works. `
         + `Ask me before you change any live data or services.`;
+    }
+    if (r.outcome === "live_attention") {
+      return `${name} read live data and reported (run ${r.run_id}): ${String(r.summary || "").slice(0, 600)}\n`
+        + `${how}, find the cause in the project's code or configuration and fix it there. `
+        + `Don't change live data, a database or a service to make the numbers look right; ask me first.`;
     }
     if (r.outcome === "checks_failed") {
       const which = Array.isArray(r.failed_checks) && r.failed_checks.length ? ` (${r.failed_checks.join("; ")})` : "";
@@ -8953,7 +8965,7 @@
   // From a Pip's own chat. A page with a chat sends it here, as the card would. The side bar's Sessions home has no
   // chat: the host opens the chat the Pip reports to (or a new one) in its tab, and that chat sends it (pipAskDgc).
   function askDgcFromPips(r, session) {
-    if (!validPipReport(r) || !["audit", "checks"].includes(r.kind)) return "This run can't be sent to the Work chat.";
+    if (!validPipReport(r) || !PIP_REPORT_KINDS.includes(r.kind)) return "This run can't be sent to the Work chat.";
     if (chatPlace === "home") {
       vscode.postMessage({ type: "pipAskDgc", report: r, session: /^[A-Za-z0-9_-]{1,128}$/.test(String(session || "")) ? session : "" });
       return true;
@@ -8966,7 +8978,7 @@
   // asked about here is not asked again.
   const pipAsks = [];
   function queuePipAsk(r) {
-    if (!validPipReport(r) || !["audit", "checks"].includes(r.kind) || pipAsks.length >= 8) return;
+    if (!validPipReport(r) || !PIP_REPORT_KINDS.includes(r.kind) || pipAsks.length >= 8) return;
     pipAsks.push(r);
     flushPipAsks();
   }
@@ -8978,7 +8990,7 @@
     }
   }
   function pipReportCard(r) {
-    const quiet = r.outcome === "clear" || r.outcome === "checks_passed";
+    const quiet = r.outcome === "clear" || r.outcome === "checks_passed" || r.outcome === "live_clear";
     const card = el("div", `pip-report${quiet ? " quiet" : ""}`);
     card.dataset.run = r.run_id; card.dataset.outcome = r.outcome;
     card._report = r;
@@ -8987,7 +8999,8 @@
     card.setAttribute("aria-label", `Pip report from ${r.name}: ${state}`);
     const face = el("span", "pip-report-face");
     face.setAttribute("aria-hidden", "true");
-    const pose = r.outcome === "failed" || r.outcome === "checks_failed" ? "failure" : r.outcome === "findings" ? "waiting_approval" : "success";
+    const pose = r.outcome === "failed" || r.outcome === "checks_failed" ? "failure"
+      : r.outcome === "findings" || r.outcome === "live_attention" ? "waiting_approval" : "success";
     try {
       if (window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
         { index: PIP_REPORT_TYPES.indexOf(r.pip_type), name: r.name }, pose, `pip-report-${r.run_id.slice(4, 16)}`,
@@ -9004,8 +9017,12 @@
     if (r.outcome === "failed" && r.detail) {
       const detail = el("p", "pip-report-detail"); detail.textContent = String(r.detail).slice(0, 600); main.append(detail);
     }
+    if ((r.outcome === "live_clear" || r.outcome === "live_attention") && r.summary) {
+      const summary = el("p", "pip-report-detail pip-report-summary"); summary.textContent = String(r.summary).slice(0, 600); main.append(summary);
+    }
     const rows = r.outcome === "findings" ? (Array.isArray(r.findings) ? r.findings : []).slice(0, 3)
-      : r.outcome === "checks_failed" ? (Array.isArray(r.failed_checks) ? r.failed_checks : []).slice(0, 3).map((title) => ({ title, severity: "failed" })) : [];
+      : r.outcome === "checks_failed" ? (Array.isArray(r.failed_checks) ? r.failed_checks : []).slice(0, 3).map((title) => ({ title, severity: "failed" }))
+      : r.outcome === "live_attention" ? (Array.isArray(r.failed_commands) ? r.failed_commands : []).slice(0, 3).map((title) => ({ title, severity: "failed" })) : [];
     if (rows.length) {
       const list = el("ul", "pip-report-findings");
       list.setAttribute("aria-label", r.outcome === "findings" ? "Top findings" : "Failed checks");
@@ -9098,7 +9115,10 @@
     const top = Array.isArray(r.findings) ? r.findings[0] : null;
     if (r.outcome === "failed") return { text: "failed", bad: true, sev: "failed", what: String(r.reason || "It stopped with an error.").slice(0, 300) };
     if (r.outcome === "clear") return { text: "nothing found" };
-    if (r.outcome === "checks_passed") return { text: pipReportState(r).replace(/^finished · /, "") };
+    if (r.outcome === "checks_passed" || r.outcome === "live_clear") return { text: pipReportState(r).replace(/^finished · /, "") };
+    if (r.outcome === "live_attention") {
+      return { text: pipReportState(r), bad: true, sev: "failed", what: String(r.summary || "It needs you.").slice(0, 300) };
+    }
     if (r.outcome === "checks_failed") {
       return { text: pipReportState(r).replace(/^finished · /, ""), bad: true, sev: "failed",
                what: String((Array.isArray(r.failed_checks) && r.failed_checks[0]) || "A check failed.").slice(0, 300) };
@@ -9140,8 +9160,10 @@
     if (cards.length < 3) { for (const c of cards) group.before(c); group.remove(); return; }
     const failed = cards.filter((c) => c.dataset.outcome === "failed" || c.dataset.outcome === "checks_failed").length;
     const findings = cards.reduce((sum, c) => sum + (c.dataset.outcome === "findings" ? Number(c.dataset.total) || 0 : 0), 0);
-    const clear = cards.filter((c) => c.dataset.outcome === "clear" || c.dataset.outcome === "checks_passed").length;
-    const parts = [failed && `${failed} failed`, findings && pipReportPlural(findings, "finding"), clear && `${clear} clear`].filter(Boolean);
+    const clear = cards.filter((c) => ["clear", "checks_passed", "live_clear"].includes(c.dataset.outcome)).length;
+    const attention = cards.filter((c) => c.dataset.outcome === "live_attention").length;
+    const parts = [failed && `${failed} failed`, findings && pipReportPlural(findings, "finding"),
+                   attention && `${attention} need${attention === 1 ? "s" : ""} you`, clear && `${clear} clear`].filter(Boolean);
     const head = group.querySelector(":scope > .pip-report-group-head");
     const faces = el("span", "pip-report-group-faces"); faces.setAttribute("aria-hidden", "true");
     for (const c of cards.slice(-3)) { const f = el("span"); f.innerHTML = c.querySelector(".pip-report-face")?.innerHTML || ""; faces.append(f); }
