@@ -633,7 +633,7 @@ def fallback(commands) -> str:
 
 
 # ---- grounding -------------------------------------------------------------------------------------------------
-_NUMBER = re.compile(r"(?<![\w.])\d+(?:[.,:]\d+)*(?![\w])|(?<![\w.])\d+(?:[.,:]\d+)*(?=[A-Za-z%])")
+_NUMBER = re.compile(r"(?<![\w.])\d+(?:[.,:]\d+)*")      # 3.6 in 3.6T, 35 in 35%, never the 1 in sda1
 
 
 def _numbers(text: str) -> list[str]:
@@ -654,17 +654,23 @@ def _forms(token: str) -> set[str]:
     return forms
 
 
+_COUNT_OF_COMMANDS = re.compile(r"\b(\d+)(?:\s+(?:of|out of)\s+(\d+))?\s+(?:commands?|command lines?|lines?|checks?)\b",
+                                re.IGNORECASE)
+
+
 def ungrounded(summary: str, commands, goal: str = "") -> list[str]:
     """The numbers in SUMMARY that none of the output (or the goal, or the command lines) has; [] when every one
-    is there. A count of commands (up to how many there are) is DGC's own and always fine."""
+    is there. A count of the commands themselves ("2 of 3 commands") is DGC's own and always fine."""
     known: set[str] = set()
     for text in [goal] + [c.get("output", "") for c in commands] + [c.get("command", "") for c in commands]:
         for token in _numbers(text):
             known |= _forms(token)
-    small = {str(n) for n in range(0, len(commands) + 1)}
+    total = len(commands)
+    said = _COUNT_OF_COMMANDS.sub(lambda m: "" if all(int(n) <= total for n in m.groups() if n) else m.group(0),
+                                  str(summary or ""))
     missing = []
-    for token in _numbers(summary):
-        if token in small or _forms(token) & known:
+    for token in _numbers(said):
+        if _forms(token) & known:
             continue
         if token not in missing:
             missing.append(token)

@@ -102,6 +102,8 @@ class GroundingTests(unittest.TestCase):
                                          self.OUT, "Tell me when the disk is above 80%."), [],
                          "the output's numbers, 1,204 written 1204, the goal's 80 and a count of commands are all fine")
         self.assertEqual(live.ungrounded("The disk is 36% full and 99 orders are above 80%.", self.OUT, "above 80%"), ["36", "99"])
+        self.assertEqual(live.ungrounded("2 of 2 commands ran; 2 orders are unpaid.", self.OUT), ["2"],
+                         "a count of commands is DGC's, but the same small number said of the data is not")
 
     def test_the_model_reply_is_one_object_with_a_summary_and_attention(self):
         self.assertEqual(live.parse('```json\n{"summary": "All good.", "attention": false}\n```'), ("All good.", False))
