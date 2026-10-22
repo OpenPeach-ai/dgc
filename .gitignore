@@ -22,6 +22,7 @@ dgc.tar.gz
 /scripts/check-site.py
 /scripts/check-site-worker.mjs
 /scripts/fig5_iso.py
+/scripts/fig2_iso.py
 /scripts/deploy-site.sh
 /scripts/generate-docs-site.py
 /scripts/benchmark_site.py
