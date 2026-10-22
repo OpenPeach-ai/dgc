@@ -256,7 +256,7 @@ export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=fal
     text=wordsText(words);
   }
   const askable=ask&&!personal&&['findings','checks_failed','failed'].includes(p.outcome)&&['audit','checks'].includes(p.kind);
-  const fix=askable?chip(`data-post-fix="${id}"${asked?' disabled title="This run’s prompt was sent to the Work chat."':''}`,`${icon('fix')}<span>${asked?'Asked DGC':'Ask DGC to fix'}</span>`,asked?'asked':''):'';
+  const fix=askable?chip(`data-post-fix="${id}"${asked?' disabled title="DGC was asked to fix this run, in the Work chat it reports to."':''}`,`${icon('fix')}<span>${asked?'Asked DGC':'Ask DGC to fix'}</span>`,asked?'asked':''):'';
   const attach=runs?timesMarkup(runs,now)
     :p.outcome==='findings'||p.outcome==='checks_failed'?reportMarkup(p)+fix
     :p.outcome==='failed'?chip(`data-post-open="${id}"`,`${icon('warn')}<span>See what happened</span>`)+(canRun?chip(`data-post-run="${id}"`,`${icon('play')}<span>Run again now</span>`):'')+fix

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Editor protocol: commands `start_pip_fix`, `undo_pip_fix`, `list_pip_fixes` and `get_pip_fix_change`, and events
+  `pip_fix`, `pip_fixes` and `pip_fix_change` (Ask DGC to fix in the background; offered as
+  `ready.capabilities.pip_fix`), are in the vendored protocol and the TypeScript SDK's known events, so neither SDK
+  drops them. An SDK session never sends the commands, so it never gets the events.
+
 - Editor protocol: command `get_outline` and event `outline` (every prompt of a Work session, oldest first, for the
   editor's prompt rail; offered as `ready.capabilities.outline`) are in the vendored protocol and the TypeScript SDK's
   known events, so neither SDK drops it. An SDK session never sends the command, so it never gets the event.

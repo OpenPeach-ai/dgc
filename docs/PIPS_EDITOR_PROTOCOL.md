@@ -91,8 +91,10 @@ The reply is a `pips_result` event that carries the nested request ID:
   API 51 the editor draws each post among the chat's messages, renames Runs to History and says what each
   run found there. **Ask DGC to fix** on a post goes to the Work chat: the side bar's Sessions home sends
   the extension `pipAskDgc {report, session}`, which opens that session's tab (`get_pip`'s
-  `report_session`, or a new session) and hands it the report; that chat sends the Work chat card's
-  prompt once its transcript is in, unless the transcript already names the run.
+  `report_session`, or a new session) and hands it the report; once that chat is ready it starts the
+  background fix (`start_pip_fix {run_id}`, offered as `ready.capabilities.pip_fix`), which shows the run's card
+  there when the chat never had it, unless that report's fix is already working. Against a CLI without
+  `pip_fix` it sends the Work chat card's prompt instead, unless the transcript already names the run.
 - `introduce_pip {pip_id}` (API 43, local only) queues a new Personal Pip's first message once and
   returns `{run, message}` like `send_pip_message`. That message has `intro: true` in
   `list_pip_messages`; the editor hides it and shows the Pip typing until its reply arrives.

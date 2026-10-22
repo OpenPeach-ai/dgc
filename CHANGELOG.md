@@ -6,6 +6,25 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Ask DGC to fix runs in the background.** On a Pip report's card it starts a helper in the chat's own session,
+  with no turn and no message from you, so the chat stays free while it works (`start_pip_fix`). It reads the whole
+  report (every finding with its evidence), fixes what is real in a copy of the project and runs the project's tests
+  there when it can; it never changes live data or services. When it finishes, its changes are applied as any
+  helper's are: a file you changed on the same lines meanwhile is held back, a file with uncommitted work of yours is
+  fixed on top of it, and every file it writes is recorded first, so Undo puts it back while it still holds what the
+  fix left (a file you changed since is kept). Whether the tests ran is the helper's own word,
+  and a helper that ran no command is never believed to have run them.
+  - **One fix copy per project**, kept between fixes and brought up to date with the project (its commit and your
+    uncommitted changes) before each one. Dependencies are installed in it once with the project's own install command
+    (`npm ci`, `pnpm install`, `uv sync`, `poetry install` and others, by lock file), and again only when a lock file
+    changes; the install follows your permission rules like any command. Fixes run one at a time per project, and
+    another one waits its turn. A Git-ignored file a test needs (a `.env`) is asked for only then
+    (`request_project_file`), copied, never linked, and copied into later fixes of that project. A copy unused for
+    14 days is removed; `dgc doctor` lists the copies and their size.
+  - Editor protocol: commands `start_pip_fix`, `undo_pip_fix`, `list_pip_fixes` and `get_pip_fix_change`, events
+    `pip_fix`, `pip_fixes` and `pip_fix_change`, offered as `ready.capabilities.pip_fix`; a replayed report card
+    carries its latest fix as `report.fix`. No existing event gained a field.
+
 - **Every prompt of a session, for the editor's prompt rail.** `get_outline` (offered as
   `ready.capabilities.outline`) answers with `outline`: every prompt of the session, oldest first, with its first
   words (or "Image" when it is only an image) and when it was sent. The ones compaction folded away come first, then

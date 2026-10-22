@@ -2682,6 +2682,9 @@ schedule, a commit trigger or a routine. Up to four Pips work at once, with no d
   message that updates itself. Reply to it there.
 - **Reports reach your chat.** A project reviewer's finished run appears as a card in the chat it
   reports to: what it found and the worst of it, with **Open report**. A card never starts a turn.
+  **Ask DGC to fix** fixes it in the background, in a copy of the project kept for fixes, while you
+  keep chatting: the card shows what it is doing (**Watch**, **Stop**) and asks there if it needs
+  you; then what it changed and whether the tests ran in the copy, with **Review** and **Undo**.
 - **Routines.** A Personal Pip does things on its own at a time, on a new email that matches a
   search, or before a calendar event. It suggests one as a card; nothing runs until you add it.
 
