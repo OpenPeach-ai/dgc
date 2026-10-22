@@ -46,7 +46,9 @@ else:
     os.environ.pop("XDG_DATA_HOME", None)
 
 from dgc import config as config_module  # noqa: E402
+from dgc import headless, sessions  # noqa: E402
 from dgc import llm as llm_module  # noqa: E402
+from dgc.editor_protocol import event_error  # noqa: E402
 from dgc.agent import Agent, recommended_window  # noqa: E402
 from dgc.config import Config  # noqa: E402
 from dgc.llm import ContextOverflowError, LLMClient, remember_context_limit  # noqa: E402
@@ -280,6 +282,80 @@ class TheWindowDGCUses(IsolatedHome):
         self.assertEqual(hint("sglang"), "restart SGLang with --context-length")
         self.assertEqual(hint("llamacpp"), "restart llama-server with -c")
         self.assertEqual(hint("aphrodite"), "restart the server with a larger context")
+
+
+
+class TheEditorIsTold(IsolatedHome):
+    """`server_window`: asked once (ready.capabilities.server_window), then sent as it changes."""
+
+    def host(self, **values):
+        self.config(**values)
+        self.wire = io.StringIO()
+        sessions_dir = patch.object(sessions, "SESSIONS_DIR", self.user / "sessions")
+        sessions_dir.start()
+        self.addCleanup(sessions_dir.stop)
+        host = headless.Host(Config(project_root=self.root))
+        host.core.fp = self.wire
+        self.addCleanup(lambda: [chat.agent.mcp.stop_all() for chat in list(host.chats.values())])
+        return host
+
+    def frames(self, kind: str = "") -> list[dict]:
+        frames = [json.loads(line) for line in self.wire.getvalue().splitlines()]
+        for frame in frames:
+            self.assertIsNone(event_error(frame), frame)
+        return [f for f in frames if not kind or f["type"] == kind]
+
+    def test_ready_offers_it_and_a_client_that_never_asks_never_gets_one(self):
+        self.server.served_models = [VLLM_ENTRY]
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        self.assertEqual(host.default._ready_payload()["capabilities"]["server_window"], 1)
+        host.default.agent.client.prepare_model()
+        host.dispatch({"type": "set_config", "request_id": "s1", "values": {"context_size": 65_536}})
+        self.assertEqual(self.frames("server_window"), [], "an SDK or an older editor never sees it")
+        self.assertEqual(self.frames("context")[-1]["size"], 8192, "the meter is the server's window")
+
+    def test_asked_it_answers_then_says_when_it_changes(self):
+        self.server.served_models = [VLLM_ENTRY, {"id": "big", "owned_by": "vllm", "max_model_len": 131072}]
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        host.default.agent.client.prepare_model()
+        host.dispatch({"type": "server_window", "request_id": "w1"})
+        told = self.frames("server_window")
+        self.assertEqual(len(told), 1)
+        self.assertEqual({key: told[0].get(key) for key in ("request_id", "model", "window", "server", "trained")},
+                         {"request_id": "w1", "model": "qwen2.5-0.5b", "window": 8192, "server": "vllm",
+                          "trained": None})
+        host.dispatch({"type": "set_model", "request_id": "m1", "model": "big"})
+        told = self.frames("server_window")
+        self.assertEqual([(f["model"], f["window"]) for f in told], [("qwen2.5-0.5b", 8192), ("big", 131072)])
+        self.assertNotIn("request_id", told[-1], "unasked, as it changed")
+        self.assertEqual(host.default.config.get("context_size"), 131_072)
+        host.dispatch({"type": "status", "request_id": "st"})
+        host.dispatch({"type": "set_config", "request_id": "s2", "values": {"context_size": 16_384}})
+        self.assertEqual(len(self.frames("server_window")), 2, "nothing changed: nothing said again")
+        self.assertEqual(self.frames("context")[-1]["size"], 16_384, "below it, your own window decides")
+
+    def test_a_server_that_names_none_is_window_zero(self):
+        self.server.served_models = [{"id": "m", "owned_by": "organization_owner"}]
+        host = self.host(model="m", base_url=self.server.url + "/v1")
+        host.default.agent.client.prepare_model()
+        host.dispatch({"type": "server_window"})
+        told = self.frames("server_window")
+        self.assertEqual(len(told), 1)
+        self.assertEqual((told[0]["model"], told[0]["window"]), ("m", 0))
+        self.assertNotIn("server", told[0])
+
+    def test_the_server_s_word_arriving_after_ready_reaches_the_meter(self):
+        self.server.served_models = [LLAMACPP_ENTRY]
+        host = self.host(model="local", base_url=self.server.url + "/v1")
+        host.dispatch({"type": "server_window", "request_id": "w1"})
+        self.assertEqual(self.frames("server_window")[0]["window"], 0, "not read yet")
+        host.default._publish_model_capabilities()
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and len(self.frames("server_window")) < 2:
+            time.sleep(0.05)
+        told = self.frames("server_window")[-1]
+        self.assertEqual((told["window"], told["server"], told["trained"]), (6144, "llamacpp", 32768))
+        self.assertEqual(self.frames("context")[-1]["size"], 6144)
 
 
 if __name__ == "__main__":

@@ -5844,6 +5844,50 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "server_window"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "window": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "server": {
+              "type": "string"
+            },
+            "trained": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "model",
+            "window"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chatdgc_chats"
             },
             "seq": {
@@ -10517,6 +10561,26 @@
             "pid",
             "instance",
             "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "server_window"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "additionalProperties": false
         },

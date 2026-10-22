@@ -224,6 +224,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
     "get_config", "status", "get_history", "list_monitors", "stop_monitor", "list_mcp_context",
     "list_agents", "get_image", "list_troupes", "stop_troupe",
+    # The window a vLLM, SGLang or llama.cpp server was started with: asked once, then sent as it changes.
+    "server_window",
     # Pip reports: a client asking for them, or dismissing a card, is not a user acting on the chat.
     "watch_pip_reports", "pip_report_dismiss",
     # The Agent map's task list reads like the monitors list beside it, and its Stop is stop_monitor's.
@@ -340,8 +342,8 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "fork_session", "list_checkpoints", "rewind", "list_retained_tasks",
-    "resolve_retained_task", "compact", "context_breakdown", "list_artifacts", "stop_artifact", "set_config", "clear_todos",
-    "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
+    "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
+    "set_config", "clear_todos", "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
@@ -2300,6 +2302,9 @@ class Backend:
                           "heic_images": True,
                           # context_breakdown is understood: what fills the window, part by part.
                           "context_breakdown": 1,
+                          # server_window is understood: the window a vLLM, SGLang or llama.cpp server was
+                          # started with, asked once and then sent as it changes.
+                          "server_window": 1,
                           # The web search providers set_config's search_provider takes (Settings -> Web search
                           # offers only these): an older CLI refuses the whole save on one it doesn't know.
                           "search_providers": list(SEARCH_PROVIDERS),
@@ -2429,15 +2434,20 @@ class Backend:
         snapshot = getattr(client, "capability_snapshot", None)
         if not callable(prepare) or not callable(snapshot):
             return
+        limit = getattr(client, "window_limit", None)
+
+        def state():
+            # What the editor was told: the capabilities, and the window a server set (vLLM, llama.cpp).
+            return snapshot(), (limit() if callable(limit) else 0)
         try:
-            before = snapshot()
+            before = state()
         except Exception:
             return
 
         def run() -> None:
             try:
                 prepare()
-                after = snapshot()
+                after = state()
             except Exception:
                 return
             # Another switch landed meanwhile: that one publishes its own model.
@@ -4395,6 +4405,38 @@ class Backend:
                      cached_input_tokens=int(totals.get("cached_input_tokens", 0)),
                      reasoning_tokens=int(totals.get("reasoning_tokens", 0)),
                      requests=int(totals.get("requests", 0)), **_request_fields(request_id))
+        if getattr(self, "_server_window_wanted", False):
+            self._emit_server_window()           # another model, or the server's own word just arrived
+
+    def _server_window_state(self) -> dict:
+        """The window the server was started with, for the editor (cached: never a network wait)."""
+        config_get = getattr(self.config, "get", None)
+        engine = str(config_get("subscription_engine", "") or "").strip() if callable(config_get) else ""
+        client = getattr(getattr(self, "agent", None), "client", None)
+        reader = getattr(client, "server_window", None)
+        try:
+            served = reader() if callable(reader) and not engine else {}
+        except Exception:                    # noqa: BLE001 -- the meter keeps DGC's own window
+            served = {}
+        state = {"model": str(getattr(self.config, "model", "") or ""),
+                 "window": int(served.get("window") or 0) if isinstance(served, dict) else 0}
+        if state["window"]:
+            if served.get("server"):
+                state["server"] = str(served["server"])[:32]
+            if served.get("trained"):
+                state["trained"] = int(served["trained"])
+        return state
+
+    def _emit_server_window(self, request_id: str | None = None, *, force: bool = False) -> None:
+        """Tell an editor that asked (server_window) the window the server set, when it changed."""
+        state = self._server_window_state()
+        if not force and state == getattr(self, "_server_window_sent", None):
+            return
+        self._server_window_sent = state
+        try:
+            self.em.emit("server_window", **state, **_request_fields(request_id))
+        except Exception:                    # noqa: BLE001 -- a hint never costs a chat
+            pass
 
     def _emit_artifacts(self, request_id: str | None = None) -> None:
         from . import artifacts
@@ -6864,6 +6906,10 @@ class Backend:
                 self.em.emit("error", message=f"Could not {action} retained task {task_id}: "
                              f"{result.error or result.status}.{conflicts}")
             self._emit_retained_tasks(request_id)
+        elif t == "server_window":
+            # From now on this client hears when it changes too (another model, a server restarted).
+            self._server_window_wanted = True
+            self._emit_server_window(request_id, force=True)
         elif t == "context_breakdown":
             # What fills the window, part by part, scaled to what the meter shows (its estimate).
             try:

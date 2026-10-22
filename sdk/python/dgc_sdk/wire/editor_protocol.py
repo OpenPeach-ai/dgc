@@ -947,6 +947,20 @@ EVENT_FIELDS["live_sessions"] = {"items": _A(), "request_id": _S(False), "messag
 # it end. The editor offers Continue (`resume_turn`). The session's next turn clears it.
 EVENT_FIELDS["turn_interrupted"] = {"session_id": _S(), "cause": _S(), "at": _N()}
 
+# ---- the window a server was started with (0.48) -------------------------------------------------
+# vLLM (--max-model-len), SGLang (--context-length) and llama.cpp (-c) size the context window when
+# they start; DGC reads it from the server and can't change it (a window of its own below it only
+# decides when to compact). Advertised as ready.capabilities.server_window = 1. `server_window` asks;
+# the answer is a `server_window` event, and from then on one is sent, unasked, whenever it changes
+# (another model or server, the server restarted with another size). `window` is the server's
+# window in tokens, 0 when DGC sizes the window (Ollama, a cloud API, a server that doesn't say);
+# `server` names the server ("vllm", "sglang", "llamacpp", or what it calls itself: any string);
+# `trained` is what the model was trained for, when the server says (llama.cpp). A client that never
+# asks never gets one.
+COMMAND_FIELDS["server_window"] = {"request_id": _S(False)}
+EVENT_FIELDS["server_window"] = {"request_id": _S(False), "model": _S(), "window": _I(),
+                                  "server": _S(False), "trained": _I(False)}
+
 # ---- ChatDGC: chats of their own, the same in every folder ----------------------------------------
 # The process's, never a session's: the router answers every chatdgc_* command itself and none of
 # their events carries the envelope's chat_id (that name is the session router's), so a conversation
