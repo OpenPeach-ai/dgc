@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import threading
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -37,7 +38,8 @@ class TurnOutcomeTests(unittest.TestCase):
         self.agent = Agent(config, UI())
         self.addCleanup(self.agent.mcp.stop_all)
         self.now = 0.0
-        replacement = patch("dgc.agent.time", types.SimpleNamespace(monotonic=lambda: self.now))
+        # The turn clock is faked; the wall clock (the prompt cache's) stays real.
+        replacement = patch("dgc.agent.time", types.SimpleNamespace(monotonic=lambda: self.now, time=time.time))
         replacement.start()
         self.addCleanup(replacement.stop)
 
@@ -50,7 +52,7 @@ class TurnOutcomeTests(unittest.TestCase):
         # time the loop looks at it: the deadline must stop the turn before any request.
         started = iter([self.now])
         clock = patch("dgc.agent.time", types.SimpleNamespace(
-            monotonic=lambda: next(started, self.now + 2)))
+            monotonic=lambda: next(started, self.now + 2), time=time.time))
         with clock, patch.object(self.agent.client, "chat") as chat:
             self.assertFalse(self.agent.run_turn("Inspect the fixture"))
             chat.assert_not_called()

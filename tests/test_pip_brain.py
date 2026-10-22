@@ -223,8 +223,11 @@ class ToolServerTests(unittest.TestCase):
                 reader = link.makefile("rb")
                 replies = []
                 for message in messages:
-                    link.sendall(json.dumps(message).encode() + b"\n")
-                    line = reader.readline()
+                    try:
+                        link.sendall(json.dumps(message).encode() + b"\n")
+                        line = reader.readline()
+                    except (BrokenPipeError, ConnectionResetError):
+                        line = b""     # the server already hung up on a wrong token
                     replies.append(json.loads(line) if line else None)
                 return replies
 

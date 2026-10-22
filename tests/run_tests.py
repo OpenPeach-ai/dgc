@@ -19553,7 +19553,9 @@ def test_serve_clear_todos_mid_turn_stdio():
         send({"type": "prompt", "text": "second job", "request_id": "p2"})
         wait(lambda e: e["type"] == "turn_end" and e is not end, 60)
         later = requests[before:]
-        told = [r for r in later if "# Checklist cleared" in str((r.get("messages") or [{}])[0].get("content", ""))]
+        # The note rides on the new message (its turn notes), so the request's start stays cached.
+        told = [r for r in later if any(m.get("role") == "user" and "# Checklist cleared" in str(m.get("content", ""))
+                                        for m in r.get("messages") or [])]
         check("mid-turn Clear: the next turn's request tells the model the user cleared the checklist",
               len(later) == 1 and len(told) == 1, str(len(later)))
     finally:
