@@ -1409,6 +1409,8 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .context-size-custom { width: 10ch; cursor: text; }
 .context-size-select:hover, .context-size-custom:hover, .context-size-custom:focus { border-color: var(--accent); }
 .context-size-note { margin: var(--sp-1) 0 0; color: var(--faint); text-align: right; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+/* "Set by the server: 32K": a vLLM or llama.cpp server sized the window when it started; nothing to choose here. */
+.context-size-server { color: var(--text-strong); font: var(--w-semi) var(--t-xs)/24px var(--sans); font-variant-numeric: tabular-nums; }
 .context-usage { margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); background: var(--code); font: var(--w-med) var(--t-xs)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
 .context-last { display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .context-last .codicon { flex: none; margin-top: 0; color: var(--accent-text); }

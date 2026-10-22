@@ -1407,6 +1407,9 @@
   let curWorkers = 4;
   let lastConfig = null;
   let contextBreakdown = null;      // what fills the window, part by part (context_breakdown), once asked for
+  // The window a vLLM, SGLang or llama.cpp server was started with (server_window): {window, server, trained}, or null
+  // when DGC sizes the window itself. The meter then says the server set it, and how to change it there.
+  let serverWindow = null;
   let contextState = { used: 0, size: 0, input_tokens: 0, output_tokens: 0,
     cached_input_tokens: 0, reasoning_tokens: 0, requests: 0, compact_threshold: .85 };
   let lastCompaction = null, compacting = false;
@@ -1470,11 +1473,24 @@
     if (tokens >= 1024) return `${Math.round(tokens / 1024)}k`;
     return String(tokens);
   }
-  // "256k · this model's max" when the window in use is the model's own maximum, below the one chosen.
+  // "256k · this model's max" when the window in use is the model's own maximum, below the one chosen; "8k · set by the
+  // server" when it is the window a vLLM or llama.cpp server was started with.
   function modelMaxLabel() {
     const configured = Math.floor(Number(lastConfig?.context_size || 0));
     const effective = Math.floor(Number(contextState.size || 0));
-    return configured > 0 && effective > 0 && effective < configured ? `${windowShort(effective)} · this model's max` : "";
+    if (!(configured > 0 && effective > 0 && effective < configured)) return "";
+    return `${windowShort(effective)} · ${serverWindow && effective === serverWindow.window ? "set by the server" : "this model's max"}`;
+  }
+  // How to change a server's window: where it starts, with the option that sizes it.
+  const SERVER_WINDOW_OPTIONS = { vllm: ["vLLM", "--max-model-len"], sglang: ["SGLang", "--context-length"], llamacpp: ["llama-server", "-c"] };
+  function serverWindowHint(server) {
+    const [name, option] = SERVER_WINDOW_OPTIONS[String(server || "").toLowerCase()] || [];
+    return name ? `To change it, restart ${name} with ${option}.` : "To change it, restart the server with a larger context.";
+  }
+  function onServerWindow(ev) {
+    const tokens = Math.floor(Number(ev.window) || 0);
+    serverWindow = tokens > 0 ? { window: tokens, server: String(ev.server || ""), trained: Math.floor(Number(ev.trained) || 0) } : null;
+    renderContext();
   }
   function renderContextMenu() {
     const used = Math.max(0, Number(contextState.used || 0));
@@ -1516,8 +1532,21 @@
   // is the smaller of that and the model's own maximum.
   const CONTEXT_SIZES = [8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
   function syncContextSizeControl() {
-    const select = $("ctx-size"), custom = $("ctx-size-custom"), note = $("ctx-size-note");
+    const select = $("ctx-size"), custom = $("ctx-size-custom"), note = $("ctx-size-note"), served = $("ctx-size-server");
     if (!select || !custom || !note) return;
+    if (served) served.hidden = !serverWindow;
+    if (serverWindow && served) {
+      // The server set it when it started: no sizes to offer that can't apply. DGC's own smaller window (Settings) only
+      // decides when it compacts.
+      select.hidden = true; custom.hidden = true;
+      served.textContent = `Set by the server: ${windowShort(serverWindow.window).replace(/k$/, "K")}`;
+      const effective = Math.floor(Number(contextState.size || 0));
+      note.hidden = false;
+      note.textContent = serverWindowHint(serverWindow.server)
+        + (effective > 0 && effective < serverWindow.window ? ` DGC keeps to ${windowShort(effective).replace(/k$/, "K")}, as set in Settings.` : "");
+      return;
+    }
+    select.hidden = false;
     const configured = Math.floor(Number(lastConfig?.context_size || contextState.size || 0));
     if (document.activeElement !== custom && document.activeElement !== select) {
       const known = CONTEXT_SIZES.includes(configured);
@@ -6291,9 +6320,11 @@
         setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
         if (!draftScope && ev.session_id) selectDraftSession(ev.session_id);
         imagesOnReady(ev); retryOnReady(ev);
+        serverWindow = null;           // the new backend says its own (server_window), if it offers it
         break;
       }
       case "cache_clock": onCacheClock(ev); break;
+      case "server_window": onServerWindow(ev); break;
       case "context": {
         contextState = { ...contextState, ...ev };
         renderContext();

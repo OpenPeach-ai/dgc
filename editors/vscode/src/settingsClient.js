@@ -17,7 +17,7 @@ import driveLogo from '../media/plugin-logos/drive.png';
 import dgcLogo from '../media/dgc-mark.svg';
 const connectorLogos = {zapier:zapierLogo, make:makeLogo, n8n:n8nLogo, arcade:arcadeLogo, asana:asanaLogo, docusign:docusignLogo, zoom:zoomLogo};
 const serviceLogos = {gmail:gmailLogo, calendar:calendarLogo, contacts:contactsLogo, drive:driveLogo};
-import { renderFields } from './settingsFields.js';
+import { contextSizeHint, renderFields } from './settingsFields.js';
 import { createUsage } from './settingsUsage.js';
 import { usageMarkup } from './settingsUsageMarkup.js';
 import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
@@ -76,6 +76,8 @@ function applyConfig(ev) {
     draft.budget_settable = 'turn_token_budget' in ev;
     // The prompt-cache lifetime and Ollama's keep-loaded time come from a CLI that answers cache_settings (0.48).
     draft.cache_settable = ev.cache_settable === true;
+    // The window a vLLM, SGLang or llama.cpp server was started with (the extension adds the last server_window event).
+    draft.server_window = ev.server_window && typeof ev.server_window === 'object' ? { ...ev.server_window } : null;
     if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section) && !saving)
         render();
 }
@@ -1090,6 +1092,14 @@ window.addEventListener('message', event => {
         const ev = msg.event || {};
         if (ev.type === 'config')
             applyConfig(ev);
+        else if (ev.type === 'server_window') {
+            // The server's window changed (another model, a restart): Context size's hint says it, in place, so a
+            // number being typed on the page is kept.
+            draft.server_window = Number(ev.window) > 0 ? { model: ev.model, window: ev.window, server: ev.server || '', trained: ev.trained || 0 } : null;
+            if (config) config.server_window = draft.server_window;
+            const hint = $('context_size')?.closest('.field')?.querySelector('.hint');
+            if (hint) hint.textContent = contextSizeHint(draft);
+        }
         else if (ev.type === 'usage_report')
             usage?.receive(ev);
         else if (ev.type === 'memory_state') {

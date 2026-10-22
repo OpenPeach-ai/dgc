@@ -498,6 +498,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  get_config's "cache_settings" with an event of that name (0.48). Undefined: an older CLI, which would
    *  refuse a save that carried them. */
   private cacheSettings?: { prompt_cache: boolean; prompt_cache_ttl: string; ollama_keep_alive: string };
+  /** The window a vLLM, SGLang or llama.cpp server was started with (server_window, 0.48), for Settings -> General.
+   *  Undefined until a CLI that offers it answers; `window` 0 when DGC sizes the window itself. */
+  private serverWindow?: { model: string; window: number; server: string; trained: number };
   private pipsEditor?: PipsEditor;
   private pipsDocumentId = randomBytes(16).toString("hex");
   private pendingSignIn?: McpBrowserRequest;
@@ -3335,6 +3338,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (Number((ev.capabilities as any)?.memory?.learned) >= 1) {
           this.backend?.send({ type: "memory_watch", request_id: this.nextRequestId("memory-watch") });
         }
+        // The window a vLLM, SGLang or llama.cpp server was started with: asked once, then sent as it changes. The
+        // meter and Settings show it as set by the server. A backend that doesn't offer it is never asked.
+        this.serverWindow = undefined;
+        if (Number((ev.capabilities as any)?.server_window) >= 1) {
+          this.backend?.send({ type: "server_window", request_id: this.nextRequestId("server-window") });
+        }
         this.currentSessionId = String(ev.session_id || "");
         this.currentSessionName = String(ev.session_name || "");
         this.currentSessionSaved = false;           // a fresh backend's chat has no file yet
@@ -3462,6 +3471,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.postChatSlots();
         this.retitle();
         this.tabSessionChanged();
+        break;
+      case "server_window":
+        this.serverWindow = { model: String((ev as any).model || ""), window: Math.max(0, Math.floor(Number((ev as any).window) || 0)),
+                              server: String((ev as any).server || ""), trained: Math.max(0, Math.floor(Number((ev as any).trained) || 0)) };
         break;
       case "cache_settings":
         this.cacheSettings = {
@@ -3717,7 +3730,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Voice: the page's own state and progress, and only its own errors (a chat's dictation reports its own).
     const settingsVoice = ["voice_state", "voice_progress"].includes(ev.type)
       || (ev.type === "voice_error" && String((ev as any).request_id || "").startsWith("settings-voice"));
-    if (this.settingsEditor && (settingsRejection || settingsVoice || ["config", "usage_report", "pip_usage_report", "mcp_servers", "memory_state", "memory_history"].includes(ev.type))) {
+    if (this.settingsEditor && (settingsRejection || settingsVoice || ["config", "server_window", "usage_report", "pip_usage_report", "mcp_servers", "memory_state", "memory_history"].includes(ev.type))) {
       const managed = ev.type === "mcp_servers" ? new Map(this.managedMcpServers().map((m) => [m.name, m])) : null;
       // The form shows a server's own OAuth app (its public client id and port); never its secret.
       const event = managed && Array.isArray((ev as any).items) ? { ...ev, items: (ev as any).items.map((item: any) => {
@@ -3731,7 +3744,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    // Not protocol fields: the cache_settings event that came just before.
                                    ...(this.cacheSettings ? { prompt_cache_ttl: this.cacheSettings.prompt_cache_ttl,
                                                               ollama_keep_alive: this.cacheSettings.ollama_keep_alive,
-                                                              cache_settable: true } : {}) } : ev;
+                                                              cache_settable: true } : {}),
+                                   // Not a protocol field either: the last server_window event, for Context size.
+                                   ...(this.serverWindow ? { server_window: { ...this.serverWindow } } : {}) } : ev;
       this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -7902,6 +7917,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           <div class="context-size">
             <label for="ctx-size" class="context-kicker">Window size</label>
             <div class="context-size-controls">
+              <span id="ctx-size-server" class="context-size-server" hidden></span>
               <input id="ctx-size-custom" class="context-size-custom" type="number" min="2048" step="1024" inputmode="numeric" placeholder="tokens" aria-label="Custom context window in tokens" hidden>
               <select id="ctx-size" class="context-size-select" aria-label="Context window size" title="How much conversation the model is sent, in tokens">
                 <option value="8192">8K</option><option value="16384">16K</option><option value="32768">32K</option>

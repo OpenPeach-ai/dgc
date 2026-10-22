@@ -2927,3 +2927,22 @@ test("ChatDGC's instructions and personality are saved only to a CLI that takes 
   assert.equal(values.chatdgc_style, "", "cleared");
   assert.equal("chatdgc_personality" in values, false, "only the five it knows");
 });
+
+test("the window a vLLM or llama.cpp server set reaches Settings with the config, and as it changes", () => {
+  // 0.48: server_window. Kept from the event (the chat's meter has it too) and added to the config Settings gets,
+  // not as a protocol field; a change reaches an open Settings page as the event itself.
+  const settings = [], chat = [];
+  const { provider } = harness();
+  provider.settingsEditor = { webview: { postMessage: m => settings.push(m) } };
+  provider.post = m => chat.push(m);
+  provider.onEvent({ type: "config", model: "qwen2.5-0.5b", base_url: "http://127.0.0.1:18000/v1", context_size: 32768 });
+  assert.equal("server_window" in settings.at(-1).event, false, "nothing said yet: DGC sizes the window");
+  provider.onEvent({ type: "server_window", model: "qwen2.5-0.5b", window: 8192, server: "vllm" });
+  assert.deepEqual(settings.at(-1), { type: "event", event: { type: "server_window", model: "qwen2.5-0.5b", window: 8192, server: "vllm" } });
+  assert.ok(chat.some(m => m.type === "event" && m.event.type === "server_window"), "the chat's meter gets it");
+  provider.onEvent({ type: "config", model: "qwen2.5-0.5b", base_url: "http://127.0.0.1:18000/v1", context_size: 32768 });
+  assert.deepEqual(settings.at(-1).event.server_window, { model: "qwen2.5-0.5b", window: 8192, server: "vllm", trained: 0 });
+  provider.onEvent({ type: "server_window", model: "qwen3.8:27b", window: 0 });
+  provider.onEvent({ type: "config", model: "qwen3.8:27b", base_url: "http://localhost:11434/v1", context_size: 65536 });
+  assert.equal(settings.at(-1).event.server_window.window, 0);
+});

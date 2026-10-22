@@ -918,3 +918,29 @@ test('Models: the cache lifetime and, for a local Ollama only, how long the mode
     assert.ok(y.d.querySelector('#prompt_cache_ttl'));
   }
 });
+
+test('General: Context size says a vLLM or llama.cpp server set the window, and how to change it there',()=>{
+  // 0.48. These servers size the window when they start; the extension adds the last server_window event to the
+  // config it forwards (not a protocol field). A number here can only be smaller, and then decides when DGC compacts.
+  const plain=setup();
+  plain.click('[data-nav=general]');
+  const hintOf=x=>x.d.querySelector('#context_size').closest('.field').querySelector('.hint').textContent;
+  assert.equal(hintOf(plain),"Tokens before DGC compacts. The model's own maximum still applies.");
+
+  const x=setup();
+  x.message({type:'event',event:{...x.config,context_size:32768,server_window:{model:'qwen2.5-0.5b',window:8192,server:'vllm',trained:0}}});
+  x.click('[data-nav=general]');
+  assert.equal(hintOf(x),'Set by the server: 8K (restart vLLM with --max-model-len to change it). A smaller number here makes DGC compact sooner.');
+  assert.equal(x.d.querySelector('#context_size').max,'','a larger number from before never blocks saving the page');
+
+  // The server restarted with another size (or llama-server answered): said in place, a number being typed is kept.
+  x.input('#context_size','4096');
+  x.message({type:'event',event:{type:'server_window',model:'local',window:6144,server:'llamacpp',trained:32768}});
+  assert.equal(hintOf(x),'Set by the server: 6K (restart llama-server with -c to change it). A smaller number here makes DGC compact sooner.');
+  assert.equal(x.d.querySelector('#context_size').value,'4096');
+  x.message({type:'event',event:{type:'server_window',model:'qwen3.8:27b',window:0}});
+  assert.equal(hintOf(x),"Tokens before DGC compacts. The model's own maximum still applies.");
+  x.click('#save');
+  const saved=x.sent.filter(m=>m.type==='saveSettings').pop().values;
+  assert.equal(saved.context_size,'4096');
+});

@@ -35,6 +35,23 @@ export function localOllama(c) {
     return ollama && near;
 }
 
+// How to change a server's window: where it starts, with the option that sizes it (the meter says the same).
+const SERVER_WINDOW_OPTIONS = { vllm: ["vLLM", "--max-model-len"], sglang: ["SGLang", "--context-length"], llamacpp: ["llama-server", "-c"] };
+function tokensShort(n) {
+    const tokens = Math.max(0, Math.floor(Number(n) || 0));
+    if (tokens >= 1048576 && tokens % 1048576 === 0) return `${tokens / 1048576}M`;
+    return tokens >= 1024 ? `${Math.round(tokens / 1024)}K` : String(tokens);
+}
+/** Context size's hint. A vLLM, SGLang or llama.cpp server sized the window when it started (server_window): say so
+ *  and how to change it there; a number here can only be smaller, and then decides when DGC compacts. */
+export function contextSizeHint(c) {
+    const served = c && c.server_window && Number(c.server_window.window) > 0 ? c.server_window : null;
+    if (!served) return "Tokens before DGC compacts. The model's own maximum still applies.";
+    const [name, option] = SERVER_WINDOW_OPTIONS[String(served.server || "").toLowerCase()] || [];
+    const how = name ? `restart ${name} with ${option} to change it` : "restart the server with a larger context to change it";
+    return `Set by the server: ${tokensShort(served.window)} (${how}). A smaller number here makes DGC compact sooner.`;
+}
+
 export function renderFields(section, main, config, providers, ui) {
     const { field, sel, inp, bool, card } = ui;
     function renderGeneral(main) {
@@ -47,7 +64,7 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("DGC Ultra", "Extra guidance and bounded sub-agents. Permissions stay as set.", bool("ultra_mode", c.ultra_mode === true))
                 + field("Parallel sub-agents", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"))
                 + field("Token cap per turn", c.budget_settable ? "Tokens one turn may spend, sub-agents included. When it is reached, no new sub-agent starts and the turn wraps up, keeping its work. 0 means no cap." : "Update the DGC CLI to set this here.", inp("turn_token_budget", c.turn_token_budget ?? 0, "number"))
-                + field("Context size", "Tokens before DGC compacts. The model's own maximum still applies.", inp("context_size", c.context_size ?? "", "number"))
+                + field("Context size", contextSizeHint(c), inp("context_size", c.context_size ?? "", "number"))
                 + field("Show thinking", "Inline, collapsed, or hidden.", sel("show_reasoning", [["inline", "Inline"], ["collapsed", "Collapsed"], ["hidden", "Hidden"]], shown))
                 + field("Prompt suggestions", "", bool("suggest", c.suggest !== false))
                 + field("Wake on monitors", "Start a short turn when a background monitor prints.", bool("monitor_wake", c.monitor_wake !== false))
