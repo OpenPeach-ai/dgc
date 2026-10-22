@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **DOMPurify 3.4.17** for Mermaid's diagram rendering (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr,
+  GHSA-c6gr-qvv4-5v3f).
+
 - **follow-redirects 1.16.1** for the Open VSX publishing tool (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c: credential headers kept across a cross-origin redirect). It is a build tool, not part of the extension.
 - **markdown-it 15.0.3.** A security fix in the Markdown parser (GHSA-r7fv-28h4-cvq7: unmatched closing quotes with smart quotes took quadratic time).
 
