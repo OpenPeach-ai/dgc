@@ -344,6 +344,13 @@ API-key environment reference is process-only:
 - `dgc protocol describe` — print the installed headless/editor contract as JSON.
 - `dgc serve` — the headless JSON backend the VS Code extension drives. Stdout is
   protocol-only.
+- `dgc ps [--json]` — every DGC running on this computer: each editor window's backend, one
+  running a session with no window (and for how long), a terminal DGC; what each is doing, its
+  sessions and folders. See **In your editor → A session keeps running through a reload**.
+- `dgc stop PID|SESSION|--windowless [--force]` — save and stop one: by pid from `dgc ps`, by
+  session id, or every backend running with no window. It asks the process over its own socket
+  (it saves first), then sends SIGTERM (it saves then too); `--force` ends one that will not stop,
+  and loses what it had not saved.
 - `dgc acp` — Agent Client Protocol JSON-RPC over stdio (Zed, Neovim, and other ACP
   clients). Prompt blocks, text and images are bounded; embedded resources are untrusted data.
 - `dgc mcp ...` — the same MCP catalog as `/mcp`, outside a chat. See **MCP servers**.
@@ -1798,6 +1805,43 @@ Add Selection, Add File, the model and the mode — act on the tab you used last
 shows that tab; with none open, Add Selection and Add File start a new session's tab. *DGC: Resume*
 shows the list. Deleting a session from the list asks first, and waits until its tab is closed.
 The Pips stay in the side bar.
+
+## A session keeps running through a reload
+
+Reload the window, close it, or lose a Remote SSH connection and reload: a session that was working
+keeps working. Its `dgc serve` carries on with no window, and when the window comes back the tab
+picks the session up where it is: the reply still being written, the question still waiting for
+you, its queue, its sub-agents and watchers, with nothing missing and nothing shown twice.
+
+With no window a session never runs for ever. It saves and stops by itself:
+
+- **2 minutes after its work finishes**, so a reload a moment later still finds it;
+- **after 1 hour waiting on your answer** (an approval or a question, with nothing else running);
+  opening it again shows the question, and **Continue** picks the turn up;
+- **after 12 hours at most**, whatever it is doing; watchers come back when you open it again.
+
+**Settings → Running sessions** lists each session running with no window, what it is doing and
+for how long, with **Open** and **Stop**, and the Sessions list marks it **Running, no window**.
+In a terminal, `dgc ps` shows every DGC on this computer and `dgc stop` stops one.
+
+- **One window at a time.** A session shown in another window is never taken from it on its own.
+  The new window shows it read-only with **Open here**; Open here moves it, and the other window
+  then shows it read-only with its own Open here. Nothing stops when a session moves.
+- **Closing a session's tab while it works asks once**: keep it running in the background, or stop
+  it. Tick **Remember my choice** to be asked no more (`dgc.closingAWorkingTab`: `ask`,
+  `keepRunning` or `stop`). Closing a tab with nothing running ends it, as before.
+- **After an update**, a session still running in the older DGC is saved and stopped, and opens in
+  the new one; what was running stops there, and its turn offers Continue.
+- **A window that stopped answering** for 15 minutes (an editor left running by a reload, for
+  example) no longer keeps a session to itself: the session runs on as if it had no window, under
+  the rules above, and that window, if it is still there, shows it read-only with Open here.
+- **Private to you.** A window reaches the running session through a socket only your user can
+  open (a 0700 directory, a 0600 socket, the other process's user checked), never a network port.
+  It works on Linux and macOS, and over Remote SSH. On Windows, DGC runs in WSL, and a session
+  keeps running only while WSL keeps DGC's Linux system up.
+- **What it is not.** It does not survive a restart of the computer: a session that was working
+  then is opened from disk with Continue. Pips are separate: the Pips runner never stopped for a
+  reload.
 
 ## Several chats, several folders, in one panel
 

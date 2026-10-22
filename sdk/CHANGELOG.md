@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Editor protocol: commands `set_detach`, `detach`, `list_live_sessions` and `stop_live_session`; events
+  `session_live`, `session_moved`, `live_sessions` and `turn_interrupted` are in the vendored protocol and the
+  TypeScript SDK's known events, so neither SDK drops them. An SDK session is never offered `detach` (it is isolated,
+  or pinned to one project), never sends `set_detach`, and so behaves exactly as before: its process ends with it.
+
 - Pips API 59: `list_pip_borrows` (read) and `allow_pip_borrow`, `decline_pip_borrow` and `stop_pip_borrow`
   (mutations, each `{pip_id, borrow_id}`), in both SDKs; each is refused before API 59, and the card's id is checked
   before anything is sent. A Personal Pip borrowing your own signed-in Chrome: its cards, Allow once, Not now and Stop.

@@ -241,6 +241,203 @@ class LifetimeRuleTests(unittest.TestCase):
         self.assertEqual(serve_detach.host_work(self.host).kind(), "progressing")
 
 
+# ------------------------------------------------- a window that only went quiet (25-hour hole) ---
+class SilentWindowTests(unittest.TestCase):
+    """An extension host a reload left behind keeps pinging for ever: its window is judged on what the
+    chat panel itself says, and 15 minutes of silence makes the connection windowless (the windowless
+    rules then decide), with session_moved to a window that is in fact still there."""
+
+    def setUp(self):
+        self.clock = Clock()
+        self.chat = FakeChat()
+        self.host = FakeHost(self.chat)
+        self.board, home = board_for(self.host, self.clock)
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        self.silence = (0.0, "")
+        self.host._editor_liveness = SimpleNamespace(window_silence=lambda: self.silence)
+
+    def test_fifteen_silent_minutes_make_the_connection_windowless_and_say_so(self):
+        self.chat.busy = True
+        self.silence = (serve_detach.SILENT_WINDOW_S - 1, "its window's chat panel stopped answering")
+        self.assertEqual(self.board.check(), "")
+        self.assertIs(self.board.current, self.board.stdio)
+        self.silence = (serve_detach.SILENT_WINDOW_S + 1, "its window's chat panel stopped answering")
+        self.assertEqual(self.board.check(), "silent_window")
+        self.assertTrue(self.board.windowless)
+        self.assertFalse(self.board.exit.is_set(), "a running turn keeps it up, now by the windowless rules")
+        _fp, farewell, _first = self.host.core.switched[-1]
+        self.assertEqual(farewell, ("session_moved", {"reason": "no_window"}))
+        self.assertIn("stopped answering", self.board.windowless_cause)
+        # From here the windowless rules apply: 12 hours at most.
+        self.clock.now += serve_detach.MAX_WINDOWLESS_S + 1
+        self.assertEqual(self.board.check(), "max_windowless")
+
+    def test_a_silent_window_with_nothing_running_ends_as_before(self):
+        self.silence = (serve_detach.SILENT_WINDOW_S + 1, "its editor stopped answering")
+        self.assertEqual(self.board.check(), "silent_window")
+        self.assertTrue(self.board.exit.is_set())
+        self.assertIn("nothing running", self.board.ending.cause)
+
+    def test_the_panels_word_counts_not_the_hosts_pings_unless_the_view_was_closed(self):
+        from dgc import headless
+        watch = headless._EditorLiveness(SimpleNamespace(), io.StringIO())
+        self.assertEqual(watch.window_silence(), (0.0, ""), "an editor that never pinged is never judged")
+        watch.pinged()
+        watch.editor_state(source="renderer", view="open")
+        watch._last_renderer -= 1000                        # the panel last spoke 1000s ago...
+        watch.pinged()                                      # ...while its host keeps pinging
+        quiet, why = watch.window_silence()
+        self.assertGreaterEqual(quiet, 999)
+        self.assertIn("chat panel", why)
+        watch.editor_state(source="host", view="closed")    # the user hid the view: its host says so
+        quiet, why = watch.window_silence()
+        self.assertLess(quiet, 5, "a hidden view is judged on the host's traffic, which is fresh")
+        self.assertIn("editor", why)
+
+    def test_the_watchdog_leaves_an_opted_in_backend_to_the_switchboard(self):
+        from dgc import headless
+        ended = []
+        for opted in (False, True):
+            backend = SimpleNamespace(switchboard=SimpleNamespace(opted_in=opted), keepalive_reason=lambda: "")
+            watch = headless._EditorLiveness(backend, io.StringIO(), after=0.0, wake=lambda: ended.append(opted))
+            watch.pinged()
+            watch._last -= 10
+            result = watch.check()
+            self.assertEqual(result, not opted, f"opted in: {opted}")
+        self.assertEqual(ended, [False], "only the editor that never opted in is ended by the watchdog")
+
+
+class AttachModeTests(unittest.TestCase):
+    def setUp(self):
+        self.board, home = board_for(FakeHost(FakeChat()), Clock())
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+
+    def liveness(self, quiet, closed=None):
+        last = time.monotonic() - quiet
+        self.board.host._editor_liveness = SimpleNamespace(
+            renderer_on_screen=lambda: quiet < 40, _last_renderer=last,
+            _view_closed_at=None if closed is None else last + closed)
+
+    def test_a_reload_judges_on_two_heartbeats_anything_else_on_two_minutes(self):
+        self.liveness(60)
+        self.assertFalse(self.board._on_screen("restore")[0], "a reload takes it from a panel quiet 40s")
+        self.assertTrue(self.board._on_screen("auto")[0], "opened from a list: a background window is not taken")
+        self.liveness(130)
+        self.assertFalse(self.board._on_screen("auto")[0])
+        self.liveness(60, closed=1)
+        self.assertFalse(self.board._on_screen("auto")[0], "a view its host closed shows nothing")
+
+
+class _FakeSocket:
+    def __init__(self):
+        self.closed = False
+
+    def settimeout(self, _value):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+class RelayWaitTests(unittest.TestCase):
+    """A reload asks again while the old window's panel falls quiet, but a panel that speaks while it
+    waits is a window in use: the wait ends there, and the session is shown read-only."""
+
+    def run_relay(self, answers):
+        from dgc import __version__
+        asked = []
+        holder = {"pid": 4321, "socket": "/nonexistent", "instance": "abcd", "version": __version__,
+                  "protocol_version": ep.PROTOCOL_VERSION}
+        replies = iter(answers)
+        patches = {
+            (serve_relay, "find_holder"): lambda session: holder,
+            (serve_relay, "pump"): lambda sock: 0,
+            (serve_relay, "RETRY_EVERY_S"): 0.0,
+            (session_socket, "connect"): lambda *a, **k: _FakeSocket(),
+            (session_socket, "send_line"): lambda sock, value: asked.append(value),
+            (session_socket, "read_line"): lambda sock: next(replies),
+        }
+        saved = {key: getattr(*key) for key in patches}
+        for (module, name), value in patches.items():
+            setattr(module, name, value)
+        serve_relay._refused = None
+        try:
+            return serve_relay._attach("s-one", "restore"), asked, serve_relay.refused()
+        finally:
+            for (module, name), value in saved.items():
+                setattr(module, name, value)
+            serve_relay._refused = None
+
+    def test_a_panel_that_speaks_while_it_waits_ends_the_wait(self):
+        result, asked, refused = self.run_relay([{"type": "refused", "reason": "on_screen", "quiet_s": 12.0},
+                                                 {"type": "refused", "reason": "on_screen", "quiet_s": 1.0}])
+        self.assertIsNone(result, "a normal serve, showing it read-only")
+        self.assertEqual(len(asked), 2)
+        self.assertEqual(refused["reason"], "on_screen")
+
+    def test_a_panel_that_stays_quiet_is_waited_for_and_then_taken(self):
+        result, asked, refused = self.run_relay([{"type": "refused", "reason": "on_screen", "quiet_s": 20.0},
+                                                 {"type": "refused", "reason": "on_screen", "quiet_s": 30.0},
+                                                 {"type": "attached", "pid": 4321}])
+        self.assertEqual(result, 0, "relayed")
+        self.assertEqual(len(asked), 3)
+        self.assertEqual(asked[0]["mode"], "restore")
+        self.assertIsNone(refused)
+
+
+class ReleaseWhileWorkingTests(unittest.TestCase):
+    """The peer-file stand-down: a backend that keeps work running without a window never stands down
+    mid-work, whether it has a window or not; a window of the same DGC reattaches instead."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="dgc-release-"))
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        self._prior = os.environ.get("HOME")
+        os.environ["HOME"] = str(self.home)
+        self.addCleanup(lambda: os.environ.__setitem__("HOME", self._prior) if self._prior else None)
+
+    def backend(self, *, windowless, busy, on_screen=False):
+        from dgc import headless
+        chat = FakeChat(session="one")
+        chat.agent.session_file = "/s/one.json"
+        chat.busy = busy
+        host = SimpleNamespace(chats={"c0": chat}, switchboard=SimpleNamespace(opted_in=True, windowless=windowless))
+        watch = SimpleNamespace(stood_down=False, renderer_on_screen=lambda: on_screen,
+                                editor_gone_for_takeover=lambda: (True, 0.0))
+
+        def stand_down():
+            watch.stood_down = True
+            return True
+        watch.stand_down = stand_down
+        backend = SimpleNamespace(_host=host, agent=chat.agent, _editor_liveness=watch,
+                                  _announce_peer=lambda status="idle": None)
+        backend._consider_release = headless.Backend._consider_release.__get__(backend)
+        return backend, watch
+
+    def ask(self):
+        from dgc import peers
+        note = {"pid": os.getpid(), "proc_start": "", "kind": "serve", "session": "/s/one.json", "cwd": "/w",
+                "project_root": "/w", "git_common_dir": "", "status": "working", "takeover": True,
+                "heartbeat": time.time()}
+        peers.request_release(note, "/s/one.json")
+        return peers
+
+    def test_an_orphaned_window_with_a_turn_running_keeps_it(self):
+        peers = self.ask()
+        backend, watch = self.backend(windowless=False, busy=True)
+        self.assertFalse(backend._consider_release())
+        self.assertFalse(watch.stood_down, "standing down mid-turn is what lost the turn before")
+        answer = peers.release_answer(os.getpid())
+        self.assertFalse(answer["granted"])
+        self.assertIn("dgc stop", answer["reason"])
+
+    def test_nothing_running_hands_it_over(self):
+        self.ask()
+        backend, watch = self.backend(windowless=True, busy=False)
+        self.assertTrue(backend._consider_release())
+        self.assertTrue(watch.stood_down)
+
+
 # ---------------------------------------------------------------- the wire and attaching ---
 class WireSwitchTests(unittest.TestCase):
     def test_switch_keeps_one_strictly_increasing_seq_and_never_tears_a_frame(self):

@@ -2483,6 +2483,7 @@ def run_help() -> None:
     c.print("  dgc mcp                 manage servers, resources, prompts and connections")
     c.print("  dgc pips                local manual jobs  (enable · create · run · report · context · serve)")
     c.print("  dgc serve · dgc acp     editor back-ends (JSON over stdio · Agent Client Protocol)")
+    c.print("  dgc ps · dgc stop       what DGC is running here, a session with no window too · save and stop one")
     c.print("  dgc bug                 where to report a bug")
     c.print("  dgc <command> --help    usage for any of the above")
     c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")

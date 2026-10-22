@@ -404,6 +404,9 @@ export interface ChatTabInit {
   host: DgcViewProvider;
   /** Names the tab. */
   title(text: string): void;
+  /** VS Code brought the tab back after a reload: its session may still be running in the backend the
+   *  reload left behind, which may need a moment to fall quiet before it can be reattached to. */
+  restored?: boolean;
 }
 
 interface ChatSlot {
@@ -661,6 +664,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.sessionRestoreSaved = !!tab.session;
       this.sessionRestoreSuppressed = true;
       this.tabTitled = !!tab.session;              // opened from the list: it already has its title
+      this.attachMode = tab.restored ? "restore" : "auto";
       this.backendLog = tab.host.backendLog;
       this.sb = tab.host.sb;
       tab.host.tabProviders.add(this);
