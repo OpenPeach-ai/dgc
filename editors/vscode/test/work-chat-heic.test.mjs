@@ -65,7 +65,7 @@ test("a pasted iPhone photo is named in its chip and sent for the backend to mak
   assert.ok(chip, "the photo is attached");
   assert.equal(chip.img, false, "no broken picture: Chromium can't draw HEIC");
   assert.match(chip.title, /iPhone photo, sent as a JPEG/);
-  assert.equal(chip.caption, "HEIC");
+  assert.equal(chip.caption, "IMG_4417.HEIC", "its own file name, as every pasted image's chip shows");
   await page.evaluate(() => { document.getElementById("input").textContent = "What do I owe?"; });
   await page.keyboard.press("Enter").catch(() => {});
   await page.evaluate(() => document.getElementById("send")?.click());
