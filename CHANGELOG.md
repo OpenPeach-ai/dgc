@@ -31,9 +31,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   cloud models and subscription CLIs stay `unknown`. A saved chat keeps its clock, and reopening one sends it
   with `resumed: true`. A compaction, a new chat or another model resets it.
 - **The context window follows the model.** The window you choose is remembered for each model, so switching to
-  another model and back restores your 1M instead of the other model's guess. A model's own reported maximum (an
-  Ollama cloud model's 1M, Anthropic's) now beats DGC's name-based guess (which said 64K for anything called
-  "deepseek"); the guess is kept for models on your own machine, where a big window costs memory. When a provider
+  another model and back restores your 1M instead of the other model's guess. A cloud model you haven't set a window
+  for starts at a moderate one, its family's usual window and at least 128K (no longer the 64K DGC guessed from the
+  name "deepseek"), never above the maximum the model reports; that maximum (an Ollama cloud model's 1M,
+  Anthropic's) is one choice away in the context meter, because a bigger window means more input on every turn. The
+  name-based guess is kept for models on your own machine, where a big window costs memory. When a provider
   refuses a request as too long and names its limit ("maximum context length is 262144"), DGC remembers that limit
   for the endpoint and model, compacts to fit, and starts every later request (and session) from it, instead of
   overflowing again. The context meter says "256k · this model's max" when the model holds less than you chose.

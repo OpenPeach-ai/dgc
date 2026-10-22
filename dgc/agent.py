@@ -618,6 +618,10 @@ def _call_model_wait(hook, label, detail="", **options):
     return hook(label, detail, **options)
 
 
+# Where an unset window starts for a model in the cloud that reports a larger maximum.
+CLOUD_START_WINDOW = 131_072
+
+
 def recommended_window(config, client, model: str, *, probe: bool = True) -> int | None:
     """The context window to give ``model`` when it becomes the model, or None to keep the current one.
 
@@ -625,8 +629,9 @@ def recommended_window(config, client, model: str, *, probe: bool = True) -> int
     model on this machine, the memory-conscious recommendation for its family (MODEL_CATALOG, never
     above the model's own maximum: a local model's trained maximum is memory it allocates, not a
     free window); for any other model -- a cloud API, or an Ollama ``:cloud`` model reached through a
-    local Ollama -- the maximum the provider reports (Ollama /api/show, Anthropic's Models API), and
-    the family's known window only when nothing is reported. ``probe`` lets the client fetch the
+    local Ollama -- a moderate start: the family's known window, at least CLOUD_START_WINDOW, capped by
+    the maximum the provider reports (Ollama /api/show, Anthropic's Models API); the family's window
+    alone when nothing is reported. ``probe`` lets the client fetch the
     model's metadata (bounded, cached); without it only what is already cached counts.
     """
     from .config import context_for_model, remembered_context_size
@@ -660,7 +665,12 @@ def recommended_window(config, client, model: str, *, probe: bool = True) -> int
             return min(table, limit) if limit else table
         return None
     if limit:
-        return limit
+        # A cloud model starts at a moderate window, never its whole maximum: a larger window means more
+        # input on every turn before DGC compacts, which a paid API bills and an Ollama plan counts
+        # (founder, 2026-10-22). The family's window, at least CLOUD_START_WINDOW (the table's small
+        # numbers are for memory on this machine), capped by what the model holds. Its maximum is one
+        # choice away in the context meter, and a window chosen there is remembered for the model.
+        return min(max(table or 0, CLOUD_START_WINDOW), limit)
     return table
 
 

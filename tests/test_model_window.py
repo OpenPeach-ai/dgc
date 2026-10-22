@@ -144,11 +144,30 @@ class PerModelMemory(IsolatedHome):
 
 
 class ReportedMaximum(IsolatedHome):
-    def test_a_cloud_model_s_reported_maximum_beats_the_name_table(self):
+    def test_a_cloud_model_starts_at_a_moderate_window_not_the_tables_local_64k_or_its_whole_maximum(self):
+        # Founder, 2026-10-22: an unset window starts moderate; the maximum is the user's choice.
         self.server.show_context = 1_048_576
         cfg = self.config(model="qwen2.5:14b", base_url=self.server.url, api_mode="ollama")
         agent = self.agent(cfg)
         self.switch(agent, "deepseek-v4.1-flash:cloud")       # the table alone says 64k for "deepseek"
+        self.assertEqual(cfg.get("context_size"), 131_072)
+        self.assertEqual(agent.context_size(), 131_072)
+
+    def test_a_cloud_model_that_holds_less_than_the_start_gets_what_it_holds(self):
+        self.server.show_context = 32_768
+        cfg = self.config(model="qwen2.5:14b", base_url=self.server.url, api_mode="ollama")
+        agent = self.agent(cfg)
+        self.switch(agent, "deepseek-v4.1-flash:cloud")
+        self.assertEqual(cfg.get("context_size"), 32_768)
+
+    def test_the_maximum_chosen_for_a_cloud_model_is_kept_for_it(self):
+        self.server.show_context = 1_048_576
+        cfg = self.config(model="qwen2.5:14b", base_url=self.server.url, api_mode="ollama")
+        agent = self.agent(cfg)
+        self.switch(agent, "deepseek-v4.1-flash:cloud")
+        cfg.set("context_size", 1_048_576)                    # chosen in the context meter
+        self.switch(agent, "qwen2.5:14b")
+        self.switch(agent, "deepseek-v4.1-flash:cloud")
         self.assertEqual(cfg.get("context_size"), 1_048_576)
         self.assertEqual(agent.context_size(), 1_048_576)
 
@@ -168,7 +187,8 @@ class ReportedMaximum(IsolatedHome):
         cfg = self.config(model="claude-sonnet-5-5", base_url=self.server.url + "/v1", api_mode="anthropic")
         agent = self.agent(cfg)
         agent.client.prepare_model()
-        self.assertEqual(agent.context_size(), 1_000_000, "a window left unset follows the reported maximum")
+        self.assertEqual(agent.context_size(), 200_000,
+                         "a window left unset starts at the family's window, never the whole 1M maximum")
 
     def test_a_cloud_model_that_reports_nothing_keeps_the_family_window_or_the_current_one(self):
         cfg = self.config(model="gpt-5", base_url="https://api.example.invalid/v1")
