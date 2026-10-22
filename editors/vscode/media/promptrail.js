@@ -47,6 +47,7 @@
     rail.type = "button"; rail.id = o.id; rail.hidden = true;
     rail.setAttribute("aria-haspopup", "dialog"); rail.setAttribute("aria-expanded", "false");
     rail.setAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown");
+    rail.setAttribute("aria-label", "Prompts in this chat");
     const ticks = el("span", "prompt-rail-ticks");
     ticks.setAttribute("aria-hidden", "true");
     rail.append(ticks);

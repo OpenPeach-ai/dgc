@@ -2817,6 +2817,153 @@
   });
   // ---- end 0.47 pinned prompt ----
 
+  // ---- the prompt rail (media/promptrail.js, the same as ChatDGC's; the founder chose it for Work chats 2026-10-18) ----
+  // From five prompts, a short tick per prompt in the transcript's right margin, the one being read bright; hover or
+  // Tab to it for a card of every prompt with its time; a click, or Alt+Up and Alt+Down from anywhere (the message box
+  // too), goes there and outlines it. A chat opens on its latest pages, so the prompts before what's on screen come
+  // from the session's outline (get_outline, offered as ready.capabilities.outline), asked for each time the
+  // transcript is drawn from a history snapshot: a reload, a reattach, a resume, a switch. Going to one of those loads
+  // the pages before it first. With an older CLI the rail lists the prompts on screen, and its card offers to load
+  // the earlier messages. Only this chat's own transcript: a Pip's chat has none of these rows.
+  let railOffered = false;            // ready.capabilities.outline
+  let railOutline = null;             // {token, prompts}: the answer to the latest get_outline
+  let railAsked = 0;                  // that request's token: an older answer is dropped
+  let railHeld = new Set();           // the turn ids of the prompts in the latest history snapshot (reachable here)
+  let railSerial = 0, railSeeking = null;
+  const railTurnIds = new WeakMap();  // a prompt row -> its turn's id ("h3", "t2") or its place in the archive ("a1")
+  const railIds = new WeakMap();      // a prompt row -> the rail's own id for one with neither
+  // Each turn's prompt row, in the order the transcript shows them: the archived ones, the saved ones, this window's.
+  const railHeads = () => [...log.querySelectorAll(":scope > .turn > .msg.user.turn-head, :scope > .history-pages > .turn > .msg.user.turn-head")];
+  function railHeadText(head) {
+    const bubble = head.querySelector(":scope > .bubble");
+    const words = (bubble?.querySelector(":scope > .prompt-text")?.textContent || "").replace(/\s+/g, " ").trim();
+    if (words) return words.slice(0, 160);
+    const chips = [...(bubble?.querySelectorAll(":scope > .prompt-atts .prompt-att") || [])]
+      .map((chip) => chip.textContent.replace(/\s+/g, " ").trim()).filter(Boolean);
+    return chips.join(", ").slice(0, 160) || "Image";
+  }
+  function railPrompts() {
+    const heads = railHeads();
+    const told = railOutline?.prompts || null;
+    if (told) {
+      // The archive's rows on screen are its latest prompts: they take the outline's ids for them ("a<n>").
+      const archived = told.filter((p) => p.archived), rows = heads.filter((h) => h.classList.contains("archived"));
+      const total = archived.length ? Number(archived[archived.length - 1].id.slice(1)) + 1 : 0;
+      rows.forEach((head, j) => { const n = total - rows.length + j; if (n >= 0) railTurnIds.set(head, `a${n}`); else railTurnIds.delete(head); });
+    }
+    const seen = new Set(), shown = [];
+    for (const head of heads) {
+      let id = railTurnIds.get(head) || railIds.get(head);
+      if (!id || seen.has(id)) { id = railIds.get(head) || `p${++railSerial}`; railIds.set(head, id); }
+      seen.add(id);
+      const time = head.querySelector(":scope > .msg-time");
+      shown.push({ id, text: railHeadText(head), at: time ? Date.parse(time.dateTime) : NaN, loaded: true, node: head });
+    }
+    // The ones before what's on screen, from the outline: those this window can reach (an archived one, or one in the
+    // snapshot it holds; a long session's snapshot leaves its oldest turns out).
+    const before = (told || []).filter((p) => !seen.has(p.id) && (p.archived || railHeld.has(p.id)))
+      .map((p) => ({ id: p.id, text: p.text, at: typeof p.at === "number" ? p.at * 1000 : NaN, loaded: false }));
+    return [...before, ...shown];
+  }
+  const railOlder = () => log.querySelector(":scope > .history-pages > .history-older");
+  function railNode(id) { return railPrompts().find((p) => p.id === id && p.loaded)?.node || null; }
+  // To a prompt not on screen: the pages before what's shown, held here or asked of the archive, until it is there.
+  function railReach(p, then) {
+    railSeeking = { id: p.id, then, pages: 0 };
+    railSeek();
+  }
+  function railSeek() {
+    const seeking = railSeeking;
+    while (seeking && railSeeking === seeking) {
+      if (railNode(seeking.id)) { railSeeking = null; seeking.then(); return; }
+      const older = railOlder();
+      if (!older || older.hidden || seeking.pages++ > 5000) { railSeeking = null; speak("That part of the chat isn't shown here."); return; }
+      if (older.disabled) return;                  // the archive's next page is on its way: its answer carries on
+      older.click();
+    }
+  }
+  // Eased to its own place (where a pinned prompt rests), at once for a reader who asked for less motion; then put
+  // exactly there, since the blocks it passed may have taken their real height on the way.
+  let railGliding = 0;
+  function railGlide(head) {
+    cancelAnimationFrame(railGliding);
+    readingBack(); following = false;
+    const bound = () => Math.max(0, log.scrollHeight - log.clientHeight);
+    const from = log.scrollTop, to = Math.min(bound(), Math.max(0, from + laidOutTop(head) - restLine()));
+    const settle = (left) => {
+      const delta = laidOutTop(head) - restLine();
+      if (Math.abs(delta) > 1 && head.isConnected) {
+        const before = log.scrollTop;
+        log.scrollTop = Math.min(bound(), Math.max(0, before + delta));
+        if (left > 0 && log.scrollTop !== before) { railGliding = requestAnimationFrame(() => settle(left - 1)); return; }
+      }
+      renderToLatest();
+    };
+    const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still || Math.abs(to - from) < 2) { log.scrollTop = to; settle(3); return; }
+    const t0 = performance.now(), ms = 320;
+    const frame = (now) => {
+      readingBack();
+      const t = Math.min(1, (now - t0) / ms);
+      log.scrollTop = from + (to - from) * (1 - (1 - t) ** 3);
+      if (t < 1) railGliding = requestAnimationFrame(frame); else settle(3);
+    };
+    railGliding = requestAnimationFrame(frame);
+  }
+  function railFlash(node) {
+    node.classList.remove("prompt-flash");
+    void node.offsetWidth;                  // so it plays again on a node that just played it
+    node.classList.add("prompt-flash");
+    setTimeout(() => node.classList.remove("prompt-flash"), 1600);
+  }
+  const promptRail = window.DgcPromptRail?.create({
+    id: "prompt-rail", scroller: log, input,
+    visible: () => log.clientHeight > 0 && !document.body.hasAttribute("data-agent-page"),
+    prompts: railPrompts,
+    top: (p) => (p.node?.isConnected ? laidOutTop(p.node) : null),
+    landing: restLine,
+    go: railReach,
+    show: (p) => {
+      const head = p.node?.isConnected ? p.node : railNode(p.id);
+      if (!head) return false;
+      railGlide(head);
+      railFlash(head.querySelector(":scope > .bubble") || head);
+      return true;
+    },
+    // An older CLI: the prompts before what's on screen can't be listed until they're loaded.
+    more: (list) => {
+      const older = railOlder();
+      return !railOutline && older && !older.hidden && !list.some((p) => !p.loaded)
+        ? { label: "Earlier messages aren't listed yet: load them", run: () => older.click() } : null;
+    },
+    announce: speak,
+  });
+  // The rows change when the transcript does: a turn's box added or taken away, a page of history landing.
+  let railFrame = 0;
+  const railSoon = () => { if (promptRail && !railFrame) railFrame = requestAnimationFrame(() => { railFrame = 0; railWatch(); promptRail.refresh(); }); };
+  const railObserver = typeof MutationObserver === "function" ? new MutationObserver(railSoon) : null;
+  function railWatch() {
+    const pages = log.querySelector(":scope > .history-pages");
+    if (pages && railObserver) railObserver.observe(pages, { childList: true });
+  }
+  railObserver?.observe(log, { childList: true });
+  // A history snapshot drew the transcript again: the prompts it holds, and the outline asked for afresh.
+  function railSnapshot(items) {
+    railHeld = new Set();
+    for (const it of items || []) {
+      if (it && it.type === "turn_start" && (it.kind || "prompt") === "prompt" && typeof it.turn_id === "string") railHeld.add(it.turn_id);
+    }
+    railOutline = null; railSeeking = null;
+    if (railOffered) vscode.postMessage({ type: "getOutline", token: ++railAsked });
+    railSoon();
+  }
+  function railOutlined(ev) {
+    if (ev.request_id !== `outline-${railAsked}` || !Array.isArray(ev.prompts)) return;
+    railOutline = { prompts: ev.prompts.filter((p) => p && typeof p.id === "string" && p.id && typeof p.text === "string").slice(-5000) };
+    railSoon();
+  }
+  function railReset() { railOutline = null; railHeld = new Set(); railSeeking = null; railAsked++; railSoon(); }
+
   // ---- turn lifecycle ----
   // Two prompts are "the same" when their opening prose matches; the composer's own bubble may
   // carry attachment chips the backend never echoes, and the backend may expand a template.
@@ -3389,6 +3536,7 @@
     // The prompt's time goes under its bubble: when its turn started, live. A saved turn's comes with its
     // history (a {role: "time"} item, legacyItem), so a reopened chat says when each prompt was sent.
     turn.head = head?.matches?.(".msg.user") ? head : null;
+    if (turn.head && id) railTurnIds.set(turn.head, String(id));    // the prompt rail knows it by its turn (an outline's id)
     if (!replaying) stampPrompt(turn.head, Date.now());
     if (!replaying) {
       turn.timer = setInterval(renderTurnMeta, 200);
@@ -6326,6 +6474,7 @@
         setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
         if (!draftScope && ev.session_id) selectDraftSession(ev.session_id);
         imagesOnReady(ev); retryOnReady(ev);
+        railOffered = Number(ev.capabilities?.outline) >= 1;      // get_outline: every prompt, for the prompt rail
         serverWindow = null;           // the new backend says its own (server_window), if it offers it
         break;
       }
@@ -6341,11 +6490,13 @@
       case "history":
         if (ev.complete === true) prepareCompleteHistory(ev.items || []);
         renderHistory(ev.items || []);
+        railSnapshot(ev.items);
         if (Array.isArray(ev.todos)) renderTodos(ev.todos);
         if (!replaying) releaseHeldEvents(ev.complete === true ? ev.seq : -1);
         if (pipAsks.length) flushPipAsks();
         break;
-      case "recall": renderHistory._absorbRecall?.(ev); break;
+      case "recall": renderHistory._absorbRecall?.(ev); railSeek(); break;
+      case "outline": railOutlined(ev); break;
       case "rewound":
         if (ev.ok) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
@@ -9328,6 +9479,7 @@
     pipSetupCards?.reset();
     cacheClockOnSessionReset(kind);   // the incoming chat's backend says its own
     agentsOnSessionReset(kind); imagesOnSessionReset(kind); retryOnSessionReset(kind); askOnSessionReset(kind);
+    railReset();                       // the prompt rail: the incoming chat's snapshot and outline say its own
   }
   function backendExitHooks(msg) {
     agentsOnBackendExit(msg); imagesOnBackendExit(msg); retryOnBackendExit(msg); askOnBackendExit(msg);

@@ -4727,6 +4727,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "getOutline": {
+        // Every prompt of the session, for the prompt rail; the answer (`outline`) carries the webview's token back.
+        // Only to a CLI that offers it: an older one would reject the command.
+        const be = this.backend, token = typeof msg.token === "number" ? msg.token : NaN;
+        if (be && (this.lastReadyEvent?.capabilities as any)?.outline >= 1 && Number.isSafeInteger(token) && token > 0) {
+          be.send({ type: "get_outline", request_id: `outline-${token}` });
+        }
+        break;
+      }
       case "reqFiles":
         this.sendFiles();
         break;
@@ -7715,6 +7724,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const voicebarJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "voicebar.js"));
     const readAloudJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "readaloud.js"));
     const msgTimeJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "msgtime.js"));
+    // The prompt rail beside the transcript, the same as ChatDGC's.
+    const promptRailJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "promptrail.js"));
     // `https:` in img-src is what lets a favicon load beside a link the user typed, and it is
     // the same allowance Codex ships. It is NOT what keeps model output from phoning home: the
     // markdown renderer never emits an <img> for model content -- it turns every image into a
@@ -7965,6 +7976,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${pipsScript}"></script>
 <script nonce="${nonce}" src="${voicebarJs}"></script>
 <script nonce="${nonce}" src="${msgTimeJs}"></script>
+<script nonce="${nonce}" src="${promptRailJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;

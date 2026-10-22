@@ -201,6 +201,10 @@ Unconsumed terminal follow-ups remain queued after interruption; a new prompt co
 In the editor, Enter steers and **Alt+Enter** or **Queue** submits a later turn. Unapplied steering
 can be restored to the draft. Subscription CLI mode changes apply to the next launched turn.
 
+In the editor, from five prompts a **prompt rail** sits in the transcript's right margin: a tick per
+prompt, the one you're reading bright. Hover it for every prompt with its time and click one to go
+there, or press **Alt+↑ / Alt+↓** for the prompt before or after, from the message box too.
+
 A message sent mid-turn says what became of it, on its own line under the bubble (under, not in:
 what became of a message is not something you said):
 *steering …* while the backend holds it, *queued for the next turn* if the turn would not take it,

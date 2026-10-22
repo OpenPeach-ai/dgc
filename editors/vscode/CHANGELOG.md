@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **The prompt rail in Work chats,** as ChatDGC has it: in a session of five prompts or more, a short tick for each
+  prompt sits in the transcript's right margin, centred, and the one you're reading is bright.
+  - **Hover it** (or Tab to it) for a card of every prompt with its time under day headings, the one you're reading
+    tinted. Click one to go there: the view eases to it (at once for a reader who asked for less motion), it rests
+    where a pinned prompt rests, and it's outlined for a moment.
+  - **Keys:** Alt+↑ and Alt+↓ go to the prompt before or after, from anywhere in the chat, the message box included;
+    in the card, ↑ ↓, Home, End and Enter, and Esc closes it.
+  - **Long sessions** open on their latest messages and still list every prompt, the ones folded away by compaction
+    too; going to an early one draws the messages before it first. After a window reload, a session picked up where
+    it was running, or a resume, the rail is right again. Needs a DGC CLI with the same feature; with an older one,
+    the rail lists the prompts on screen and its card offers to load the earlier messages.
+  - It belongs to the chat's own transcript: it isn't shown over Pips, an agent's page or the Sessions list.
+
 - **A pasted image's chip shows its file name,** cut to fit, as Claude Code's does; its type, size and
   dimensions are on hover. A screenshot copied straight to the clipboard has no name of its own and still
   reads like "PNG · 1920×1080". The sent prompt's chip reads the same.
