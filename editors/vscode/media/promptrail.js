@@ -19,6 +19,8 @@
 //   show(p)    the view moved to p and p outlined for a moment; false when it isn't there
 //   more(list) null, or {label, run} when the pages before what's on screen can't be listed yet
 //   announce(text), input (the message box: Alt+Up/Down work in it too)
+//   reveal     "hover": the ticks stay out of sight until the pointer comes near the transcript's right edge (or
+//              Alt+Up/Down, focus or the open card asks for them), as the Work chat has it (founder, 2026-10-23)
 // and calls refresh() when the prompts may have changed. It returns {refresh, track, close, step, rail, card}.
 (function () {
   "use strict";
@@ -235,6 +237,29 @@
       goTo(to);
       return true;
     }
+    // Out of sight until wanted ("hover"): the pointer within reach of the right edge, beside the rail's own height.
+    let near = false, nearFrame = 0, shownUntil = 0, hideTimer = 0;
+    const REACH = 56;
+    const setNear = (on) => { if (on !== near) { near = on; rail.classList.toggle("near", on); } };
+    const reveal = (ms) => {
+      shownUntil = performance.now() + ms; setNear(true);
+      clearTimeout(hideTimer); hideTimer = setTimeout(() => { if (performance.now() >= shownUntil && !rail.matches(":hover")) setNear(false); }, ms);
+    };
+    if (o.reveal === "hover") {
+      rail.classList.add("reveal-hover");
+      document.addEventListener("pointermove", (e) => {
+        if (nearFrame) return;
+        const x = e.clientX, y = e.clientY;
+        nearFrame = requestAnimationFrame(() => {
+          nearFrame = 0;
+          if (rail.hidden) return setNear(false);
+          const r = rail.getBoundingClientRect(), box = scroller.getBoundingClientRect();
+          const inReach = x >= r.left - REACH && x <= box.right && y >= box.top && y <= box.bottom;
+          setNear(inReach || performance.now() < shownUntil);
+        });
+      }, { passive: true });
+      document.documentElement.addEventListener("mouseleave", () => { if (performance.now() >= shownUntil) setNear(false); });
+    }
     let frame = 0;
     scroller.addEventListener("scroll", () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; track(); }); }, { passive: true });
     window.addEventListener("resize", () => { if (!rail.hidden) place(); });
@@ -248,7 +273,7 @@
       // Everywhere but a field of a card or an edit being typed in (the message box itself takes them too).
       const t = e.target;
       if (t instanceof HTMLElement && t !== o.input && !o.input?.contains?.(t) && t.closest("input, textarea, select, [contenteditable='true']")) return;
-      if (step(e.key === "ArrowDown")) { e.preventDefault(); e.stopPropagation(); }
+      if (step(e.key === "ArrowDown")) { e.preventDefault(); e.stopPropagation(); if (o.reveal === "hover") reveal(1600); }
     }, true);
     return { refresh, track, close, step, rail, card };
   }

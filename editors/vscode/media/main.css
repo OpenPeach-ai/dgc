@@ -1955,6 +1955,12 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.tu
 .prompt-rail { --tick: 16px; position: fixed; z-index: 30; display: block; padding: 8px 4px 8px 10px; border: 0; border-radius: var(--r-sm);
   background: transparent; cursor: pointer; }
 .prompt-rail[hidden] { display: none; }
+/* The Work chat's rail stays out of sight until the pointer nears the right edge, the keyboard steps, or it has focus
+   or its card open (promptrail.js, reveal: "hover"). */
+.prompt-rail.reveal-hover .prompt-rail-ticks { opacity: 0; transition: opacity .18s ease-out; }
+.prompt-rail.reveal-hover.near .prompt-rail-ticks, .prompt-rail.reveal-hover:hover .prompt-rail-ticks,
+.prompt-rail.reveal-hover:focus-visible .prompt-rail-ticks, .prompt-rail.reveal-hover[aria-expanded="true"] .prompt-rail-ticks { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .prompt-rail.reveal-hover .prompt-rail-ticks { transition: none; } }
 .prompt-rail:focus { outline: none; }
 .prompt-rail:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 0; }
 .prompt-rail-ticks { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--pitch, 10px) - 2px); overflow: hidden; }

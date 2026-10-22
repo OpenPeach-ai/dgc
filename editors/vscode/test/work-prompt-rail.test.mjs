@@ -338,3 +338,27 @@ test("the rail stays with this chat's own transcript: hidden while Pips or an ag
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+// Founder, 2026-10-23: in a Work chat the rail appears only when wanted. Its ticks stay out of sight until the pointer
+// nears the transcript's right edge, or Alt+Up/Down steps; the rail is still there for the keyboard and a screen reader.
+test("the Work chat's ticks stay out of sight until the pointer nears the right edge, or Alt+Up/Down steps", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openPage({ width: 460, reducedMotion: true });          // at once: no fade to wait for
+  try {
+    await s.events([{ type: "history", items: history(6) }]);
+    await s.settle();
+    const opacity = () => s.page.evaluate(() => getComputedStyle(document.querySelector("#prompt-rail .prompt-rail-ticks")).opacity);
+    await s.page.mouse.move(40, 300); await s.settle();
+    assert.equal((await s.state()).shown, true, "the rail is there");
+    assert.equal(await opacity(), "0", "but its ticks are out of sight with the pointer over the words");
+    const b = await s.page.locator("#prompt-rail").boundingBox();
+    await s.page.mouse.move(b.x - 30, b.y + b.height / 2); await s.settle();
+    assert.equal(await opacity(), "1", "near the right edge the ticks show");
+    await s.page.mouse.move(40, 300); await s.settle();
+    assert.equal(await opacity(), "0", "and go when the pointer moves away");
+    await s.page.keyboard.press("Alt+ArrowUp"); await s.settle(100);
+    assert.equal(await opacity(), "1", "Alt+Up shows where you are");
+    await s.page.waitForTimeout(1900); await s.settle();
+    assert.equal(await opacity(), "0", "then they go again");
+  } finally { await s.page.close(); }
+});

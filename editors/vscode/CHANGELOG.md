@@ -39,7 +39,8 @@
     starts the same fix in the chat the Pip reports to.
   - Needs a DGC CLI with the same feature; with an older one, Ask DGC to fix sends its one message as before.
 
-- **The prompt rail in Work chats,** as ChatDGC has it: in a session of five prompts or more, a short tick for each
+- **The prompt rail in Work chats,** out of sight until you want it (bring the pointer to the transcript's right edge, or
+  press Alt+↑/↓), then as ChatDGC has it: in a session of five prompts or more, a short tick for each
   prompt sits in the transcript's right margin, centred, and the one you're reading is bright.
   - **Hover it** (or Tab to it) for a card of every prompt with its time under day headings, the one you're reading
     tinted. Click one to go there: the view eases to it (at once for a reader who asked for less motion), it rests

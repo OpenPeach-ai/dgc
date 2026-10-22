@@ -2925,7 +2925,7 @@
     setTimeout(() => node.classList.remove("prompt-flash"), 1600);
   }
   const promptRail = window.DgcPromptRail?.create({
-    id: "prompt-rail", scroller: log, input,
+    id: "prompt-rail", scroller: log, input, reveal: "hover",
     visible: () => log.clientHeight > 0 && !document.body.hasAttribute("data-agent-page"),
     prompts: railPrompts,
     top: (p) => (p.node?.isConnected ? laidOutTop(p.node) : null),
