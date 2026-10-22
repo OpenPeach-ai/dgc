@@ -7824,6 +7824,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <div id="rail-pop-links" class="rail-pop-links" hidden></div>
     </div>
   </div>
+  <div id="elsewhere-bar" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="elsewhere-text" class="elsewhere-text"></span><button type="button" id="elsewhere-open" class="act primary" title="Carry on with this session in this window; the other window shows it read-only">Open here</button></div>
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="pipsbar" class="rail-item" aria-label="Pips digest" hidden>
       <div id="pips-digest-panel" class="pips-digest-panel" role="region" aria-label="What your Pips found" hidden></div>
@@ -7881,7 +7882,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <button type="button" id="paste-keep" class="rail-text-action" title="Send the text exactly as pasted">Keep</button>
     </section>
   </div>
-  <div id="elsewhere-bar" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="elsewhere-text" class="elsewhere-text"></span><button type="button" id="elsewhere-open" class="act primary" title="Carry on with this session in this window; the other window shows it read-only">Open here</button></div>
   <div id="cbox" data-mode="default">
     <div id="attachments" aria-label="Attached context"></div>
     <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><div id="input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></div></div>
