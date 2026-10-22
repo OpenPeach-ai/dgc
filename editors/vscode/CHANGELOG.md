@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A Pip for live data.** A Pulse's **Plan & schedule** now asks what it runs: tests or page checks on a copy of the
+  code, or **read-only commands on live data**, one a line (up to six), with what they can reach one click away. DGC
+  runs only those exact commands, read-only, and the Pip's model sums up what they print. Saving them is a reviewed
+  change, and a command that writes is refused with the reason. A setup card from the chat shows "3 read-only
+  commands" and "Changes nothing", and Details lists each command. **Run now** on its History runs it; a run's page
+  shows the summary, then each command, how it ended and what it printed. The summary posts in the Pip's chat, and
+  all-clear runs fold into one message ("✓ All clear 12 times since Monday"); one that needs you has its output and
+  **Ask DGC to fix** under it. On the Work chat's report card it reads "needs you" with the summary, or "finished ·
+  all clear". Needs DGC CLI with Pips API 60; an older CLI shows a Pulse as before.
+
 - **A finished turn folds its work into "Worked for 43s".** Once a turn has its answer, the one-line updates
   between tool calls, the tool rows, thinking and finished sub-agents fold into the turn's **Worked for** row, which
   moves to the top of the turn, so a turn reads as your prompt, one line and the answer. Click the row (or press

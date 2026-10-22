@@ -4,8 +4,9 @@ Grok Bots and OpenAI Dots both post a scheduled run's result in the bot's own co
 can reply to it, and keep a separate run list for the record. A Pip does the same: each run's result
 appears in its chat, and the run list behind it is the History tab (it was Runs).
 
-Which runs. A source review (Scout, Lens, Rook, Lock), a Pulse check, a Quill draft and a Personal
-Pip's scheduled task, when it finishes or fails. Chat replies are the chat already; Patch work and a
+Which runs. A source review (Scout, Lens, Rook, Lock), a Pulse check, a live-data run (pip_live_data:
+its summary, the one post a model writes, held to the numbers its commands printed), a Quill draft and a
+Personal Pip's scheduled task, when it finishes or fails. Chat replies are the chat already; Patch work and a
 handoff's test run are reviewed where they were handed off, and a cancelled run is the user's own doing.
 
 Exactly once. ``post`` writes one row, keyed by the run, inside the transaction that finishes the run

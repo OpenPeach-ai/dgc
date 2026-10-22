@@ -27,7 +27,7 @@ page.
 | Lens | Repository research | Investigates one question using the approved source files. It does no web research. |
 | Patch | File fixes | Edits only reviewed paths in a private copy of the project. Every fix needs its own approved handoff. |
 | Rook | Code review | Reviews the approved source for correctness and maintainability. |
-| Pulse | Test execution | Runs exact commands, either through a reviewed handoff or from a separately approved verification plan. |
+| Pulse | Test execution | Runs exact commands, either through a reviewed handoff or from a separately approved verification plan, or keeps an eye on [live data](#a-pip-for-live-data) with read-only commands you approve. |
 | Lock | Security review | Reviews the approved source for potential security issues. It runs no exploits. |
 | Quill | Documentation drafts | Writes a private Markdown draft from the approved source, with checked citations. It does not change project files. |
 
@@ -149,7 +149,7 @@ with nobody watching, long after the chat ends. A card expires after seven days,
 sooner if the next run time it shows has already passed.
 
 The main chat can set up Scout, Lens, Rook and Lock reviews, Quill drafts, Pulse
-command plans and Personal Pips. A new Scout, Lens, Rook, Lock or Quill can run after
+command plans, [live-data Pips](#a-pip-for-live-data) and Personal Pips. A new Scout, Lens, Rook, Lock or Quill can run after
 each new commit instead of on a schedule. The main chat cannot set up Patch or the
 other event triggers; use the Pips view or the CLI for those.
 
@@ -467,11 +467,13 @@ list is the Pip's **History** tab (it was Runs; for a Personal Pip, Results).
 | Pulse checks that failed | "1 of 2 checks failed: GET …/api/invoices → 200." | **Report · 1 of 2 failed ›** and **Ask DGC to fix** |
 | A run that didn't finish | "I couldn't finish this run. I ran out of time. Nothing in your project was changed. I'll try again tomorrow at 9:00 AM." | **See what happened**, **Run again now** when it can, **Ask DGC to fix** |
 | A clean run | "Both checks passed. Nothing for you to do." or "I didn't find any issues this run." | **Open run** |
+| A live-data run | Its summary: "Orders: 2 paid, 1 unpaid. Disk 62% used. Health ok." | **Output · 3 commands ›** and **Ask DGC to fix** when it needs you; **Open run** when all is clear |
 | A Quill draft | "I drafted “Release notes for 0.48”." and its summary | **Open draft** |
 | A Personal Pip's scheduled task (Core and the others) | Its result, in its own words, starting short with **Show all** | **Open result** |
 
 **Its words are the report's.** DGC writes the sentence from the run's saved result alone, so every
-number, file name and title the Pip says is in the report; no model writes it. A few wordings for each
+number, file name and title the Pip says is in the report; no model writes it. A live-data Pip is the one exception:
+its model sums up what its commands printed, and every number in that summary must be in their output. A few wordings for each
 kind of run, chosen by the run, keep a week of nightly runs from reading the same, and a run always reads
 the same however often you open the chat. A routine's reply is the Pip's own message already: it says
 which routine it was, and a long one starts short with **Show all** too.
@@ -580,8 +582,8 @@ reads "Interrupted" and changed nothing.
 copies and their size. An older DGC CLI keeps the earlier behaviour: Ask DGC to fix sends DGC one
 message naming the run, and the button reads "Asked DGC".
 
-**Which runs.** A finished source review (Scout, Lens, Rook, Lock), a Pulse's checks, and a
-failed run of either. They are said when something changes: the first report, new or different
+**Which runs.** A finished source review (Scout, Lens, Rook, Lock), a Pulse's checks, a live-data
+run, and a failed run of any of them. They are said when something changes: the first report, new or different
 findings, a failure, or the all clear after one. A clean run after a clean one, the same findings
 again or the same failure again are not shown again. A clean run is one quiet line. A run you
 asked a chat to start is always shown there. Runs that finished while the chat was closed arrive
@@ -598,6 +600,65 @@ models are told so, and told that a report is not a request to change anything.
 terminal. In the terminal (`dgc`) a report is one line in the open chat, such as
 `Pip 'ERP daily audit' finished: 5 findings (2 high, 3 medium) · /pips to open`, and the
 editor shows its card when you open that chat there.
+
+## A Pip for live data
+
+A Pulse can keep an eye on live data instead of running tests: the numbers in a database, a health endpoint, disk
+space. Its job is a short list of exact command lines you approve, up to six, and it changes nothing:
+
+```text
+sqlite3 -readonly data/app.db "SELECT status, count(*) FROM orders GROUP BY status"
+psql "$DGC_READONLY_DATABASE_URL" -At -c "SELECT count(*) FROM invoices WHERE gst IS NULL"
+df -h .
+curl -s http://127.0.0.1:8000/health
+```
+
+On its schedule, or when you choose **Run now**, DGC runs exactly those lines and nothing else, and the Pip's model
+writes two or three sentences about what they printed, saying whether something needs you under its goal ("Tell me
+when invoices miss GST or the disk is over 80% full"). The summary posts in the Pip's chat; all-clear runs fold into
+one message, and a run that needs you is a report card in the chats it reports to, with **Ask DGC to fix**. Fixing is
+always a chat action you choose: the Pip never fixes anything, and DGC's fixer works in a copy of the project and
+never touches live data or services.
+
+**Only the approved lines run.** Each run runs every approved line once, in order. A line that isn't on the list is
+refused and never runs, and a run whose job changed after it was queued runs nothing. Changing the list is a reviewed
+job change, like any other: in the Pips view, or by asking DGC in the chat, which shows it as a card.
+
+**Nothing it runs can change anything.** The lines run in your project folder as it is now (the live files, not a
+committed copy), in the read-only box a Troupe checker's shell uses: they can read the computer's files but write
+none, your homes and the project's credential files (`.env`, keys, `.git`) are hidden, and the one writable place is
+a private `/tmp`, gone when the line ends. They reach no network but the local addresses the lines name
+(`localhost:PORT` or `127.0.0.1:PORT`) and the project's read-only database. As a safety net, DGC also refuses a line
+with an obvious write when you approve it, and again before it runs: a redirection into a file, `rm`, `mv`, `tee`,
+`sed -i`, `git push`, `systemctl restart`, SQL that changes data (`INSERT`, `UPDATE`, `DELETE`, `DROP` and the like),
+`curl -X POST` or a request body, `$(...)`, `bash -c`, `sudo`, a service on another computer, or a password in the
+line. It says which and why.
+
+**Use a read-only database account.** The approved list is the guarantee; for SQL, so is the database. Make a
+read-only role (`dgc readonly-db guide` shows the statements; DGC never creates or changes a role), keep it for the
+project with `dgc readonly-db set`, and a line reaches it as `$DGC_READONLY_DATABASE_URL`. Never approve a line that
+connects as a superuser. For SQLite, open the file read only: `sqlite3 -readonly FILE "SELECT ..."`.
+
+**Its numbers come from the output.** The model reads each line's output (up to 4 KB of it, credentials redacted) as
+data, never as instructions. Every number in its summary must appear in that output; a summary with one that doesn't
+is asked for once more and otherwise left out, and DGC says in its own words what ran. A run's page under History shows
+the summary and, under it, each line, how it ended and what it printed.
+
+**Setting one up.** Ask in the chat: "watch the orders database and the health endpoint every hour; tell me when an
+order goes unpaid". DGC reads what the project has, proposes the exact lines and shows them on a card above the chat
+box (a Pulse that runs commands is always a card, even in auto mode). Or, for a Pulse in the Pips view, choose **Plan &
+schedule**, then **Read-only commands on live data**, one a line. In the terminal:
+
+```sh
+dgc pips create "Orders watch" --type pulse --reviewed-execution --goal "Tell me when an order goes unpaid"
+dgc pips propose PIP --expected-version 1 --live-command 'sqlite3 -readonly data/app.db "SELECT status, count(*) FROM orders GROUP BY status"' --live-command 'df -h .'
+dgc pips accept PIP PROPOSAL --expected-version 1
+dgc pips run PIP
+dgc pips report RUN
+```
+
+It needs Linux with working bubblewrap (as Pulse commands do); on stock Ubuntu 24.04, `dgc pips execution --fix`. Each
+line gets up to a minute and 64 KB of output.
 
 ## Rating results
 

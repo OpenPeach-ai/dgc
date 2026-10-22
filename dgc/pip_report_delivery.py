@@ -12,8 +12,8 @@ Which chat. The chat a Pip was set up in, every chat it is attached to (``attach
 and, for that one run, the chat that ran it (``run_pip_now``). A Pip with no chat reports where it
 always has: the Pips view, Needs attention and the home strip.
 
-Which runs. A finished source review (Scout, Lens, Rook, Lock) or Pulse check, and a failed run of
-either, said when it changes: a clean run after a clean run, the same findings again or the same
+Which runs. A finished source review (Scout, Lens, Rook, Lock), Pulse check or live-data run
+(pip_live_data), and a failed run of any of them, said when it changes: a clean run after a clean run, the same findings again or the same
 failure again is entered in the ledger but not shown. A run the chat asked for is always shown.
 Older runs of one Pip that waited together fold into the newest ("2 earlier runs"). Conversation
 replies, drafts and Patch work are not reports and stay in Pips.

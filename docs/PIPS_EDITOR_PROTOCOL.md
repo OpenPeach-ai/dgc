@@ -304,6 +304,17 @@ PIP didn't use your Chrome (Cancel in Chrome, nobody answered) or couldn't reach
 `in_use` the view asks again every 1.5 s. The host refuses all four before API 59 ("Update DGC to let a Pip borrow
 your Chrome.") and an older CLI is asked for none.
 
+**Live data** (API 60). A project Pulse may carry `live_plan` (`{schema_version: 1, commands: [...]}`, one to six
+read-only command lines; null for other Pips) on `get_pip` and `list_pips`, and a setup card may carry it with
+`work_kind` `live_data` instead of a `verification_plan`. `propose_pip_update` takes `changes.live_plan` (null removes
+it); the backend refuses a line that writes (`write_command`, with the reason), which the view shows as is. The host
+refuses `changes.live_plan` before API 60 ("Update DGC to keep an eye on live data."). Its runs have `run_kind` `live`
+and start with `run_pip` without Pulse pins; `get_pip_run`'s `result.live` has the summary (`summary`, `summary_by`,
+`attention`, `notes`) and each line's `command`, `status`, `exit_code`, `output` and `note`. Its run posts and its
+`pip_report` cards have `kind` `live` and `outcome` `live_clear` or `live_attention`, with `summary`, `summary_by`,
+`commands` `{ok, failed, total}` and `failed_commands`; an older editor leaves out a post or a card it can't read.
+No event and no event field changes.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

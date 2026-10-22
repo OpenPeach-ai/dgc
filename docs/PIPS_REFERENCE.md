@@ -319,6 +319,57 @@ read only; Worker has the parent's exact `write_paths`. They share the parent's
 budget (12 model requests, 64 tool calls, 300 seconds) and can't run commands, use
 the network or start further children.
 
+### Live-data commands
+
+A live-data Pip (API 60, `dgc/pip_live_data.py`) is a project Pulse whose job has a `live_plan` instead of a
+verification plan: `{"schema_version": 1, "commands": [...]}`, one to six distinct command lines of up to 1,000
+characters, each on one line. It is set and changed only by a reviewed job change (`changes.live_plan`, `null`
+removes it) or a setup card (`work_kind` `live_data`); a model proposal or an adaptation can't change it, and an
+adaptation carries it over. A Pulse has a verification plan or a live plan, not both, and runs on a schedule or when
+asked, never on events.
+
+- **Only the approved lines run.** Before each run the controller checks the job is still active at the queued
+  version with the same lines (else `stale_grant`, and nothing more runs); each line runs once, in order. A line that
+  isn't exactly one of the approved ones is refused and never reaches the box. A failed line doesn't stop the others.
+- **The safety net.** `refusal(line)` turns a line down when it is approved (`write_command`, with the reason) and
+  again before it runs: a redirection into a file (`>`, `>>`, `&>`, `<>`; `2>/dev/null` and `2>&1` are fine), `&`,
+  a subshell, a here-document, `$(...)`, backticks or process substitution; programs that write (`rm`, `mv`, `cp`,
+  `tee`, `dd`, `touch`, `chmod`, `kill`, archive tools, ...), `sudo` and friends, `eval`, `xargs`, `bash -c`;
+  `sed -i`, `sort -o`, `find -delete`/`-exec`, `tar` other than `-t`; `git`, `docker`, `kubectl`, `systemctl` and
+  package managers with a write subcommand; `curl` with a method other than GET/HEAD/OPTIONS, a body, a form, an
+  upload or an output file, `wget` without `-O-`; Redis write commands; psql meta-commands and sqlite3
+  dot-commands that write, run commands or open another file; SQL statements that change data (`INSERT INTO`,
+  `UPDATE ... SET`, `DELETE FROM`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, `GRANT`, `MERGE`, `COPY ... FROM`,
+  `SELECT ... INTO`, `PRAGMA x =`, `nextval()` and others); a URL off this computer, a loopback URL without a port,
+  or a port below 1024; a password or key in the line (`secret_detected`). It is a net for obvious writes; the
+  approved list is the guarantee, and a read-only database account is what keeps SQL read-only.
+- **The box.** Each line runs as `/bin/bash -o pipefail -c LINE` in a Troupe checker's bubblewrap box
+  (`checker_box`): every namespace unshared, capabilities dropped, the host read only, homes, `/root`, `/tmp` and
+  `/run` replaced by empty ones, the project mounted read only at `/mnt` and at its own path with its credential files
+  hidden, a private writable `/tmp`, and the working folder `/mnt`. Its network is its own loopback, where one
+  forwarder per port relays to `127.0.0.1:PORT` on the host for each port the approved lines name
+  (`localhost:PORT`, `127.0.0.1:PORT`, at most eight), and the project's read-only database
+  (`dgc readonly-db set`) is reached as `$DGC_READONLY_DATABASE_URL`. The environment is the sandbox's small one
+  (`PATH`, `LANG`, `TZ`, `HOME=/tmp/dgc-home`). Linux with working bubblewrap only; elsewhere `run_pip` and the
+  schedule refuse it with `execution_unavailable` and the reason, and its status says so.
+- **Limits.** 60 seconds and 64 KiB of output a line (`timed_out`, `output_limit`); 4 KiB of each output is kept,
+  redacted for configured credentials. Statuses: `ok`, `failed`, `timed_out`, `output_limit`, `cancelled`,
+  `refused`, `not_run`.
+- **The summary.** The worker makes one tool-free request (up to 1,024 output tokens, 240 seconds) with the job's
+  goal and each line's status, exit code and output as untrusted data, for `{"summary": "...", "attention": bool}`.
+  Every number in the summary must appear in an output, the goal or a command line (counts up to the number of lines
+  are DGC's own); otherwise, or when the reply isn't that object, it is asked once more, then left out, and the
+  run's summary is DGC's own sentence ("All 3 commands ran and printed their output.", "2 of 3 commands ran. Not
+  finished: ..."). The controller checks the numbers again before saving. A model error never fails the run.
+  `attention` is the model's verdict, or true whenever a line didn't finish.
+- **The result.** `result.live` is `{schema_version, commands: [{index, command, status, exit_code, output,
+  output_truncated, seconds, note?}], summary, summary_by ("model" | "dgc"), attention, notes, verification}`, with
+  `result.snapshot` `{files: 0, bytes: 0, scope: "live"}` (no source is copied) and the event `pip_run_live_reads`
+  (each line's status and exit code). `pips_context` `report` reads it; `dgc pips report RUN` prints it.
+- **Its chat.** A conversation run of a live-data Pip carries `live_plan` as reference, and `last_report` is the
+  latest run (`classification` `live_data`: the summary and each line's output, at most 1,200 characters each, 8 KiB
+  in all). It can't run the lines, or anything else, from its chat.
+
 ### Personal scope
 
 A Personal Pip's run has no tools. It receives its approved goal, its chat history,
@@ -579,6 +630,7 @@ systemd.
 | `conversation` | Any | A chat message | Project: the same read tools. Personal: the five drafting tools only. |
 | `patch` | Patch | An accepted handoff | Read tools plus the four write tools on reviewed paths; `task` only with a specialists grant |
 | `test` | Pulse | An accepted handoff, or a standing verification plan (manual or scheduled) | Read tools (handoff); none, and no model (plan) |
+| `live` | Pulse with a `live_plan` (API 60) | Manual, schedule, main chat (`run_pip_now`), a setup card's first run | None: the controller runs the approved lines, then one tool-free request for the summary |
 | `personal_task` | Any Personal Pip | Manual, schedule, main chat, Personal handoff, an approved computer action | None; `computer` when the job has a computer (API 42) |
 
 Conversations work while a Pip is paused, and are always read-only, including for
@@ -617,14 +669,15 @@ the Work chat card's report (`pip_report_delivery` builds both) plus:
 
 | Field | Meaning |
 | --- | --- |
-| `kind` | `audit`, `checks`, `draft` or `result` (a Personal Pip's task) |
-| `outcome` | `findings`, `clear`, `failed`, `checks_failed`, `checks_passed`, `draft` or `result` |
+| `kind` | `audit`, `checks`, `draft`, `result` (a Personal Pip's task) or `live` (a live-data Pip, API 60) |
+| `outcome` | `findings`, `clear`, `failed`, `checks_failed`, `checks_passed`, `draft`, `result`, `live_clear` or `live_attention` |
 | `trigger` | `schedule`, `event`, `you`, `chat` (the main chat ran it) or `handoff` |
 | `total`, `counts`, `findings` | A review's findings: how many, by severity, the top three (`title`, `severity`, `path`, `line`) |
 | `checks`, `failed_checks` | Pulse: `{passed, failed, total}` and up to three failed checks |
 | `reason`, `detail` | A failure in plain words, and the saved message |
 | `next_run_at` | A failed run of an active, scheduled Pip: when it runs next |
 | `title`, `summary` | A Quill draft |
+| `summary`, `summary_by`, `commands`, `failed_commands` | A live-data run: its grounded summary (`model`) or DGC's sentence (`dgc`), `{ok, failed, total}` and up to three lines that didn't finish |
 | `preview`, `truncated` | A Personal Pip's result: its first 1,200 characters, cut at a paragraph |
 | `text` | The post in one plain line, as the terminal says it |
 | `posted_at` | When the run finished |
@@ -633,8 +686,9 @@ the Work chat card's report (`pip_report_delivery` builds both) plus:
 `{pip_id, workspace_id, posts, next_before_id}`, oldest first, the newest page first; `before_id`
 is a post's `run_id`. The editor draws each post where it falls among the chat's messages, as the
 Pip speaking: first-person words made from the post's own fields (never a model's), the details one
-click away, and all-clear posts in a row (`clear`, or `checks_passed` with the same number of checks,
-no message between them) folded into one message. History (the Runs tab) says what each run found from
+click away, and all-clear posts in a row (`clear`, `live_clear`, or `checks_passed` with the same number of
+checks, no message between them) folded into one message. A live-data post's words are its `summary`: the model's,
+held to the numbers its commands printed, or DGC's own. History (the Runs tab) says what each run found from
 the same posts.
 
 A post is not a chat message: it is not in `pip_chat_messages`, never queues a reply and never
@@ -1881,6 +1935,7 @@ Clients check it before using a newer control.
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
+| 60 | A live-data Pip: a project Pulse's `live_plan` (`changes.live_plan`, a setup card's `work_kind` `live_data`), run kind `live`, `result.live`, run posts of kind `live` and report cards with outcomes `live_clear` and `live_attention`, `live_plan` on `get_pip` and `list_pips` (see [Live-data commands](#live-data-commands)) |
 | 59 | Borrowing the user's own signed-in Chrome (`pip_borrow`): `borrow_chrome` and `borrowed_chrome`; `list_pip_borrows`, `allow_pip_borrow` (Allow once), `decline_pip_borrow` (Not now), `stop_pip_borrow`, all local only; the reserved chat keys `borrow_` and `borrow_no_`; no Always allow |
 | 58 | How much a Personal Pip asks (`pip_levels`): `get_pip_level`, `set_pip_level` (`ask`, `approve`, `full`); what a level lets through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a pending hold's `asks_because`; the safety floor's computer action of kind `floor`; sites written out in an attached document count as named by the user |
 | 57 | Memory that learns, for Pips: a Personal Pip's own working notes (`pip_working_notes`: the `working_notes` tool, `get_pip_working_notes`, `set_pip_working_notes`), its daily log (`pip_daily_log`: `list_pip_daily_log`), and its chat looked back over for the user's one memory (`pip_memory_review`) |

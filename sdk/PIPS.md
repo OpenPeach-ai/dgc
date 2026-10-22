@@ -168,6 +168,7 @@ job with `create_pip` and a reviewed update.
 | 53 | `get_pip_eyes` (R) and `set_pip_eyes` (M, `choice` ask, relay or off): how a Personal Pip whose model reads text only sees; `list_pip_computer_frames`' `pointers`; `use_pip_computer_view`'s op `pointer`. A payment held in a Pip's browser is refused Always allow |
 | 54 | `get_pip_computer_apps` (R) and `set_pip_computer_apps` (M, `choice` download or not_now): a Pip computer's image editor, document editor and PDF viewer, and the one offer to download the ones this computer lacks. Pips use the whole desktop: its steps reach the timeline and the live view as API 53's pointers. |
 | 59 | Borrowing your own signed-in Chrome, with your consent each time: `list_pip_borrows {pip_id}` (R: `{pip_id, minutes, borrows}`, each card's `status` requested, allowed, declined, replaced, in_use, returned or expired, its `sites`, `why`, whether your Chrome is `reachable`, and `ended`), `allow_pip_borrow`, `decline_pip_borrow` and `stop_pip_borrow` (M, each `{pip_id, borrow_id}`, local only). Allow once lets only the one turn it starts use your Chrome, on the card's sites, in a tab of DGC's own; there is no Always allow. |
+| 60 | A live-data Pip: `changes.live_plan` on `propose_pip_update`, `{schema_version: 1, commands: [...]}` with one to six distinct read-only command lines (or `null` to remove them). Both SDKs refuse it before API 60 and check its shape; the backend refuses a line that writes (`write_command`) or holds a password (`secret_detected`). Its runs (`run_kind` `live`) start with `run_pip` and no Pulse pins; `get_pip_run`'s `result.live` has each line's `status`, `exit_code` and `output`, and the `summary` (`summary_by` `model` or `dgc`) with `attention`. Its run posts have `kind` `live` and `outcome` `live_clear` or `live_attention`. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -247,8 +248,10 @@ returns the original receipt without applying it again.
 
 `changes` may contain `name`, `goal`, `source_ref`, `model_choice`, `schedule`,
 `event_trigger`, `adaptation_policy`, `source_policy`, `verification_plan`,
-`app_plan`, `web_plan` and `github_plan` (project reviewers and Quill: one repository and
-up to four read-only reads that DGC makes before each run with the user's GitHub login). A proposal changes nothing until it is accepted, and
+`app_plan`, `web_plan`, `github_plan` (project reviewers and Quill: one repository and
+up to four read-only reads that DGC makes before each run with the user's GitHub login) and
+`live_plan` (a project Pulse, API 60: the exact read-only command lines DGC runs each time, for a
+live-data Pip; see [PIPS.md](../docs/PIPS.md#a-pip-for-live-data)). A proposal changes nothing until it is accepted, and
 accepting checks the expected version again. The shapes of each field are in
 [PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md#schedules-and-event-triggers).
 
