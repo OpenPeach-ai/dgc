@@ -13,6 +13,8 @@ Built by Mohit Kalra.
 
 DGC is an interactive coding agent that lives in your terminal and points at **the model endpoint you choose**: local Ollama, llama.cpp, LM Studio, or vLLM; native Anthropic or OpenAI; and compatible clouds such as OpenRouter, Groq, DeepSeek, Together, and Mistral.
 
+It can also hand each turn to a coding subscription you already pay for (Claude Code, Codex, Qwen Code, Kimi or GitHub Copilot) through the vendor's official CLI, and the same harness sits in VS Code and Cursor, beside **ChatDGC**, a chat for everything else, and **DGC Pips**, for the work you come back to.
+
 ![Vibe DGC — the CLI welcome screen](docs/welcome.png)
 
 <sub>The welcome screen, pointed at your own local model — the `///` mark, the session menu, and the **mode · model** status line.</sub>
@@ -44,6 +46,22 @@ dgc           # start the interactive agent
 ```
 
 <sub>Prefer to do it by hand? See [Manual install](#manual-install). Want your own coding agent to set it up? See [Let your agent install it](#let-your-agent-install-it).</sub>
+
+## In your editor: Work, Chat and Pips
+
+The VS Code and Cursor extension keeps three things side by side in the DGC side bar.
+
+- **Work** — DGC's coding sessions: the same agent as the terminal, with structured tools, readable diffs, plan review and goals. A session keeps running through a window reload; `dgc ps` and **Settings → Running sessions** show what is running.
+- **ChatDGC — a chat for everything else.** Ask anything that isn't code. It looks things up and cites every page, researches in depth, reads your files and draws the charts. Your own model answers, and your chats stay on your computer. Deep research with a plan you can edit, Study mode, interactive answers (a calculator, converter, timer or quiz that opens in a locked-down tab beside the chat), a canvas, projects and a Library, the plugins you turned on, and your voice: dictation, read aloud and voice mode, on speech models that run on your computer. [vibedgc.com/chatdgc](https://vibedgc.com/chatdgc) · [guide](docs/CHATDGC.md)
+- **DGC Pips — for the work you come back to.** Give recurring reviews, focused fixes, test runs and the errands of your day a home of their own. Your Pips keep their own conversations, work with the models you choose, and bring decisions back to you; each run is a message from the Pip in its own chat. A Personal Pip has a computer of its own (the whole desktop on Linux), asks as much as you set (**Ask**, **Approve for me** or **Full access**; a payment always asks), signs in with logins you saved, can borrow your signed-in Chrome for one task when you allow it, and can think with the Claude Code or Codex you are signed in to. Pips run on Linux, macOS and Windows (DGC inside WSL 2), in the CLI (`dgc pips`), the extension and the SDK. [vibedgc.com/pips](https://vibedgc.com/pips) · [guide](docs/PIPS.md)
+
+## Plugins, apps and MCP
+
+**Settings ▸ Plugins** lists the plugins DGC offers: GitHub, Linear, Notion, Sentry, Stripe and Supabase, connectors such as Composio, Zapier, Make, n8n and Arcade, and many more. Install one (or run `dgc plugin install NAME`) and its tools join the same list as the built-ins: one route, one permission prompt, one set of hooks and redaction. Hosted plugins need no Node.js: DGC connects to them itself. Any MCP server works too; see [MCP servers](#whats-in-the-box).
+
+## The SDK
+
+Embed the DGC harness in an application or a CI job: `pip install dgc-sdk` for Python, or the TypeScript package `@vibedgc/sdk`. The same client reaches ChatDGC (`dgc.chat()`: ask, stream, deep research, Study mode) and the Pips of your profile (`session.pips`). See [vibedgc.com/sdk](https://vibedgc.com/sdk/) and [`sdk/`](sdk/).
 
 ## Connect any model in one command
 
