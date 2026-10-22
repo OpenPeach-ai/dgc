@@ -1680,6 +1680,11 @@ class LLMClient:
     _capability_lock = threading.Lock()
     _model_metadata_cache: dict[tuple[str, str], tuple[float, dict]] = {}
     _model_metadata_lock = threading.Lock()
+    # The last window each vLLM, SGLang or llama.cpp server said it runs with, per endpoint+model. Kept past the
+    # minute after which DGC asks again (the metadata cache's expiry), so the window never falls back to DGC's own
+    # in between: mid-way through a long turn, or in a chat left idle. Replaced by the server's next answer; dropped
+    # when it names none, or a refusal names another size. Guarded by _model_metadata_lock.
+    _server_windows: dict[tuple[str, str], dict] = {}
 
     def __init__(self, base_url: str, api_key: str, model: str, read_timeout: int = 1800,
                  think_budget_tokens="auto", max_tokens: int = 0, ollama_keep_alive: str = "",
@@ -1986,30 +1991,45 @@ class LLMClient:
             metadata = {}
         if cancel is not None and cancel.is_set():
             return {}
+        key = self._model_metadata_key()
         if metadata:
             self._cache_model_metadata(metadata, min(self.capability_cache_ttl_s, _SERVER_WINDOW_TTL_S))
+            served = {"window": metadata["server_window"], "server": str(metadata.get("server") or "")[:32]}
+            if metadata.get("trained_context"):
+                served["trained"] = metadata["trained_context"]
+            with self._model_metadata_lock:
+                self._server_windows.pop(key, None)
+                self._server_windows[key] = served
+                while len(self._server_windows) > _MAX_MODEL_METADATA_CACHE_ENTRIES:
+                    self._server_windows.pop(next(iter(self._server_windows)))
         elif answered:
             # The server answered and names no window (LM Studio, a proxy): DGC sizes it, as before.
             self._cache_model_metadata({"source": "server_models"})
+            with self._model_metadata_lock:
+                self._server_windows.pop(key, None)
         else:
+            # Not reachable just now: the window it last said stands (a request would fail anyway).
             self._cache_model_metadata({}, failure_ttl)
         return dict(metadata)
 
     def server_window(self) -> dict:
-        """The window the server itself was started with, as last read (no network), or {}.
+        """The window the server itself was started with, as it last said (no network), or {}.
 
         ``{"window": tokens, "server": "vllm" | "sglang" | "llamacpp" | …, "trained": tokens?}``; empty
         when DGC sizes the window (Ollama, Anthropic, a cloud API) or the server has not said.
         """
-        _, metadata = self._cached_model_metadata()
-        window = _bounded_model_tokens(metadata.get("server_window"))
-        if not window:
+        if not self._server_sizes_window():
             return {}
-        found = {"window": window, "server": str(metadata.get("server") or "")[:32]}
-        trained = _bounded_model_tokens(metadata.get("trained_context"))
-        if trained:
-            found["trained"] = trained
-        return found
+        with self._model_metadata_lock:
+            found = self._server_windows.get(self._model_metadata_key())
+            return dict(found) if found else {}
+
+    def _forget_server_window(self) -> None:
+        """Ask the server again before the next request, and use no window it said before."""
+        key = self._model_metadata_key()
+        with self._model_metadata_lock:
+            self._model_metadata_cache.pop(key, None)
+            self._server_windows.pop(key, None)
 
     def prepare_model(self, *, force: bool = False, cancel=None) -> dict:
         """Discover selected native-provider model metadata once per bounded cache generation.
@@ -2065,7 +2085,8 @@ class LLMClient:
     def model_context_limit(self) -> int:
         """Return a discovered hard input limit, or zero when the provider did not report one."""
         _, metadata = self._cached_model_metadata()
-        return _bounded_model_tokens(metadata.get("context_length"))
+        return (_bounded_model_tokens(metadata.get("context_length"))
+                or self.server_window().get("window", 0))
 
     def _note_dropped_images(self, count: int) -> None:
         """Record that images were withheld, so a frontend can tell the user once."""
@@ -2115,9 +2136,9 @@ class LLMClient:
         if limit:
             remember_context_limit(self.base_url, self.model, limit)
             if self.server_window().get("window", limit) != limit:
-                # The server was restarted with another window: read it again before the next request.
-                with self._model_metadata_lock:
-                    self._model_metadata_cache.pop(self._model_metadata_key(), None)
+                # The server was restarted with another window: read it again before the next request, and
+                # meanwhile fit the size the refusal named.
+                self._forget_server_window()
         return ContextOverflowError("context window exceeded: " + str(body)[:200], limit=limit)
 
     def model_output_limit(self) -> int:
@@ -2157,8 +2178,7 @@ class LLMClient:
             for key in list(self._capability_rejections):
                 if key[:2] == prefix:
                     self._capability_rejections.pop(key, None)
-        with self._model_metadata_lock:
-            self._model_metadata_cache.pop(self._model_metadata_key(), None)
+        self._forget_server_window()
 
     @property
     def tools_supported(self) -> bool:

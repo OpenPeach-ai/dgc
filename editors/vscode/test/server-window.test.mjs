@@ -36,8 +36,8 @@ test("the meter says the server set the window, and how to change it there", () 
   assert.equal(served.textContent, "Set by the server: 8K");
   assert.equal(note.hidden, false);
   assert.equal(note.textContent, "To change it, restart vLLM with --max-model-len.");
-  assert.equal(max.textContent, "8k · set by the server");
-  assert.match(doc.getElementById("btn-ctx").title, /\(8k · set by the server\)/);
+  assert.equal(max.hidden, true, "the Window size row says it: not twice");
+  assert.match(doc.getElementById("btn-ctx").title, /\(8k · set by the server\)/, "the meter's tooltip, menu closed");
 
   // Your own smaller window still applies: it only decides when DGC compacts.
   event(config(4096));

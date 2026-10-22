@@ -931,7 +931,8 @@ test('General: Context size says a vLLM or llama.cpp server set the window, and 
   x.message({type:'event',event:{...x.config,context_size:32768,server_window:{model:'qwen2.5-0.5b',window:8192,server:'vllm',trained:0}}});
   x.click('[data-nav=general]');
   assert.equal(hintOf(x),'Set by the server: 8K (restart vLLM with --max-model-len to change it). A smaller number here makes DGC compact sooner.');
-  assert.equal(x.d.querySelector('#context_size').max,'','a larger number from before never blocks saving the page');
+  assert.equal(x.d.querySelector('#context_size').value,'8192','the window in use: above the server\'s can\'t apply');
+  assert.equal(x.d.querySelector('#context_size').max,'','a larger number typed is refused by nothing on the page: DGC holds it to the server\'s');
 
   // The server restarted with another size (or llama-server answered): said in place, a number being typed is kept.
   x.input('#context_size','4096');
@@ -940,7 +941,16 @@ test('General: Context size says a vLLM or llama.cpp server set the window, and 
   assert.equal(x.d.querySelector('#context_size').value,'4096');
   x.message({type:'event',event:{type:'server_window',model:'qwen3.8:27b',window:0}});
   assert.equal(hintOf(x),"Tokens before DGC compacts. The model's own maximum still applies.");
+  assert.equal(x.d.querySelector('#context_size').value,'4096','what you typed stays');
   x.click('#save');
   const saved=x.sent.filter(m=>m.type==='saveSettings').pop().values;
   assert.equal(saved.context_size,'4096');
+
+  // The server's word arriving after the page opened: the number shown follows it until you type one.
+  const y=setup();
+  y.click('[data-nav=general]');
+  assert.equal(y.d.querySelector('#context_size').value,'65536');
+  y.message({type:'event',event:{type:'server_window',model:'qwen2.5-0.5b',window:24576,server:'vllm'}});
+  assert.equal(y.d.querySelector('#context_size').value,'24576');
+  assert.match(hintOf(y),/^Set by the server: 24K \(restart vLLM/);
 });

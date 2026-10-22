@@ -1499,7 +1499,7 @@
     $("ctx-used").textContent = `${fmtTokens(used)} / ${fmtTokens(size)}`;
     const capped = modelMaxLabel();
     $("ctx-max").textContent = capped;
-    $("ctx-max").hidden = !capped;
+    $("ctx-max").hidden = !capped || !!serverWindow;     // a server's window: the Window size row below says it
     $("ctx-pct").textContent = `${pct}%`;
     $("ctx-fill").style.width = `${pct}%`;
     $("ctx-free").textContent = `${fmtTokens(Math.max(0, size - used))} free`;

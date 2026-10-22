@@ -82,6 +82,7 @@ class IsolatedHome(unittest.TestCase):
         # The metadata cache is the process's, keyed by address: a port a closed fixture freed comes back.
         with LLMClient._model_metadata_lock:
             LLMClient._model_metadata_cache.clear()
+            LLMClient._server_windows.clear()
 
     def client(self, model="qwen2.5-0.5b", path="/v1", **options) -> LLMClient:
         return LLMClient(self.server.url + path, "sk-local", model, **options)
@@ -203,6 +204,32 @@ class Advisory(IsolatedHome):
         expiry = client._model_metadata_cache[client._model_metadata_key()][0]
         self.assertLessEqual(expiry - time.monotonic(), 60.5,
                              "a restart with another window shows within a minute")
+
+    def test_the_window_stands_between_asks_through_a_long_turn_or_an_idle_chat(self):
+        # Seen in real VS Code on llama.cpp: a 3-minute first turn on a CPU, and the meter fell back to DGC's 32K at
+        # its end, because the minute after which DGC asks again had passed.
+        self.server.served_models = [LLAMACPP_ENTRY]
+        client = self.client(model="local", context_size=32_768)
+        client.prepare_model()
+        with LLMClient._model_metadata_lock:
+            LLMClient._model_metadata_cache.clear()            # the minute has passed
+        self.assertEqual(client.server_window()["window"], 6144)
+        self.assertEqual(client.effective_context_size(), 6144)
+        self.assertEqual(client.model_context_limit(), 6144, "ChatDGC's window reads this")
+        self.server.served_models = None                       # not answering just now
+        client.prepare_model()
+        self.assertEqual(client.server_window()["window"], 6144, "what it said last stands")
+        self.server.served_models = [{"id": "local", "owned_by": "llamacpp", "meta": {"n_ctx": 12288}}]
+        with LLMClient._model_metadata_lock:
+            LLMClient._model_metadata_cache.clear()
+        client.prepare_model()
+        self.assertEqual(client.server_window()["window"], 12288, "restarted with -c 12288")
+        self.server.served_models = [{"id": "local", "owned_by": "someone"}]
+        with LLMClient._model_metadata_lock:
+            LLMClient._model_metadata_cache.clear()
+        client.prepare_model()
+        self.assertEqual(client.server_window(), {}, "a server that names none: DGC sizes it again")
+        self.assertEqual(client.effective_context_size(), 32_768)
 
     def test_cloud_apis_ollama_and_anthropic_are_not_asked(self):
         def no_network(*args, **kwargs):

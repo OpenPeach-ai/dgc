@@ -52,6 +52,13 @@ export function contextSizeHint(c) {
     return `Set by the server: ${tokensShort(served.window)} (${how}). A smaller number here makes DGC compact sooner.`;
 }
 
+/** The number Context size shows: the window in use, so never more than a server's own window (above it can't apply). */
+export function contextSizeShown(c) {
+    const served = c && c.server_window && Number(c.server_window.window) > 0 ? Number(c.server_window.window) : 0;
+    const chosen = Number(c?.context_size) || 0;
+    return served && chosen > served ? served : (c?.context_size ?? "");
+}
+
 export function renderFields(section, main, config, providers, ui) {
     const { field, sel, inp, bool, card } = ui;
     function renderGeneral(main) {
@@ -64,7 +71,7 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("DGC Ultra", "Extra guidance and bounded sub-agents. Permissions stay as set.", bool("ultra_mode", c.ultra_mode === true))
                 + field("Parallel sub-agents", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"))
                 + field("Token cap per turn", c.budget_settable ? "Tokens one turn may spend, sub-agents included. When it is reached, no new sub-agent starts and the turn wraps up, keeping its work. 0 means no cap." : "Update the DGC CLI to set this here.", inp("turn_token_budget", c.turn_token_budget ?? 0, "number"))
-                + field("Context size", contextSizeHint(c), inp("context_size", c.context_size ?? "", "number"))
+                + field("Context size", contextSizeHint(c), inp("context_size", contextSizeShown(c), "number"))
                 + field("Show thinking", "Inline, collapsed, or hidden.", sel("show_reasoning", [["inline", "Inline"], ["collapsed", "Collapsed"], ["hidden", "Hidden"]], shown))
                 + field("Prompt suggestions", "", bool("suggest", c.suggest !== false))
                 + field("Wake on monitors", "Start a short turn when a background monitor prints.", bool("monitor_wake", c.monitor_wake !== false))

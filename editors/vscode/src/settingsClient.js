@@ -17,7 +17,7 @@ import driveLogo from '../media/plugin-logos/drive.png';
 import dgcLogo from '../media/dgc-mark.svg';
 const connectorLogos = {zapier:zapierLogo, make:makeLogo, n8n:n8nLogo, arcade:arcadeLogo, asana:asanaLogo, docusign:docusignLogo, zoom:zoomLogo};
 const serviceLogos = {gmail:gmailLogo, calendar:calendarLogo, contacts:contactsLogo, drive:driveLogo};
-import { contextSizeHint, renderFields } from './settingsFields.js';
+import { contextSizeHint, contextSizeShown, renderFields } from './settingsFields.js';
 import { createUsage } from './settingsUsage.js';
 import { usageMarkup } from './settingsUsageMarkup.js';
 import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
@@ -1099,6 +1099,8 @@ window.addEventListener('message', event => {
             if (config) config.server_window = draft.server_window;
             const hint = $('context_size')?.closest('.field')?.querySelector('.hint');
             if (hint) hint.textContent = contextSizeHint(draft);
+            const box = $('context_size');
+            if (box && !dirty.has('context_size') && document.activeElement !== box) box.value = String(contextSizeShown(draft));
         }
         else if (ev.type === 'usage_report')
             usage?.receive(ev);
