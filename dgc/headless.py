@@ -2385,6 +2385,7 @@ class Backend:
             if (always or after != before) and getattr(self.agent, "client", None) is client:
                 try:
                     self._emit_config()
+                    self._emit_context()     # the model's own maximum may have changed the window
                 except Exception:
                     pass
         threading.Thread(target=run, name="dgc-model-capabilities", daemon=True).start()
@@ -6213,12 +6214,11 @@ class Backend:
             if cmd.get("model"):
                 self.config.set("model", cmd["model"])
             self.agent.refresh_client()
-            recommend = getattr(self.agent, "recommended_context_size", None)
-            ctx = (recommend() if cmd.get("model") and callable(recommend) else None)
-            context_changed = False
-            if ctx and ctx != int(self.config.get("context_size", 32768)):
-                self.config.set("context_size", ctx)
-                context_changed = True
+            # The previous model keeps the window chosen for it; the new one gets its own (remembered,
+            # reported, or recommended for a local model), never just a name-table guess.
+            switch_window = getattr(self.agent, "window_after_switch", None)
+            context_changed = bool(cmd.get("model") and callable(switch_window)
+                                   and switch_window(previous))
             # While delegation is active, keep the public model control aligned with the route a
             # prompt will use even when a settings operation updates the native fallback.
             shown_model = (str(config_get("subscription_model", "")).strip()
@@ -6233,6 +6233,8 @@ class Backend:
             # configured recommendation happens to be identical. Never leave the editor meter on
             # the prior model's window.
             self._emit_context(request_id if context_changed else None)
+            if context_changed:
+                self._emit_config()          # the window the editor shows as the one you chose
             # The editor still holds the previous model's capabilities: always re-send them.
             self._publish_model_capabilities(always=True)
         elif t == "list_models":

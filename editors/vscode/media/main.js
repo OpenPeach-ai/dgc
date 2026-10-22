@@ -1457,11 +1457,27 @@
       mechanical: "Safe local fallback", tool_prune: "Local tool-output prune",
       none: "No change" })[strategy] || "Not compacted yet";
   }
+  // A window as the size menu names it: 262,144 is "256k", 1,048,576 is "1M".
+  function windowShort(n) {
+    const tokens = Math.max(0, Math.floor(Number(n) || 0));
+    if (tokens >= 1048576 && tokens % 1048576 === 0) return `${tokens / 1048576}M`;
+    if (tokens >= 1024) return `${Math.round(tokens / 1024)}k`;
+    return String(tokens);
+  }
+  // "256k · this model's max" when the window in use is the model's own maximum, below the one chosen.
+  function modelMaxLabel() {
+    const configured = Math.floor(Number(lastConfig?.context_size || 0));
+    const effective = Math.floor(Number(contextState.size || 0));
+    return configured > 0 && effective > 0 && effective < configured ? `${windowShort(effective)} · this model's max` : "";
+  }
   function renderContextMenu() {
     const used = Math.max(0, Number(contextState.used || 0));
     const size = Math.max(0, Number(contextState.size || 0));
     const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
     $("ctx-used").textContent = `${fmtTokens(used)} / ${fmtTokens(size)}`;
+    const capped = modelMaxLabel();
+    $("ctx-max").textContent = capped;
+    $("ctx-max").hidden = !capped;
     $("ctx-pct").textContent = `${pct}%`;
     $("ctx-fill").style.width = `${pct}%`;
     $("ctx-free").textContent = `${fmtTokens(Math.max(0, size - used))} free`;
@@ -1516,7 +1532,8 @@
     $("ctx").textContent = pct + "%";
     $("btn-ctx").classList.toggle("warn", pct >= Math.round(threshold * 100));
     $("btn-ctx").classList.toggle("busy", compacting);
-    $("btn-ctx").title = `Context ${fmtTokens(used)} / ${fmtTokens(size)} estimated tokens · ` +
+    const capped = modelMaxLabel();
+    $("btn-ctx").title = `Context ${fmtTokens(used)} / ${fmtTokens(size)} estimated tokens${capped ? ` (${capped})` : ""} · ` +
       `provider ${fmtTokens(contextState.input_tokens)} in / ${fmtTokens(contextState.output_tokens)} out · ` +
       `${fmtTokens(contextState.cached_input_tokens)} cached · ${fmtTokens(contextState.reasoning_tokens)} reasoning · ` +
       `${fmtTokens(contextState.requests)} requests · click for details`;
@@ -6245,6 +6262,7 @@
       case "config":
         reasoningControl = ev.provider_capabilities?.reasoning_control || "provider";
         lastConfig = ev;
+        renderContext();                 // the window you chose, beside the one in use ("· this model's max")
         nativeSteering = liveSteering && !ev.subscription_engine;
         renderComposerControls();
         paintMonitorsRow();              // Wake on monitor events decides whether events are "waiting"

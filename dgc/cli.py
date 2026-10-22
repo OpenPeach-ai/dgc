@@ -1591,12 +1591,12 @@ class CLI:
         self._show_restored_todos()
 
     def _set_model(self, model: str) -> None:
+        previous = str(self.config.model or "")
         self.config.set("model", model)
         self.agent.refresh_client()
-        ctx = self.agent.recommended_context_size(model)
-        if ctx and ctx != int(self.config.get("context_size", 32768)):
-            self.config.set("context_size", ctx)
-            self.ui.info(f"model → {model}  ·  context auto-set to {ctx // 1024}k (/context to change)")
+        ctx = self.agent.window_after_switch(previous)
+        if ctx:
+            self.ui.info(f"model → {model}  ·  context {ctx // 1024}k")
         else:
             self.ui.info(f"model → {model}")
 
@@ -2422,15 +2422,13 @@ def run_setup(config: Config) -> None:
             config.set("model", m)
             model_changed = True
     if model_changed:
-        from .config import context_for_model
+        from .agent import recommended_window
         selected_client = LLMClient(
             config.base_url, config.api_key, config.model,
             api_mode=str(config.get("api_mode", "auto")))
-        discovered_context = (selected_client.model_context_limit()
-                              if selected_client.api_mode == "anthropic" else 0)
-        suggested_context = discovered_context or context_for_model(config.model)
+        suggested_context = recommended_window(config, selected_client, config.model)
         if suggested_context:
-            config.set("context_size", suggested_context)
+            config.set_model_window(suggested_context)
     cs = input(f"  context window in tokens [{config.get('context_size')}] › ").strip()
     if cs.isdigit():
         config.set("context_size", int(cs))

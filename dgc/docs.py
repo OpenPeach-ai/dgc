@@ -3604,8 +3604,14 @@ Useful keys:
   that refuses the one-hour lifetime gets the five-minute one.
 - `provider_capabilities`, `capability_cache_ttl_s` — explicit feature overrides and the bounded
   interval before DGC retries a capability that an endpoint/model rejected.
-- `context_size` — requested operating window. Known models receive memory-conscious defaults;
-  provider metadata clamps impossible values without silently expanding local Ollama allocations.
+- `context_size` — requested operating window. The window you choose is remembered for that model
+  (`model_context_sizes`, written by DGC), and switching back to the model restores it. A model you
+  have not chosen one for gets the maximum its provider reports (Ollama's model details, Anthropic's
+  Models API) — an Ollama cloud model included — and, on this machine, a memory-conscious window for
+  its family (Qwen3.8 64K, Qwen 32K, …) that never exceeds what the model holds. A provider that
+  reports no maximum and refuses a request as too long ("maximum context length is 262144") teaches
+  DGC that limit for that endpoint and model (kept in `~/.dgc/model-limits.json`); later requests,
+  and later sessions, fit it. The meter then reads "256k · this model's max".
   Sessions compact at `compact_threshold` of the effective window. Changes apply to the next
   request, even during a turn. Editor settings saves wait only when changing an execution route:
   provider, model, sandbox, or delegation engine.

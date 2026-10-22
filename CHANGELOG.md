@@ -23,6 +23,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   seconds to re-read the conversation before, and none do after. That guidance now rides on the message
   itself, in a `<dgc-turn-notes>` block before its clock line (hidden in history and `/export`), and an MCP
   tool offered once in a chat stays offered while its budget lasts.
+- **The context window follows the model.** The window you choose is remembered for each model, so switching to
+  another model and back restores your 1M instead of the other model's guess. A model's own reported maximum (an
+  Ollama cloud model's 1M, Anthropic's) now beats DGC's name-based guess (which said 64K for anything called
+  "deepseek"); the guess is kept for models on your own machine, where a big window costs memory. When a provider
+  refuses a request as too long and names its limit ("maximum context length is 262144"), DGC remembers that limit
+  for the endpoint and model, compacts to fit, and starts every later request (and session) from it, instead of
+  overflowing again. The context meter says "256k · this model's max" when the model holds less than you chose.
 - **The cache lifetime and Ollama's keep-loaded time in the editor's Settings.** `dgc serve` sends both in a new
   `cache_settings` event to an editor that asks for it (get_config `fields: ["cache_settings"]`), never as new
   fields on `config`, and `set_config` takes `prompt_cache_ttl` (`5m` or `1h`) and `ollama_keep_alive` (a

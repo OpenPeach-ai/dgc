@@ -8,9 +8,11 @@ import copy
 import json
 import hashlib
 import math
+import os
 import re
 import threading
 import time
+from pathlib import Path
 from urllib.parse import quote
 from dataclasses import dataclass, field
 from datetime import timezone
@@ -770,7 +772,119 @@ class ModelStallError(LLMError):
 
 
 class ContextOverflowError(LLMError):
-    """The request exceeded the model's context window. Recoverable: the agent compacts + retries once."""
+    """The request exceeded the model's context window. Recoverable: the agent compacts + retries once.
+
+    ``limit`` is the window the provider named in its refusal ("maximum context length is 262144"),
+    or 0 when it named none. The client remembers it for its endpoint+model (learned_context_limit).
+    """
+
+    def __init__(self, message: str = "", limit: int = 0):
+        super().__init__(message)
+        self.limit = int(limit or 0)
+
+
+# The window a refusal names, in the phrasings _OVERFLOW_RE recognises. Each pattern's last group
+# is the limit; a number that is not a plausible window (fewer than 512 tokens, over 16M) is ignored.
+_OVERFLOW_LIMIT_RES = tuple(re.compile(pattern, re.I | re.S) for pattern in (
+    r"maximum context length is\s*(\d[\d,_]*)",                       # OpenAI, vLLM, DeepSeek, Groq
+    r"(\d[\d,_]*)\s*tokens?\s*>\s*(\d[\d,_]*)\s*maximum",                # Anthropic "215000 tokens > 200000 maximum"
+    r"maximum prompt length is\s*(\d[\d,_]*)",
+    r"too large for model with\s*(\d[\d,_]*)\s*maximum",
+    r"with\s*(\d[\d,_]*)\s*maximum context length",
+    r"[\"']?n_ctx[\"']?\s*[:=]\s*(\d+)",                                   # llama.cpp exceed_context_size_error
+    r"context (?:length|size|window) of (?:only )?(\d[\d,_]*)",              # LM Studio "context length of only 4096"
+    r"configured context size[^\d]{0,24}(\d[\d,_]*)",
+    r"range of input length should be \[\s*\d+\s*,\s*(\d+)\s*\]",            # DashScope/Qwen
+    r"input token count.{0,80}?exceeds.{0,40}?(\d[\d,_]{3,})",
+    r"(?:context|token)[_ ](?:window|limit|length)[^\d]{0,24}(?:is|of|:)\s*(\d[\d,_]{3,})",
+    r"exceeds?.{0,40}?(?:limit|maximum)(?: of)?\s*(\d[\d,_]{3,})\s*tokens?",
+))
+
+
+def overflow_limit(text: str) -> int:
+    """The context window an overflow refusal names, or 0 when it names none."""
+    for pattern in _OVERFLOW_LIMIT_RES:
+        match = pattern.search(str(text or "")[:8192])
+        if not match:
+            continue
+        try:
+            value = int(re.sub(r"[,_]", "", match.groups()[-1]))
+        except (TypeError, ValueError):
+            continue
+        if 512 <= value <= 16_777_216:
+            return value
+    return 0
+
+
+# Windows learned from overflow refusals, per endpoint+model, kept on disk so the next session (and
+# the next DGC) starts from the real limit instead of overflowing, compacting and forgetting again.
+_LEARNED_LIMITS_FILE = "model-limits.json"
+_MAX_LEARNED_LIMITS = 256
+_learned_limits_lock = threading.Lock()
+_learned_limits_cache: dict = {"path": None, "mtime": None, "limits": {}}
+
+
+def _learned_limits_path():
+    from .config import USER_HOME
+    return Path(USER_HOME) / _LEARNED_LIMITS_FILE
+
+
+def _learned_key(base_url: str, model: str) -> str:
+    return f"{str(base_url or '').rstrip('/').lower()}|{str(model or '')}"
+
+
+def _read_learned_limits() -> dict:
+    path = _learned_limits_path()
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    with _learned_limits_lock:
+        cache = _learned_limits_cache
+        if cache["path"] == str(path) and cache["mtime"] == mtime:
+            return dict(cache["limits"])
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    limits = raw.get("limits") if isinstance(raw, dict) else None
+    clean = {}
+    for key, value in (limits.items() if isinstance(limits, dict) else ()):
+        tokens = value.get("tokens") if isinstance(value, dict) else None
+        if (isinstance(key, str) and len(key) <= 4096 and isinstance(tokens, int)
+                and not isinstance(tokens, bool) and 512 <= tokens <= 16_777_216):
+            clean[key] = {"tokens": tokens, "at": value.get("at") if isinstance(value.get("at"), (int, float)) else 0}
+    with _learned_limits_lock:
+        _learned_limits_cache.update(path=str(path), mtime=mtime, limits=clean)
+    return dict(clean)
+
+
+def learned_context_limit(base_url: str, model: str) -> int:
+    """The window an overflow refusal taught DGC for this endpoint+model, or 0."""
+    entry = _read_learned_limits().get(_learned_key(base_url, model))
+    return int(entry["tokens"]) if entry else 0
+
+
+def remember_context_limit(base_url: str, model: str, tokens: int) -> None:
+    """Keep the window a refusal named. Never raises: a read-only home only costs the memory."""
+    if not (512 <= int(tokens or 0) <= 16_777_216) or not model:
+        return
+    path = _learned_limits_path()
+    try:
+        limits = _read_learned_limits()
+        key = _learned_key(base_url, model)
+        limits.pop(key, None)
+        limits[key] = {"tokens": int(tokens), "at": int(time.time())}
+        while len(limits) > _MAX_LEARNED_LIMITS:
+            limits.pop(next(iter(limits)))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps({"version": 1, "limits": limits}, indent=1), encoding="utf-8")
+        os.replace(tmp, path)
+        with _learned_limits_lock:
+            _learned_limits_cache.update(path=None, mtime=None, limits={})
+    except (OSError, ValueError, TypeError):
+        pass
 
 
 class ToolsUnsupportedError(LLMError):
@@ -1801,11 +1915,29 @@ class LLMClient:
         return stripped
 
     def effective_context_size(self, configured: int | None = None) -> int:
-        """Clamp a requested operating window to a discovered model maximum without expanding it."""
+        """Clamp a requested operating window to the model's maximum without expanding it.
+
+        The maximum is the smaller of what the provider reports (Ollama /api/show, Anthropic's
+        Models API) and what an overflow refusal from this endpoint+model taught DGC.
+        """
         requested = _bounded_model_tokens(
             self.context_size if configured is None else configured)
-        limit = self.model_context_limit()
+        limit = self.window_limit()
         return min(requested, limit) if requested and limit else (requested or limit)
+
+    def window_limit(self) -> int:
+        """This model's maximum as DGC knows it: reported, learned from a refusal, or 0 (unknown)."""
+        reported = self.model_context_limit()
+        learned = learned_context_limit(self.base_url, self.model)
+        known = [value for value in (reported, learned) if value]
+        return min(known) if known else 0
+
+    def _overflow(self, body: str) -> ContextOverflowError:
+        """The refusal as an overflow, remembering the window it names for this endpoint+model."""
+        limit = overflow_limit(body)
+        if limit:
+            remember_context_limit(self.base_url, self.model, limit)
+        return ContextOverflowError("context window exceeded: " + str(body)[:200], limit=limit)
 
     def model_output_limit(self) -> int:
         """Return a discovered hard output limit, or zero when the provider did not report one."""
@@ -3122,7 +3254,7 @@ class LLMClient:
                 low = body.lower()
                 last_err = body
                 if status == 413 or _OVERFLOW_RE.search(low):
-                    raise ContextOverflowError("context window exceeded: " + body[:200])
+                    raise self._overflow(body)
                 if _has_cache_marker(payload) and _CACHE_CONTROL_REFUSAL_RE.search(body):
                     # An Anthropic-compatible server that does not take the marker (or its ttl).
                     # Before the tools check below, which a "tools.3.cache_control" error matches.
@@ -3722,7 +3854,7 @@ class LLMClient:
                 low = body.lower()
                 last_err = body
                 if _OVERFLOW_RE.search(low):
-                    raise ContextOverflowError("context window exceeded: " + body[:200])
+                    raise self._overflow(body)
                 if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     # images: /api/show can be silent about capabilities, so a text-only model's
                     # "Multimodal data provided, but model does not support multimodal requests"
@@ -3983,7 +4115,7 @@ class LLMClient:
                 # Classify OVERFLOW first — some overflow bodies contain words like "invalid" that would
                 # otherwise be misread as a sampling/tool rejection and permanently strip a capability.
                 if _OVERFLOW_RE.search(low):
-                    raise ContextOverflowError("context window exceeded: " + body[:200])
+                    raise self._overflow(body)
                 if (r.status_code in (400, 422) and _image_parts_in(payload["messages"])
                         and _IMAGE_REFUSAL_RE.search(body)):
                     # images: the endpoint refused the image part, not tools. Retry once without it.
@@ -4499,7 +4631,7 @@ class LLMClient:
                 body = _error_body(response)
                 low = body.lower()
                 if _OVERFLOW_RE.search(low):
-                    raise ContextOverflowError("context window exceeded: " + body[:200])
+                    raise self._overflow(body)
                 if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     # images: the endpoint refused the image part, not tools. Retry once without it.
                     messages = self._without_images(messages, refused=True)

@@ -1390,6 +1390,8 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .context-head > div { min-width: 0; display: grid; gap: var(--sp-1); }
 .context-kicker { color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; }
 .context-head strong { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+/* "256k · this model's max": the window in use is the model's own, smaller than the one you chose. */
+.context-max { color: var(--muted); font: var(--t-xs)/1.3 var(--sans); }
 #ctx-pct { color: var(--accent-text); font: var(--w-bold) var(--t-xl)/1 var(--mono); font-variant-numeric: tabular-nums; }
 .context-track { height: 4px; margin-top: var(--sp-3); overflow: hidden; border-radius: var(--r-2xl); background: var(--border); }
 .context-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--lav)); transition: width .24s ease; }

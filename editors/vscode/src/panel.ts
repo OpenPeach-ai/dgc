@@ -7499,7 +7499,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <div class="picker context-picker">
         <button type="button" id="btn-ctx" class="fbtn" title="Context used — click for details" aria-label="Context used: 0 percent; open context details" aria-haspopup="dialog" aria-expanded="false"><span class="codicon codicon-pie-chart" aria-hidden="true"></span> <span id="ctx">0%</span></button>
         <section id="ctxmenu" class="cmenu context-menu" role="dialog" aria-label="Context window" hidden>
-          <div class="context-head"><div><span class="context-kicker">Context window</span><strong id="ctx-used">0 / 0</strong></div><span id="ctx-pct">0%</span></div>
+          <div class="context-head"><div><span class="context-kicker">Context window</span><strong id="ctx-used">0 / 0</strong><span id="ctx-max" class="context-max" hidden></span></div><span id="ctx-pct">0%</span></div>
           <div class="context-track" aria-hidden="true"><span id="ctx-fill"></span></div>
           <div class="context-split"><span id="ctx-free">0 free</span><span id="ctx-auto">auto at 85%</span></div>
           <div id="ctx-breakdown" hidden></div>

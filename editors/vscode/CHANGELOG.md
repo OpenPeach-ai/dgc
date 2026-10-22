@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The context meter says when the model holds less than you chose.** Its menu and tooltip read, for example,
+  **256k · this model's max** when the window in use is the model's own maximum, below the one you picked. With a
+  DGC CLI that remembers the window per model, switching back to a model shows the window you chose for it.
+
 - **Settings → Models: Cache lifetime and Keep the model loaded.** **Cache lifetime** (5 minutes or 1 hour) is how
   long Anthropic keeps the conversation cached between replies; 1 hour costs more per write and suits replies that
   are further apart. For a local Ollama, **Keep the model loaded** says how long Ollama keeps the model in memory

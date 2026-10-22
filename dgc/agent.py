@@ -618,6 +618,52 @@ def _call_model_wait(hook, label, detail="", **options):
     return hook(label, detail, **options)
 
 
+def recommended_window(config, client, model: str, *, probe: bool = True) -> int | None:
+    """The context window to give ``model`` when it becomes the model, or None to keep the current one.
+
+    In order: the window the user chose for this model before (remembered per model); then, for a
+    model on this machine, the memory-conscious recommendation for its family (MODEL_CATALOG, never
+    above the model's own maximum: a local model's trained maximum is memory it allocates, not a
+    free window); for any other model -- a cloud API, or an Ollama ``:cloud`` model reached through a
+    local Ollama -- the maximum the provider reports (Ollama /api/show, Anthropic's Models API), and
+    the family's known window only when nothing is reported. ``probe`` lets the client fetch the
+    model's metadata (bounded, cached); without it only what is already cached counts.
+    """
+    from .config import context_for_model, remembered_context_size
+    from .model_watch import is_local_endpoint, is_ollama_cloud_model
+    remembered = remembered_context_size(config, model)
+    if remembered:
+        return remembered
+    limit = 0
+    if client is not None and str(getattr(client, "model", "") or "") == str(model):
+        if probe:
+            prepare = getattr(client, "prepare_model", None)
+            if callable(prepare):
+                try:
+                    prepare()
+                except Exception:              # noqa: BLE001 -- discovery is advisory
+                    pass
+        window = getattr(client, "window_limit", None)
+        if not callable(window):
+            window = getattr(client, "model_context_limit", None)
+        try:
+            limit = int(window() or 0) if callable(window) else 0
+        except (TypeError, ValueError):
+            limit = 0
+    base_url = str(getattr(client, "base_url", "") or getattr(config, "base_url", "") or "")
+    family = str(getattr(client, "family", "") or "")
+    table = context_for_model(model)
+    # A Claude Messages model never runs on this machine, even behind a proxy on localhost.
+    hosted = str(getattr(client, "api_mode", "") or "") == "anthropic" or is_ollama_cloud_model(model)
+    if is_local_endpoint(base_url, family) and not hosted:
+        if table:
+            return min(table, limit) if limit else table
+        return None
+    if limit:
+        return limit
+    return table
+
+
 def _wire_call_id(ui, call_id):
     """The call id ``ui`` puts on the wire for this agent's ``call_id``: a sub-agent's UI prefixes
     it with its own id at every level. Looked up on the type, like ``approve_live``, so a permissive
@@ -2884,8 +2930,10 @@ class Agent(GoalLifecycle):
         # against 65536 while the transport still sent num_ctx=32768 — so the compaction trigger sat
         # above the entire real window and could never fire.
         if configured == 32_768 and not self.config.is_explicit("context_size"):
-            from .config import context_for_model      # (qwen3.8 → 65536)
-            rec = context_for_model(str(self.config.model))
+            # (qwen3.8 → 65536 locally; a cloud model's own reported maximum.) Cached metadata
+            # only: this runs for every estimate and must never wait on a network.
+            rec = recommended_window(self.config, getattr(self, "client", None),
+                                     str(self.config.model), probe=False)
             if rec and rec > configured:
                 configured = rec
         effective = getattr(self.client, "effective_context_size", None)
@@ -2896,20 +2944,53 @@ class Agent(GoalLifecycle):
                 pass
         return configured
 
-    def recommended_context_size(self, model: str | None = None) -> int | None:
-        """Choose a model-switch default without turning a trained local maximum into allocation."""
-        from .config import context_for_model
-        selected = str(model or self.config.model)
-        if selected == self.config.model and getattr(self.client, "api_mode", "") == "anthropic":
-            discovered = getattr(self.client, "model_context_limit", None)
-            if callable(discovered):
+    def recommended_context_size(self, model: str | None = None, *, probe: bool = True) -> int | None:
+        """The window a model switch gives ``model``: see recommended_window."""
+        return recommended_window(self.config, getattr(self, "client", None),
+                                  str(model or self.config.model), probe=probe)
+
+    def window_after_switch(self, previous_model: str = "") -> int | None:
+        """After a model switch: the previous model keeps its window, the new one gets its own.
+
+        A switch used to overwrite context_size with the new model's name-table guess, so switching
+        back lost the 1M the user had chosen. The window chosen for each model is remembered
+        (Config.set); one set before 0.48, when nothing was remembered yet, is kept for the model it
+        was set on. Returns the new window when it changed, else None.
+        """
+        current = str(self.config.model or "")
+        previous = str(previous_model or "")
+        remembered = self.config.get("model_context_sizes", {})
+        # The one-time carry-over from a config.json written before 0.48, when nothing was
+        # remembered yet; never a window DGC itself picked on an earlier switch.
+        if (previous and previous != current and not remembered
+                and getattr(self.config, "_window_from_switch", "") != previous
+                and self.config.is_explicit("context_size")):
+            try:
+                size = int(self.config.get("context_size", 0) or 0)
+            except (TypeError, ValueError):
+                size = 0
+            keep = getattr(self.config, "_remember_window", None)
+            if callable(keep) and size:
+                data = getattr(self.config, "data", {})
+                chosen = data.get("model")
                 try:
-                    limit = int(discovered() or 0)
-                except (TypeError, ValueError):
-                    limit = 0
-                if limit > 0:
-                    return limit
-        return context_for_model(selected)
+                    data["model"] = previous
+                    keep(size)
+                finally:
+                    data["model"] = chosen
+        window = self.recommended_context_size(current)
+        try:
+            configured = int(self.config.get("context_size", 32768))
+        except (TypeError, ValueError):
+            configured = 32768
+        if window and window != configured:
+            setter = getattr(self.config, "set_model_window", None)
+            if callable(setter):
+                setter(window)
+            else:
+                self.config.set("context_size", window)
+            return window
+        return None
 
     def _mcp_catalog_query(self) -> str:
         query = str(getattr(self, "_mcp_query_text", "") or "")
@@ -7362,7 +7443,15 @@ class Agent(GoalLifecycle):
                             "completion withheld — context overflowed before verification")
                     else:
                         self.ui.end_stream()
-                    self.ui.info("↻ context overflowed — compacting and retrying")
+                    limit = int(getattr(e, "limit", 0) or 0)
+                    if limit:
+                        # The refusal named the real window; the client now remembers it for this
+                        # endpoint+model, so the compaction below (and every later request, in this
+                        # session and the next) fits it instead of overflowing again.
+                        # The compaction's own event carries the new window to the editor's meter.
+                        self.ui.info(f"↻ this model holds {limit:,} tokens — compacting to fit and retrying")
+                    else:
+                        self.ui.info("↻ context overflowed — compacting and retrying")
                     # Aggressive compaction guarantees the retry is smaller.
                     self.maybe_compact(force=True, deadline=compact_deadline, tools=tools,
                                        trigger="overflow")

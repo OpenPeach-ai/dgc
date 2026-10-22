@@ -443,6 +443,8 @@ DEFAULTS: dict = {
     "top_k": "",                                # only the top-K tokens (Ollama/llama.cpp/vLLM/SGLang)
     "min_p": "",                                # min-probability floor (llama.cpp/vLLM/SGLang)
     "context_size": 32768,
+    "model_context_sizes": {},                  # the window you chose for each model ({model: tokens}):
+                                                #   switching back to a model restores it (written by DGC)
     "max_turns": 0,                             # no fixed tool-iteration cap by default: a progressing turn
                                                 #   runs until completion/cancel/deadline. Set >0 only as an
                                                 #   explicit emergency backstop; no-progress guards still apply.
@@ -739,6 +741,39 @@ _SESSION_KEYS = frozenset({
 # another revoked a trusted folder wrote it back the next time it trusted a different one: the
 # revoke was undone in the unsafe direction.
 _ENTRY_MERGED_KEYS = ("trusted_dirs",)
+# Mappings several processes edit one entry at a time: two editor windows each remembering the
+# window chosen for their own model must not wipe out the other's.
+_MAPPING_MERGED_KEYS = ("model_context_sizes",)
+
+
+def _merge_mapping(on_disk, baseline, now) -> dict:
+    """`on_disk` with exactly this process's own entry changes since `baseline` applied."""
+    def mapping(value):
+        return dict(value) if isinstance(value, dict) else {}
+    was, mine = mapping(baseline), mapping(now)
+    merged = mapping(on_disk)
+    for key in was:
+        if key not in mine:
+            merged.pop(key, None)
+    for key, value in mine.items():
+        if was.get(key, object()) != value:
+            merged.pop(key, None)
+            merged[key] = value
+    return merged
+
+
+# The windows a model switch can restore: the most recently chosen ones win a place.
+_MAX_REMEMBERED_WINDOWS = 64
+
+
+def remembered_context_size(config, model: str) -> int | None:
+    """The window the user chose for ``model`` (0.48), or None when they never chose one."""
+    getter = getattr(config, "get", None)
+    table = getter("model_context_sizes", {}) if callable(getter) else {}
+    value = table.get(str(model or "")) if isinstance(table, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 2_048 <= value <= 16_777_216 else None
 
 
 def _merge_entries(on_disk, baseline, now) -> list:
@@ -1334,6 +1369,11 @@ class Config:
                         baseline = getattr(self, "_baseline_data", None) or {}
                         payload[key] = _merge_entries(on_disk.get(key), baseline.get(key),
                                                       self.data.get(key))
+                for key in _MAPPING_MERGED_KEYS:
+                    if key in changed:
+                        baseline = getattr(self, "_baseline_data", None) or {}
+                        payload[key] = _merge_mapping(on_disk.get(key), baseline.get(key),
+                                                      self.data.get(key))
                 for key in SECRET_KEYS:
                     payload.pop(key, None)
                 base = on_disk.get("permissions")
@@ -1351,6 +1391,9 @@ class Config:
                 for key in _ENTRY_MERGED_KEYS:
                     if key in changed:
                         self.data[key] = list(payload[key])
+                for key in _MAPPING_MERGED_KEYS:
+                    if key in changed:
+                        self.data[key] = dict(payload[key])
                 for key, value in payload.items():
                     # An ephemeral key is deliberately absent from `changed`, so without this it
                     # would be adopted back FROM DISK over the value this run was given -- a
@@ -1517,6 +1560,34 @@ class Config:
                 return ""
         return data.get(key, default) if isinstance(data, dict) else default
 
+    def _remember_window(self, value) -> None:
+        """A window the user chose is the current model's own: switching back to it restores it."""
+        model = str(self.data.get("model") or "").strip()
+        if isinstance(value, bool) or not isinstance(value, int) or not model or len(model) > 512:
+            return
+        if not 2_048 <= value <= 16_777_216:
+            return
+        table = self.data.get("model_context_sizes")
+        table = {k: v for k, v in table.items() if isinstance(k, str)} if isinstance(table, dict) else {}
+        table.pop(model, None)
+        table[model] = value
+        while len(table) > _MAX_REMEMBERED_WINDOWS:
+            table.pop(next(iter(table)))
+        self.data["model_context_sizes"] = table
+        self._explicit_keys.add("model_context_sizes")
+
+    def set_model_window(self, size: int, *, persist: bool = True) -> None:
+        """The window a model switch picked for the new model: restored, reported or recommended.
+
+        Not the user's own choice, so it is not remembered as one (Config.set remembers those).
+        """
+        self._window_from_model = True
+        try:
+            self.set("context_size", int(size), persist=persist)
+        finally:
+            self._window_from_model = False
+        self._window_from_switch = str(self.data.get("model") or "")
+
     def is_explicit(self, key: str) -> bool:
         """True when `key` was present in the user's config.json rather than inherited."""
         return key in getattr(self, "_explicit_keys", set())
@@ -1561,6 +1632,10 @@ class Config:
         if was_held:
             held.discard(key)                          # the user chose: the hold is over
             self._ephemeral_keys.discard(key)
+        if key == "context_size" and not getattr(self, "_window_from_model", False):
+            self._window_from_switch = ""           # whatever it is now, the user set it
+            if value != self.data.get("context_size"):
+                self._remember_window(value)
         self.data[key] = value
         if key == "plugin_credentials_store":
             from . import plugin_credentials

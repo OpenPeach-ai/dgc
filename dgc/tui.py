@@ -7255,9 +7255,8 @@ class TUI:
         previous = str(self.config.model or "")
         self.config.set("model", model)
         self.agent.refresh_client()
-        ctx = self.agent.recommended_context_size(model)
-        if ctx and ctx != int(self.config.get("context_size", 32768)):
-            self.config.set("context_size", ctx)
+        ctx = self.agent.window_after_switch(previous)
+        if ctx:
             self._flash(f"model → {model}  ·  context {ctx // 1024}k")
         else:
             self._flash(f"model → {model}")
