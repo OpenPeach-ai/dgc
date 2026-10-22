@@ -406,11 +406,12 @@ def tests_outcome(result: str, commands: list[str]) -> dict:
 
 
 _MARKUP = re.compile(r"\*\*|__|`+|^#{1,6}\s+|^\s*(?:[-*+]|\d+[.)])\s+")
+_LINK = re.compile(r"\[([^\]\n]{1,200})\]\([^)\s]{1,500}\)")
 
 
 def summary_of(result: str) -> str:
     """The fixer's own account as one plain line: without its TESTS and FILES lines, or Markdown's marks."""
-    kept = [_MARKUP.sub("", line.strip()).strip() for line in str(result or "").splitlines()
+    kept = [_MARKUP.sub("", _LINK.sub(r"\1", line.strip())).strip() for line in str(result or "").splitlines()
             if line.strip() and not _TESTS_LINE.match(line) and not line.strip().upper().startswith("FILES:")]
     return _clip(" ".join(line for line in kept if line), MAX_SUMMARY)
 

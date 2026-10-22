@@ -9255,7 +9255,7 @@
     line.append(acts);
     const body = [line];
     // Files: three, then how many more; each opens its diff.
-    if ((fix.state === "applied" || fix.state === "partial" || fix.state === "undone") && files.length) {
+    if ((fix.state === "applied" || fix.state === "partial") && files.length) {
       const list = el("ul", "pip-fix-files");
       list.setAttribute("aria-label", "Files the fix changed");
       for (const f of files.slice(0, 3)) {
@@ -9297,7 +9297,7 @@
       body.push(el("p", "pip-fix-note", `Put back ${pipFixPlural(restored, "file")}.`
         + (kept.length ? ` Kept ${kept.map((k) => `${k.path} (${k.why})`).slice(0, 3).join(", ")}.` : "")));
     }
-    if (fix.summary && !pipFixActive(fix)) {
+    if (fix.summary && !pipFixActive(fix) && fix.state !== "undone") {      // undone, "Put back 2 files." says it all
       const p = el("p", "pip-fix-summary"); p.textContent = String(fix.summary).slice(0, 400); p.title = p.textContent; body.push(p);
     }
     const keepFocus = area.contains(document.activeElement) && !ask.contains(document.activeElement)
