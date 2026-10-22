@@ -382,7 +382,7 @@ def tests_outcome(result: str, commands: list[str]) -> dict:
         if match:
             word = match.group(1).lower()
             state = "passed" if word == "passed" else "failed" if word == "failed" else "not_run"
-            rest = match.group(2).strip().strip("`*").strip()
+            rest = match.group(2).strip().strip("*").strip()
     ran = [c for c in commands if c]
     if state != "not_run" and not ran:
         return {"state": "not_run", "note": "It didn't run any command in the fix copy."}
@@ -391,7 +391,12 @@ def tests_outcome(result: str, commands: list[str]) -> dict:
         if rest:
             out["note"] = _clip(rest, 200)
         return out
-    command, _, note = rest.partition(":") if not rest.startswith("`") else (rest, "", "")
+    quoted = re.match(r"`([^`]+)`(.*)$", rest)
+    if quoted:                                       # "`npm test` (12 passed)", "`pytest -q`: 2 failed"
+        command, note = quoted.group(1), quoted.group(2).strip()
+        note = note[1:-1] if note.startswith("(") and note.endswith(")") else note.lstrip(":,\u2014\u2013- ")
+    else:
+        command, _, note = rest.partition(":")
     command = command.strip().strip("`").strip()
     if command:
         out["command"] = _clip(command, 160)
@@ -400,11 +405,14 @@ def tests_outcome(result: str, commands: list[str]) -> dict:
     return out
 
 
+_MARKUP = re.compile(r"\*\*|__|`+|^#{1,6}\s+|^\s*(?:[-*+]|\d+[.)])\s+")
+
+
 def summary_of(result: str) -> str:
-    """The fixer's own account, without its TESTS and FILES lines."""
-    kept = [line.strip() for line in str(result or "").splitlines()
+    """The fixer's own account as one plain line: without its TESTS and FILES lines, or Markdown's marks."""
+    kept = [_MARKUP.sub("", line.strip()).strip() for line in str(result or "").splitlines()
             if line.strip() and not _TESTS_LINE.match(line) and not line.strip().upper().startswith("FILES:")]
-    return _clip(" ".join(kept), MAX_SUMMARY)
+    return _clip(" ".join(line for line in kept if line), MAX_SUMMARY)
 
 
 # ---- dependencies --------------------------------------------------------------------------------
@@ -1013,11 +1021,12 @@ def _apply(agent, project: FixProject, workspace, fix_id: str, cancel: threading
         fields.update(state="not_applied", message=(
             "You changed the same lines while it worked, so nothing was applied. Review shows what it would change."))
     else:
-        applied_any = bool(recorder.entries)
+        # integrate() puts back what it had written when applying fails; only a put-back that failed leaves any.
+        left = bool(recorder.entries) and "rollback incomplete" in str(integration.error or "")
         fields.update(state="failed", message=_clip(
             f"DGC couldn't apply the fix: {integration.error or integration.status}. "
-            + ("Undo puts back what it had changed." if applied_any else "Nothing in your project was changed."), 400))
-        if applied_any:
+            + ("Undo puts back what it had changed." if left else "Nothing in your project was changed."), 400))
+        if left:
             fields["undo"] = {"state": "available"}
             fields["files"] = [_counts_of(project, recorder, rel) for rel in list(recorder.entries)[:MAX_FILES_SHOWN]]
     return fields
@@ -1092,6 +1101,9 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
         return snapshot
 
     jobs = _detached_maps(agent)
+    # The fix's record first, then its agent: a client that hears of the agent already knows it is this
+    # fix's (its card is its line, never a second one in the chat).
+    first = update()
     registry.start(id=agent_id, description=description, depth=1, isolated=True, queued=True,
                    background=True, turn_hint="")
     handle = {"cancel": cancel, "description": description, "agent": None, "parent_id": None,
@@ -1099,7 +1111,6 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
               "started_at": time.time(), "queued": False, "queue_seq": 0, "pip_fix": fix_id}
     jobs[agent_id] = handle
     queue_join(project.key, fix_id, name)
-    first = update()
 
     def end_record(state: str, message: str = "") -> None:
         if registry.state(agent_id) in ("queued", "running", "waiting"):

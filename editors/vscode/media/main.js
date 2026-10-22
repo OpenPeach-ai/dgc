@@ -9115,6 +9115,7 @@
     const was = had?.fix_id === fix.fix_id ? had.state : "";
     const next = { ...fix, _seen: quiet || (had?.fix_id === fix.fix_id && had._seen && !(pipFixActive(had) && !pipFixActive(fix))) };
     pipFixes.set(fix.run_id, next);
+    if (next.agent_id && agentLineOf(next.agent_id)?.provisional) pruneProvisionalLines();   // the card is its line
     for (const card of pipFixCards(fix.run_id)) paintPipFixCard(card, next);
     if (!quiet && was !== next.state && !pipFixActive(next) && was) speak(`${next.name || "The Pip"}'s fix ${pipFixHeadline(next).toLowerCase()}`);
     syncPipFixTick();
@@ -9296,7 +9297,9 @@
       body.push(el("p", "pip-fix-note", `Put back ${pipFixPlural(restored, "file")}.`
         + (kept.length ? ` Kept ${kept.map((k) => `${k.path} (${k.why})`).slice(0, 3).join(", ")}.` : "")));
     }
-    if (fix.summary && !pipFixActive(fix)) { const p = el("p", "pip-fix-summary"); p.textContent = String(fix.summary).slice(0, 400); body.push(p); }
+    if (fix.summary && !pipFixActive(fix)) {
+      const p = el("p", "pip-fix-summary"); p.textContent = String(fix.summary).slice(0, 400); p.title = p.textContent; body.push(p);
+    }
     const keepFocus = area.contains(document.activeElement) && !ask.contains(document.activeElement)
       ? document.activeElement.className : "";
     // An answered request leaves the card (the line says what happens next); one still open when the fix ends goes too.
@@ -10158,15 +10161,16 @@
       if (!line.provisional) continue;
       line.ids = line.ids.filter((id) => {
         const record = agentRecords.get(id);
-        return !!record && !record.parent_id && AGENT_ACTIVE.has(record.state) && !agentAnchor(id);
+        return !!record && !record.parent_id && AGENT_ACTIVE.has(record.state) && !agentAnchor(id) && !pipFixByAgent(id);
       });
       if (!line.ids.length || !line.node.isConnected) dropAgentLine(line);
       else paintAgentLine(line);
     }
   }
   function provisionalAgentLine(record) {
+    // A Pip fix's helper has its report's card for a line (Watch, Stop): never a second line in the chat.
     if (agentsHoldClaims || record.parent_id || !AGENT_ACTIVE.has(record.state)
-        || agentAnchor(record.id) || agentLineOf(record.id)) return;
+        || agentAnchor(record.id) || agentLineOf(record.id) || pipFixByAgent(record.id)) return;
     const last = turn ? turn.act.previousElementSibling : log.lastElementChild;
     let line = [...agentLines].find((l) => l.provisional && l.node === last && l.ids.length < AGENT_LINE_CAP);
     if (!line) {

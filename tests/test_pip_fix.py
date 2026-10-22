@@ -172,6 +172,11 @@ class BackgroundFixTests(FixScene):
         self.assertEqual(pip_fix.tests_outcome("Done.\nTESTS: not run — no tests in this project", []),
                          {"state": "not_run", "note": "no tests in this project"})
         self.assertEqual(pip_fix.tests_outcome("Done.", ["ls"]), {"state": "not_run"})
+        self.assertEqual(pip_fix.tests_outcome("TESTS: passed \u2014 `python3 -m unittest -v` (2 tests, OK)", ["python3"]),
+                         {"state": "passed", "command": "python3 -m unittest -v", "note": "2 tests, OK"})
+        self.assertEqual(pip_fix.summary_of("Fixed `billing.py`:\n- **invoice_total** summed one line\nFILES: billing.py\n"
+                                            "TESTS: passed \u2014 npm test"),
+                         "Fixed billing.py: invoice_total summed one line", "one plain line for the card")
 
     def test_undo_puts_back_what_the_fix_left_and_keeps_a_file_changed_since(self):
         backend = self.make()

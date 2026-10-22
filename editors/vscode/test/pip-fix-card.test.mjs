@@ -75,6 +75,7 @@ test("the card is the fix's live status: waiting, getting ready, what the fixer 
   assert.equal(line(s), "Fixing");
   s.event({ type: "tool_call", call_id: `${AGENT}:c1`, name: "bash", args: { command: "npm test" }, summary: "npm test" });
   assert.match(line(s), /^Fixing · .+npm test$/, "the fixer's own step");
+  assert.equal(s.doc.querySelector("#log .agent-line"), null, "the card is the helper's line: no second one in the chat");
   assert.deepEqual(actions(s), ["Watch", "Stop"]);
   assert.equal(area(s).closest(".pip-report").dataset.shown, "closed", "shown on the closed card, its two lines and this one");
   const before = s.posted.length;
@@ -90,9 +91,11 @@ test("the card is the fix's live status: waiting, getting ready, what the fixer 
 test("a permission the fix needs is asked on its card, and the agents pill says an agent needs you", () => {
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
-  s.event({ type: "pip_fix", fix: fix({ state: "running" }) });
+  // Heard in the other order (a reattach's snapshot), the helper's line in the chat goes once its fix is known.
   s.event({ type: "agent_started", id: AGENT, parent_id: null, call_id: null, description: "Fix", depth: 1,
     state: "running", started_at: now(), isolated: true, parallel: false, background: true });
+  s.event({ type: "pip_fix", fix: fix({ state: "running" }) });
+  assert.equal(s.doc.querySelector("#log .agent-line"), null);
   s.event({ type: "permission_request", id: "p1", call_id: `${AGENT}:install-1`, name: "bash",
     args: { command: "npm ci --no-audit --no-fund" }, command: "npm ci --no-audit --no-fund", suggested_rule: "Bash(npm ci *)", choices: [] });
   s.event({ type: "agent_updated", id: AGENT, state: "waiting", waiting_for: "permission" });

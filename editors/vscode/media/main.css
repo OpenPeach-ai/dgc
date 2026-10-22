@@ -2952,6 +2952,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-fix-held, .pip-fix-note, .pip-fix-tests, .pip-fix-summary { margin: 3px 0 0 19px; min-width: 0; overflow-wrap: anywhere; }
 .pip-fix-held { color: var(--need-text); }
 .pip-fix-note, .pip-fix-summary { color: var(--muted); }
+.pip-fix-summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .pip-fix-tests.tone-ok { color: var(--good); }
 .pip-fix-tests.tone-bad { color: var(--del-text); }
 .pip-fix-tests.tone-muted { color: var(--muted); }

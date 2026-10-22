@@ -5282,7 +5282,8 @@ class Backend:
                 self._show_asked_report(report)
 
                 def emit(record: dict) -> None:
-                    if self.agent is agent:
+                    # Only to the chat that asked: another session opened in this tab never hears of it.
+                    if self.agent is agent and self._pip_fix_session() == session_id:
                         self._emit_pip_fix(record)
                 try:
                     record = pip_fix.start(agent, brief, session_id=session_id, emit=emit)
@@ -5294,7 +5295,24 @@ class Backend:
                     return
                 self._emit_pip_fix(record, request_id)
 
-        threading.Thread(target=go, name="dgc-pip-fix-start", daemon=True).start()
+        self._pip_fix_job(go)
+
+    def _pip_fix_job(self, job) -> None:
+        """Run a fix command off the stdin loop, in the order the commands came: two quick clicks start their
+        fixes in the order they were clicked, so the second waits behind the first."""
+        jobs = self.__dict__.get("_pip_fix_jobs")
+        if jobs is None:
+            jobs = self.__dict__.setdefault("_pip_fix_jobs", queue.SimpleQueue())
+
+            def work() -> None:
+                while True:
+                    item = jobs.get()
+                    try:
+                        item()
+                    except Exception:                       # noqa: BLE001 -- each job says its own refusal
+                        pass
+            threading.Thread(target=work, name="dgc-pip-fix-commands", daemon=True).start()
+        jobs.put(job)
 
     def _show_asked_report(self, report: dict) -> None:
         """A fix asked for a run this chat was never shown (from the Pip's own chat): show its card here,
@@ -5345,10 +5363,10 @@ class Backend:
             except Exception as exc:                        # noqa: BLE001
                 reject("failed", f"DGC couldn't undo the fix: {type(exc).__name__}: {exc}")
                 return
-            if self.agent is agent:
+            if self.agent is agent and self._pip_fix_session() == session_id:
                 self._emit_pip_fix(record, request_id)
 
-        threading.Thread(target=go, name="dgc-pip-fix-undo", daemon=True).start()
+        self._pip_fix_job(go)
 
     def _emit_pip_fixes(self, request_id: str | None = None) -> None:
         from . import pip_fix
