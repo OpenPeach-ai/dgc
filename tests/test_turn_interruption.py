@@ -727,21 +727,36 @@ class PlanHandoffPromptTests(unittest.TestCase):
         return agent
 
     def next_turn_prompt(self, agent):
-        """The system prompt exactly as the NEXT top-level turn sends it."""
+        """What the NEXT top-level turn's request carries as guidance: its system prompt and its prompt.
+
+        0.48: the hand-back note rides on the turn's prompt (Agent._turn_notes), never in the system
+        prompt, which must stay byte-identical between turns so a cached prefix survives.
+        """
         seen = {}
 
         def fake_chat(*a, **k):
             seen["system"] = agent.messages[0]["content"]
+            seen["prompt"] = next(str(m.get("content", "")) for m in reversed(agent.messages)
+                                  if m.get("role") == "user")
             from dgc.llm import ChatResult
             return ChatResult(content="phase 1 done", tool_calls=[], finish_reason="stop")
         agent._chat = fake_chat
         agent.run_turn("do phase 1")
-        return seen.get("system", "<no model request was made>")
+        if "system" not in seen:
+            return "<no model request was made>"
+        self.assertNotIn("# Approved plan", seen["system"], "never in the cached system prompt")
+        return seen["system"] + "\n" + seen["prompt"]
+
+    @staticmethod
+    def guidance(agent):
+        """The guidance a request would carry now: the system prompt and this turn's notes."""
+        agent._turn_notes_given = set()
+        return agent.system_prompt() + "\n" + agent._turn_notes()
 
     def test_the_approving_turn_is_never_told_to_hand_back(self):
         agent = self.approve(self.agent())
         # The approval tool result in this very turn says "Execute the plan now".
-        self.assertNotIn("# Approved plan", agent.system_prompt())
+        self.assertNotIn("# Approved plan", self.guidance(agent))
         self.assertIn("# Approved plan", self.next_turn_prompt(agent))
 
     def test_a_plan_with_open_phases_asks_for_the_hand_back_without_refusing_the_plan(self):
@@ -761,20 +776,20 @@ class PlanHandoffPromptTests(unittest.TestCase):
         goal_agent = self.approve(self.agent())
         self.assertTrue(goal_agent.set_goal("Ship the thing"))
         goal_agent._plan_approved_this_turn = False   # a later turn; the goal loop owns run_turn
-        prompt = goal_agent.system_prompt()
+        prompt = self.guidance(goal_agent)
         self.assertIn("# Standing goal", prompt)
         self.assertNotIn("# Approved plan", prompt)
 
         auto_agent = self.approve(self.agent())
         auto_agent._plan_approved_this_turn = False
         auto_agent.set_mode("auto")
-        self.assertNotIn("# Approved plan", auto_agent.system_prompt())
+        self.assertNotIn("# Approved plan", self.guidance(auto_agent))
         auto_agent.set_mode("default")
-        self.assertIn("# Approved plan", auto_agent.system_prompt())
+        self.assertIn("# Approved plan", self.guidance(auto_agent))
 
     def test_no_plan_means_no_extra_instructions(self):
         plain = self.agent()
-        self.assertNotIn("# Approved plan", plain.system_prompt())
+        self.assertNotIn("# Approved plan", self.guidance(plain))
         self.assertNotIn("# Approved plan", self.next_turn_prompt(plain))
         # ... and the same agent, once a plan is approved and a turn has passed, does get it.
         self.assertIn("# Approved plan", self.next_turn_prompt(self.approve(plain)))
@@ -799,7 +814,7 @@ class PlanHandoffPromptTests(unittest.TestCase):
         agent = self.approve(self.agent())
         self.assertIn("# Approved plan", self.next_turn_prompt(agent))
         agent.reset()
-        self.assertNotIn("# Approved plan", agent.system_prompt())
+        self.assertNotIn("# Approved plan", self.guidance(agent))
 
     def test_a_resumed_session_does_not_inherit_someone_else_s_approved_plan(self):
         project = tempfile.TemporaryDirectory(prefix="dgc-plan-resume-")
@@ -812,7 +827,7 @@ class PlanHandoffPromptTests(unittest.TestCase):
         self.assertFalse(resumed._executing_plan)
         self.assertFalse(resumed._plan_presented)
         self.assertNotIn("# Approved plan", resumed.messages[0]["content"])
-        self.assertNotIn("# Approved plan", resumed.system_prompt())
+        self.assertNotIn("# Approved plan", self.guidance(resumed))
 
 
 class _HeadlessBackendFixture:

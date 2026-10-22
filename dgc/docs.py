@@ -1716,6 +1716,21 @@ because a model with no clock writes "what I completed tonight" in the middle of
 A day boundary reaches the model on your next message, so an overnight session does not keep
 calling it yesterday. A sub-agent is told the same two things. A turn DGC starts by itself on a
 background monitor gets no clock line: the events it delivers are already timestamped.
+
+The same rule keeps the start of every request the same from one turn to the next, which is what
+lets a provider (OpenAI, DeepSeek, Anthropic, Ollama cloud) charge cached-input rates and a local
+Ollama or llama.cpp skip re-reading the conversation. What one message needs for itself rides on that
+message, just before the clock line, in a `<dgc-turn-notes>` block: the how-to for showing you a page
+when you ask to see one, the note when you ask to choose between options and the picker is not
+offered, a skill your words matched, the hand-back while an approved plan still has steps, and the
+note after you cleared the checklist. The session prompt and the tool list stay as they were. A large
+MCP catalog is cut to the tools a chat needs, and a tool offered once in a chat stays offered while its
+budget lasts, so the tool list changes only when a new tool joins. Resumed chats and `/export` show what
+you typed, without the notes. What still changes the start, by design: switching the mode, the
+thinking level or the model, naming a skill with `$`, remembering or forgetting something, a goal,
+plugins and skills installed mid-chat, a background job or sub-agent that adds the tools to manage it,
+and, in Auto mode, the options picker on a message that asks to choose. The `adaptive` tool profile
+still shapes its prompt and tool list from each message's words.
 """.strip()),
 
     ("Sessions & rewind", "resume, jump, and undo whole turns", """

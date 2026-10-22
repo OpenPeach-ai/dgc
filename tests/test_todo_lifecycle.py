@@ -314,19 +314,26 @@ class TodoLifecycleTests(unittest.TestCase):
         with patch.object(self.agent.client, "chat", side_effect=chat):
             self.assertTrue(self.agent.run_turn("Carry on"))
         self.assertEqual(len(calls), 2)
-        for request in calls:                    # the system prompt carries it for this turn only
-            self.assertIn("# Checklist cleared", request[0]["content"])
-            self.assertIn(AgentClass.TODO_CLEARED_NOTE, request[0]["content"])
+        # 0.48: on this turn's prompt, never in the system prompt, which must stay byte-identical
+        # between turns so a cached prefix survives.
+        for request in calls:
+            self.assertNotIn("# Checklist cleared", request[0]["content"])
+            self.assertNotIn(AgentClass.TODO_CLEARED_NOTE, request[0]["content"])
+        prompt = next(m for m in calls[0] if m.get("role") == "user" and "Carry on" in str(m.get("content", "")))
+        self.assertIn("# Checklist cleared", prompt["content"])
+        self.assertIn(AgentClass.TODO_CLEARED_NOTE, prompt["content"])
         transcript = " ".join(str(m.get("content", "")) for m in calls[-1][1:])
-        self.assertNotIn(AgentClass.TODO_CLEARED_NOTE, transcript, "not repeated as a reminder")
-        self.assertNotIn("Rotate the fixture key", request[0]["content"], "the dropped item text is kept nowhere")
-        self.assertNotIn("# Checklist cleared", self.agent.messages[0]["content"],
-                         "gone from the prompt once that turn ends")
+        self.assertEqual(transcript.count(AgentClass.TODO_CLEARED_NOTE), 1, "told once, not repeated as a reminder")
+        self.assertFalse(any("Rotate the fixture key" in str(m.get("content", "")) for request in calls
+                             for m in request), "the dropped item text is kept nowhere")
         self.assertTrue(self.agent.todo_clear_in_force(), "still in force until the next turn starts")
         chat, calls = self.script(ChatResult(content="Hello."))
         with patch.object(self.agent.client, "chat", side_effect=chat):
             self.assertTrue(self.agent.run_turn("Anything else?"))
-        self.assertNotIn("# Checklist cleared", calls[0][0]["content"])
+        latest = next(m for m in reversed(calls[0]) if m.get("role") == "user")
+        self.assertNotIn("# Checklist cleared", str(latest.get("content", "")), "the next prompt says nothing")
+        self.assertEqual(" ".join(str(m.get("content", "")) for m in calls[0]).count(AgentClass.TODO_CLEARED_NOTE), 1,
+                         "the earlier prompt keeps its note byte for byte; nothing is added")
         self.assertFalse(self.agent.todo_clear_in_force())
 
     def test_a_mid_turn_clear_reaches_the_model_once_and_silences_the_make_a_list_nudge(self):
@@ -456,12 +463,15 @@ class TodoLifecycleTests(unittest.TestCase):
         self.agent.messages.append({"role": "user", "content": "Plan it"})
         self.assertTrue(self.agent.clear_todos())           # an idle clear, before the goal starts
         self.assertTrue(self.agent.set_goal("Write the three files"))
-        seen = []                                           # (cycle, note in the system prompt?)
+        seen = []                                           # (cycle, copies of the note sent, in the system prompt?)
+        from dgc.agent import Agent as AgentClass
 
         def chat(messages, **kwargs):
             cycle = sum(1 for m in messages if m.get("role") == "user"
                         and CYCLE_MARKER in str(m.get("content", "")))
-            seen.append((cycle, "# Checklist cleared" in messages[0]["content"]))
+            seen.append((cycle, sum(str(m.get("content", "")).count(AgentClass.TODO_CLEARED_NOTE)
+                                    for m in messages[1:]),
+                         "# Checklist cleared" in messages[0]["content"]))
             if messages[-1].get("role") == "tool":
                 return ChatResult(content=f"Cycle {cycle + 1} done.")
             if cycle < 2:                                   # real, distinct progress each cycle
@@ -474,11 +484,11 @@ class TodoLifecycleTests(unittest.TestCase):
         with patch.object(self.agent.client, "chat", side_effect=chat):
             self.assertTrue(self.agent.run_turn("Start the work"), (self.agent._last_turn_error, self.ui.errors))
         self.assertEqual(self.agent.goal_status, "completed", self.agent.goal_snapshot())
-        cycles = sorted({cycle for cycle, _ in seen})
+        cycles = sorted({cycle for cycle, _, _ in seen})
         self.assertEqual(cycles, [0, 1, 2], seen)
-        self.assertTrue(all(noted for cycle, noted in seen if cycle == 0), seen)
-        self.assertFalse(any(noted for cycle, noted in seen if cycle > 0),
-                         f"told in the first cycle's prompt, not repeated in every later one: {seen}")
+        self.assertTrue(all(copies == 1 for _, copies, _ in seen),
+                        f"told in the first cycle's prompt, not repeated in every later one: {seen}")
+        self.assertFalse(any(in_system for _, _, in_system in seen), "never in the cached system prompt")
         self.assertNotIn("# Checklist cleared", self.agent.messages[0]["content"])
         self.assertTrue(self.agent.todo_clear_in_force(), "the nudge stays quiet through the next turn")
 

@@ -34,6 +34,9 @@ from datetime import datetime, timezone
 # a restored chat shows what was typed and never re-sends an old clock as if it were now.
 CLOCK_OPEN = "<dgc-now>"
 CLOCK_CLOSE = "</dgc-now>"
+# This turn's own guidance (Agent._turn_notes), just before the clock. Same reason, same place.
+NOTES_OPEN = "<dgc-turn-notes>"
+NOTES_CLOSE = "</dgc-turn-notes>"
 
 _CLOCK_RE = re.compile(r"\n*" + re.escape(CLOCK_OPEN) + r"[^\n<>]{0,160}"
                        + re.escape(CLOCK_CLOSE) + r"\s*\Z")
@@ -142,14 +145,41 @@ def turn_clock_line(now: datetime | None = None) -> str:
 
 
 def strip_turn_clock(text):
-    """Remove a clock line DGC appended. A ``<dgc-now>`` the user typed mid-message stays."""
+    """Remove the suffix DGC appended to a prompt: its clock line, and the turn notes just before it.
+
+    A ``<dgc-now>`` or ``<dgc-turn-notes>`` the user typed mid-message stays: only a clock at the very
+    end is DGC's, and only notes that end right where that clock begins.
+    """
     if not isinstance(text, str) or CLOCK_OPEN not in text:
         return text
-    return _CLOCK_RE.sub("", text)
+    stripped = _CLOCK_RE.sub("", text)
+    return _strip_trailing_notes(stripped) if stripped != text else stripped
+
+
+def _strip_trailing_notes(text: str) -> str:
+    body = text.rstrip()
+    if not body.endswith(NOTES_CLOSE):
+        return text
+    start = body.rfind("\n\n" + NOTES_OPEN + "\n")
+    if start >= 0:
+        return body[:start]
+    return "" if body.startswith(NOTES_OPEN + "\n") else text
 
 
 def attach_turn_clock(text, now: datetime | None = None) -> str:
     """Append this turn's clock to the user's prompt, replacing one that is already there."""
+    return attach_turn_suffix(text, "", now)
+
+
+def attach_turn_suffix(text, notes: str = "", now: datetime | None = None) -> str:
+    """The prompt as the model reads it: what the user wrote, this turn's notes, then the clock.
+
+    Both change from turn to turn, so both ride here, after the conversation so far, and never in
+    the system prompt (see the module docstring and Agent._turn_notes). A suffix already there --
+    a recovered prompt sent again -- is replaced, never stacked.
+    """
     body = strip_turn_clock(text if isinstance(text, str) else str(text or ""))
     line = turn_clock_line(now)
+    if notes:
+        body = f"{body}\n\n{notes}" if body.strip() else notes
     return f"{body}\n\n{line}" if body.strip() else line

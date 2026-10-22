@@ -97,7 +97,16 @@ class FakeProviders:
                 else:
                     self._send(200, "text/event-stream", _openai_events(reply))
 
-        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        class Server(http.server.ThreadingHTTPServer):
+            daemon_threads = True
+
+            def handle_error(self, request, client_address):
+                # A client that closes a finished stream early is not a test failure.
+                import sys
+                if not isinstance(sys.exc_info()[1], (ConnectionError, BrokenPipeError)):
+                    super().handle_error(request, client_address)
+
+        self.server = Server(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"

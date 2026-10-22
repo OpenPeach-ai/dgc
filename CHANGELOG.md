@@ -13,6 +13,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   setting is how long the cache lasts: `5m` (the default) or `1h` (each write costs more; for replies usually more
   than five minutes apart). `prompt_cache: false` turns it off. An Anthropic-compatible server that refuses the
   marker gets the request again without it. ChatDGC and Pips get the same saving.
+- **Every request starts the way the last one did, so caches keep working.** What one message asked for
+  used to change the start of the request: asking to see a page added the page instructions to the system
+  prompt and the next message took them out again, "edit only this file" removed two lines near the top, a
+  cleared checklist or an approved plan switched a section on and off, and a large MCP catalog was cut
+  afresh to each message's words. Each change made the provider (and a local Ollama) read the whole
+  conversation again at full price. In a real five-message chat on `deepseek-v4.1-flash:cloud`, 62% of the
+  prompt came from the cache before and 97% after; on a local `qwen2.5:14b` two of the messages took about 4
+  seconds to re-read the conversation before, and none do after. That guidance now rides on the message
+  itself, in a `<dgc-turn-notes>` block before its clock line (hidden in history and `/export`), and an MCP
+  tool offered once in a chat stays offered while its budget lasts.
 - **The cache lifetime and Ollama's keep-loaded time in the editor's Settings.** `dgc serve` sends both in a new
   `cache_settings` event to an editor that asks for it (get_config `fields: ["cache_settings"]`), never as new
   fields on `config`, and `set_config` takes `prompt_cache_ttl` (`5m` or `1h`) and `ollama_keep_alive` (a
