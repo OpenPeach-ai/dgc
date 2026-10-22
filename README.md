@@ -77,6 +77,8 @@ Embed the DGC harness in an application or a CI job: `pip install dgc-sdk` for P
 | `openrouter` | `openrouter.ai` | 100s of models, one key |
 | `groq` · `deepseek` · `together` · `mistral` | — | cloud, prompt for key |
 
+vLLM, SGLang and llama.cpp set the context window when they start (`--max-model-len`, `--context-length`, `-c`). DGC reads it from the server and uses it from the first turn; the context meter says **Set by the server: 32K** and how to change it there.
+
 ```
 /connect ollama
 /connect openrouter        # securely prompts for the key

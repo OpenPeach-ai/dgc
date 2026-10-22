@@ -6,6 +6,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **vLLM, SGLang and llama.cpp: DGC uses the window the server was started with.** These servers set the context
+  window when they start (vLLM `--max-model-len`, SGLang `--context-length`, llama.cpp `-c`), and DGC never read it:
+  against an 8K server it planned for 32K, so a long turn overflowed, compacted and retried; against a 128K server it
+  compacted at a quarter of what the server holds. DGC now reads the window from the server itself (vLLM and SGLang
+  list `max_model_len`, llama.cpp `n_ctx`; an older `llama-server` says it in `/props`) and uses it from the first
+  turn. A model you have not chosen a window for gets the server's whole window; a window set above it can't apply;
+  a smaller one of your own only makes DGC compact sooner. A restart with another size is seen by the next turn, and
+  the server's own word beats a limit an earlier refusal taught. Any other OpenAI-compatible server on this computer
+  or network is asked the same way, so vLLM on a port of its own is found too. The question is bounded and never
+  holds up a chat; a server that doesn't answer leaves the window to DGC, as before. `/context` says "set by the
+  server" and how to change it. Prompt caching on these servers stays the server's own, and `/think` works as before.
+- Editor protocol (opt-in, old clients unchanged): `ready.capabilities.server_window`; command `server_window`; event
+  `server_window` (`model`, `window`, `server`, `trained`), answered once and then sent as it changes. A client that
+  never asks never gets one.
+
 - **A session keeps running through a window reload.** For an editor that asks for it, `dgc serve` no longer
   ends with its window: a reload, a closed window or a dropped connection leaves the work running, and the next
   window picks the session up where it is, with nothing lost and nothing shown twice (the running reply, the

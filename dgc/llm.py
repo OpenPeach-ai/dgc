@@ -833,6 +833,19 @@ def server_window_hint(server: str) -> str:
     return f"restart {name} with {option}" if name else "restart the server with a larger context"
 
 
+def server_window_note(client) -> str:
+    """/context's line for a window the server set: "set by the server: 8,192 tokens · restart vLLM with …"."""
+    reader = getattr(client, "server_window", None)
+    try:
+        served = reader() if callable(reader) else {}
+    except Exception:                    # noqa: BLE001 -- a note never costs the command
+        served = {}
+    window = _bounded_model_tokens(served.get("window")) if isinstance(served, dict) else 0
+    if not window:
+        return ""
+    return f"set by the server: {window:,} tokens · {server_window_hint(served.get('server'))} to change it"
+
+
 # Windows learned from overflow refusals, per endpoint+model, kept on disk so the next session (and
 # the next DGC) starts from the real limit instead of overflowing, compacting and forgetting again.
 _LEARNED_LIMITS_FILE = "model-limits.json"

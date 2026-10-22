@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **vLLM, SGLang and llama.cpp: the context meter shows the window the server was started with.** In the meter's
+  details, Window size reads **Set by the server: 32K** with one line on how to change it there (restart vLLM with
+  `--max-model-len`, SGLang with `--context-length`, `llama-server` with `-c`), instead of offering sizes that can't
+  apply. A smaller window of your own still decides when DGC compacts, and the line says so. **Settings → General →
+  Context size** says the same. Needs a DGC CLI with the same feature; with an older one, nothing changes.
+
 - **A session keeps running through a window reload.** Reload the window, close it, or reconnect after a dropped
   Remote SSH connection: a session that was working carries on, and its tab picks it up where it is when the window
   comes back, with nothing lost or shown twice. With no window it saves and stops by itself, 2 minutes after its

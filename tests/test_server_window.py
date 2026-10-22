@@ -283,6 +283,41 @@ class TheWindowDGCUses(IsolatedHome):
         self.assertEqual(hint("llamacpp"), "restart llama-server with -c")
         self.assertEqual(hint("aphrodite"), "restart the server with a larger context")
 
+    def test_context_in_the_terminal_says_it_too(self):
+        self.server.served_models = [LLAMACPP_ENTRY]
+        client = self.client(model="local")
+        self.assertEqual(llm_module.server_window_note(client), "", "not read yet: nothing to say")
+        client.prepare_model()
+        self.assertEqual(llm_module.server_window_note(client),
+                         "set by the server: 6,144 tokens · restart llama-server with -c to change it")
+        self.assertEqual(llm_module.server_window_note(None), "")
+
+    def test_the_terminal_s_context_popup_says_it(self):
+        import contextlib
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.data_structures import Size
+        from prompt_toolkit.input.defaults import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+        from dgc.tui import TUI
+
+        class Output(DummyOutput):
+            def get_size(self):
+                return Size(rows=30, columns=160)
+        self.server.served_models = [VLLM_ENTRY]
+        cfg = self.config(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        agent = self.agent(cfg)
+        agent.client.prepare_model()
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(create_app_session(input=stack.enter_context(create_pipe_input()), output=Output()))
+        ui = TUI(cfg, agent=agent)
+        shown = {}
+        ui._open_overlay = lambda rows, **options: shown.update(options)
+        ui._open_context_popup()
+        lines = [str(line) for line in shown["header"]]
+        self.assertIn("/ 8.2K tokens", lines[2])
+        self.assertIn("Set by the server: 8,192 tokens · restart vLLM with --max-model-len to change it", lines)
+
 
 
 class TheEditorIsTold(IsolatedHome):

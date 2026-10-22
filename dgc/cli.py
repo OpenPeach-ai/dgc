@@ -1322,6 +1322,10 @@ class CLI:
         elif cmd == "context":
             used, size = self.agent.estimate_tokens(), self._context_window_size()
             self.console.print("  [bold]context[/bold]  ", render.context_bar(used, size), highlight=False)
+            from .llm import server_window_note
+            note = server_window_note(getattr(self.agent, "client", None))
+            if note:
+                self.ui.info(note)       # vLLM, SGLang, llama.cpp: the server sized the window when it started
         elif cmd in ("bg", "background"):
             from . import termbg
             if termbg.switch(cfg, rest.strip().lower()):

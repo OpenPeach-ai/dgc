@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Editor protocol: command `server_window` and event `server_window` (the window a vLLM, SGLang or llama.cpp server
+  was started with) are in the vendored protocol and the TypeScript SDK's known events. An SDK session never sends
+  the command, so it never gets the event.
+
 - Editor protocol: commands `set_detach`, `detach`, `list_live_sessions` and `stop_live_session`; events
   `session_live`, `session_moved`, `live_sessions` and `turn_interrupted` are in the vendored protocol and the
   TypeScript SDK's known events, so neither SDK drops them. An SDK session is never offered `detach` (it is isolated,

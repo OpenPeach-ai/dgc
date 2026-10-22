@@ -3333,6 +3333,22 @@ DGC talks to any supported native or OpenAI-compatible endpoint. Pick one with
   renders the chat template, so DGC sends the reasoning switch it understands.
 - **LM Studio** — `/connect lmstudio` (`http://localhost:1234/v1`).
 
+### The window the server was started with
+
+vLLM, SGLang and llama.cpp set the context window when they start: vLLM with
+`--max-model-len`, SGLang with `--context-length`, `llama-server` with `-c` (each of its
+parallel slots gets its share unless they share one cache). Nothing DGC sends can change it, so
+DGC reads it from the server (its model list, or an older `llama-server`'s `/props`) and uses
+it from the first turn: the context meter reads **Set by the server: 32K** with how to change
+it there, and `/context` says the same. A model you have not chosen a window for gets the
+server's whole window; a window set above it can't apply, and a smaller one of your own only
+makes DGC compact sooner (Settings → General → Context size). Restart the server with another
+size and DGC sees it by the next turn. Prompt caching on these servers is the server's own
+(vLLM's prefix cache, llama.cpp's prompt cache) and works by itself: every request starts the
+way the last one did. Thinking is switched with `/think`, as for any model. Any other
+OpenAI-compatible server on this computer or network is asked the same way, so vLLM on a port
+of its own is found too.
+
 ## unsloth GGUFs
 
 unsloth is not a serving runtime — its GGUF/quantized models are served **through**
@@ -3829,7 +3845,10 @@ Useful keys:
   window for its family (Qwen3.8 64K, Qwen 32K, …) that never exceeds what the model holds. A provider that
   reports no maximum and refuses a request as too long ("maximum context length is 262144") teaches
   DGC that limit for that endpoint and model (kept in `~/.dgc/model-limits.json`); later requests,
-  and later sessions, fit it. The meter then reads "256k · this model's max".
+  and later sessions, fit it. The meter then reads "256k · this model's max". vLLM, SGLang and
+  llama.cpp set the window when they start (`--max-model-len`, `--context-length`, `-c`): DGC reads
+  it from the server and never goes above it, a model you have not chosen a window for gets all of
+  it, and the meter reads "Set by the server: 32K".
   Sessions compact at `compact_threshold` of the effective window. Changes apply to the next
   request, even during a turn. Editor settings saves wait only when changing an execution route:
   provider, model, sandbox, or delegation engine.

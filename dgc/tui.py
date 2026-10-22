@@ -3547,6 +3547,12 @@ class TUI:
             Text(""),
             Text.from_markup(f"[{th.text}]{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)} tokens[/]  [{col}]({pct:.1f}%)[/]"),
             Text.from_markup(f"[{col}]{'█' * _full}{_part}[/][{th.border_strong}]{'░' * _empty}[/]"),
+        ]
+        from .llm import server_window_note
+        served = server_window_note(getattr(self.agent, "client", None))
+        if served:                          # vLLM, SGLang, llama.cpp: the server sized it when it started
+            header.append(Text.from_markup(f"[{th.faint}]{_esc(served[0].upper() + served[1:])}[/]"))
+        header += [
             Text(""),
             Text.from_markup(f"[{th.text}]{glyphs.DIAMOND}[/] [{th.muted}]System prompt[/]   [{th.faint}]{render_mod.fmt_tokens(sys_tok)}[/]"),
             Text.from_markup(f"[{th.accent}]{glyphs.DIAMOND}[/] [{th.muted}]Conversation[/]    [{th.faint}]{render_mod.fmt_tokens(msg_tok)}[/]"),
