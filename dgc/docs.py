@@ -2694,6 +2694,14 @@ schedule, a commit trigger or a routine. Up to four Pips work at once, with no d
   you; then what it changed and whether the tests ran in the copy, with **Review** and **Undo**.
 - **Routines.** A Personal Pip does things on its own at a time, on a new email that matches a
   search, or before a calendar event. It suggests one as a card; nothing runs until you add it.
+- **Live data.** A Pulse can keep an eye on live data instead of running tests: a short list of exact
+  read-only command lines you approve (a `SELECT` through a read-only database account, `df -h .`,
+  `curl -s http://127.0.0.1:8000/health`). DGC runs only those lines, in a read-only box in your
+  project folder, and its model sums up what they printed; every number in the summary comes from the
+  output. A line that writes is refused, nothing it runs can change anything, and a run that needs you
+  reaches your chat as a card with **Ask DGC to fix**. Ask the main chat to set one up, or choose
+  **Read-only commands on live data** in a Pulse's Plan & schedule. `dgc readonly-db guide` shows how
+  to make the read-only database account.
 
 ## A Personal Pip's computer
 

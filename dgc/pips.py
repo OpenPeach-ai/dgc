@@ -324,7 +324,8 @@ def _project_pulse_plan(job):
         job['verification_plan_digest'] = None
         return
     plan = validate_job(pip_type=job['pip_type'], plan=job.get('verification_plan'),
-        source_policy=job['source_policy'], schedule=job.get('schedule'), event_trigger=job.get('event_trigger'))
+        source_policy=job['source_policy'], schedule=job.get('schedule'), event_trigger=job.get('event_trigger'),
+        live_plan=job.get('live_plan'))
     job['verification_plan'] = plan
     job['verification_plan_digest'] = plan_digest(plan) if plan is not None else None
 
@@ -354,7 +355,7 @@ def _new_computer(personal: bool, asked) -> dict | None:
     return {'schema_version': 1} if personal and (computer_by_default() if asked is None else asked) else None
 
 
-def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", model_choice={"mode": "default"}, adaptation_policy="suggest_changes", event_trigger=None, source_policy=None, verification_plan=None, app_plan=None, web_plan=None, github_plan=None, computer_plan=None):
+def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", model_choice={"mode": "default"}, adaptation_policy="suggest_changes", event_trigger=None, source_policy=None, verification_plan=None, app_plan=None, web_plan=None, github_plan=None, computer_plan=None, live_plan=None):
     if source_policy is None:
         # A new project Pip reads committed source under the current rules (safe_source_v2).
         from .pip_sources import default_policy
@@ -377,12 +378,20 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
     from .pip_sources import validate_job as validate_source_job
     source_policy = validate_source_job(source_policy, pip_type=pip_type, schedule=schedule, event_trigger=event_trigger)
     from .pip_pulse_plans import validate_job as validate_verification_job
+    # A live-data Pip (pip_live_data): a project Pulse whose job is a fixed list of read-only commands.
+    from .pip_live_data import validate as validate_live_plan
+    live_plan = validate_live_plan(live_plan)
+    if live_plan is not None and (source_policy == {'mode': 'personal'} or selected_type.id != 'pulse'):
+        raise RegistryError('unsupported_live_plan', 'Live data is a project Pulse: approved read-only commands in this project.')
+    if live_plan is not None and (verification_plan is not None or event_trigger is not None):
+        raise RegistryError('unsupported_live_plan', 'A Pulse runs its tests or reads live data, not both, and live data '
+                            'runs on a schedule or when you ask, not on events.')
     if source_policy == {'mode': 'personal'}:
         if verification_plan is not None:
             raise RegistryError('permission_denied', 'Personal Pips cannot receive project command plans.')
     else:
         verification_plan = validate_verification_job(pip_type=pip_type, plan=verification_plan,
-            source_policy=source_policy, schedule=schedule, event_trigger=event_trigger)
+            source_policy=source_policy, schedule=schedule, event_trigger=event_trigger, live_plan=live_plan)
     if event_trigger is not None and (selected_type.id not in ("scout", "lens", "rook", "lock", "quill") or schedule is not None):
         raise RegistryError("invalid_event_trigger", "Only audits and Quill drafts can run on events, and not together with a schedule.")
     if selected_type.id == "patch" and schedule is not None and source_policy != {"mode": "personal"}:
@@ -401,6 +410,8 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
         definition['verification_plan'] = verification_plan
         if len(_json(definition).encode('utf-8')) > 16384:
             raise RegistryError('invalid_request', 'The complete reviewed job, including commands, must fit within 16 KiB.')
+    if live_plan is not None:
+        definition['live_plan'] = live_plan
     from .pip_app_access import validate as validate_app_plan
     app_plan = validate_app_plan(app_plan)
     if app_plan is not None:
@@ -645,6 +656,7 @@ class PipStore:
         result.setdefault("web_plan", None)
         result.setdefault("computer_plan", None)
         result.setdefault("github_plan", None)
+        result.setdefault("live_plan", None)
         from .pip_adaptation import policy as adaptation_policy
         result["adaptation_policy"] = adaptation_policy(result.get("adaptation_policy", "suggest_changes"))
         from .pip_sources import validate_policy as source_policy
@@ -673,6 +685,7 @@ class PipStore:
         result.setdefault("pip_type", "rook")
         result.setdefault("model_choice", {"mode": "default"})
         result.setdefault("verification_plan", None)
+        result.setdefault("live_plan", None)
         from .pip_adaptation import policy as adaptation_policy
         result["adaptation_policy"] = adaptation_policy(result.get("adaptation_policy", "suggest_changes"))
         from .pip_sources import validate_policy as source_policy
@@ -706,7 +719,7 @@ class PipStore:
                 active_kind = active_manifest.get("run_kind", "audit")
             except (TypeError, ValueError, AttributeError):
                 raise RegistryError("stored_data_limit", "The active run has an invalid or oversized manifest.") from None
-            if active_kind not in ("audit", "conversation", "patch", "test", "draft", "personal_task"):
+            if active_kind not in ("audit", "conversation", "patch", "test", "draft", "personal_task", "live"):
                 raise RegistryError("invalid_run", "The active run has an unsupported kind.")
             result["active_run"]["run_kind"] = active_kind
             if 'pulse_verification' in active_manifest:
@@ -808,7 +821,7 @@ class PipStore:
         model_origin = origin_session_id is not None
         # The chat may also propose a Pip's Excluded folders (a safe_source_v2 policy in the same mode);
         # where its source comes from stays a human choice. Checked against the job below.
-        allowed = {"name", "goal", "source_ref", "source_policy"} if model_origin else {"name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan"}
+        allowed = {"name", "goal", "source_ref", "source_policy"} if model_origin else {"name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan", "live_plan"}
         if not isinstance(changes, dict) or not changes or set(changes) - allowed:
             raise RegistryError("invalid_request", "Only job text, committed source and a human-reviewed schedule may change. This release cannot broaden permissions.")
         if 'event_trigger' in changes:
@@ -820,6 +833,11 @@ class PipStore:
         if 'verification_plan' in changes:
             from .pip_pulse_plans import validate_plan
             changes = {**changes, 'verification_plan': validate_plan(changes['verification_plan'])}
+        if 'live_plan' in changes:
+            # Changing a live-data Pip's commands is a reviewed change; a write is refused before it is even saved.
+            from .pip_live_data import validate as validate_live_plan
+            from .redaction import secret_values
+            changes = {**changes, 'live_plan': validate_live_plan(changes['live_plan'], secrets=secret_values(getattr(self, 'config', None)))}
         if len(_json(changes).encode()) > 16384:
             raise RegistryError("invalid_request", "Proposed changes exceed 16 KiB.")
         reason = _text(reason, "reason", 1000, empty=True)
@@ -868,7 +886,7 @@ class PipStore:
                 raise RegistryError("limit", "Too many changes are waiting for this Pip. Accept or turn some down first.")
             if self.db.execute("SELECT count(*) FROM pip_proposals").fetchone()[0] >= 10000:
                 raise RegistryError("limit", "The local proposal archive is full; retain/export it before adding more.")
-            merged = {key: changes.get(key, pip[key]) for key in ("name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan")}
+            merged = {key: changes.get(key, pip[key]) for key in ("name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan", "live_plan")}
             merged["pip_type"] = pip["pip_type"]
             definition = _definition(**merged)
             personal = self.registry.get(pip['workspace_id'])['kind'] == 'personal'
@@ -921,7 +939,7 @@ class PipStore:
                 if proposed_type != pip["pip_type"]:
                     raise RegistryError("review_changed", "A proposal cannot change a Pip's type. Create a separate Pip for another role.")
                 from .pip_adaptation import policy as adaptation_policy
-                checked = _definition(**{key: definition.get(key) for key in ("name", "goal", "source_ref", "schedule", "event_trigger", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan")}, pip_type=proposed_type, model_choice=definition.get("model_choice", {"mode": "default"}), adaptation_policy=definition.get("adaptation_policy", "suggest_changes"), source_policy=definition.get("source_policy", "committed_only"))
+                checked = _definition(**{key: definition.get(key) for key in ("name", "goal", "source_ref", "schedule", "event_trigger", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan", "live_plan")}, pip_type=proposed_type, model_choice=definition.get("model_choice", {"mode": "default"}), adaptation_policy=definition.get("adaptation_policy", "suggest_changes"), source_policy=definition.get("source_policy", "committed_only"))
                 if (any(definition.get(key) != checked[key] for key in ("name", "goal", "source_ref", "policy"))
                         or adaptation_policy(definition.get("adaptation_policy", "suggest_changes")) != checked["adaptation_policy"]):
                     raise RegistryError("review_changed", "The saved proposal cannot broaden its approved policy.")
@@ -1128,11 +1146,22 @@ class PipStore:
             raise RegistryError('source_mismatch', 'The job scope does not match its workspace.')
         if personal and any(v is not None for v in (event_occurrence, pulse_request, _audit_preparation)):
             raise RegistryError('permission_denied', 'Personal Pips do not inherit project execution authority.')
-        executable = not personal and pip["pip_type"] in ("patch", "pulse") and conversation_request is None
-        standalone = (not personal and pip['pip_type'] == 'pulse' and handoff is None
+        # A live-data Pulse (pip_live_data): its approved read-only commands, then its model's summary. No handoff.
+        live = (not personal and pip['pip_type'] == 'pulse' and pip.get('live_plan') is not None
+                and conversation_request is None)
+        if live and (handoff is not None or pulse_request is not None or event_occurrence is not None):
+            raise RegistryError('invalid_request', 'A live-data Pip runs its approved commands when you ask or on its schedule: '
+                                'no handoffs, test-plan pins or events.')
+        executable = not personal and pip["pip_type"] in ("patch", "pulse") and conversation_request is None and not live
+        standalone = (not personal and pip['pip_type'] == 'pulse' and handoff is None and not live
                       and (pulse_request is not None or schedule_occurrence is not None))
         if pulse_request is not None and pip['pip_type'] != 'pulse':
             raise RegistryError('invalid_request', 'Verification-plan run pins apply only to standalone Pulse.')
+        if live:
+            from .pip_live_data import unavailable_reason
+            blocked = unavailable_reason()
+            if blocked:
+                raise RegistryError("execution_unavailable", "Its commands can’t run on this computer: " + blocked + ".")
         if standalone:
             from .pip_pulse_plans import validate_job, plan_digest
             plan = validate_job(pip_type=pip['pip_type'], plan=pip.get('verification_plan'),
@@ -1214,6 +1243,8 @@ class PipStore:
             run_kind = "personal_task" if personal else "audit"
             if conversation_request is not None:
                 run_kind = "conversation"
+            elif live:
+                run_kind = "live"
             elif executable:
                 run_kind = "patch" if pip["pip_type"] == "patch" else "test"
             elif pip["pip_type"] == "quill" and not personal:
@@ -1246,6 +1277,12 @@ class PipStore:
                         "trigger": "schedule" if schedule_occurrence else "manual", "requested_by": actor}
             if not personal and pip.get('github_plan') is not None and run_kind in ("audit", "draft"):
                 manifest['github_plan'] = pip['github_plan']
+            if not personal and pip.get('live_plan') is not None and run_kind in ("live", "conversation"):
+                # Its approved commands, pinned: a live run runs exactly these (checked again against the job then);
+                # a chat reply only reads them, to say what the Pip does.
+                manifest['live_plan'] = pip['live_plan']
+                if run_kind == "live":
+                    manifest['tools'] = []
             if personal:
                 manifest["tools"] = []
                 if pip.get('app_plan') is not None:
@@ -1384,7 +1421,7 @@ class PipStore:
                 if self.db.execute("SELECT count(*) FROM pip_runs WHERE status IN ('queued','running','cancelling')").fetchone()[0] >= MAX_QUEUE:
                     raise RegistryError("limit", "The local run queue is full.")
                 from .workspace_context import ContextStore
-                if not standalone:
+                if not standalone and run_kind != "live":
                     manifest["workspace_context"] = ContextStore(self.registry).snapshot(pip["workspace_id"])
                 if conversation_request is not None:
                     manifest["conversation"] = pip_chat.prepare(self, latest, conversation_request,
@@ -1739,6 +1776,11 @@ class PipStore:
                 from .pip_drafts import validate_saved
                 result = validate_saved(result, self.registry.directory / "runs" / run_id)
                 result_json = _json(result)
+            elif status == "succeeded" and run["manifest"].get("run_kind") == "live":
+                from .pip_live_data import validate_record
+                live = validate_record(result.get("live") if isinstance(result, dict) else None)
+                result_json = _json({**{k: v for k, v in result.items() if k in ("usage", "tools_called", "snapshot")},
+                                     "live": live})
             elif status == "succeeded" and run["manifest"].get("run_kind") in ("patch", "test"):
                 from .pip_execution import validate_execution_result
                 from .pip_handoffs import validate_result_input
@@ -2611,6 +2653,13 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     from . import pip_chat
     kind = manifest.get("run_kind", "audit")
     personal = source["source_policy"]["mode"] == "personal"
+    if kind == "live":
+        # A live-data Pip (pip_live_data): the controller ran its approved commands; this is one tool-free request
+        # for the summary of what they printed. No Agent turn, no tools.
+        if personal or selected_type.id != "pulse" or "handoff" in manifest:
+            raise RegistryError("role_mismatch", "Live data is a project Pulse's own run.")
+        from .pip_live_data import summarize
+        return summarize(config, snapshot, manifest, emit, deadline=deadline)
     if kind not in ("audit", "conversation", "patch", "test", "draft", "personal_task"):
         raise RegistryError("invalid_run", "The worker does not support this run kind.")
     if not personal and ((kind == "draft" and selected_type.id != "quill") or (selected_type.id == "quill" and kind not in ("draft", "conversation"))):
@@ -3387,6 +3436,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         if conversation.get("run_posts"):
             # What its runs posted in this chat (pip_run_posts): DGC's words, never the user's.
             reference["run_posts"] = conversation["run_posts"]
+        live_pin = None
+        if not personal and manifest.get("live_plan") is not None:
+            # A live-data Pip's commands, so it can say what it does; it can't run them from its chat.
+            from .pip_live_data import validate as validate_live_plan, CHAT_NOTICE as live_notice
+            live_pin = validate_live_plan(manifest["live_plan"])
+            reference["live_plan"] = live_pin
         if 'continuity' in conversation:
             from .pip_chat_continuity import reference as continuity_reference
             reference['conversation_continuation'] = continuity_reference(conversation['continuity'])
@@ -3408,6 +3463,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             + ("\n\n" + (typed_memory_notice if working_memory["schema_version"] == 2 else pip_chat.MEMORY_NOTICE)
                if working_memory is not None else "")
             + ("\n\n" + run_posts_notice if conversation.get("run_posts") else "")
+            + ("\n\n" + live_notice if live_pin is not None else "")
             + ("\n\nuser_notes: " + notes_notice if user_notes else "")
             + ("\n\nabout_you: " + about_notice if about_you else "")
             + ("\n\nworking_notes: " + pip_working_notes.NOTICE if working_notes is not None else "")
@@ -3847,6 +3903,55 @@ def _execute_pulse_plan(registry, row, manifest, config, deadline):
     return plans.validate_receipt(json.loads(current['result']), manifest, run_status=current['status'])
 
 
+def _run_live_commands(registry, row, manifest, config, binding):
+    """A live-data run's commands (pip_live_data), run by this controller before its model writes the summary:
+    exactly the approved lines of the job as it is now, which must still be the ones the run was queued with."""
+    from . import pip_live_data, readonly_database
+    from .pip_daemon import is_runtime_paused
+    from .redaction import contains_secret, secret_values
+    pinned = pip_live_data.validate(manifest.get('live_plan'))
+    if pinned is None:
+        raise RegistryError('invalid_run', 'A live-data run needs its approved commands.')
+
+    def approved():
+        if config.get('pips_enabled', False) is not True or is_runtime_paused(registry):
+            PipStore(registry).cancel(row['id'], 'runner-stop')
+        state = registry.db.execute("SELECT status FROM pip_runs WHERE id=?", (row['id'],)).fetchone()
+        if not state or state[0] != 'running':
+            raise RegistryError('cancelled', 'The run was stopped before all of its commands ran.')
+        current = PipStore(registry)._job(row['pip_id'])
+        if (current['status'] != 'active' or current['current_version'] != manifest['job_version']
+                or current.get('live_plan') != pinned):
+            raise RegistryError('stale_grant', "This Pip's approved commands or job changed before they ran. "
+                                "Nothing else ran; its next run uses the new job.")
+        return current['live_plan']
+
+    class Stopped:
+        error = None
+
+        def is_set(self):
+            if self.error is None:
+                try:
+                    approved()
+                except RegistryError as exc:
+                    self.error = exc
+            return self.error is not None
+
+    stopped = Stopped()
+    plan = approved()
+    secrets = secret_values(config)
+    if contains_secret(plan, secrets):
+        raise RegistryError('secret_detected', 'The approved commands now overlap configured credentials; nothing ran.')
+    commands = pip_live_data.run(binding['canonical_root'], pinned['commands'], approved=plan, cancelled=stopped,
+                                 secrets=secrets, database=readonly_database.load(binding['canonical_root']))
+    registry.event(row['workspace_id'], 'pip_run_live_reads', pip_id=row['pip_id'], run_id=row['id'],
+                   payload={'commands': [{key: c.get(key) for key in ('index', 'status', 'exit_code', 'seconds')}
+                                         for c in commands]})
+    if stopped.error is not None:
+        raise stopped.error
+    return commands
+
+
 def _execute_run(registry, row, config):
     _require_runner_platform()
     # What still has a clock: a standalone Pulse, the app reads before the model, reviewed tests. The model's own run
@@ -3889,11 +3994,14 @@ def _execute_run(registry, row, config):
         # ambient permissions. Create the controller-owned artifact root explicitly.
         run_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
     snapshot = run_dir / "source"
-    if personal:
+    live = manifest.get("run_kind") == "live"
+    if personal or live:
+        # Nothing of the project is copied: a Personal Pip has none, and a live-data Pip's commands read the project
+        # folder as it is now, in their read-only box (pip_live_data).
         from .workspace_registry import _private_directory
         _private_directory(run_dir)
         snapshot.mkdir(mode=0o700, exist_ok=False)
-        snapshot_info = {'files': 0, 'bytes': 0, 'scope': 'personal'}
+        snapshot_info = {'files': 0, 'bytes': 0, 'scope': 'personal' if personal else 'live'}
     elif current_tree:
         from .pip_source_storage import check_root
         from .pip_tree_snapshot import verify
@@ -3973,6 +4081,12 @@ def _execute_run(registry, row, config):
                                 'reads': [{'kind': r['kind'], **({'error': r['error']} if 'error' in r else
                                            {'items': len(r['items']) if isinstance(r['items'], list) else len(r['items']['check_runs'])})}
                                           for r in manifest['github_references']]})
+    live_commands = None
+    if live:
+        live_commands = _run_live_commands(registry, row, manifest, config, binding)
+        manifest = {**manifest, 'live_outputs': live_commands}
+        # Its lines have their own clock (a minute each); the summary that follows gets a fresh one.
+        deadline = time.monotonic() + MAX_WALL_SECONDS
     worker_home = run_dir / "worker-home"
     worker_home.mkdir(mode=0o700)
     worker_env = {k: os.environ[k] for k in ("PATH", "LANG", "SYSTEMROOT", "WINDIR") if k in os.environ}
@@ -4197,6 +4311,12 @@ def _execute_run(registry, row, config):
                 raise RegistryError(str(failure.get("code", "worker_failed")), str(failure.get("message", "Audit failed.")))
             raise RegistryError("worker_failed", "The audit worker stopped without a verified structured result.")
         result["snapshot"] = snapshot_info
+        if live_commands is not None:
+            # The record is the controller's: its outputs, and the worker's summary only if it is grounded in them.
+            from .pip_live_data import record as live_record
+            result = {"live": live_record(live_commands, result, str(manifest["job"].get("goal") or "")),
+                      "usage": result.get("usage") if isinstance(result.get("usage"), dict) else {},
+                      "tools_called": 0, "snapshot": snapshot_info}
         if computer_socket is not None:
             result["computer"] = {"calls": computer_socket.calls, "held": list(computer_host.waiting)}
         # The plugins a chat reply took an answer from ("Used Aave" under it): what this controller saw, never the

@@ -125,11 +125,15 @@ def plan_digest(plan):
     return _digest(plan, MAX_PLAN_BYTES, b'dgc.pulse.plan.v1\0')
 
 
-def validate_job(*, pip_type, plan, source_policy, schedule, event_trigger):
+def validate_job(*, pip_type, plan, source_policy, schedule, event_trigger, live_plan=None):
     checked = validate_plan(plan)
     if checked is None:
-        if pip_type == 'pulse' and schedule is not None: _fail('Pulse schedules require a reviewed verification plan.', 'review_required')
+        # A live-data Pulse (pip_live_data) runs its approved read-only commands on its schedule instead.
+        if pip_type == 'pulse' and schedule is not None and live_plan is None:
+            _fail('Pulse schedules require a reviewed verification plan.', 'review_required')
         return None
+    if live_plan is not None:
+        _fail('A Pulse runs its tests or reads live data, not both.', 'unsupported_live_plan')
     from .pip_sources import validate_policy
     from .pip_schedules import validate_schedule
     if pip_type != 'pulse' or validate_policy(source_policy) != {'mode':'committed_only'} or event_trigger is not None:

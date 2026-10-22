@@ -6,6 +6,38 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Pip for live data.** A project Pulse can now keep an eye on live data instead of running tests: its job is a
+  short list of exact read-only command lines you approve (up to six), such as a `SELECT` through a read-only
+  database account, `df -h .` or `curl -s http://127.0.0.1:8000/health`. DGC runs only those exact lines, on its
+  schedule or when you choose Run now, and its model writes two or three sentences about what they printed. It
+  replaces the watcher scripts and polling loops a model would otherwise improvise: nothing it runs can change
+  anything, and fixing stays your call in the chat.
+  - **Only the approved lines run.** DGC runs each approved line once a run, in order, and refuses any other; the
+    run stops if the job changed after it was queued. Changing the list is a reviewed job change, like any other.
+  - **A read-only box.** The lines run in the project folder as it is now (not a committed copy), in the same box a
+    Troupe checker's shell uses: the computer's files read only, the project's credential files hidden, a private
+    `/tmp`, and no network but the local addresses the lines name (`localhost:PORT`) and the project's read-only
+    database, which a line reaches as `$DGC_READONLY_DATABASE_URL` (`dgc readonly-db guide` shows how to make the
+    account). Linux with bubblewrap; elsewhere the Pip says why it can't run.
+  - **A safety net for writes.** A line with an obvious write is refused when it is approved and again before it
+    runs: a redirection into a file, `rm`, `mv`, `tee`, `sed -i`, `git push`, `systemctl restart`, SQL that changes
+    data (`INSERT`, `UPDATE`, `DELETE`, `DROP`, ...), `curl -X POST` or a request body, `$(...)`, `bash -c`,
+    `sudo`, a service off this computer, or a password in the line. The approved list is the guarantee; the net
+    catches the obvious ones.
+  - **A grounded summary.** The model reads each line's output (up to 4 KB, credentials redacted) as data, never as
+    instructions, and says whether something needs you. Every number it writes must appear in that output; a summary
+    with one that doesn't is asked for once more, then left out, and DGC says what ran in its own words. A model that
+    can't answer never fails the run.
+  - **It speaks in its chat and reaches the Work chat.** The summary posts in the Pip's own chat, and all-clear runs
+    fold into one message. A run that needs you is a report card in the chats it reports to ("needs you"), with Ask
+    DGC to fix, which fixes the cause in a copy of the project and never touches live data or services.
+  - Set it up from the chat ("check the orders database and the health endpoint every hour"; the chat's
+    `pips_setup` takes `work_kind` `live_data` and a `live_plan`), in the Pips view (a Pulse's Plan & schedule:
+    **Read-only commands on live data**), or with `dgc pips propose PIP --live-command LINE ...`. `dgc pips report`
+    shows each line and what it printed, and the main chat reads a run with `pips_context`.
+  - Pips API 60: `live_plan` on a Pip and in `changes`, run kind `live`, run posts of kind `live` with outcomes
+    `live_clear` and `live_attention`, and the same outcomes on a `pip_report` card. No editor event gained a field.
+
 - **The final answer is told why it must stand alone.** The Work prompt now says the one-line updates and tool calls
   may fold away once the answer arrives (the editor folds them into its "Worked for" row), so the answer has to carry
   everything you need from them.

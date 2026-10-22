@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Pips API 60: a live-data Pip, a project Pulse whose job is a fixed list of read-only command lines.
+  `propose_pip_update` takes `changes.live_plan` (`{schema_version: 1, commands: [...]}`, one to six distinct lines,
+  or `null` to remove them); both SDKs refuse it before API 60 and check its shape, and the backend refuses a line
+  that writes (`write_command`). Its runs (`run_kind` `live`) start with `run_pip` and no Pulse pins, and the run's
+  `result.live` holds each line's output and the summary.
+
 - Editor protocol: commands `start_pip_fix`, `undo_pip_fix`, `list_pip_fixes` and `get_pip_fix_change`, and events
   `pip_fix`, `pip_fixes` and `pip_fix_change` (Ask DGC to fix in the background; offered as
   `ready.capabilities.pip_fix`), are in the vendored protocol and the TypeScript SDK's known events, so neither SDK

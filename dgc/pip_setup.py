@@ -149,7 +149,7 @@ def needs_card(request) -> bool:
 def validate_request(value):
     _encode(value)
     if (type(value) is not dict or not _REQUIRED <= set(value)
-            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger', 'computer', 'source_exclude'})
+            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger', 'computer', 'source_exclude', 'live_plan'})
             or (set(value) & _PINS and not _PINS <= set(value))):
         _fail('Supply the complete source-only setup; an existing Pip needs pip_id, expected_version and expected_lifecycle_revision together.')
     request = dict(value)
@@ -179,9 +179,16 @@ def validate_request(value):
     pulse = value['pip_type'] == 'pulse' and not personal
     if type(value['pip_type']) is not str or value['pip_type'] not in _AUDIT | {'quill', 'pulse'}:
         _fail('Conversational setup supports source reviewers, Quill and reviewed Pulse plans.')
+    if 'live_plan' in value and (not pulse or 'verification_plan' in value or value['work_kind'] != 'live_data'):
+        _fail('Live data is a project Pulse with work_kind live_data and a live_plan of approved read-only commands, '
+              'not a verification_plan.', 'unsupported_work_kind')
     if personal:
         if value['work_kind'] != 'personal_task' or 'verification_plan' in value:
             _fail('Personal setup needs personal_task and cannot contain project command permissions.')
+    elif pulse and 'live_plan' in value:
+        # A live-data Pip (pip_live_data): exact read-only commands; a write is refused here, before any card.
+        from .pip_live_data import validate as validate_live_plan
+        request['live_plan'] = validate_live_plan(value['live_plan'])
     elif pulse:
         from .pip_pulse_plans import validate_plan
         plan = validate_plan(value.get('verification_plan'))
@@ -196,6 +203,8 @@ def validate_request(value):
             _fail('Only Pulse accepts a reviewed verification plan.')
         if value['work_kind'] == 'app_smoke_test':
             _fail('An application smoke test needs a reviewed Pulse execution plan and a confirmed local URL. Do not substitute a source review.', 'unsupported_work_kind')
+        if value['work_kind'] == 'live_data':
+            _fail('Live data is a Pulse (pip_type pulse) with a live_plan of approved read-only commands.', 'unsupported_work_kind')
         if value['work_kind'] != ('documentation_draft' if value['pip_type'] == 'quill' else 'source_review'):
             _fail('The work kind must match the Pip role.', 'unsupported_work_kind')
     if type(value['run_now']) is not bool:
@@ -314,6 +323,8 @@ def _definition(store, request, workspace_id, saved_policy=None):
         extra['model_choice'] = request['model_choice']
     if 'verification_plan' in request:
         extra['verification_plan'] = request['verification_plan']
+    if 'live_plan' in request:
+        extra['live_plan'] = request['live_plan']
     if 'event_trigger' in request:
         extra['event_trigger'] = request['event_trigger']
     return build_definition(**{key: request[key] for key in ('name', 'goal', 'source_ref', 'schedule', 'pip_type')}, **extra)
@@ -356,12 +367,13 @@ def _load(registry, setup_id, workspace_id):
             raise ValueError()
         from .pips import _definition as build_definition
         definition = body['definition']
-        checked = build_definition(**{k: definition.get(k) for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type', 'model_choice', 'adaptation_policy', 'event_trigger', 'source_policy', 'verification_plan', 'app_plan', 'web_plan', 'github_plan', 'computer_plan')})
+        checked = build_definition(**{k: definition.get(k) for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type', 'model_choice', 'adaptation_policy', 'event_trigger', 'source_policy', 'verification_plan', 'app_plan', 'web_plan', 'github_plan', 'computer_plan', 'live_plan')})
         if checked != definition or any(definition[k] != request[k] for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type')):
             raise ValueError()
         if 'model_choice' in request and definition['model_choice'] != request['model_choice']:
             raise ValueError()
         if definition.get('verification_plan') != request.get('verification_plan'): raise ValueError()
+        if definition.get('live_plan') != request.get('live_plan'): raise ValueError()
         personal=request.get('scope')=='personal'
         from .pip_sources import validate_policy as source_policy_of
         if (definition['policy'] != ('review_required' if request['pip_type'] == 'pulse' and not personal else 'read_only')
@@ -405,7 +417,8 @@ def cannot_run_here(request):
     if not isinstance(request, dict) or request.get('pip_type') != 'pulse' or request.get('scope') == 'personal':
         return None
     from .pip_execution import run_here_notice
-    return run_here_notice({'pip_type': 'pulse', 'verification_plan': request.get('verification_plan')})
+    return run_here_notice({'pip_type': 'pulse', 'verification_plan': request.get('verification_plan'),
+                            'live_plan': request.get('live_plan')})
 
 
 def _projection(registry, row, body, receipt):
@@ -426,9 +439,10 @@ def _projection(registry, row, body, receipt):
             **({'computer': True} if body['definition'].get('computer_plan') else {}),
             **({'event_trigger': req['event_trigger']} if req.get('event_trigger') else {}),
             'receipt': receipt, 'permissions': body['definition']['policy'], 'source_policy': 'personal' if req.get('scope')=='personal' else 'committed_only',
-            **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' else {}),
+            **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' and 'verification_plan' in req else {}),
+            **({'live_plan': req['live_plan']} if req.get('live_plan') else {}),
             'scope_notice': ('It has its own computer (a browser, a Terminal and files), separate from yours, and sees only what you share with it. Anything it would send or change waits for your OK.' if req.get('scope')=='personal' and body['definition'].get('computer_plan')
-                             else 'It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else source_scope(body['definition']['source_policy'])),
+                             else 'It sees only what you share with it and any reads listed here. You can give it a computer or connect apps later; anything it would send or change waits for your OK.' if req.get('scope')=='personal' else live_scope(req['live_plan']) if req.get('live_plan') else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else source_scope(body['definition']['source_policy'])),
             'runner_notice': ((("It can’t run on this computer yet: " + blocked + " ") if blocked else "")
                               + (f"While Pips are running, DGC checks {req['source_ref']} for new local commits and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Accepting this doesn’t start Pips."
                               if req.get('event_trigger') else 'It works while Pips are running on this computer. Creating it doesn’t start Pips.' if req.get('scope')=='personal'
@@ -634,7 +648,8 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
     if personal:
         config=config.clone_for_root(Path(registry.binding(registry.personal()['id'])['canonical_root']))
     model_preparation = None
-    if accept and preview['status'] == 'pending' and (saved_body['request']['pip_type'] != 'pulse' or personal) and ('model_choice' in saved_body['request'] or saved_body['request']['run_now']):
+    live = 'live_plan' in saved_body['request']        # a live-data Pulse uses its model for the summary
+    if accept and preview['status'] == 'pending' and (saved_body['request']['pip_type'] != 'pulse' or personal or live) and ('model_choice' in saved_body['request'] or saved_body['request']['run_now']):
         if str(canonical_directory(config.project_root)) != saved_body['project_root']:
             _fail('Open the setup card in its original project before accepting it.', 'workspace_mismatch')
         from .pips import _model_settings
@@ -655,7 +670,7 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
             _fail('The setup overlaps configured credentials. Ask for a draft without secrets.', 'secret_detected')
         from .pip_runtime import require_supervisor
         require_supervisor(config)
-        if saved_body['request']['pip_type'] == 'pulse' and not personal:
+        if saved_body['request']['pip_type'] == 'pulse' and not personal and not live:
             # Warm the bounded OS probe before holding SQLite's writer lock.
             # enqueue rechecks the cached capability and exact plan pins.
             # DGC's own local page checks need no sandbox (pip_execution.sandbox_required).
@@ -723,7 +738,7 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
                 from .pip_event_triggers import reset_trigger
                 reset_trigger(registry, pip_id, version, request['event_trigger'], now)
             pulse_request = None
-            if request['pip_type'] == 'pulse' and not personal:
+            if request['pip_type'] == 'pulse' and not personal and 'live_plan' not in request:
                 # This human setup decision is also the exact durable execution
                 # review. Reuse the existing approval lineage, including v1's
                 # expected_version=0; the model never reaches this control.
@@ -778,6 +793,12 @@ def source_scope(policy):
             + (', and also: ' + shown if exclude else '') + '. Each run lists what it left out. '
             'It saves a private report or documentation draft. '
             'It doesn’t run tests, open websites, touch the running app, change project files or deploy.')
+
+
+def live_scope(plan):
+    """A live-data card's scope line (pip_live_data), with the read-only database account when it reads one."""
+    from .pip_live_data import SETUP_NOTICE, DATABASE_TIP, reads_a_database
+    return SETUP_NOTICE + (' ' + DATABASE_TIP if reads_a_database(plan) else '')
 
 
 def pulse_scope(plan):

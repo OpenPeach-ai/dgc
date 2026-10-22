@@ -695,6 +695,20 @@ const PIP_LEVELS = new Set(["ask", "approve", "full"]);
 // API 59: a Personal Pip may borrow your own signed-in Chrome, with your consent each time. list_pip_borrows reads its
 // cards (the sites, why, and how each went); allow_pip_borrow is Allow once (the one turn it starts may use your Chrome on
 // those sites), decline_pip_borrow is Not now, stop_pip_borrow takes it back now. There is no Always allow. Local only.
+// API 60: a live-data Pip (a project Pulse) carries `live_plan` {schema_version: 1, commands: [1-6 exact read-only
+// command lines]}, set with propose_pip_update's changes.live_plan; the backend refuses a line that writes.
+function checkLivePlan(plan: unknown): void {
+  if (plan === null) return;
+  const value = plan as Record<string, unknown> | undefined;
+  const commands = value?.commands;
+  if (!value || typeof value !== "object" || Array.isArray(value)
+      || Object.keys(value).sort().join() !== "commands,schema_version" || value.schema_version !== 1
+      || !Array.isArray(commands) || commands.length < 1 || commands.length > 6
+      || commands.some((line) => typeof line !== "string" || !line.trim() || line.length > 1000 || /[\u0000-\u001f\u007f]/.test(line))
+      || new Set(commands).size !== commands.length) {
+    throw new DGCConfigError("live_plan is null or {schema_version: 1, commands: [1 to 6 distinct command lines of up to 1,000 characters]}");
+  }
+}
 const API59_READS = new Set(["list_pip_borrows"]);
 const API59_MUTATIONS = new Set(["allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow"]);
 for (const command of API59_READS) READS.add(command);
@@ -914,6 +928,14 @@ export class Pips {
     if (command === "propose_pip_update" && values.changes && typeof values.changes === "object"
       && Object.hasOwn(values.changes, "computer_plan") && (this.caps.pips_api_version as number) < 42) {
       throw new DGCUnsupportedError("Pip computers require Pips API 42 or newer");
+    }
+    // API 60: a live-data Pip's approved read-only commands (a project Pulse's live_plan).
+    if (command === "propose_pip_update" && values.changes && typeof values.changes === "object"
+      && Object.hasOwn(values.changes, "live_plan")) {
+      if ((this.caps.pips_api_version as number) < 60) {
+        throw new DGCUnsupportedError("A live-data Pip's commands require Pips API 60 or newer");
+      }
+      checkLivePlan((values.changes as Record<string, unknown>).live_plan);
     }
     const calendarPlan = (values.changes as Record<string, unknown> | undefined)?.app_plan as Record<string, unknown> | undefined;
     if (command === "propose_pip_update" && calendarPlan?.schema_version === 3 && (this.caps.pips_api_version as number) < 39) {

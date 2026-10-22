@@ -39,7 +39,7 @@ export function mountSetupCards(options) {
   }).catch(error=>{if(token===epoch)entry.error=error.message;}).finally(()=>{if(token===epoch){entry.loading=false;repaint(entry);}});
  }
  function button(label,fn,cls='') {const b=node('button',cls,label);b.type='button';b.onclick=fn;return b;}
- function detail(parent,label,value){const row=node('div','pip-setup-fact');row.append(node('dt','',label),node('dd','',value));parent.append(row);}
+ function detail(parent,label,value,cls=''){const row=node('div','pip-setup-fact');row.append(node('dt','',label),node('dd',cls,value));parent.append(row);}
  const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
  const typeName=t=>t?t[0].toUpperCase()+t.slice(1):'Pip';
  function face(entry,size,pose,uid){
@@ -55,7 +55,9 @@ export function mountSetupCards(options) {
   if(s.app_plan){const server=String(s.app_plan.server||'');out.push('Reads '+(/gmail/i.test(server)?'Gmail':/calendar/i.test(server)?'Google Calendar':/drive/i.test(server)?'Google Drive':server||'a connected app'));}
   if(s.web_plan)out.push('Reads the web');
   if(s.verification_plan){const n=s.verification_plan.action.tests.length;out.push(`${n} fixed ${s.work_kind==='app_smoke_test'?(n===1?'check':'checks'):(n===1?'command':'commands')}`);}
-  out.push(s.source_policy==='personal'?'Asks before sending':s.pip_type==='quill'?'Drafts docs':'Reads committed code');
+  // A live-data Pip (API 60): its approved read-only commands, and that nothing it runs can change anything.
+  if(s.live_plan){const n=s.live_plan.commands.length;out.push(`${n} read-only ${n===1?'command':'commands'}`);}
+  out.push(s.source_policy==='personal'?'Asks before sending':s.pip_type==='quill'?'Drafts docs':s.live_plan?'Changes nothing':'Reads committed code');
   out.push(s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Your DGC model');
   return out;
  }
@@ -68,8 +70,9 @@ export function mountSetupCards(options) {
   if(goal)body.append(node('p','pip-setup-goal',s.goal));          // the docked card shows it already
   const facts=node('dl','pip-setup-facts');detail(facts,s.source_policy==='personal'?'Scope':'Project',s.source_policy==='personal'?'Personal':s.project_root);if(s.event_trigger)detail(facts,'Runs',`After each new commit to ${s.source_ref}`);else detail(facts,'Schedule',s.schedule?scheduleLabel(s.schedule):'When you ask');
   if(s.next_run_at)detail(facts,'Next run',`${new Date(s.next_run_at).toLocaleString()} (your local time)`);
-  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal')detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Your DGC model');
+  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal'&&!s.live_plan)detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'&&!s.live_plan?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Your DGC model');
   if(s.verification_plan){detail(facts,'Runs','Set checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → status ${test.argv[2]}`:commandLine(test.argv)+' · in '+test.cwd);}
+  if(s.live_plan){detail(facts,'Runs','These exact commands · its model summarizes what they print');for(const line of s.live_plan.commands)detail(facts,'Command',line,'pip-setup-command');}
   if(s.app_plan)for(const words of appReadWords(s.app_plan))detail(facts,'Reads',words);
   if(s.web_plan)for(const read of s.web_plan.reads||[])detail(facts,read.kind==='page'?'Web page':'Web search',read.kind==='page'?read.url:read.query);
   body.append(facts,node('p','pip-setup-notice',s.scope_notice),node('p','pip-setup-notice',s.runner_notice));

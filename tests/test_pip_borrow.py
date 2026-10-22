@@ -103,7 +103,7 @@ class Borrow(Store):
 class ConsentEachTimeTests(Borrow):
     def test_api_59_names_the_four_requests_and_nothing_remembers_an_allow(self):
         from dgc.headless import PIPS_API_VERSION
-        self.assertEqual(PIPS_API_VERSION, 59)
+        self.assertGreaterEqual(PIPS_API_VERSION, 59)
         names = {"list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow"}
         self.assertLessEqual(names, pips.CONTROL_COMMANDS)
         self.assertEqual({n: pips._COMMAND_ARGS[n] for n in names}, {"list_pip_borrows": {"pip_id"},

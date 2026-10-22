@@ -920,6 +920,10 @@ def _last_report(store, pip_id):
     if kind == "draft":
         from .pip_drafts import chat_reference
         return chat_reference(store.registry, row["workspace_id"], row["id"])
+    if kind == "live":
+        # A live-data Pip's latest run: its summary and what each approved command printed (pip_live_data).
+        from .pip_live_data import chat_reference as live_reference, validate_record
+        return live_reference(row["id"], manifest, validate_record(result.get("live")))
     if kind == 'test' and 'pulse_verification' in manifest:
         from .pip_pulse_results import stored, notice
         saved = stored(store.registry, row['workspace_id'], row['id'])
@@ -1367,6 +1371,9 @@ def validate_context(value):
         elif classification == 'historical_command_outcomes':
             from .pip_pulse_results import validate_chat_reference
             valid = validate_chat_reference(report)
+        elif classification == 'live_data':
+            from .pip_live_data import validate_chat_reference as validate_live_reference
+            valid = validate_live_reference(report)
         elif classification == "historical_execution":
             valid = (report.get("run_kind") in ("patch", "test")
                      and report.get("verification") == "Recorded command outcomes and private changes only; model interpretation is not proof of correctness or application."

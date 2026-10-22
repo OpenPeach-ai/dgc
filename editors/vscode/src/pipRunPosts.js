@@ -20,8 +20,9 @@ import {esc,record} from './pipsModel.js';
 import '../media/msgtime.js';
 
 const RUN=/^run_[0-9a-f]{32}$/;
-export const POST_KINDS=['audit','checks','draft','result'];
-export const POST_OUTCOMES=['findings','clear','failed','checks_failed','checks_passed','draft','result'];
+// 'live' (Pips API 60): a live-data Pip's run, its summary grounded in what its approved read-only commands printed.
+export const POST_KINDS=['audit','checks','draft','result','live'];
+export const POST_OUTCOMES=['findings','clear','failed','checks_failed','checks_passed','draft','result','live_clear','live_attention'];
 const TRIGGERS=['schedule','event','you','chat','handoff'];
 const SEVERITIES=['critical','high','medium','low'];
 const DAY=86400000;
@@ -58,7 +59,7 @@ export function dayWord(time,now=Date.now()){
   if(days>1&&days<7)return `${new Date(time).toLocaleDateString('en-US',{weekday:'long'})}’s`;
   return null;
 }
-const kindWord=p=>({audit:'audit',checks:'checks',draft:'draft',result:'result'})[p.kind];
+const kindWord=p=>({audit:'audit',checks:'checks',draft:'draft',result:'result',live:'check'})[p.kind];
 /** "Today's audit", or "The audit on 12 Oct". */
 export function whose(p,now=Date.now()){
   const day=dayWord(at(p),now);
@@ -76,6 +77,8 @@ export function postShort(p){
   if(p.outcome==='clear')return {text:'Nothing found',tone:'clear'};
   if(p.outcome==='checks_passed')return {text:count(p.checks?.total)===1?'The check passed':`All ${count(p.checks?.total)} checks passed`,tone:'clear'};
   if(p.outcome==='checks_failed')return {text:`${count(p.checks?.failed)} of ${plural(count(p.checks?.total),'check')} failed`,tone:'bad'};
+  if(p.outcome==='live_clear')return {text:'All clear',tone:'clear'};
+  if(p.outcome==='live_attention'){const f=count(p.commands?.failed);return {text:f?`Needs you · ${f} of ${plural(count(p.commands?.total),'command')} didn’t run`:'Needs you',tone:'bad'};}
   if(p.outcome==='failed'){const r=String(p.reason||'').replace(/\.$/,'');return {text:`Didn’t finish${r?` · ${lower(r).slice(0,90)}`:''}`,tone:'bad'};}
   if(p.outcome==='draft')return {text:'Draft ready',tone:''};
   return {text:'Result ready',tone:''};
@@ -88,6 +91,8 @@ export function postStatus(p,now=Date.now()){
   if(p.outcome==='clear')return `${who}: nothing found`;
   if(p.outcome==='checks_passed')return `${who}: all passed`;
   if(p.outcome==='checks_failed')return `${who}: ${count(p.checks?.failed)} of ${count(p.checks?.total)} failed`;
+  if(p.outcome==='live_clear')return `${who}: all clear`;
+  if(p.outcome==='live_attention')return `${who}: needs you`;
   return `${who} is ready`;
 }
 
@@ -174,6 +179,8 @@ export function pipWords(p,{previous=null,personal=false,now=Date.now()}={}){
   if(p.outcome==='checks_passed'||p.outcome==='checks_failed')return [checksWords(p,before)];
   if(p.outcome==='failed')return [failedWords(p,before,{personal,now})];
   if(p.outcome==='draft'){const t=String(p.title||'a draft');return [pick(p,before,[['I drafted “',t,'”.'],['Your draft is ready: “',t,'”.']]),...(p.summary?[[String(p.summary)]]:[])];}
+  // A live-data run says its summary: the model's, held to the numbers its commands printed, or DGC's own line.
+  if(p.outcome==='live_clear'||p.outcome==='live_attention')return [[String(p.summary||'')]];
   return [[String(p.preview||'')]];
 }
 const partHtml=x=>typeof x==='string'?esc(x):`<code>${esc(x.code)}</code>`;
@@ -213,12 +220,16 @@ function reportMarkup(p){
     const total=count(p.total),top=(Array.isArray(p.findings)?p.findings:[]).filter(record).slice(0,3);
     label=`Report · ${plural(total,'finding')}`;more=total-top.length;
     rows=top.map(f=>{const s=SEVERITIES.includes(f.severity)?f.severity:'low';return `<li><span class="sev" data-sev="${s}">${s}</span><span class="t">${esc(f.title)}</span>${where(f)?`<span class="w">${esc(where(f))}</span>`:''}</li>`;});
+  }else if(p.kind==='live'){
+    const labels=(Array.isArray(p.failed_commands)?p.failed_commands:[]).filter(l=>typeof l==='string').slice(0,3),n=count(p.commands?.total);
+    label=`Output · ${plural(n,'command')}`;more=count(p.commands?.failed)-labels.length;
+    rows=labels.map(l=>`<li><span class="sev" data-sev="high">didn’t run</span><span class="w">${esc(l)}</span></li>`);
   }else{
     const labels=(Array.isArray(p.failed_checks)?p.failed_checks:[]).filter(l=>typeof l==='string').slice(0,3);
     label=`Report · ${count(p.checks?.failed)} of ${count(p.checks?.total)} failed`;more=count(p.checks?.failed)-labels.length;
     rows=labels.map(l=>`<li><span class="sev" data-sev="high">failed</span><span class="w">${esc(l)}</span></li>`);
   }
-  return `<details class="run-post-report" data-details="report-${id}"><summary class="run-post-chip">${icon('doc')}<span>${esc(label)}</span>${chev}</summary><div class="run-post-report-body">${rows.length?`<ul class="run-post-findings">${rows.join('')}</ul>`:''}${more>0?`<p class="run-post-more">${more} more in the full report</p>`:''}<button type="button" class="link" data-post-open="${id}">Open full report</button></div></details>`;
+  return `<details class="run-post-report" data-details="report-${id}"><summary class="run-post-chip">${icon('doc')}<span>${esc(label)}</span>${chev}</summary><div class="run-post-report-body">${rows.length?`<ul class="run-post-findings">${rows.join('')}</ul>`:''}${more>0?`<p class="run-post-more">${more} more in the full report</p>`:''}<button type="button" class="link" data-post-open="${id}">${p.kind==='live'?'Open the full output':'Open full report'}</button></div></details>`;
 }
 // Under a fold: "✓ Passed 12 times since Monday", which opens to every time it ran, by day; each opens that run.
 function sinceWords(time,now){
@@ -227,7 +238,7 @@ function sinceWords(time,now){
 }
 export function foldWords(runs,now=Date.now()){
   const n=runs.length,times=n===2?'twice':`${n} times`;
-  return `${runs[0].kind==='checks'?'Passed':'Nothing found'} ${times} since ${sinceWords(at(runs[0]),now)}`;
+  return `${runs[0].kind==='checks'?'Passed':runs[0].kind==='live'?'All clear':'Nothing found'} ${times} since ${sinceWords(at(runs[0]),now)}`;
 }
 function timesMarkup(runs,now){
   const days=new Map();
@@ -255,10 +266,10 @@ export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=fal
     body=words.map(w=>`<p>${w.map(partHtml).join('')}</p>`).join('');
     text=wordsText(words);
   }
-  const askable=ask&&!personal&&['findings','checks_failed','failed'].includes(p.outcome)&&['audit','checks'].includes(p.kind);
+  const askable=ask&&!personal&&['findings','checks_failed','failed','live_attention'].includes(p.outcome)&&['audit','checks','live'].includes(p.kind);
   const fix=askable?chip(`data-post-fix="${id}"${asked?' disabled title="DGC was asked to fix this run, in the Work chat it reports to."':''}`,`${icon('fix')}<span>${asked?'Asked DGC':'Ask DGC to fix'}</span>`,asked?'asked':''):'';
   const attach=runs?timesMarkup(runs,now)
-    :p.outcome==='findings'||p.outcome==='checks_failed'?reportMarkup(p)+fix
+    :p.outcome==='findings'||p.outcome==='checks_failed'||p.outcome==='live_attention'?reportMarkup(p)+fix
     :p.outcome==='failed'?chip(`data-post-open="${id}"`,`${icon('warn')}<span>See what happened</span>`)+(canRun?chip(`data-post-run="${id}"`,`${icon('play')}<span>Run again now</span>`):'')+fix
     :chip(`data-post-open="${id}"`,`<span>${p.outcome==='draft'?'Open draft':p.kind==='result'?'Open result':'Open run'}</span>${chev}`,'quiet');
   const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${time}</div>`;
@@ -280,7 +291,7 @@ export function timeline(messages,posts,{complete=true}={}){
     else items.push({message:m}),i++;
   }
   // Which runs fold together: passes of the same checks, or audits that found nothing.
-  const fold=p=>p.outcome==='checks_passed'?`checks:${count(p.checks?.total)}`:p.outcome==='clear'?`${p.kind}:clear`:'';
+  const fold=p=>p.outcome==='checks_passed'?`checks:${count(p.checks?.total)}`:p.outcome==='clear'?`${p.kind}:clear`:p.outcome==='live_clear'?'live:clear':'';
   const out=[];
   for(let k=0;k<items.length;){
     if(items[k].message){out.push(items[k++]);continue;}

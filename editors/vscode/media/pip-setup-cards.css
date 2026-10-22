@@ -8,6 +8,7 @@
 .pip-setup-facts{margin:0 0 10px;border:1px solid var(--border);border-radius:var(--r-sm,6px);padding:6px 10px}
 .pip-setup-fact{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;margin:3px 0;font:var(--w-reg,400) var(--t-xs,11px)/1.6 var(--sans)}
 .pip-setup-fact dt{color:var(--muted)}.pip-setup-fact dd{margin:0}
+.pip-setup-fact dd.pip-setup-command{font-family:var(--mono,monospace);overflow-wrap:anywhere}
 .pip-setup-notice,.pip-setup-receipt{margin:6px 0;color:var(--muted);font:var(--w-reg,400) var(--t-xs,11px)/1.5 var(--sans)}
 .pip-setup-reason summary{cursor:pointer;color:var(--muted);font:var(--w-reg,400) var(--t-xs,11px)/1.6 var(--sans)}
 .pip-setup-reason p{margin:4px 0 0;font:var(--w-reg,400) var(--t-xs,11px)/1.5 var(--sans)}

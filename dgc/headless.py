@@ -303,7 +303,15 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # of its own in that Chrome (Chrome asks the user too), on the card's sites only, and closes it when the Pip says done,
 # when its reply ends, on Stop, or after `minutes`; `ended` says which (done, run_end, stop, timeout, chrome_no,
 # no_answer, unreachable, lost, error).
-PIPS_API_VERSION = 59
+# API 60: a live-data Pip (pip_live_data): a project Pulse whose job has a `live_plan` {schema_version: 1, commands:
+# [1-6 exact read-only command lines]}, set with propose_pip_update's `changes.live_plan` (or a setup card's, work_kind
+# "live_data") and refused there when a line writes (error write_command). Its runs (run_kind "live", on its schedule or
+# with run_pip and no Pulse pins) run exactly those lines in a read-only box in the project folder, and the result's
+# `live` is {schema_version, commands: [{index, command, status, exit_code, output, output_truncated, seconds, note?}],
+# summary, summary_by "model" | "dgc", attention, notes, verification}. Its run posts have kind "live" and outcome
+# "live_clear" or "live_attention" with summary, summary_by, commands {ok, failed, total} and failed_commands; so do
+# its pip_report cards. get_pip and list_pips carry `live_plan` (null for other Pips).
+PIPS_API_VERSION = 60
 
 
 def _pips_platform_supported() -> bool:
@@ -5272,7 +5280,7 @@ class Backend:
                 reject("unknown_run", "DGC can't find that Pip run in this project any more.")
                 return
             report = brief["report"]
-            if report.get("outcome") in ("clear", "checks_passed"):
+            if report.get("outcome") in ("clear", "checks_passed", "live_clear"):
                 reject("nothing_to_fix", "That run found nothing to fix.")
                 return
             with self._dispatch_guard():

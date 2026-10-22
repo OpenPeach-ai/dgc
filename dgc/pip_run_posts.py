@@ -4,8 +4,9 @@ Grok Bots and OpenAI Dots both post a scheduled run's result in the bot's own co
 can reply to it, and keep a separate run list for the record. A Pip does the same: each run's result
 appears in its chat, and the run list behind it is the History tab (it was Runs).
 
-Which runs. A source review (Scout, Lens, Rook, Lock), a Pulse check, a Quill draft and a Personal
-Pip's scheduled task, when it finishes or fails. Chat replies are the chat already; Patch work and a
+Which runs. A source review (Scout, Lens, Rook, Lock), a Pulse check, a live-data run (pip_live_data:
+its summary, the one post a model writes, held to the numbers its commands printed), a Quill draft and a
+Personal Pip's scheduled task, when it finishes or fails. Chat replies are the chat already; Patch work and a
 handoff's test run are reviewed where they were handed off, and a cancelled run is the user's own doing.
 
 Exactly once. ``post`` writes one row, keyed by the run, inside the transaction that finishes the run
@@ -44,7 +45,7 @@ CREATE TABLE IF NOT EXISTS pip_run_posts(
  posted_at TEXT NOT NULL, post TEXT NOT NULL CHECK(length(CAST(post AS BLOB))<=8192));
 CREATE INDEX IF NOT EXISTS pip_run_posts_chat ON pip_run_posts(pip_id,posted_at,run_id);
 """
-KINDS = ("audit", "checks", "draft", "result")
+KINDS = ("audit", "checks", "draft", "result", "live")
 OUTCOMES = (*delivery.OUTCOMES, "draft", "result")
 TRIGGERS = ("schedule", "event", "you", "chat", "handoff")
 PREVIEW_CHARS = 1200       # a Personal Pip's result as its chat shows it; Open full result has the rest
@@ -135,7 +136,7 @@ def _build(registry, run_id: str) -> tuple[dict | None, str | None]:
     pip = delivery._pip(db, row["pip_id"])
     if pip is None:
         return None, None
-    if kind == "audit" or kind == "test" and "pulse_verification" in manifest:
+    if kind in ("audit", "live") or kind == "test" and "pulse_verification" in manifest:
         candidate = delivery._candidate(registry, row, pip)
         if candidate is None:
             return None, None
@@ -263,7 +264,8 @@ def recent(store, pip_id: str) -> list[dict]:
         if value is None:
             continue
         item = {k: value[k] for k in ("run_id", "posted_at", "kind", "outcome", "trigger", "text", "total", "counts",
-                                      "findings", "checks", "failed_checks", "reason", "title", "next_run_at")
+                                      "findings", "checks", "failed_checks", "reason", "title", "next_run_at",
+                                      "summary", "summary_by", "commands", "failed_commands")
                 if k in value}
         if isinstance(value.get("preview"), str):
             item["preview"] = value["preview"][:RECENT_PREVIEW]

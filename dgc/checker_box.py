@@ -283,7 +283,18 @@ def wrap(command: str, project_root, box: dict) -> list[str] | None:
     forward = box.get("forward")
     if forward:
         argv += ["--ro-bind", str(forward["socket_dir"]), BOX_SOCKET_DIR]
+    # More local ports, each through a relay of its own (a live-data Pip's localhost:PORT, dgc/pip_live_data.py):
+    # one forwarder each, chained, so every one listens before the command starts.
+    extra = [item for item in box.get("forwards") or () if isinstance(item, dict)]
+    for item in extra:
+        argv += ["--ro-bind", str(item["socket_dir"]), f"/run/dgc-forward-{int(item['port'])}"]
     argv += ["--chdir", "/mnt", "--"]
+    if forward or extra:
+        if not Path(PYTHON).is_file():
+            return None
+    for item in extra:
+        port = int(item["port"])
+        argv += [PYTHON, "-I", "-c", FORWARDER, f"/run/dgc-forward-{port}/db.sock", str(port)]
     shell = ["/bin/bash", "-o", "pipefail", "-c", command]
     if forward:
         argv += [PYTHON, "-I", "-c", FORWARDER, BOX_SOCKET_DIR + "/db.sock", str(int(forward["port"])), *shell]

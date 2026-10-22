@@ -592,6 +592,27 @@ export function pulsePlan(value){
  if(bytes(JSON.stringify(value))>12288||value.action.tests.some(t=>!pulseText(t.cwd,1024)||t.argv.some(a=>!pulseText(a,1024))))pulseFail();
  return value;
 }
+// A live-data Pip (Pips API 60): a project Pulse whose job is a fixed list of read-only command lines. DGC runs only
+// those exact lines, in a read-only box, and its model summarizes what they print (dgc/pip_live_data.py). The backend
+// refuses a line that writes; this only checks the shape it shows.
+export function livePlan(value){
+ if(value===null||value===undefined)return null;
+ const bad=()=>{throw Error('These live-data commands are invalid. Refresh before reviewing them.');};
+ if(!record(value)||Object.keys(value).sort().join()!=='commands,schema_version'||value.schema_version!==1||!Array.isArray(value.commands)||!value.commands.length||value.commands.length>6)bad();
+ for(const line of value.commands)if(typeof line!=='string'||!line.trim()||line.length>1000||/[\u0000-\u001f\u007f]/.test(line))bad();
+ if(new Set(value.commands).size!==value.commands.length)bad();
+ return value;
+}
+/** The approved lines from what the user typed: one a line, blank lines left out. */
+export function livePlanFromText(text){
+ const commands=String(text||'').split('\n').map(line=>line.trim()).filter(Boolean);
+ if(!commands.length)throw Error('Add at least one command, one a line.');
+ if(commands.length>6)throw Error('A live-data Pip runs up to 6 commands.');
+ if(commands.some(line=>line.length>1000))throw Error('Each command is up to 1,000 characters.');
+ if(new Set(commands).size!==commands.length)throw Error('Each command is listed once.');
+ return livePlan({schema_version:1,commands});
+}
+export const livePip=pip=>record(pip)&&pip.pip_type==='pulse'&&record(pip.live_plan);
 export function pulsePlanFromCommands(commands){
  return pulsePlan({schema_version:1,action:{...handoffAction('test','',JSON.stringify(commands)),network:false,limits:{wall_seconds:60,cpu_seconds:30,memory_bytes:536870912,output_bytes:65536,processes:32}}});
 }
@@ -1028,8 +1049,9 @@ export function appReadPlan(value){
 
 export function pipSetup(value,workspace,id=null) {
  const fail=()=>{throw Error('This setup is invalid or belongs to another project. Refresh before reviewing it.');};
- if(!record(value)||Object.keys(value).filter(k=>!['model_choice','verification_plan','app_plan','web_plan','event_trigger','computer'].includes(k)).sort().join()!==setupKeys||value.workspace_id!==workspace||!/^setup_[a-f0-9]{32}$/.test(value.id)||id!==null&&value.id!==id||!/^[a-f0-9]{64}$/.test(value.digest)||!setupText(value.project_root,16384)||!(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value.project_root))||!setupText(value.name,480)||!setupText(value.goal,16000)||!setupText(value.reason,4000)||!setupText(value.scope_notice,4000)||!setupText(value.runner_notice,2000)||!setupText(value.source_ref,800)||!['scout','lens','rook','lock','quill','pulse'].includes(value.pip_type)||value.work_kind!==(value.source_policy==='personal'?'personal_task':value.pip_type==='pulse'?(value.verification_plan?.action?.network==='loopback_http_v1'?'app_smoke_test':'command_verification'):value.pip_type==='quill'?'documentation_draft':'source_review')||value.permissions!==(value.pip_type==='pulse'&&value.source_policy!=='personal'?'review_required':'read_only')||!['committed_only','personal'].includes(value.source_policy)||typeof value.run_now!=='boolean'||!['pending','accepted','rejected','expired'].includes(value.status)||!setupTime(value.created_at)||!setupTime(value.expires_at)||Date.parse(value.expires_at)<=Date.parse(value.created_at)||!(value.next_run_at===null||setupTime(value.next_run_at))||!(value.run_now?setupText(value.run_now_policy,2000):value.run_now_policy===null))fail();
- if(value.pip_type==='pulse'&&value.source_policy!=='personal'){if(!pulsePlan(value.verification_plan))fail();}else if(Object.hasOwn(value,'verification_plan'))fail();
+ if(!record(value)||Object.keys(value).filter(k=>!['model_choice','verification_plan','app_plan','web_plan','event_trigger','computer','live_plan'].includes(k)).sort().join()!==setupKeys||value.workspace_id!==workspace||!/^setup_[a-f0-9]{32}$/.test(value.id)||id!==null&&value.id!==id||!/^[a-f0-9]{64}$/.test(value.digest)||!setupText(value.project_root,16384)||!(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value.project_root))||!setupText(value.name,480)||!setupText(value.goal,16000)||!setupText(value.reason,4000)||!setupText(value.scope_notice,4000)||!setupText(value.runner_notice,2000)||!setupText(value.source_ref,800)||!['scout','lens','rook','lock','quill','pulse'].includes(value.pip_type)||value.work_kind!==(value.source_policy==='personal'?'personal_task':value.pip_type==='pulse'?(Object.hasOwn(value,'live_plan')?'live_data':value.verification_plan?.action?.network==='loopback_http_v1'?'app_smoke_test':'command_verification'):value.pip_type==='quill'?'documentation_draft':'source_review')||value.permissions!==(value.pip_type==='pulse'&&value.source_policy!=='personal'?'review_required':'read_only')||!['committed_only','personal'].includes(value.source_policy)||typeof value.run_now!=='boolean'||!['pending','accepted','rejected','expired'].includes(value.status)||!setupTime(value.created_at)||!setupTime(value.expires_at)||Date.parse(value.expires_at)<=Date.parse(value.created_at)||!(value.next_run_at===null||setupTime(value.next_run_at))||!(value.run_now?setupText(value.run_now_policy,2000):value.run_now_policy===null))fail();
+ if(value.pip_type==='pulse'&&value.source_policy!=='personal'&&Object.hasOwn(value,'live_plan')){if(Object.hasOwn(value,'verification_plan')||!livePlan(value.live_plan))fail();}
+ else if(value.pip_type==='pulse'&&value.source_policy!=='personal'){if(!pulsePlan(value.verification_plan))fail();}else if(Object.hasOwn(value,'verification_plan')||Object.hasOwn(value,'live_plan'))fail();
  if(Object.hasOwn(value,'app_plan')){if(value.source_policy!=='personal')fail();appReadPlan(value.app_plan);}
  if(Object.hasOwn(value,'web_plan')){if(value.source_policy!=='personal')fail();webReadPlan(value.web_plan);}
  if(Object.hasOwn(value,'computer')&&(value.computer!==true||value.source_policy!=='personal'))fail();
