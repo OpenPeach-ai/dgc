@@ -882,7 +882,8 @@ def validate_chat_reference(value) -> bool:
                     for c in value["commands"]))
 
 
-CHAT_NOTICE = ("live_plan: your job's approved read-only commands. DGC runs them on your schedule, or when the user "
+CHAT_NOTICE = ("live_plan: your job's own approved read-only commands (your job, not a handoff: you watch live data, "
+               "you don't run tests). DGC runs them on your schedule, or when the user "
                "chooses Run now, and you summarize what they print; you can't run them, or anything else, in this "
                "chat. last_report has the latest output. For fresh numbers, tell the user to choose Run now. To change "
                "the commands, the user changes your job (a reviewed change); nothing you run may change anything.")
