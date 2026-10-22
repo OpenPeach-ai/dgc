@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A clock for the prompt cache, after the context meter (Work chat only).** As Claude Code shows it: a small
+  clock and the whole minutes left (**4m**) while the provider keeps this conversation cached, changing once a
+  minute; the clock alone in the error colour once the cache has gone, with why in its tooltip (idle too long,
+  the conversation was compacted, or Ollama unloaded the model). It appears only for Anthropic and a local
+  Ollama, and only after a reply used the cache; everywhere else there is no clock. Reopening a chat whose cache
+  has gone adds one line: "Idle 2h 5m. The prompt cache has likely expired, so your next message will re-cache
+  about 180k tokens." ChatDGC and Pips don't show it.
+
 - **The context meter says when the model holds less than you chose.** Its menu and tooltip read, for example,
   **256k · this model's max** when the window in use is the model's own maximum, below the one you picked. With a
   DGC CLI that remembers the window per model, switching back to a model shows the window you chose for it.

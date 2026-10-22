@@ -1703,6 +1703,12 @@ class HeadlessUI:
         """Carry the exact post-save compaction outcome instead of parsing a status sentence."""
         self.em.emit("compacted", **result)
 
+    def prompt_cache(self, record, *, resumed: bool = False) -> None:
+        """The chat's prompt-cache record changed (dgc/cache_clock.py): the Backend says what it means."""
+        hook = getattr(self, "_cache_hook", None)
+        if callable(hook):
+            hook(record, resumed=resumed)
+
     def error(self, message: str, cause=None) -> None:
         payload = self._error_cause(cause)
         if payload is None:
@@ -2102,6 +2108,7 @@ class Backend:
         self._package_cancel = threading.Event()
         self.ui.cancelled = self.agent.cancelled
         self.ui._goal_hook = self._emit_goal
+        self.ui._cache_hook = self._publish_cache_clock
         self.ui._rule_hook = self._add_rule
         self.ui._steering_hook = self._steering_applied
         self.agent.session_file = sessions_mod.new_path(config.project_root)
@@ -4099,6 +4106,9 @@ class Backend:
             stop = getattr(self, "_peer_stop", None)
             if stop is not None:
                 stop.set()
+            clock_stop = self.__dict__.get("_cache_clock_stop")
+            if clock_stop is not None:
+                clock_stop.set()                # the prompt cache's Ollama watcher
             if process:     # one chat of a Host leaves the process's note to the Host
                 from . import peers as _peers
                 _peers.withdraw()      # a clean exit leaves no note; a crash leaves one to expire
@@ -4415,6 +4425,85 @@ class Backend:
         return snapshot() if callable(snapshot) else {
             "text": getattr(self.agent, "goal", ""), "status": getattr(self.agent, "goal_status", "none"),
             "elapsed_seconds": self._goal_elapsed_seconds()}
+
+    # ---- the prompt cache's clock (dgc/cache_clock.py) -------------------------------------------
+    def _publish_cache_clock(self, record=None, *, resumed: bool = False, current: bool = False) -> None:
+        """Tell the editor how long this chat's prompt cache lasts, as far as the provider says.
+
+        Anthropic's state is computed here from the reply's own report; a local Ollama is asked
+        (/api/ps, off this thread) when it will unload the model, and asked again while that clock
+        runs, so a model unloaded early, or kept longer by another request, is seen. ``current``
+        publishes the record the agent holds now (a repaint, a resume).
+        """
+        from . import cache_clock
+        agent = getattr(self, "agent", None)
+        if current:
+            getter = getattr(agent, "prompt_cache_record", None)
+            record = getter() if callable(getter) else None
+        record = cache_clock.clean(record)
+        # A record about another model than the one this chat now sends to says nothing about it, and
+        # a subscription CLI's cache is that CLI's own.
+        config_get = getattr(self.config, "get", None)
+        engine = str(config_get("subscription_engine", "") or "").strip() if callable(config_get) else ""
+        if record and (engine or str(record.get("model") or "") != str(getattr(self.config, "model", "") or "")):
+            record = None
+        # With the cache markers off, Anthropic caches nothing new: the clock it ran on has nothing to time.
+        if (record and record.get("source") == "anthropic" and callable(config_get)
+                and config_get("prompt_cache", True) is False):
+            record = None
+        with self._cache_clock_lock():
+            self._cache_clock_generation = getattr(self, "_cache_clock_generation", 0) + 1
+            generation = self._cache_clock_generation
+            self._cache_clock_current = record
+        if not record or record.get("source") != "ollama" or record.get("compacted_ms"):
+            self._emit_cache_clock(cache_clock.wire_state(record), resumed=resumed)
+            return
+
+        def watch() -> None:
+            # One watcher per record: a newer record (a later reply) ends this one.
+            last = None
+            first = True
+            while True:
+                listed = cache_clock.ollama_listed(record["endpoint"], record["model"])
+                state = cache_clock.wire_state(record, listed=listed)
+                with self._cache_clock_lock():
+                    if generation != self._cache_clock_generation:
+                        return
+                if state != last:
+                    self._emit_cache_clock(state, resumed=resumed and first)
+                    last = state
+                first = False
+                if state.get("state") != "warm":
+                    return
+                # Look again a little after it should unload, and at least once a minute, so an early
+                # unload (another model loaded, `ollama stop`) or a later one (another request) shows.
+                expires = state.get("expires_ms")
+                wait = 60.0 if not expires else max(2.0, min(60.0, (expires - time.time() * 1000) / 1000 + 2))
+                stop = getattr(self, "_cache_clock_stop", None)
+                if stop is None:
+                    stop = self._cache_clock_stop = threading.Event()
+                if stop.wait(wait):
+                    return
+        threading.Thread(target=watch, name="dgc-cache-clock", daemon=True).start()
+
+    def _cache_clock_lock(self):
+        lock = self.__dict__.get("_cache_clock_mutex")
+        if lock is None:
+            lock = self.__dict__.setdefault("_cache_clock_mutex", threading.Lock())
+        return lock
+
+    def _emit_cache_clock(self, state: dict, *, resumed: bool = False) -> None:
+        fields = {key: value for key, value in state.items()
+                  if key in ("state", "source", "anchor_ms", "expires_ms", "ttl_s", "reason", "tokens")}
+        session = getattr(getattr(self, "agent", None), "session_file", None)
+        if session is not None:
+            fields["session_id"] = Path(session).stem
+        if resumed:
+            fields["resumed"] = True
+        try:
+            self.em.emit("cache_clock", **fields)
+        except Exception:                    # noqa: BLE001 -- a clock never costs a chat
+            pass
 
     def _emit_history(self, request_id: str | None = None) -> None:
         """Replay the transcript together with the checklist that belongs to it.
@@ -6235,6 +6324,10 @@ class Backend:
             self._emit_context(request_id if context_changed else None)
             if context_changed:
                 self._emit_config()          # the window the editor shows as the one you chose
+            # The clock is about one model's cache: another model hides it until its first reply
+            # (and switching back while that cache lasts shows it again).
+            if shown_model != previous:
+                self._publish_cache_clock(current=True)
             # The editor still holds the previous model's capabilities: always re-send them.
             self._publish_model_capabilities(always=True)
         elif t == "list_models":
@@ -6430,6 +6523,7 @@ class Backend:
             self._emit_monitors()
             self._emit_agents()
             self._forget_ended_shells()
+            self._publish_cache_clock(current=True)      # a new chat: nothing cached yet
         elif t == "fork_session":
             # "Branch from here" keeps the conversation and hands it a new identity, so the
             # chat it came from stops where the branch began instead of being overwritten.
@@ -6473,6 +6567,7 @@ class Backend:
             self._emit_monitors()
             self._emit_agents()
             self._forget_ended_shells()
+            self._publish_cache_clock(current=True)      # an empty chat: nothing cached
         elif t == "resume_session":
             path = cmd.get("path")
             if not path and cmd.get("latest"):
@@ -6508,11 +6603,15 @@ class Backend:
                 # ended start again (once) and each says so.
                 self._bring_back_monitors(self.agent.restart_monitors)
                 self._await_previous_owner()
+                # The prompt cache's clock, with whether it went cold while the chat was closed. Last:
+                # it is a new event, and an older SDK's resume drain stops at the first it does not know.
+                self._publish_cache_clock(current=True, resumed=True)
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
         elif t == "get_history":
             self._emit_history(cmd["request_id"])
+            self._publish_cache_clock(current=True)
         elif t == "watch_pip_reports":
             # This client draws Pip reports: from now on this chat hears about them (see
             # _look_for_pip_reports). Until a client says so none is sent, and none is taken.
@@ -6910,6 +7009,8 @@ class Backend:
                 if has_persist_flag:
                     self.config._persist = persist_before
             self._emit_config(request_id)
+            if "subscription_engine" in values or "prompt_cache" in values:
+                self._publish_cache_clock(current=True)  # whose cache the next turn uses changed
             if "thinking" in values or "subscription_effort" in values:
                 active_engine = str(self.config.get("subscription_engine", "") or "").strip()
                 shown = ((str(self.config.get("subscription_effort", "") or "").strip() or "off")

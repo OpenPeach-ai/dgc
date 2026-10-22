@@ -418,7 +418,8 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None,
          workspace_identity: dict | None = None,
-         mode: str | None = None, plan_return_mode: str | None = None) -> bool:
+         mode: str | None = None, plan_return_mode: str | None = None,
+         prompt_cache: dict | None = None) -> bool:
     saved = False
     try:
         path = resolve_path(project_root, path)
@@ -478,6 +479,13 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
                     data["goal_active_since"] = active_since
         if usage:
             data["usage"] = {key: max(0, int(usage.get(key, 0) or 0)) for key in USAGE_KEYS}
+        if prompt_cache:
+            # The prompt cache's clock (dgc/cache_clock.py): when the last reply was sent, and how
+            # long the provider said its cache lasts. A reopened chat says whether it has gone.
+            from .cache_clock import clean as _clean_cache
+            cleaned = _clean_cache(prompt_cache)
+            if cleaned:
+                data["prompt_cache"] = cleaned
         if activity is not None:
             # Unlike the compacted transcript, these counters never shrink. Benchmarking and
             # telemetry can therefore take reliable per-turn deltas after any number of compactions.

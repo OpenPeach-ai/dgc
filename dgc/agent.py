@@ -2382,6 +2382,34 @@ class Agent(GoalLifecycle):
             owner, finished_client, result)
         return client
 
+    def _note_prompt_cache(self, client, result, sent_at: float) -> None:
+        """What this main-conversation reply says about the chat's prompt cache (dgc/cache_clock.py).
+
+        Only the main agent's own conversation counts: a sub-agent, a title or a summary sends another
+        prefix. A reply on a route whose cache DGC cannot see hides the clock again.
+        """
+        if self.depth:
+            return
+        from . import cache_clock
+        previous = getattr(self, "_cache_record", None)
+        record = cache_clock.record_from_reply(client, result, sent_at, previous)
+        if record is None and previous is None:
+            return
+        self._cache_record = record
+        self._publish_prompt_cache()
+
+    def _publish_prompt_cache(self, *, resumed: bool = False) -> None:
+        hook = getattr(self.ui, "prompt_cache", None)
+        if callable(hook):
+            try:
+                hook(getattr(self, "_cache_record", None), resumed=resumed)
+            except Exception:                    # noqa: BLE001 -- a clock never costs a turn
+                pass
+
+    def prompt_cache_record(self) -> dict | None:
+        """The chat's prompt-cache record (dgc/cache_clock.py), or None when DGC cannot know."""
+        return getattr(self, "_cache_record", None)
+
     def _ledger_usage(self, client, result) -> None:
         """Write one finished request to ~/.dgc/usage.sqlite; never raises into the turn.
 
@@ -3880,6 +3908,7 @@ class Agent(GoalLifecycle):
                     if read_timeout is not None and old_timeout is not None:
                         client.read_timeout = max(1, min(old_timeout, int(read_timeout)))
                     try:
+                        sent_at = time.time()       # a cache entry lives from the request's start
                         result = client.chat(safe_messages, tools=tools, reasoning_effort=effort,
                                              on_text=emit_text, on_thinking=emit_thinking,
                                              cancel=gate)
@@ -3902,6 +3931,8 @@ class Agent(GoalLifecycle):
                     if not (gate.superseded and not base_cancel.is_set() and result is not None
                             and getattr(result, "finish_reason", "") == "cancelled"
                             and self.client is not client):
+                        if result is not None and getattr(result, "finish_reason", "") != "cancelled":
+                            self._note_prompt_cache(client, result, sent_at)
                         break
                     # Nothing of that request reached the turn: send it again on the new model.
                     self._close_runs("cancelled", layers=("request",))
@@ -4174,6 +4205,7 @@ class Agent(GoalLifecycle):
         self._explicit_skill_instructions: dict[str, dict] = {}
         self._active_mcp_tools: set[str] = set()
         self._mcp_offered: set[str] = set()      # MCP tools this chat has offered (_tool_schemas)
+        self._cache_record = None                # the prompt cache's clock (dgc/cache_clock.py)
         self._mcp_query_text = ""
         self._draft_mcp_context: list[dict] = []
         self._pips_tools_loaded = False
@@ -5829,6 +5861,7 @@ class Agent(GoalLifecycle):
                         images=image_index,
                         agents=self.subagents.saved_state(),
                         mode=self.mode, plan_return_mode=self.plan_return_mode,
+                        prompt_cache=getattr(self, "_cache_record", None),
                         expected_revision=self._session_revision,
                         expected_exists=self._session_exists,
                         redact_secrets=redact_secrets,
@@ -6227,6 +6260,8 @@ class Agent(GoalLifecycle):
             self._active_tool_intents.clear()
             self._active_mcp_tools.clear()
             self._mcp_offered = set()
+            from .cache_clock import clean as _clean_cache
+            self._cache_record = _clean_cache(record.get("prompt_cache"))
             self._mcp_query_text = ""
             self._draft_mcp_context = []
             self._pips_tools_loaded = False
@@ -11770,6 +11805,15 @@ class Agent(GoalLifecycle):
         except Exception:
             pass
 
+    def _cache_compacted(self, result: dict) -> None:
+        if self.depth or not isinstance(result, dict) or result.get("status") not in ("compacted", "pruned"):
+            return
+        from . import cache_clock
+        record = getattr(self, "_cache_record", None)
+        if record:
+            self._cache_record = cache_clock.compacted(record)
+            self._publish_prompt_cache()
+
     def _publish_compaction(self, result: dict[str, object]) -> None:
         """Publish one truthful post-persistence outcome to any frontend.
 
@@ -11871,6 +11915,7 @@ class Agent(GoalLifecycle):
                 self._last_compaction = result
                 if notify:
                     self._publish_compaction(result)
+                self._cache_compacted(result)
                 return True
             self.messages = before
             self._restore_image_state(before_images)

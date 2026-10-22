@@ -1540,6 +1540,84 @@
     $("btn-ctx").setAttribute("aria-label", `Context used: ${pct} percent; open context details`);
     renderContextMenu();
   }
+  // ---- the prompt cache's clock (0.48, Work only; dgc/cache_clock.py) ----------------------------------
+  // Copied from Claude Code: unknown -> hidden; warm -> a clock and the whole minutes left ("4m"), changed
+  // at most once a minute (no seconds, no animation); gone -> the clock alone in the error colour. Shown
+  // only where the backend knows it from the provider itself (Anthropic's own cache report, a local
+  // Ollama's /api/ps), after a reply that used a cache. Reopening a chat whose cache has gone says so once.
+  let cacheClock = null, cacheClockTimer = null;
+  const cacheClockNoted = new Set();
+  function cacheIdle(ms) {
+    const minutes = Math.max(0, Math.floor(ms / 60000));
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ${minutes % 60}m`;
+    return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  }
+  function cacheTokens(n) {
+    return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+  }
+  function cacheWindow(now = Date.now()) {
+    const c = cacheClock;
+    if (!c || !["warm", "cold"].includes(c.state)) return { kind: "unknown" };
+    const anchor = Number(c.anchor_ms) || now, idleMs = Math.max(0, now - anchor);
+    const tokens = Number(c.tokens) > 0 ? Number(c.tokens) : undefined;
+    if (c.state === "cold") return { kind: "cold", reason: c.reason || "expired", idleMs, tokens, source: c.source };
+    if (!c.expires_ms) return { kind: "warm", kept: true };
+    const ttl = Number(c.ttl_s) > 0 ? Number(c.ttl_s) * 1000 : Infinity;
+    const left = Math.min(ttl, Number(c.expires_ms) - now);
+    if (left > 0) return { kind: "warm", msLeft: left, minutesLeft: Math.ceil(left / 60000) };
+    return { kind: "cold", reason: c.source === "ollama" ? "unloaded" : "expired", idleMs, tokens, source: c.source };
+  }
+  function cacheLeftText(win) {
+    if (win.kind !== "warm" || win.kept) return "";
+    return win.minutesLeft < 60 ? `${win.minutesLeft}m` : `${Math.floor(win.minutesLeft / 60)}h`;
+  }
+  function cacheTooltip(win) {
+    if (win.kind === "warm") {
+      if (win.kept) return "Prompt cache warm: Ollama keeps the model loaded.";
+      const m = win.minutesLeft;
+      return `Prompt cache warm, about ${m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`} left.`;
+    }
+    if (win.kind !== "cold") return "";
+    if (win.reason === "compacted") return "Prompt cache does not cover the compacted conversation.";
+    if (win.reason === "unloaded") return `Prompt cache expired: Ollama unloaded the model (idle ${cacheIdle(win.idleMs)}).`;
+    return `Prompt cache likely expired (idle ${cacheIdle(win.idleMs)}).`;
+  }
+  function cacheReopenNote(win) {
+    if (win.kind !== "cold") return "";
+    if (win.reason === "compacted") return "The conversation was compacted, so your next message will re-cache it.";
+    const what = win.tokens === undefined ? "the conversation" : `about ${cacheTokens(win.tokens)} tokens`;
+    return `Idle ${cacheIdle(win.idleMs)}. The prompt cache has likely expired, so your next message will re-cache ${what}.`;
+  }
+  function renderCacheClock() {
+    const node = $("cache-clock");
+    if (!node) return;
+    if (cacheClockTimer) { clearTimeout(cacheClockTimer); cacheClockTimer = null; }
+    const win = cacheWindow();
+    node.hidden = win.kind === "unknown";
+    node.dataset.cacheWindow = win.kind;
+    node.classList.toggle("cold", win.kind === "cold");
+    $("cache-clock-left").textContent = cacheLeftText(win);
+    const tip = cacheTooltip(win);
+    node.title = tip;
+    if (tip) node.setAttribute("aria-label", tip); else node.removeAttribute("aria-label");
+    // The next change is the next whole minute (or the moment it runs out): one wake-up, never a tick.
+    if (win.kind === "warm" && !win.kept) {
+      cacheClockTimer = setTimeout(renderCacheClock, win.msLeft - (win.minutesLeft - 1) * 60000 + 50);
+    }
+  }
+  function onCacheClock(ev) {
+    cacheClock = { ...ev };
+    renderCacheClock();
+    if (ev.resumed !== true) return;
+    const note = cacheReopenNote(cacheWindow());
+    const key = `${ev.session_id || ""}:${ev.anchor_ms || ""}:${ev.reason || ""}`;
+    if (note && !cacheClockNoted.has(key)) { cacheClockNoted.add(key); sysLine(note); }
+  }
+  function cacheClockOnSessionReset() { cacheClock = null; renderCacheClock(); }
+  // A cold clock's "idle" is read when you look at it, not counted on screen.
+  $("cache-clock")?.addEventListener("mouseenter", () => { if (cacheWindow().kind === "cold") renderCacheClock(); });
   function toggleContextMenu() {
     const menu = $("ctxmenu");
     if (!menu.hidden) { hideContextMenu(); return; }
@@ -6208,6 +6286,7 @@
         imagesOnReady(ev); retryOnReady(ev);
         break;
       }
+      case "cache_clock": onCacheClock(ev); break;
       case "context": {
         contextState = { ...contextState, ...ev };
         renderContext();
@@ -9188,6 +9267,7 @@
   // the dispatchers keep the order agents, images, reconnecting, options.
   function sessionResetHooks(kind) {
     pipSetupCards?.reset();
+    cacheClockOnSessionReset(kind);   // the incoming chat's backend says its own
     agentsOnSessionReset(kind); imagesOnSessionReset(kind); retryOnSessionReset(kind); askOnSessionReset(kind);
   }
   function backendExitHooks(msg) {

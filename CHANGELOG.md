@@ -23,6 +23,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   seconds to re-read the conversation before, and none do after. That guidance now rides on the message
   itself, in a `<dgc-turn-notes>` block before its clock line (hidden in history and `/export`), and an MCP
   tool offered once in a chat stays offered while its budget lasts.
+- **A clock for the prompt cache, in the editor's Work chat.** `dgc serve` sends a new `cache_clock` event:
+  `warm` with when the cache runs out, `cold` with why (expired, compacted, or Ollama unloaded the model), or
+  `unknown`. It is sent only where the provider says so itself: an Anthropic reply's own cache report and the
+  lifetime its write used, counted from the start of the request, and a local Ollama's own unload time for the
+  loaded model (`/api/ps`, looked at again while it runs, so an early unload shows). OpenAI, DeepSeek, Ollama
+  cloud models and subscription CLIs stay `unknown`. A saved chat keeps its clock, and reopening one sends it
+  with `resumed: true`. A compaction, a new chat or another model resets it.
 - **The context window follows the model.** The window you choose is remembered for each model, so switching to
   another model and back restores your 1M instead of the other model's guess. A model's own reported maximum (an
   Ollama cloud model's 1M, Anthropic's) now beats DGC's name-based guess (which said 64K for anything called

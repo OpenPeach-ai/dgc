@@ -1390,6 +1390,13 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .context-head > div { min-width: 0; display: grid; gap: var(--sp-1); }
 .context-kicker { color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; }
 .context-head strong { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+/* The prompt cache's clock, after the context meter (as Claude Code shows it): whole minutes in tabular
+   figures, the clock alone in the error colour once the cache has gone. Not a control: no hover fill. */
+.cache-clock { cursor: default; gap: 2px; }
+.cache-clock:hover, .cache-clock:active { background: transparent; }
+.cache-clock svg { display: block; width: 16px; height: 16px; flex: none; }
+.cache-clock .cache-clock-left { display: inline-block; font-variant-numeric: tabular-nums; }
+.cache-clock.cold { color: var(--vscode-errorForeground, var(--err-text)); }
 /* "256k · this model's max": the window in use is the model's own, smaller than the one you chose. */
 .context-max { color: var(--muted); font: var(--t-xs)/1.3 var(--sans); }
 #ctx-pct { color: var(--accent-text); font: var(--w-bold) var(--t-xl)/1 var(--mono); font-variant-numeric: tabular-nums; }

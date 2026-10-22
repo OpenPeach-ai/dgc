@@ -3397,6 +3397,26 @@ are counted once, as its own.
 - **Not counted:** turns delegated to a subscription CLI (Claude Code, Codex and the others) run in
   the vendor's own tool, so DGC never sees their token counts.
 
+## The prompt cache's clock
+
+In the editor's Work chat, a small clock after the context meter says how long the provider keeps
+this conversation cached, so the next message is read from the cache instead of at full price:
+
+- **4m** beside the clock: the cache is warm, about four minutes left. It changes once a minute,
+  never in seconds. Its tooltip says "Prompt cache warm, about 4 min left."
+- **The clock alone, in the error colour:** the cache has gone. The tooltip says why: likely
+  expired after so long idle, the conversation was compacted past it, or Ollama unloaded the model.
+- **No clock:** DGC cannot know. It is shown only where the provider says so itself, and only
+  after a reply used a cache: Anthropic's own cache report, and the lifetime its cache write used
+  (`prompt_cache_ttl`, 5 minutes or 1 hour, counted from the start of the request), and a local
+  Ollama's own unload time for the loaded model (`ollama_keep_alive`). OpenAI, DeepSeek, Ollama
+  cloud models and subscription CLIs do not publish one, so no clock is shown for them, though their
+  caches still work.
+
+Reopening a chat whose cache has gone adds one line to it: "Idle 2h 5m. The prompt cache has likely
+expired, so your next message will re-cache about 180k tokens." The clock is in Work only, not in
+ChatDGC or Pips. `dgc serve` sends it as a `cache_clock` event.
+
 ## Privacy
 
 Everything stays on this machine, in `~/.dgc/usage.sqlite` (readable only by you). No prompt or
