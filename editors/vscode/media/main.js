@@ -9117,7 +9117,8 @@
     if (r.outcome === "clear") return { text: "nothing found" };
     if (r.outcome === "checks_passed" || r.outcome === "live_clear") return { text: pipReportState(r).replace(/^finished · /, "") };
     if (r.outcome === "live_attention") {
-      return { text: pipReportState(r), bad: true, sev: "failed", what: String(r.summary || "It needs you.").slice(0, 300) };
+      // The summary says why in its own words: no "why" label before it.
+      return { text: pipReportState(r), bad: true, sev: "", what: String(r.summary || "It needs you.").slice(0, 300) };
     }
     if (r.outcome === "checks_failed") {
       return { text: pipReportState(r).replace(/^finished · /, ""), bad: true, sev: "failed",

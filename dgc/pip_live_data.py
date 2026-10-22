@@ -620,7 +620,7 @@ def fallback(commands) -> str:
         return ("The command ran and printed its output." if tally["total"] == 1
                 else f"All {tally['total']} commands ran and printed their output.")
     bad = [c for c in commands if c.get("status") != "ok"]
-    named = "; ".join(f"`{label(c['command'], 80)}` ({_status_words(c)})" for c in bad[:2])
+    named = "; ".join(f"{label(c['command'], 80)} ({_status_words(c)})" for c in bad[:2])
     more = f" and {len(bad) - 2} more" if len(bad) > 2 else ""
     if tally["ok"] == 0:
         return (f"The command didn't finish: {named}." if tally["total"] == 1

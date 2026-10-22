@@ -125,7 +125,7 @@ class GroundingTests(unittest.TestCase):
         self.assertEqual(live.outcome(failed), "live_attention")
         self.assertEqual(live.signature(failed), "live:attention:1:model")
         self.assertEqual(live.fallback(failed["commands"]),
-                         "1 of 2 commands ran. Not finished: `sqlite3 -readonly a.db 'select count(*) from orders'` (exit code 7).")
+                         "1 of 2 commands ran. Not finished: sqlite3 -readonly a.db 'select count(*) from orders' (exit code 7).")
 
 
 @unittest.skipUnless(BOX, "this computer's bubblewrap box")
