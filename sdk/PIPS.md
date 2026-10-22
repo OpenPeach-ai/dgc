@@ -5,7 +5,7 @@ lets trusted host code read and manage the Pips of an existing DGC profile throu
 `dgc serve`: list workspaces and Pips, read runs and reports, review proposals,
 setups and handoffs, queue runs, chat with a Pip, and review Personal app actions.
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 46** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 59** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 

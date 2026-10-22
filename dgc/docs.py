@@ -1180,6 +1180,17 @@ moment you need it. A `dgc -p` run ends with its turn, so there a background chi
 within the turn: one still running at the end is stopped. Foreground `task` (the default) still
 waits.
 
+One `task` call can also start several helpers at once: `tasks` lists 2 to 8 of them, each with
+its own `description`, `prompt` and `agent`, and they start together (some models send one `task`
+call per reply even when they mean several, so their helpers used to run one after another).
+Without `background`, the call returns when every helper has ended, with each one's result under
+its own description, in the order listed, a failed one included; with `background: true` it
+returns at once with every helper's id. They run up to `max_parallel_tasks` at a time and the rest
+wait for a free slot. Each has its own private checkout, and their changes land or are kept aside
+exactly as several `task` calls in one reply would. Stopping the turn stops every helper the call
+is waiting for; background helpers run on, as a single background task does, and stop from the
+agent map.
+
 A background child belongs to the chat that started it. Starting a new chat — `/new`, `/clear`, or
 the editor's New Session — stops any that are still running and says how many, because the chat
 that asked for the work is gone: a child left running would keep writing files and would fold its
@@ -2576,6 +2587,140 @@ See **Plugins, apps and MCP**.
   the prompt.
 """.strip()),
 
+    ("ChatDGC", "a chat for everything that isn't code, answered by your own model", """
+# ChatDGC
+
+ChatDGC is a chat app inside DGC for everything that isn't code: a question, a plan, a letter, a
+spreadsheet to make sense of. Your own model answers (the one you set in DGC, or another you pick for
+a chat), and your chats stay on your computer. It runs on its own engine, separate from Work (the
+coding sessions) and from Pips. The full guide is
+[docs/CHATDGC.md](https://github.com/OpenPeach-ai/dgc/blob/main/docs/CHATDGC.md).
+
+## Using it
+
+The DGC side bar has two tabs, **Chat** and **Work**. **New chat** opens a chat in an editor tab, as
+does **DGC: New Chat (ChatDGC)** in the Command Palette. One search box finds a chat by its name or
+anything said in it. Enter sends, Shift+Enter adds a line, Esc stops a reply. A message you send
+while a reply is still being written waits above the box and goes when the reply finishes.
+
+## What it does
+
+- **Looks things up, and cites them.** When an answer depends on facts it searches first, with the
+  web search set in **Settings → Web search** (the same one Work and your Pips use), and every claim
+  carries a pill that names its site and opens the page. **Sources** lists what it read and used.
+  Web search is on unless you turn it off there (**Search in ChatDGC**).
+- **Deep research.** **Deep research** in the box shows a plan you can edit (it starts on its own
+  after 15 seconds), reads its way through many pages as you watch, then writes a report whose every
+  citation was checked against its source. **Open report** shows it full screen; **Export…** saves it.
+- **Study mode.** **Study** makes the chat a tutor until you turn it off: it asks what you know,
+  teaches a step at a time, has you try, and checks with quick quizzes you answer with a click.
+- **Interactive answers.** Ask for a calculator, a converter, a timer or a quiz and it opens in a tab
+  beside the chat, locked down (no network, nothing from your chats or VS Code), in the editor's
+  colours. ChatDGC checks what it shows once it's open and fixes it if it's wrong. A card under the
+  reply has **Open** and **Show code**; **Widgets N** in the chat's header lists that chat's widgets,
+  and the Library's **Widgets** tab keeps them all.
+- **Questions.** When what comes next depends on something only you know, a reply asks with a card:
+  pick an answer or type your own; a card of up to four questions sends them all with one button.
+- **Files, data and charts.** Attach documents, images and spreadsheets, or paste something long.
+  Answers about a spreadsheet come from exact queries (**Analyzed the data** shows them), and replies
+  draw bar, line, area, pie and scatter charts you can hover, copy and save. Formulas are typeset.
+- **The canvas.** A longer piece you'll work on together opens in an editor beside the chat: edit it
+  yourself and ChatDGC reads your version and changes it with small edits you can undo, with every
+  version kept.
+- **Files it makes.** Ask for a document, PDF, spreadsheet or slides and the reply comes with the file.
+- **Projects and the Library.** A project keeps chats, files and instructions together. The Library
+  holds every file you attached or ChatDGC made, and every widget.
+- **Memory.** What you tell it about yourself is kept in your own words, in the one memory Work
+  sessions and Pips share; **Settings → Memory** shows it all, to edit or delete.
+- **Plugins.** Every plugin you turned on in **Settings → Plugins** works here: reads happen at once,
+  and a change waits on a card you approve (or hand to a Pip), unless you told that plugin it never
+  needs to ask. A reply that read from a plugin shows its logo.
+- **Your voice.** Dictate into the box, have a reply read aloud, or talk with voice mode, which
+  listens, answers aloud and listens again. The speech models run on your computer: install one in
+  **Settings → Voice**.
+
+## Where chats live
+
+One file per chat in `~/.dgc/chat`, readable only by you. Tick **Temporary** before your first
+message and the chat is never written down or listed. From your own program, the SDK's `dgc.chat()`
+reaches the same chats; see **SDK**.
+""".strip()),
+    ("Pips", "standing agents with one job each, beside your main chat", """
+# Pips
+
+Pips are standing agents that work beside your main DGC chat. A Pip has one job, written in plain
+words, and keeps it: reviewing a project's committed code every morning, running a fixed set of test
+commands, drafting documentation, or helping you with your own day. Everything a Pip does that
+matters is a proposal you review first. The full guide is
+[docs/PIPS.md](https://github.com/OpenPeach-ai/dgc/blob/main/docs/PIPS.md).
+
+## Project Pips and Personal Pips
+
+A **Project Pip** belongs to one Git project and reads its committed source: Scout explores, Lens
+researches a question, Rook reviews, Lock looks for security issues, Quill drafts documentation,
+Patch prepares a fix in a private copy, Pulse runs the exact commands you reviewed. A **Personal
+Pip** belongs to your DGC profile and helps with errands, plans and replies.
+
+Open the Pips view with the Pips button in the DGC chat view's title bar, or ask the main chat:
+"Review committed changes in this project every weekday at 9:00, and run once now." In the terminal,
+`dgc pips` does the same (`dgc pips create`, `list`, `run`, `stop`, ...).
+
+## They keep going
+
+Pips run on your computer, in the **runner**, with no Pips account and no hosted service. **Keep Pips
+running** (the Pips view's runner controls, or `dgc pips keep-running on`) starts the runner when you
+log in, so a morning schedule still runs after a restart; DGC turns it on the first time a Pip gets a
+schedule, a commit trigger or a routine. Up to four Pips work at once, with no daily token limit.
+
+- **A Pip speaks for its runs.** Each finished run is a message from the Pip in its own chat, in
+  short first-person words made from the run's report alone, so every number, file and title it says
+  is the report's: "I found 4 issues, 3 of them serious." All-clear runs in a row fold into one
+  message that updates itself. Reply to it there.
+- **Reports reach your chat.** A project reviewer's finished run appears as a card in the chat it
+  reports to: what it found and the worst of it, with **Open report**. A card never starts a turn.
+- **Routines.** A Personal Pip does things on its own at a time, on a new email that matches a
+  search, or before a calendar event. It suggests one as a card; nothing runs until you add it.
+
+## A Personal Pip's computer
+
+Every new Personal Pip gets its own computer: a browser and files in a sandbox, apart from yours,
+on Linux, in WSL 2 and on Apple-silicon Macs with macOS 26 or later. A Pip whose model can see uses
+the whole desktop on Linux (browser, Files, Terminal, an image editor, Documents and a PDF viewer); on
+a Mac it works in its browser.
+
+- **How much it asks.** Each Personal Pip has a level you set on its page: **Ask** (every submit and
+  send waits for you), **Approve for me** (routine steps such as a search, adding to a cart or saving a
+  draft go by themselves; orders, posting, deleting and sending to someone new still ask) or **Full
+  access**. New Pips start at Approve for me. Payments ask at every level.
+- **Always allow** lets one exact kind of action through from then on, for the same account, tool or
+  site; its page lists them, with **Stop allowing**. A payment never offers it.
+- **Saved logins.** Save a site's login once, with its authenticator key if it has one, and DGC types
+  it in, the one-time code too. The Pip never sees it.
+- **Borrowing your Chrome.** For one task that needs a site you're signed in to, a Pip can ask to use
+  your own Chrome. **Allow once** (Chrome asks too), and it works in a tab of its own, on the card's
+  sites only, then gives your Chrome back. It asks every time; there is no Always allow.
+- **You type the card.** Asked to pay, it fills in everything but the card and asks you to type it on
+  its screen and press Pay. A card number sent in its chat isn't sent.
+
+## Its brain, its memory, its tools
+
+- **Your Claude Code or Codex.** A Personal Pip can think with the Claude Code or Codex you're signed
+  in to, on your own plan. Their own tools stay off: the Pip's tools and rules come from DGC.
+- **Working notes and a daily log.** It keeps short notes on how its job goes, which you can edit;
+  DGC writes a daily log of its runs for you. What you tell it about yourself shows as
+  **Remembered**, with **Forget**. `/learn` in its chat turns what it just did into a skill you save.
+- **Apps and plugins.** Connect Gmail or a calendar from its chat; every plugin you turned on in
+  Settings is every Pip's to use, and for each one you choose what it may do without asking, from
+  Always ask to Never ask. A plugin that can move money always asks.
+
+## Where Pips run
+
+Linux and macOS, and Windows with DGC inside WSL 2: there, Windows starts the runner when you sign
+in, notifications are Windows' own, and your signed-in Chrome is the one on Windows. Patch and Pulse
+commands run under bubblewrap on Linux and Seatbelt on macOS, which DGC tells you is weaker. Pause one
+Pip, or stop them all with `dgc pips stop`. From your own program, the SDK's `session.pips` manages
+the Pips of your profile; see **SDK**.
+""".strip()),
     ("Pasted text",
      "a tall paste, a pasted link, and characters you cannot see",
      """
@@ -2663,6 +2808,13 @@ a stacked card. The recommended option is preselected — checked, highlighted, 
 a click on it, or Continue takes it. Skip sits beside Continue. Nothing is sent without your
 action. Keys that arrive within 400 ms of the question opening are ignored. If the composer still
 has focus on a draft, it says "Press Tab to answer" instead of stealing focus.
+
+When DGC asks several questions in one card, your pick stays marked for a moment, then the next
+question streams in and its options appear one after another; for a moment after the card moves on,
+a second click in the same spot or a held-down key can't answer the new question by accident.
+Answering the last question doesn't send: the card reads "all answered" and focuses **Submit**, so
+you can page back and check or change any answer first. A single question still sends on one click.
+With reduced motion on, the next question simply appears.
 
 ## In the terminal
 
@@ -3471,7 +3623,7 @@ deleted copy), then delete `usage.sqlite` together with its `usage.sqlite-wal` a
 `usage.sqlite-shm` companions; DGC creates a new one the next time it runs.
 """.strip()),
 
-    ("Web search", "DuckDuckGo by default; Brave, Tavily, or SearXNG if you set them", """
+    ("Web search", "DuckDuckGo by default; Brave, Tavily, Ollama or SearXNG if you set them", """
 # Web search
 
 The native agent gets a `web_search` tool when the request needs current information (versions,
