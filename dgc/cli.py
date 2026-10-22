@@ -2128,6 +2128,25 @@ def run_doctor(config: Config) -> int:
     if pips_note:
         c.print(f"  [yellow]![/yellow] {_markup_literal(pips_note)}", highlight=False, soft_wrap=True)
     c.print("")
+    # Ask DGC to fix keeps one copy of each project it fixed (dgc/pip_fix.py). Their size is said here
+    # and nowhere else; a copy nobody used for 14 days is removed by itself.
+    try:
+        from .pip_fix import doctor_rows, KEEP_UNUSED_S
+        fix_rows = doctor_rows()
+    except Exception:                                   # noqa: BLE001 -- a diagnostic, never the reason doctor fails
+        fix_rows = []
+    if fix_rows:
+        c.print(f"  [bold]fix copies[/bold] — one per project Ask DGC to fix worked in; removed after "
+                f"{KEEP_UNUSED_S // 86400} days unused")
+        for row in fix_rows:
+            size = row["bytes"]
+            shown = (f"{size / (1024 ** 3):.1f} GB" if size >= 1024 ** 3 else f"{size / (1024 ** 2):.0f} MB"
+                     if size >= 1024 ** 2 else f"{size // 1024} KB")
+            when = row.get("last_used")
+            days = f", last used {int((time.time() - when) // 86400)} days ago" if isinstance(when, (int, float)) else ""
+            c.print(f"    {shown:>9}  {terminal_safe_text(row['project'])}{days}", markup=False, highlight=False,
+                    soft_wrap=True)
+        c.print("")
     # subscription engines — run your own plan through the official first-party CLI
     from . import subscriptions as _subs
     active = str(config.get("subscription_engine", "")).strip().lower()

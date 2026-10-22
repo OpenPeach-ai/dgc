@@ -955,6 +955,35 @@ EVENT_FIELDS["live_sessions"] = {"items": _A(), "request_id": _S(False), "messag
 # it end. The editor offers Continue (`resume_turn`). The session's next turn clears it.
 EVENT_FIELDS["turn_interrupted"] = {"session_id": _S(), "cause": _S(), "at": _N()}
 
+# ---- Ask DGC to fix: a Pip report fixed in the background of its chat (dgc/pip_fix.py) ----------
+# Advertised as ready.capabilities.pip_fix = 1. `start_pip_fix {run_id}` starts a background
+# sub-agent in this chat's session for the report of that run (one the chat was shown, or one of its
+# project's Pips' runs: a card is then shown for it as for any report): no turn, the chat stays free.
+# The fix's record goes out as `pip_fix {fix}` when it starts and every time it changes (state,
+# step), a reply to start_pip_fix or undo_pip_fix carrying its request_id. `fix` is an open object
+# (a client reads the keys it knows): {fix_id, run_id, pip_id, name, pip_type, agent_id, state
+# (queued | preparing | running | applying | applied | partial | unchanged | not_applied | failed |
+# stopped | interrupted | undone), step?, queued_behind?, created_at, started_at?, ended_at?,
+# files?: [{path, kind, additions, deletions, counted}], held?: [{path, why}], merged?: [path],
+# tests?: {state: passed | failed | not_run, command?, note?}, summary?, message?, deps?: [{command,
+# state, note?}], undo?: {state: available | done | partial, restored?, kept?: [{path, why}]}}.
+# `agent_id` is the sub-agent's, as agent_started has it: its Watch is that agent's page, its Stop
+# `agent_control close`, and a permission it asks for carries a call_id starting with it. A report
+# card replayed by get_history carries its latest fix as `report.fix`. `list_pip_fixes` answers
+# `pip_fixes {items}` (this chat's fixes, newest first). `undo_pip_fix {fix_id}` puts back every file
+# the fix wrote that still holds what it left. `get_pip_fix_change {fix_id, path}` answers
+# `pip_fix_change` with what the file held before and after the fix (kind added | deleted | edited),
+# or, for a file it held back, the project's file and the fix's version (kind held). A refusal of any
+# of them is command_rejected with a reason and a message to show.
+COMMAND_FIELDS["start_pip_fix"] = {"run_id": _S(), "request_id": _S(False)}
+COMMAND_FIELDS["undo_pip_fix"] = {"fix_id": _S(), "request_id": _S(False)}
+COMMAND_FIELDS["list_pip_fixes"] = {"request_id": _S(False)}
+COMMAND_FIELDS["get_pip_fix_change"] = {"fix_id": _S(), "path": _S(), "request_id": _S()}
+EVENT_FIELDS["pip_fix"] = {"fix": _O(), "request_id": _S(False)}
+EVENT_FIELDS["pip_fixes"] = {"items": _A(), "request_id": _S(False)}
+EVENT_FIELDS["pip_fix_change"] = {"request_id": _S(), "fix_id": _S(), "path": _S(), "before": _S(),
+                                  "after": _S(), "kind": _S()}
+
 # ---- the window a server was started with (0.48) -------------------------------------------------
 # vLLM (--max-model-len), SGLang (--context-length) and llama.cpp (-c) size the context window when
 # they start; DGC reads it from the server and can't change it (a window of its own below it only

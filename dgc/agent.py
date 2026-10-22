@@ -110,7 +110,8 @@ _CONTROL_TOOLS_WITH_RULES = frozenset({"present_plan", "propose_options", "ask_u
 # Names `_handle_call` acts on but `EXECUTORS` does not contain: delegation, the artifact server,
 # and every MCP route (which are discovered at runtime, so they are matched by shape).
 _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_search",
-                                           "list_tasks", "wait_tasks", "use_pips", "troupe"})
+                                           "list_tasks", "wait_tasks", "use_pips", "troupe",
+                                           "request_project_file"})
 # Pips tools reach the model only after `use_pips` loads them (or the user points a turn at a
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
@@ -3198,6 +3199,10 @@ class Agent(GoalLifecycle):
         if not (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]
+        if getattr(self, "_fix_copy", None):
+            # A Pip fix's child (dgc/pip_fix.py): it may ask for an ignored file a test needs.
+            from .pip_fix import PROJECT_FILE_SCHEMA
+            schemas = [*schemas, PROJECT_FILE_SCHEMA]
         allow = getattr(self, "_agent_tool_allowlist", None)
         if allow:
             schemas = [tool for tool in schemas
@@ -4341,6 +4346,8 @@ class Agent(GoalLifecycle):
                 f"- Shared with the real project, NOT isolated: {', '.join(shared)}. What you write "
                 f"there changes the user's own copy immediately and no integration step can take it "
                 f"back, so treat those paths as read-only unless the task is about them.")
+        # A Pip fix's kept copy: what is installed in it and which ignored files it was given.
+        lines.extend(str(line) for line in (getattr(self, "_fix_notes", ()) or ()))
         return lines
 
     # ------------------------------------------------------ system prompt ---
@@ -9263,6 +9270,9 @@ class Agent(GoalLifecycle):
                             str(args.get("query", "")), args.get("limit", 8))
                     elif name == "use_pips":
                         out = self._load_pips_tools()
+                    elif name == "request_project_file":
+                        from . import pip_fix
+                        out = pip_fix.project_file_tool(self, args)
                     elif name == "troupe":
                         from . import troupe_agent
                         out = troupe_agent.start(self, args, call_id)
@@ -9933,11 +9943,13 @@ class Agent(GoalLifecycle):
                                    unattended: bool = False,
                                    checker_box: dict | None = None,
                                    tool_env: dict | None = None,
-                                   secrets=()) -> tuple[str, str, str]:
+                                   secrets=(),
+                                   prepare_child=None) -> tuple[str, str, str]:
         """Run one child in an already-selected checkout.
 
         `tools` narrows what the child is offered (a troupe's read-only agents); `unattended` makes it refuse steps
-        that would ask, as a monitor turn's children do (nobody answers a troupe's hundred cards).
+        that would ask, as a monitor turn's children do (nobody answers a troupe's hundred cards). `prepare_child`
+        is called with the fully wired child just before it runs (a Pip fix tells it about its kept copy).
 
         Returns ``(failure, summary, start_error)``. It deliberately does not inspect, integrate,
         retain, or clean the checkout: the parent coordinator performs those operations in stable
@@ -10064,6 +10076,8 @@ class Agent(GoalLifecycle):
                     registry.running(agent_id, model=str(getattr(sub.client, "model", "") or ""))
                 if adef and adef.effort:
                     sub._effort_override = adef.effort
+                if prepare_child is not None:
+                    prepare_child(sub)
                 if handle is not None:
                     # Publish only a FULLY wired child: whatever reads this later expects the cancel
                     # token, registry, checkpoints, client and effort above to be in place.
