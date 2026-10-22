@@ -568,6 +568,21 @@ def _check_api52_fields(values: Mapping[str, Any]) -> None:
         raise DGCConfigError('as_file must be true or false')
 
 
+def _check_live_plan(plan: Any) -> None:
+    """API 60: a live-data Pip's live_plan, null or {schema_version: 1, commands: [1-6 command lines]}. The backend
+    refuses a line that writes; this checks only the shape."""
+    if plan is None:
+        return
+    commands = plan.get('commands') if isinstance(plan, Mapping) else None
+    if (not isinstance(plan, Mapping) or set(plan) != {'schema_version', 'commands'} or plan['schema_version'] != 1
+            or type(plan['schema_version']) is not int or type(commands) is not list or not 1 <= len(commands) <= 6
+            or any(type(line) is not str or not line.strip() or len(line) > 1000
+                   or any(ord(c) < 32 or ord(c) == 127 for c in line) for line in commands)
+            or len(set(commands)) != len(commands)):
+        raise DGCConfigError('live_plan is None or {schema_version: 1, commands: [1 to 6 distinct command lines of up '
+                             'to 1,000 characters]}')
+
+
 def _check_login_save(values: Mapping[str, Any]) -> None:
     """save_pip_login's shape, said without ever repeating what it carries."""
     for key in ('pip_id', 'username', 'password'):
@@ -777,6 +792,11 @@ class Pips:
         if (command == 'propose_pip_update' and isinstance(values.get('changes'), dict)
                 and 'computer_plan' in values['changes'] and version < 42):
             raise DGCUnsupportedError('Pip computers require Pips API 42 or newer')
+        if command == 'propose_pip_update' and isinstance(values.get('changes'), dict) and 'live_plan' in values['changes']:
+            # API 60: a live-data Pip's approved read-only commands (a project Pulse's live_plan).
+            if version < 60:
+                raise DGCUnsupportedError("A live-data Pip's commands require Pips API 60 or newer")
+            _check_live_plan(values['changes']['live_plan'])
         plan = values.get('changes', {}).get('app_plan') if isinstance(values.get('changes'), dict) else None
         if command == 'propose_pip_update' and isinstance(plan, dict) and plan.get('schema_version') == 3 and version < 39:
             raise DGCUnsupportedError('Additional app searches require Pips API 39 or newer')

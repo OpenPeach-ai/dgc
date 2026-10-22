@@ -155,6 +155,12 @@ def _clip(text, limit: int) -> str:
     return value if len(value) <= limit else value[:limit - 1].rstrip() + "…"
 
 
+def _clip_block(text, limit: int) -> str:
+    """Like _clip, but a command's output keeps its lines: a table read as one line is no table."""
+    value = str(text or "").rstrip()
+    return value if len(value) <= limit else value[:limit - 1].rstrip() + "…"
+
+
 def _alive(pid) -> bool:
     try:
         pid = int(pid)
@@ -321,7 +327,7 @@ def run_brief(run_id: str, *, session_id: str = "", project_root=None, secrets=(
         # A live-data Pip's report: what its approved read-only commands printed, read for the fixer as data.
         brief["live"] = {"summary": _clip(live.get("summary"), 600), "commands": [
             {"command": _clip(c.get("command"), 300), "status": c.get("status"), "exit_code": c.get("exit_code"),
-             "output": _clip(c.get("output"), 1500), "note": _clip(c.get("note"), 300)}
+             "output": _clip_block(c.get("output"), 1500), "note": _clip(c.get("note"), 300)}
             for c in (live.get("commands") or [])[:6] if isinstance(c, dict)]}
     return redact_value(brief, secrets)
 
