@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A pasted image's chip shows its file name,** cut to fit, as Claude Code's does; its type, size and
+  dimensions are on hover. A screenshot copied straight to the clipboard has no name of its own and still
+  reads like "PNG · 1920×1080". The sent prompt's chip reads the same.
+
 - **Edited files lists only files that were edited.** The card at the end of a turn listed a script's printed
   headers as files (+0 −0, with an Undo), and a `git diff` a command printed as if the turn had made those
   changes. It now lists what DGC's file tools, or a subscription engine's own edit tools, changed; other

@@ -7437,6 +7437,13 @@
     recordComposerEdit(() => { clearComposer(); attachments.length = 0; });
     renderAtts(); persistDraft(); setSending(true); scroll();
   }
+  // An image's own file name, or "" when all it has is a placeholder: "Image" (an older draft's
+  // label), or the "image.png" a browser gives a screenshot copied straight to the clipboard, which
+  // would read the same on every chip. Those keep their type and size ("PNG · 1920×1080").
+  function imageFileName(label) {
+    const text = String(label || "").replace(/^📷\s*/, "").trim();
+    return /^(image|iphone photo|image\.(png|jpe?g|gif|webp|bmp|heic|heif))$/i.test(text) ? "" : text;
+  }
   // An attached image is shown, not named: the same tile the sent prompt carries, so you can see
   // what you are about to send (and that it is the right screenshot) before you send it.
   function imageAttachmentChip(a, remove) {
@@ -7445,16 +7452,17 @@
     const caption = el("span", "image-caption");
     const kind = (String(a.data || "").match(/^data:image\/([a-z]+)/i) || [])[1];
     const name = kind ? kind.toUpperCase() : "Image";
+    const file = imageFileName(a.label);
     const size = imageSize(a.bytes);
-    caption.textContent = name;
-    chip.title = [a.heic ? "iPhone photo, sent as a JPEG" : name, size].filter(Boolean).join(" · ");
+    caption.textContent = file || name;
+    chip.title = [file, a.heic ? "iPhone photo, sent as a JPEG" : name, size].filter(Boolean).join(" · ");
     if (a.data && !a.heic) {
       const img = el("img"); img.alt = ""; img.decoding = "async"; img.src = a.data;
       img.addEventListener("load", () => {
-        // The caption stays short enough to read; the full details are the chip's hover label.
+        // The caption is the file's name, cut to fit; type, size and dimensions are the hover label.
         const dims = img.naturalWidth ? `${img.naturalWidth}×${img.naturalHeight}` : "";
-        caption.textContent = [name, dims].filter(Boolean).join(" · ");
-        chip.title = [name, dims, size].filter(Boolean).join(" · ");
+        caption.textContent = file || [name, dims].filter(Boolean).join(" · ");
+        chip.title = [file, name, dims, size].filter(Boolean).join(" · ");
       });
       tile.appendChild(img);
     } else {
@@ -8019,10 +8027,13 @@
             sysLine("The pasted image could not be encoded safely.", true); return;
           }
           // An iPhone photo is labelled for what it is; DGC turns it into a JPEG for the model.
+          // The chip shows the file's own name, as Claude Code's does ("Screenshot 2026-10-22 at
+          // 17.11.png"); see imageFileName for a screenshot copied straight to the clipboard.
+          const fileName = String(file.name || "").trim();
           const image = heic
-            ? { label: "iPhone photo", img: true, heic: true, bytes: file.size,
+            ? { label: fileName || "iPhone photo", img: true, heic: true, bytes: file.size,
                 data: r.result.replace(/^data:[^;,]*(;[^,]*)?;base64,/, `data:${String(file.type || "").toLowerCase() === "image/heif" ? "image/heif" : "image/heic"};base64,`) }
-            : { label: "Image", img: true, data: r.result, bytes: file.size };
+            : { label: fileName || "Image", img: true, data: r.result, bytes: file.size };
           if (owner.session === draftSession) {
             recordComposerEdit(() => attachments.push(image)); renderAtts();
           } else {
@@ -11974,7 +11985,9 @@
     chip.title = failure ? failure[2] : [record.name, dims, imageSize(record.bytes)].filter(Boolean).join(" · ");
     const kind = (String(record.src || "").match(/^data:image\/([a-z]+)/i) || [])[1];
     const caption = el("span", "image-caption");
-    const describe = () => { caption.textContent = failure ? failure[1] : [kind ? kind.toUpperCase() : "Image", imageDims(record)].filter(Boolean).join(" · "); };
+    // A sent image's chip reads as it did in the composer: its file name when it has one.
+    const describe = () => { caption.textContent = failure ? failure[1]
+      : (record.compact && imageFileName(record.name)) || [kind ? kind.toUpperCase() : "Image", imageDims(record)].filter(Boolean).join(" · "); };
     const tile = el("span", "image-tile");
     if (record.state === "ready") {
       const img = el("img"); img.alt = ""; img.decoding = "async";

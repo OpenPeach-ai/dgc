@@ -784,7 +784,7 @@ for (const kind of ["image", "file"]) {
         assert.equal(m.height, composer.height, `its chip is the composer's height (${m.height}px sent, ${composer.height}px in the composer)`);
         assert.equal(m.tile, 28, "the image is a 28px tile, as in the composer");
         assert.equal(m.tile, composer.tile);
-        assert.equal(m.caption, "PNG · 1920×1080", "beside its type and size");
+        assert.equal(m.caption, "shot.png", "beside its file's name, as in Claude Code");
         assert.equal(m.caption, composer.caption, "the same words as in the composer");
         await s.page.evaluate(() => window.__pin.heads().at(-1).querySelector(".image-chip").click());
         assert.equal(await s.page.evaluate(() => { const v = document.getElementById("image-viewer"); return !!v && !v.hidden && !!v.querySelector("img"); }), true, "a click opens the image");
@@ -793,3 +793,33 @@ for (const kind of ["image", "file"]) {
     } finally { await s.page.close(); }
   });
 }
+
+// A pasted image's chip names its file, as Claude Code's does (founder, 2026-10-22): the name cut to
+// fit, the full name with its type, size and dimensions on hover. An image with no file name keeps
+// its type and size.
+test("a pasted image's chip shows its file name, cut to fit", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openPage({ width: 833, height: 793 });
+  try {
+    const paste = (name) => s.page.evaluate(async (name) => {
+      const canvas = document.createElement("canvas"); canvas.width = 1920; canvas.height = 1080;
+      const blob = await new Promise((done) => canvas.toBlob(done, "image/png"));
+      const data = new DataTransfer(); data.items.add(new File([blob], name, { type: "image/png" }));
+      document.getElementById("input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, name);
+    const long = "Screenshot 2026-10-22 at 17.11.42 of the dispatch screen.png";
+    await paste(long);
+    await paste("image.png");   // a screenshot copied to the clipboard: the browser's placeholder name
+    await s.page.waitForFunction(() => document.querySelectorAll("#attachments .image-att-chip img").length === 2
+      && [...document.querySelectorAll("#attachments .image-att-chip img")].every((img) => img.complete && img.naturalWidth));
+    await s.settle();
+    const chips = await s.page.evaluate(() => [...document.querySelectorAll("#attachments .image-att-chip")].map((chip) => {
+      const caption = chip.querySelector(".image-caption");
+      return { caption: caption.textContent, title: chip.title, cut: caption.scrollWidth > caption.clientWidth };
+    }));
+    assert.equal(chips[0].caption, long, "the file's own name");
+    assert.equal(chips[0].cut, true, "cut to the chip's width with an ellipsis, not wrapped");
+    assert.ok(chips[0].title.startsWith(`${long} · PNG · 1920×1080`), chips[0].title);
+    assert.equal(chips[1].caption, "PNG · 1920×1080", "a clipboard screenshot has no name of its own: its type and size, as before");
+  } finally { await s.page.close(); }
+});
