@@ -1094,15 +1094,16 @@ export class DgcBackend extends EventEmitter {
     if (record && !record.cause) {
       record.cause = cause;
     }
+    const keep = !!p && !!this.detach && teardownKeepsWork(cause);
+    this.detach = undefined;
     if (p) {
-      this.emit("teardown", cause, p.pid);
+      // `keep`: the process is not being stopped; it carries on with no window (the log says so).
+      this.emit("teardown", cause, p.pid, keep);
     }
     this.emit("disposed");
     if (!p) {
       return;
     }
-    const keep = !!this.detach && teardownKeepsWork(cause);
-    this.detach = undefined;
     if (keep) {
       // The window is going, not the work. The backend saves and exits by itself once its work is done
       // (2 minutes after it, 12 hours at most), and a window that comes back reattaches to it.

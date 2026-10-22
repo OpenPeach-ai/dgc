@@ -2855,8 +2855,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     serve.on("stderr", (line: string) => this.backendNote(line));
     serve.on("spawned", (pid?: number) => this.backendNote(`[dgc serve started: pid ${pid ?? "?"}, host pid ${process.pid}]`));
     serve.on("launch_failed", (message: string) => this.backendNote(`[dgc serve failed to start: ${message}]`));
-    serve.on("teardown", (cause: string, pid?: number) => {
-      this.backendNote(`[extension: stopping the backend — ${cause}${pid ? ` (pid ${pid})` : ""}]`);
+    serve.on("teardown", (cause: string, pid?: number, kept?: boolean) => {
+      this.backendNote(kept
+        ? `[extension: the window is going; dgc serve keeps its work running with no window — ${cause}${pid ? ` (pid ${pid})` : ""}]`
+        : cause.startsWith(MOVED_CAUSE)
+        ? `[extension: this session is open in another window now; dgc serve${pid ? ` pid ${pid}` : ""} keeps running there]`
+        : `[extension: stopping the backend — ${cause}${pid ? ` (pid ${pid})` : ""}]`);
     });
     serve.on("exit", (code: number | null, signal?: string | null, info?: ChildExitInfo) => {
       const facts: ChildExitInfo = info || { uptimeMs: serve.uptimeMs, framesWritten: 0 };
@@ -3072,7 +3076,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  starts a process of its own, which relays to that one, rather than a chat on this window's. */
   private liveElsewhere(session: string): boolean {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(session)) { return false; }
-    return this.liveSessionRows.some((row) => row && !row.here && row.detachable
+    // The Sessions home asks for the list (its Settings and its Sessions marks); a tab reads the home's.
+    const rows = (this.tab?.host ?? this).liveSessionRows;
+    return rows.some((row) => row && !row.here && row.detachable
       && Array.isArray(row.sessions) && row.sessions.some((item: any) => item?.session_id === session));
   }
 
@@ -7569,7 +7575,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     else { this.readAloud?.release(this.micChat); this.readAloud?.release(this.micPips); this.dictation?.dispose(); }
     // Note first, dispose the channel after: a panel teardown is one of the three things that can
     // end a turn, and it is the one the user never sees.
-    this.backendNote("[extension: panel disposed — stopping the backend]");
+    this.backendNote("[extension: panel disposed — stopping the backend, or leaving a session's work running with no window]");
     this.intentionalShutdown = true;                 // shutting down; do not respawn behind us
     if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }
     if (this.changesRefreshTimer) { clearTimeout(this.changesRefreshTimer); }

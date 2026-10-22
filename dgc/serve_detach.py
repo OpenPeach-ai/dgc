@@ -673,7 +673,8 @@ class Switchboard:
                 previous.close()
         took = "from a window that was still connected" if previous is not None else (
             f"after {_duration(windowless_s)} with no window")
-        self.log(f"attached by {conn.client or 'a window'} ({'steal: user' if mode == 'steal' else 'steal: auto'}), {took}")
+        how = {"steal": "Open here", "restore": "a reload"}.get(mode, "opened from a list")
+        self.log(f"attached by {conn.client or 'a window'} ({how}), {took}")
         self.host.announce_peers()
         threading.Thread(target=self._read_connection, args=(conn,), name=f"dgc-attach-{conn.id}",
                          daemon=True).start()

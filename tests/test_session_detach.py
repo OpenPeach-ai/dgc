@@ -914,6 +914,14 @@ class DetachIntegrationTests(unittest.TestCase):
         snap_b = b.wait(lambda e: e.get("type") == "history")
         self.assertTrue(snap_b["complete"])
         self.assertTrue(turn_text([], 0, snap_b).startswith("a0.a1.a2.a3."))
+        # The newer per-chat state comes back with the repaint too, exactly once: the prompt cache's
+        # clock, as the last word before the snapshot (0.48), for this session.
+        clocks = [e for e in b.events if e.get("type") == "cache_clock"]
+        self.assertEqual(len(clocks), 1, [e.get("type") for e in b.events])
+        self.assertEqual(clocks[0]["session_id"], session_id)
+        self.assertLess(clocks[0]["seq"], snap_b["seq"])
+        self.assertEqual(sum(1 for e in b.events if e.get("type") == "ready"), 1)
+        self.assertEqual(sum(1 for e in b.events if e.get("type") == "session_live"), 1)
         ask_b = b.wait(lambda e: e.get("type") == "permission_request", 60)
         # B goes too, with the approval open.
         b.send({"type": "detach"})
