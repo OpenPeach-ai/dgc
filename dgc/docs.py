@@ -2451,6 +2451,16 @@ console.log(result.status, result.finalText);
 await dgc.close();
 ```
 
+## Pips and ChatDGC
+
+With `inherit_user_state=True` the same client reaches the rest of your DGC profile.
+`session.pips` lists its Pips, reads their runs and what each run posted in its own chat
+(`run_posts`), and starts or changes one with `mutate`, which needs your code's `approved=True` on
+that call. [sdk/PIPS.md](https://github.com/OpenPeach-ai/dgc/blob/main/sdk/PIPS.md) lists every call
+and field with the Pips API it needs, such as a live-data Pip's `changes.live_plan` (API 60).
+`DGC.chat()` is ChatDGC from your program: `ask`, `stream`, `research` and `answer`, with numbered
+sources. TypeScript has the same API.
+
 Product page: [vibedgc.com/sdk](https://vibedgc.com/sdk/). Source: [github.com/OpenPeach-ai/dgc](https://github.com/OpenPeach-ai/dgc) (`sdk/`).
 """.strip()),
     ("In your editor", "the VS Code and Cursor panel, and what a finished turn gives you", """
