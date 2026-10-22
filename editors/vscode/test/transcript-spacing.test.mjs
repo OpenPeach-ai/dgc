@@ -979,12 +979,12 @@ for (const width of WIDTHS) {
         return [key, hit ? [hit.above, hit.below] : null];
       }));
       // Answered, the turn folds its work into its "Worked for" row (work-fold.test.mjs). What stays -- the
-      // steered prompts, the permission card, the monitor card, the error line, the answer -- is spaced by
-      // what is still drawn beside it, never by a folded step: a prompt whose prose or tool line folded
-      // away now has the next prompt beside it, 24px, as two prompts in a row always are.
+      // steered prompts, the permission card and its "Allowed once", the monitor card, the error line, the
+      // answer -- is spaced by what is still drawn beside it, never by a folded step: a prompt whose prose
+      // or tool line folded away now has the next prompt beside it, 24px, as two prompts in a row always are.
       const folded = await measure(panel);
       assertSpacing(folded, `steered beside everything, folded, at ${width}px`);
-      assert.deepEqual(spaced(folded), { S1: [24, 24], S2: [24, 24], S3: [24, 16], S4: [24, 24], S5: [24, 16], S6: [24, 16],
+      assert.deepEqual(spaced(folded), { S1: [24, 24], S2: [24, 24], S3: [24, 16], S4: [24, 16], S5: [24, 16], S6: [24, 16],
         S7: [24, 24], S8: [24, 16], S9: [24, 16] }, "folded: above/below each steered prompt");
       await panel.page.evaluate(() => document.querySelector("#log .msg.dgc.work-folded > .work-toggle").click());
       await panel.settle(); await toBottom(panel); await panel.settle();

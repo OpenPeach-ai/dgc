@@ -3737,12 +3737,15 @@
   // beside it instead. A background sub-agent still working when the turn folded keeps its line on
   // screen; done, the line goes into the fold the next time the turn folds (the next turn's answer, or
   // a click), never at the moment it finishes, under a reader who may be reading beside it. A reload
-  // draws it folded at once.
-  function paintWorkFold(block) {
+  // draws it folded at once. `keep`: what this fold already decided stays as it was; only a block it
+  // has not seen (a sub-agent line the agents snapshot draws after a reload) is decided now.
+  const workFoldSeen = new WeakSet();
+  function paintWorkFold(block, keep = false) {
     const shown = [];
     for (const node of block.children) {
       if (node.matches(".role")) continue;
-      const step = isWorkStep(node);
+      const step = keep && workFoldSeen.has(node) ? node.classList.contains("work-step") : isWorkStep(node);
+      workFoldSeen.add(node);
       node.classList.toggle("work-step", step);
       if (!step) shown.push(node);
     }
@@ -3753,15 +3756,17 @@
     });
   }
   function foldTurnWork(block, act) {
-    if (![...block.children].some(isWorkStep)) return;      // nothing to fold: the row stays a plain line
-    act.classList.add("work-toggle");
-    act.setAttribute("role", "button");
-    act.setAttribute("aria-expanded", "false");
-    act.tabIndex = 0;
-    const role = block.querySelector(":scope > .role");
-    if (role) role.after(act); else block.prepend(act);
-    block.classList.add("has-work-fold", "work-folded");
-    paintWorkFold(block);
+    // Nothing to fold (the answer was all the turn did): the row stays a plain line.
+    if ([...block.children].some(isWorkStep)) {
+      act.classList.add("work-toggle");
+      act.setAttribute("role", "button");
+      act.setAttribute("aria-expanded", "false");
+      act.tabIndex = 0;
+      const role = block.querySelector(":scope > .role");
+      if (role) role.after(act); else block.prepend(act);
+      block.classList.add("has-work-fold", "work-folded");
+      paintWorkFold(block);
+    }
     if (replaying) return;      // an older page drawn into the chat leaves alone what you opened below it
     // A turn opened to read folds again once the next one has answered, and one whose sub-agent has
     // since finished takes its line in.
@@ -10390,6 +10395,10 @@
     }
     line.node.dataset.agentIds = line.ids.join(" ");
     line.node.setAttribute("aria-label", members.length === 1 ? "Sub-agent" : "Sub-agents");
+    // A line drawn into a turn that has already folded its work (after a reload the agents snapshot draws
+    // them once the history has): the fold decides it now, as it would have when the turn ended.
+    const host = line.node.parentElement;
+    if (host?.classList.contains("has-work-fold")) paintWorkFold(host, true);
     // "started working" turns to "running" on its own: one timer for the line, at the latest window's
     // end, so agents started a few milliseconds apart change together.
     clearTimeout(line.timer); line.timer = 0;
