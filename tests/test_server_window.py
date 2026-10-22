@@ -414,6 +414,17 @@ class TheEditorIsTold(IsolatedHome):
         self.assertEqual(len(self.frames("server_window")), 2, "nothing changed: nothing said again")
         self.assertEqual(self.frames("context")[-1]["size"], 16_384, "below it, your own window decides")
 
+    def test_a_subscription_cli_running_the_turns_is_not_the_server_s_window(self):
+        self.server.served_models = [VLLM_ENTRY]
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        host.default.agent.client.prepare_model()
+        host.dispatch({"type": "server_window", "request_id": "w1"})
+        host.dispatch({"type": "set_config", "request_id": "s1", "values": {"subscription_engine": "codex"}})
+        self.assertEqual(self.frames("command_rejected"), [])
+        self.assertEqual([f["window"] for f in self.frames("server_window")], [8192, 0])
+        host.dispatch({"type": "set_config", "request_id": "s2", "values": {"subscription_engine": ""}})
+        self.assertEqual([f["window"] for f in self.frames("server_window")], [8192, 0, 8192])
+
     def test_a_server_that_names_none_is_window_zero(self):
         self.server.served_models = [{"id": "m", "owned_by": "organization_owner"}]
         host = self.host(model="m", base_url=self.server.url + "/v1")

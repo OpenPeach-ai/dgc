@@ -7154,6 +7154,8 @@ class Backend:
             self._emit_config(request_id)
             if "subscription_engine" in values or "prompt_cache" in values:
                 self._publish_cache_clock(current=True)  # whose cache the next turn uses changed
+            if "subscription_engine" in values and getattr(self, "_server_window_wanted", False):
+                self._emit_server_window()               # a subscription CLI's window is not the server's
             if "thinking" in values or "subscription_effort" in values:
                 active_engine = str(self.config.get("subscription_engine", "") or "").strip()
                 shown = ((str(self.config.get("subscription_effort", "") or "").strip() or "off")
