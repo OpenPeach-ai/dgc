@@ -220,8 +220,17 @@ export class DgcBackend extends EventEmitter {
   /** Set before start(): the session to reattach to if a backend is still running it. A later start of
    *  this same instance (a restart on the next command) asks again, automatically. */
   attach: { session: string; mode: AttachMode } | undefined;
-  /** What `ready` offered for running with no window; undefined from a CLI that cannot. */
+  /** Set by the owner before start(): a window that goes should leave this backend's work running (a
+   *  session's tab). Off, it is today's backend: the window going ends it. */
+  keepWorkRunning = false;
+  /** Set once this backend opted in to running with no window (ready offered `detach` and the owner
+   *  wants it); undefined otherwise. Only then does a window's teardown say `detach` instead of stopping. */
   detach: DetachCapability | undefined;
+  /** What ready.capabilities.detach said, opted in or not: Settings shows its numbers. */
+  detachOffer: DetachCapability | undefined;
+  /** The other chats a reattached backend already holds, as it announced them (chat_opened, request_id
+   *  "attached"): a slot adopts one of these instead of opening a chat (OpenedChat.adopt). */
+  readonly attachedOpened = new Map<string, DgcEvent>();
   /** Set when this child is a window reattached to a running backend: what it was doing. */
   attached: AttachedState | undefined;
   /** The session moved to another window ("Open here" there): this child was released, not stopped. */
@@ -277,7 +286,9 @@ export class DgcBackend extends EventEmitter {
     let child: ChildProcessWithoutNullStreams;
     this.earlyStderr = "";
     this.detach = undefined;
+    this.detachOffer = undefined;
     this.attached = undefined;
+    this.attachedOpened.clear();
     this.moved = false;
     // A CLI that keeps sessions running reads these and relays to the backend still running this
     // session (dgc/serve_relay.py); an older one ignores them. Asked once with the caller's mode; a
@@ -588,9 +599,10 @@ export class DgcBackend extends EventEmitter {
         // from here on leaves the work running. Validated like any command; gated on the capability, so
         // an older CLI is never sent a command it would reject.
         const detach = (ev as any).capabilities?.detach;
-        this.detach = detach && typeof detach === "object" && Number(detach.version) >= 1 ? detach : undefined;
+        this.detachOffer = detach && typeof detach === "object" && Number(detach.version) >= 1 ? detach : undefined;
         const attached = (ev as any).capabilities?.attached;
         this.attached = attached && typeof attached === "object" && Array.isArray(attached.chats) ? attached : undefined;
+        this.detach = this.detachOffer && this.keepWorkRunning ? this.detachOffer : undefined;
         if (this.detach) { this.sendSetup({ type: "set_detach", keep_running: true } as DgcCommand); }
         // Renderer-sourced liveness, and deliberately NOT a replacement for the timer above. That
         // timer says "this extension host is alive", which is exactly what an orphaned host also
@@ -680,6 +692,11 @@ export class DgcBackend extends EventEmitter {
       return false;
     }
     if (chat) {
+      // A reattached backend introduces the other chats it holds: a slot adopts one rather than
+      // opening a chat of its own (OpenedChat.adopt), and it may only come asking after this frame.
+      if (this.attached && ev.type === "chat_opened" && (ev as any).request_id === "attached") {
+        this.attachedOpened.set(chat, ev);
+      }
       // Another chat's event. The listener on "event" is the chat this backend started with, and a
       // second chat's tokens must never land in its transcript: they go to that chat's channel.
       this.emit("chat-event", chat, ev);

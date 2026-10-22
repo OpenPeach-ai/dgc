@@ -929,9 +929,33 @@ class _EditorLiveness:
             self.idle_for = time.monotonic() - self._last
             return self.idle_for > self.after
 
+    def window_silence(self) -> tuple[float, str]:
+        """How long the window behind this connection has given no sign of being there, and which
+        sign stopped. Any traffic counts, until a chat panel has spoken: from then on the panel's own
+        word is what counts, unless the host said the view was closed (a panel the user hid), which
+        an extension host left behind by a reload never does. 0.0 for an editor that never pinged."""
+        with self._lock:
+            if not self.armed:
+                return 0.0, ""
+            now = time.monotonic()
+            quiet = now - self._last
+            renderer, closed = self._last_renderer, self._view_closed_at
+        if renderer is not None and (closed is None or closed < renderer) and now - renderer > quiet:
+            return now - renderer, "its window's chat panel stopped answering"
+        return quiet, "its editor stopped answering"
+
+    def _owned_by_switchboard(self) -> bool:
+        """An editor that opted in to running without a window: dgc/serve_detach.py decides how long
+        this process lives (it makes a silent window's connection windowless, and the windowless rules
+        take it from there), so this watchdog never ends it on its own."""
+        board = getattr(self.backend, "switchboard", None)
+        return bool(getattr(board, "opted_in", False))
+
     def check(self) -> bool:
         """One evaluation. Returns True when it ended the backend, for the tests to drive."""
         if self.abandoned or not self._expired():
+            return False
+        if self._owned_by_switchboard():
             return False
         if self.working():
             return False
@@ -2877,16 +2901,22 @@ class Backend:
             return False
         watch = getattr(self, "_editor_liveness", None)
         board = getattr(host, "switchboard", None) if host is not None else None
-        if board is not None and board.windowless:
-            # No window to judge: the work decides. Standing down mid-work is exactly what lost the
-            # turn before a session could run without a window.
+        if board is not None and board.opted_in:
+            # An editor that keeps work running without a window: standing down mid-work is exactly
+            # what lost the turn before, so while work runs this never stands down. A window of the
+            # same DGC reattaches instead (dgc/serve_relay.py); anything else is told how to stop it.
             from .serve_detach import host_work
             work = host_work(host)
-            if work.kind() != "none":
+            ask_on_screen = getattr(watch, "renderer_on_screen", None)
+            on_screen = (not board.windowless and callable(ask_on_screen) and bool(ask_on_screen()))
+            if work.kind() != "none" and not on_screen:     # on screen: refused below, in its own words
+                where = "without a window" if board.windowless else "in an editor window"
                 _peers.answer_release(granted=False, reason=(
-                    f"it is running without a window (pid {os.getpid()}: {work.reason()}); open it in "
+                    f"it is running {where} (pid {os.getpid()}: {work.reason()}); open it in "
                     f"the editor, or run `dgc stop {os.getpid()}`"))
                 return False
+        if board is not None and board.windowless:
+            # No window to judge, and nothing running: hand it over.
             _peers.answer_release(granted=True)
             self._announce_peer("standing down")
             return watch.stand_down() if watch is not None else True

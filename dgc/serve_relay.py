@@ -33,9 +33,11 @@ ATTACH_SESSION_ENV = "DGC_ATTACH_SESSION"
 ATTACH_MODE_ENV = "DGC_ATTACH"
 MODES = ("auto", "restore", "steal")
 # A reload: the old window's panel may have spoken a moment ago (an extension host that was left
-# running, Cursor's orphan), so an automatic attach waits this long for it to fall silent before
-# showing the session read-only. Its renderer's silence is judged on 2 x 20s heartbeats.
+# running, Cursor's orphan), so an automatic attach waits up to this long for it to fall silent
+# before showing the session read-only. Its renderer's silence is judged on 2 x 20s heartbeats. A
+# panel that speaks again while this waits is a window someone is using, so the wait ends there.
 RESTORE_WAIT_S = 45.0
+RETRY_EVERY_S = 2.0
 _SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _refused: dict | None = None
 
@@ -104,6 +106,7 @@ def _attach(session_id: str, mode: str) -> int | None:
     from .editor_protocol import PROTOCOL_VERSION
     deadline = time.monotonic() + (RESTORE_WAIT_S if mode == "restore" else 0.0)
     told_waiting = False
+    quiet_before: float | None = None
     while True:
         holder = find_holder(session_id)
         if holder is None:
@@ -132,11 +135,16 @@ def _attach(session_id: str, mode: str) -> int | None:
             return pump(sock)
         sock.close()
         reason = str(answer.get("reason") or "")
-        if reason == "on_screen" and time.monotonic() < deadline:
+        quiet = answer.get("quiet_s")
+        quiet = float(quiet) if isinstance(quiet, (int, float)) else None
+        # Its panel spoke since the last ask: a window in use, not one a reload left behind.
+        spoke = quiet is not None and quiet_before is not None and quiet < quiet_before
+        quiet_before = quiet
+        if reason == "on_screen" and not spoke and time.monotonic() < deadline:
             if not told_waiting:
                 _note(f"pid {pid} still shows this session in a window; waiting for it to go quiet")
                 told_waiting = True
-            time.sleep(2.0)
+            time.sleep(RETRY_EVERY_S)
             continue
         if reason == "on_screen":
             _refused = {"session_id": session_id, "pid": pid, "reason": "on_screen"}
@@ -153,6 +161,8 @@ def _stop_older(holder: dict, session_id: str, version: str) -> int | None:
     from .serve_detach import stop_process
     pid = holder.get("pid")
     other = holder.get("version") or "an older DGC"
+    _note(f"DGC {other} (pid {pid}) is still running this session; saving and stopping it to open "
+          f"it in DGC {version}")
     stopped, what = stop_process(holder, reason=f"DGC {version} opening this session", wait_s=30.0,
                                  unless_on_screen=True)
     if stopped:

@@ -44,6 +44,8 @@ from . import session_socket
 IDLE_EXIT_S = 120.0
 WAITING_EXIT_S = 3600.0
 MAX_WINDOWLESS_S = 12 * 3600.0
+# headless.ABANDONED_AFTER_S: the 15 minutes after which a window that has given no sign is gone.
+SILENT_WINDOW_S = 15 * 60.0
 CHECK_EVERY_S = 30.0
 # A chat of the process no window claimed this long after an attach is closed if idle; one that is
 # working is kept until its work is done, then closed IDLE_EXIT_S later.
@@ -287,6 +289,9 @@ class Switchboard:
         self.idle_exit_s = IDLE_EXIT_S * scale
         self.waiting_exit_s = WAITING_EXIT_S * scale
         self.max_windowless_s = MAX_WINDOWLESS_S * scale
+        # A connection whose window has said nothing this long is treated as gone (the 25-hour
+        # stranded session: an extension host left behind by a reload keeps pinging for ever).
+        self.silent_window_s = SILENT_WINDOW_S * scale
         self.unclaimed_chat_s = UNCLAIMED_CHAT_S * scale
         self.check_every = max(0.1, CHECK_EVERY_S * scale) if check_every is None else check_every
         self.stand_down_grace, self.shutdown_grace = stand_down_grace, shutdown_grace
@@ -443,13 +448,16 @@ class Switchboard:
         global STDERR_IS_LOG
         STDERR_IS_LOG = True
 
-    def go_windowless(self, conn: Connection, cause: str) -> bool:
-        """The window ``conn`` belongs to has gone. True when the process stays up for its work."""
+    def go_windowless(self, conn: Connection, cause: str, *, farewell: tuple | None = None) -> bool:
+        """The window ``conn`` belongs to has gone. True when the process stays up for its work.
+
+        ``farewell`` (type, fields) is the last frame that connection gets: a window that only went
+        quiet, and is in fact still there, is told it was let go rather than left talking to nobody."""
         with self.lock:
             if self.current is not conn:
                 return False
             self.current = None
-            self.host.core.switch(NullSink())
+            self.host.core.switch(NullSink(), farewell=farewell)
             self.windowless_since = self.clock()
             self.windowless_wall = self.wall()
             self.windowless_cause = cause
@@ -801,7 +809,7 @@ class Switchboard:
         if since is None:
             if attached_at is not None and now - attached_at >= self.unclaimed_chat_s:
                 self._close_unclaimed(now)
-            return ""
+            return self._check_silent_window()
         elapsed = now - since
         if elapsed >= self.max_windowless_s:
             rule = f"no window for {_duration(elapsed)}, the most a session runs without one"
@@ -836,6 +844,29 @@ class Switchboard:
                               self.shutdown_grace)
             return "idle"
         return ""
+
+    def _check_silent_window(self) -> str:
+        """A window that has given no sign for 15 minutes is gone, whatever its host still says.
+
+        The 25-hour stranded session: an extension host a reload left behind kept pinging, so the
+        backend it started kept its session for as long as that host lived. Here its connection
+        becomes windowless instead, and the windowless rules decide from then on (2 minutes with no
+        work, 1 hour waiting on an answer, 12 hours at most). If the window is in fact still there it
+        hears ``session_moved`` and offers Open here."""
+        liveness = getattr(self.host, "_editor_liveness", None)
+        reader = getattr(liveness, "window_silence", None)
+        conn = self.current
+        if conn is None or not callable(reader):
+            return ""
+        try:
+            silence, why = reader()
+        except Exception:
+            return ""
+        if silence < self.silent_window_s:
+            return ""
+        self.go_windowless(conn, f"{why} for {_duration(silence)}",
+                           farewell=("session_moved", {"reason": "no_window"}))
+        return "silent_window"
 
     def _close_unclaimed(self, now: float) -> None:
         """After an attach, a chat no window took back: closed once it has nothing to do."""
