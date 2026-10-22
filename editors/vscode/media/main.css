@@ -1815,6 +1815,16 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
 .recovery-card .recovery-text { flex: 1 1 16em; min-width: 0; overflow-wrap: anywhere; }
 .recovery-card .recovery-actions { display: flex; gap: var(--sp-2); }
 
+/* This session is open in another window: one line above the box, which stays read-only until Open here. */
+.elsewhere-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);
+  margin: 0 0 var(--sp-2); padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);
+}
+.elsewhere-bar[hidden] { display: none; }
+.elsewhere-bar > .codicon { flex: none; color: var(--muted); }
+.elsewhere-bar .elsewhere-text { flex: 1 1 14em; min-width: 0; overflow-wrap: anywhere; }
+
 /* Earlier turns folded into a summary: a marker in the flow, the summary itself only on request.
    No margin of its own: it only ever sits in the log's column, whose gap spaces it like every other
    block (8px more on top of that left a hole around it). */

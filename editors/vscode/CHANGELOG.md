@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **A session keeps running through a window reload.** Reload the window, close it, or reconnect after a dropped
+  Remote SSH connection: a session that was working carries on, and its tab picks it up where it is when the window
+  comes back, with nothing lost or shown twice. With no window it saves and stops by itself, 2 minutes after its
+  work finishes, after 1 hour waiting on your answer (the question and **Continue** are there when you reopen it),
+  or after 12 hours at most. Needs a DGC CLI with the same feature; with an older one, nothing changes.
+- **One window at a time, never taken by itself.** A session shown in another window opens read-only here with
+  **Open here**; Open here moves it, the work never stops, and the other window shows it read-only with its own
+  Open here.
+- **Closing a working tab asks once:** keep the session running in the background, or stop it, with **Remember my
+  choice** (`dgc.closingAWorkingTab`). Closing a tab with nothing running ends it, as before.
+- **Settings → Running sessions** lists each session running with no window, what it is doing and for how long, with
+  **Open** and **Stop**; the Sessions list marks it **Running, no window**.
+
 - **A clock for the prompt cache, after the context meter (Work chat only).** As Claude Code shows it: a small
   clock and the whole minutes left (**4m**) while the provider keeps this conversation cached, changing once a
   minute; the clock alone in the error colour once the cache has gone, with why in its tooltip (idle too long,

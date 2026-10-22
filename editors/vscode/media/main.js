@@ -1029,6 +1029,12 @@
         if (part) { const span = el("span"); span.textContent = part; meta.append(span); }
       }
       if (item.open) { const open = el("span", "session-tab"); open.textContent = "Open in a tab"; meta.append(open); }
+      // Still running with no window (a reload, a closed window or tab): opening it picks it up where it is.
+      else if (item.windowless) {
+        const live = el("span", "session-tab session-windowless"); live.textContent = "Running, no window";
+        live.title = `${String(item.windowless).slice(0, 200)}. Open it to pick it up, or stop it in Settings › Running sessions.`;
+        meta.append(live);
+      }
       main.append(name, meta);
       if (typeof item.match === "string" && item.match) {
         const found = el("span", "session-match"); found.textContent = item.match; main.append(found);
@@ -3531,7 +3537,7 @@
     if (!replaying) undockAskCard("turn_end");
     turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
     turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
-      if (outlivesTheTurn(card)) return;
+      if (outlivesTheTurn(card) || reason === "moved") return;   // moved: it is still running, elsewhere
       setToolStatus(card, "stopped");
       const dot = card.querySelector(".dot");
       if (dot) dot.className = "dot deny";
@@ -3586,14 +3592,15 @@
     }
     turn.act.classList.add("done");
     turn.act.removeAttribute("title");
-    const outcome = reason === "paused" ? "Paused" : reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked";
+    const outcome = reason === "paused" ? "Paused" : reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed"
+      : reason === "moved" ? "Carrying on in another window" : "Worked";
     // A replayed turn has no running clock. A finished one whose history says when the prompt was sent and the
     // reply written worked from one to the other. A stopped or failed one ended some time after its last message,
     // which the session file doesn't say, and a session saved before DGC kept times says nothing: those say what
     // happened and stop there rather than printing a made-up number.
     const took = turn.t0 != null ? Date.now() - turn.t0
       : reason === "completed" && turn.promptAt > 0 && turn.replyAt >= turn.promptAt ? turn.replyAt - turn.promptAt : null;
-    turn.act.textContent = took == null ? outcome : `${outcome} for ${Math.floor(took / 1000)}s`;
+    turn.act.textContent = took == null || reason === "moved" ? outcome : `${outcome} for ${Math.floor(took / 1000)}s`;
     const finished = turn.block;
     pipSetupCards?.finish(finished);
     pipDigestBar?.refresh();
@@ -9182,10 +9189,13 @@
       imageViewerAttention("continue_offer");
       const cause = String(msg.cause || "").slice(0, 300);
       recoveryCard("continue-offer",
-        `DGC's backend stopped during your last turn${cause ? ` (${cause})` : ""}. `
+        (msg.windowless
+          ? `Your last turn was stopped while no window was open${cause ? ` (${cause})` : ""}. `
+          : `DGC's backend stopped during your last turn${cause ? ` (${cause})` : ""}. `)
           + "Work up to the last completed step is saved.",
         "Continue", () => vscode.postMessage({ type: "resumeTurn" }));
     }
+    else if (msg.type === "session_elsewhere") showSessionElsewhere(msg);
     else if (msg.type === "goal_resume_held") {
       imageViewerAttention("goal_resume_held");
       const cause = String(msg.cause || "").slice(0, 300);
@@ -10019,20 +10029,52 @@
     clearImageRecords(agentPageImageRecords);
     agentPageImageRecords = [];
   }
-  function lockAgentComposer(locked) {
+  // Two things lock the box: an agent's page (read-only until you go back to the chat), and this session
+  // being open in another window (read-only until Open here).
+  let agentPageLock = false, elsewhereLock = false;
+  function lockAgentComposer(locked) { agentPageLock = locked; applyComposerLock(); }
+  function applyComposerLock() {
+    const locked = agentPageLock || elsewhereLock;
     composerLocked = locked;
     const box = $("cbox");
     box?.classList.toggle("agent-page-locked", locked);
     box?.setAttribute("aria-disabled", String(locked));
     input.setAttribute("contenteditable", String(!locked));
     input.setAttribute("aria-disabled", String(locked));
-    input.setAttribute("aria-label", locked ? "Message DGC unavailable while viewing an agent" : "Message DGC");
-    input.dataset.placeholder = locked ? "Return to the chat to send a message" : composerPlaceholder;
+    input.setAttribute("aria-label", agentPageLock ? "Message DGC unavailable while viewing an agent"
+      : elsewhereLock ? "Message DGC unavailable: this session is open in another window" : "Message DGC");
+    input.dataset.placeholder = agentPageLock ? "Return to the chat to send a message"
+      : elsewhereLock ? "Open here to carry on in this window" : composerPlaceholder;
     $("btn-add").disabled = locked;
     $("btn-cmd").disabled = locked;
     if (locked) hidePop();
     renderComposerControls();
   }
+  // This session is shown in another window ("Open here" there), or this window stopped answering and its
+  // backend kept the session running without it. Nothing stopped: the turn goes on where the session is.
+  function showSessionElsewhere(msg) {
+    const bar = $("elsewhere-bar"), state = String(msg?.state || "none");
+    if (!bar) return;
+    const button = $("elsewhere-open");
+    if (state !== "moved" && state !== "elsewhere") {
+      bar.hidden = true; elsewhereLock = false; if (button) button.disabled = false;
+      applyComposerLock();
+      return;
+    }
+    $("elsewhere-text").textContent = state === "moved" && msg.reason === "no_window"
+      ? "This window stopped answering, so DGC kept the session running without it."
+      : state === "moved" ? "This session is open in another window now."
+      : "This session is open in another window.";
+    bar.hidden = false;
+    if (button) button.disabled = false;
+    if (state === "moved" && turn) { releaseHeldEvents(); endTurn("moved"); setSending(false); }
+    elsewhereLock = true;
+    applyComposerLock();
+  }
+  $("elsewhere-open")?.addEventListener("click", (e) => {
+    e.currentTarget.disabled = true;
+    vscode.postMessage({ type: "openSessionHere" });
+  });
   // `from`: the control that opened the page, which gets focus back when the chat does. `nested`:
   // opened from a nested agent's name on its parent's page, so Back returns to that page. Any other
   // way in (the chat, the agents list) starts over, and Back goes to the chat.

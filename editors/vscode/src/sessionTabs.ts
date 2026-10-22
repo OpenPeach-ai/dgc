@@ -90,15 +90,15 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
       panel.dispose();                       // a second copy of a tab already open: one session, one tab
       return;
     }
-    this.adopt(panel, key, session);
+    this.adopt(panel, key, session, true);
   }
 
-  private adopt(panel: vscode.WebviewPanel, key: string, session: string): DgcViewProvider {
+  private adopt(panel: vscode.WebviewPanel, key: string, session: string, restored = false): DgcViewProvider {
     // Not the activity bar's dgc.svg: its currentColor is black in a tab, invisible on a dark theme. Inline, so a
     // reload draws it before the tab is revived (tabIcon.ts).
     panel.iconPath = tabIcon(this.context.extensionUri, "dgc-tab");
     const provider = this.make({
-      key, session, places: this, host: this.sidebar,
+      key, session, places: this, host: this.sidebar, restored,
       title: (text) => { if (this.tabs.get(key)?.panel === panel) panel.title = tabTitle(text); },
     });
     const tab: Tab = { key, panel, provider, seq: ++this.seq };
@@ -109,7 +109,8 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     panel.onDidDispose(() => {
       if (this.tabs.get(key) !== tab) return;
       this.tabs.delete(key);
-      provider.dispose();
+      // Closed by the user (not a reload or a closed window): a turn still running is asked about.
+      provider.dispose(!this.closing);
       if (!this.closing) provider.forgetTab();     // closed by the user: its state goes with it
       this.changedCurrent();
       this.changed();

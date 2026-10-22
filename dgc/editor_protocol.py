@@ -919,6 +919,34 @@ EVENT_FIELDS["chat_opened"] = {"request_id": _S(), **{
 EVENT_FIELDS["chat_closed"] = {"request_id": _S(False),
                                 "reason": _f("string", enum=("closed", "handed_over"))}
 
+# ---- a session that keeps running with no window (dgc/serve_detach.py) ---------------------------
+# Advertised as ready.capabilities.detach = {version, idle_exit_s, waiting_exit_s, max_windowless_s,
+# elsewhere?}. `set_detach {keep_running}` opts in (sent right after ready); `detach` says "this
+# window is going: keep running while there is work" and is sent INSTEAD of shutdown on a window's
+# teardown. A client that never sends set_detach -- an older editor, the SDK, ACP -- is unchanged:
+# end of input or shutdown ends the process. A window that reattaches gets a `ready` whose
+# capabilities.attached = {chats: [{chat_id, session_id, cwd, turn, queued, waiting}], windowless_s,
+# work, pid}, then `chat_opened` (request_id "attached") for each other chat, then one
+# `session_live` per chat. `turn` is {turn_id, kind, prompt, started_at} or null; `queued` is
+# [{request_id, text}] and `waiting` the ids of the open approvals and questions, which get_history
+# announces again. The window it displaced hears `session_moved` and is closed.
+# `list_live_sessions` is answered by `live_sessions`: every DGC process on this computer
+# ({pid, kind, instance, version, attached, detachable, windowless_s, uptime_s, work, status,
+# liveness, here, sessions: [{session_id, name, cwd, status}]}); `stop_live_session` asks one to save
+# and stop, and is answered by `live_sessions` again (with a `message`).
+COMMAND_FIELDS["set_detach"] = {"keep_running": _B(False)}
+COMMAND_FIELDS["detach"] = {}
+COMMAND_FIELDS["list_live_sessions"] = {"request_id": _S()}
+COMMAND_FIELDS["stop_live_session"] = {"pid": _I(), "instance": _S(), "request_id": _S()}
+EVENT_FIELDS["session_live"] = {"session_id": _S(), "cwd": _S(), "turn": _f("object", "null"),
+                                 "queued": _A(), "waiting": _A()}
+EVENT_FIELDS["session_moved"] = {"reason": _S()}
+EVENT_FIELDS["live_sessions"] = {"items": _A(), "request_id": _S(False), "message": _S(False)}
+# After a resume's replay, to a client that opted in: a turn of this session was stopped while no
+# window was attached (an hour waiting on an answer, the twelve-hour limit, `dgc stop`), so nobody saw
+# it end. The editor offers Continue (`resume_turn`). The session's next turn clears it.
+EVENT_FIELDS["turn_interrupted"] = {"session_id": _S(), "cause": _S(), "at": _N()}
+
 # ---- ChatDGC: chats of their own, the same in every folder ----------------------------------------
 # The process's, never a session's: the router answers every chatdgc_* command itself and none of
 # their events carries the envelope's chat_id (that name is the session router's), so a conversation

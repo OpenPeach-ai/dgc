@@ -649,6 +649,17 @@
           "minimum": 0,
           "markdownDescription": "How many chats may hold a live `dgc serve` at once. **0 (the default) means no limit** — open as many as your machine and your model budget allow. Each chat is its own backend with its own model context and session, so the chat you switch away from keeps working. A backend itself is small (about 9 MB); the real cost of another chat is another model context. Set a positive number if you want DGC to stop you at a ceiling, or 1 to keep it single-chat."
         },
+        "dgc.closingAWorkingTab": {
+          "type": "string",
+          "enum": ["ask", "keepRunning", "stop"],
+          "enumDescriptions": [
+            "Ask each time, and remember the answer if you tick Remember my choice.",
+            "Keep the session running in the background. Settings › Running sessions shows it, with Stop.",
+            "Stop the session's turn, as closing a tab always did."
+          ],
+          "default": "ask",
+          "markdownDescription": "What happens when you close a session's tab while it is working. A window reload or a closed window always keeps the work running, and the session comes back when you open it again (up to 12 hours with no window; it saves and stops 2 minutes after its work finishes)."
+        },
         "dgc.contextSize": {
           "type": "number",
           "default": 0,

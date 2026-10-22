@@ -6,6 +6,30 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A session keeps running through a window reload.** For an editor that asks for it, `dgc serve` no longer
+  ends with its window: a reload, a closed window or a dropped connection leaves the work running, and the next
+  window picks the session up where it is, with nothing lost and nothing shown twice (the running reply, the
+  question it waits on with the same id, the queue, sub-agents and watchers). With no window it saves and stops by
+  itself: 2 minutes after its work finishes, after 1 hour waiting on an answer (reopening offers Continue), and
+  after 12 hours at most. A session shown in another window is never taken from it on its own. A session still
+  running in an older DGC after an update is saved, stopped and opened in the new one. A window is reached through
+  a socket only your user can open (0700 directory, 0600 socket, the peer's user checked), never a network port;
+  Linux and macOS.
+- **`dgc ps` and `dgc stop`.** `dgc ps [--json]` lists every DGC on this computer: each window's backend, one
+  running with no window and for how long, a terminal DGC, with what it is doing and its sessions. `dgc stop
+  PID|SESSION|--windowless` saves and stops one (`--force` if it will not).
+- **A window that stopped answering no longer holds its session.** An editor left running by a reload kept
+  pinging, so its backend kept the session for as long as that editor lived (once for 25 hours). With an editor
+  that keeps work running, 15 minutes with no word from the window's chat panel now leaves the session running
+  as if it had no window, under the rules above; and a backend running work never stands down mid-turn when
+  another DGC asks for its session.
+- Editor protocol (opt-in, old clients unchanged): `ready.capabilities.detach` (`version`, `idle_exit_s`,
+  `waiting_exit_s`, `max_windowless_s`, and `elsewhere` when the session asked for is shown in another window);
+  `ready.capabilities.attached` on a window that reattached; commands `set_detach`, `detach`,
+  `list_live_sessions` and `stop_live_session`; events `session_live`, `session_moved`, `live_sessions` and
+  `turn_interrupted`. A client that never sends `set_detach` (an older editor, the SDK, ACP) gets exactly the old
+  behaviour, and an SDK session is never offered `detach`.
+
 - **Claude models read the conversation from Anthropic's prompt cache.** DGC sent Anthropic no cache marker, so
   every reply paid full price for the whole conversation again. Each request now marks where its cached part ends
   (the tool list, the system prompt, the newest message and the previous request's end), as Anthropic documents,

@@ -22,7 +22,7 @@ const RESERVED_EVENT_NAMES = new Set(["error", "event", "newListener", "removeLi
 /** Hidden WSL (src/wslHost.ts): how this backend's `dgc serve` is started inside DGC's distro, how the paths in its
  *  frames are translated, and how to tell, from what wsl.exe said, that DGC is not set up there yet. */
 export interface HostRoute {
-  launch(cwd: string, args: string[]): Launch;
+  launch(cwd: string, args: string[], env?: Record<string, string>): Launch;
   bridge: Bridge;
   notSetUp(stderr: string): boolean;
 }
@@ -55,6 +55,42 @@ interface PendingFrame {
   requestId?: string;
   /** The chat the command addresses: "" for the backend's default chat. */
   chat: string;
+}
+
+/** ready.capabilities.detach: this CLI keeps a session running when its window goes, and a window can
+ *  reattach to it (dgc/serve_detach.py). `elsewhere` says the session this backend was asked to reattach
+ *  to is shown in another window, so this one opened it read-only. */
+export interface DetachCapability {
+  version: number;
+  idle_exit_s?: number;
+  waiting_exit_s?: number;
+  max_windowless_s?: number;
+  elsewhere?: { session_id: string; pid: number; reason: string; version?: string };
+}
+
+/** How a spawn asks to reattach: a reload (`restore`, which waits briefly for an old window to fall
+ *  quiet), a session opened from a list (`auto`), or the user's "Open here" (`steal`). */
+export type AttachMode = "auto" | "restore" | "steal";
+
+/** What a backend says about itself when a window reattached to it: ready.capabilities.attached. */
+export interface AttachedChatState {
+  chat_id: string;
+  session_id: string;
+  cwd: string;
+  turn: { turn_id: string; kind: string; prompt: string; started_at: number } | null;
+  queued: Array<{ request_id: string; text: string }>;
+  waiting: string[];
+}
+export interface AttachedState { chats: AttachedChatState[]; windowless_s: number; work: string; pid: number }
+
+/** Causes that stop the process on purpose: a restart, an explicit stop, a chat the user closed. Every
+ *  other teardown -- a window reload or close, a protocol failure, a restore that timed out -- leaves a
+ *  backend that can run with no window running for its work instead of ending it. */
+export const STOP_CAUSE = "stop: ";
+export const MOVED_CAUSE = "moved: ";
+export function teardownKeepsWork(cause: string): boolean {
+  return !(cause.startsWith("restart: ") || cause.startsWith(STOP_CAUSE) || cause.startsWith("chat closed: ")
+    || cause.startsWith(MOVED_CAUSE));
 }
 
 /** ready.capabilities.chats: this backend can hold several chats, each in its own directory. */
@@ -181,6 +217,24 @@ export class DgcBackend extends EventEmitter {
   private requestChats = new Map<string, string>();
   /** What `ready` offered for several chats, or undefined from a CLI that cannot hold them. */
   chats: ChatsCapability | undefined;
+  /** Set before start(): the session to reattach to if a backend is still running it. A later start of
+   *  this same instance (a restart on the next command) asks again, automatically. */
+  attach: { session: string; mode: AttachMode } | undefined;
+  /** Set by the owner before start(): a window that goes should leave this backend's work running (a
+   *  session's tab). Off, it is today's backend: the window going ends it. */
+  keepWorkRunning = false;
+  /** Set once this backend opted in to running with no window (ready offered `detach` and the owner
+   *  wants it); undefined otherwise. Only then does a window's teardown say `detach` instead of stopping. */
+  detach: DetachCapability | undefined;
+  /** What ready.capabilities.detach said, opted in or not: Settings shows its numbers. */
+  detachOffer: DetachCapability | undefined;
+  /** The other chats a reattached backend already holds, as it announced them (chat_opened, request_id
+   *  "attached"): a slot adopts one of these instead of opening a chat (OpenedChat.adopt). */
+  readonly attachedOpened = new Map<string, DgcEvent>();
+  /** Set when this child is a window reattached to a running backend: what it was doing. */
+  attached: AttachedState | undefined;
+  /** The session moved to another window ("Open here" there): this child was released, not stopped. */
+  moved = false;
   /** This process's own `ready`: a chat opened on it borrows the version and capabilities. */
   readyEvent: DgcEvent | undefined;
   /** Chats other slots opened on this backend. While any remains, this process must outlive the
@@ -231,15 +285,25 @@ export class DgcBackend extends EventEmitter {
     this.ignoredUnknownTypes.clear();
     let child: ChildProcessWithoutNullStreams;
     this.earlyStderr = "";
+    this.detach = undefined;
+    this.detachOffer = undefined;
+    this.attached = undefined;
+    this.attachedOpened.clear();
+    this.moved = false;
+    // A CLI that keeps sessions running reads these and relays to the backend still running this
+    // session (dgc/serve_relay.py); an older one ignores them. Asked once with the caller's mode; a
+    // later start of this instance asks again automatically.
+    const attach: Record<string, string> = this.attach?.session
+      ? { DGC_ATTACH_SESSION: this.attach.session, DGC_ATTACH: this.attach.mode } : {};
+    if (this.attach) { this.attach = { session: this.attach.session, mode: "auto" }; }
     try {
       if (this.route) {
-        const spec = this.route.launch(this.cwd, ["serve"]);
+        const spec = this.route.launch(this.cwd, ["serve"], attach);
         child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, windowsHide: true });
       } else {
-        child = spawn(this.command, ["serve"], {
-          cwd: this.cwd,
-          env: { ...process.env },
-        });
+        const env: NodeJS.ProcessEnv = { ...process.env, ...attach };
+        if (!attach.DGC_ATTACH_SESSION) { delete env.DGC_ATTACH_SESSION; delete env.DGC_ATTACH; }
+        child = spawn(this.command, ["serve"], { cwd: this.cwd, env });
       }
     } catch (err: any) {
       this.launchError(err);
@@ -531,6 +595,15 @@ export class DgcBackend extends EventEmitter {
         if ((ev as any).capabilities?.editor_liveness) {
           this.startLivenessPings(this.proc);
         }
+        // Running with no window (dgc/serve_detach.py): opt in before anything else, so a window that goes
+        // from here on leaves the work running. Validated like any command; gated on the capability, so
+        // an older CLI is never sent a command it would reject.
+        const detach = (ev as any).capabilities?.detach;
+        this.detachOffer = detach && typeof detach === "object" && Number(detach.version) >= 1 ? detach : undefined;
+        const attached = (ev as any).capabilities?.attached;
+        this.attached = attached && typeof attached === "object" && Array.isArray(attached.chats) ? attached : undefined;
+        this.detach = this.detachOffer && this.keepWorkRunning ? this.detachOffer : undefined;
+        if (this.detach) { this.sendSetup({ type: "set_detach", keep_running: true } as DgcCommand); }
         // Renderer-sourced liveness, and deliberately NOT a replacement for the timer above. That
         // timer says "this extension host is alive", which is exactly what an orphaned host also
         // says -- true, useless for a takeover, and still the right signal for the backend's
@@ -610,7 +683,20 @@ export class DgcBackend extends EventEmitter {
       }
       this.controlPending = keep;
     }
+    if (ev.type === "session_moved") {
+      // Another window took this session ("Open here" there). Say so first, then let go of the child
+      // without stopping it: it may be the very process now serving that window.
+      this.emit("event", ev);
+      this.emit(ev.type, ev);
+      this.release(`${MOVED_CAUSE}${String((ev as any).reason || "opened elsewhere")}`);
+      return false;
+    }
     if (chat) {
+      // A reattached backend introduces the other chats it holds: a slot adopts one rather than
+      // opening a chat of its own (OpenedChat.adopt), and it may only come asking after this frame.
+      if (this.attached && ev.type === "chat_opened" && (ev as any).request_id === "attached") {
+        this.attachedOpened.set(chat, ev);
+      }
       // Another chat's event. The listener on "event" is the chat this backend started with, and a
       // second chat's tokens must never land in its transcript: they go to that chat's channel.
       this.emit("chat-event", chat, ev);
@@ -954,7 +1040,39 @@ export class DgcBackend extends EventEmitter {
     this.dispose(cause);
   }
 
-  /** Stop the current child on purpose. `cause` is what the exit line and the panel will report. */
+  /** Stop using the current child WITHOUT stopping it: its session moved to another window, whose
+   *  backend this child may be. Its stdin is ended (a relay then exits; a backend already ignores
+   *  this window), and nothing is killed. */
+  release(cause: string): void {
+    this.moved = true;
+    this.stopping = true;
+    this.ready = false;
+    this.draining = false;
+    this.released = false;
+    this.setupPending = [];
+    this.controlPending = [];
+    this.pending = [];
+    this.pendingBytes = 0;
+    this.activeRequests.clear();
+    this.respondedRequests.clear(); this.acceptedSignIns.clear();
+    this.requestChats.clear();
+    this.stopLivenessPings();
+    const p = this.proc;
+    this.proc = undefined;
+    const record = p ? this.life.get(p) : undefined;
+    if (record && !record.cause) {
+      record.cause = cause;
+    }
+    if (p) {
+      this.emit("teardown", cause, p.pid);
+    }
+    this.emit("disposed");
+    try { p?.stdin.end(); } catch { /* already closed */ }
+  }
+
+  /** Stop the current child on purpose. `cause` is what the exit line and the panel will report.
+   *  A backend that can run with no window is told `detach` instead, and is not killed, unless the
+   *  cause is a restart, an explicit stop or a closed chat (teardownKeepsWork). */
   dispose(cause = "disposed"): void {
     this.stopping = true;
     this.ready = false;
@@ -976,11 +1094,31 @@ export class DgcBackend extends EventEmitter {
     if (record && !record.cause) {
       record.cause = cause;
     }
+    const keep = !!p && !!this.detach && teardownKeepsWork(cause);
+    this.detach = undefined;
     if (p) {
-      this.emit("teardown", cause, p.pid);
+      // `keep`: the process is not being stopped; it carries on with no window (the log says so).
+      this.emit("teardown", cause, p.pid, keep);
     }
     this.emit("disposed");
     if (!p) {
+      return;
+    }
+    if (keep) {
+      // The window is going, not the work. The backend saves and exits by itself once its work is done
+      // (2 minutes after it, 12 hours at most), and a window that comes back reattaches to it.
+      try {
+        if (p.stdin.writable) {
+          p.stdin.write(JSON.stringify({ type: "detach" }) + "\n");
+          if (record) {
+            record.framesWritten += 1;
+            record.lastFrame = "detach";
+          }
+        }
+        p.stdin.end();
+      } catch {
+        /* pipe already closed */
+      }
       return;
     }
     try {

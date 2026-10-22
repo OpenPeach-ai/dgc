@@ -156,13 +156,21 @@ def liveness(record: dict, *, now: float | None = None) -> str:
     return "unknown"
 
 
+# Fields a note's `extra` may not replace: they are what every reader trusts the note by.
+_CORE_FIELDS = frozenset({"pid", "proc_start", "kind", "session", "cwd", "project_root",
+                          "git_common_dir", "status", "takeover", "heartbeat", "sessions"})
+
+
 def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str = "",
              git_common_dir: str = "", status: str = "idle",
-             takeover: bool = False, sessions: list | None = None) -> Path | None:
+             takeover: bool = False, sessions: list | None = None,
+             extra: dict | None = None) -> Path | None:
     """Write (or refresh) this process's note. Returns the path, or None if it could not be left.
 
     ``sessions`` lists every chat a backend holds, each in its own folder. The top-level fields
-    stay the first chat's, so a DGC that predates the list still reads a true note.
+    stay the first chat's, so a DGC that predates the list still reads a true note. ``extra`` adds
+    fields of the writer's own (a `dgc serve` that can run without a window says where its socket
+    is, whether a window is attached, and what it is doing); readers that predate them ignore them.
     """
     try:
         directory = peers_dir()
@@ -176,7 +184,7 @@ def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str =
             "pid": pid,
             "proc_start": _proc_start(pid),
             "kind": str(kind)[:32],
-            "session": str(session)[:128],
+            "session": str(session)[:4096],      # a path: 128 cut long ones, and they never matched
             "cwd": str(cwd)[:4096],
             "project_root": str(project_root)[:4096],
             "git_common_dir": str(git_common_dir)[:4096],
@@ -187,9 +195,13 @@ def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str =
             "takeover": bool(takeover),
             "heartbeat": time.time(),
         }
+        for key, value in (extra or {}).items():
+            if isinstance(key, str) and key not in _CORE_FIELDS and len(key) <= 64:
+                record[key] = value
         if sessions:
             record["sessions"] = [
-                {"session": str(item.get("session") or "")[:128],
+                {"session": str(item.get("session") or "")[:4096],
+                 "name": str(item.get("name") or "")[:200],
                  "cwd": str(item.get("cwd") or "")[:4096],
                  "project_root": str(item.get("project_root") or "")[:4096],
                  "git_common_dir": str(item.get("git_common_dir") or "")[:4096],

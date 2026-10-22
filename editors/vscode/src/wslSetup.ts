@@ -25,7 +25,7 @@ export function hiddenWslDistro(platform: NodeJS.Platform = process.platform): s
 
 export function wslRoute(distro: string): HostRoute {
   return {
-    launch: (cwd, args) => launch(distro, cwd, args),
+    launch: (cwd, args, env) => launch(distro, cwd, args, { ...process.env, ...(env || {}) }),
     bridge: bridge(pathMap(distro)),
     notSetUp,
   };
